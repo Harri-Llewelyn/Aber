@@ -2,11 +2,15 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { ActionButton } from '../common/ActionButton'
+import { Badge } from '../common/Badge'
+import { EmptyState } from '../common/EmptyState'
+import { LoadingState } from '../common/LoadingState'
+import { Modal } from '../common/Modal'
+import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ConfirmModal } from './ConfirmModal'
 import {
   IconBookOpen,
-  IconX,
   IconPlus,
   IconPencil,
   IconTrash,
@@ -23,7 +27,6 @@ import {
   IconGithub,
   IconGlobe
 } from '../common/Icons'
-import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 /**
  * The tag vocabulary. These keys are stored values and must not be renamed: `links.link_tag`
@@ -54,12 +57,12 @@ const TAG_LABELS = {
 
 /** What each tag is for, on the option and on the badge. */
 const TAG_HINTS = {
-  image:             'A photograph or rendering of the asset',
+  image:             'A photograph or rendering',
   health_and_safety: 'Risk assessments, safe systems of work, COSHH sheets',
   procurement:       'Purchase orders, quotations, supplier records',
   schematic:         'Drawings, wiring diagrams, P&IDs',
-  asset_register:    'This asset in an external asset tracker, such as EZOfficeInventory',
-  file_repository:   'Where files for this asset are saved — measurement data, exports, logs. '
+  asset_register:    'An entry in an external asset tracker, such as EZOfficeInventory',
+  file_repository:   'Where files are saved — measurement data, exports, logs. '
                      + 'The platform stores no such files; this records where they belong.',
   other:             'Anything else with a URL',
 }
@@ -67,23 +70,18 @@ const TAG_HINTS = {
 function getDomainBadgeIcon(url = '') {
   const lower = url.toLowerCase()
   if (lower.includes('sharepoint.com')) {
-    return <span className="badge badge-brand badge-sharepoint"><IconSharePoint size={12} /> SharePoint</span>
+    return <Badge tone="brand" brand="sharepoint" size="sm" icon={<IconSharePoint size={12} />}>SharePoint</Badge>
   }
   if (lower.includes('drive.google.com') || lower.includes('docs.google.com')) {
-    return <span className="badge badge-brand badge-drive"><IconDrive size={12} /> Google Drive</span>
+    return <Badge tone="brand" brand="drive" size="sm" icon={<IconDrive size={12} />}>Google Drive</Badge>
   }
   if (lower.includes('github.com')) {
-    return <span className="badge badge-neutral" style={{ gap: '4px' }}><IconGithub size={12} /> GitHub</span>
+    return <Badge size="sm" icon={<IconGithub size={12} />}>GitHub</Badge>
   }
-  return <span className="badge badge-neutral" style={{ gap: '4px' }}><IconGlobe size={12} /> External Link</span>
+  return <Badge size="sm" icon={<IconGlobe size={12} />}>External Link</Badge>
 }
 
 export function EntityLinksModal({ entityType, entityId, entityName, onClose, showToast, hasPermission }) {
-  // Escape closes through the shared stack, so a ConfirmModal opened on top takes the keypress.
-  useEscapeKey(onClose)
-
-  // `links` here and on the wire: the endpoint, the table and the payload key all use the same
-  // vocabulary.
   const [links, setLinks]             = useState([])
   const [loading, setLoading]         = useState(true)
   const [showForm, setShowForm]       = useState(false)
@@ -150,29 +148,33 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
     }
   }
 
-  // The link form's Save. The validation guards above return early WITHOUT a request, so the
-  // pending state clears on the same tick -- a rejected form must not leave a button spinning.
+  // The link form's Save. The validation guards above return before any request, so the pending
+  // state clears on the same tick.
   const [savingLink, runSaveLink] = usePendingAction()
 
   return (
-    <div className="modal-overlay">
-      <div className="modal modal-lg">
-        <div className="modal-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <IconBookOpen size={18} style={{ color: 'var(--accent)' }} />
-            <span>Attached Links — <strong style={{ color: 'var(--accent)' }}>{entityName}</strong></span>
-          </div>
-          <button className="btn btn-ghost btn-sm" onClick={onClose} title="Close modal"><IconX size={14} /></button>
-        </div>
+    <Modal
+      title={<>Attached Links — <strong>{entityName}</strong></>}
+      icon={<IconBookOpen size={18} />}
+      size="lg"
+      onClose={onClose}
+      footer={<button className="btn btn-ghost" onClick={onClose}>Close</button>}
+    >
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
             {links.length} attached
           </div>
 
-          <button className={`btn btn-primary btn-sm ${!canManage ? 'btn-disabled' : ''}`} disabled={!canManage} onClick={openNew} title="Attach a new link to this asset">
+          <ActionButton
+            className="btn btn-primary btn-sm"
+            permitted={canManage}
+            deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.LINK_MANAGE)}
+            onClick={openNew}
+            title={`Attach a new link to this ${entityType}`}
+          >
             <IconPlus size={13} /> Add Link
-          </button>
+          </ActionButton>
         </div>
 
         {showForm && (
@@ -199,7 +201,7 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
               </select>
               {/* The chosen tag's meaning, under the control. File Repository especially needs it:
                   it is the one tag that names a destination rather than a document. */}
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+              <div className="form-hint">
                 {TAG_HINTS[form.link_tag]}
               </div>
             </div>
@@ -218,12 +220,9 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
         )}
 
         <div style={{ maxHeight: '340px', overflowY: 'auto' }}>
-          {loading ? <div className="loading-wrap"><div className="spinner" /> Loading links…</div> :
+          {loading ? <LoadingState label="links" /> :
            links.length === 0 ? (
-             <div className="empty-state" style={{ padding: '30px 10px' }}>
-               <div className="empty-icon"><IconBookOpen size={30} /></div>
-               <div className="empty-text">No links attached to this {entityType}.</div>
-             </div>
+             <EmptyState icon={<IconBookOpen size={30} />} message={`No links attached to this ${entityType}.`} />
            ) : (
              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                {links.map(d => (
@@ -231,10 +230,9 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
                    <div style={{ minWidth: 0, flex: 1 }}>
                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                        <strong style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{d.display_name}</strong>
-                       <span className="badge badge-neutral" style={{ fontSize: '11px', gap: '4px' }} title={TAG_HINTS[d.link_tag] || TAG_HINTS.other}>
-                         {TAG_ICONS[d.link_tag] || <IconFileText size={12} />}
+                       <Badge size="sm" icon={TAG_ICONS[d.link_tag] || <IconFileText size={12} />} title={TAG_HINTS[d.link_tag] || TAG_HINTS.other}>
                          {TAG_LABELS[d.link_tag] || 'Other'}
-                       </span>
+                       </Badge>
                        {getDomainBadgeIcon(d.url)}
                      </div>
                      <div className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -266,17 +264,14 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
 
         {confirmDelete && (
           <ConfirmModal
+            title="Remove link"
+            icon={<IconTrash size={18} />}
             message={`Are you sure you want to remove the link '${confirmDelete.display_name}'?`}
             pendingLabel="Removing…"
             onConfirm={() => removeLink(confirmDelete.id, confirmDelete.display_name)}
             onCancel={() => setConfirmDelete(null)}
           />
         )}
-
-        <div className="modal-actions" style={{ marginTop: '20px' }}>
-          <button className="btn btn-ghost" onClick={onClose}>Close</button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

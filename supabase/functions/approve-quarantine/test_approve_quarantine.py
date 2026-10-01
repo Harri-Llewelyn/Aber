@@ -265,7 +265,7 @@ class TestApproveQuarantineMirrorsSource(unittest.TestCase):
 
     def test_the_actor_is_passed_so_the_audit_trail_can_attribute_the_approval(self):
         """
-        log_digital_thread_event() records auth.uid(), and this function acts through the
+        log_audit_trail_event() records auth.uid(), and this function acts through the
         service-role client whose JWT carries no `sub`. Without an explicit actor every
         approval and merge is logged with changed_by = NULL.
         """

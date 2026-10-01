@@ -1,16 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import {
   STANDARDS, STANDARD_OPTIONS, SEMANTIC_ID_TYPES, DEFAULT_SEMANTIC_ID_TYPE,
-  inferSemanticIdType, standardLabel, LOCAL_EXTENSION_LABEL,
+  inferSemanticIdType, followSemanticIdType, storedSemanticIdPair, sameSemanticIdPair,
   LOCAL_SEMANTIC_NAMESPACE, MTCONNECT_SEMANTIC_NAMESPACE, ISO22400_SEMANTIC_NAMESPACE,
   mtconnectSemanticId, mtconnectVocabularySemanticId
 } from '../utils/standards'
-import { MTCONNECT_STANDARD } from '../utils/mtconnect'
 
 describe('standards registry', () => {
   it('stores a local extension as an empty standard, not the word "Custom"', () => {
     // The column is provenance and NULL means "no standard behind this". A literal 'Custom' would
-    // read as a fourth standard and an AAS export would try to find a namespace for it.
+    // read as a fifth standard and an AAS export would try to find a namespace for it.
     expect(STANDARDS.CUSTOM).toBe('')
     const custom = STANDARD_OPTIONS.find(o => o.label.startsWith('Custom'))
     expect(custom.value).toBe('')
@@ -24,13 +23,10 @@ describe('standards registry', () => {
     expect(values).toContain(STANDARDS.OPCUA)
   })
 
-  it('keeps one definition of the MTConnect provenance string', () => {
-    // Two constants holding 'MTConnect' would silently fork the day one of them was corrected.
-    expect(MTCONNECT_STANDARD).toBe(STANDARDS.MTCONNECT)
-  })
-
-  it('mirrors the CHECK constraint on semantic_id_type (archived migration 0029)', () => {
-    expect(SEMANTIC_ID_TYPES).toEqual(['IRI', 'IRDI', 'ModelReference'])
+  it('mirrors the CHECK constraints on semantic_id_type (migration 0012)', () => {
+    // ModelReference is withdrawn: the exporter emits every id as an ExternalReference, and one
+    // text column cannot carry a ModelReference's typed key chain.
+    expect(SEMANTIC_ID_TYPES).toEqual(['IRI', 'IRDI'])
     expect(SEMANTIC_ID_TYPES).toContain(DEFAULT_SEMANTIC_ID_TYPE)
   })
 })
@@ -49,12 +45,77 @@ describe('inferSemanticIdType', () => {
     expect(inferSemanticIdType('0173-1#02-AAO677#002')).toBe('IRDI')
   })
 
+  it('recognises the IEC CDD form the Digital Nameplate seeds', () => {
+    // 0002_seed_data.sql, ManufacturerName and ManufacturerProductRoot. Empty registration
+    // authority parts and an underscore in the organisation part are both in the seed.
+    expect(inferSemanticIdType('0112/2///61987#ABA565#009')).toBe('IRDI')
+    expect(inferSemanticIdType('0112/2///61360_7#AAS011#001')).toBe('IRDI')
+  })
+
+  it('recognises the ECLASS property-value pair the Digital Nameplate seeds', () => {
+    // 0002_seed_data.sql, AssetSpecificProperties: two IRDIs joined by a slash.
+    expect(inferSemanticIdType('0173-1#02-ABI218#003/0173-1#01-AGZ672#004')).toBe('IRDI')
+  })
+
+  it('does not call an IRDI-like near miss an IRDI', () => {
+    expect(inferSemanticIdType('0173-1#02-AAO677')).toBe('')             // no version
+    expect(inferSemanticIdType('173-1#02-AAO677#002')).toBe('')          // three-digit ICD
+    expect(inferSemanticIdType('0173-1##002')).toBe('')                  // no data identifier
+    expect(inferSemanticIdType('0173-1#02-AAO677#002/')).toBe('')        // dangling pair
+    expect(inferSemanticIdType('see 0173-1#02-AAO677#002')).toBe('')     // free text around one
+    expect(inferSemanticIdType('0173-1#02-AAO677#002 (ECLASS)')).toBe('')
+  })
+
+  it('reads a URL holding an IRDI as the IRI it is', () => {
+    expect(inferSemanticIdType('https://eclass.example/0173-1#02-AAO677#002')).toBe('IRI')
+  })
+
   it('guesses nothing rather than guessing wrong', () => {
     // A wrong inference is worse than none: it is prefilled, so it gets believed and saved.
     expect(inferSemanticIdType('ActualPosition')).toBe('')
     expect(inferSemanticIdType('')).toBe('')
     expect(inferSemanticIdType(null)).toBe('')
     expect(inferSemanticIdType('  ')).toBe('')
+  })
+})
+
+describe('followSemanticIdType', () => {
+  const IRI = 'https://admin-shell.io/idta/nameplate/3/0/Nameplate'
+  const IRDI = '0112/2///61987#ABA565#009'
+
+  it('guesses the type for a first id', () => {
+    expect(followSemanticIdType('', '', IRI)).toBe('IRI')
+  })
+
+  it('retypes an id whose type was the guess, so replacing an IRI with an IRDI says IRDI', () => {
+    expect(followSemanticIdType(IRI, 'IRI', IRDI)).toBe('IRDI')
+  })
+
+  it('keeps a type chosen against the guess', () => {
+    expect(followSemanticIdType('ActualPosition', 'IRI', 'ActualPositionX')).toBe('IRI')
+  })
+
+  it('clears the type with the id, so a retracted claim leaves nothing half-filled', () => {
+    expect(followSemanticIdType(IRI, 'IRI', '')).toBe('')
+    expect(followSemanticIdType('ActualPosition', 'IRDI', '   ')).toBe('')
+  })
+})
+
+describe('storedSemanticIdPair', () => {
+  it('trims the id and drops a type that has no id', () => {
+    expect(storedSemanticIdPair('  urn:x  ', 'IRI')).toEqual({ semanticId: 'urn:x', semanticIdType: 'IRI' })
+    expect(storedSemanticIdPair('', 'IRDI')).toEqual({ semanticId: '', semanticIdType: '' })
+    expect(storedSemanticIdPair(null, null)).toEqual({ semanticId: '', semanticIdType: '' })
+  })
+})
+
+describe('sameSemanticIdPair', () => {
+  it('compares pairs as they would be stored', () => {
+    expect(sameSemanticIdPair({ semanticId: ' urn:x ', semanticIdType: 'IRI' }, { semanticId: 'urn:x', semanticIdType: 'IRI' })).toBe(true)
+    // A type on a blank id is not stored, so it does not make two blanks differ.
+    expect(sameSemanticIdPair({ semanticId: '', semanticIdType: 'IRDI' }, { semanticId: '', semanticIdType: '' })).toBe(true)
+    expect(sameSemanticIdPair({ semanticId: 'urn:x', semanticIdType: 'IRI' }, { semanticId: 'urn:x', semanticIdType: 'IRDI' })).toBe(false)
+    expect(sameSemanticIdPair(null, { semanticId: 'urn:x', semanticIdType: 'IRI' })).toBe(false)
   })
 })
 
@@ -77,29 +138,28 @@ describe('semantic id namespaces', () => {
 })
 
 describe('mtconnectSemanticId', () => {
-  it('mirrors the SQL in archived migration 0032 — namespace plus the whole metric name', () => {
-    expect(mtconnectSemanticId('Axes/C/ANGLE'))
-      .toBe('https://aber.local/semantics/mtconnect/v2.0/Axes/C/ANGLE')
+  it('is the vocabulary id of the data item type, the form mtconnect_vocabulary seeds (#457)', () => {
+    expect(mtconnectSemanticId('ANGLE'))
+      .toBe('https://aber.local/semantics/mtconnect/v2.0/DataItemType/ANGLE')
+    expect(mtconnectSemanticId('ANGLE')).toBe(mtconnectVocabularySemanticId('DATA_ITEM_TYPE', 'ANGLE'))
   })
 
-  it('uses the full path, not just the type — a catalog entry is a specific observation', () => {
-    // Axes/C/ANGLE and Axes/X/ANGLE are different data items on different components.
-    expect(mtconnectSemanticId('Axes/C/ANGLE')).not.toBe(mtconnectSemanticId('Axes/X/ANGLE'))
+  it('names the concept, so two metrics of one type share an id', () => {
+    // Axes/X/POSITION and Axes/W/POSITION are two data items and one concept. The component path,
+    // instance and subType stay in the name and the sub_type column.
+    expect(mtconnectSemanticId('POSITION'))
+      .toBe('https://aber.local/semantics/mtconnect/v2.0/DataItemType/POSITION')
+    expect(mtconnectSemanticId('POSITION')).not.toContain('Axes')
   })
 
-  it('handles an ungrouped name', () => {
-    expect(mtconnectSemanticId('SERIAL_NUMBER'))
-      .toBe('https://aber.local/semantics/mtconnect/v2.0/SERIAL_NUMBER')
-  })
-
-  it('returns empty for an empty name rather than a dangling namespace', () => {
+  it('returns empty for an empty type rather than a dangling namespace', () => {
     expect(mtconnectSemanticId('')).toBe('')
     expect(mtconnectSemanticId(null)).toBe('')
     expect(mtconnectSemanticId('   ')).toBe('')
   })
 
   it('produces something inferSemanticIdType reads back as an IRI', () => {
-    expect(inferSemanticIdType(mtconnectSemanticId('Axes/C/ANGLE'))).toBe('IRI')
+    expect(inferSemanticIdType(mtconnectSemanticId('ANGLE'))).toBe('IRI')
   })
 })
 
@@ -122,20 +182,7 @@ describe('mtconnectVocabularySemanticId', () => {
       .not.toBe(mtconnectVocabularySemanticId('DATA_ITEM_TYPE', 'X'))
   })
 
-  it('is distinct from the observation-level id for the same token', () => {
-    // The vocabulary row identifies the concept; the catalog row identifies a specific data item.
-    expect(mtconnectVocabularySemanticId('DATA_ITEM_TYPE', 'ANGLE')).not.toBe(mtconnectSemanticId('ANGLE'))
-  })
-
   it('returns empty for an empty name', () => {
     expect(mtconnectVocabularySemanticId('DATA_ITEM_TYPE', '')).toBe('')
-  })
-})
-
-describe('standardLabel', () => {
-  it('names the absence of a standard rather than rendering blank', () => {
-    expect(standardLabel(null)).toBe(LOCAL_EXTENSION_LABEL)
-    expect(standardLabel('')).toBe(LOCAL_EXTENSION_LABEL)
-    expect(standardLabel('ISO 22400')).toBe('ISO 22400')
   })
 })

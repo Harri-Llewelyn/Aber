@@ -85,12 +85,14 @@ section moves with it. [`releases.md`](releases.md#major--1x--200) lists what mo
 
 ### What 1.0 renames, and what each rename asks of a site
 
-1.0 finishes the rename to Aber ([#335](https://github.com/Harri-Llewelyn/Aber/issues/335)).
-Tiers 1 and 2 were prose and the chart; this is the third tier, the identifiers that exist outside
-the repository. Each row is a value a site already holds somewhere, and the right-hand column is
-what the site does about it. Nothing here is undone by `helm upgrade`, because no install below 1.0
-reaches it that way (see [the floor](#the-floor-100)): a pre-1.0 install that brings its data comes
-by backup, reinstall and restore, and the restored database is what the rows below meet.
+1.0 finishes the rename to Aber ([#335](https://github.com/Harri-Llewelyn/Aber/issues/335)) and
+retires the names that outlived what they named
+([#532](https://github.com/Harri-Llewelyn/Aber/issues/532)). The rows are the identifiers either
+one changes that exist outside the repository; the rename's first two tiers were prose and the
+chart, which no site holds. Each row is a value a site already holds somewhere, and the right-hand
+column is what the site does about it. Nothing here is undone by `helm upgrade`, because no install
+below 1.0 reaches it that way (see [the floor](#the-floor-100)): a pre-1.0 install that brings its
+data comes by backup, reinstall and restore, and the restored database is what the rows below meet.
 
 | Was | Is | What a site does |
 | :--- | :--- | :--- |
@@ -103,16 +105,40 @@ by backup, reinstall and restore, and the restored database is what the rows bel
 | AAS identifier base `https://acs-cymru.local/ids/asset/` (`supabaseFunctions.aas.baseIri`, the `AAS_BASE_IRI` default) | `https://aber.local/ids/asset/` | Identifiers are derived at request time, so every exported shell and submodel id changes with the release. A site that had set `aas.baseIri` to its own authority is unaffected. |
 | Prometheus metric families `acs_ingestion_*`, `acs_historian_*`, `acs_postgres_*` (59 names: the daemon's exporter, the two database exporters' query files) | `aber_ingestion_*`, `aber_historian_*`, `aber_postgres_*` | The shipped dashboards, alert rules, ServiceMonitor and readiness gates move with them. **Series recorded before the upgrade stay under the old names**: Prometheus does not rename history, so every panel starts again at the upgrade and a query of your own that named an old metric returns nothing until it is edited. Keep the old names in a recording rule if you need the join. |
 | Grafana dashboard uids `acs-cymru-platform`, `-cluster`, `-databases`, `-gateway-health`, the provider `acs-cymru-platform`, the contact-point uid `acs-cymru-webhook`, and the alert-rule uids `acs-*` (`acs-gateway-stale`, `acs-archive-backlog`, …) | `aber-…` | On a Grafana that keeps its database across the upgrade, provisioning creates the dashboards, the contact point and the rules afresh under the new uids; the old ones linger and can be deleted by hand, and a bookmarked `/d/acs-cymru-…` or `/alerting/grafana/acs-…` URL no longer resolves. A fresh Grafana sees nothing of this. |
+| The gateway's Service `supabase-kong`, and every in-cluster URL that named it (`http://supabase-kong:8000`); Envoy has served it since 2026-09-13 ([#532](https://github.com/Harri-Llewelyn/Aber/issues/532)) | `supabase-envoy`, the name of the gateway's Deployment | Nothing for the chart's own consumers: every workload, Grafana's OAuth URLs and contact point, and the functions URL db-init stores in Vault on every run name the new Service. **Anything of your own that names the old one stops reaching the gateway**: a port-forward or script (`svc/supabase-kong`), an Ingress or NetworkPolicy outside the chart, and a `webhook_endpoints` row pointing at an edge function. The `supabaseEnvoy.serviceName` value is gone, and an override of it is ignored. |
 | Internal CA `ClusterIssuer/acs-cymru-ca`, `Certificate/acs-cymru-ca`, Secret `acs-cymru-ca-key-pair` (`deploy/k8s/internal-ca.yaml`), and the bundle files `acs-cymru-ca.pem` / `acs-cymru.crt` | `aber-ca`, `aber-ca-key-pair`, `aber-ca.pem`, `aber.crt` | Apply the new `internal-ca.yaml`. To keep the same CA (so every appliance's pinned digest stays valid), copy the old Secret's `tls.crt` and `tls.key` into `aber-ca-key-pair` before the ClusterIssuer is created; otherwise a new CA is minted and every gateway bundle is re-issued. The chart's `clusterIssuer` values and the backup's `ca.secretName` name the new objects. |
 | The CA download path `/.well-known/acs-cymru/ca.pem` | `/.well-known/aber/ca.pem` | Nothing for an appliance that already holds the CA; the installer the dashboard hands out names the new path. |
 | The gateway appliance's layout: `/etc/acs-cymru`, the `acs_*` playbook variables, `acs-gateway-converge`, the `acs-gateway-*` Compose services, the `ACS_*` installer variables, the `acs-*` flow node ids | `aber…` | **An appliance installed before 1.0 is reinstalled, not converged.** The platform playbook it pulls at the 1.0 tag lays the new tree next to the old one and does not move state between them. Re-enrol it from the dashboard; the identity in the platform is unchanged, so its rows and history stay. |
 | The sweep's manifest `.acs/manifest.json` in the platform repository and in every gateway repository seeded from the template | `.aber/manifest.json` | Nothing. The sweep reads the manifest at the new path, finds none, republishes the platform in one commit and removes the old file with it; a gateway repository's copied manifest is removed the way it always was. The version tag is never moved, so `main` carries the new path while an already-published tag keeps the old one: that is the tag being immutable for the appliances that pin it, and the 1.0 tag is created fresh. |
 | The forge machine account `acs_platform` (`gitea.machineUser`) and every gateway repository under it | `aber_platform` | A forge restored from a 0.1.0 backup still holds `acs_platform` and its repositories. Either set `gitea.machineUser: acs_platform` to keep them as they are, or rename the account in Gitea's site administration before the first boot under the new chart (Gitea keeps a redirect from the old name). Left to the default, `gitea-init` creates `aber_platform` empty beside it. |
+| The commit status `acs/flow-shape` that `main` requires on every gateway repository | `aber/flow-shape` | Nothing. The forge sweep takes the old name out of each repository's rule and requires the new one, keeping any other required check. A proposal whose last push was checked under the old name shows no status under the new one; push to it again and `forge-events` posts it. |
 | The runtime-config global `window.__ACS_CYMRU_CONFIG__`, the browser storage keys `acs_cymru_theme`, `acs_cymru_sidebar_mode` and `acs-cymru.capture.dismissed-failures` | `__ABER_CONFIG__`, `aber_…` | Nothing. Each user's theme and sidebar preference reset once. |
-| The capture-file key `acs_capture_version` | `aber_capture_version` | Nothing: a capture recorded before 1.0 is read under either key, by the daemon and by the upload dialog. New captures carry the new key. |
+| The capture-file key `acs_capture_version` | `aber_capture_version` | A capture recorded before 1.0 is refused, by the daemon and by the upload dialog, as carrying no `aber_capture_version`; record it again. |
 | The AAS bundle paths `aasx/files/acs-cymru/…` and the manifest schema id `acs-cymru/asset-bundle/1` | `aasx/files/aber/…`, `aber/asset-bundle/1` | A consumer that unpacks the bundle by path reads the new one. Bundles exported before 1.0 are unchanged. |
 | Environment variables read by the scripts and the edge functions: `ACS_CYMRU_NAMESPACE`, `ACS_CYMRU_RELEASE`, `ACS_DEV_*`, `ACS_CA_URL`, `ACS_CA_PEM`, `ACS_PLATFORM_VERSION`, `ACS_INSTALLER_ALLOW_HTTP`, and the pods' mount paths under `/etc/acs-cymru`, `/var/lib/acs-cymru`, `/opt/acs-cymru` | `ABER_…`, `/etc/aber`, … | Nothing inside the cluster; the chart sets them. A shell profile that exported one of the names for the dev loop exports the new one. |
+| The platform's broker accounts `factoryplus_ingestion`, `factoryplus_i3x`, `factoryplus_monitor` (`secrets.mqttIngestionUser`, `mqttI3xUser`, `mqttMonitorUser`) | `aber_ingestion`, `aber_i3x`, `aber_monitor` | Nothing. The broker's boot reconcile creates the new accounts from the chart's passwords and removes the old ones, and the broker, the ingestion daemon and the i3X server restart onto them in the same upgrade. A values file that names an old username keeps that account. With `secrets.existingSecret` the old names stay until the Secret's `MQTT_*_USER` keys change; then restart `mosquitto`, `ingestion` and `i3x-service`. |
+| Node-RED's seed marker `/data/.factoryplus-seeded` and editor-users map `/data/.factoryplus-editor-users.json` | `/data/.aber-seeded`, `/data/.aber-editor-users.json` | Nothing. `node-red-init` moves each file on the first boot that finds it, before deciding whether to seed, so the flows and the editors' permissions stay; `settings.js` is rewritten once, at version 7, to read the new name. |
+| Node-RED's `tls-config` node `factoryplus-tls-config`, named *Factory+ internal CA*, which every broker node in `flows.json` points at while broker TLS is on | `aber-tls-config`, *Aber internal CA* | Nothing. `node-red-init` moves the node's id, every reference to it and its name on the first boot that finds it, and leaves the rest of `flows.json` byte for byte. A name somebody gave the node is kept. The CA it trusts keeps its common name, *Factory+ Internal CA*, because changing that re-mints the CA. |
+| The Directory entry *Node-RED (Virtual Edge Gateway Simulator)* | *Node-RED (Host-Run Gateways)* | Nothing. `0024` renames the row on the first boot, unless it was renamed by hand or another row already has the new name. |
+| The vault secret and psql variable `supabase_anon_key`, which held the publishable key | `supabase_publishable_key` | Nothing. `0002` rewrites the secret from db-init's variable on every boot and deletes the old name. A migration runner of your own that passes `-v supabase_anon_key=` passes the new name instead, or credential revocation and the forge sweep go inert. |
 | The dev cluster `k3d-acs-cymru` and the development credentials in `values-dev.yaml` (`sb_publishable_acscymru_dev_…`, `acscymru-ingest-writer`, `acscymrusecret`, …) | `k3d-aber`, `…aber…` | Development only. `k3d cluster delete acs-cymru`, then `npm run dev:up` creates `aber`. The Node-RED credential secret changed, so a dev cluster that keeps its volume needs `npm run dev:reset`. |
+| The Storage bucket `floor-plans`, its policies `floor_plans_*` and the path check `is_floor_plan_path()`; in the dashboard `FloorPlan.jsx`, `FloorPlacementPicker.jsx`, `utils/floorPlans.js`, the `.floor-plan*`, `.floor-pin*` and `.floor-placement*` classes, and `api.uploadFloorPlan`, `removeFloorPlan` and `loadFloorPlanUrl` | `area-plans`, `area_plans_*`, `is_area_plan_path()`; `AreaPlan.jsx`, `CellPlacementPicker.jsx`, `utils/areaPlans.js`, `.area-plan*`, `uploadAreaPlan`, `removeAreaPlan`, `loadAreaPlanUrl` | Nothing. `storage-policies.sql` replaces the four policies and drops the old check, and `storage-init.mjs` creates `area-plans`, moves every plan into it under the same key and deletes `floor-plans`. `areas.plan_path` holds only the key, so no row changes. A restored backup that still holds `floor-plans` is moved the same way by the next `helm upgrade`, and until then the Site Map draws the default outline and says the plan could not be loaded. A script of your own that read plans from `floor-plans` names `area-plans`. |
+| The dashboard page *Digital Thread*, its route `/digital-thread` and the words on every page that link to it | *Audit Trail*, `/audit-trail` | Nothing. A bookmark or a shared link to `/digital-thread` opens the Audit Trail and the address is rewritten. |
+| The audit table `digital_thread`: its partitions `digital_thread_default` and `digital_thread_YYYY_MM`, its sequence, indexes, constraints and policies, the view `digital_thread_partition_health`, the functions `digital_thread_page()`, `log_digital_thread_event()`, `ensure_digital_thread_partition(s)()`, `secure_digital_thread_partition()`, `enforce_digital_thread_append_only()`, `digital_thread_user_ids_matching()` and `digital_thread_backup_job_ids_matching()`, the `trg_*_digital_thread` triggers and the nightly job `digital_thread_partitions` | `audit_trail`, `audit_trail_*` throughout | Nothing in the database: `0000` renames the table and every partition, index and constraint on the first boot, so every row keeps its id; it drops the functions, triggers, policies, view and job under the old names and the baseline declares them under the new ones. A backup from before the rename is renamed the same way on the boot after its restore. A query, report or PostgREST call of your own that reads `/rest/v1/digital_thread` or `/rest/v1/rpc/digital_thread_page` names the new ones. |
+| The columns `change_proposals.applied_thread_id` and `retired_entities.thread_id`, and the `thread_id` key `approve_proposal()` returns | `applied_trail_id`, `trail_id` | Nothing in the database: `0000` renames both columns in place. A caller of your own that reads them reads the new names. |
+| The permission `digital_thread:read` | `audit_trail:read`, the same id (`d345e678-…-933e08544e42`) | Nothing. `0000` renames the row, so every role and machine identity that held it still does. A script of your own that grants the permission to a machine identity by name names the new one. |
+| The setting `ui.digital_thread_poll_seconds`, under the Settings category *Digital Thread* | `ui.audit_trail_poll_seconds`, under *Audit Trail* | Nothing. A settings key cannot be renamed, so `0000` copies the value to the new key and deletes the old row. |
+| The alert rule uid `aber-digital-thread-partitions`, titled *Digital Thread Partitions Falling Behind* | `aber-audit-trail-partitions`, *Audit Trail Partitions Falling Behind* | Nothing. The rules file names the old uid under `deleteRules`, so a Grafana that loaded it drops it. A silence or a notification route of your own that matched the old title matches the new one. |
+| The AAS bundle's part `aasx/files/aber/digital-thread.json`, its manifest key `digital_thread`, the `thread_rows` count in `X-AAS-Stats`, the manifest schema id `aber/asset-bundle/1`, and the cap `ASSET_EXPORT_MAX_THREAD_ROWS` | `audit-trail.json`, `audit_trail`, `trail_rows`, `aber/asset-bundle/2`, `ASSET_EXPORT_MAX_TRAIL_ROWS` | A consumer that unpacks a bundle by path reads the new part, and the schema id tells the two layouts apart. Bundles exported before 1.0 keep the old layout and the old id. An override of the cap in your own environment names the new variable. |
+
+**A development forge that already tagged `v0.1.0` holds other content under that tag.** The
+platform playbook has changed since a development forge first published it (the appliance flow's
+certificate note names `aber-gateway-converge`, for one), and a tag is never moved, so the forge
+sweep lists `platform/gateway-platform is tagged v0.1.0 at other content than this build ships`
+among its warnings until the version moves. Delete the tag as
+[`supabase/README.md`](../supabase/README.md#the-platform-playbook-is-published-by-the-sweep)
+says, and the next sweep tags `main` again. The release bumps the version, so an upgrading site
+meets a new tag instead.
 
 Everything below is what that one command does and does not disturb.
 
@@ -241,7 +267,7 @@ release is exactly when a backup is most wanted.
 - **Otherwise, the nightly CronJob.** A safety net to the last run and no finer, so it is not a
   substitute for taking one deliberately before an upgrade.
 
-Either way the two databases are always dumped, and the **3D model objects and the forge's volume
+Either way the two databases are always dumped, and the **storage objects and the forge's volume
 are not**: they are `backup.includeStorage` and `backup.includeForge`, both off by default, and each
 pins the pod to a ReadWriteOnce volume's node.
 [`deploy/k8s/README.md`](../deploy/k8s/README.md) has that caveat in full.
@@ -249,15 +275,15 @@ pins the pod to a ReadWriteOnce volume's node.
 From a host with a shell, against any reachable Postgres:
 
 ```bash
-bash scripts/backup-databases.sh          # both databases plus the 3D model objects
+bash scripts/backup-databases.sh          # both databases plus the storage objects
 bash scripts/restore-databases.sh         # the other half
 ```
 
 **Restore is a runbook, not a button** — [`supabase/README.md`](../supabase/README.md) §*Backup and
-Recovery*. A dump holds `auth.users`, every OAuth secret's hash and the whole `digital_thread`, so
+Recovery*. A dump holds `auth.users`, every OAuth secret's hash and the whole `audit_trail`, so
 the bytes are deliberately never handed to a browser.
 
-**`digital_thread` is the reason this matters more than it looks.** It is append-only audit and is
+**`audit_trail` is the reason this matters more than it looks.** It is append-only audit and is
 unreconstructable from anything else, so it is the one table for which "restore from backup" is the
 entire recovery story.
 
@@ -267,7 +293,7 @@ entire recovery story.
 
 **Nothing in this platform pushes a flow to a plant appliance.** The dashboard's *"Sync Edge Flows
 via GitOps"* action and the `deploy-nodered` edge function both target
-`http://node-red:1880/flows` — the **central** Node-RED that runs the simulated shopfloor. A
+`http://node-red:1880/flows` — the **central** Node-RED, which runs the host-run gateways. A
 Remote gateway's Node-RED has no inbound path at all: it dials out to the broker on 8883 and
 nothing anywhere assumes traffic in the other direction.
 
@@ -311,7 +337,7 @@ token** and is a manual act, per appliance.
 - **Its devices are untouched.** `enroll-gateway` does not reference the `devices` table at all.
   Approved devices stay approved and stay bound; they are not re-quarantined and do not need
   re-approving.
-- **History survives.** `telemetry`, `digital_thread` and `platform_alerts` all key on identity that
+- **History survives.** `telemetry`, `audit_trail` and `platform_alerts` all key on identity that
   did not change.
 
 So re-bundling is *re-provisioning an appliance*, not *re-registering an asset*. That is a much

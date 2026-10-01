@@ -6,7 +6,7 @@ import React from 'react'
  * `dangerouslySetInnerHTML`, so raw HTML in a help file is text. `scripts/check-docs-drift.mjs`
  * fails the build on any construct outside this subset.
  *
- * Supported: `## Heading` (h3; the panel title is the h2), `### Heading` (h4), `- item`, `1. item`,
+ * Supported: `## Heading` (h3), `### Heading` (h4), `- item`, `1. item`,
  * paragraphs from consecutive lines, **bold**, `code`, and [label](https://...).
  *
  * Links must be absolute http(s): a relative link resolves against the dashboard's routes and 404s,
@@ -98,8 +98,7 @@ export function HelpMarkdown({ source }) {
     <div className="help-prose">
       {parsed.map((b, i) => {
         if (b.kind === 'heading') {
-          // The panel's own title is the h2, so the corpus starts at h3 and the document outline
-          // stays continuous for anything reading it as a document rather than as a drawer.
+          // The drawer title is a <div>, not a heading; `##` renders as h3 and `###` as h4.
           const Tag = b.level === 2 ? 'h3' : 'h4'
           return <Tag key={i}>{inline(b.text, i)}</Tag>
         }

@@ -12,9 +12,8 @@
  * returned without its row could never be withdrawn.
  */
 
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { create, getNumericDate } from "https://deno.land/x/djwt@v2.9.1/mod.ts";
+import { createClient } from "@supabase/supabase-js";
+import { create, getNumericDate } from "djwt";
 import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 // Imported from another function's directory: this validator exists in exactly two places, the
@@ -190,4 +189,4 @@ export default async function handler(req: Request): Promise<Response> {
   }
 }
 
-serve(handler);
+Deno.serve(handler);

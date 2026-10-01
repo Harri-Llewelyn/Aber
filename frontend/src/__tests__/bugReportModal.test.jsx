@@ -45,14 +45,21 @@ describe('BugReportModal target repository', () => {
     expect(url.startsWith(`${GITHUB_REPO_URL}/issues/new?`)).toBe(true)
   })
 
-  // The specific regression. Asserted by name so reinstating the literal fails loudly rather
-  // than quietly resuming misrouted reports.
-  it('never files against the stale aber repository', () => {
+  // Equality rather than a pattern: whatever repository the constant names is the only one a
+  // report may reach.
+  it('files against no repository other than the configured one', () => {
     renderModal()
     setTitle('anything')
     submit()
 
-    expect(open.mock.calls[0][0]).not.toMatch(/aber/)
+    const url = new URL(open.mock.calls[0][0])
+    expect(`${url.origin}${url.pathname}`).toBe(`${GITHUB_REPO_URL}/issues/new`)
+  })
+
+  it('offers no category for a component that does not exist', () => {
+    renderModal()
+    const options = [...screen.getByDisplayValue('UI Dashboard').querySelectorAll('option')].map(o => o.value)
+    expect(options).not.toContain('FastAPI Backend')
   })
 
   it('defaults to this repository when VITE_GITHUB_REPO_URL is unset', async () => {

@@ -3,6 +3,7 @@ import { IconAlertTriangle, IconAlertCircle, IconShieldCheck, IconX, IconExterna
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import { REALTIME_ENABLED, grafanaAlertUrl } from '../../constants'
+import { POLL_INTERVAL_MS, RECONCILE_MS } from '../../hooks/usePlatformAlerts'
 
 /**
  * The top bar's alert counter, and the list behind it.
@@ -37,8 +38,8 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
   const count = alerts.length
   const healthy = count === 0
 
-  // Severity drives the colour, and critical wins outright. A floor with one critical and four
-  // warnings is a floor with a critical on it; averaging the two would be a summary nobody asked for.
+  // Severity drives the colour, and critical wins outright. A site with one critical and four
+  // warnings is a site with a critical on it; averaging the two would be a summary nobody asked for.
   const critical = alerts.filter((a) => a.severity === 'critical').length
   const tone = healthy
     ? 'alert-pill-healthy'
@@ -87,8 +88,7 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
           </div>
 
           {healthy ? (
-            /* The empty state says what is true: it names the evaluator, so nothing wrong and
-               nothing arriving are told apart. */
+            /* The healthy state: nothing firing. */
             <div className="alert-pill-empty">
               <IconShieldCheck size={20} />
               <div className="alert-pill-empty-title">No active alerts</div>
@@ -156,11 +156,12 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
 
           <div className="alert-pill-foot">
             {/* The feed mode lives here rather than as its own chip in the bar: it is read off a
-                build flag, and the question it answers is whether this count is fresh. */}
+                build flag, and the question it answers is whether this count is fresh. The
+                intervals are the hook's own constants, so the sentence cannot drift from them. */}
             Evaluated by Grafana. Thresholds and silences live there, not here.
             {' '}{realtime
-              ? 'Delivered live, reconciled every 60s.'
-              : 'Polled every 3s (Realtime disabled).'}
+              ? `Delivered live, reconciled every ${RECONCILE_MS / 1000}s.`
+              : `Polled every ${POLL_INTERVAL_MS / 1000}s (Realtime disabled).`}
           </div>
         </div>
       )}

@@ -43,7 +43,7 @@ info:
 
     Row Level Security is enforced by PostgreSQL, not by this gateway, and fails closed.
     Reads are open to any authenticated user; writes to `cells`, `gateways`, `devices` and
-    friends require `Administrator` or `Shopfloor_Manager`. `digital_thread` is readable by
+    friends require `Administrator` or `Shopfloor_Manager`. `audit_trail` is readable by
     `Administrator`, `Shopfloor_Manager` and `Auditor` only, and is **append-only** — the
     write verbs are revoked from every application role including `service_role`.
 
@@ -89,9 +89,9 @@ info:
     operator's assertion that an asset has no single cell; a CHECK forbids either wide scope with
     a populated `cell_id`.
 
-    Above the cell sits the ISA-95 **area** (a building, `/rest/v1/areas`): `cells.area_id` files
-    a cell, and a device's `effective_area_id` on the same view is its cell's area, or its own
-    `area_id` when it is `area_wide`. The site is one campus and lives in `system_settings` as
+    Above the cell sits the ISA-95 **area** (one part of the site, `/rest/v1/areas`):
+    `cells.area_id` files a cell, and a device's `effective_area_id` on the same view is its cell's
+    area, or its own `area_id` when it is `area_wide`. The site is one campus and lives in `system_settings` as
     `site.name`; the enterprise is each gateway's `sparkplug_group`. An area carries one SVG
     **plan** (`areas.plan_path`), and a cell's `plan_x`/`plan_y` place says where the Site Map
     pins it on that plan; nothing else reads them. A floor is not a level of the hierarchy and is
@@ -123,7 +123,7 @@ tags:
   - name: Telemetry
     description: Time-series metrics, served from the standalone TimescaleDB hypertable.
   - name: Audit
-    description: Append-only Digital Thread audit log.
+    description: The append-only Audit Trail.
   - name: Registry
     description: Schemas, metric catalog, reference vocabularies, links and services.
   - name: Storage
@@ -291,7 +291,7 @@ paths:
   /rest/v1/areas:
     get:
       tags: [Assets]
-      summary: List areas (buildings)
+      summary: List areas
       description: |
         The ISA-95 level above the cells. `?select=*,cells(*)` embeds each area's cells; devices
         are not embeddable here for the reason in the Asset location note — read
@@ -418,7 +418,7 @@ paths:
         `heartbeat_age_seconds`, derived at read time against a 90-second threshold.
 
         **Staleness is deliberately not stored.** A sweep writing `STALE` would fire
-        `log_digital_thread_event()` on every tick and append to an append-only audit table
+        `log_audit_trail_event()` on every tick and append to an append-only audit table
         forever, and would be correct only between ticks.
       parameters:
         - $ref: '#/components/parameters/Select'
@@ -741,25 +741,31 @@ paths:
           description: Granted to authenticated users only; `anon` is refused.
 
   # --------------------------------------------------------------- Audit ----
-  /rest/v1/digital_thread:
+  /rest/v1/audit_trail:
     get:
       tags: [Audit]
-      summary: Read the Digital Thread audit log
+      summary: Read the Audit Trail
       description: |
-        **Append-only.** Rows are written exclusively by the `log_digital_thread_event()`
-        trigger on `cells`, `gateways` and `devices`; `INSERT`/`UPDATE`/`DELETE` are revoked
-        from every application role — `service_role` included. Readable by `Administrator`,
-        `Shopfloor_Manager` and `Auditor`.
+        **Append-only.** Rows are written only by `log_audit_trail_event()` and its named
+        siblings: triggers on the audited tables, and the `SECURITY DEFINER` functions behind
+        proposals, backups, service identities and gateway credentials. `INSERT`/`UPDATE`/`DELETE`
+        are revoked from every application role — `service_role` included. The asset lane
+        (`audit_domain = 'asset'`) is readable by `Administrator`, `Shopfloor_Manager` and
+        `Auditor`, the security lane by `Administrator` and `Auditor`.
 
-        `entity_type` only ever holds `cells`, `gateways` or `devices`, and rows key on
-        `entity_id`. To find an entity's history after deleting it, collect the ids first.
+        `entity_type` names the table an event is about: `areas`, `cells`, `gateways`, `devices`,
+        `device_nameplate`, `schemas`, `metric_catalog` and `change_proposals` in the asset lane,
+        and `user_roles`, `service_principals`, `system_settings`, `backup_jobs` and `backups` in
+        the security lane. A trail older than their retirement also holds `area_floors`,
+        `cell_links`, `gateway_links` and `device_links` rows. Rows key on `entity_id`. To find an
+        entity's history after deleting it, collect the ids first.
 
         `actor_source` records who made the change (`user` / `ingestion` / `service` /
         `migration`). The trigger refuses to accept `user` from a client-supplied header.
       parameters:
         - { name: entity_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
-        - { name: entity_type, in: query, schema: { type: string }, description: '`eq.devices` | `eq.gateways` | `eq.cells`' }
-        - { name: action, in: query, schema: { type: string }, description: '`eq.INSERT` | `eq.UPDATE` | `eq.DELETE`' }
+        - { name: entity_type, in: query, schema: { type: string }, description: 'e.g. `eq.devices` or `eq.metric_catalog`; any `AuditTrailEntry.entity_type`' }
+        - { name: action, in: query, schema: { type: string }, description: 'e.g. `eq.UPDATE` or `eq.TOKEN_REVOKED`; any `AuditTrailEntry.action`' }
         - $ref: '#/components/parameters/Select'
         - $ref: '#/components/parameters/Order'
         - $ref: '#/components/parameters/Limit'
@@ -768,8 +774,8 @@ paths:
           description: Matching audit entries.
           content:
             application/json:
-              schema: { type: array, items: { $ref: '#/components/schemas/DigitalThreadEntry' } }
-        '403': { description: Role lacks Digital Thread read access. }
+              schema: { type: array, items: { $ref: '#/components/schemas/AuditTrailEntry' } }
+        '403': { description: Role lacks Audit Trail read access. }
 
   /rest/v1/revoked_service_tokens:
     get:
@@ -781,7 +787,7 @@ paths:
 
         **Operational, not audit.** Rows are pruned once the token they name has expired, because
         the signature check refuses it from then on — so this is *not* the history of revocations.
-        That is the `TOKEN_REVOKED` entry in `/rest/v1/digital_thread`, which is append-only and
+        That is the `TOKEN_REVOKED` entry in `/rest/v1/audit_trail`, which is append-only and
         carries the original mint in `old_data` so it stays readable after the row here is gone.
 
         **Revocation reaches PostgREST only.** `supabase-storage`, `supabase-realtime`, the edge
@@ -869,7 +875,7 @@ paths:
         name. No write policy exists. Deleting the `auth.users` row cascades to this one.
 
         Read is `Administrator` and `Auditor`, matching `list_user_accounts()`: a name here labels
-        digital-thread rows both roles may read, and holds nothing a token could be derived from.
+        audit-trail rows both roles may read, and holds nothing a token could be derived from.
       parameters:
         - { name: principal_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>` to name one identity.' }
         - $ref: '#/components/parameters/Select'
@@ -945,6 +951,10 @@ paths:
         Only a `draft` row is writable. A PATCH against an `active` or `archived` version is
         rejected by `prevent_active_schema_mutation()` — including with the service role.
 
+        A draft inherits its parent's `semantic_id` and `semantic_id_type` from `fork_schema()`,
+        so the draft is where a wrong claim is corrected or cleared. The dashboard's draft save
+        sends the pair together, with the type NULL whenever the id is.
+
         `version` and `status` cannot be set directly: use the two RPCs below.
       parameters:
         - { name: id, in: query, required: true, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
@@ -999,7 +1009,7 @@ paths:
       description: |
         One transaction: flips the draft to `active`, archives the predecessor, repoints every
         `device_submodels` row **and** `devices.schema_id`, and logs the device updates to the
-        Digital Thread.
+        Audit Trail.
 
         A device attached to both versions has its redundant old attachment dropped first, or
         the repoint would collide on `uq_device_submodels`.
@@ -1128,6 +1138,47 @@ paths:
         '201': { description: Created. }
         '400': { description: 'Name format, group spelling, or `semantic_id_type` CHECK violation.' }
         '403': { $ref: '#/components/responses/Forbidden' }
+    patch:
+      tags: [Registry]
+      summary: Deprecate, restore, or correct the semantic id of a metric
+      description: |
+        `name` and `datatype` are refused by `enforce_metric_catalog_immutability()`; every other
+        column may change. The three writes the dashboard makes:
+
+        * **Deprecate** — `{"deprecated": true, "superseded_by": "<uuid>" | null}`, sent by
+          `POST /api/v1/metric-catalog/{id}/deprecate`. The schema builder stops offering the
+          metric; schemas that model it, and its readings, are unchanged.
+        * **Restore** — `{"deprecated": false, "superseded_by": null}`, sent by
+          `POST /api/v1/metric-catalog/{id}/restore`. The pointer is cleared with the flag:
+          a current metric that still named a replacement would be current and replaced at once.
+        * **Edit** — `{"semantic_id": "<id>" | null, "semantic_id_type": "IRI" | "IRDI" | null}`,
+          sent by `PUT /api/v1/metric-catalog/{id}`. Only the pair, with the type NULL whenever the
+          id is. A semantic id is an assertion about the metric, not part of what a device
+          publishes, so it is corrected in place; every shell exported from a schema that models the
+          metric carries the new id.
+
+        Administrator only (`metric_catalog_update_privileged`). A caller the policy does not admit
+        matches no row, so nothing changes and no error is raised; send
+        `Prefer: return=representation` and treat an empty array as refused. Always send a filter,
+        e.g. `?id=eq.<uuid>`; an unfiltered PATCH updates every row.
+      parameters:
+        - { name: id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
+        - $ref: '#/components/parameters/Prefer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deprecated: { type: boolean }
+                superseded_by: { type: string, format: uuid, nullable: true, description: 'The replacement. NULL on restore.' }
+                semantic_id: { type: string, nullable: true }
+                semantic_id_type: { $ref: '#/components/schemas/SemanticIdType' }
+      responses:
+        '200': { description: 'Updated, with `Prefer: return=representation`. An empty array means no row was admitted.' }
+        '204': { description: Updated. }
+        '400': { description: '`name` or `datatype` in the body; both are immutable.' }
 
   /rest/v1/metric_groups:
     get:
@@ -1422,7 +1473,7 @@ paths:
       description: |
         One row per backup **on the backup volume** (`0101`): where it is, how big, which
         components it holds with their digests, and whether it is pinned. The row is deleted when
-        the service prunes the files; `BACKUP_PRUNED` in `digital_thread` is the record that it did.
+        the service prunes the files; `BACKUP_PRUNED` in `audit_trail` is the record that it did.
 
         **The bytes are not served.** Nothing here or in Storage hands a dump to a browser: it
         holds every user account, every service credential's hash, the whole audit trail and the
@@ -1658,8 +1709,8 @@ paths:
         `value` is `jsonb` and `value_type` says what it holds; a CHECK constraint enforces the
         pair, so a reader may trust the type. `anon` is revoked.
       parameters:
-        - { name: key, in: query, schema: { type: string }, description: 'e.g. `eq.ui.digital_thread_poll_seconds`' }
-        - { name: category, in: query, schema: { type: string }, description: 'e.g. `eq.Digital Thread`' }
+        - { name: key, in: query, schema: { type: string }, description: 'e.g. `eq.ui.audit_trail_poll_seconds`' }
+        - { name: category, in: query, schema: { type: string }, description: 'e.g. `eq.Audit Trail`' }
         - $ref: '#/components/parameters/Select'
       responses:
         '200':
@@ -1680,7 +1731,7 @@ paths:
         A non-Administrator receives `204` with zero rows affected rather than an error: the row
         is invisible to the UPDATE policy.
       parameters:
-        - { name: key, in: query, required: true, schema: { type: string }, description: 'e.g. `eq.ui.digital_thread_poll_seconds`' }
+        - { name: key, in: query, required: true, schema: { type: string }, description: 'e.g. `eq.ui.audit_trail_poll_seconds`' }
       requestBody:
         required: true
         content:
@@ -1794,10 +1845,9 @@ paths:
         `is_quarantined`, `first_dbirth_at`), the device's `gateway_id` data path and its
         `schema_id` binding are all refused, by name, at insert time.
 
-        **The `schemas` lane proposes an act rather than a column edit.** Its `entity_id` is a
-        **draft** schema and its patch is exactly `{"publish": true}`; approving calls
-        `publish_schema_version()`, which archives the predecessor and repoints every attached
-        device in the same transaction.
+        **A lane is open while `proposable_columns()` answers for it**, which it does for the five
+        `entity_type` values below. `schemas` is refused: archived migration 0090 withdrew that
+        lane, and rows filed before then still carry it.
       requestBody:
         required: true
         content:
@@ -1806,32 +1856,35 @@ paths:
               type: object
               required: [entity_type, entity_id, patch]
               properties:
-                entity_type: { type: string, enum: [devices, device_nameplate, schemas] }
-                entity_id: { type: string, format: uuid, description: 'The device. Both lanes are keyed by one.' }
+                entity_type: { type: string, enum: [areas, cells, device_nameplate, devices, gateways] }
+                entity_id: { type: string, format: uuid, description: 'The target row: the device for `devices` and `device_nameplate`, otherwise the area, cell or gateway. It must exist and not be archived.' }
                 patch: { type: object, description: 'Column -> new value. A patch, not a row snapshot.' }
                 rationale: { type: string }
       responses:
         '201': { description: Filed. }
+        '400': { description: 'The lane is not proposable, or the patch names a column the lane does not admit.' }
         '403': { description: 'Caller lacks `proposal:create`, or named somebody else as the proposer.' }
-        '409': { description: 'An open proposal against this asset by this person already exists.' }
+        '409': { description: 'An open proposal against this asset by this person already exists, or the target is absent or archived.' }
 
   /rest/v1/rpc/approve_proposal:
     post:
       tags: [Registry]
       summary: Approve a proposal, which is to apply it
       description: |
-        **The lane names the approver.** `may_decide_proposal()` admits an Administrator or a
-        Shopfloor_Manager to the asset lanes, and an Administrator alone to the `schemas` lane —
-        `0069` withdrew `schema:manage` from that role. Re-checked **server-side** rather than
-        taken from the caller. The patch is re-validated against the allowlist and applied in the same
+        **The lane names the approver.** `may_decide_proposal()` resolves what the target table's
+        own write policy resolves: an Administrator or a Shopfloor_Manager for `devices`,
+        `device_nameplate` and `areas`, and `cell:manage` or `gateway:manage` for `cells` and
+        `gateways`. A withdrawn lane, `schemas` among them, is decidable by nobody. Re-checked
+        **server-side** rather than taken from the caller. The patch is re-validated against the allowlist and applied in the same
         transaction, so every CHECK, foreign key and trigger on the target runs now — **an invalid
         change cannot be approved**, it aborts rather than becoming an audit record of something
         that did not happen.
 
-        Writes one `digital_thread` row naming both parties: `changed_by` is the approver,
-        `new_data.proposed_by` is who asked. On the nameplate lane `updated_by` is set to the
-        **proposer**, because a nameplate is an assertion about an asset and who made it is part
-        of the record.
+        Writes one `audit_trail` row naming both parties: `changed_by` is the approver,
+        `new_data.proposed_by` is who asked. It carries the same `causation_id` as the audit row
+        the change itself wrote, so the two read as one act. On the nameplate lane `updated_by` is
+        set to the **proposer**, because a nameplate is an assertion about an asset and who made it
+        is part of the record.
       requestBody:
         required: true
         content:
@@ -1843,7 +1896,7 @@ paths:
                 p_proposal_id: { type: string, format: uuid }
       responses:
         '200':
-          description: Applied, with the digital_thread id it wrote.
+          description: Applied, with the audit_trail id it wrote.
           content:
             application/json:
               schema: { type: object }
@@ -1897,6 +1950,30 @@ paths:
         '200': { description: Withdrawn. }
         '403': { description: Not the proposer. }
 
+  /rest/v1/rpc/list_proposer_names:
+    post:
+      tags: [Registry]
+      summary: The names of the machines behind the proposals you may decide
+      description: |
+        A machine identity has no email for a proposal to carry, and `machine_principals` is
+        readable by Administrator and Auditor only. This returns the name of each machine that
+        filed a proposal the caller may decide, by `may_decide_proposal()` on each proposal's
+        lane, the gate `approve_proposal` decides by. A caller who decides nothing gets an empty
+        array. A person, and a pinned identity with no name, has no row.
+      responses:
+        '200':
+          description: One row per machine proposer.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    principal_id: { type: string, format: uuid }
+                    name: { type: string }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
   /rest/v1/links:
     get:
       tags: [Registry]
@@ -1949,17 +2026,17 @@ paths:
         One row per area, cell, gateway or device that was **archived and then deleted**, by its
         retention timer or by hand, written by an `AFTER DELETE` trigger on each of the four tables
         as the row goes (`0124`). A delete that skipped the archive stage leaves no row here: it is
-        still on the digital thread, but it is not a retirement.
+        still on the audit trail, but it is not a retirement.
 
         The row carries what the entity was called, the `sparkplug_id` its readings are still keyed
         by in the historian, when it was archived and retired, who retired it (`retired_by` is null
-        when the timer did), the id of the thread's `DELETE` row, and `old_data`, the whole row as
+        when the timer did), the id of the trail's `DELETE` row, and `old_data`, the whole row as
         it was. It is the Archived Entities page's second card, where each row links to what
-        survives it: the digital thread, a gateway's repository in the forge, and any bundle in
+        survives it: the audit trail, a gateway's repository in the forge, and any bundle in
         `asset_exports`.
 
         **Read-only for every role.** No write policy exists; the trigger writes as definer.
-        Readable by any role holding `archive:manage` or `digital_thread:read`.
+        Readable by any role holding `archive:manage` or `audit_trail:read`.
       parameters:
         - { name: entity_type, in: query, schema: { type: string, enum: [areas, cells, gateways, devices] }, description: 'e.g. `eq.devices`' }
         - { name: entity_id, in: query, schema: { type: string, format: uuid } }
@@ -1983,7 +2060,7 @@ paths:
                     retired_at: { type: string, format: date-time }
                     retired_by: { type: string, format: uuid, nullable: true, description: 'Null when the retention job deleted it.' }
                     retired_by_email: { type: string, nullable: true }
-                    thread_id: { type: integer, nullable: true, description: 'The digital thread row that recorded the DELETE.' }
+                    trail_id: { type: integer, nullable: true, description: 'The audit trail row that recorded the DELETE.' }
                     old_data: { type: object, description: 'The row as it was.' }
         '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
 
@@ -2001,7 +2078,7 @@ paths:
 
         **Read-only for every role**, and readable by the three roles the bucket's read policy
         admits: `Administrator`, `Shopfloor_Manager` and `Auditor`. The row is written by the
-        function with the service role; its insert is recorded on the digital thread as `EXPORTED`.
+        function with the service role; its insert is recorded on the audit trail as `EXPORTED`.
         It is **not** a row in `telemetry_archive_manifest`: that catalogue is keyed by chunk and
         exists to make dropping a chunk safe, and a per-asset bundle has no chunk.
       parameters:
@@ -2028,7 +2105,7 @@ paths:
                     object_key: { type: string }
                     object_bytes: { type: integer, nullable: true }
                     sha256: { type: string, nullable: true }
-                    stats: { type: object, description: 'The counts the manifest reported: raw, hourly and thread rows, cold objects named, whether a cap was hit.' }
+                    stats: { type: object, description: 'The counts the manifest reported: raw, hourly and trail rows, cold objects named, whether a cap was hit.' }
                     taken_at: { type: string, format: date-time }
                     taken_by: { type: string, format: uuid, nullable: true }
                     taken_by_email: { type: string, nullable: true }
@@ -2106,7 +2183,7 @@ paths:
         out. Anything in this bucket is world-readable to whoever learns the path.
 
         Composed at read time from `AAS_MODEL_PUBLIC_BASE`. It **cannot** be derived from
-        `SUPABASE_URL`, which inside the cluster is `http://supabase-kong:8000` and resolves for
+        `SUPABASE_URL`, which inside the cluster is `http://supabase-envoy:8000` and resolves for
         nothing outside it.
       security: []
       parameters:
@@ -2128,7 +2205,7 @@ paths:
         A WebSocket upgrade, not a REST call — use `supabase-js`
         (`supabase.channel(...).on('postgres_changes', …)`) rather than calling this directly.
 
-        The publication carries `cells`, `gateways`, `devices` and `digital_thread`.
+        The publication carries `cells`, `gateways`, `devices` and `audit_trail`.
         **`telemetry` is unpublishable, not merely unpublished** — see that endpoint.
 
         Three things a client must know:
@@ -2312,7 +2389,7 @@ paths:
         Requires `Administrator` or `Shopfloor_Manager`. The authority decision is made by
         `authorize_host_gateway_credential()`, a `SECURITY DEFINER` RPC called *as the caller*
         that checks `has_role()` itself — the role check in the function turns a refusal into a
-        usable 403 rather than being the boundary. The mint is recorded in `digital_thread` as a
+        usable 403 rather than being the boundary. The mint is recorded in `audit_trail` as a
         `CREDENTIAL_ISSUED` row attributed to the calling operator, carrying the wire identity and
         never the password.
 
@@ -2335,7 +2412,7 @@ paths:
         '200':
           description: >-
             The credential. `audit_recorded` is `false` when the mint succeeded but the
-            `digital_thread` row could not be written — the password is still returned, because the
+            `audit_trail` row could not be written — the password is still returned, because the
             account exists and withholding it would strand one nobody can authenticate as.
           content:
             application/json:
@@ -2442,14 +2519,14 @@ paths:
                     type: string
                     format: uuid
                     description: >-
-                      The handle for revoking this token. Recorded in `digital_thread` — unlike the
+                      The handle for revoking this token. Recorded in `audit_trail` — unlike the
                       token itself — so it survives the dialog being closed.
                   principal_id: { type: string, format: uuid }
                   expires_at:   { type: string, format: date-time }
                   audit_row_id:
                     type: integer
                     format: int64
-                    description: The `digital_thread` row recording the mint.
+                    description: The `audit_trail` row recording the mint.
                   revocation_scope:
                     type: string
                     enum: [postgrest]
@@ -2725,7 +2802,7 @@ paths:
             text/plain:
               schema:
                 type: string
-              example: "ABER_SUPABASE_URL=https://api.plant.example\nACS_ENROLLMENT_TOKEN=...\n"
+              example: "ABER_SUPABASE_URL=https://api.plant.example\nABER_ENROLLMENT_TOKEN=...\n"
             application/zip:
               schema:
                 type: string
@@ -2747,7 +2824,9 @@ paths:
 
         **Allowed to `Operator` and `Auditor` as well** — it is a read. Still an allow-list,
         and still a broader disclosure than any single table, since a shell aggregates
-        nameplate, config and gateway identity into one payload.
+        nameplate, config and gateway identity into one payload. `bundle` also needs
+        `audit_trail:read` (Administrator, Shopfloor_Manager, Auditor), because it carries the
+        device's Audit Trail.
 
         **Telemetry values are never inlined.** The Time Series submodel carries a
         `LinkedSegment` naming the historian endpoint plus an `asset_id` query.
@@ -2761,9 +2840,10 @@ paths:
 
         `?format=bundle` returns the same AASX with the device's history inside, for taking an
         asset away before it is taken out of service: supplementary parts under
-        `aasx/files/aber/` hold the digital thread (JSON), the readings still in the live
-        historian at raw and hourly resolution (CSV, oldest first, capped newest-first), and a
-        manifest (`aber/asset-bundle/1`) that says what each part holds, where it was cut,
+        `aasx/files/aber/` hold the audit trail's asset lane, read as the caller (JSON), the
+        readings still in the live historian at raw and hourly resolution (CSV, oldest first,
+        capped newest-first), and a
+        manifest (`aber/asset-bundle/2`) that says what each part holds, where it was cut,
         and which cold-tier objects hold the rest — named, never read back. A copy is stored in the
         cold tier's bucket under `assets/<sparkplug_id>/<stamp>.aasx` and recorded in
         `asset_exports`; `X-AAS-Stats.bundle` says whether that copy was stored, and the file is
@@ -2801,13 +2881,13 @@ paths:
                 properties:
                   assetAdministrationShells: { type: array, items: { type: object } }
                   submodels: { type: array, items: { type: object } }
-                  conceptDescriptions: { type: array, items: { type: object }, description: 'Omitted entirely when empty — `minItems: 1` in the IDTA schema.' }
+                  conceptDescriptions: { type: array, items: { type: object }, description: 'One per semantic id the shell carries, with IEC 61360 content: name, definition, unit and data type. Omitted when there are none — `minItems: 1` in the IDTA schema.' }
                   stats: { type: object }
-            application/asset-administration-shell-package+zip:
+            application/asset-administration-shell-package+xml:
               schema: { type: string, format: binary }
         '400': { description: 'Missing `device_id`, a non-UUID `device_id`, or an unknown `format`.' }
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Role is outside the allow-list.' }
+        '403': { description: 'Role is outside the allow-list, or `format=bundle` without `audit_trail:read`; the bundle refusal names the Audit Trail.' }
         '404': { description: No such device. }
 
   /functions/v1/aas-api:
@@ -2830,7 +2910,7 @@ paths:
         runtime rather than by care.
 
         Every route is a `GET`. Writes would bypass the dashboard's role model and its
-        `digital_thread` audit trail, so the advertised profiles are the read-only SSP-002 pair.
+        `audit_trail` record, so the advertised profiles are the read-only SSP-002 pair.
       responses:
         '404':
           description: No resource at the root; the body names the routes that exist.
@@ -2866,7 +2946,7 @@ paths:
 
         Both advertised profiles are **SSP-002, the read-only variants**. Every route below is a
         `GET`; asset data is authored through the dashboard, which has the role model and writes
-        `digital_thread`, and a write here would bypass both.
+        `audit_trail`, and a write here would bypass both.
       responses:
         '200':
           description: The advertised profiles.
@@ -3379,7 +3459,7 @@ paths:
         **Authenticated by a scoped bearer secret, not by a Supabase key.** Grafana presents
         `GRAFANA_ALERT_WEBHOOK_SECRET`; this function verifies it and then uses its own service-role
         client internally. Grafana is deliberately *not* given the service-role key — that key
-        bypasses RLS entirely and can rewrite `digital_thread`, and a service fronted by browser SSO
+        bypasses RLS entirely and can rewrite `audit_trail`, and a service fronted by browser SSO
         gets the narrowest credential that does its job. Same shape as `nodered_webhook_jwt_secret`
         for the quarantine webhook.
 
@@ -3532,6 +3612,11 @@ paths:
         Authorised by `FORGE_SWEEP_SECRET` in the `x-sweep-secret` header, **not** by the publishable key.
         The identities acted on come from `user_roles` and the forge's own lists, never from the
         request, so a caller holding the secret can only make the forge more correct, and sooner.
+
+        **One pass at a time** (migration `0025`). A pass holds a five-minute lease from before it
+        reads the forge until it answers; a call that finds the lease held does nothing and answers
+        200 with `already_sweeping: true`. The running pass, or the one its release then queues,
+        sees whatever that call was asked about.
       security:
         - apiKeyAuth: []
       parameters:
@@ -3539,6 +3624,14 @@ paths:
           name: x-sweep-secret
           required: true
           schema: { type: string }
+        - in: header
+          name: x-sweep-lease
+          required: false
+          description: >-
+            A lease the caller holds, from `claim_forge_sweep()` as `service_role`. The pass renews
+            it, runs under it and leaves it held, so no other pass runs between the caller's changes
+            and this one.
+          schema: { type: string, format: uuid }
       requestBody:
         required: false
         content:
@@ -3550,14 +3643,19 @@ paths:
         '200':
           description: >-
             The pass completed. `placed`, `removed`, `hooked`, `protected`, `rekeyed`, `revoked`,
-            `published` and `recorded` list what changed; `errors` lists what the forge refused, per
-            item; `warnings` lists what the sweep declined and was right to decline -- a released tag
-            found at other content than this build ships, which no retry clears and only a version
-            bump resolves.
+            `archived`, `restored`, `published` and `recorded` list what changed; `errors` lists what
+            the forge refused, per item; `warnings` lists what the sweep declined and was right to
+            decline -- a released tag found at other content than this build ships, which no retry
+            clears and only a version bump resolves. Or, with the body `{"already_sweeping": true}`
+            and nothing else, another pass holds the lease and this call did nothing.
         '401':
           description: The secret is missing or wrong.
+        '409':
+          description: The lease named in `x-sweep-lease` is not held, because it was released or lapsed and was taken over.
         '502':
-          description: The forge could not be reached or the organisation could not be read; nothing further was attempted.
+          description: >-
+            The forge could not be reached or the organisation could not be read, or the lease could
+            not be read; nothing further was attempted.
         '503':
           description: FORGE_SWEEP_SECRET is not configured, or this deployment has no forge.
   /functions/v1/forge-signout:
@@ -3711,11 +3809,13 @@ components:
     SemanticIdType:
       type: string
       nullable: true
-      enum: [IRI, IRDI, ModelReference]
+      enum: [IRI, IRDI]
       description: |
-        Which kind of AAS Reference `semantic_id` is. CHECK-constrained — a bad value would
-        surface as an invalid AAS Reference at export time. **Never half-populated**: the pair
-        is written together or not at all.
+        Which kind of AAS Reference `semantic_id` is: an IRI (a URL or URN) or an IRDI (an ECLASS
+        or IEC CDD code). CHECK-constrained (`0012`); both export as an `ExternalReference`.
+        `ModelReference` was withdrawn because the exporter cannot emit one. **Never
+        half-populated**: the dashboard writes the pair together, with the type NULL whenever the
+        id is.
 
     LocationScope:
       type: string
@@ -3724,23 +3824,24 @@ components:
       description: |
         `site_wide` is an operator's assertion that this asset has no single cell and no single
         area: it serves the whole campus (an AGV, an ambient sensor). `area_wide` is the same
-        assertion one level down: no single cell, one building (a BMS), and it REQUIRES `area_id`.
-        A CHECK forbids either alongside a populated `cell_id`, and forbids `area_id` on anything
-        but `area_wide` — a cell-scoped asset's area is its cell's, read from `device_locations`.
+        assertion one level down: no single cell, one area (a building management system), and it
+        REQUIRES `area_id`. A CHECK forbids either alongside a populated `cell_id`, and forbids
+        `area_id` on anything but `area_wide` — a cell-scoped asset's area is its cell's, read from
+        `device_locations`.
 
         **Scope does not inherit; only `cell_id` does.** A device behind a site-wide gateway
         resolves to *Unassigned*, not to Site-Wide.
 
     Area:
       type: object
-      description: An ISA-95 area — one building of the one site. The level between the site (a setting, `site.name`) and the cells.
+      description: An ISA-95 area — one part of the one site. The level between the site (a setting, `site.name`) and the cells.
       properties:
         id: { type: string, format: uuid, readOnly: true }
         name: { type: string, example: Building 3, description: 'UNIQUE, and the `<area>` segment of every `uns/` topic beneath it, so it cannot contain `/`, `+` or `#`.' }
         description: { type: string, nullable: true }
-        icon: { type: string, default: Building2, enum: [Building2, Factory, Warehouse, FlaskConical, Truck, Parking, Trees, Zap], description: 'Icon key, a closed set (`areas_icon_valid`) rendered by the dashboard from a bundled SVG set. What the building is for.' }
+        icon: { type: string, default: Building2, enum: [Building2, Factory, Warehouse, FlaskConical, Truck, Parking, Trees, Zap], description: 'Icon key, a closed set (`areas_icon_valid`) rendered by the dashboard from a bundled SVG set. What the area is for.' }
         created_at: { type: string, format: date-time, readOnly: true }
-        plan_path: { type: string, nullable: true, description: 'Object path of the SVG plan in the private `floor-plans` bucket, `<area_id>/<file>.svg`, or NULL for the default outline. Set through the dashboard, which uploads the object first.' }
+        plan_path: { type: string, nullable: true, description: 'Object path of the SVG plan in the private `area-plans` bucket, `<area_id>/<file>.svg`, or NULL for the default outline. Set through the dashboard, which uploads the object first.' }
         plan_aspect: { type: number, nullable: true, description: 'Width over height of the plan''s viewBox; NULL exactly when `plan_path` is. Cell places are fractions of the plan, so this is what turns them back into a distance.' }
         cells:
           type: array
@@ -3762,10 +3863,10 @@ components:
       properties:
         id: { type: string, format: uuid, readOnly: true }
         name: { type: string, example: Assembly Line 1, description: 'UNIQUE — cells are not addressed on the wire, so a stable name is safe here. It is the `<cell>` segment of its `uns/` topics, so a new name cannot contain `/`, `+` or `#`.' }
-        area_id: { type: string, format: uuid, nullable: true, description: 'The area (building) this cell is filed in. NULL is unfiled, which the dashboard lists as a queue.' }
+        area_id: { type: string, format: uuid, nullable: true, description: 'The area this cell is filed in. NULL is unfiled, which the dashboard lists as a queue.' }
         plan_x: { type: number, nullable: true, minimum: 0, maximum: 1, description: 'Where the cell sits on its area''s plan, as a fraction of the plan''s width. Set with `plan_y` or not at all, requires `area_id`, and is refused closer than `site_map.min_pin_spacing` (a fraction of the plan''s shorter side) to another cell in the same area. Moving the cell to another area clears it, unless the same write names a new place.' }
         plan_y: { type: number, nullable: true, minimum: 0, maximum: 1, description: 'Fraction of the plan''s height, 0 at the top.' }
-        description: { type: string, nullable: true, description: 'Free text, shown as a help tip beside the name on the Overview map when present.' }
+        description: { type: string, nullable: true, description: 'Free text, shown as a help tip beside the name on the Site Map when present.' }
         grafana_url: { type: string, nullable: true }
         is_archived: { type: boolean, default: false }
         archived_at: { type: string, format: date-time, nullable: true }
@@ -3907,7 +4008,7 @@ components:
             unreachable. Read `device_locations.effective_cell_id` to display.
         area_id: { type: string, format: uuid, nullable: true, description: 'Populated exactly when `location_scope` is `area_wide`. Read `device_locations.effective_area_id` to display.' }
         location_scope: { $ref: '#/components/schemas/LocationScope' }
-        status: { type: string, enum: [ONLINE, OFFLINE], default: OFFLINE, description: 'Set ONLINE on DBIRTH, OFFLINE on DDEATH, and OFFLINE by the ingestion watchdog after a configurable silence.' }
+        status: { type: string, enum: [ONLINE, OFFLINE], default: OFFLINE, description: 'Set ONLINE on DBIRTH, OFFLINE on DDEATH, and OFFLINE by the ingestion watchdog after a configurable silence. DDATA from a device the watchdog timed out sets it ONLINE again.' }
         is_quarantined:
           type: boolean
           default: false
@@ -4073,18 +4174,53 @@ components:
         datatype: { type: integer, nullable: true, example: 12, description: 'Sparkplug B datatype code (9 Float, 10 Double, 11 Boolean, 12 String, …).' }
         updated_at: { type: string, format: date-time }
 
-    DigitalThreadEntry:
+    AuditTrailEntry:
       type: object
-      description: One trigger-written audit event.
+      description: One audit event.
       properties:
         id: { type: integer, readOnly: true }
-        entity_type: { type: string, enum: [cells, gateways, devices] }
+        entity_type:
+          type: string
+          enum: [areas, cells, gateways, devices, device_nameplate, schemas, metric_catalog, change_proposals,
+                 user_roles, service_principals, system_settings, backup_jobs, backups]
+          description: >-
+            The table the event is about: the types the trail records today. A trail older than
+            their retirement also holds `area_floors`, `cell_links`, `gateway_links` and
+            `device_links` rows.
         entity_id: { type: string, format: uuid }
-        action: { type: string, enum: [INSERT, UPDATE, DELETE] }
+        action:
+          type: string
+          enum: [INSERT, UPDATE, DELETE, SCHEMA_REJECTION, CREDENTIAL_ISSUED, TOKEN_MINTED, TOKEN_REVOKED,
+                 PRINCIPAL_REVOKED, PRINCIPAL_REINSTATED, PRINCIPAL_DESCRIBED, PROPOSAL_APPLIED, EXPORTED,
+                 PROPOSAL_EXPIRED, ROLE_GRANTED, ROLE_REVOKED, FLOW_DEPLOYED, BACKUP_REQUESTED,
+                 BACKUP_CANCELLED, BACKUP_RELEASED, BACKUP_TAKEN, BACKUP_FAILED, BACKUP_PRUNED]
+          description: >-
+            What happened. The audit trigger on each audited table writes `INSERT`, `UPDATE` and
+            `DELETE`; every other action is written by the function that performs the act, such as
+            `TOKEN_REVOKED` by `revoke_service_token()`. A service principal's creation is an
+            `INSERT` written by `create_machine_principal()`.
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }
-        actor_source: { type: string, nullable: true, enum: [user, ingestion, service, migration], description: 'The trigger accepts only the non-`user` values from a client header — a client asserting a human author is precisely the claim it must not be able to make.' }
+        actor_source: { type: string, nullable: true, enum: [user, ingestion, service, migration], description: 'A person is `user`. For any other caller the trigger believes an `X-Aber-Actor` header only from the caller it describes: `ingestion` from the ingestion principal, `migration` from the database owner''s session with no token, `service` from anyone else. A machine identity is `service` whatever it sends, and `user` is never taken from the header — a client asserting a human author is precisely the claim it must not be able to make.' }
+        causation_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: >-
+            The transaction that wrote the row (`txid_current()`), so rows sharing it were written
+            by one act. Unique only within this database: group by it, never keep it as a
+            reference. A `PROPOSAL_APPLIED` row shares it with the change that approval made, and
+            the `PROPOSAL_EXPIRED` rows one expiry run writes share that run's. NULL on rows older
+            than the column, and on `PROPOSAL_APPLIED` and `PROPOSAL_EXPIRED` rows written before
+            migration 0021.
+        audit_domain:
+          type: string
+          enum: [asset, security]
+          description: >-
+            The lane, which decides who may read the row: `asset` is readable by Administrator,
+            Shopfloor_Manager and Auditor, `security` by Administrator and Auditor. Stamped by a
+            trigger from `audit_domain_for()`; a writer cannot supply it.
         recorded_at: { type: string, format: date-time }
 
     DirectoryService:
@@ -4279,7 +4415,7 @@ components:
           description: |
             Dotted, lowercase, `namespace.name`. IMMUTABLE: a key names the value some code reads,
             so renaming one would silently disconnect it from that reader.
-          example: ui.digital_thread_poll_seconds
+          example: ui.audit_trail_poll_seconds
         value:
           description: |
             The value, as JSON. Its JSON type must match `value_type` — a CHECK constraint enforces
@@ -4292,7 +4428,7 @@ components:
         category:
           type: string
           description: 'Grouping for the settings page.'
-          example: Digital Thread
+          example: Audit Trail
         label: { type: string, example: 'Refresh interval (seconds)' }
         description:
           type: string
@@ -4304,7 +4440,7 @@ components:
             The environment variable or code constant this overrides, named so the fallback is
             greppable from either end. An absent row means the fallback applies, which is what
             keeps local boot zero-configuration.
-          example: the 60_000 ms interval in DigitalThreadTab.jsx
+          example: the 60_000 ms interval in AuditTrailTab.jsx
         updated_at: { type: string, format: date-time }
         updated_by:
           type: string

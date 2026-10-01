@@ -373,7 +373,7 @@ class TestTokenEmbedding(BundleBase):
         self.assertIn("NODERED_CREDENTIAL_SECRET=", env)
         # The address the APPLIANCE dials -- never the in-stack one, which resolves nowhere useful.
         url = re.search(r"^ABER_SUPABASE_URL=(.+)$", env, re.M).group(1)
-        self.assertNotIn("supabase-kong", url)
+        self.assertNotIn("supabase-envoy", url)
         self.assertNotIn("127.0.0.1", url)
 
     def test_the_embedded_token_matches_the_stored_hash(self):

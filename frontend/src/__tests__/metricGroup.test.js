@@ -14,8 +14,8 @@ describe('deriveMetricGroup', () => {
   })
 
   it('returns null for a name with no separator', () => {
-    // The whole starter catalog is flat; treating each of those as its own group would make
-    // grouping worse than no grouping.
+    // A name with no separator has no group; treating each as its own group would make grouping
+    // worse than no grouping.
     expect(deriveMetricGroup('temperature')).toBeNull()
     expect(deriveMetricGroup('availability')).toBeNull()
   })

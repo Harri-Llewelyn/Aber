@@ -53,9 +53,9 @@ Compose's lack of templating and disappear entirely under Helm.
 ### Guiding principle: keep the names
 
 **Kubernetes Service names must be identical to the Compose service names** (`supabase-db`,
-`supabase-kong`, `supabase-rest`, `mosquitto`, `timescaledb`, …). In-cluster DNS then resolves
-`http://supabase-kong:8000` inside the namespace exactly as Docker's embedded DNS does, and every
-compose-internal URL already in `grafana.ini`, `kong.yml`, `settings.js` and the edge-function
+`supabase-envoy`, `supabase-rest`, `mosquitto`, `timescaledb`, …). In-cluster DNS then resolves
+`http://supabase-envoy:8000` inside the namespace exactly as Docker's embedded DNS does, and every
+compose-internal URL already in `grafana.ini`, the gateway config, `settings.js` and the edge-function
 environment keeps working with **no change**. The diff between the two topologies collapses to the
 host-facing URLs, which is where it genuinely belongs.
 
@@ -76,9 +76,9 @@ Rationale, briefly, since the alternative is reasonable:
   exists to guarantee: **one definition, so the values cannot drift between the writer and the
   reader.** Kustomize expresses shared *patches*, not shared *values*, and would reintroduce the
   drift the anchor was written to prevent.
-- Two config files need real templating with secrets in them (`kong.yml`,
-  `datasources.template.yml`). Helm renders them into Secrets; that is what deletes
-  `supabase-kong-init` and Grafana's `sed` entrypoint.
+- Two config files need secrets substituted into them: the gateway template and Grafana's
+  `datasources.template.yml`. Kubernetes gives both a real rendering step (an initContainer, §4.5
+  and §7.4), which is what deletes Compose's gateway init container and Grafana's `sed` entrypoint.
 - `helm upgrade` hooks give ordered, re-runnable migration Jobs, which is the direct replacement
   for `depends_on: condition: service_completed_successfully`.
 
@@ -123,7 +123,7 @@ ConfigMap is mounted over. Both paths run the same code, so Compose behaves exac
 - **An unsubstituted template placeholder counts as absent.** A `config.js` rendered but never
   substituted leaves `${VITE_SUPABASE_URL}` behind, and that is *worse* than no value: the client
   constructs, every request fails against a nonsense origin, and nothing names the cause. Same
-  guard as `supabase-kong-init`'s leftover-marker scan, for the same reason.
+  guard as the gateway's leftover-marker scan (§2.3), for the same reason.
 - **NGINX serves `/config.js` `no-store`.** The bundle around it is content-hashed and cached
   normally, but this file has a fixed name and exists to differ between deployments; a cached copy
   would point a redeployed dashboard at the previous environment's Supabase URL, which surfaces as
@@ -170,7 +170,11 @@ export is the platform's root for the one-liner's pin.
   repository, so this is no longer optional; `frontend/.dockerignore` excludes `node_modules`,
   where the host's tree can carry platform-specific binaries the alpine builder cannot execute. It
   deliberately does **not** exclude `public/`, which now carries `config.js`.
-- **The Dockerfile removes itself from the functions directory after copying.** Inert today —
+- **Dependencies are resolved at build time.** The build caches every import against
+  `deno.lock` and boots each function with no network, so the image runs where nothing is
+  reachable (`supabase/README.md`, *Edge function dependencies*).
+- **The Dockerfile removes itself and `offline-check.sh` from the functions directory after
+  copying.** Inert today —
   `main/index.ts` is an allow-list, so nothing dispatches to it — but a stray non-TypeScript file
   in the functions root is what a future runtime's directory scan trips over.
 - Compose keeps bind-mounting, for hot-reload. Both run identical code; only delivery differs.
@@ -179,71 +183,44 @@ export is the platform's root for the one-liner's pin.
 
 ### 2.3 Gateway config: template, don't `sed`
 
-> **Envoy is the gateway** ([`docs/gateway.md`](gateway.md)) and Kong is gone from the chart;
-> `supabase-envoy`'s initContainer plays the role described here. The Kong reasoning below is
-> kept because the argument is the gateway-agnostic one.
+`supabase/envoy.yaml` is a **template**, not a config: thirteen `__UPPER_SNAKE__` placeholders,
+mirrored into the chart (§3.5) and substituted at boot by the gateway's `render-config`
+initContainer from environment variables sourced from the Secret. Helm has templating and does not
+use it here, for the reason §4.5 gives: with `secrets.existingSecret` the chart cannot see the keys.
 
-`supabase-kong-init` exists because Compose has no templating. It originally existed because Kong
-2.8 could not read environment variables from declarative config either; **on 3.x it can**
-(`${{env.VAR}}`), so that half of the reason is gone and the service is now kept deliberately —
-interpolation would move the service-role key into Kong's environment, where `docker inspect`
-prints it, in exchange for deleting a container that runs once for a second. Helm has templating
-anyway. `supabase/kong.yml` stays **one
-template serving both targets** — the `__UPPER_SNAKE__` placeholders are unchanged for Compose and
-are what Helm renders into a Secret mounted at `/usr/local/kong/declarative/kong.yml`.
+One template is the point: the file a developer edits is the file the cluster runs, so a route
+cannot exist in one and be missing from the other. `scripts/check-gateway-surface.mjs` asserts that
+the substituter knows every placeholder and that each is still a placeholder, and it holds the route
+inventory ([`docs/gateway.md`](gateway.md)).
 
-Keeping one file rather than forking it is the point: a route added for Compose and forgotten on
-Kubernetes is a gateway that behaves differently between environments, which is the class of bug
-this gateway exists to prevent.
+The substituter carries three guards, each against a failure that otherwise looks healthy:
 
-Three changes made it usable from both:
+- **An empty key or JWT is refused.** An empty key substituted into the Lua filter is matched by any
+  caller sending an empty `apikey`, and an empty JWT answers 401 to every request while every pod
+  reports healthy.
+- **The Realtime upstream host must begin with the label `realtime-dev`** (§3.4). Realtime reads
+  its tenant from that label and answers every WebSocket handshake with a bare 403 otherwise.
+- **The leftover scan matches any `__UPPER_SNAKE__` marker**, so a placeholder added to the
+  template and forgotten in the substituter fails loudly. It **skips comment lines**: the template's
+  own header documents the convention by name, and a whole-file scan flagged the documentation of
+  the rule as a violation of it.
 
-- **`__REALTIME_UPSTREAM_URL__` is now a placeholder** rather than a literal, because it is the one
-  upstream that genuinely differs (§3.4) — `realtime-dev.supabase-realtime` (a Compose network
-  alias) versus `realtime-dev` (a Kubernetes Service name).
-- **`supabase-kong-init` validates the tenant label.** A URL whose leading hostname label is not
-  `realtime-dev` is refused at render time with a message saying why, instead of producing a
-  gateway that answers every WebSocket handshake with a bare 403.
-- **The leftover-placeholder scan matches any `__UPPER_SNAKE__` marker**, not just `__SUPABASE_`,
-  so a placeholder added to the template and forgotten in a substituter fails loudly. It **skips
-  comment lines** — found the hard way: the template's own header documents the convention by
-  name, so a whole-file scan flagged the documentation of the rule as a violation of it.
-
-**The service and the `kong_config` volume both disappear on Kubernetes.** They stay on Compose.
-
-**The gateway is on `kong:3.9.3`.** It was pinned to the unmaintained `2.8.1-alpine` until the
-upgrade; two things about that bump are worth carrying forward:
-
-- **There is no 3.x `-alpine` image.** Kong stopped publishing alpine variants after `3.3.1`;
-  `kong:3.9.3-alpine` is a 404 on Docker Hub, so the tag drops the suffix and the image is
-  Debian-based.
-- **3.0 made the Prometheus plugin's per-entity metrics opt-in.** `status_code_metrics`,
-  `latency_metrics` and `bandwidth_metrics` all default to `false`, so a bare `- name: prometheus`
-  — which was the whole configuration on 2.8 — exports node-level gauges and nothing else. The
-  scrape target stays UP while every per-service series vanishes. They are set explicitly in
-  `kong.yml`; the metric names also changed, and `templates/obs/servicemonitors.yaml` carries the
-  new ones as read off the running gateway.
-
-**Rate limiting does not depend on the gateway version.** The stack has none anywhere, but
-`rate-limiting` is bundled in Kong already; it is unavailable only because naming plugins in
-`KONG_PLUGINS`
-*replaces* the bundled set rather than extending it. Adding it means a plugin block in `kong.yml`
-and the name added to both plugin lists, which CI already asserts agree. `policy: local` is the
-correct choice — `cluster` is unsupported in DB-less mode, and local counters are exact at one
-replica.
+This section first described Kong and the Compose init container that rendered its config. What
+those taught is in `docs/gateway.md`, *History*.
 
 ### 2.4 Grafana datasource: render, don't `sed`
 
 Grafana's entrypoint is a `sed` that substitutes `DB_PASSWORD` into a datasource template, which is
-why the `grafana_provisioning_datasources` volume exists. On Kubernetes, Helm renders the same
-template into a Secret mounted at `/etc/grafana/provisioning/datasources/datasources.yml`; the
-custom entrypoint and the volume both go away and Grafana runs its stock `/run.sh`.
+why the `grafana_provisioning_datasources` volume exists. On Kubernetes, the `render-datasource`
+initContainer renders the same template into an `emptyDir` mounted at
+`/etc/grafana/provisioning/datasources` (§7.4 says why not Helm); the custom entrypoint and the
+volume both go away and Grafana runs its stock `/run.sh`.
 
-**The placeholder moved from `${DB_PASSWORD}` to `__DB_PASSWORD__`**, matching `kong.yml`. The
-shell form had to survive Compose's variable substitution *and* sed's, which is what produced the
+**The placeholder moved from `${DB_PASSWORD}` to `__DB_PASSWORD__`**, matching the gateway
+template. The shell form had to survive Compose's variable substitution *and* sed's, which is what produced the
 barely-readable `sed "s/\$${DB_PASSWORD}/$$DB_PASSWORD/g"`; the new form needs no escaping in either
-substituter, and the entrypoint gained the same empty-value check and leftover-marker scan Kong's
-has.
+substituter, and the renderer has the same empty-value check and leftover-marker scan as the
+gateway's (§2.3).
 
 Grafana provisioning files also support `$__env{VAR}` interpolation — the mechanism `grafana.ini`
 already uses for `GRAFANA_OAUTH_CLIENT_SECRET` — which would remove the rendering step entirely on
@@ -311,7 +288,7 @@ deploy/
       secret.yaml                        skipped when secrets.existingSecret is set
       data/{timescaledb-configmap,timescaledb-statefulset,supabase-db-statefulset}.yaml
       supabase/realtime-service.yaml     the name is the decision — §3.4
-      supabase/{auth,rest,kong,functions,storage,meta,studio,realtime-deployment}.yaml
+      supabase/{auth,rest,envoy,functions,storage,meta,studio,realtime-deployment}.yaml
       jobs/{db-roles-init,db-init,storage-init}.yaml
       jobs/{backup-cronjob,timescaledb-maintenance}.yaml
       jobs/{e2e-validate-job,e2e-aas-export-job}.yaml
@@ -396,28 +373,25 @@ backups (§10.3) is the deliberate position — see §11 for what taking it furt
 ### 3.4 Realtime's tenant hostname — the one naming exception
 
 Realtime resolves its tenant from the **leading hostname label** of the `Host` header, which is why
-Compose gives it the network alias `realtime-dev.supabase-realtime` and `kong.yml` addresses it as
+Compose gave it the network alias `realtime-dev.supabase-realtime` and the gateway addressed it as
 such. Kubernetes has no per-Service aliases of that shape.
 
-**Name the Service `realtime-dev`.** Both gateways end up sending `Host: realtime-dev` — leading
-label `realtime-dev`, which is the tenant `SEED_SELF_HOST` creates — but they get there differently,
-and the difference matters if either is changed. Kong took the upstream `Host` from the service
-hostname, with the default `preserve_host: false`, so the Service name alone did the work. Envoy
-preserves the downstream `Host` unless told otherwise, so `supabase/envoy.yaml` carries an explicit
-`host_rewrite_literal` for that route ([`docs/gateway.md`](gateway.md) records it
-as one of the four translation traps).
-The Service name is still load-bearing on both — `aber.validateRealtimeServiceName` refuses an
-install that renames it — and it is still the Kubernetes-native equivalent of the Compose alias.
+**Name the Service `realtime-dev`.** The gateway sends `Host: realtime-dev`, whose leading label is
+the tenant `SEED_SELF_HOST` creates. Envoy preserves the downstream `Host` unless told otherwise, so
+`supabase/envoy.yaml` carries an explicit `host_rewrite_literal` for that route; a gateway that
+forwards the downstream `Host` unchanged would send `api.<domain>` and every handshake would get a
+bare 403. The Service name is load-bearing too: `aber.validateRealtimeServiceName` refuses an
+install that renames it, and it is the Kubernetes-native equivalent of the Compose alias.
 
 The Service is a separate template file from its Deployment, because the *name* is the architectural
 decision and the workload behind it is ordinary.
-`aber.validateRealtimeServiceName` refuses any other name, mirroring the guard
-`supabase-kong-init` applies to `REALTIME_UPSTREAM_URL` on the Compose side — one invariant,
-enforced on both targets.
+`aber.validateRealtimeServiceName` refuses any other name at render time, and the gateway's
+initContainer refuses a `REALTIME_UPSTREAM_HOST` without the `realtime-dev` label at boot (§2.3):
+one invariant, checked twice.
 
-The chart therefore templates the Realtime upstream URL in `kong.yml`. The fallback, if a future
-gateway does not preserve that behaviour, is a `request-transformer` rule setting the header
-explicitly — note it in the chart comments so the next person does not have to rediscover it.
+The chart therefore hands the gateway the Realtime upstream's host and address as two placeholders
+(`__REALTIME_UPSTREAM_HOST__`, `__REALTIME_UPSTREAM_ADDRESS__`), and the host rewrite is the part
+any future gateway has to reproduce.
 
 `replicas: 1`, always: Realtime holds a logical replication slot and clustering multiple nodes
 requires `DNS_NODES` configuration the stack does not have.
@@ -428,7 +402,7 @@ requires `DNS_NODES` configuration the stack does not have.
 
 This constraint shapes every mounted config file in the chart. `.Files.Glob` is scoped to the chart
 directory and `..` is rejected outright — but the files the chart must mount are the *same files*
-`docker-compose.yml` bind-mounts: the TimescaleDB bootstrap scripts, the Kong template, the Grafana
+`docker-compose.yml` bind-mounts: the TimescaleDB bootstrap scripts, the gateway template, the Grafana
 datasource template, the Mosquitto config and ACL, and the Node-RED flow. Two hand-maintained copies
 of those is precisely the drift a shared substrate exists to avoid.
 
@@ -491,8 +465,8 @@ objects' own framing that the estimate does not reconstruct.
 
 ## 4. Supabase control plane and the ordering problem
 
-Nine Deployments (`kong`, `auth`, `rest`, `realtime`, `storage`, `functions`, `meta`, `studio`,
-`swagger-ui`), three hook Jobs, and the ConfigMaps carrying the migrations, the seed, the Kong
+Nine Deployments (`envoy`, `auth`, `rest`, `realtime`, `storage`, `functions`, `meta`, `studio`,
+`swagger-ui`), three hook Jobs, and the ConfigMaps carrying the migrations, the seed, the gateway
 template and the storage-init script. The OpenAPI specifications are not among them: swagger-ui
 is their only reader, so they are baked into its image (swagger-ui/Dockerfile) and the ConfigMap
 that carried them is gone -- it was the largest object in the release Secret.
@@ -501,7 +475,7 @@ that carried them is gone -- it was the largest object in the release Secret.
 by probing the images directly:
 
 - **The edge runtime has no health endpoint** (§4.3).
-- **Rendering Kong's config in Helm silently disables gateway authentication** on the
+- **Rendering the gateway's config in Helm silently disables its authentication** on the
   `existingSecret` path (§4.5).
 - **The port-leak check must be scoped to wiring fields**, because the seed legitimately contains
   `postgres://localhost:5433` (§4.6).
@@ -521,8 +495,8 @@ of a boot that half-works:
 |---|---|---|
 | `supabase-db-roles-init` | Hook Job, weight 0 | Mutates shared DB state. **Load-bearing:** without it `supabase_storage_admin` has no password and storage-api crash-loops on `28P01` with nothing else reporting a problem |
 | `supabase-db-init` | Hook Job, weight 10 | Applies migrations + seed. Must wait for `supabase-db` **and** `supabase-auth` — GoTrue installs the `auth` schema the migrations build on |
-| `supabase-storage-init` | Hook Job, weight 20 | Creates the bucket through the Storage REST API. Must wait for storage-api to have finished its own `storage`-schema migrations |
-| `supabase-kong-init` | **deleted** | Replaced by Helm templating (§2.3) |
+| `supabase-storage-init` | Hook Job, weight 20 | Creates the buckets through the Storage REST API, and moves a renamed bucket's objects into its new name before deleting it. Must wait for storage-api to have finished its own `storage`-schema migrations |
+| `supabase-kong-init` | initContainer | `render-config` in the gateway's own pod: the keys come from the Secret, which the chart cannot read under `existingSecret` (§4.5) |
 | `mosquitto-init` | initContainer | Writes the Dynamic Security plugin's document onto the broker's PVC — see §5.1 |
 | `node-red-init` | initContainer | Writes into `/data` on Node-RED's own PVC, and must run from the *same image* as the main container (§6.1) |
 
@@ -542,8 +516,8 @@ load-bearing in one more place.
 
 ### 4.2 Stateless services
 
-`supabase-auth`, `supabase-rest`, `supabase-kong`, `supabase-functions`, `supabase-meta`,
-`supabase-studio`, `swagger-ui` → plain Deployments. `supabase-rest`, `supabase-kong` and
+`supabase-auth`, `supabase-rest`, `supabase-envoy`, `supabase-functions`, `supabase-meta`,
+`supabase-studio`, `swagger-ui` → plain Deployments. `supabase-rest`, `supabase-envoy` and
 `supabase-functions` are the horizontally scalable ones and are the HPA candidates
 (§10.2); the rest stay at 1.
 
@@ -594,29 +568,31 @@ supported switch in `values.yaml`, and the remaining gap is recorded in §11.
 
 The `asset-3d-models` bucket stays **public-read**: an AAS `File` URL must be dereferenceable by a
 viewer holding no session. `AAS_MODEL_PUBLIC_BASE` must be the *ingress* hostname, not the
-in-cluster Kong address — see §7.
+in-cluster gateway address — see §7.
 
-### 4.5 Kong's config is substituted in an initContainer, not by Helm
+### 4.5 The gateway's config is substituted in an initContainer, not by Helm
 
-The obvious implementation renders `kong.yml` at template time and puts the result in a Secret. It
-is simpler, it works, and **it breaks the `secrets.existingSecret` path in the worst way available**:
-with the Secret managed outside the chart, `.Values.secrets.anonKey` is empty, and Helm substitutes
-an **empty string**. Kong then registers empty API keys — *which `key-auth` accepts*. The gateway
+The obvious implementation renders `supabase/envoy.yaml` at template time and puts the result in a
+Secret. It is simpler, it works, and **it breaks the `secrets.existingSecret` path in the worst way
+available**: with the Secret managed outside the chart, `.Values.secrets.publishableKey` is empty,
+and Helm substitutes an **empty string**. The gateway's Lua filter then compares each caller's
+`apikey` with an empty key, which any caller sending an empty `apikey` header matches. The gateway
 comes up healthy with its authentication silently disabled.
 
-So the chart mounts the **template** as a ConfigMap (it holds no secrets) and an initContainer does
-the substitution from environment variables sourced from the Secret, into an `emptyDir`. That:
+So the chart mounts the **template** as a ConfigMap (it holds no secrets) and the `render-config`
+initContainer does the substitution from environment variables sourced from the Secret, into an
+`emptyDir`. That:
 
 - works whoever owns the Secret, which is the entire point of the `existingSecret` seam;
 - keeps key material out of the rendered manifest, out of `helm get manifest`, and out of any CI
   log or GitOps repository the manifests reach — a CI check now asserts that JWTs appear only
   inside `Secret` objects;
-- is the same mechanism `supabase-kong-init` uses on Compose, **including its guards**: the refusal
-  on an empty key, the `realtime-dev` leading-label check, and the leftover-marker scan that skips
-  comment lines.
+- carries the guards §2.3 lists: the refusal of an empty key or JWT, the `realtime-dev`
+  leading-label check, and the leftover-marker scan that skips comment lines.
 
-The cost is that the pod's `checksum/kong-template` annotation covers the routes but not the keys,
-so **rotating an API key needs an explicit `kubectl rollout restart`** — recorded in the runbook.
+The cost is that the pod's `checksum/envoy-template` annotation covers the routes but not the keys,
+so **rotating an API key needs `kubectl rollout restart deployment/supabase-envoy`**, which the
+runbook records.
 
 ### 4.6 The port-leak check had to be scoped to wiring fields
 
@@ -739,7 +715,7 @@ Service, so one would have no consumer and would only add a second way for the p
 
 - `nodered_data` → PVC, `replicas: 1`, `strategy: Recreate`. Node-RED is a single-writer runtime and
   persists editor sessions to `/data/.sessions.json` and the editor-user map to
-  `/data/.factoryplus-editor-users.json`; both must survive a restart or a live Administrator
+  `/data/.aber-editor-users.json`; both must survive a restart or a live Administrator
   silently degrades to a read-only editor.
 - `node-red-init` becomes an **initContainer built from the same image as the main container**. This
   is not tidiness: `settingsAreCorrect()` *evaluates* `settings.js`, which `require`s
@@ -760,7 +736,7 @@ Service, so one would have no consumer and would only add a second way for the p
 
 Deployment + Service + the `/config.js` ConfigMap from §2.1. Horizontally scalable; NGINX serving
 static files is the one thing here that can trivially run three replicas — default 2, and an HPA
-candidate alongside Kong and PostgREST (§10.2).
+candidate alongside the gateway and PostgREST (§10.2).
 
 **Two things worth recording:**
 
@@ -813,10 +789,10 @@ Compose port layout 1:1:
 | Host | Backend | Compose equivalent |
 |---|---|---|
 | `app.<domain>` | frontend | `:3000` |
-| `api.<domain>` | supabase-kong | `:54321` |
+| `api.<domain>` | supabase-envoy | `:54321` |
 | `nodered.<domain>` | node-red | `:1880` |
 | `grafana.<domain>` | grafana | `:3002` |
-| `studio.<domain>` | supabase-kong `:8001` — the gateway's studio listener, off by default | `:54323` |
+| `studio.<domain>` | supabase-envoy `:8001` — the gateway's studio listener, off by default | `:54323` |
 | `docs.<domain>` | swagger-ui | `:8088` |
 
 Path-based routing on a single host is possible but fragile here: Grafana needs
@@ -830,9 +806,10 @@ Start with the **Ingress** API. On k3s that means **Traefik, which ships enabled
 templated so an ingress-nginx cluster needs only a values change. Structure the templates so the
 gateway is one file, so a later move to **Gateway API** is a template swap, not a chart redesign.
 
-Per the standing roadmap decision, the Kong→Envoy question is reframed here as *which Gateway API
-implementation* (Envoy Gateway being the likely answer, Istio overkill with no service-mesh
-requirement). It is **deliberately not answered by this chart** — see §11.
+The gateway is Envoy as a plain Deployment ([`docs/gateway.md`](gateway.md)). What remains open is
+*which Gateway API implementation* would replace the Ingress (Envoy Gateway being the likely answer,
+Istio overkill with no service-mesh requirement). It is **deliberately not answered by this
+chart**; see §11.
 
 ### 7.2 MQTT cannot go through Ingress
 
@@ -907,7 +884,7 @@ the file — so the long, load-bearing OAuth reasoning in its comments stays in 
 left exactly as the file has them.
 
 **Grafana's datasource is rendered by an initContainer, not by Helm** — the same arrangement as
-Kong's config and for the same reason: with `secrets.existingSecret` set the chart cannot see
+the gateway's config (§4.5) and for the same reason: with `secrets.existingSecret` set the chart cannot see
 `timescalePassword`, so Helm would substitute an empty string and provision the historian with no
 password. That fails against a database that is perfectly healthy, which reads as a database fault.
 This is what deletes the `sed` entrypoint override and the `grafana_provisioning_datasources` volume
@@ -969,7 +946,7 @@ Both targets must stay green.
    Compose job already makes, for the same reason (a healthy container behind a misconfigured
    gateway passes every other check). Make this one go through the **ingress**, not a
    port-forward: on Kubernetes the tenant hostname (§3.4) and the ingress both sit in that path,
-   and a port-forward straight to Kong would skip half of what is being tested.
+   and a port-forward straight to the gateway would skip half of what is being tested.
 
 Running the suites in-cluster is *simpler* than the Compose job, which has to override `DB_HOST`,
 `MQTT_HOST` and `SUPABASE_URL` back to published ports. Keep that observation in the job's comments.
@@ -1113,7 +1090,7 @@ Postgres** via `pg_net`, which is not a shape a service-tier policy anticipates 
 normally egress leaves. pg_net has no retries, ordering or DLQ, so a blocked request is simply
 lost, and nothing surfaces it.
 
-**Mitigation:** the policy must explicitly allow egress from `supabase-db` to `supabase-kong:8000`
+**Mitigation:** the policy must explicitly allow egress from `supabase-db` to `supabase-envoy:8000`
 and to the edge runtime, and to Node-RED's webhook receiver. Write these allows **in the same
 change** as the default-deny, never as a follow-up — and add a validation check that fires a
 quarantine event and asserts the webhook arrived, or the gap is invisible until an operator notices
@@ -1183,7 +1160,7 @@ Two rules matter more than the rest:
   rather than a blocked packet. It would look exactly like the Service-naming mistakes this chart
   spends so much effort preventing. Both protocols because a response over 512 bytes falls back to
   TCP, so a UDP-only rule works until a query gets large enough and then fails *intermittently*.
-- **`supabase-db → node-red:1880`.** The obvious `pg_net` allow-list is Kong and the edge runtime,
+- **`supabase-db → node-red:1880`.** The obvious `pg_net` allow-list is the gateway and the edge runtime,
   and **the quarantine webhook goes through neither**:
   `webhook_endpoints` seeds `http://node-red:1880/hooks/quarantine` directly. pg_net
   has no retries, no ordering and no DLQ, so blocking it drops every quarantine notification with no
@@ -1234,13 +1211,14 @@ survives `helm uninstall` — deleting the release is precisely when the backups
   restore needs: `supabase_auth_admin`, `authenticator` and `supabase_storage_admin` own objects, and
   RLS policies reference roles by name. A dump stripped of ownership restores into a database where
   every policy denies.
-- **`digital_thread` is the reason this matters most.** Telemetry can be re-derived from a rebirth;
+- **`audit_trail` is the reason this matters most.** Telemetry can be re-derived from a rebirth;
   an append-only audit trail cannot be reconstructed at all.
 - **A zero-byte dump is asserted against**, not just a non-zero exit. A backup that looks like one is
   worse than none.
-- **`s3` refuses rather than half-working**: the `supabase/postgres` image has no `aws` CLI, and the
-  Job says so instead of producing an unsigned request. `destination: s3` with no bucket fails the
-  render for the same reason.
+- **Off site is the backup service's job, not the CronJob's.** The CronJob's `destination: s3`
+  could never run (its image has no `aws` CLI) and is retired; a values file that still sets it
+  fails the render. The backup service copies every backup, age-encrypted, to an S3 destination set
+  on the Backups page (`supabase/README.md`, "An encrypted copy off site").
 - **This is a logical dump, not PITR.** It recovers to the last nightly run and no finer. A real RPO
   wants pgBackRest or WAL archiving; this is the floor, said plainly so nobody mistakes it for the
   ceiling. **Test a restore** — an untested backup is a belief, not a capability.
@@ -1253,7 +1231,7 @@ key contract, an ESO `ExternalSecret` example, and the SOPS alternative.
 
 **Rotation is not automatic even with ESO**, and that is the part worth writing down. Most values are
 read into a pod's environment at start, so a refreshed Secret reaches nothing until a restart. Two
-need more: Kong's API keys are substituted by an initContainer (needs a rollout restart), and the two
+need more: the gateway's API keys are substituted by an initContainer (needs a rollout restart), and the two
 OAuth client secrets are *hashed into `auth.oauth_clients`* by db-init (needs a `helm upgrade`, and
 both halves must move together or the handshake fails with `invalid_credentials`).
 
@@ -1285,16 +1263,17 @@ Four features that came after the first working chart, each with a design note w
   which mounts the RWO PVC read-only under a podAffinity onto the storage pod's node), plus
   replicated-StorageClass guidance with the RWO-and-fsGroup constraint spelled out.
 - **Self-monitoring**, and the useful part was establishing *what can actually be scraped*. Each
-  target was verified against its pinned image before a ServiceMonitor was written: `grafana` (1250
-  series, native), `supabase-kong` (57 `kong_*` series, needing the plugin *and* the status
-  listener) and `mosquitto` (48 `broker_*` series via an exporter sidecar, since the broker has no
-  HTTP surface at all). **`supabase-rest` is deliberately absent** — PostgREST 12.2.0 exposes no
-  metrics whatsoever, and a ServiceMonitor for it would have produced a permanently DOWN target
-  reading as an idle component. Its traffic is measured Kong-side instead, which is what makes
-  Kong's the most valuable scrape here.
-- CI gained two guards: the three Kong plugin lists must agree (a mismatch stops Kong booting, with
-  an error naming the config file rather than the env var), and every ServiceMonitor port must
-  resolve to a named port on the Service it selects.
+  target was verified against its pinned image before it was listed: `grafana` (native),
+  `supabase-envoy` (its admin listener, `:9901/stats/prometheus`, whose
+  `envoy_http_downstream_rq_xx` family covers every REST, Auth, Storage, Realtime and
+  edge-function request), `supabase-rest` (PostgREST's admin server, `:3001/metrics`, since
+  v14.12; 12.2.0 served none), `ingestion`, `mosquitto` (an exporter sidecar, since the broker
+  has no HTTP surface at all), and the two databases' `postgres_exporter` sidecars. Alloy scrapes
+  the annotated pods, and `telemetry.serviceMonitor.enabled` adds ServiceMonitors for a cluster
+  that runs its own Prometheus Operator. The runbook's table is the contract.
+- CI gained two guards: `check-gateway-surface.mjs` holds the gateway's route inventory and its
+  placeholders (§2.3), and every ServiceMonitor port must resolve to a named port on the Service it
+  selects.
 
 ---
 
@@ -1313,10 +1292,11 @@ oversights.
 - **Object storage stays on the `file` backend by default.** `supabaseStorage.backend: s3` is a
   supported switch (§4.4). With the durability gap closed (§10.5), what remains is a *scaling*
   question — the `file` backend is what pins that Deployment to one replica — not a data-loss one.
-- **Nothing rate-limits anything.** The gateway is now Kong 3.9.3 (§2.3), so the unmaintained-image
-  half of this entry is closed; the missing rate limiting is not, and does not depend on the
-  version — `rate-limiting` is bundled, and is unavailable only because `KONG_PLUGINS` replaces the
-  bundled set rather than extending it. §7.1 covers the longer-term Gateway API question.
+- **Only sign-in is rate-limited.** GoTrue limits sign-in, token refresh, OTP, verify and MFA per
+  client address (`supabaseAuth.rateLimitHeader`), which Traefik has to preserve
+  (`deploy/k8s/traefik-config.yaml`; `docs/gateway.md`, *The client's address*). The gateway limits
+  nothing: no overall request ceiling and no per-route limit (#442). §7.1 covers the longer-term
+  Gateway API question.
 - **Backups are logical dumps, not PITR** (§10.3). The recovery floor is the last nightly run.
 
 ## 12. What the shared helpers decide
@@ -1330,7 +1310,7 @@ checked here before it is changed.
 ### 12.1 Names and labels
 
 **Service names are not prefixed.** Every in-cluster URL the stack carries (`grafana.ini`,
-`settings.js`, the edge-function environment) resolves a component name: `supabase-kong:8000`,
+`settings.js`, the edge-function environment) resolves a component name: `supabase-envoy:8000`,
 `timescaledb:5432`, `mosquitto:1883`. The release-qualified `aber.fullname` is for objects nothing
 addresses by name from inside the stack (Secrets, ConfigMaps, Jobs). Two releases in one namespace
 is therefore not a supported configuration; two namespaces is.
@@ -1429,7 +1409,7 @@ false` with TLS off leaves the external Service with no ports, which the API ser
 `external.enabled: false`. TLS on with an external LoadBalancer and a certificate carrying nothing
 a gateway could match (no IP SAN, no operator-supplied DNS SAN) lets every in-cluster client verify
 perfectly while every gateway fails on a hostname mismatch the broker never logs: the stack reports
-healthy, the simulator keeps producing, and the fleet is off. Refused rather than warned about,
+healthy, the host-run gateways keep producing, and the fleet is off. Refused rather than warned about,
 because Helm has no non-fatal warning `helm template` would surface. `publicBaseDomain` alone does
 not satisfy it, since `mqtt.<domain>` is the WebSocket name and not the address a gateway dials;
 an IP SAN or an explicit DNS SAN does, so a deployment behind plant DNS is not blocked.
@@ -1602,11 +1582,11 @@ resolves every value from `process.env` at load time, so a value present when th
 written and absent when it is read makes the settings look wrong on every boot and get rewritten
 forever, silently, because an unloadable `settings.js` is already handled as "replace it".
 
-**The gateway's component label is not its Service name.** Promotion works by the Envoy Service
-adopting the name `supabase-kong`, so every consumer's URL keeps resolving, but NetworkPolicy and
-ServiceMonitor select pod labels, which the adopted name does not touch; hard-coding
-`supabase-kong` there left the policy denying every flow to the gateway and the scrape selecting
-nothing, both presenting as the gateway being down.
+**A Service carries its component's name, the gateway's included.** NetworkPolicy and the
+ServiceMonitors select pod labels, not Service names, and the ingress-controller policy selects the
+published backends by their Service names, so a Service named apart from its component leaves the
+gateway denied every flow and unscraped while it reports healthy. The gateway's Service carried
+Kong's name until 2026-09-28; `docs/gateway.md`, *History*, records why and why that ended.
 
 **The SSH ingress rule emits no `from` at its default rather than `ipBlock: 0.0.0.0/0`.** A rule
 with no peers matches every source by definition, in every CNI; an ipBlock is matched against an

@@ -21,10 +21,10 @@ beforeEach(() => vi.clearAllMocks())
 
 describe('tokenStatus with a denylist', () => {
   /**
-   * The count is the point: a badge reading "5 active tokens" when four are withdrawn overstates
-   * exposure, and an operator acting on it withdraws things that are already dead.
+   * The count is the point: a badge reading "5 active tokens" when four are revoked overstates
+   * exposure, and an operator acting on it revokes things that are already dead.
    */
-  it('stops counting a withdrawn token as active', () => {
+  it('stops counting a revoked token as active', () => {
     const mints = [mint('a', 10), mint('b', 20), mint('c', 30)]
     expect(tokenStatus(mints, NOW).outstanding).toBe(3)
 
@@ -35,29 +35,29 @@ describe('tokenStatus with a denylist', () => {
   })
 
   /**
-   * Marked, not dropped: "there were three and two are withdrawn" is the useful sentence, and the
-   * dialog lists them so an operator can confirm a withdrawal took.
+   * Marked, not dropped: "there were three and two are revoked" is the useful sentence, and the
+   * dialog lists them so an operator can confirm a revocation took.
    */
-  it('still returns the withdrawn rows, flagged', () => {
+  it('still returns the revoked rows, flagged', () => {
     const status = tokenStatus([mint('a', 10), mint('b', 20)], NOW, new Set(['a']))
     expect(status.rows).toHaveLength(2)
     expect(status.rows.find(r => r.jti === 'a').revoked).toBe(true)
     expect(status.rows.find(r => r.jti === 'b').revoked).toBe(false)
   })
 
-  it('reads as expired when every unexpired token has been withdrawn', () => {
+  it('reads as expired when every unexpired token has been revoked', () => {
     const status = tokenStatus([mint('a', 10)], NOW, new Set(['a']))
     expect(status.state).toBe(TOKEN_STATES.EXPIRED)
     // A FOURTH STATE WOULD NOT CHANGE WHAT ANYBODY DOES NEXT -- nothing here reaches the API
     // either way -- so the distinction lives in the detail line rather than in the badge.
-    expect(tokenStatusDetail(status, NOW)).toMatch(/withdrawn/i)
-    // And the scope is still stated, because a withdrawn token is not a dead one everywhere.
+    expect(tokenStatusDetail(status, NOW)).toMatch(/revoked/i)
+    // And the scope is still stated, because a revoked token is not a dead one everywhere.
     expect(tokenStatusDetail(status, NOW)).toMatch(/storage, realtime/i)
   })
 
-  it('mentions withdrawals alongside a live count, so the smaller number is legible', () => {
+  it('mentions revocations alongside a live count, so the smaller number is legible', () => {
     const status = tokenStatus([mint('a', 10), mint('b', 20)], NOW, new Set(['a']))
-    expect(tokenStatusDetail(status, NOW)).toMatch(/1 further token has been withdrawn/i)
+    expect(tokenStatusDetail(status, NOW)).toMatch(/1 further token has been revoked/i)
   })
 
   /**
@@ -87,17 +87,17 @@ describe('ServiceTokenInventoryModal', () => {
 
   const rowFor = (jti) => screen.getByText(jti).closest('tr')
 
-  it('offers Revoke on a live token and not on one already withdrawn', () => {
+  it('offers Revoke on a live token and not on one already revoked', () => {
     openWith([mint('live-one', 10), mint('gone-one', 20)], new Set(['gone-one']))
 
     expect(within(rowFor('live-one')).getByRole('button', { name: /Revoke/i })).toBeTruthy()
     expect(within(rowFor('gone-one')).queryByRole('button', { name: /Revoke/i })).toBeNull()
-    expect(within(rowFor('gone-one')).getByText('WITHDRAWN')).toBeTruthy()
+    expect(within(rowFor('gone-one')).getByText('REVOKED')).toBeTruthy()
   })
 
   /**
    * `revoke_service_token()` refuses an expired jti outright, so a button would exist only to
-   * produce an error. EXPIRED is shown in preference to WITHDRAWN because the signature check
+   * produce an error. EXPIRED is shown in preference to REVOKED because the signature check
    * refuses the token everywhere.
    */
   it('offers no Revoke on an expired token', () => {
@@ -106,18 +106,18 @@ describe('ServiceTokenInventoryModal', () => {
     expect(within(rowFor('old-one')).getByText('EXPIRED')).toBeTruthy()
   })
 
-  it('withdraws by jti and marks the row without waiting for a reload', async () => {
+  it('revokes by jti and marks the row without waiting for a reload', async () => {
     api.revokeServiceToken.mockResolvedValue(1)
     openWith([mint('doomed', 10)])
 
     within(rowFor('doomed')).getByRole('button', { name: /Revoke/i }).click()
 
     await waitFor(() => expect(api.revokeServiceToken).toHaveBeenCalledWith('doomed'))
-    await waitFor(() => expect(within(rowFor('doomed')).getByText('WITHDRAWN')).toBeTruthy())
+    await waitFor(() => expect(within(rowFor('doomed')).getByText('REVOKED')).toBeTruthy())
     expect(within(rowFor('doomed')).queryByRole('button', { name: /Revoke/i })).toBeNull()
   })
 
-  /** Per-row, not a dialog banner: several tokens can be withdrawn in one visit. */
+  /** Per-row, not a dialog banner: several tokens can be revoked in one visit. */
   it('reports a failure against the row it belongs to and leaves the button', async () => {
     api.revokeServiceToken.mockRejectedValue(new Error('insufficient privileges'))
     openWith([mint('stubborn', 10)])
@@ -130,7 +130,7 @@ describe('ServiceTokenInventoryModal', () => {
   })
 
   /** The dialog is opened to look at least as often as to act; a glance must not refetch. */
-  it('reloads the page only when something was actually withdrawn', async () => {
+  it('reloads the page only when something was actually revoked', async () => {
     api.revokeServiceToken.mockResolvedValue(1)
     const onChanged = vi.fn()
     const onClose = vi.fn()
@@ -146,8 +146,8 @@ describe('ServiceTokenInventoryModal', () => {
     expect(onChanged).toHaveBeenCalled()
   })
 
-  /** A withdrawn token is not a deleted one; the scope is stated where the control is offered. */
-  it('states that withdrawing reaches the API only, and cannot be undone', () => {
+  /** A revoked token is not a deleted one; the scope is stated where the control is offered. */
+  it('states that revoking reaches the API only, and cannot be undone', () => {
     const { container } = openWith([mint('one', 10)])
     const copy = container.textContent.replace(/\s+/g, ' ')
     expect(copy).toMatch(/Storage, realtime, the edge functions and Studio verify the signature independently/i)

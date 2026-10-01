@@ -6,7 +6,9 @@ info:
   description: |
     A conformant [i3X](https://github.com/cesmii/i3X) (CESMII Industrial Information
     Interoperability eXchange) read-side view of this platform's asset model — **52 passed,
-    0 failed** against CESMII's official 60-test conformance suite.
+    0 failed** against CESMII's official 60-test conformance suite at `5010274f` (cesmii/i3X,
+    2026-06-18), the ref CI pins, which tests shape. What it says about a seeded plant is
+    checked against the Directory by `ingestion/validate.py` (checks 12 and 17).
 
     ### This is a different service from the Platform API
 
@@ -32,13 +34,19 @@ info:
     ### Authentication
 
     `Authorization: Bearer <access_token>` — the **user's own** access token from
-    `POST /auth/v1/token?grant_type=password` on the Platform API.
+    `POST /auth/v1/token?grant_type=password` on the Platform API, or a service principal's
+    token minted for i3X clients.
+
+    Every request except `GET /info` is authenticated first, by one PostgREST call carrying
+    your token, so a revoked or expired token is refused here as it is on the Platform API
+    (within 15 seconds). A subscription belongs to your token's `sub` as well as to its
+    `clientId`: another principal gets `404` for it.
 
     > ⚠️ **The anon key is not a substitute.** This service holds no service-role key and
     > refuses to start if one is in its environment. It replays your token to PostgREST for
-    > every metadata read, so RLS decides what the address space contains. The anon key
-    > authenticates but is rejected by the data layer with
-    > `401 The supplied credentials were rejected by the data layer`.
+    > every metadata read, so RLS decides what the address space contains. The publishable
+    > key stands for `anon` and is refused with
+    > `401 The data layer refused this token: a user or service access token is required`.
 
     > ℹ️ **Tokens expire after an hour.** A client that persists its connection settings —
     > Explorer does — will start returning 401 on a profile that worked earlier. Paste a
@@ -72,7 +80,7 @@ info:
     | Replicas | Exactly one, always. The service holds a plain `spBv1.0/#` broker subscription and its subscription state is in process memory; a second instance would answer `/subscriptions/sync` for ids it has never seen |
     | Reachability during a restart | None — the old instance stops before the new one starts, so the endpoint is absent rather than degraded |
     | Subscriptions across a restart | None. Queues, sequence numbers and open streams are lost |
-    | Current values just after a restart | Cold and **reported as cold**: `quality: "GoodNoData"` with a null value, until that device next publishes |
+    | Current values just after a restart | Filled on the first read: what the value cache lacks for a device is read from `telemetry_latest`, with each sample's stored time. Only a metric the historian does not hold is `GoodNoData` until it next changes |
     | Metadata and history | Unaffected — neither is held by this service |
 
     `/subscriptions/sync` and `/subscriptions/stream` answer **404** for a subscriptionId this
@@ -152,9 +160,16 @@ paths:
       tags: [Discovery]
       summary: Namespaces in use
       description: |
-        The local namespace, the relationship namespace, and one entry per **vocabulary
-        actually referenced by a schema in this deployment** — MTConnect, ISO 22400, OPC UA
-        and friends appear only when something uses them.
+        Exactly the namespaces the served types belong to: the local one, the relationship
+        namespace, and each one a metric type takes from its catalog row's semantic id.
+
+        MTConnect and ISO 22400 ids are minted here, so their namespaces are local
+        (`https://aber.local/semantics/mtconnect/v2.0`, `https://aber.local/semantics/iso22400`).
+        An OPC UA or ASHRAE 223P id is the standard's own, and a scalar type adapted from it is an
+        in-exact implementation of that namespace, marked as the i3X guide asks with a
+        `projection` suffix: `http://opcfoundation.org/UA/Machinery/?projection=i3X`,
+        `http://data.ashrae.org/standard223?projection=i3X`. A namespace no served type
+        belongs to is never listed.
       responses:
         '200':
           description: Namespaces this address space draws on.
@@ -178,8 +193,23 @@ paths:
       summary: Every ObjectType
       description: |
         Rows from `schemas` — **a `schema_definition` already is a JSON Schema**, so there is
-        no translation step — plus the synthetic Site, Cell, Gateway and untyped-device types
-        that give the structural objects something to point at.
+        no translation step — plus the synthetic Site, Area, Cell, Lane, Unassigned, Gateway
+        and untyped-device types that give the structural objects something to point at.
+
+        The metric types, always served so every metric's `typeElementId` resolves:
+        * `i3x:type:metric:<name>` per `metric_catalog` row: a scalar schema from its Sparkplug
+          datatype, with `description` and the unit as `x-unit`, and its semantic id as
+          `sourceTypeId`;
+        * `i3x:type:sparkplug:<datatype>` for a metric the catalog lacks, by its DBIRTH datatype;
+        * `UnknownType` (`i3x:type:unknown`), schema `{}`, when no datatype is known.
+
+        And `i3x:type:schemas:<ids sorted, joined by +>` for each distinct set of schemas
+        attached to a device: `allOf` over their definitions, inlined.
+      parameters:
+        - name: namespaceUri
+          in: query
+          schema: { type: string, format: uri, example: 'https://aber.local/i3x' }
+          description: 'Return only the types in this namespace. One this server does not serve gives an empty list, not an error.'
       responses:
         '200':
           description: All object types visible to this caller.
@@ -225,11 +255,20 @@ paths:
         `HasParent`/`HasChildren`, `HasComponent`/`ComponentOf`, and
         `ConnectsVia`/`ProvidesConnectivityFor` — each registered with its `reverseOf`.
 
-        The pairing that matters: **`parentId` is the cell, not the gateway.** A device here
-        has two parents — a cell (where it is) and a gateway (how its data arrives). i3X
-        gives an Object one parent, `HasParent` is organizational hierarchy, so the cell wins
-        and the data path becomes `ConnectsVia`/`ProvidesConnectivityFor`. Collapsing them
-        would make a host-run gateway unrepresentable.
+        The pairing that matters: **`parentId` is where the asset is, not the gateway.** A
+        device here has two parents — a place (its cell, else its area, else the site) and a
+        gateway (how its data arrives). i3X gives an Object one parent, `HasParent` is
+        organizational hierarchy, so the place wins and the data path becomes
+        `ConnectsVia`/`ProvidesConnectivityFor`. Collapsing them would make a host-run gateway
+        unrepresentable.
+
+        Location is `HasParent`/`HasChildren` only: the site, areas, cells and lanes compose
+        nothing. `HasComponent`/`ComponentOf` is kept for what a device's value is composed of.
+      parameters:
+        - name: namespaceUri
+          in: query
+          schema: { type: string, format: uri, example: 'https://aber.local/i3x/relationships' }
+          description: 'Return only the types in this namespace. One this server does not serve gives an empty list, not an error.'
       responses:
         '200':
           description: All relationship types.
@@ -274,18 +313,25 @@ paths:
       summary: Browse the address space
       description: |
         ```
-        i3x:site                          synthetic root — the only parentId: null
-        ├── <cell uuid>                   cells
-        │   ├── <gwy…>                    gateways in that cell
-        │   └── <dev…>                    devices whose RESOLVED cell is that cell
-        ├── i3x:unassigned                synthetic — assets with no resolved cell
-        └── <gwy…>                        site-wide gateways
+        i3x:site                          synthetic root, named by site.name — the only parentId: null
+        ├── <area uuid>                   areas
+        │   ├── <cell uuid>               cells filed in that area
+        │   │   ├── <gwy…>                gateways in that cell
+        │   │   └── <dev…>                devices whose RESOLVED cell is that cell
+        │   └── <gwy…> / <dev…>           area-wide gateways and devices
+        ├── <cell uuid>                   cells filed in no area, with their gateways and devices
+        ├── <gwy…> / <dev…>               site-wide gateways and devices
+        ├── i3x:lane:simulated            synthetic — behind a simulated gateway; only while non-empty
+        ├── i3x:lane:shadow               synthetic — behind a playback gateway; only while non-empty
+        └── i3x:unassigned                synthetic — assets nobody has placed
         ```
 
-        **Unassigned is synthetic, and deliberately so.** `parentId: null` means root, so a
-        device with no cell would otherwise become a second root. A synthetic object is
+        **Unassigned and the lanes are synthetic, and deliberately so.** `parentId: null` means
+        root, so an unplaced device would otherwise become a second root. A synthetic object is
         legitimate where a magic `cells` row is not: it has no table behind it, so it cannot
-        be edited, deleted, or swept by the pg_cron purge that runs past RLS.
+        be edited, deleted, or swept by the pg_cron purge that runs past RLS. Unassigned holds
+        only assets nobody has placed; a simulated or replayed asset is in its lane, which
+        claims no place.
       parameters:
         - name: root
           in: query
@@ -387,10 +433,17 @@ paths:
         Served from the MQTT value cache, **gated on a PostgREST read as the caller** — see
         the RLS note in the introduction.
 
-        `quality` is derived at read time, never stored: a quarantined device or stale
-        gateway is `Uncertain`; a metric that has never been published is `GoodNoData` with
-        no value; anything else is `Good`. A `quality` column on the hypertable would be a
-        stored verdict that goes stale the moment the gateway does.
+        `quality` is derived at read time, never stored, from the device, its gateway and
+        whether a value is held: see `Quality`. What the value cache lacks for a device named
+        here is read once from `telemetry_latest` as the caller, and a failed read makes what
+        is missing `Bad`.
+
+        **A device and its metrics.** A device's value is the map of its metrics' latest
+        values. Each metric is also an object, `<sparkplug_id>/<metric name>`, and a component
+        of the device, whose value is a bare scalar: its latest sample, or `null` with
+        `GoodNoData` (or `Bad`, per `Quality`) when it has none. So `maxDepth: 1` on a device
+        returns the map, and `maxDepth: 0` or `2` adds each metric's own value under
+        `components`.
       requestBody:
         required: true
         content:
@@ -405,7 +458,8 @@ paths:
                 maxDepth:
                   type: integer
                   default: 1
-                  description: '`1` is the object itself. `0` is unbounded; anything higher descends that many levels of `HasComponent` into `components`.'
+                  minimum: 0
+                  description: '`1` is the object itself. `0` is unbounded; anything higher descends that many levels of `HasComponent` into `components`. Anything but an integer of 0 or more is a 400.'
       responses:
         '200':
           description: Current value per requested id, in order.
@@ -418,13 +472,38 @@ paths:
                   - success: true
                     elementId: dev220000000000400080000
                     result:
-                      isComposition: false
+                      isComposition: true
                       value:
                         Systems/TEMPERATURE: 37.13
                         Controller/EXECUTION: ACTIVE
                       quality: Good
                       timestamp: '2026-08-10T13:06:29.423Z'
-        '400': { $ref: '#/components/responses/BadRequest' }
+                  - success: true
+                    elementId: dev220000000000400080000/Systems/TEMPERATURE
+                    result:
+                      isComposition: false
+                      value: 37.13
+                      quality: Good
+                      timestamp: '2026-08-10T13:06:29.423Z'
+        '206':
+          description: |
+            The components past `I3X_MAX_COMPONENTS` (default 10000), counted over the whole
+            request, were left out. Each item cut carries its own `responseDetail` with status
+            206 saying how many; the top-level one names every item cut. Request those
+            elementIds on their own for the rest.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BulkEnvelope'
+                  - type: object
+                    properties:
+                      responseDetail: { $ref: '#/components/schemas/ResponseDetail' }
+        '400':
+          description: '`elementIds` missing or not an array of strings, or `maxDepth` not an integer of 0 or more.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
     put:
       tags: [Values]
@@ -438,6 +517,7 @@ paths:
         does not implement the verb cannot be talked into it. Writes belong on the
         Sparkplug/NCMD command path, where they are audited.
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
   /objects/history:
@@ -446,13 +526,31 @@ paths:
       summary: Historical values
       description: |
         From the TimescaleDB hypertable through PostgREST, **never** from the value cache, so
-        this read carries the caller's token like every other.
+        these reads carry the caller's token like every other.
 
         `startTime` and `endTime` are **required**: an unbounded history query over a
-        hypertable is not a slow request, it is an availability incident.
+        hypertable is not a slow request, it is an availability incident. Both are RFC 3339
+        with an offset, parsed in full, and a start after the end is a 400.
 
-        Only devices carry telemetry. A cell has no series of its own and returns an empty
-        `values` — inventing an aggregate would assert a measurement nobody took.
+        What comes back depends on the element, newest first in every case:
+
+        * **A metric**, `<sparkplug_id>/<metric_name>` split at the first `/`: its stored
+          samples as scalar VQTs.
+        * **A device**: one map per instant at which any of its metrics changed, holding every
+          metric's newest value at that instant, the shape of its current value. Sparkplug
+          reports by exception, so values carry forward from before the window. A metric with
+          no value yet is absent from the map rather than invented.
+        * **Its components**, at `maxDepth` 0 or above 1: each metric's samples under
+          `components`, keyed by elementId and taken from the device's own rows.
+        * **Anything else** (the site, a cell, a gateway) has no series of its own and returns
+          an empty `values`. Inventing an aggregate would assert a measurement nobody took.
+
+        **Nothing is cut silently.** `I3X_HISTORY_MAX_ROWS` (default 1000) bounds each series:
+        the rows it reads and the values it returns, a device's map of N metrics counting N. A
+        series that stops short keeps its newest values and answers **206**. Its item's
+        `responseDetail` names the instant it stops at, and asking again with that instant as
+        `endTime` returns the rest. `I3X_MAX_COMPONENTS` bounds the components, as on
+        `/objects/value`.
       requestBody:
         required: true
         content:
@@ -464,18 +562,84 @@ paths:
                 elementIds:
                   type: array
                   items: { type: string }
-                startTime: { type: string, format: date-time, description: RFC 3339. Required. }
-                endTime: { type: string, format: date-time, description: RFC 3339. Required. }
-                limit: { type: integer, default: 1000, maximum: 10000 }
-                maxDepth: { type: integer, default: 1 }
+                startTime:
+                  type: string
+                  format: date-time
+                  description: 'RFC 3339 with `Z` or an offset. Required, and not after `endTime`.'
+                  example: '2026-09-28T10:00:00Z'
+                endTime:
+                  type: string
+                  format: date-time
+                  description: RFC 3339 with `Z` or an offset. Required. Inclusive.
+                  example: '2026-09-28T11:00:00Z'
+                limit:
+                  type: integer
+                  minimum: 1
+                  description: 'Not an i3X parameter. Values per series, at most `I3X_HISTORY_MAX_ROWS`: a larger value is served as that, and omitting it asks for that.'
+                maxDepth:
+                  type: integer
+                  default: 1
+                  minimum: 0
+                  description: '`1` is the element alone. `0` or above 1 adds a device''s metrics under `components`.'
       responses:
         '200':
-          description: Samples per requested id, newest first.
+          description: One `HistoryResult` per requested id, in request order.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BulkEnvelope' }
+              example:
+                success: true
+                results:
+                  - success: true
+                    elementId: dev220000000000400080000
+                    result:
+                      isComposition: true
+                      values:
+                        - value: { Controller/EXECUTION: ACTIVE, Systems/TEMPERATURE: 37.4 }
+                          quality: Good
+                          timestamp: '2026-09-28T10:20:00Z'
+                        - value: { Controller/EXECUTION: READY, Systems/TEMPERATURE: 37.4 }
+                          quality: Good
+                          timestamp: '2026-09-28T10:10:00Z'
+                  - success: true
+                    elementId: dev220000000000400080000/Systems/TEMPERATURE
+                    result:
+                      isComposition: false
+                      values:
+                        - { value: 37.4, quality: Good, timestamp: '2026-09-28T10:10:00Z' }
+        '206':
+          description: |
+            A server limit cut at least one series or components list short. Each item cut is
+            still `success: true` and carries its own `responseDetail` with status 206 saying
+            where it stops; the top-level one names every item cut.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BulkEnvelope'
+                  - type: object
+                    properties:
+                      responseDetail: { $ref: '#/components/schemas/ResponseDetail' }
+              example:
+                success: true
+                results:
+                  - success: true
+                    elementId: dev220000000000400080000/Systems/TEMPERATURE
+                    result:
+                      isComposition: false
+                      values:
+                        - { value: 37.6, quality: Good, timestamp: '2026-09-28T10:50:00Z' }
+                        - { value: 37.5, quality: Good, timestamp: '2026-09-28T10:40:00Z' }
+                    responseDetail:
+                      title: Partial results returned
+                      status: 206
+                      detail: "This series stops at this request's limit of 2 rows: nothing at or before 2026-09-28T10:30:00.000000Z was returned. Request it again with that endTime for the rest."
+                responseDetail:
+                  title: Partial results returned
+                  status: 206
+                  detail: "A server limit cut 1 result(s) short: dev220000000000400080000/Systems/TEMPERATURE. Each one's responseDetail says where."
         '400':
-          description: '`elementIds` missing, or `startTime`/`endTime` absent or not RFC 3339.'
+          description: '`elementIds` missing or not an array of strings, `startTime`/`endTime` absent, not RFC 3339 or the start after the end, `limit` not a positive integer, or `maxDepth` not an integer of 0 or more.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -485,6 +649,7 @@ paths:
       summary: Write history — refused
       description: '**405.** See `PUT /objects/value`.'
       responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
   # --------------------------------------------------------- Subscriptions ----
@@ -529,12 +694,17 @@ paths:
                       result: { $ref: '#/components/schemas/Subscription' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '429':
+          description: 'The caller''s principal holds `I3X_MAX_SUBSCRIPTIONS_PER_PRINCIPAL` subscriptions (default 20), or the server holds `I3X_MAX_SUBSCRIPTIONS` (default 500). `responseDetail.detail` names which.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
   /subscriptions/list:
     post:
       tags: [Subscriptions]
       summary: List your subscriptions
-      description: 'Scoped to `clientId` — you cannot enumerate another client''s subscriptions. An empty `subscriptionIds` lists all of yours.'
+      description: 'Scoped to `clientId` and your token''s principal: an id that is not yours is a per-item 404, exactly as one that does not exist. Only the ids you name are listed. `monitoredObjects` is the set as of the last check of your view, made by each `/sync` and stream tick, each `{elementId, maxDepth}` with the depth of its first registration.'
       requestBody:
         required: true
         content:
@@ -549,10 +719,15 @@ paths:
                   items: { type: string }
       responses:
         '200':
-          description: Subscriptions owned by this client.
+          description: 'One result per id, at its position in the request. An id that is not a string fails its own item with a 400; one that is not yours, or does not exist, with a 404.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BulkEnvelope' }
+        '400':
+          description: '`subscriptionIds` present but not an array.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /subscriptions/delete:
@@ -573,10 +748,15 @@ paths:
                   items: { type: string }
       responses:
         '200':
-          description: One result per id; unknown or unowned ids are per-item failures.
+          description: 'One result per id, at its position in the request. An id that is not a string fails its own item with a 400; one that is unknown or not yours, including one deleted earlier in the same request, with a 404.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BulkEnvelope' }
+        '400':
+          description: '`subscriptionIds` present but not an array.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /subscriptions/register:
@@ -590,7 +770,26 @@ paths:
         a machine that is simply quiet — it waits forever for a value that cannot arrive.
 
         Validating here also means the monitored set can only contain ids this caller may see,
-        so a subscription cannot become a way around RLS on the value path.
+        so a subscription cannot become a way around RLS on the value path. Each delivery checks
+        again: see `/subscriptions/sync`.
+
+        **`maxDepth` applies to every elementId in the call.** What each registration then
+        receives:
+
+        | Registered | Receives updates for |
+        | :--- | :--- |
+        | A device at `maxDepth: 1` | The device: its map of metrics |
+        | A device at `maxDepth: 0`, or 2 or more | The device, and each of its metrics as `<device>/<metric>`, in one batch when both change |
+        | A metric, `<device>/<metric>` | That metric only |
+        | A gateway | That gateway only (its birth, its death, and a heartbeat that changes its live status), not its devices |
+        | The site, an area, a cell, a lane or Unassigned | Nothing: their values change only with the Directory, which is not staged |
+
+        **Registering an object again succeeds and changes nothing**, as the guide requires, so
+        its first `maxDepth` stands. Unregister it first to change the depth.
+
+        **Each device registered, or whose metric is, has what the server lacks for it filled
+        from the historian**, as `/objects/value` fills it, so the first map staged for it is
+        complete. A fill that fails does not fail the registration.
       requestBody:
         required: true
         content:
@@ -601,21 +800,35 @@ paths:
               properties:
                 clientId: { type: string }
                 subscriptionId: { type: string }
+                elementIds:
+                  type: array
+                  description: 'Objects to monitor. `objects` is accepted in its place.'
+                  items: { type: string }
                 objects:
                   type: array
-                  description: 'Objects to monitor. Accepts bare id strings or `{elementId}` objects; `elementIds` is accepted as an alias.'
+                  description: 'An alias of `elementIds`, taking bare id strings or `{elementId}` objects. Only `elementId` is read from an object.'
                   items:
                     oneOf:
                       - type: string
                       - type: object
                         properties:
                           elementId: { type: string }
+                maxDepth:
+                  type: integer
+                  minimum: 0
+                  default: 1
+                  description: '`1` is the object alone, `0` is unbounded, N descends N-1 levels of `HasComponent`, as on `/objects/value`. For every elementId in the call; register separately to use different depths.'
       responses:
         '200':
-          description: One result per entry, in request order.
+          description: 'One result per entry, at its position in the request, so a repeated elementId has a result at each place. An elementId that is not a non-empty string fails its own item with a 400, and one not in your address space with a 404.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BulkEnvelope' }
+        '400':
+          description: '`maxDepth` not an integer of 0 or more, `elementIds` (or `objects`) not an array, more entries than the server accepts, or a `subscriptionId` that is not a string.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/SubscriptionNotFound' }
 
@@ -638,8 +851,13 @@ paths:
               properties:
                 clientId: { type: string }
                 subscriptionId: { type: string }
+                elementIds:
+                  type: array
+                  description: 'Objects to stop monitoring. `objects` is accepted in its place.'
+                  items: { type: string }
                 objects:
                   type: array
+                  description: 'An alias of `elementIds`, taking bare id strings or `{elementId}` objects.'
                   items:
                     oneOf:
                       - type: string
@@ -648,10 +866,15 @@ paths:
                           elementId: { type: string }
       responses:
         '200':
-          description: One result per entry, in request order.
+          description: 'One result per entry, at its position in the request. An elementId that is not a non-empty string fails its own item with a 400, and one not in your address space with a 404.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BulkEnvelope' }
+        '400':
+          description: '`elementIds` (or `objects`) not an array, more entries than the server accepts, or a `subscriptionId` that is not a string.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/SubscriptionNotFound' }
 
@@ -672,6 +895,15 @@ paths:
         **Overflow is reported, not hidden.** Past `I3X_SUBSCRIPTION_QUEUE_LIMIT` (default
         10,000) the oldest batches drop and the next sync answers **206**. Compute the gap
         from `lastSequenceNumber + 1` to `result[0].sequenceNumber - 1`.
+
+        **What it delivers is checked against your view first.** Each call reads your address
+        space as you (cached per token for `I3X_ADDRESS_SPACE_TTL_SECONDS`). A registered element
+        you can no longer see, or a metric `<device>/<metric>` whose device you can no longer see,
+        is removed from the subscription and its queued updates are discarded, not delivered. The
+        call then answers **206**, with or without batches, and `responseDetail` names what was
+        removed, so "left your view" is not mistaken for "nothing changed". A batch left empty is
+        dropped, so its sequence number is a gap. If that read fails, the call answers `502` and
+        acknowledges and delivers nothing.
       requestBody:
         required: true
         content:
@@ -699,12 +931,27 @@ paths:
                         type: array
                         items: { $ref: '#/components/schemas/UpdateBatch' }
         '206':
-          description: 'Delivered, but batches were dropped from the queue. `responseDetail` says so.'
+          description: 'Delivered, but batches were dropped from the queue, or registered elements left your view and were removed with their queued updates, or both. `responseDetail` says which and names the removed elements. Reported once.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Envelope' }
+        '400':
+          description: 'A `subscriptionId` that is not a string.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/SubscriptionNotFound' }
+        '409':
+          description: 'This subscription has an open stream. Close it before calling `/sync`: the stream has already delivered, and discarded, the queue a sync would acknowledge.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '502':
+          description: 'Your address space could not be read to check what may be delivered. Nothing was acknowledged or delivered; retry.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
   /subscriptions/stream:
     post:
@@ -725,6 +972,16 @@ paths:
         keep-alive *serialises* a connection, so a pooling client that abandons a stream and
         immediately issues another request has that request queued behind the corpse of the
         first — which presents as a hung server on an endpoint that was never reached.
+
+        **A client that stops reading loses its stream after 10 seconds.** A write that cannot
+        finish in that time ends the stream, and the connection with it; nothing else waits on it.
+
+        **What it carries is checked against your view**, as `/sync` checks it: at open, before
+        the backlog is sent, and on each 15-second keepalive tick, together with your token. An
+        element you can no longer see stops arriving, and its queued updates are discarded. A
+        stream whose last element left ends cleanly, and so does one whose check fails on a tick;
+        a check that fails at open answers `502` and leaves the queue in place. The stream cannot
+        say why, so the next `/sync` answers 206 naming what was removed.
       requestBody:
         required: true
         content:
@@ -737,12 +994,27 @@ paths:
                 subscriptionId: { type: string }
       responses:
         '200':
-          description: An open SSE stream of `UpdateBatch` events.
+          description: An open SSE stream; each event is one `UpdateBatch`'s `updates` array.
           content:
             text/event-stream:
               schema: { type: string }
+        '400':
+          description: 'A `subscriptionId` that is not a string.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/SubscriptionNotFound' }
+        '429':
+          description: 'The server has `I3X_MAX_STREAMS` streams open (default 50). Replacing this subscription''s own stream is not refused. Poll `/subscriptions/sync` instead.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '502':
+          description: 'Your address space could not be read to check what may be streamed. No stream was opened and the queue is untouched; retry.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
 components:
 
@@ -753,14 +1025,14 @@ components:
       bearerFormat: JWT
       description: |
         The **user's** access token from `POST /auth/v1/token?grant_type=password` on the
-        Platform API. Not the anon key, and not a service-role key — this server refuses to
-        start if one is in its environment.
+        Platform API, or a service principal's minted token. Not the anon key. This server holds
+        no service-role key and refuses to start if one is in its environment.
 
   responses:
     Unauthorized:
       description: |
-        No `Authorization` header, or a token the data layer rejected. Only `GET /info` is
-        unauthenticated.
+        No `Authorization` header, or a token PostgREST refused: not a token, the anon key,
+        expired, or revoked. Checked before every request except `GET /info`.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -770,7 +1042,7 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }
     SubscriptionNotFound:
-      description: 'No such subscription for this `clientId` — including after a restart, since subscription state is in memory.'
+      description: 'No such subscription for this `clientId` and this token''s principal, or no `subscriptionId` given — including after a restart, since subscription state is in memory.'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -826,7 +1098,7 @@ components:
       type: object
       properties:
         specVersion: { type: string, example: '1.0' }
-        serverVersion: { type: string, example: 0.1.0 }
+        serverVersion: { type: string, example: 0.1.0, description: "The Helm chart's `appVersion`; `dev` when started without the chart." }
         serverName: { type: string, example: aber-i3x }
         capabilities:
           type: object
@@ -849,22 +1121,32 @@ components:
     Namespace:
       type: object
       properties:
-        uri: { type: string, format: uri, example: 'https://mtconnect.org/v2.0' }
-        displayName: { type: string, example: MTConnect }
+        uri: { type: string, format: uri, example: 'https://aber.local/i3x' }
+        displayName: { type: string, example: Aber Local }
 
     ObjectType:
       type: object
       properties:
         elementId: { type: string, example: i3x:type:cell }
-        displayName: { type: string, example: Factory Cell }
+        displayName: { type: string, example: Cell }
         namespaceUri: { type: string, format: uri }
         sourceTypeId:
           type: string
-          description: The platform's own `semantic_id`, or the synthetic type's name.
+          description: |
+            The platform's own `semantic_id` (a schema's, or a catalog metric's), else its name;
+            a synthetic type's or Sparkplug datatype's name; or, for a set of schemas, the type's
+            own id, since no source namespace defines the combination.
         version: { type: string, example: 1.0.0 }
         schema:
           type: object
-          description: '`schemas.schema_definition` verbatim — it already is a JSON Schema, so nothing is translated.'
+          description: |
+            `schemas.schema_definition` verbatim — it already is a JSON Schema, so nothing is
+            translated. A metric type's is a scalar such as `{"type": "number", "x-unit":
+            "CELSIUS"}`; `UnknownType`'s is `{}`; a set of schemas' is `{"type": "object",
+            "allOf": [...]}` over their definitions.
+        related:
+          type: object
+          description: 'Only on a type synthesized for a set of schemas: `{relationshipType: InheritsFrom, types: [<schema ids>]}`, the schemas it is a kind of.'
 
     RelationshipType:
       type: object
@@ -887,21 +1169,23 @@ components:
           description: |
             The platform's `sparkplug_id` — immutable and on the wire. i3X requires an
             elementId that is unique *and persistent*, which `name` is not: it is a freely
-            editable display label.
+            editable display label. A metric's is `<sparkplug_id>/<metric name>`; a
+            `sparkplug_id` never contains `/`, so the first `/` splits it.
           example: dev220000000000400080000
         displayName: { type: string, example: Sim_CNC_Mill_01 }
         typeElementId: { type: string }
         parentId:
           type: string
           nullable: true
-          description: 'The **cell**, not the gateway. `null` only on `i3x:site`.'
+          description: 'Where the object is — its cell, area or lane, else the site — never its gateway. `null` only on `i3x:site`.'
         isComposition: { type: boolean }
         isExtended:
           type: boolean
           description: |
             Whether the object publishes beyond its type. Derived from `last_birth_metrics`,
             so it reflects the most recent DBIRTH — a device that has never birthed reports
-            `false` rather than unknown.
+            `false` rather than unknown — judged against every schema attached to the device.
+            `metadata.schemaExtensions` names what is beyond them.
         metadata:
           $ref: '#/components/schemas/ObjectMetadata'
 
@@ -911,16 +1195,28 @@ components:
       properties:
         description: { type: string, nullable: true }
         typeNamespaceUri: { type: string, format: uri }
-        sourceTypeId: { type: string }
-        quarantined:
-          type: boolean
-          description: 'Present in the directory but its telemetry is being dropped. Drives `quality: Uncertain`.'
+        sourceTypeId:
+          type: string
+          description: "The same as its ObjectType's: a schema's `semantic_id`, else its name; the synthesized type's id for a device with several schemas; `Device` for a device with none. A metric's is its catalog row's `semantic_id`, else its name, or its Sparkplug datatype's name or `UnknownType` when the catalog lacks it."
+        schemaExtensions:
+          type: object
+          description: 'Only when `isExtended` is true: each metric the device declared beyond its schemas, with a JSON Schema fragment from its DBIRTH datatype, or `{}` when none is known.'
+          additionalProperties: { type: object }
+          example:
+            Environmental/HUMIDITY_RELATIVE: { type: number }
+        system:
+          type: object
+          description: 'Vendor keys, on a device. i3X requires it whenever `isExtended` is true; a device always sends it.'
+          properties:
+            quarantined:
+              type: boolean
+              description: 'Present in the directory but its telemetry is being dropped. Makes a held value `Uncertain` and no value `Bad`.'
         relationships:
           type: object
           description: |
-            Edge lists keyed by relationship type. `HasComponent` is carried **alongside**
-            `HasChildren`, not instead of it — they answer different questions: `HasChildren`
-            is the browse hierarchy, `HasComponent` is what `maxDepth > 1` descends.
+            Edge lists keyed by relationship type. `HasParent`/`HasChildren` is the location
+            tree and is never descended by a value query; `HasComponent` is composition, what
+            `maxDepth > 1` descends, and no location object carries it.
           additionalProperties:
             type: array
             items: { type: string }
@@ -933,7 +1229,14 @@ components:
       properties:
         isComposition: { type: boolean }
         value:
-          description: 'For a device, an object of metric name to latest value. `null` when quality is `GoodNoData`.'
+          description: |
+            For a device, an object of metric name to latest value, `null` when quality is
+            `GoodNoData` or `Bad`. Every other object sends exactly what its ObjectType declares: the site
+            `{cellCount, deviceCount}`, an area `{cellCount, deviceCount, description}`, a cell,
+            lane or Unassigned `{deviceCount, description}`, a gateway `{status, sparkplugGroup,
+            lastHeartbeat}`, or `null` with `GoodNoData` when it has no stored status. Counts are
+            of devices or cells, never of children.
+            A metric sends its latest value, a bare scalar.
         quality: { $ref: '#/components/schemas/Quality' }
         timestamp: { type: string, format: date-time }
         components:
@@ -947,7 +1250,9 @@ components:
         isComposition: { type: boolean }
         values:
           type: array
-          description: Newest first. Empty for anything that is not a device.
+          description: |
+            Newest first, all inside the window. A metric's are scalars; a device's are maps of
+            metric name to value, one per instant a metric changed. Empty for anything else.
           items:
             type: object
             properties:
@@ -956,18 +1261,28 @@ components:
               timestamp: { type: string, format: date-time }
         components:
           type: object
+          description: 'Present only when `maxDepth` is 0 or above 1. Keyed by elementId, each with its own `values`.'
           additionalProperties: { $ref: '#/components/schemas/HistoryResult' }
 
     Quality:
       type: string
-      enum: [Good, Uncertain, GoodNoData]
+      enum: [Good, GoodNoData, Uncertain, Bad]
       description: |
-        Derived at read time, never stored. `Uncertain` — quarantined device, or a gateway
-        that is STALE/OFFLINE/UNKNOWN. `GoodNoData` — never published, and no value is
-        carried. `Good` — otherwise.
+        Derived at read time, never stored, by one rule for values, subscription updates and
+        history, following the i3X guide's quality table:
 
-        A STALE gateway is `Uncertain` rather than `Bad`: it has not been heard from inside
-        the threshold, which is doubt about currency, not a fault.
+        | Condition | With a held value | Without one |
+        | :--- | :--- | :--- |
+        | Device quarantined | `Uncertain` | `Bad` |
+        | Device OFFLINE, or its gateway OFFLINE or STALE | `Uncertain` | `Bad` |
+        | Device online, never published | n/a | `GoodNoData` |
+        | Otherwise | `Good` | n/a |
+
+        A device's map takes the worst quality among the metrics it holds. A gateway's own
+        value is its live status (STALE after 90 s without a heartbeat), and is `Good`
+        whenever that is known: it is the devices behind it whose values are stale. A stored
+        history sample is `Good`. `timestamp` is never null: the sample's, else the
+        device's last birth or death, else the time of the read.
 
     Subscription:
       type: object
@@ -978,14 +1293,14 @@ components:
 
     UpdateBatch:
       type: object
-      description: One batch of accumulated changes. Also the SSE event payload.
+      description: One batch of accumulated changes. Each SSE event carries one batch's `updates` array.
       properties:
         sequenceNumber:
           type: integer
-          description: 'Monotonic per subscription. A gap after a 206 is the overflow window.'
-        timestamp: { type: string, format: date-time }
-        values:
+          description: 'Increasing per subscription and never reused. A gap is updates that were dropped, by overflow or because their element left your view; the 206 that reports it says which.'
+        updates:
           type: array
+          description: 'Each update names its own object: a registered one, or `<device>/<metric>` for a device registered at `maxDepth` 0 or 2 or more.'
           items:
             type: object
             properties:

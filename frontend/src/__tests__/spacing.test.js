@@ -27,10 +27,16 @@ const jsxFiles = (dir) =>
 
 describe('the tokens', () => {
 
-  it('declares the two insets and the stack gap', () => {
+  it('declares the two insets, the page gutter, the stack gap and the scrollbar', () => {
     expect(token('--inset')).toBe(16)
     expect(token('--inset-tight')).toBe(12)
+    expect(token('--gutter')).toBe(12)
     expect(token('--stack')).toBe(16)
+    expect(token('--scrollbar')).toBe(6)
+  })
+
+  it('keeps the page gutter no wider than a card\'s inset: it is space no content uses', () => {
+    expect(token('--gutter')).toBeLessThanOrEqual(token('--inset'))
   })
 
   it('keeps the tight inset genuinely tighter, or it is a second opinion rather than a step', () => {
@@ -52,9 +58,8 @@ describe('the tokens', () => {
 
 describe('every container refers to the token rather than restating it', () => {
 
-  // The page edge and the card edge. These were the two outliers, at 24px and 20px.
+  // The card edge. It and the page edge were the two outliers, at 20px and 24px.
   it.each([
-    ['.content', 'the page'],
     ['.card-header', 'a card header'],
     ['.card-body', 'a card body']
   ])('%s insets by var(--inset)', (selector) => {
@@ -80,6 +85,30 @@ describe('every container refers to the token rather than restating it', () => {
   })
 })
 
+describe('the page gutter', () => {
+
+  // The page edge is its own token, --gutter, not a card's inset.
+  it('.content pads by var(--gutter) on every side, less the reserved track on the right', () => {
+    expect(rule('.content')).toMatch(/padding:\s*var\(--gutter\) calc\(var\(--gutter\) - var\(--scrollbar\)\) var\(--gutter\) var\(--gutter\);/)
+  })
+
+  it('puts the open help drawer the same gutter from the window edge, and nothing on the page side', () => {
+    expect(rule('.context-panel-app.context-panel-open')).toMatch(/margin:\s*var\(--gutter\) var\(--gutter\) var\(--gutter\) 0;/)
+  })
+
+  it('gives the closed help drawer no margin: it was an empty strip down the right of every page', () => {
+    // A margin declaration; the transition names margin-right as a value.
+    expect(rule('.context-panel-app')).not.toMatch(/^\s*margin[\w-]*:/m)
+    // As an overlay it is flush with the window, as the details drawer's is.
+    const overlay = APP_CSS.match(/@media \(max-width: 800px\) \{([\s\S]*?)\n\}/)[1]
+    expect(overlay).toMatch(/\.context-panel-app\.context-panel-open \{ margin: 0; \}/)
+  })
+
+  it('spaces a page drawer from its list as one card from the next', () => {
+    expect(rule('.context-panel-open')).toMatch(/margin-left:\s*var\(--stack\)/)
+  })
+})
+
 describe('the scrollbar gutter', () => {
 
   /**
@@ -93,8 +122,16 @@ describe('the scrollbar gutter', () => {
   it('is only worth reserving because the scrollbar is narrow', () => {
     // A 6px track is a rounding error to give up permanently. If somebody widens the scrollbar to
     // a platform default of ~15px, `stable` stops being a free trade and wants re-deciding.
-    const width = Number(APP_CSS.match(/::-webkit-scrollbar \{([^}]*)\}/)[1].match(/width:\s*(\d+)px/)[1])
-    expect(width).toBeLessThanOrEqual(8)
+    expect(APP_CSS).toMatch(/::-webkit-scrollbar \{ width: var\(--scrollbar\); \}/)
+    expect(token('--scrollbar')).toBeLessThanOrEqual(8)
+  })
+
+  it('is thin in Firefox too, which does not read ::-webkit-scrollbar', () => {
+    // Without it Firefox reserved its full ~17px platform track beside every page.
+    const firefox = APP_CSS.match(/@supports not selector\(::-webkit-scrollbar\) \{([\s\S]*?)\n\}/)[1]
+    expect(firefox).toMatch(/scrollbar-width: thin;/)
+    // Its track is not --scrollbar wide, so none of it is taken back out of the padding.
+    expect(firefox).toMatch(/padding-right: var\(--gutter\);/)
   })
 })
 
@@ -110,7 +147,7 @@ describe('components do not reintroduce an inset of their own', () => {
   const files = jsxFiles(path.join(SRC, 'components', 'tabs'))
 
   it('sweeps every page, so a passing result means something', () => {
-    // Thirteen pages. A glob that silently matched nothing would pass every assertion below it.
+    // A glob that silently matched nothing would pass every assertion below it.
     expect(files.length).toBeGreaterThanOrEqual(13)
   })
 
@@ -141,5 +178,55 @@ describe('components do not reintroduce an inset of their own', () => {
       }
     }
     expect(offenders, `use var(--stack) instead:\n  ${offenders.join('\n  ')}`).toEqual([])
+  })
+})
+
+describe('pages do not space a block sideways with a literal margin', () => {
+
+  /**
+   * A literal horizontal margin on a page is a second opinion about where an edge is: the container
+   * or a shared class owns it. Every offender that existed when this guard landed is named here with
+   * its count, so a NEW one fails and a fix lowers the count. The pages of the consistency audit
+   * remove their entries as they adopt the shared badge, callout and row classes; an entry left
+   * behind after its fix also fails, so the list cannot go stale.
+   */
+  const BASELINE = {
+  }
+
+  const files = jsxFiles(path.join(SRC, 'components', 'tabs'))
+
+  // A horizontal term that is `auto`, zero or a token is not a hand-picked value.
+  const isLiteral = (term) => /^-?\d+(\.\d+)?(px|rem|em)$/.test(term) && parseFloat(term) !== 0
+
+  const found = () => {
+    const counts = {}
+    for (const file of files) {
+      const source = fs.readFileSync(file, 'utf8')
+      for (const [, prop, value] of source.matchAll(/\b(margin(?:Left|Right|Inline)?):\s*'([^']*)'/g)) {
+        const parts = value.trim().split(/\s+/)
+        const terms = prop === 'margin' ? [parts.length === 1 ? parts[0] : parts[1], parts[3]] : [parts[0]]
+        if (terms.some(t => t && isLiteral(t))) {
+          const key = `${path.basename(file)}: ${prop} ${value}`
+          counts[key] = (counts[key] || 0) + 1
+        }
+      }
+    }
+    return counts
+  }
+
+  it('has no offender beyond the named baseline', () => {
+    const counts = found()
+    const fresh = Object.entries(counts)
+      .filter(([key, n]) => n > (BASELINE[key] || 0))
+      .map(([key, n]) => `${key} (x${n})`)
+    expect(fresh, `use a shared class or the container's own spacing instead:\n  ${fresh.join('\n  ')}`).toEqual([])
+  })
+
+  it('names no offender that has since been fixed', () => {
+    const counts = found()
+    const stale = Object.entries(BASELINE)
+      .filter(([key, n]) => (counts[key] || 0) < n)
+      .map(([key]) => key)
+    expect(stale, `lower or remove these baseline entries:\n  ${stale.join('\n  ')}`).toEqual([])
   })
 })

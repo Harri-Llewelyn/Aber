@@ -46,9 +46,7 @@ import { supabase } from '../lib/supabaseClient'
 
 const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
 
-// Every page reachable from the rail. The mocked session has no permission rows, so every
-// permission-gated page is absent: Archived Entities, Approvals and Digital Thread. Capture stays visible
-// because it is gated on role, and the mocked session is an Administrator.
+// Pages with no permission or role gate: the rail shows them to any session.
 const ALWAYS_VISIBLE = [
   'Site Map', 'Cells', 'Gateways', 'Devices',
   'Schemas', 'Vocabulary', 'Directory'
@@ -142,22 +140,24 @@ describe('Merged navigation shell', () => {
   })
 
   /**
-   * Four controls on the right, and the count is the assertion: the alert pill, whose value
-   * changes; the shortcuts key and the help control, which are signposts rather than preferences;
-   * and the account door, behind which the standing preferences live. Help is the only one carrying
-   * `aria-expanded`, because it toggles a drawer that stays open. An exact count rather than an
-   * upper bound, because the failure this guards against is accretion.
+   * Five controls on the right, and the count is the assertion: the alert pill and the
+   * notification bell, whose values change; the shortcuts key and the help control, which are
+   * signposts rather than preferences; and the account door, behind which the standing preferences
+   * live. An exact count rather than an upper bound, because the failure this guards against is
+   * accretion.
    */
-  it('keeps the bar to the changing control, the two signposts and the account door', async () => {
+  it('keeps the bar to the two changing controls, the two signposts and the account door', async () => {
     await renderShell()
 
     const right = topbar().querySelector('.topbar-right')
     expect(right).toBeTruthy()
     const controls = [...right.querySelectorAll('button')]
-    expect(controls).toHaveLength(4)
+    expect(controls).toHaveLength(5)
 
-    // The one whose VALUE moves, the two signposts, and the door to everything else.
+    // The two whose VALUES move, the two signposts, and the door to everything else. The bell sits
+    // directly after the pill.
     expect(right.querySelector('.alert-pill')).toBeTruthy()
+    expect(controls[1]).toBe(within(right).getByRole('button', { name: /^notifications/i }))
     expect(within(right).getByRole('button', { name: /keyboard shortcuts/i })).toBeTruthy()
     expect(within(right).getByRole('button', { name: /help for this page/i })).toBeTruthy()
     expect(right.querySelector('.user-avatar')).toBeTruthy()
@@ -383,33 +383,39 @@ describe('Merged navigation shell', () => {
   })
 
   it('keeps the brand the only flank that yields when the bar runs out of room', () => {
-    // `min-width: 0` lets a flex item shrink below its content width. Only the brand has it, so
-    // `.brand-name` truncates while the session controls hold at content size.
+    // A set min-width lets a flex item shrink below its content width. Only the brand has one, so
+    // its text goes while the session controls hold at content size. It is the mark's width, not 0:
+    // at 760px a 0 floor left the brand 21px and clipped the 28px mark while the search box kept 480.
     const brandRule = APP_CSS.match(/\.topbar-brand \{([\s\S]*?)\n\}/)[1]
     const rightRule = APP_CSS.match(/\.topbar-right \{([\s\S]*?)\n\}/)[1]
-    expect(brandRule).toMatch(/min-width:\s*0/)
-    expect(rightRule).not.toMatch(/min-width:\s*0/)
+    expect(brandRule).toMatch(/min-width:\s*42px/)
+    expect(rightRule).not.toMatch(/min-width/)
   })
 
   /**
    * The bands that are left, as a set. Navigation is in neither: the rail's collapse is a mode
    * rather than a width band, so no viewport can take a page away. The brand subtitle goes first;
-   * the wordmark is four letters and stays until the whole brand text goes.
+   * the wordmark is four letters and stays until the whole brand text goes. Both bands are the
+   * brand region's own width, not the window's: at a 960px window the region still has about 200px,
+   * room for the wordmark.
    */
   it('sheds only recoverable text now that navigation is not in the bar', () => {
-    const band = (px) => APP_CSS.match(new RegExp(`@media \\(max-width: ${px}px\\) \\{([\\s\\S]*?)\\n\\}`))?.[1]
+    const band = (px) => APP_CSS.match(new RegExp(`@container brand \\(max-width: ${px}px\\) \\{([\\s\\S]*?)\\n\\}`))?.[1]
 
-    const narrow = band(1399)
-    const narrowest = band(1099)
-    expect(narrow, 'the <1400px band is missing').toBeTruthy()
-    expect(narrowest, 'the <1100px band is missing').toBeTruthy()
+    expect(APP_CSS.match(/\.topbar-brand \{([\s\S]*?)\n\}/)[1]).toMatch(/container: brand \/ inline-size;/)
+    const narrow = band(250)
+    const narrowest = band(80)
+    expect(narrow, 'the strapline band is missing').toBeTruthy()
+    expect(narrowest, 'the wordmark band is missing').toBeTruthy()
+    // No window band hides any of the brand any more.
+    expect(APP_CSS).not.toMatch(/@media[^{]*\{\s*\.brand-(?:sub|text|name)/)
 
-    // <1400: the strapline goes and the wordmark stays. The bar's remaining controls are
-    // icons already, so there is no button label left to shed.
+    // Under 250px of brand: the strapline goes and the wordmark stays. The bar's remaining controls
+    // are icons already, so there is no button label left to shed.
     expect(narrow).toMatch(/\.brand-sub\s*\{\s*display:\s*none/)
     expect(narrow).not.toMatch(/\.brand-name/)
 
-    // <1100: the brand text entirely, leaving the mark.
+    // Under 80px: the brand text entirely, leaving the mark.
     expect(narrowest).toMatch(/\.brand-text\s*\{\s*display:\s*none/)
 
     // NAVIGATION IS IN NO BAND. The rail is the same width at every viewport, so a page cannot be
@@ -435,8 +441,8 @@ describe('Merged navigation shell', () => {
   it('never hides the alert control at any width', () => {
     // It has nothing to shed: a glyph plus at most two digits at every width. What it must never do
     // is disappear, because an absent alert control and a healthy one would look identical.
-    for (const band of [1399, 1099]) {
-      const rules = APP_CSS.match(new RegExp(`@media \\(max-width: ${band}px\\) \\{([\\s\\S]*?)\\n\\}`))[1]
+    for (const band of [250, 80]) {
+      const rules = APP_CSS.match(new RegExp(`@container brand \\(max-width: ${band}px\\) \\{([\\s\\S]*?)\\n\\}`))[1]
       expect(rules).not.toMatch(/\.alert-pill[\s\S]*?display:\s*none/)
     }
     expect(APP_CSS).not.toMatch(/\.alert-pill-label/)
@@ -476,70 +482,29 @@ describe('Merged navigation shell', () => {
 })
 
 /**
- * The area thumbnails across the viewports. One track expression does the work of a stack of media
- * queries: the minimum is a third of the row less its share of the gaps, or a fixed floor,
- * whichever is larger, so a row holds three at most and fewer as the window narrows. What is checked
- * is the arithmetic. jsdom computes no layout, so the count is derived as
- * floor((available + gap) / (track + gap)).
+ * The area cards: one track per column, --map-columns of them (three when unset), and one
+ * column on a card under 760px. The Site Map sets --map-columns from the number of areas.
  */
-describe('area thumbnail grid across viewports', () => {
+describe('area card grid', () => {
   const gridRule = APP_CSS.match(/\n\.shopfloor-grid \{([\s\S]*?)\n\}/)[1]
-  const track = gridRule.match(/minmax\(min\(max\((\d+)px, calc\(33\.333% - (\d+)px\)\), 100%\), 1fr\)/)
-  const floorWidth = Number(track[1])
-  const thirdLess = Number(track[2])
-  const gap = Number(gridRule.match(/gap:\s*(\d+)px/)[1])
 
-  /* What the grid's container measures: the viewport less the rail, the content padding and the
-     scrollbar gutter. Every term is read from the stylesheet rather than written down here, because
-     a copied number stops tracking the thing it was copied from. */
-  const block = (re) => APP_CSS.match(re)[1]
-
-  const rail = Number(block(/\n\.sidebar \{([\s\S]*?)\n\}/).match(/flex:\s*0 0 (\d+)px/)[1])
-  const inset = Number(block(/:root, \[data-theme="dark"\] \{([\s\S]*?)\n\}/).match(/--inset:\s*(\d+)px/)[1])
-  // The reserved scrollbar track: `scrollbar-gutter: stable` holds it open on every page, so it is
-  // part of the width arithmetic.
-  const gutter = Number(block(/::-webkit-scrollbar \{([^}]*)\}/).match(/width:\s*(\d+)px/)[1])
-
-  const availableAt = (viewport) => viewport - rail - inset * 2 - gutter
-  const columnsAt = (viewport) => {
-    const available = availableAt(viewport)
-    // The track is capped at the container, so a container narrower than the floor yields one
-    // full-width column rather than an overflow.
-    const min = Math.min(Math.max(floorWidth, available / 3 - thirdLess), available)
-    return Math.floor((available + gap) / (min + gap))
-  }
-
-  // Three tracks share two gaps, so each gives up two thirds of one.
-  it('takes each track\'s share of the gaps off its third', () => {
-    expect(thirdLess).toBe(Math.round(gap * 2 / 3))
+  it('takes its column count from --map-columns, three when unset', () => {
+    expect(gridRule).toMatch(/grid-template-columns:\s*repeat\(var\(--map-columns, 3\), minmax\(0, 1fr\)\)/)
   })
 
-  it('fills three columns at 1920x1080, the primary target, and never more at any width', () => {
-    expect(columnsAt(1920)).toBe(3)
-    for (const w of [2560, 3440, 3840]) expect(columnsAt(w), `${w}px exceeds three`).toBe(3)
+  it('collapses to one column on a narrow card, not a narrow window', () => {
+    // A docked drawer narrows the card while the window stays wide, so the breakpoint is the card's.
+    expect(APP_CSS).toMatch(/\.site-map-body \{ container: site-map \/ inline-size; \}/)
+    expect(APP_CSS).toMatch(/@container site-map \(max-width: 760px\) \{\s*\.shopfloor-grid \{ grid-template-columns: minmax\(0, 1fr\); \}/)
+    expect(APP_CSS).not.toMatch(/@media[^{]*\{\s*\.shopfloor-grid/)
   })
 
-  it('still fills three at 1366x768, and degrades below three at 1024 without overflowing', () => {
-    expect(columnsAt(1366)).toBe(3)
-    const cols = columnsAt(1024)
-    expect(cols).toBeLessThan(3)
-    expect(cols).toBeGreaterThanOrEqual(1)
-    // The check that matters: whatever the count, the row still fits.
-    const used = cols * floorWidth + (cols - 1) * gap
-    expect(used).toBeLessThanOrEqual(availableAt(1024))
-  })
-
-  it('keeps at least one column at every width down to a phone', () => {
-    for (const w of [1920, 1600, 1440, 1366, 1280, 1024, 768, 480, 360]) {
-      expect(columnsAt(w), `${w}px yields no column`).toBeGreaterThanOrEqual(1)
-    }
-  })
-
-  // auto-fill, not auto-fit. With auto-fit a single area would stretch across the entire row and
-  // the grid would change shape as areas are added.
-  it('uses auto-fill so one area does not stretch across the row', () => {
-    expect(gridRule).toMatch(/auto-fill/)
-    expect(gridRule).not.toMatch(/auto-fit/)
+  it('drops an area card\'s counts when the card itself is narrow', () => {
+    expect(APP_CSS).toMatch(/\.area-card \{\s*container: area-card \/ inline-size;/)
+    expect(APP_CSS).toMatch(/@container area-card \(max-width: 240px\) \{\s*\.area-card-counts \{ display: none; \}/)
+    // On a line of its own the tally wraps rather than overflowing the card.
+    const counts = APP_CSS.match(/\.area-card-counts \{([^}]*)\}/)[1]
+    expect(counts).not.toMatch(/flex-shrink:\s*0/)
   })
 })
 
@@ -547,21 +512,22 @@ describe('area thumbnail grid across viewports', () => {
  * The rail's warning tone, read from App.css: a page with work waiting is coloured, but the
  * current page keeps its accent, since which page you are on outranks what is waiting there.
  */
+/** The area plan row in the Areas drawer: at a narrow drawer its buttons take their own line. */
+describe('area plan row', () => {
+  it('wraps its buttons rather than squeezing the plan state to one word a line', () => {
+    expect(APP_CSS.match(/\.area-plan-panel-row \{([\s\S]*?)\n\}/)[1]).toMatch(/flex-wrap:\s*wrap/)
+    // A button group that may not shrink cannot wrap onto its own line and fit it.
+    expect(APP_CSS.match(/\.area-plan-panel-actions \{([^}]*)\}/)[1]).not.toMatch(/flex-shrink:\s*0/)
+  })
+})
+
 describe('sidebar warning tone', () => {
   it('colours a flagged item, and never the current page', () => {
     expect(APP_CSS).toMatch(/\.sidebar-item\.sidebar-item-warning:not\(\.active\) \{ color: var\(--warning-text\); \}/)
   })
 })
 
-/**
- * The KPI ribbon was a clickable 48px bar of figures above the shopfloor map, retired when the Site
- * Map became one view. This guard stops its stylesheet coming back and quietly re-enabling it.
- *
- * MOVED OUT OF THE TEST ABOVE, where it was one line with nothing to do with the sidebar's warning
- * tone: an unrelated page adding a `.kpi-` class failed a test named "colours a flagged item, and
- * never the current page", which says nothing about what was actually wrong or what to do about it.
- * Same assertion, somewhere it can explain itself.
- */
+/** The KPI ribbon above the Site Map is retired; its stylesheet must not come back. */
 describe('the retired KPI ribbon', () => {
   it('does not come back', () => {
     expect(APP_CSS).not.toMatch(/\.kpi-/)
@@ -569,10 +535,8 @@ describe('the retired KPI ribbon', () => {
 })
 
 /**
- * Shopfloor tile variants must out-specify the base tile. `.shopfloor-zone` sets `background` and
- * the `border` shorthand, so every variant that repaints any of those has to win against it;
- * single-class lane rules tie at 0-1-0 and lose to source order, and every rendering assertion
- * still passes.
+ * Each lane variant must repaint what `.site-lane` sets (its background and border), or the hue is
+ * lost while every rendering assertion still passes.
  */
 describe('Site Map lane hues', () => {
   // Each lane is one button with its own hue: blue for Site-Wide, grey for Simulated, amber for
@@ -608,6 +572,13 @@ describe('Site Map lane hues', () => {
   it('lays the three lanes side by side across the full width', () => {
     const lanes = APP_CSS.match(/\.site-lanes \{([\s\S]*?)\n\}/)[1]
     expect(lanes).toMatch(/grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/)
+  })
+
+  it('narrows to the icons on a narrow card rather than stacking or overflowing', () => {
+    // The counts go first, then the names; the three stay side by side at every width.
+    expect(APP_CSS).toMatch(/@container site-map \(max-width: 800px\) \{\s*\.site-lane-counts \{ display: none; \}/)
+    expect(APP_CSS).toMatch(/@container site-map \(max-width: 440px\) \{[^}]*\}\s*\.site-lane-name \{ display: none; \}/)
+    expect(APP_CSS).not.toMatch(/@media[^{]*\{\s*\.site-lanes/)
   })
 })
 

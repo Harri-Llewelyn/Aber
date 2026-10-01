@@ -39,6 +39,10 @@ const routeGet = (rows) => (path) => {
 const show = async (rows, hasPermission = () => true) => {
   api.get.mockImplementation(routeGet(rows))
   render(<DevicesTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={hasPermission} />)
+  // The roster opens on Active, so a fixture holding an archived row asks for All first.
+  if (rows.some(r => r.is_archived)) {
+    fireEvent.change(await screen.findByTitle('Filter by lifecycle state'), { target: { value: 'all' } })
+  }
   await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 }
 
@@ -54,12 +58,7 @@ const panelLabels = () => {
     .map(b => b.textContent.trim()).join('|')
 }
 
-/**
- * Select a device row and return its context panel. The documents accordion, the 3D uploader and
- * the telemetry inspector belong to the selected device, one drawer rather than one per row; the
- * rules checked are lazy fetch, the uploader beside the empty state, and the read-only role told
- * the state but not offered the write.
- */
+/** Select a device row and return its context panel. */
 const openPanel = (name = 'CNC_01') => {
   fireEvent.click(within(document.querySelector('.page-main')).getByText(name))
   return within(document.querySelector('.context-panel'))
@@ -69,17 +68,16 @@ beforeEach(() => vi.clearAllMocks())
 
 describe('device row actions', () => {
   it('leaves no action controls in the row at all', async () => {
-    // The cell carried seven controls and took over half the row's width. The row is identity and
-    // state now; every action lives in the drawer the row opens.
+    // The row is identity and state; every action lives in the drawer the row opens.
     await show([device()])
 
     expect(inRow().queryByRole('button', { name: /^Edit/i })).not.toBeInTheDocument()
     // Telemetry is not a row control at all now: it is a panel ACTION opening a modal, reached by
     // selecting the device rather than by navigating to a separate page and re-finding it.
     expect(inRow().queryByText('Telemetry')).not.toBeInTheDocument()
-    expect(openPanel().getByText('View Realtime Telemetry')).toBeInTheDocument()
+    expect(openPanel().getByText('View Telemetry')).toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /^Config/i })).not.toBeInTheDocument()
-    expect(inRow().queryByRole('button', { name: /^Thread/i })).not.toBeInTheDocument()
+    expect(inRow().queryByRole('button', { name: /Audit Trail/i })).not.toBeInTheDocument()
     expect(inRow().queryByRole('button', { name: /^Archive/i })).not.toBeInTheDocument()
     expect(document.querySelector('[data-testid^="device-actions-"]')).toBeNull()
   })
@@ -88,13 +86,12 @@ describe('device row actions', () => {
     await show([device()])
 
     const labels = panelLabels()
-    for (const expected of [/Digital Thread/i, /Configuration Parameters/i,
+    for (const expected of [/Audit Trail/i, /Configuration Parameters/i,
       /Export AAS JSON/i, /Export AASX package/i, /Archive Device/i,
-      /Digital Nameplate/i, /Realtime Telemetry/i, /Edit Details/i]) {
+      /Digital Nameplate/i, /View Telemetry/i, /Edit Details/i]) {
       expect(labels).toMatch(expected)
     }
-    // Documents are BOTH here: the accordion below lists the links, and this opens the editor
-    // that attaches one. The accordion's own "Attached Links" pill was removed as the duplicate.
+    // Attached Links opens the editor that lists and attaches links.
     expect(labels).toMatch(/Attached Links/i)
   })
 
@@ -126,13 +123,13 @@ describe('device row actions', () => {
     expect(btn(/Export AAS JSON/i).disabled).toBe(false)
     expect(btn(/Configuration Parameters/i).disabled).toBe(false)
 
-    // The audit trace is withdrawn, not disabled: without `digital_thread:read` the page returns no
+    // The audit trace is withdrawn, not disabled: without `audit_trail:read` the page returns no
     // rows rather than an error, and the nav hides it from this reader entirely.
-    expect(panel.queryByText(/Digital Thread/i)).toBeNull()
+    expect(panel.queryByText(/Audit Trail/i)).toBeNull()
   })
 
-  it('reaches documents through the panel action, not an accordion', async () => {
-    // The accordion is gone from the row and the drawer; Attached Links opens the full editor.
+  it('reaches links through the panel action', async () => {
+    // Attached Links opens the full editor; the row and the drawer list no links themselves.
     await show([device()])
 
     expect(inRow().queryByText('Attached Document Links')).toBeNull()
@@ -143,8 +140,8 @@ describe('device row actions', () => {
   })
 })
 
-// The 3D model is an attachment like a document link, in the row's document accordion; the
-// Configuration modal is read-only and open to every role.
+// The 3D model is an attachment like a link, in the drawer's 3D Model section; the Configuration
+// modal is read-only and open to every role.
 describe('device 3D model attachment', () => {
   it('offers the uploader as its own panel section', async () => {
     // One upload control fits a narrow column, unlike a list of links.
@@ -158,8 +155,6 @@ describe('device 3D model attachment', () => {
   })
 
   it('shows the uploader regardless of whether the device has document links', async () => {
-    // It used to render inside the documents accordion, so a device with a model but no links
-    // needed the footer to render alongside the empty state. Standing alone, that cannot regress.
     await show([device()])
 
     expect(openPanel().getByTestId('model-3d-input')).toBeInTheDocument()

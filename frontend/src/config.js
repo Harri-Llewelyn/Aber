@@ -39,6 +39,9 @@ export const RUNTIME_SETTING_NAMES = [
   // what this BUNDLE is. A runtime setting on purpose: it is a property of the deployment, and the
   // two disagreeing is the fact utils/releaseVersion.js reports.
   'VITE_RELEASE_VERSION',
+  // backup.retentionDays, the window the backup service prunes by; the Backups page says why a
+  // backup past it is still kept.
+  'VITE_BACKUP_RETENTION_DAYS',
 ];
 
 /**
@@ -57,6 +60,7 @@ const BUILD_TIME_SETTINGS = {
   VITE_MODEL_3D_BUCKET: import.meta.env.VITE_MODEL_3D_BUCKET,
   VITE_CAPTURE_BUCKET: import.meta.env.VITE_CAPTURE_BUCKET,
   VITE_RELEASE_VERSION: import.meta.env.VITE_RELEASE_VERSION,
+  VITE_BACKUP_RETENTION_DAYS: import.meta.env.VITE_BACKUP_RETENTION_DAYS,
 };
 
 /**

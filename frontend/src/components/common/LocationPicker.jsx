@@ -15,7 +15,7 @@ export function locationIncomplete(form) {
  * choosing one clears what the others store. The only area is chosen for Area-Wide without
  * asking; several leave `area_id` empty for the dropdown.
  */
-export function locationFieldsFor(scope, form, areas = []) {
+function locationFieldsFor(scope, form, areas = []) {
   if (scope === SCOPE_SITE_WIDE) return { location_scope: SCOPE_SITE_WIDE, cell_id: '', area_id: '' }
   if (scope === SCOPE_AREA_WIDE) {
     const areaId = areas.some(a => a.area_id === form.area_id)
@@ -45,7 +45,7 @@ export function LocationPicker({
   const choose = (next) => { if (!disabled) onChange(locationFieldsFor(next, form, areas)) }
 
   const choices = [
-    { scope: SCOPE_CELL, label: 'In a cell', title: 'The device sits in one work center' },
+    { scope: SCOPE_CELL, label: 'In a cell', title: 'Sits in one cell.' },
     {
       scope: SCOPE_AREA_WIDE, label: 'Area-Wide', off: areas.length === 0,
       title: areas.length === 0
@@ -75,7 +75,7 @@ export function LocationPicker({
 
       {scope === SCOPE_CELL && (
         <select
-          id={`${idPrefix}-cell-zone`}
+          id={`${idPrefix}-cell`}
           className="form-control"
           value={disabled ? '' : (form.cell_id || '')}
           disabled={disabled}

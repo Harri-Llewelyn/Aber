@@ -15,10 +15,10 @@
  *   CONSTRAINT   a DO block guarded on pg_constraint -- rule 2, added guarded, never re-added
  *   the rest     already idempotent (GRANT, REVOKE, COMMENT, ALTER ... ENABLE ROW LEVEL SECURITY)
  *
- * MONTHLY PARTITIONS ARE DROPPED ON THE FLOOR. `digital_thread` is partitioned by month and its
+ * MONTHLY PARTITIONS ARE DROPPED ON THE FLOOR. `audit_trail` is partitioned by month and its
  * partitions are created at run time by the function 0079 installs, so the months present on the
  * day the dump was taken are not schema -- baking them in would pin the baseline to a date. The
- * partitioned parent and the DEFAULT partition are kept; `digital_thread_YYYY_MM` and everything
+ * partitioned parent and the DEFAULT partition are kept; `audit_trail_YYYY_MM` and everything
  * attached to it is not.
  *
  * A PARTITION IS WRITTEN AS `PARTITION OF`, NOT AS A TABLE PLUS AN ATTACH. pg_dump splits every
@@ -44,7 +44,7 @@ import { readFileSync } from 'node:fs';
 const dump = readFileSync(process.argv[2], 'utf8');
 
 // `\b` does NOT work here: `_` is a word character, so it fails between the month and the rest
-// of a name like `digital_thread_2026_09_causation_id_idx`. That let every per-partition index
+// of a name like `audit_trail_2026_09_causation_id_idx`. That let every per-partition index
 // through, each one referring to a table this generator had just dropped.
 const MONTHLY = /_(?:19|20)\d{2}_(?:0[1-9]|1[0-2])(?!\d)/;
 
@@ -224,7 +224,7 @@ function rewrite(b) {
   // `name` is `<table> <constraint>` for a constraint and the index's own name for an index, so
   // both are resolved against the statement's target rather than the block's title. Each form is
   // matched whole: an `ON\s+` with no word boundary finds the `on` that ends `causation` in
-  // `idx_digital_thread_causation ON ONLY ...`, and takes `ONLY` for the table name.
+  // `idx_audit_trail_causation ON ONLY ...`, and takes `ONLY` for the table name.
   const target = bare(
     (s.match(/^CREATE (?:UNIQUE )?INDEX \S+ ON (?:ONLY )?(\S+)/im)
      || s.match(/^ALTER TABLE (?:ONLY )?(\S+)/im)

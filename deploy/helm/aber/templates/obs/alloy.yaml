@@ -139,6 +139,12 @@ discovery.relabel "metrics" {
     source_labels = ["__meta_kubernetes_pod_name"]
     target_label  = "pod"
   }
+  // `instance` is the pod's name, not its address. A node restart gives every pod a new IP, and
+  // an address here would re-mint every series while the WAL still holds the old ones.
+  rule {
+    source_labels = ["__meta_kubernetes_pod_name"]
+    target_label  = "instance"
+  }
   // `job` and `component` both carry the component name, which is what the dashboards and
   // rules select on.
   rule {
@@ -153,9 +159,21 @@ discovery.relabel "metrics" {
 
 prometheus.scrape "pods" {
   targets         = discovery.relabel.metrics.output
-  forward_to      = [prometheus.remote_write.local.receiver]
+  forward_to      = [prometheus.relabel.pods.receiver]
   scrape_interval = {{ $cfg.scrapeInterval | quote }}
   scrape_timeout  = "10s"
+}
+
+prometheus.relabel "pods" {
+  forward_to = [prometheus.remote_write.local.receiver]
+
+  // Grafana's embedded API server, storage and access-control internals, and one info series per
+  // feature toggle. No dashboard or rule reads them. Its alerting, HTTP and plugin families stay.
+  rule {
+    source_labels = ["job", "__name__"]
+    regex         = "grafana;grafana_(apiserver|storage|access)_.+|grafana;grafana_feature_toggles_info"
+    action        = "drop"
+  }
 }
 {{- if $cfg.hostMetrics }}
 
@@ -300,6 +318,12 @@ prometheus.relabel "cadvisor" {
 prometheus.remote_write "local" {
   endpoint {
     url = "http://prometheus:9090/api/v1/write"
+  }
+
+  // A series a rollout or restart left behind stays in memory until the WAL is truncated:
+  // every 30 minutes here, not the default two hours.
+  wal {
+    truncate_frequency = "30m"
   }
 }
 {{- end -}}

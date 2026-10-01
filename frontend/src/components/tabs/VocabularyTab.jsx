@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { api } from '../../api'
+import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { PERMISSION_UUIDS } from '../../constants'
+import { LoadingState } from '../common/LoadingState'
 import { STANDARDS } from '../../utils/standards'
 import { VocabularyPanel } from '../common/VocabularyPanel'
 import { mtconnectVocabularyTab } from '../common/MTConnectVocabularyPanel'
@@ -10,10 +12,10 @@ import { ashrae223VocabularyTab } from '../common/ASHRAE223VocabularyPanel'
 
 /**
  * The standard vocabularies as a page of their own: reference material that is only read, separate
- * from the Schemas page's registry and catalog, which are edited. Clicking Use on an entry still
- * starts a catalog entry: `onUseEntry` hands identifiers to the Schemas page, which holds the
- * vocabularies for its type picker and resolves the entry itself, so one place knows how a
- * vocabulary row becomes a metric.
+ * from the Metrics page's catalog, which is edited. Clicking an entry opens the Add Metric dialog
+ * on the Metrics page: `onUseEntry` hands identifiers over, and MetricsTab, which holds the
+ * vocabularies for its type picker, resolves the entry itself, so one place knows how a vocabulary
+ * row becomes a metric.
  */
 export function VocabularyTab({ onUseEntry, hasPermission }) {
   const [vocabulary, setVocabulary] = useState([])
@@ -47,20 +49,20 @@ export function VocabularyTab({ onUseEntry, hasPermission }) {
     return () => { cancelled = true }
   }, [])
 
-  // The same permission the Schemas page gates its Add Metric form on -- Use lands on that form,
-  // so offering it to someone who cannot submit it would be a dead end.
+  // The permission Add Metric is gated on: a click lands on that dialog, so offering it to someone
+  // who cannot submit it would be a dead end.
   const canUse = !!hasPermission?.(PERMISSION_UUIDS.SCHEMA_MANAGE)
 
   return (
     <>
-      {loading && <div style={{ color: 'var(--text-muted)', padding: '24px 0' }}>Loading vocabularies…</div>}
+      {loading && <LoadingState label="vocabularies" />}
 
       {!loading && (
         <VocabularyPanel
-          title="Standard Vocabulary Reference"
           subtitle={<>
-            What the standards define, not what this deployment publishes — a row here is a concept the standard names. The Metric Catalog on the Schemas page is the other half: what devices actually report. Entries already in your catalog are marked, and
-            {canUse ? ' Use starts a catalog entry from one.' : ' adding one to the catalog requires Admin permissions.'}
+            What the standards define, not what devices publish{canUse
+              ? '; click an entry to start a catalog metric from it.'
+              : `; ${requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)} to start a catalog metric from an entry.`}
           </>}
           canAddMetric={canUse}
           tabs={[

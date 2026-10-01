@@ -1,9 +1,9 @@
 /**
  * Proposing a change from the form that makes it.
  *
- * There is one form per asset, the Edit Details dialog, and this module lets it end in a proposal
- * instead of a write for somebody who may not make the change. The footer button is the only thing
- * that differs.
+ * Each kind of entity has one form, its Edit Details dialog (a device's nameplate has its own,
+ * Digital Nameplate), and this module lets it end in a proposal instead of a write for somebody who
+ * may not make the change. The footer button is the only thing that differs.
  *
  * The mapping table translates form field names to column names, as api.js does on the way to a
  * PUT, so the two paths out of one form agree. It is deliberately not derived from
@@ -16,12 +16,12 @@
 import { api } from '../api'
 
 /**
- * One entry per asset kind: the proposal lane, and how the form's fields map onto its columns. A
+ * One entry per form: the kind of change it files (`kind`, the table name), and how the form's fields map onto its columns. A
  * form key absent from `fields` is not proposable.
  */
 export const PROPOSAL_FORMS = {
   device: {
-    lane: 'devices',
+    kind: 'devices',
     idField: 'asset_id',
     fields: {
       asset_name: 'name',
@@ -31,7 +31,7 @@ export const PROPOSAL_FORMS = {
       area_id: 'area_id',
       location_scope: 'location_scope'
     },
-    // WHY EACH ONE IS OUT, in the words the form shows the reader.
+    // Why each one is out, in the words the form shows the reader.
     withheld: {
       active_gateway_id: 'The gateway is this device’s data path — an Administrator moves it.',
       schema_id: 'The schema is what this device’s telemetry is judged against — an Administrator changes it.',
@@ -42,7 +42,7 @@ export const PROPOSAL_FORMS = {
      FIELDS table keyed by `device_nameplate`'s columns. Written out rather than generated, so every
      field is proposable is re-read when a column is added. */
   device_nameplate: {
-    lane: 'device_nameplate',
+    kind: 'device_nameplate',
     idField: 'asset_id',
     fields: {
       uri_of_the_product: 'uri_of_the_product',
@@ -62,7 +62,7 @@ export const PROPOSAL_FORMS = {
   /* Every column of an area a person chooses; `id` and `created_at` are the platform's. `area_name`
      is the form's name for `name`, which is what api.js writes on the direct path too. */
   area: {
-    lane: 'areas',
+    kind: 'areas',
     idField: 'area_id',
     fields: {
       area_name: 'name',
@@ -72,7 +72,7 @@ export const PROPOSAL_FORMS = {
     withheld: {}
   },
   cell: {
-    lane: 'cells',
+    kind: 'cells',
     idField: 'cell_id',
     // `access_url` is the form's name for `cells.grafana_url`, which is what api.js writes too.
     fields: {
@@ -87,7 +87,7 @@ export const PROPOSAL_FORMS = {
     withheld: {}
   },
   gateway: {
-    lane: 'gateways',
+    kind: 'gateways',
     idField: 'gateway_id',
     fields: {
       gateway_name: 'name',
@@ -104,14 +104,9 @@ export const PROPOSAL_FORMS = {
   }
 }
 
-/** The form keys this asset kind cannot propose, with the sentence to show beside each. */
+/** The form keys this form cannot propose, with the sentence to show beside each. */
 export function nonProposableFields(kind) {
   return PROPOSAL_FORMS[kind]?.withheld || {}
-}
-
-/** Whether a form key can be proposed at all. */
-export function isProposable(kind, formKey) {
-  return Boolean(PROPOSAL_FORMS[kind]?.fields?.[formKey])
 }
 
 /**
@@ -163,19 +158,19 @@ export function formFromPatch(kind, patch) {
 
 /**
  * File the proposal, or update one already open. `proposalId` is how the per-asset cap stays
- * livable: one open proposal per asset per person, so a second field is added to the existing
+ * livable: one open proposal per entity per person, so a second field is added to the existing
  * request.
  */
 export async function submitProposal({ kind, entityId, patch, rationale, proposalId }) {
   const def = PROPOSAL_FORMS[kind]
-  if (!def) throw new Error(`No proposal lane for "${kind}"`)
+  if (!def) throw new Error(`No kind of proposal for "${kind}"`)
   if (!Object.keys(patch).length) {
     // Refused here rather than by the database's own patch-is-not-empty constraint, because this
     // one can say the useful half: nothing on the form was changed.
     throw new Error('Change something first — a proposal with no changes has nothing to decide.')
   }
 
-  const body = { entity_type: def.lane, entity_id: entityId, patch, rationale: rationale || null }
+  const body = { entity_type: def.kind, entity_id: entityId, patch, rationale: rationale || null }
   if (proposalId) return api.put(`/api/v1/proposals/${proposalId}`, body)
   return api.post('/api/v1/proposals', body)
 }

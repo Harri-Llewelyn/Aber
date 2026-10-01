@@ -4,9 +4,11 @@
  * early on an unknown id), and neither can derive from the other without constants.js importing
  * components. A tab in one and not the other is a dead button with no error.
  */
-import { describe, it, expect } from 'vitest'
-import { TABS, tabIsVisible } from '../App'
-import { VALID_TABS } from '../constants'
+import { describe, it, expect, afterEach } from 'vitest'
+import { renderHook } from '@testing-library/react'
+import { TABS, tabIsVisible } from '../navigation'
+import { VALID_TABS, RENAMED_TABS } from '../constants'
+import { useAppRouting } from '../hooks/useAppRouting'
 
 describe('the nav and the router agree', () => {
   it('accepts every tab the nav renders', () => {
@@ -72,5 +74,30 @@ describe('the nav and the router agree', () => {
     expect(settings).toBeTruthy()
     expect(settings.role).toBe('Administrator')
     expect(settings.permission).toBeUndefined()
+  })
+})
+
+describe('a renamed tab keeps its old address working', () => {
+  afterEach(() => window.history.replaceState({}, '', '/'))
+
+  it('maps each old id onto a tab the router accepts, and no longer accepts the old one', () => {
+    for (const [was, is] of Object.entries(RENAMED_TABS)) {
+      expect(VALID_TABS, was).toContain(is)
+      expect(VALID_TABS, was).not.toContain(was)
+    }
+  })
+
+  it('opens the Audit Trail at the old /digital-thread path, and rewrites the address with its query', () => {
+    window.history.replaceState({}, '', '/digital-thread?entity=dev-1')
+    const { result } = renderHook(() => useAppRouting())
+    expect(result.current.tab).toBe('audit-trail')
+    expect(window.location.pathname + window.location.search).toBe('/audit-trail?entity=dev-1')
+  })
+
+  it('still sends an unknown path to the Site Map, without its query', () => {
+    window.history.replaceState({}, '', '/no-such-page?x=1')
+    const { result } = renderHook(() => useAppRouting())
+    expect(result.current.tab).toBe('site-map')
+    expect(window.location.pathname + window.location.search).toBe('/site-map')
   })
 })

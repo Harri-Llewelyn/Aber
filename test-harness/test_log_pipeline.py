@@ -140,6 +140,30 @@ class CollectionTestCase(unittest.TestCase):
         self.assertEqual(1.0, prom_scalar('up{job="loki"}'),
                          "loki is not up, or prometheus is not scraping it")
 
+    def test_a_pod_series_is_named_by_its_pod_not_its_address(self):
+        """
+        An address in `instance` changes on every node restart, and each change re-mints every
+        series while the collector's WAL still holds the old ones. That is how Alloy reached 92% of
+        its memory limit after a host restart.
+        """
+        # Sampled in the last minute: a collector replaced on a rollout marks nothing stale, so its
+        # series stay visible for Prometheus's five-minute lookback.
+        rows = prom_query('count by (job, instance, pod) (time() - timestamp(up{pod!=""}) < 60)')
+        self.assertTrue(rows, "no pod-scraped `up` series at all")
+        named_by_address = [r["metric"] for r in rows if r["metric"].get("instance") != r["metric"].get("pod")]
+        self.assertEqual([], named_by_address, "pod-scraped series whose `instance` is not the pod's name")
+
+    def test_grafanas_internal_families_are_not_collected(self):
+        """The drop list in prometheus.relabel "pods", and only it: Grafana's alerting family stays."""
+        # The Grafana pod scraped in the last minute, for the lookback reason above.
+        scraped_now = ' and on (instance) (time() - timestamp(up{job="grafana"}) < 60)'
+        self.assertEqual(0.0, prom_scalar(
+            'count({job="grafana", __name__=~"grafana_(apiserver|storage|access)_.+'
+            '|grafana_feature_toggles_info"}' + scraped_now + ')'
+        ), "Grafana's internal families reach Prometheus")
+        self.assertGreater(prom_scalar('count({job="grafana", __name__=~"grafana_alerting_.+"}' + scraped_now + ')'), 0,
+                           "Grafana's alerting family is missing: the drop list is too wide")
+
     def test_the_collector_has_shipped_something(self):
         """`sent > 0` is the whole-pipeline smoke test, and is what the Stalled alert watches."""
         self.assertGreater(

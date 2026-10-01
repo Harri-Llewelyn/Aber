@@ -1,18 +1,11 @@
 /**
- * What kind of gateway this is, as one word.
+ * What kind of gateway this is, as one word: the Type column, the drawer badge and the form's
+ * select all read it from here. `gateways` carries `deployment` ('host' | 'remote') and
+ * `is_simulated`; a simulated gateway is always host-run, which leaves three legal combinations.
+ * Shadow is a fourth value that is never selectable: only the seeded Playback gateway is one.
  *
- * `gateways` carries `deployment` ('host' | 'remote') and `is_simulated` as two columns; `CHECK
- * (NOT is_simulated OR deployment = 'host')` leaves three legal combinations, so one control can
- * render them. If a remote simulator is ever wanted, the CHECK relaxes and this gains a fourth
- * option.
- *
- * Shadow is the fourth value and is not selectable: a simulated reading never happened, a shadow
- * reading did, on the day the capture was recorded. Only the seeded Playback gateway is a shadow,
- * and a trigger on `playback_jobs` refuses any other target, so `GATEWAY_TYPES` and
- * `SELECTABLE_TYPES` differ.
- *
- * Precedence is most-specific-first, matching `device_locations` and utils/cellResolution.js:
- * shadow, then simulated, then deployment.
+ * Precedence is most-specific-first, as in `device_locations` and utils/cellResolution.js: shadow,
+ * then simulated, then deployment.
  */
 
 export const GATEWAY_TYPES = {
@@ -22,7 +15,7 @@ export const GATEWAY_TYPES = {
   SHADOW: 'shadow',
 }
 
-/** What the create/edit form may choose. Shadow is seeded by 0060 and set by nothing else. */
+/** What the create/edit form may choose. */
 export const SELECTABLE_TYPES = [
   GATEWAY_TYPES.REMOTE,
   GATEWAY_TYPES.HOST,
@@ -39,22 +32,21 @@ const LABELS = {
 /** The sentence a reader needs, in terms of what it means for the numbers. */
 const DESCRIPTIONS = {
   [GATEWAY_TYPES.REMOTE]:
-    'Runs on its own hardware out on the plant network. Enrolled with a bundle; its credential is '
-    + 'minted on the appliance and never travels through a browser.',
+    'Runs on its own hardware out on the plant network. Set up with an install command or a bundle; '
+    + 'its credential is issued to the appliance when it enrols and never passes through a browser.',
   [GATEWAY_TYPES.HOST]:
     'A connector running inside this stack. Nothing to install, and no appliance to enrol — its '
-    + 'credential is minted here and shown once.',
+    + 'credential is issued here and shown once.',
   [GATEWAY_TYPES.SIMULATED]:
-    'A host-run connector whose readings are generated rather than observed — a simulator, or a '
-    + 'target for capture.py play. Its devices inherit the mark; they have no setting of their own. '
-    + 'Ingestion is unchanged: this is a label for dashboards, retention and reports, not a filter '
-    + 'on the data path.',
+    'A host-run connector whose readings are generated rather than observed. Its devices inherit '
+    + 'the mark; they have no setting of their own. Ingestion is unchanged: this is a label for '
+    + 'dashboards, retention and reports, not a filter on the data path.',
   [GATEWAY_TYPES.SHADOW]:
     'Republishes recorded captures. Its readings DID happen, on a real machine, on the day the '
     + 'capture was taken — which is what makes it different from Simulated rather than a kind of it.',
 }
 
-/** Badge tone. Only the two synthetic kinds are marked; a real gateway is unremarkable. */
+/** Badge tone. Only the two synthetic kinds are marked. */
 const TONES = {
   [GATEWAY_TYPES.HOST]: 'neutral',
   [GATEWAY_TYPES.REMOTE]: 'neutral',
@@ -70,8 +62,7 @@ export function gatewayType(gateway) {
   if (!gateway) return GATEWAY_TYPES.REMOTE
   if (gateway.is_shadow) return GATEWAY_TYPES.SHADOW
   if (gateway.is_simulated) return GATEWAY_TYPES.SIMULATED
-  // Defaults to remote when `deployment` is absent: host is the type with no appliance and no
-  // enrolment, so claiming it wrongly hides the one kind of gateway that needs setting up.
+  // Remote when `deployment` is absent: claiming host wrongly would hide the kind that needs setup.
   return gateway.deployment === 'host' ? GATEWAY_TYPES.HOST : GATEWAY_TYPES.REMOTE
 }
 
@@ -117,4 +108,14 @@ export function noDeviceAssignmentReason(gateway) {
   if (gatewayAcceptsDevices(gateway)) return null
   return 'Its devices are replay lanes, minted when a capture is played rather than assigned. '
     + 'Start a playback from the capture instead.'
+}
+
+/**
+ * Whether what an operator typed into a "type the name to confirm" box names this gateway. Compared
+ * trimmed, whitespace-collapsed and case-folded: the guard stops an accidental click, not a
+ * determined typist.
+ */
+export function typedNameMatches(typed, gatewayName) {
+  const normalise = (value) => (value || '').trim().replace(/\s+/g, ' ').toLowerCase()
+  return normalise(typed) === normalise(gatewayName)
 }

@@ -92,7 +92,7 @@ spec:
           the dev loop restarts any workload whose image it rebuilt.
 
           THREE WRITES WITH THREE LIFETIMES, and collapsing them behind one guard broke the stack
-          twice: the FLOW is user content, seeded once and guarded on /data/.factoryplus-seeded,
+          twice: the FLOW is user content, seeded once and guarded on /data/.aber-seeded,
           while settings.js and the CREDENTIALS are stack configuration reconciled on every boot --
           a volume outlives a fix.
           =========================================================================================
@@ -215,7 +215,7 @@ spec:
           {{- else }}
           {{/*
             An emptyDir loses the encrypted credentials, the persisted editor sessions AND
-            /data/.factoryplus-editor-users.json on every restart. That last one is the nasty part:
+            /data/.aber-editor-users.json on every restart. That last one is the nasty part:
             without it a live Administrator silently degrades to a read-only editor -- Node-RED
             draws a padlock on Deploy -- while the admin API would still accept the deploy. It is
             not a logout, so nothing tells the user. Only for throwaway testing.

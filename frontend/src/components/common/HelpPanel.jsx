@@ -14,8 +14,8 @@ export function HelpPanel({ open, tabId, onClose }) {
   const source = HELP_CORPUS[tabId]
 
   /* The drawer stays mounted (ContextPanel needs the width transition) but its contents do not: the
-     prose's first line is the page name, and left mounted while closed it puts a duplicate heading
-     into the document for find-in-page and for tests. */
+     title is a <div> holding the page name, and left mounted while closed the prose would put a
+     second copy of it into the document for find-in-page and for tests. */
   return (
     <ContextPanel
       open={open}

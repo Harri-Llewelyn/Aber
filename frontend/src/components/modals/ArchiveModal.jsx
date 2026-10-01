@@ -1,53 +1,50 @@
 import React, { useState } from 'react'
 import { IconArchive } from '../common/Icons'
-import { useEscapeKey } from '../../hooks/useEscapeKey'
-import { usePendingAction } from '../../hooks/usePendingAction'
-import { ActionButton } from '../common/ActionButton'
+import { ConfirmModal } from './ConfirmModal'
 
+/**
+ * Archive an entity: out of service and off the asset pages, restorable, with an auto-purge timer
+ * that deletes the archived record for good. `onArchive` receives the timer in days, or '' for
+ * none.
+ */
 export function ArchiveModal({ entityId, displayName, onArchive, onCancel }) {
-  const [archiving, runArchive] = usePendingAction()
-
-  // Escape closes through the shared stack, so a ConfirmModal opened on top takes the keypress.
-  // Inert while the archive is in flight; see ConfirmModal.
-  useEscapeKey(archiving ? () => {} : onCancel)
-
   const [retentionDays, setRetentionDays] = useState(30)
 
   return (
-    <div className="modal-overlay">
-      <div className="modal">
-        <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--warning-text)' }}>
-          <IconArchive size={18} />
-          <span>Archive Entity (Decommission)</span>
-        </div>
-        <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '16px' }}>
-          Decommissioning <strong>{displayName}</strong> <span className="mono">[{entityId}]</span> will mark it as archived. Historical telemetry and Digital Thread data remain 100% retained.
+    <ConfirmModal
+      title="Archive entity"
+      size="md"
+      icon={<IconArchive size={18} />}
+      message={<>
+        Archiving <strong>{displayName}</strong> <span className="mono">[{entityId}]</span> takes
+        it out of service and off the asset pages. Its record, its audit trail and its identifiers
+        are kept, and Restore on the Archived Entities page brings it back. Archiving a gateway
+        also revokes its broker credential and archives its forge repository. Raw readings are
+        not held back: they still age out of the historian on its raw window.
+      </>}
+      confirmLabel="Archive"
+      pendingLabel="Archiving…"
+      onConfirm={() => onArchive(retentionDays)}
+      onCancel={onCancel}
+    >
+      <div className="form-group">
+        <label className="form-label" htmlFor="archive-retention">Auto-purge</label>
+        <select
+          id="archive-retention"
+          className="form-control"
+          value={retentionDays}
+          onChange={e => setRetentionDays(e.target.value ? parseInt(e.target.value, 10) : '')}
+          title="How long the archived record is kept before it is deleted for good"
+        >
+          <option value={30}>After 30 days</option>
+          <option value={90}>After 90 days</option>
+          <option value={365}>After 1 year</option>
+          <option value="">Never (delete by hand)</option>
+        </select>
+        <p className="form-hint">
+          The archived record is deleted for good when the timer runs out. Its audit trail is kept.
         </p>
-
-        <div className="form-group">
-          <label className="form-label">Auto-Delete Retention Purge Timer</label>
-          <select className="form-control" value={retentionDays} onChange={e => setRetentionDays(e.target.value ? parseInt(e.target.value, 10) : '')} title="Set compliance retention auto-purge window">
-            <option value={30}>30 Days Retention (Standard Audit)</option>
-            <option value={90}>90 Days Retention (Quarterly Audit)</option>
-            <option value={365}>365 Days Retention (1 Year Legal Compliance)</option>
-            <option value="">Permanent Retention (Never Auto-Purge)</option>
-          </select>
-        </div>
-
-        <div className="modal-actions">
-          <button className="btn btn-ghost" onClick={onCancel} disabled={archiving} title="Cancel archival action">Cancel</button>
-          <ActionButton
-            className="btn btn-primary"
-            style={{ background: 'var(--warning)', color: 'var(--warning-contrast)' }}
-            pending={archiving}
-            pendingLabel="Archiving…"
-            onClick={() => runArchive(() => onArchive(retentionDays))}
-            title="Archive entity and activate retention timer"
-          >
-            Archive &amp; Set Timer
-          </ActionButton>
-        </div>
       </div>
-    </div>
+    </ConfirmModal>
   )
 }

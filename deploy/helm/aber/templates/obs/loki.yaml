@@ -11,7 +11,7 @@
 Loki -- the log store. Single binary, filesystem storage on one PVC, the configuration mirrored
 from loki/loki.yaml: retention, the ingest ceilings and the reasons for them are in that file.
 Alloy (obs/alloy.yaml) writes to it; Grafana reads it; nothing else can reach it. These logs are
-not the audit trail; that is `digital_thread`.
+not the audit trail; that is `audit_trail`.
 =================================================================================================
 */}}
 apiVersion: v1

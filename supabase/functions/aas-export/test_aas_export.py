@@ -4,12 +4,14 @@ Tests for the aas-export Edge Function.
 Two layers, deliberately in one file:
 
   * Offline checks always run. They guard the Sparkplug -> XSD mapping (which is duplicated between
-    Deno and the frontend bundle and would otherwise drift silently) and the authorization ladder.
-    These need no stack, so they run in the edge-function CI job alongside the other auth tests.
+    Deno and the frontend bundle and would otherwise drift silently), the authorization ladder, and
+    the ConceptDescriptions shell.ts builds for a fixture shell (run in Node, which strips the
+    types). These need no stack, so they run in the edge-function CI job alongside the auth tests.
 
-  * Live checks invoke the deployed function against `Sim_CNC_Mill_01` and validate the emitted
-    document. They skip when no stack is reachable, so the same file is safe in both CI jobs; the
-    e2e job is the one that actually exercises them.
+  * Live checks invoke the deployed function against a device the suite provisions itself
+    (test-harness/aas_fixture.py) and validate the emitted document. They skip when no stack is
+    reachable, so the same file is safe in both CI jobs; the e2e job is the one that actually
+    exercises them.
 
 Run:  python supabase/functions/aas-export/test_aas_export.py
 """
@@ -51,14 +53,11 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 DEMO_EMAIL = os.getenv("AAS_TEST_EMAIL", "admin@aber.local")
 DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "aber123")
-# The machining cell's first CNC on the `Simulated Shopfloor` flow, seeded by 0002 and given its
-# schema and nameplate by 0020 -- so it exists wherever the migrations run, not only where
-# provision-gateways.mjs has been run. It replaced `Simulated_CNC_01`, which 0020 deletes.
 # THE SUITE PROVISIONS ITS OWN SUBJECT, and this is the point of it rather than a detail.
 #
 # A CONFORMANCE SUITE MUST NOT DEPEND ON SEEDED DEMONSTRATION DATA. A subject the seed stops
 # creating, or stops sending a DBIRTH for, leaves the suite naming a device that is not there and
-# reporting success anyway -- which is part of why 0020 exists.
+# reporting success anyway -- which is part of why archived migration 0020 exists.
 #
 # `AAS_TEST_DEVICE` still overrides it, and then NOTHING IS PROVISIONED -- the escape hatch for
 # pointing the suite at a real asset is deliberately not also a way to half-create a fixture.
@@ -195,17 +194,73 @@ LIVE = TOKEN is not None and DEVICE_ID is not None
 SKIP_REASON = "no reachable stack, or the AAS fixture could not be provisioned"
 
 
-def evaluate_aas_export_authorization(user: dict | None, auth_header: str | None) -> tuple[int, str]:
-    """Python mirror of the authorization ladder in index.ts, same shape as the sibling tests."""
+TS_INDEX = REPO_ROOT / "supabase" / "functions" / "aas-export" / "index.ts"
+MIGRATIONS_DIR = REPO_ROOT / "supabase" / "migrations"
+
+
+def export_gate() -> tuple[list, str]:
+    """index.ts's ALLOWED_ROLES and BUNDLE_PERMISSION, read from its source so the mirror cannot drift."""
+    text = TS_INDEX.read_text(encoding="utf-8")
+    roles = re.search(r"const ALLOWED_ROLES = \[([^\]]*)\]", text)
+    permission = re.search(r'const BUNDLE_PERMISSION = "([^"]+)"', text)
+    if not (roles and permission):
+        raise AssertionError(f"ALLOWED_ROLES or BUNDLE_PERMISSION not found in {TS_INDEX}")
+    return re.findall(r'"([A-Za-z_]+)"', roles.group(1)), permission.group(1)
+
+
+def seeded_role_permissions() -> dict:
+    """Role name -> the permission names 0002 grants it. role_permissions is written by no one else."""
+    text = (MIGRATIONS_DIR / "0002_seed_data.sql").read_text(encoding="utf-8")
+    roles = dict(re.findall(r"INSERT INTO public\.roles VALUES \((\d+), '([A-Za-z_]+)'", text))
+    permissions = dict(re.findall(
+        r"INSERT INTO public\.permissions VALUES \('([0-9a-f-]{36})', '([a-z_:]+)'", text))
+    granted = {name: set() for name in roles.values()}
+    for role_id, permission_id in re.findall(
+            r"INSERT INTO public\.role_permissions VALUES \((\d+), '([0-9a-f-]{36})'\)", text):
+        granted[roles[role_id]].add(permissions[permission_id])
+    return granted
+
+
+def roles_a_policy_admits(policy: str) -> set:
+    """
+    The roles the latest definition of a SELECT policy admits, across the live migrations in
+    filename order: those its has_role() names, and those holding a permission its has_authority()
+    names.
+    """
+    definition = None
+    for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.startswith(f"CREATE POLICY {policy} ON "):
+                definition = line
+    if definition is None:
+        raise AssertionError(f"no CREATE POLICY {policy} in {MIGRATIONS_DIR}")
+
+    def named(fn):
+        return {value for array in re.findall(fn + r"\(ARRAY\[([^\]]*)\]", definition)
+                for value in re.findall(r"'([A-Za-z_:]+)'::text", array)}
+
+    by_permission = {role for role, held in seeded_role_permissions().items()
+                     if held & named("has_authority")}
+    return named("has_role") | by_permission
+
+
+def evaluate_aas_export_authorization(user: dict | None, auth_header: str | None,
+                                      fmt: str = "json") -> tuple[int, str]:
+    """
+    Python mirror of the authorization ladder in index.ts, same shape as the sibling tests. The
+    role list and the bundle's permission are index.ts's own; who holds the permission is the seed's.
+    """
     if not auth_header:
         return 401, "Missing Authorization header"
     if not user:
         return 401, "Invalid user token"
     role = (user.get("app_metadata") or {}).get("role") or None
     # Wider than approve-quarantine on purpose: an export is a read.
-    allowed = ["Administrator", "Shopfloor_Manager", "Operator", "Auditor"]
+    allowed, bundle_permission = export_gate()
     if not role or role not in allowed:
         return 403, "Forbidden: Insufficient privileges"
+    if fmt == "bundle" and bundle_permission not in seeded_role_permissions().get(role, set()):
+        return 403, "Forbidden: the bundle carries this device's Audit Trail"
     return 200, "Authorized"
 
 
@@ -388,6 +443,237 @@ class TestModelledMetricsContract(unittest.TestCase):
                     )
 
 
+# The IEC 61360 template reference AASc-3a-050 requires, and the types AASc-3a-009 requires a unit
+# for. Neither rule is in the JSON schema, which is why they are asserted here.
+IEC61360_TEMPLATE = "https://admin-shell.io/DataSpecificationTemplates/DataSpecificationIec61360/3"
+IEC61360_NEEDS_UNIT = {
+    "INTEGER_MEASURE", "REAL_MEASURE", "RATIONAL_MEASURE", "INTEGER_CURRENCY", "REAL_CURRENCY",
+}
+
+
+def semantic_ids(node) -> set:
+    """Every GlobalReference value any `semanticId` in the document names."""
+    found = set()
+    if isinstance(node, dict):
+        for key in (node.get("semanticId") or {}).get("keys", []):
+            if key.get("type") == "GlobalReference":
+                found.add(key.get("value"))
+        for value in node.values():
+            found |= semantic_ids(value)
+    elif isinstance(node, list):
+        for item in node:
+            found |= semantic_ids(item)
+    return found
+
+
+def concept_description_problems(environment: dict) -> list:
+    """
+    What is wrong with an Environment's ConceptDescriptions, as sentences.
+
+    One per semanticId the shells and submodels carry, and none for anything else (#460). Each
+    carries IEC 61360 content with an English preferred name and definition (AASc-3a-002, -008),
+    the template reference (-050), and a unit wherever its dataType is a measure (-009).
+    """
+    problems = []
+    descriptions = environment.get("conceptDescriptions")
+    if descriptions == []:
+        problems.append("conceptDescriptions is present and empty; minItems is 1")
+    descriptions = descriptions or []
+    ids = [cd.get("id") for cd in descriptions]
+    if len(ids) != len(set(ids)):
+        problems.append(f"duplicate ConceptDescription ids: {sorted(i for i in ids if ids.count(i) > 1)}")
+    referenced = semantic_ids({k: v for k, v in environment.items() if k != "conceptDescriptions"})
+    if set(ids) != referenced:
+        problems.append(
+            f"semanticIds with no ConceptDescription: {sorted(referenced - set(ids))}; "
+            f"ConceptDescriptions nothing references: {sorted(set(ids) - referenced)}"
+        )
+    for cd in descriptions:
+        specs = cd.get("embeddedDataSpecifications") or []
+        iec = [s for s in specs if (s.get("dataSpecificationContent") or {}).get("modelType")
+               == "DataSpecificationIec61360"]
+        if len(iec) != 1:
+            problems.append(f"{cd.get('id')}: {len(iec)} IEC 61360 specifications, expected 1")
+            continue
+        template = [k.get("value") for k in iec[0].get("dataSpecification", {}).get("keys", [])]
+        content = iec[0]["dataSpecificationContent"]
+        if template != [IEC61360_TEMPLATE]:
+            problems.append(f"{cd.get('id')}: data specification {template}, not the IEC 61360 template")
+        for field in ("preferredName", "definition"):
+            if not any(s.get("language") == "en" and s.get("text") for s in content.get(field) or []):
+                problems.append(f"{cd.get('id')}: no English {field}")
+        if content.get("dataType") in IEC61360_NEEDS_UNIT and not (content.get("unit") or content.get("unitId")):
+            problems.append(f"{cd.get('id')}: dataType {content.get('dataType')} with no unit")
+    return problems
+
+
+def node_strips_types() -> bool:
+    """Node 22.6 and later run TypeScript by stripping its types; earlier releases cannot."""
+    node = shutil.which("node")
+    if node is None:
+        return False
+    out = subprocess.run([node, "--version"], capture_output=True, text=True).stdout.strip()
+    major, minor = (int(p) for p in out.lstrip("v").split(".")[:2])
+    return (major, minor) >= (22, 6)
+
+
+def run_build_environment(record: dict) -> dict:
+    """
+    Run _shared/aas/shell.ts's own buildEnvironment() over `record`, in Node, and return its result.
+
+    The module is imported, not extracted: Node strips the types, and `Deno.env` -- read at load for
+    the AAS_* settings, all of which have defaults -- is the only Deno API it touches.
+    """
+    harness = (
+        "globalThis.Deno = { env: { get: () => undefined } };\n"
+        f"const shell = await import({json.dumps(TS_SHELL.as_uri())});\n"
+        "let text = ''; for await (const chunk of process.stdin) text += chunk;\n"
+        "const built = shell.buildEnvironment(JSON.parse(text));\n"
+        "console.log(JSON.stringify({ environment: built.environment, stats: built.stats }));\n"
+    )
+    completed = subprocess.run(
+        [shutil.which("node"), "--experimental-strip-types", "--input-type=module", "-e", harness],
+        input=json.dumps(record), capture_output=True, text=True, timeout=60,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(f"buildEnvironment() failed in Node:\n{completed.stderr[-2000:]}")
+    return json.loads(completed.stdout)
+
+
+MTC = "https://aber.local/semantics/mtconnect/v2.0/DataItemType/"
+ISO = "https://aber.local/semantics/iso22400/"
+
+
+def metric(name, semantic_id, datatype, units=None, description=None, standard="MTConnect",
+           deprecated=False):
+    return {"name": name, "semantic_id": semantic_id, "datatype": datatype, "units": units,
+            "description": description, "standard": standard, "deprecated": deprecated}
+
+
+# One shell's rows, as loadDeviceRecord() returns them: two metrics sharing an MTConnect concept
+# with different descriptions, a KPI whose deprecated predecessor shares its id, an operator's
+# IRDI, a local extension an operator mapped to a concept of their own (the seed mints none), an
+# unmapped metric, two nameplate elements and a schema with an id.
+LOCAL_CONCEPT = "urn:example:plant:safety-interlock"
+SHELL_RECORD = {
+    "device": {"id": "d1", "sparkplug_id": "dev1", "name": "Mill 1", "status": "ONLINE",
+               "connection_method": "MQTT / Sparkplug B"},
+    "config": [{"metric_name": "SERIAL_NUMBER", "val_string": "SN-1"}],
+    "links": [{"schema_id": "s1", "submodel_key": None}],
+    "catalog": [
+        metric("Axes/X/POSITION", MTC + "POSITION", 10, "MILLIMETER", "Linear position of the X axis"),
+        metric("Axes/Y/POSITION", MTC + "POSITION", 10, "MILLIMETER", "Linear position of the Y axis"),
+        metric("Controller/EXECUTION", MTC + "EXECUTION", 12, None, "Controller execution state"),
+        metric("OEE/EFFECTIVENESS", ISO + "EFFECTIVENESS", 10, "PERCENT", "ISO 22400 effectiveness ratio",
+               standard="ISO 22400"),
+        metric("OEE/PERFORMANCE", ISO + "EFFECTIVENESS", 10, "PERCENT", "ISO 22400 performance ratio",
+               standard="ISO 22400", deprecated=True),
+        metric("Spindle/TORQUE", "0173-1#02-AAO677#002", 10, "NEWTON_METER", None),
+        metric("safety_interlock", LOCAL_CONCEPT, 11, None, "Safety interlock present", standard=None),
+        metric("Custom/UNMAPPED", None, 10, None, None, standard=None),
+        metric("SERIAL_NUMBER", MTC + "SERIAL_NUMBER", 12, None, "Manufacturer serial number"),
+    ],
+    "gateway": None,
+    "nameplate": {"manufacturer_name": "Acme"},
+    "templates": [
+        {"id_short": "ManufacturerName", "semantic_id": "0112/2///61987#ABA565#009",
+         "description": "Legal name of the manufacturer."},
+        {"id_short": "SerialNumber", "semantic_id": "0112/2///61987#ABA951#009",
+         "description": "Serial number of the instance."},
+    ],
+    "schemas": [{
+        "id": "s1", "schema_name": "Mill", "description": "Mill telemetry",
+        "semantic_id": "https://example.org/submodels/Mill/1/0",
+        "schema_definition": {"properties": {n: {} for n in (
+            "Axes/X/POSITION", "Axes/Y/POSITION", "Controller/EXECUTION", "OEE/EFFECTIVENESS",
+            "OEE/PERFORMANCE", "Spindle/TORQUE", "safety_interlock", "Custom/UNMAPPED",
+        )}},
+    }],
+}
+
+
+@unittest.skipUnless(node_strips_types(), "Node 22.6 or later is needed to run shell.ts")
+class TestConceptDescriptions(unittest.TestCase):
+    """
+    The Environment's ConceptDescriptions, from shell.ts's own buildEnvironment() over a fixture.
+
+    Offline, so the metamodel shape is checked without a stack; the live classes below run the
+    same checks over a real export. Most semantic ids here resolve nowhere (`aber.local`, an
+    operator's IRDI), so the ConceptDescription is the only place a consumer finds their meaning,
+    unit and datatype (#460).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        built = run_build_environment(SHELL_RECORD)
+        cls.environment, cls.stats = built["environment"], built["stats"]
+        cls.by_id = {cd["id"]: cd for cd in cls.environment.get("conceptDescriptions", [])}
+
+    def content(self, semantic_id):
+        return self.by_id[semantic_id]["embeddedDataSpecifications"][0]["dataSpecificationContent"]
+
+    def test_every_semantic_id_has_one_well_formed_concept_description(self):
+        self.assertEqual(concept_description_problems(self.environment), [])
+        self.assertEqual(self.stats["concept_descriptions"], len(self.by_id))
+
+    @unittest.skipUnless(HAVE_JSONSCHEMA, "jsonschema not installed")
+    def test_the_environment_validates_against_the_official_schema(self):
+        schema = json.loads(AAS_SCHEMA_PATH.read_text(encoding="utf-8"))
+        errors = list(Draft201909Validator(schema).iter_errors(self.environment))
+        detail = "\n".join(
+            f"  {'/'.join(str(x) for x in e.absolute_path) or '<root>'}: {e.message[:180]}"
+            for e in errors[:10]
+        )
+        self.assertEqual(errors, [], f"AAS V3 schema violations:\n{detail}")
+
+    def test_a_shared_concept_gets_one_description_that_names_no_instance(self):
+        # Two POSITION metrics describe their own axes; neither description defines the concept.
+        content = self.content(MTC + "POSITION")
+        self.assertEqual(content["preferredName"], [{"language": "en", "text": "POSITION"}])
+        self.assertEqual(content["definition"][0]["text"], "POSITION, as MTConnect defines it.")
+        self.assertEqual((content["unit"], content["dataType"]), ("MILLIMETER", "REAL_MEASURE"))
+        self.assertEqual(self.by_id[MTC + "POSITION"]["idShort"], "POSITION")
+
+    def test_a_deprecated_metric_does_not_define_the_concept_its_successor_carries(self):
+        content = self.content(ISO + "EFFECTIVENESS")
+        self.assertEqual(content["definition"][0]["text"], "ISO 22400 effectiveness ratio")
+        self.assertEqual(content["unit"], "PERCENT")
+
+    def test_units_are_carried_as_the_catalog_spells_them(self):
+        self.assertEqual(self.content("0173-1#02-AAO677#002")["unit"], "NEWTON_METER")
+
+    def test_an_undescribed_irdi_is_defined_by_its_identifier_alone(self):
+        # Its metric is filed under MTConnect, but the IRDI is not MTConnect's to define.
+        self.assertEqual(
+            self.content("0173-1#02-AAO677#002")["definition"][0]["text"],
+            "The concept identified by 0173-1#02-AAO677#002.",
+        )
+
+    def test_a_value_without_a_unit_is_not_a_measure(self):
+        self.assertEqual(self.content(MTC + "EXECUTION")["dataType"], "STRING")
+        self.assertNotIn("unit", self.content(MTC + "EXECUTION"))
+        self.assertEqual(self.content(LOCAL_CONCEPT)["dataType"], "BOOLEAN")
+
+    def test_an_irdi_takes_its_name_from_the_metric_or_the_template(self):
+        self.assertEqual(self.by_id["0173-1#02-AAO677#002"]["idShort"], "Spindle_TORQUE")
+        self.assertEqual(self.by_id["0112/2///61987#ABA565#009"]["idShort"], "ManufacturerName")
+        self.assertEqual(
+            self.content("0112/2///61987#ABA565#009")["definition"][0]["text"],
+            "Legal name of the manufacturer.",
+        )
+
+    def test_the_submodel_semantic_id_is_described_by_its_schema(self):
+        content = self.content("https://example.org/submodels/Mill/1/0")
+        self.assertEqual(content["definition"][0]["text"], "Mill telemetry")
+        self.assertNotIn("dataType", content)
+
+    def test_the_key_is_omitted_when_nothing_carries_a_semantic_id(self):
+        bare = {**SHELL_RECORD, "catalog": [], "templates": [], "schemas": [], "links": []}
+        environment = run_build_environment(bare)["environment"]
+        self.assertEqual(semantic_ids(environment), set())
+        self.assertNotIn("conceptDescriptions", environment)
+
+
 class TestAasExportAuthorization(unittest.TestCase):
     def test_missing_auth_header_returns_401(self):
         status, message = evaluate_aas_export_authorization({}, None)
@@ -410,9 +696,47 @@ class TestAasExportAuthorization(unittest.TestCase):
 
     def test_read_roles_are_allowed(self):
         for role in ("Administrator", "Shopfloor_Manager", "Operator", "Auditor"):
+            for fmt in ("json", "aasx"):
+                status, _ = evaluate_aas_export_authorization(
+                    {"app_metadata": {"role": role}}, "Bearer x", fmt)
+                self.assertEqual(status, 200, f"{role} should be allowed to export {fmt}")
+
+    def test_the_bundle_refuses_an_operator(self):
+        # The bundle carries the device's trail, which the asset lane's policy closes to Operator.
+        status, message = evaluate_aas_export_authorization(
+            {"app_metadata": {"role": "Operator"}}, "Bearer x", "bundle")
+        self.assertEqual(status, 403)
+        self.assertIn("Audit Trail", message)
+
+    def test_the_bundle_admits_the_roles_that_read_the_trail_and_the_exports(self):
+        for role in ("Administrator", "Shopfloor_Manager", "Auditor"):
             status, _ = evaluate_aas_export_authorization(
-                {"app_metadata": {"role": role}}, "Bearer x")
-            self.assertEqual(status, 200, f"{role} should be allowed to export")
+                {"app_metadata": {"role": role}}, "Bearer x", "bundle")
+            self.assertEqual(status, 200, f"{role} should be allowed to take a bundle")
+
+    def test_the_bundle_permission_is_held_by_the_roles_both_policies_admit(self):
+        """
+        The function gates on one permission; the rule is the roles that may read the trail's
+        asset lane AND the export records the trail repeats. A migration that grants the
+        permission to another role, or narrows either policy, fails here.
+        """
+        _, permission = export_gate()
+        holders = {role for role, held in seeded_role_permissions().items() if permission in held}
+        both = (roles_a_policy_admits("audit_trail_select_asset")
+                & roles_a_policy_admits("asset_exports_select_privileged"))
+        self.assertEqual(holders, both)
+        self.assertEqual(holders, {"Administrator", "Shopfloor_Manager", "Auditor"})
+
+    def test_the_refusal_names_the_trail_and_comes_before_the_service_key(self):
+        text = TS_INDEX.read_text(encoding="utf-8")
+        gate = text.index('format === "bundle" && !(await callerHolds(supabaseUser, BUNDLE_PERMISSION))')
+        self.assertIn("Audit Trail", text[gate:gate + 400])
+        self.assertLess(gate, text.index("serviceRoleClient(supabaseUrl"))
+
+    def test_the_trail_part_is_read_as_the_caller(self):
+        text = TS_INDEX.read_text(encoding="utf-8")
+        self.assertIn("loadTrail(supabaseUser,", text)
+        self.assertNotIn("loadTrail(supabaseAdmin", text)
 
 
 @unittest.skipUnless(LIVE, SKIP_REASON)
@@ -541,7 +865,7 @@ class TestAasExportLive(unittest.TestCase):
             "the Nameplate submodel must not claim an IDTA template it cannot fully populate",
         )
 
-    def test_acs_cymru_nameplate_properties_are_not_given_invented_identifiers(self):
+    def test_aber_nameplate_properties_are_not_given_invented_identifiers(self):
         """AssetSparkplugId and friends are ours; IDTA defines nothing for them, so they carry
         nothing. An id minted under admin-shell.io for a local concept would be a forgery."""
         elements = {e["idShort"]: e for e in self.submodels["DigitalNameplate"]["submodelElements"]}
@@ -551,7 +875,7 @@ class TestAasExportLive(unittest.TestCase):
                 continue
             self.assertNotIn(
                 "semanticId", element,
-                f"{id_short} is a Factory+ concept and must not carry a standard identifier",
+                f"{id_short} is a concept of this platform and must not carry a standard identifier",
             )
 
     def test_telemetry_holds_metrics_and_a_linked_segment(self):
@@ -659,6 +983,9 @@ class TestAasExportSchemaConformance(unittest.TestCase):
                 self.assertIsInstance(
                     node["value"], str,
                     f"{node.get('idShort')} carries a non-string value {node['value']!r}")
+
+    def test_every_semantic_id_has_a_concept_description(self):
+        self.assertEqual(concept_description_problems(self.body.get("aas", {})), [])
 
     def test_no_empty_collections_are_emitted(self):
         for node in TestAasExportLive.walk(self.body.get("aas", {})):
@@ -943,13 +1270,13 @@ class TestVisualRepresentation(unittest.TestCase):
     def test_json_export_references_an_absolute_public_url(self):
         # The JSON form has no package to be relative to, so the value must be dereferenceable on
         # its own -- and must be built from the configured public base, not from SUPABASE_URL,
-        # which inside Docker is a hostname no external consumer can resolve.
+        # which inside the cluster is a Service name no external consumer can resolve.
         submodel = next(s for s in self.body["aas"]["submodels"] if s["idShort"] == "VisualRepresentation")
         value = submodel["submodelElements"][0]["value"]
         self.assertTrue(value.startswith("http"), value)
         self.assertIn(MODEL_BUCKET, value)
         self.assertTrue(value.endswith(self.MODEL_NAME), value)
-        self.assertNotIn("supabase-kong", value)
+        self.assertNotIn("supabase-envoy", value)
 
     def test_reports_the_model_in_stats(self):
         self.assertTrue(self.body["stats"]["has_3d_model"])
@@ -1118,6 +1445,34 @@ def run_bundle_helpers(script: str) -> dict:
     return json.loads(completed.stdout)
 
 
+def run_trail_loader() -> list:
+    """
+    Run bundle.ts's own loadTrail() in Node against a client that records every call made on it,
+    and return those calls. The query is what decides which rows the part can hold.
+    """
+    source = TS_BUNDLE.read_text(encoding="utf-8")
+    loader = re.search(r"^export async function loadTrail\(.*?^\}", source, re.S | re.M)
+    if not loader:
+        raise AssertionError(f"loadTrail() not found in {TS_BUNDLE}")
+    harness = loader.group(0) + """
+const calls = [];
+const query = new Proxy({}, { get: (_, name) => (...args) => {
+  calls.push([name, ...args]);
+  return name === "limit" ? Promise.resolve({ data: [], error: null }) : query;
+} });
+const client = { from: (table) => { calls.push(["from", table]); return query; } };
+loadTrail(client, "dev-1", 5).then(() => console.log(JSON.stringify(calls)));
+"""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "trail_harness.ts"
+        path.write_text(harness, encoding="utf-8")
+        completed = subprocess.run(
+            [shutil.which("node"), "--experimental-strip-types", str(path)],
+            capture_output=True, text=True, timeout=60, check=True,
+        )
+    return json.loads(completed.stdout)
+
+
 @unittest.skipIf(shutil.which("node") is None, "node is not on PATH")
 class TestBundleHelpers(unittest.TestCase):
     """The pure functions the bundle is assembled from, run against fixed inputs."""
@@ -1136,10 +1491,10 @@ const base = {
   takenBy: { id: "user-1", email: "ops@example.test" },
   device: { id: "dev-1", name: "CNC_01", sparkplug_id: "abc123", created_at: "2026-01-01T00:00:00Z", is_archived: true, archived_at: "2026-09-01T00:00:00Z", model_3d_path: null },
   gateway: { name: "Line_A", sparkplug_id: "gw1" },
-  caps: { telemetry: 3, thread: 2 },
+  caps: { telemetry: 3, trail: 2 },
   raw: part(2, "2026-09-01T10:00:00Z", "2026-09-01T10:00:01Z"),
   hourly: part(1, "2026-09-01T10:00:00Z", "2026-09-01T10:00:00Z"),
-  thread: { rows: [{ id: 1 }], truncated: false },
+  trail: { rows: [{ id: 1 }], truncated: false },
   horizons: { telemetry: "2026-08-01T00:00:00Z", telemetry_1h: null },
   cold: { objects: [{ object_key: "2026/08/telemetry-x.parquet" }], unavailable: null },
   bundled3dModel: false,
@@ -1147,7 +1502,7 @@ const base = {
 const capped = {
   ...base,
   raw: part(3, "2026-09-01T10:00:00Z", "2026-09-01T10:00:02Z", { truncated: true }),
-  thread: { rows: [{ id: 1 }, { id: 2 }], truncated: true },
+  trail: { rows: [{ id: 1 }, { id: 2 }], truncated: true },
   cold: { objects: [], unavailable: "cold_storage_rows refused: permission denied" },
   device: { ...base.device, model_3d_path: "models/x.glb" },
 };
@@ -1212,12 +1567,12 @@ console.log(JSON.stringify({
     # -- buildBundleManifest ----------------------------------------------------------------------
     def test_manifest_names_its_schema_and_every_part_under_the_supplement_directory(self):
         m = self.out["manifest"]
-        self.assertEqual(m["schema"], "aber/asset-bundle/1")
+        self.assertEqual(m["schema"], "aber/asset-bundle/2")
         self.assertEqual(m["schema"], self.out["schema"])
         for name, path in self.out["parts"].items():
             self.assertTrue(path.startswith("aasx/files/aber/"), f"{name}: {path}")
         self.assertEqual(m["parts"]["environment"], "aasx/aasenv-root.json")
-        self.assertEqual(m["parts"]["digital_thread"], self.out["parts"]["thread"])
+        self.assertEqual(m["parts"]["audit_trail"], self.out["parts"]["trail"])
         self.assertEqual(m["parts"]["telemetry_raw"], self.out["parts"]["raw"])
         self.assertEqual(m["parts"]["telemetry_1h"], self.out["parts"]["hourly"])
 
@@ -1227,7 +1582,7 @@ console.log(JSON.stringify({
         self.assertEqual(m["telemetry"]["raw"]["rows"], 2)
         self.assertEqual(m["telemetry"]["raw"]["relation_reaches_back_to"], "2026-08-01T00:00:00Z")
         self.assertIsNone(m["telemetry"]["hourly"]["relation_reaches_back_to"])
-        self.assertEqual(m["digital_thread"], {"rows": 1, "cap": 2, "truncated": False})
+        self.assertEqual(m["audit_trail"], {"rows": 1, "cap": 2, "truncated": False})
         self.assertEqual(m["device"]["gateway"], {"name": "Line_A", "sparkplug_id": "gw1"})
         self.assertEqual(m["taken_by"], {"id": "user-1", "email": "ops@example.test"})
 
@@ -1248,11 +1603,20 @@ console.log(JSON.stringify({
         m = self.out["manifest_capped"]
         sentences = m["not_included"]
         self.assertTrue(any(s.startswith("raw telemetry older than 2026-09-01T10:00:00Z") and "cap of 3 rows" in s for s in sentences), sentences)
-        self.assertTrue(any(s.startswith("digital thread rows after the first 2") for s in sentences), sentences)
+        self.assertTrue(any(s.startswith("audit trail rows after the first 2") for s in sentences), sentences)
         self.assertTrue(any(s.startswith("the cold catalogue: cold_storage_rows refused") for s in sentences), sentences)
         self.assertTrue(any(s.startswith("the 3D model: not bundled") for s in sentences), sentences)
         self.assertTrue(m["telemetry"]["raw"]["truncated"])
         self.assertFalse(m["telemetry"]["hourly"]["truncated"])
+
+    # -- loadTrail: the asset lane of one device, whoever asks ----------------------------------
+    def test_the_trail_loader_asks_for_the_asset_lane_only(self):
+        # An Administrator or an Auditor may read the security lane too; the part never holds it.
+        calls = run_trail_loader()
+        self.assertEqual(calls[0], ["from", "audit_trail"])
+        filters = [c[1:] for c in calls if c[0] == "eq"]
+        self.assertIn(["entity_id", "dev-1"], filters)
+        self.assertIn(["audit_domain", "asset"], filters)
 
 
 @unittest.skipUnless(LIVE, SKIP_REASON)
@@ -1323,7 +1687,7 @@ class TestAssetBundle(unittest.TestCase):
         names = self.zip.namelist()
         for part in (
             "aasx/files/aber/manifest.json",
-            "aasx/files/aber/digital-thread.json",
+            "aasx/files/aber/audit-trail.json",
             "aasx/files/aber/telemetry-raw.csv",
             "aasx/files/aber/telemetry-1h.csv",
         ):
@@ -1331,12 +1695,12 @@ class TestAssetBundle(unittest.TestCase):
 
     def test_manifest_describes_this_device_and_agrees_with_the_parts(self):
         m = self.manifest()
-        self.assertEqual(m["schema"], "aber/asset-bundle/1")
+        self.assertEqual(m["schema"], "aber/asset-bundle/2")
         self.assertEqual(m["device"]["id"], DEVICE_ID)
         self.assertEqual(m["telemetry"]["asset_id"], m["device"]["sparkplug_id"])
-        thread = json.loads(self.zip.read("aasx/files/aber/digital-thread.json"))
-        self.assertIsInstance(thread, list)
-        self.assertEqual(m["digital_thread"]["rows"], len(thread))
+        trail = json.loads(self.zip.read("aasx/files/aber/audit-trail.json"))
+        self.assertIsInstance(trail, list)
+        self.assertEqual(m["audit_trail"]["rows"], len(trail))
         # A CSV part's rows are its lines less the header; both parts are oldest-first.
         raw_lines = self.zip.read("aasx/files/aber/telemetry-raw.csv").decode().split("\r\n")
         self.assertEqual(raw_lines[0], "time,metric_name,val_double,val_string,val_bool")
@@ -1350,16 +1714,16 @@ class TestAssetBundle(unittest.TestCase):
         # two standing exclusions are stated on an otherwise empty bundle.
         self.assertTrue(any("never read back" in s for s in m["not_included"]))
 
-    def test_the_thread_part_holds_the_fixture_s_own_creation(self):
+    def test_the_trail_part_holds_the_fixture_s_own_creation(self):
         # The fixture INSERTed the device through PostgREST, which the audit trigger recorded, so
         # the part is never empty for a device that exists at all.
-        thread = json.loads(self.zip.read("aasx/files/aber/digital-thread.json"))
-        self.assertTrue(any(row.get("entity_id") == DEVICE_ID for row in thread), thread[:3])
+        trail = json.loads(self.zip.read("aasx/files/aber/audit-trail.json"))
+        self.assertTrue(any(row.get("entity_id") == DEVICE_ID for row in trail), trail[:3])
 
     def test_reports_the_stored_copy_in_the_stats_header(self):
         self.assertIn("bundle", self.stats, self.stats)
         b = self.bundle
-        for key in ("raw_rows", "hourly_rows", "thread_rows", "cold_objects", "truncated", "stored", "bucket", "object_key", "taken_at"):
+        for key in ("raw_rows", "hourly_rows", "trail_rows", "cold_objects", "truncated", "stored", "bucket", "object_key", "taken_at"):
             self.assertIn(key, b, b)
         self.assertTrue(b["stored"], f"the bundle was not stored: {b.get('reason')}")
         self.assertTrue(b["object_key"].startswith("assets/"), b["object_key"])
@@ -1376,10 +1740,95 @@ class TestAssetBundle(unittest.TestCase):
         self.assertEqual(row["sha256"], self.bundle["sha256"])
         self.assertEqual(row["stats"]["raw_rows"], self.bundle["raw_rows"])
 
-    def test_the_export_is_on_the_digital_thread(self):
-        rows = self.rest_get(f"/digital_thread?entity_id=eq.{DEVICE_ID}&action=eq.EXPORTED&select=action,entity_type,new_data")
+    def test_the_export_is_on_the_audit_trail(self):
+        rows = self.rest_get(f"/audit_trail?entity_id=eq.{DEVICE_ID}&action=eq.EXPORTED&select=action,entity_type,new_data")
         self.assertTrue(rows, "no EXPORTED row for the device")
         self.assertTrue(any((r.get("new_data") or {}).get("object_key") == self.bundle["object_key"] for r in rows), rows)
+
+    def test_the_trail_part_holds_the_asset_lane_only(self):
+        # Taken as an Administrator, who may read the security lane as well.
+        trail = json.loads(self.zip.read("aasx/files/aber/audit-trail.json"))
+        self.assertEqual({row.get("audit_domain") for row in trail}, {"asset"})
+
+
+DEMO_PASSWORD_FOR_ROLES = os.getenv("ABER_DEMO_PASSWORD", DEMO_PASSWORD)
+
+
+def sign_in_as(email: str) -> str | None:
+    try:
+        status, data, _ = post_json(
+            f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
+            {"email": email, "password": DEMO_PASSWORD_FOR_ROLES},
+            {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {PUBLISHABLE_KEY}"},
+        )
+        return data.get("access_token") if status == 200 else None
+    except Exception:
+        return None
+
+
+def take_bundle(token: str) -> tuple[int, bytes, dict]:
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/functions/v1/aas-export?format=bundle",
+        data=json.dumps({"device_id": DEVICE_ID}).encode(), method="POST",
+    )
+    for key, value in {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {token}",
+                       "Content-Type": "application/json"}.items():
+        req.add_header(key, value)
+    try:
+        with urllib.request.urlopen(req, timeout=120) as res:
+            return res.status, res.read(), lower_headers(res.headers)
+    except urllib.error.HTTPError as err:
+        return err.code, err.read(), lower_headers(err.headers)
+
+
+@unittest.skipUnless(LIVE, SKIP_REASON)
+class TestAssetBundleByRole(unittest.TestCase):
+    """
+    The bundle is for the roles that may read what it holds. A Shopfloor_Manager takes one whose
+    trail is the asset lane; an Operator is refused the bundle and still gets the shell. Signs in
+    as the seeded demo accounts, and skips where they do not exist.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.manager = sign_in_as("manager@aber.local")
+        cls.operator = sign_in_as("operator@aber.local")
+        if not (cls.manager and cls.operator):
+            raise unittest.SkipTest("the seeded manager and operator accounts could not sign in")
+        cls.status, cls.payload, cls.headers = take_bundle(cls.manager)
+        cls.bundle = json.loads(cls.headers.get("x-aas-stats", "{}")).get("bundle", {})
+
+    @classmethod
+    def tearDownClass(cls):
+        # As the Administrator: the bucket's delete policy admits that role alone.
+        key, bucket = cls.bundle.get("object_key"), cls.bundle.get("bucket")
+        if not (cls.bundle.get("stored") and key and bucket):
+            return
+        req = urllib.request.Request(f"{SUPABASE_URL}/storage/v1/object/{bucket}/{key}", method="DELETE")
+        req.add_header("apikey", PUBLISHABLE_KEY)
+        req.add_header("Authorization", f"Bearer {TOKEN}")
+        try:
+            urllib.request.urlopen(req, timeout=30).read()
+        except urllib.error.URLError as err:  # pragma: no cover - reported, never silently skipped
+            print(f"[test_aas_export] bundle object {key} not removed: {err}")
+
+    def test_a_shopfloor_manager_takes_a_bundle_of_the_asset_lane(self):
+        self.assertEqual(self.status, 200, self.payload[:300])
+        trail = json.loads(zipfile.ZipFile(io.BytesIO(self.payload)).read("aasx/files/aber/audit-trail.json"))
+        self.assertTrue(trail, "the fixture's own creation is on the trail")
+        self.assertEqual({row.get("audit_domain") for row in trail}, {"asset"})
+
+    def test_an_operator_is_refused_the_bundle_with_a_reason(self):
+        status, body, _ = take_bundle(self.operator)
+        self.assertEqual(status, 403, body[:300])
+        self.assertIn("Audit Trail", json.loads(body).get("error", ""))
+
+    def test_an_operator_still_takes_the_shell(self):
+        status, body, _ = post_json(
+            f"{SUPABASE_URL}/functions/v1/aas-export", {"device_id": DEVICE_ID},
+            {"apikey": PUBLISHABLE_KEY, "Authorization": f"Bearer {self.operator}"},
+        )
+        self.assertEqual(status, 200, body)
 
 
 if __name__ == "__main__":

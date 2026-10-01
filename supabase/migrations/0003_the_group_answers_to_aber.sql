@@ -23,7 +23,7 @@
 --
 -- The read-only guard on system_settings refuses a value change, and that is right for a page;
 -- this lifts it for one statement and puts it back. The gateway rows are attributed as 'migration'
--- in digital_thread by the session role. Idempotent: the second run matches nothing.
+-- in audit_trail by the session role. Idempotent: the second run matches nothing.
 -- =============================================================================================
 
 \if :{?sparkplug_group} \else \set sparkplug_group 'Aber' \endif

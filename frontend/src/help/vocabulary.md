@@ -1,15 +1,17 @@
 ## Summary
 
-Reference vocabularies: the published sets of terms that industrial standards define, so that a metric on this floor can be labelled with the same name somebody else's system already uses. This page is reference you read, not state you edit.
+Reference vocabularies: the published sets of terms that industrial standards define, so that a metric in this deployment can be labelled with the same name somebody else's system already uses. This page is reference you read, not state you edit.
 
 ## What the controls do
 
-- **Browse or search a vocabulary** to find the term for what a metric actually measures.
-- **Use an entry** hands that term to the Schema builder -- it opens Schemas with the semantic identifier and reference type already filled in. That path exists because these identifiers are long, exact, and wrong in a way nothing notices if they are typed by hand.
+- **The four standard tabs** -- MTConnect, ISO 22400, OPC UA and ASHRAE 223P -- each show how many entries that standard holds. Switching tab keeps the search text, so one query asks every standard.
+- **Search** filters the selected standard by name and by the text shown on hover (an ISO 22400 KPI is found by its formula). The count beside the card title reads `shown / total` while a search narrows it.
+- **The sections** group each standard's entries: MTConnect's data item types, components, sub types and units, ISO 22400's KPI families, OPC UA's companion specifications and ASHRAE 223P's superclasses. They start collapsed and each header shows how many entries it holds, and **N in use** when a catalog metric already uses N of them. A search opens the sections that match.
+- **Click an entry** to start a catalog metric from it. It opens the Add Metric dialog on the Metrics page with the type, the semantic identifier and the reference type already filled in. That path exists because these identifiers are long, exact, and wrong in a way nothing notices if they are typed by hand. Only some entries can be clicked: MTConnect data item types (not components, sub types or units), every ISO 22400 KPI, every OPC UA data point, and ASHRAE 223P classes (not relations). Entries already in use are ticked and stay clickable. Clicking needs the Administrator role; without it the entries are read-only.
 
-## Why this is a separate page from Schemas
+## Why this is a separate page from Metrics and Schemas
 
-Schemas are state: the registry and the catalog are things you edit, publish and version. Vocabularies are reference: they are what standards bodies say, they arrive by seeding rather than by editing, and the set of them grows every time this stack adopts another standard. Keeping them apart means the page you edit stays small while the page you consult can grow.
+The catalog and the schema registry are state: things you add to, correct, publish and version. Vocabularies are reference: they are what standards bodies say, they arrive by seeding rather than by editing, and the set of them grows every time this stack adopts another standard. Keeping them apart means the page you edit stays small while the page you consult can grow.
 
 ## What the states mean
 

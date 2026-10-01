@@ -1,4 +1,3 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
 
 /**
@@ -81,15 +80,8 @@ export function authorizeAlertWebhook(
   return { ok: true, status: 200, message: "Authorized" };
 }
 
-/**
- * Normalise one Grafana alert instance into a platform_alerts row. The subject is (entity_type,
- * entity_id), not a device: a rule declares its scope with an `entity_type` label, `device` (the
- * default), `gateway` or `platform`. Returns null only for a malformed instance, which is not an
- * error: a DatasourceError notification carries no labels, and the caller counts and reports these.
- * An asset scope still requires a wire identity, as `platform_alerts_asset_has_wire_id` enforces;
- * refusing it here keeps one bad instance from failing the batch.
- */
-export function normalizeAlert(alert: GrafanaAlert): {
+/** A platform_alerts row before its subject id is resolved. */
+interface AlertRow {
   fingerprint: string;
   entity_type: string;
   sparkplug_id: string | null;
@@ -100,7 +92,17 @@ export function normalizeAlert(alert: GrafanaAlert): {
   starts_at: string;
   ends_at: string | null;
   device_name: string | null;
-} | null {
+}
+
+/**
+ * Normalise one Grafana alert instance into a platform_alerts row. The subject is (entity_type,
+ * entity_id), not a device: a rule declares its scope with an `entity_type` label, `device` (the
+ * default), `gateway` or `platform`. Returns null only for a malformed instance, which is not an
+ * error: a DatasourceError notification carries no labels, and the caller counts and reports these.
+ * An asset scope still requires a wire identity, as `platform_alerts_asset_has_wire_id` enforces;
+ * refusing it here keeps one bad instance from failing the batch.
+ */
+export function normalizeAlert(alert: GrafanaAlert): AlertRow | null {
   const labels = alert.labels ?? {};
   const annotations = alert.annotations ?? {};
 
@@ -175,7 +177,7 @@ export default async function handler(req: Request): Promise<Response> {
     return jsonResponse({ success: true, received: 0, written: 0, skipped: 0 }, 200);
   }
 
-  const rows = [];
+  const rows: AlertRow[] = [];
   let skipped = 0;
   for (const alert of alerts) {
     const row = normalizeAlert(alert);
@@ -258,4 +260,4 @@ export default async function handler(req: Request): Promise<Response> {
   );
 }
 
-serve(handler);
+Deno.serve(handler);

@@ -15,24 +15,27 @@
 -- names are the ones `0001` is about to NOT create.
 --
 -- WHY IT SORTS BEFORE THE BASELINE, WHICH IS THE ONE SURPRISING THING ABOUT IT. Section 8
--- converts `digital_thread` from an ordinary table into a partitioned one, and `0001` describes it
--- already partitioned: `CREATE TABLE IF NOT EXISTS public.digital_thread_default PARTITION OF
--- public.digital_thread DEFAULT` fails with "public.digital_thread is not partitioned" against a
+-- converts the audit table from an ordinary table into a partitioned one, and `0001` describes it
+-- already partitioned: `CREATE TABLE IF NOT EXISTS public.audit_trail_default PARTITION OF
+-- public.audit_trail DEFAULT` fails with "public.audit_trail is not partitioned" against a
 -- database that has not been converted. The conversion therefore has to happen before the
 -- description, not after it -- and once one block runs early, every other block may as well,
 -- because a subtraction of something the baseline never mentions reads the same either side of it.
+-- Section 9 is the same fact again: `0001` names the table `audit_trail`, so a database that still
+-- calls it `digital_thread` is renamed before the baseline describes it.
 --
 -- Running before the baseline is also what makes section 4 correct. `0132` decided whether to
 -- remove the old `archive.bucket` row by asking whether `system_settings.sensitive` existed yet,
 -- which is precisely "has the new schema arrived". Here that question still has the right answer.
 --
--- WHY THE CONVERSION IS LAST WITHIN THIS FILE, which is the same fact seen from the other side.
--- Sections 1 to 5 delete rows, and every one of those deletes fires the audit trigger and writes
--- to `digital_thread`. The conversion rebuilds that table from `LIKE`, which carries columns,
--- defaults and constraints but NOT triggers -- so between the swap and `0001` the audit table has
--- a NOT NULL `audit_domain` and nothing left to stamp it. Deleting after converting therefore
--- fails on the first row it audits. Deleting first costs nothing: the rows are copied across by
--- the conversion like any other.
+-- WHY THE CONVERSION AND THE RENAME COME LAST WITHIN THIS FILE, which is the same fact seen from
+-- the other side. Sections 1 to 5 delete and rename rows, and every one of those writes fires the
+-- audit trigger, which writes to the audit table under the only name it knows: the old one. The
+-- conversion rebuilds that table from `LIKE`, which carries columns, defaults and constraints but
+-- NOT triggers -- so between the swap and `0001` the audit table has a NOT NULL `audit_domain`
+-- and nothing left to stamp it. Deleting after converting therefore fails on the first row it
+-- audits, and writing after the rename fails on a table that is no longer there. Doing both first
+-- costs nothing: the rows are copied across by the conversion and carried by the rename.
 --
 -- WHAT THIS FILE DOES NOT DO. It does not add anything. Widening an existing table -- a column,
 -- an inline constraint, a default that moved -- is `0001`'s, because a description can be made to
@@ -148,7 +151,7 @@ DROP FUNCTION IF EXISTS public.proposable_link_tags();
 -- 4. Two settings rows that are no longer controls
 -- ---------------------------------------------------------------------------------------------
 -- A setting nothing reads is a control that does nothing, and both of these read that way on the
--- Settings page: one moves a limit the Digital Thread stopped applying, the other names a
+-- Settings page: one moves a limit the Audit Trail stopped applying, the other names a
 -- Supabase Storage bucket that no longer exists.
 --
 -- `archive.bucket` NEEDS ITS GUARD AND THE OTHER DOES NOT. The key was given a second, unrelated
@@ -179,7 +182,7 @@ END
 $settings$;
 
 -- ---------------------------------------------------------------------------------------------
--- 5. One directory row the seed cannot correct
+-- 5. Rows the seed cannot correct
 -- ---------------------------------------------------------------------------------------------
 -- `0002` seeds the API gateway's row ON CONFLICT (id) DO NOTHING, which is deliberate -- the id
 -- is what a hand-edited endpoint hangs off, and DO UPDATE would overwrite an operator's address
@@ -210,6 +213,54 @@ BEGIN
     END IF;
 END
 $renames$;
+
+-- The Digital Thread became the Audit Trail, and three seeded rows carry its name: the permission
+-- and the Auditor role are seeded ON CONFLICT (id) DO NOTHING for the reason above, and a setting
+-- is found by its key. The permission keeps its id, which `role_permissions`,
+-- `principal_permissions` and PERMISSION_UUIDS in the dashboard hold; only its name moves, and
+-- every policy and allow-list reads the name. Guarded on the new name being free, as above.
+DO $trail_rows$
+DECLARE
+    v_rows integer;
+BEGIN
+    -- Nested rather than AND-ed: a query naming a missing table fails when it is planned.
+    IF to_regclass('public.permissions') IS NOT NULL THEN
+        IF NOT EXISTS (SELECT 1 FROM public.permissions WHERE name = 'audit_trail:read') THEN
+            UPDATE public.permissions
+               SET name = 'audit_trail:read', description = 'View the audit trail'
+             WHERE name = 'digital_thread:read';
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN
+                RAISE NOTICE '0000: the permission digital_thread:read is audit_trail:read.';
+            END IF;
+        END IF;
+    END IF;
+
+    IF to_regclass('public.roles') IS NOT NULL THEN
+        UPDATE public.roles
+           SET description = 'Read-only access to the audit trail'
+         WHERE name = 'Auditor'
+           AND description = 'Read-only audit trace and digital thread access';
+    END IF;
+
+    -- A key cannot be renamed (system_settings_stamp() refuses it), so the value, which is the
+    -- operator's, is copied to a row under the new key and the old row goes; `0002` then fills in
+    -- the rest of the new row. Only the columns every settings table has had are named here.
+    IF to_regclass('public.system_settings') IS NOT NULL THEN
+        INSERT INTO public.system_settings (key, value, value_type, category, label)
+        SELECT 'ui.audit_trail_poll_seconds', value, value_type, 'Audit Trail', label
+          FROM public.system_settings
+         WHERE key = 'ui.digital_thread_poll_seconds'
+           AND NOT EXISTS (SELECT 1 FROM public.system_settings
+                            WHERE key = 'ui.audit_trail_poll_seconds');
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+        DELETE FROM public.system_settings WHERE key = 'ui.digital_thread_poll_seconds';
+        IF v_rows > 0 THEN
+            RAISE NOTICE '0000: the setting ui.digital_thread_poll_seconds is ui.audit_trail_poll_seconds.';
+        END IF;
+    END IF;
+END
+$trail_rows$;
 
 -- ---------------------------------------------------------------------------------------------
 -- 6. gateways.is_virtual, retired
@@ -347,9 +398,10 @@ $overloads$;
 -- them itself. `LIKE ... INCLUDING DEFAULTS INCLUDING CONSTRAINTS` carries the column defaults
 -- and the CHECKs; nothing else is copied on purpose, so anything this misses is missing loudly.
 --
--- LAST IN THIS FILE, because the triggers are among the things it does not carry: until `0001`
--- re-attaches `stamp_audit_domain()`, an INSERT into the rebuilt table has no way to fill a NOT
--- NULL column, and every delete above audits itself. See the header.
+-- AFTER EVERY WRITE ABOVE, because the triggers are among the things it does not carry: until
+-- `0001` re-attaches `stamp_audit_domain()`, an INSERT into the rebuilt table has no way to fill a
+-- NOT NULL column, and every write above audits itself. See the header. It works on the table's
+-- old name, the only one a database from before partitioning has; section 9 renames the result.
 DO $convert$
 DECLARE
     v_min         timestamptz;
@@ -447,11 +499,159 @@ END
 $convert$;
 
 -- ---------------------------------------------------------------------------------------------
--- 9. Self-check
+-- 9. digital_thread is audit_trail
+-- ---------------------------------------------------------------------------------------------
+-- The Digital Thread page became the Audit Trail, and every name in the database followed it. A
+-- RENAME, so each row keeps its id and each partition its rows. What renames cleanly is renamed:
+-- the table, its partitions, its sequence, its indexes and constraints, and the two columns
+-- elsewhere that point into it. What holds the old name in its text is dropped, and `0001`
+-- declares it again under the new one, as on a fresh database: the functions, the triggers
+-- that call them, the policies, the partition-health view and the nightly job.
+--
+-- BOTH NAMES AT ONCE means a backup from before the rename was restored over a stack after it.
+-- The restore drops every partition first, so the stack's own `audit_trail` is left empty and the
+-- restored table is the record: whatever the stack's table still holds is appended to it under
+-- new ids, the stack's table is dropped, and the rename goes ahead.
+--
+-- ONE BLOCK, so the triggers never outlive the table name their functions write to.
+DO $trail$
+DECLARE
+    r        record;
+    v_cols   text;
+    v_rows   bigint;
+    v_count  integer := 0;
+BEGIN
+    IF to_regclass('public.digital_thread') IS NOT NULL THEN
+        IF to_regclass('public.audit_trail') IS NOT NULL THEN
+            SELECT string_agg(quote_ident(a.attname), ', ' ORDER BY a.attnum) INTO v_cols
+              FROM pg_attribute a
+             WHERE a.attrelid = 'public.audit_trail'::regclass
+               AND a.attnum > 0 AND NOT a.attisdropped AND a.attname <> 'id'
+               AND EXISTS (SELECT 1 FROM pg_attribute b
+                            WHERE b.attrelid = 'public.digital_thread'::regclass
+                              AND b.attname = a.attname AND b.attnum > 0 AND NOT b.attisdropped);
+            EXECUTE format('INSERT INTO public.digital_thread (%s) SELECT %s FROM public.audit_trail ORDER BY id',
+                           v_cols, v_cols);
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            -- Its view reads a partition by name, so it goes first; the partitions and the
+            -- sequence go with the table.
+            DROP VIEW IF EXISTS public.audit_trail_partition_health;
+            DROP TABLE public.audit_trail;
+            RAISE NOTICE '0000: a restored digital_thread met an audit_trail; % row(s) moved into it.', v_rows;
+        END IF;
+
+        ALTER TABLE public.digital_thread RENAME TO audit_trail;
+        RAISE NOTICE '0000: digital_thread is audit_trail.';
+    END IF;
+
+    DROP VIEW IF EXISTS public.digital_thread_partition_health;
+
+    -- Constraints first, each on its own table. Renaming a primary key renames its index with it;
+    -- a CHECK is renamed on the parent, and PostgreSQL carries it to every partition.
+    FOR r IN
+        SELECT c.conrelid::regclass AS rel, c.conname
+          FROM pg_constraint c
+          JOIN pg_class t ON t.oid = c.conrelid
+         WHERE t.relnamespace = 'public'::regnamespace
+           AND c.conname LIKE '%digital\_thread%'
+           AND NOT (c.contype = 'c' AND c.coninhcount > 0)
+    LOOP
+        EXECUTE format('ALTER TABLE %s RENAME CONSTRAINT %I TO %I',
+                       r.rel, r.conname, replace(r.conname, 'digital_thread', 'audit_trail'));
+        v_count := v_count + 1;
+    END LOOP;
+
+    -- Then every relation left: the partitions, the sequence and the indexes.
+    FOR r IN
+        SELECT c.oid::regclass AS rel, c.relname, c.relkind
+          FROM pg_class c
+         WHERE c.relnamespace = 'public'::regnamespace
+           AND c.relname LIKE '%digital\_thread%'
+           AND c.relkind IN ('r', 'p', 'S', 'i', 'I')
+    LOOP
+        EXECUTE format('ALTER %s %s RENAME TO %I',
+                       CASE WHEN r.relkind IN ('i', 'I') THEN 'INDEX'
+                            WHEN r.relkind = 'S' THEN 'SEQUENCE'
+                            ELSE 'TABLE' END,
+                       r.rel, replace(r.relname, 'digital_thread', 'audit_trail'));
+        v_count := v_count + 1;
+    END LOOP;
+
+    FOR r IN
+        SELECT pol.polname, pol.polrelid::regclass AS rel
+          FROM pg_policy pol
+          JOIN pg_class t ON t.oid = pol.polrelid
+         WHERE t.relnamespace = 'public'::regnamespace
+           AND pol.polname LIKE '%digital\_thread%'
+    LOOP
+        EXECUTE format('DROP POLICY %I ON %s', r.polname, r.rel);
+        v_count := v_count + 1;
+    END LOOP;
+
+    -- A partition's copy of a trigger goes with its parent's and cannot be dropped alone.
+    FOR r IN
+        SELECT tg.tgname, tg.tgrelid::regclass AS rel
+          FROM pg_trigger tg
+          JOIN pg_class t ON t.oid = tg.tgrelid
+         WHERE t.relnamespace = 'public'::regnamespace
+           AND NOT tg.tgisinternal
+           AND tg.tgparentid = 0
+           AND tg.tgname LIKE '%digital\_thread%'
+    LOOP
+        EXECUTE format('DROP TRIGGER %I ON %s', r.tgname, r.rel);
+        v_count := v_count + 1;
+    END LOOP;
+
+    FOR r IN
+        SELECT p.oid::regprocedure AS sig
+          FROM pg_proc p
+         WHERE p.pronamespace = 'public'::regnamespace
+           AND p.proname LIKE '%digital\_thread%'
+    LOOP
+        EXECUTE format('DROP FUNCTION %s', r.sig);
+        v_count := v_count + 1;
+    END LOOP;
+
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'change_proposals'
+                  AND column_name = 'applied_thread_id')
+       AND NOT EXISTS (SELECT 1 FROM information_schema.columns
+                        WHERE table_schema = 'public' AND table_name = 'change_proposals'
+                          AND column_name = 'applied_trail_id') THEN
+        ALTER TABLE public.change_proposals RENAME COLUMN applied_thread_id TO applied_trail_id;
+        v_count := v_count + 1;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'retired_entities'
+                  AND column_name = 'thread_id')
+       AND NOT EXISTS (SELECT 1 FROM information_schema.columns
+                        WHERE table_schema = 'public' AND table_name = 'retired_entities'
+                          AND column_name = 'trail_id') THEN
+        ALTER TABLE public.retired_entities RENAME COLUMN thread_id TO trail_id;
+        v_count := v_count + 1;
+    END IF;
+
+    -- `0002` schedules the job again under the new name; the old one would call a dropped function.
+    IF to_regclass('cron.job') IS NOT NULL THEN
+        IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'digital_thread_partitions') THEN
+            PERFORM cron.unschedule('digital_thread_partitions');
+            v_count := v_count + 1;
+        END IF;
+    END IF;
+
+    IF v_count > 0 THEN
+        RAISE NOTICE '0000: % object(s) renamed or dropped; 0001 declares the rest as audit_trail.', v_count;
+    END IF;
+END
+$trail$;
+
+-- ---------------------------------------------------------------------------------------------
+-- 10. Self-check
 -- ---------------------------------------------------------------------------------------------
 -- Properties, not counts, and every one of them is already true on a fresh database -- which is
 -- the point: this file leaves both kinds of database in the same state, and that state is what
--- `0001` is about to describe. `digital_thread` is deliberately not asserted partitioned: on a
+-- `0001` is about to describe. `audit_trail` is deliberately not asserted partitioned: on a
 -- fresh database it does not exist yet.
 DO $check$
 DECLARE
@@ -499,12 +699,49 @@ BEGIN
     END IF;
 
     -- NESTED, NOT `AND`-ed. SQL does not promise to short-circuit, and
-    -- `'public.digital_thread'::regclass` is resolved whether or not the left operand held --
+    -- `'public.audit_trail'::regclass` is resolved whether or not the left operand held --
     -- which raises "relation does not exist" on the fresh database this check exists to pass.
-    IF to_regclass('public.digital_thread') IS NOT NULL THEN
+    IF to_regclass('public.audit_trail') IS NOT NULL THEN
         IF NOT EXISTS (SELECT 1 FROM pg_partitioned_table
-                        WHERE partrelid = 'public.digital_thread'::regclass) THEN
-            v_problems := v_problems || 'digital_thread is still one table'::text;
+                        WHERE partrelid = 'public.audit_trail'::regclass) THEN
+            v_problems := v_problems || 'audit_trail is still one table'::text;
+        END IF;
+    END IF;
+
+    -- Nothing in the schema is still named for the Digital Thread, under any kind of name.
+    IF EXISTS (SELECT 1 FROM pg_class
+                WHERE relnamespace = 'public'::regnamespace AND relname LIKE '%digital\_thread%')
+       OR EXISTS (SELECT 1 FROM pg_proc
+                   WHERE pronamespace = 'public'::regnamespace AND proname LIKE '%digital\_thread%')
+       OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgname LIKE '%digital\_thread%')
+       OR EXISTS (SELECT 1 FROM pg_policy WHERE polname LIKE '%digital\_thread%')
+       OR EXISTS (SELECT 1 FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid
+                   WHERE t.relnamespace = 'public'::regnamespace AND c.conname LIKE '%digital\_thread%') THEN
+        v_problems := v_problems || 'an object is still named digital_thread'::text;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND (table_name, column_name) IN (('change_proposals', 'applied_thread_id'),
+                                                    ('retired_entities', 'thread_id'))) THEN
+        v_problems := v_problems || 'a column is still named for the thread'::text;
+    END IF;
+
+    IF to_regclass('public.permissions') IS NOT NULL THEN
+        IF EXISTS (SELECT 1 FROM public.permissions WHERE name = 'digital_thread:read') THEN
+            v_problems := v_problems || 'the permission is still digital_thread:read'::text;
+        END IF;
+    END IF;
+
+    IF to_regclass('public.system_settings') IS NOT NULL THEN
+        IF EXISTS (SELECT 1 FROM public.system_settings WHERE key = 'ui.digital_thread_poll_seconds') THEN
+            v_problems := v_problems || 'the setting is still ui.digital_thread_poll_seconds'::text;
+        END IF;
+    END IF;
+
+    IF to_regclass('cron.job') IS NOT NULL THEN
+        IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'digital_thread_partitions') THEN
+            v_problems := v_problems || 'the job digital_thread_partitions is still scheduled'::text;
         END IF;
     END IF;
 

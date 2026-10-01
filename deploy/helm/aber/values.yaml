@@ -22,7 +22,7 @@ global:
   # only, no path. An origin missing here presents as a dashboard that logs in and shows empty
   # tables while the gateway reports 200.
   #   corsExtraOrigins:
-  #     - https://acs.example.com
+  #     - https://aber.example.com
   corsExtraOrigins: []
 
   # PVC storage class for every stateful component. `local-path` (k3s's provisioner) is
@@ -128,17 +128,17 @@ secrets:
   # Each password is independent.
 
   # Reads spBv1.0/#; publishes only rebirth NCMDs.
-  mqttIngestionUser: factoryplus_ingestion
+  mqttIngestionUser: aber_ingestion
   mqttIngestionPassword: ""
   # Read-only at the broker; the i3X server refuses writes in code too.
-  mqttI3xUser: factoryplus_i3x
+  mqttI3xUser: aber_i3x
   mqttI3xPassword: ""
   # ingestion/validate.py's gateway. A fixture: leave empty with e2e.enabled false.
   mqttValidatorUser: gwy110000000000400080000
   mqttValidatorPassword: ""
   # $SYS only, for the broker probes and the exporter sidecar. Required: without it the
   # healthcheck never passes.
-  mqttMonitorUser: factoryplus_monitor
+  mqttMonitorUser: aber_monitor
   mqttMonitorPassword: ""
   # The account the credential service administers the broker's Dynamic Security plugin as:
   # $CONTROL/dynamic-security/# and nothing else. Required; the broker's initContainer writes it
@@ -496,7 +496,7 @@ realtime:
 # Browser-facing URLs
 #
 # In-cluster URLs are not configurable: the Service names are the ones every in-cluster URL
-# carries, so `http://supabase-kong:8000`, `timescaledb:5432` and `mosquitto:1883` are constants. Each
+# carries, so `http://supabase-envoy:8000`, `timescaledb:5432` and `mosquitto:1883` are constants. Each
 # value below is derived from global.publicBaseDomain unless overridden.
 # ---------------------------------------------------------------------------------------------
 publicUrls:
@@ -534,6 +534,11 @@ supabaseAuth:
   # seed.sql, an admin invite, or an upstream identity provider.
   disableSignup: true
   jwtExpiry: 3600
+  # The request header GoTrue keys its per-client rate limits on (sign-in, token refresh, OTP,
+  # verify, MFA), taking the first address in it. Traefik sets X-Forwarded-For, which names the
+  # client only once deploy/k8s/traefik-config.yaml is applied; with k3s's default Service every
+  # request carries the same address and the whole site shares one limit. Empty turns the limits off.
+  rateLimitHeader: X-Forwarded-For
   # The relay GoTrue sends "forgot your password" links through. Empty host: a reset request
   # fails and the sign-in card tells the user to ask an administrator. The password is
   # secrets.smtpPassword. Sign-up confirmation is off, so this is the only mail the stack sends.
@@ -560,8 +565,7 @@ supabaseRest:
     limits: { memory: 512Mi }
 
 # -----------------------------------------------------------------------------------------------
-# The gateway (Envoy; docs/gateway.md). Its Service is named `supabase-kong`, the name every
-# in-cluster consumer carries in `http://supabase-kong:8000`.
+# The gateway (Envoy; docs/gateway.md), reached in-cluster as `http://supabase-envoy:8000`.
 # -----------------------------------------------------------------------------------------------
 supabaseEnvoy:
   enabled: true
@@ -572,7 +576,6 @@ supabaseEnvoy:
     pullPolicy: IfNotPresent
   replicas: 1
   logLevel: info
-  serviceName: supabase-kong
   metrics:
     enabled: true
     # Envoy's admin listener serves /ready and /stats/prometheus. Unauthenticated; not on the
@@ -1004,6 +1007,20 @@ i3xService:
   # How many update batches one subscription may queue before the oldest are dropped. Dropping
   # is reported: the next /sync answers 206 and the client backfills from /objects/history.
   subscriptionQueueLimit: 10000
+  # Past these, creating a subscription or opening a stream answers 429 naming the limit. A
+  # principal is the token's `sub`, so every token minted for one service principal shares its
+  # allowance. Each open stream holds a server thread.
+  maxSubscriptionsPerPrincipal: 20
+  maxSubscriptions: 500
+  maxStreams: 50
+  # The most stored rows one history series reads, and values it returns: a device's map of N
+  # metrics counts N. A request's `limit` may ask for fewer. A series cut short answers 206,
+  # naming the instant it stops at, and the client asks again with that endTime. Keep it under
+  # about 6300: past that each read fetches its whole window (i3x/README.md -> History).
+  historyMaxRows: 1000
+  # The most HasComponent descendants one value or history request returns under `components`,
+  # summed over its elementIds. Past it the rest are left out and the answer is a 206.
+  maxComponents: 10000
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     # Sized for connection handling; the value cache and queues are bounded.
@@ -1207,6 +1224,11 @@ ingress:
 # ---------------------------------------------------------------------------------------------
 e2e:
   enabled: false
+  # Creates both Jobs with `spec.suspend: true`, so helm makes them and nothing runs until
+  # something patches `suspend` to false. The dev loop sets it on an upgrade and resumes the Jobs
+  # once every workload has rolled out: a run started during the upgrade would meet the pods being
+  # replaced, and its side effects (a rebirth throttle, quarantine rows) outlive it.
+  suspend: false
   image:
     # Built from test-harness/Dockerfile with the REPOSITORY ROOT as context. Extends the
     # ingestion image with jsonschema and the AAS suite (jsonschema is deliberately not in the
@@ -1477,7 +1499,7 @@ autoscaling:
   # Adding a single-writer component here fails the render rather than the cluster.
   components:
     - supabase-rest
-    - supabase-kong
+    - supabase-envoy
     - supabase-functions
     - frontend
 
@@ -1489,29 +1511,21 @@ backup:
   schedule: "30 2 * * *"
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
-  # Dumps older than this are pruned by the same Job that writes them.
+  # Days a scheduled backup is kept. The backup service never prunes the newest three backups,
+  # whatever their age, so failures longer than the window leave the last good ones; a requested
+  # backup is pinned until released. The CronJob prunes only after a dump succeeds. 0: no pruning.
   retentionDays: 14
-  # Also archive the 3D model objects from supabase-storage's PVC. The pg_dumps capture
-  # `devices.model_3d_path` but not the bytes it points at. Off by default because the PVC is
+  # Also archive every bucket's objects from supabase-storage's PVC. The pg_dumps capture the
+  # rows that name them (`devices.model_3d_path`, `areas.plan_path`) but not the bytes. Off by default because the PVC is
   # ReadWriteOnce: the Job must land on the storage pod's node (the chart adds a podAffinity),
   # and on a full or cordoned node it stays Pending. Check the first run completed. Prefer
   # Velero or a CSI snapshotter where available (supabaseStorage.podAnnotations).
   includeStorage: false
-  # pvc | s3
-  destination: pvc
+  # The backup PVC, the only place the CronJob writes. The off-site copy is the backup service's.
   persistence:
     size: 20Gi
     storageClass: ""
     accessMode: ReadWriteOnce
-  s3:
-    # destination: s3 only. The bucket must already exist.
-    bucket: ""
-    # e.g. https://s3.eu-west-2.amazonaws.com, or a MinIO endpoint.
-    endpoint: ""
-    region: ""
-    # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY are read from this Secret, kept out of the
-    # chart's own Secret because backup credentials have a different lifetime.
-    existingSecret: ""
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { memory: 1Gi }
@@ -1535,18 +1549,25 @@ backup:
 
 # The backup service (apps/backup-service.yaml) in place of the CronJob: backups an
 # Administrator asks for on the Backups page, and `backup.schedule` through pg_cron, with
-# `backup.retentionDays` applied to scheduled backups only. Needs backup.enabled, destination=pvc
-# and the image below. Off until the image is built; with it off the CronJob runs as before.
+# `backup.retentionDays` applied to scheduled backups only, and an encrypted copy of every backup
+# off site once the Backups page names an S3 destination. Needs backup.enabled and the image below.
+# Off until the image is built; with it off the CronJob runs as before.
 backupService:
   enabled: false
   image:
-    # Built FROM supabase/postgres for its pg_dump, plus node, sqlite3 and GNU tar.
+    # Built FROM supabase/postgres for its pg_dump, plus node, sqlite3, GNU tar, age and the AWS CLI.
     repository: ghcr.io/harri-llewelyn/aber/backup-service
     tag: ""
     pullPolicy: IfNotPresent
   # custom -> .dump, the artefact the CronJob writes and pg_restore reads selectively;
   # plain -> .sql.gz, what scripts/restore-databases.sh replays.
   format: custom
+  # NetworkPolicy egress rules for the off-site destination, applied to this pod alone under
+  # networkPolicy.enabled. The destination is a page setting, so the chart cannot derive it; with
+  # none, every copy fails at connect time and Off-site Backup Stale fires. For example:
+  #   - to: [{ ipBlock: { cidr: 203.0.113.10/32 } }]
+  #     ports: [{ protocol: TCP, port: 443 }]
+  offsiteEgress: []
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 1Gi }

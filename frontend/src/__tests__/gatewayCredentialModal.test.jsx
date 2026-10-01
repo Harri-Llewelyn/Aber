@@ -83,6 +83,12 @@ describe('GatewayCredentialModal', () => {
     // Case and surrounding space are forgiven: an operator reading the name off the drawer should
     // not be defeated by the label's capitalisation.
     expect(button.className).not.toContain('btn-disabled')
+
+    // Inner runs of whitespace collapse too, as in GatewayBundleModal.
+    fireEvent.change(screen.getByLabelText(`Type ${GATEWAY.gateway_name} to confirm`), {
+      target: { value: 'Host   Connector  2' }
+    })
+    expect(button.className).not.toContain('btn-disabled')
   })
 
   it('reveals the username and password once the mint succeeds', async () => {
@@ -97,25 +103,27 @@ describe('GatewayCredentialModal', () => {
     expect(api.mintGatewayCredential).toHaveBeenCalledWith(GATEWAY.gateway_id)
   })
 
-  /** The .env block has to agree with the fields shown above it. */
-  it('builds the .env block from the same values it displays', async () => {
+  /** The block for the release Secret has to agree with the fields shown above it. */
+  it('builds the release Secret block from the same values it displays', async () => {
     api.mintGatewayCredential.mockResolvedValue(CREDENTIAL)
     renderModal()
     await confirmAndMint()
 
-    await waitFor(() => expect(screen.getByText(/For \.env/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/For the release Secret/i)).toBeTruthy())
     fireEvent.click(screen.getByText(/Copy block/i))
 
     await waitFor(() => expect(written.length).toBe(1))
     expect(written[0]).toContain(`MQTT_GW_<NAME>_USER=${CREDENTIAL.mqtt_username}`)
     expect(written[0]).toContain(`MQTT_GW_<NAME>_PASSWORD=${CREDENTIAL.password}`)
-    // Twice: the comment inside the block, and the hint under it that says where to find the value.
+    // The hint under the block says where to find the name and what reads the pair.
     expect(screen.getAllByText(/acsCredentialsEnv/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/node-red-init/)).toBeInTheDocument()
+    expect(screen.queryByText(/\.env/)).toBeNull()
   })
 
   /**
    * A playback gateway's password goes to the playback worker, not Node-RED: it has no broker node,
-   * and the worker reads one variable keyed by sparkplug_id, so the block is pasteable whole.
+   * and the worker reads one object keyed by sparkplug_id, so the block is pasteable whole.
    */
   it('points a playback gateway at the playback worker, not at Node-RED', async () => {
     api.mintGatewayCredential.mockResolvedValue(CREDENTIAL)
@@ -123,17 +131,16 @@ describe('GatewayCredentialModal', () => {
       onClose={vi.fn()} showToast={vi.fn()} />)
     await confirmAndMint()
 
-    await waitFor(() => expect(screen.getByText(/For \.env/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/For secrets\.mqttPlaybackCredentials/i)).toBeTruthy())
     fireEvent.click(screen.getByText(/Copy block/i))
 
     await waitFor(() => expect(written.length).toBe(1))
-    expect(written[0]).toContain(
-      `MQTT_PLAYBACK_CREDENTIALS={"${CREDENTIAL.mqtt_username}":"${CREDENTIAL.password}"}`)
+    expect(written[0]).toBe(`{"${CREDENTIAL.mqtt_username}":"${CREDENTIAL.password}"}`)
     // No placeholder to substitute, and no mention of a flow it does not appear in.
     expect(written[0]).not.toContain('<NAME>')
     expect(screen.queryAllByText(/acsCredentialsEnv/)).toHaveLength(0)
     expect(screen.queryAllByText(/Node-RED/)).toHaveLength(0)
-    expect(screen.getByText(/restart the playback worker/i)).toBeInTheDocument()
+    expect(screen.getByText(/rollout restart deploy\/playback/)).toBeInTheDocument()
   })
 
   /**
@@ -162,20 +169,10 @@ describe('GatewayCredentialModal', () => {
     await confirmAndMint()
 
     await waitFor(() => {
-      expect(showToast).toHaveBeenCalledWith(expect.stringContaining('Digital Thread'), 'error')
+      expect(showToast).toHaveBeenCalledWith(expect.stringContaining('Audit Trail'), 'error')
     })
     // And the password is still shown -- the account exists, and withholding it would strand one
     // nobody can ever authenticate as.
     expect(screen.getByDisplayValue(CREDENTIAL.password)).toBeTruthy()
-  })
-
-  it('warns when the durable write landed but the running broker has not reloaded', async () => {
-    api.mintGatewayCredential.mockResolvedValue({ ...CREDENTIAL, applied_to_running_broker: false })
-    renderModal()
-    await confirmAndMint()
-
-    await waitFor(() => {
-      expect(screen.getByText(/has not reloaded it yet/i)).toBeTruthy()
-    })
   })
 })

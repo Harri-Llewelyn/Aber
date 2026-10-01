@@ -6,7 +6,7 @@ browser, returning email addresses. Every property that makes that safe lives in
 rather than in a grant -- `authenticated` holds EXECUTE and the function decides -- so a gate that
 stops working fails OPEN, silently, with the page looking exactly as it should.
 
-THE GATE IS NOT ADMINISTRATOR-ONLY, deliberately: it matches `digital_thread_select_security`, the
+THE GATE IS NOT ADMINISTRATOR-ONLY, deliberately: it matches `audit_trail_select_security`, the
 policy on the rows these names label. An Auditor can read the role-assignment lane, and refusing
 them the names would leave them reading uuids beside an Administrator reading people -- one record
 told two ways. Both directions are asserted, because "admits the right roles" and "refuses the rest"
@@ -266,7 +266,7 @@ class UserAccountsListing(unittest.TestCase):
     # -----------------------------------------------------------------------------------------
     def test_the_email_that_labels_a_lane_also_finds_it(self):
         """
-        THE INVARIANT 0115 STATES AND 0116 NEARLY BROKE. The Digital Thread labels a
+        THE INVARIANT 0115 STATES AND 0116 NEARLY BROKE. The Audit Trail labels a
         role-assignment lane with the person, and a lane the timeline draws and the search cannot
         match is the drift that file's shared field list exists to prevent -- one which would not
         have raised anything, because a search that matches nothing looks the same as one that
@@ -277,7 +277,7 @@ class UserAccountsListing(unittest.TestCase):
         """
         self.as_user(ADMIN_ID)
         self.cur.execute(
-            "SELECT (public.digital_thread_page(p_limit => 5, p_include_purged => true,"
+            "SELECT (public.audit_trail_page(p_limit => 5, p_include_purged => true,"
             "                                   p_search => %s) ->> 'total_matching')::bigint",
             ("administrator@0116.test",),
         )
@@ -291,12 +291,12 @@ class UserAccountsListing(unittest.TestCase):
         """
         The matcher returns an empty array rather than raising, and this is why: it is ONE DISJUNCT
         of a search. Refusing would fail the whole page for an Operator, turning "your search
-        matched nothing here" into "the Digital Thread is broken" -- on a lane they cannot read
+        matched nothing here" into "the Audit Trail is broken" -- on a lane they cannot read
         either way.
         """
         self.as_user(OPERATOR_ID)
         self.cur.execute(
-            "SELECT (public.digital_thread_page(p_limit => 1, p_include_purged => true,"
+            "SELECT (public.audit_trail_page(p_limit => 1, p_include_purged => true,"
             "                                   p_search => %s) ->> 'total_matching')::bigint",
             ("administrator@0116.test",),
         )

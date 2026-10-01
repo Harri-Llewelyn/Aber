@@ -2,15 +2,15 @@
 {{- $component := "backup" -}}
 {{- $secretName := include "aber.secretName" . -}}
 {{- $fullname := include "aber.fullname" . -}}
-{{- /* Only meaningful when there is a storage PVC to mount: the s3 backend keeps nothing locally,
-       and with persistence off the volume is an emptyDir that dies with the pod. Silently ignoring
+{{- /* Only meaningful when there is a storage PVC to mount: with persistence off the volume is an
+       emptyDir that dies with the pod. Silently ignoring
        the flag in those cases is right -- there is nothing to archive -- but it must not render a
        volume mount naming a PVC that does not exist, which would leave the CronJob permanently
        unschedulable. */ -}}
 {{- $includeStorage := and .Values.backup.includeStorage .Values.supabaseStorage.enabled
       .Values.supabaseStorage.persistence.enabled (eq .Values.supabaseStorage.backend "file") -}}
-{{- if and (eq .Values.backup.destination "s3") (not .Values.backup.s3.bucket) }}
-{{- fail "\n\naber: backup.destination is 's3' but backup.s3.bucket is empty.\n\nFailing the render rather than installing: a backup CronJob that runs nightly and writes nowhere is\nworse than no backup at all, because it looks like one. The Job would exit 0 having dumped to a path\nthat is discarded with the pod, and the first sign would be a restore that has nothing to restore.\n" }}
+{{- if or (and .Values.backup.destination (ne (toString .Values.backup.destination) "pvc")) .Values.backup.s3 }}
+{{- fail "\n\naber: backup.destination and backup.s3 are retired.\n\nThe CronJob writes to the backup PVC only: the s3 upload it offered could not run, since its image has\nno aws CLI. The off-site copy is the backup service's. Enable backupService and set the destination\non the Backups page (supabase/README.md, \"An encrypted copy off site\"), and remove both values.\n" }}
 {{- end }}
 {{/*
 =================================================================================================
@@ -18,17 +18,18 @@ Scheduled logical backups -- AND THE ONLY RECOVERY PATH THIS STACK HAS.
 
 `local-path` is a node-local hostPath provisioner: one node, no replication, no snapshots, and
 neither database is replicated either (architecture §3.3 keeps Postgres HA out of scope). There is
-no storage layer underneath to fall back on.
+no storage layer underneath to fall back on. This Job writes the backup PVC only, for stacks
+without the backup service; the off-site copy is the service's.
 
 WHAT IS WORTH BACKING UP, AND WHAT IS NOT:
-  supabase-db   asset metadata, RLS policies, the schema registry, and `digital_thread` -- an
+  supabase-db   asset metadata, RLS policies, the schema registry, and `audit_trail` -- an
                 APPEND-ONLY audit table, which is why this matters most: telemetry can be
                 re-derived from a rebirth, an audit trail cannot.
   timescaledb   the telemetry hypertable. Large and growing; see the retention note below.
-  storage       the 3D model objects, WHEN `backup.includeStorage` is set. Neither dump covers
-                them, but `devices.model_3d_path` points at them, and the AAS exporter composes
-                that URL without fetching it -- so nothing detects the break until a viewer opens
-                the shell.
+  storage       every bucket's objects (3D models, area plans, broker captures, export
+                bundles), WHEN `backup.includeStorage` is set. Neither dump covers them, but rows
+                point at them: the AAS exporter composes `devices.model_3d_path`'s URL without
+                fetching it, so nothing detects the break until a viewer opens the shell.
 
 `pg_dump -Fc` (custom format), not plain SQL: compressed, and restorable SELECTIVELY with
 pg_restore. A plain dump can only be replayed whole, which on the historian is not a realistic
@@ -42,7 +43,6 @@ supabase_storage_admin own objects and RLS policies reference roles by name, so 
 ownership restores into a database where every policy denies.
 =================================================================================================
 */}}
-{{- if eq .Values.backup.destination "pvc" }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -61,7 +61,6 @@ spec:
   resources:
     requests:
       storage: {{ .Values.backup.persistence.size }}
-{{- end }}
 {{- /* The PVC above is rendered either way; the CronJob yields to the backup service
        (apps/backup-service.yaml) when that is enabled, so one scheduler writes the volume. */ -}}
 {{- if not .Values.backupService.enabled }}
@@ -75,7 +74,7 @@ metadata:
 spec:
   schedule: {{ .Values.backup.schedule | quote }}
   # NEVER concurrent. Two pg_dumps of the historian at once double the IO on a database that is also
-  # taking live writes, and on the PVC destination they would interleave into the same directory.
+  # taking live writes, and they would interleave into the same directory.
   concurrencyPolicy: Forbid
   # A missed window (node down, cluster upgrade) is skipped, not caught up on: running yesterday's
   # backup now produces a dump labelled with today's date and nothing gained.
@@ -119,7 +118,6 @@ spec:
                     matchLabels:
                       {{- include "aber.selectorLabels" (dict "ctx" . "component" "supabase-storage") | nindent 22 }}
           {{- end }}
-          {{- if eq .Values.backup.destination "pvc" }}
           # Same gid as supabase-db, whose image this Job reuses for its pg_dump -- so a restore Job
           # running from that same image can read what this one wrote. 101 is that image's `postgres`
           # group at 17.6.1.175, verified against the pinned tag; it read 999 here for the same
@@ -132,7 +130,6 @@ spec:
           securityContext:
             fsGroup: 101
             fsGroupChangePolicy: OnRootMismatch
-          {{- end }}
           containers:
             - name: backup
               # The supabase/postgres image, for its pg_dump. THE DUMPING CLIENT MUST BE AT LEAST THE
@@ -152,28 +149,6 @@ spec:
                 {{- include "aber.secretEnv" (dict "name" "TS_PGPASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 16 }}
                 - name: RETENTION_DAYS
                   value: {{ .Values.backup.retentionDays | quote }}
-                {{- if eq .Values.backup.destination "s3" }}
-                - name: S3_BUCKET
-                  value: {{ .Values.backup.s3.bucket | quote }}
-                - name: S3_ENDPOINT
-                  value: {{ .Values.backup.s3.endpoint | quote }}
-                - name: AWS_DEFAULT_REGION
-                  value: {{ .Values.backup.s3.region | quote }}
-                {{- if .Values.backup.s3.existingSecret }}
-                # Kept in their own Secret: backup credentials have a different lifetime and a
-                # different blast radius from the stack's own.
-                - name: AWS_ACCESS_KEY_ID
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ .Values.backup.s3.existingSecret }}
-                      key: AWS_ACCESS_KEY_ID
-                - name: AWS_SECRET_ACCESS_KEY
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ .Values.backup.s3.existingSecret }}
-                      key: AWS_SECRET_ACCESS_KEY
-                {{- end }}
-                {{- end }}
               command:
                 - /bin/sh
                 - -e
@@ -213,7 +188,7 @@ spec:
                   {{ if and .Values.timescaledb.enabled (not (include "aber.physicalBackupOn" .)) }}dump timescaledb {{ include "aber.timescale.host" . }} {{ include "aber.timescale.port" . }} {{ .Values.timescaledb.username }} {{ .Values.timescaledb.database }} "$TS_PGPASSWORD"{{ end }}
                   {{- if $includeStorage }}
 
-                  echo '--- archive the 3D model objects'
+                  echo '--- archive the storage objects (every bucket)'
                   # Mounted READ-ONLY from the live storage PVC. Not a snapshot: storage-api may be
                   # writing while this runs, so an upload landing mid-tar is captured whole or not
                   # at all. That is acceptable here in a way it would not be for a database --
@@ -240,23 +215,6 @@ spec:
                   fi
                   {{- end }}
 
-                  {{- if eq .Values.backup.destination "s3" }}
-                  echo '--- upload'
-                  # The supabase/postgres image has no aws CLI, so this uses the S3 REST API through
-                  # curl with a SigV4 signature... which is more than a shell script should attempt.
-                  # Instead: refuse clearly rather than silently produce an unsigned request.
-                  if ! command -v aws >/dev/null 2>&1; then
-                    echo 'FAIL: destination is s3 but this image has no aws CLI.' >&2
-                    echo '  Set backup.destination=pvc, or override backup.image with one that has it' >&2
-                    echo '  (amazon/aws-cli plus a postgresql-client of at least the server version).' >&2
-                    exit 1
-                  fi
-                  for f in "$OUT"/*-"$STAMP".dump; do
-                    aws s3 cp "$f" "s3://$S3_BUCKET/$(basename "$f")" \
-                      ${S3_ENDPOINT:+--endpoint-url "$S3_ENDPOINT"}
-                    rm -f "$f"
-                  done
-                  {{- else }}
                   echo '--- prune'
                   # Pruned by the Job that writes them rather than by a second CronJob: one place
                   # that knows the naming, and a prune that cannot run while a dump is in flight.
@@ -264,7 +222,6 @@ spec:
                   # and mtime survives a rename.
                   find "$OUT" -maxdepth 1 -name '*.dump' -type f -mtime "+$RETENTION_DAYS" -print -delete
                   echo "    retaining $RETENTION_DAYS days; $(ls -1 "$OUT"/*.dump 2>/dev/null | wc -l) dump(s) on disk"
-                  {{- end }}
                   echo 'Backup complete.'
               volumeMounts:
                 {{- with include "aber.dbClientCaMount" . }}{{ . | nindent 16 }}{{- end }}
@@ -284,14 +241,8 @@ spec:
           volumes:
             {{- with include "aber.dbClientCaVolume" . }}{{ . | nindent 12 }}{{- end }}
             - name: backups
-              {{- if eq .Values.backup.destination "pvc" }}
               persistentVolumeClaim:
                 claimName: {{ printf "%s-backup" $fullname }}
-              {{- else }}
-              # Scratch: the dump is written here and uploaded, then the pod goes away. Sized by the
-              # node's ephemeral storage, which is the constraint to watch on a large historian.
-              emptyDir: {}
-              {{- end }}
             {{- if $includeStorage }}
             - name: storage-objects
               persistentVolumeClaim:

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Tier 1 logical backup: both databases plus the 3D model objects.
+# Tier 1 logical backup: both databases plus the storage objects of every bucket.
 #
 # Runs against any reachable PostgreSQL: the two databases through `npm run dev:forward` or a
 # port-forward of your own, an edge appliance, or a CI job. The in-cluster equivalent is the backup
@@ -13,7 +13,7 @@
 # NOR DOES IT CAPTURE THE LOG STORE, which is a decision and is recorded so that its absence from
 # this list reads as one. `loki_data` holds thirty days of container logs and is not a database of
 # record: the durable half of everything that matters is already in the dump as rows --
-# digital_thread, which is the audit trail and the conformance record both, and platform_alerts --
+# audit_trail, which is the audit trail and the conformance record both, and platform_alerts --
 # while the logs are the volatile half, there to be queried during an incident rather than
 # restored after one. See the Loki values in the chart for the full argument.
 #
@@ -116,7 +116,7 @@ dump_db() {
 
 dump_storage() {
   out="$BACKUP_DIR/storage-objects-${STAMP}.tar.gz"
-  log "archiving 3D model objects -> $out"
+  log "archiving the storage objects (every bucket) -> $out"
   if [ -n "$STORAGE_HOST_PATH" ]; then
     [ -d "$STORAGE_HOST_PATH" ] || die "STORAGE_HOST_PATH '$STORAGE_HOST_PATH' is not a directory"
     tar -czf "$out" -C "$STORAGE_HOST_PATH" .

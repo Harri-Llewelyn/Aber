@@ -1,12 +1,19 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { api } from '../../api'
-import { POLL_INTERVAL_MS, PERMISSION_UUIDS } from '../../constants'
+import { POLL_INTERVAL_MS, ENTITY_KIND_BY_TABLE } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
-import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { IconPencil, IconCheck, IconX, IconArchive, IconHistory, IconInbox } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 import { PageHeading } from '../common/PageHeading'
+import { Badge } from '../common/Badge'
+import { SectionCount } from '../common/SectionCount'
+import { SearchInput } from '../common/SearchInput'
+import { ClearFilters } from '../common/ClearFilters'
+import { LoadingState } from '../common/LoadingState'
+import { EmptyState } from '../common/EmptyState'
+import { Modal } from '../common/Modal'
+import { formatDateTime, formatRelative } from '../../utils/format'
 
 /**
  * The Approvals page: one inbox for every change somebody proposed but may not apply.
@@ -17,50 +24,22 @@ import { PageHeading } from '../common/PageHeading'
  */
 
 /**
- * The lanes and their labels. `entity_type` holds the table name, the vocabulary `digital_thread`
- * speaks; the label is presentation only.
+ * The kinds of change the queue admits, mirroring the CHECK constraint and `proposable_columns()`.
+ * `entity_type` holds the table name, the vocabulary `audit_trail` speaks; the label is
+ * presentation only. There is no schema kind: creating a draft needs `schema:manage`, so whoever
+ * could propose a publication could also perform it. A decided row left in a withdrawn kind still
+ * renders through the `entity_type` fallback. The form for each kind is the entity's own Edit
+ * Details dialog.
  */
-/**
- * The lanes the queue admits, mirroring the CHECK constraint and `proposable_columns()`. No schema
- * lane: creating a draft needs `schema:manage`, so the only person who could propose a publication
- * could also perform it. Historical rows in that lane still render through the `entity_type`
- * fallback below. The form for each lane is the asset's own Edit Details dialog.
- */
-export const LANES = [
-  {
-    id: 'devices',
-    label: 'Device details',
-    blurb: 'Name, description, type, connection and location.'
-  },
-  {
-    id: 'device_nameplate',
-    label: 'Device nameplate',
-    blurb: 'The IDTA Digital Nameplate a person asserts about a machine — manufacturer, serial, '
-      + 'versions.'
-  },
-  {
-    id: 'areas',
-    label: 'Area details',
-    blurb: 'An area’s name, its description and its icon. The name is also the <area> segment of '
-      + 'every uns/ topic beneath it.'
-  },
-  {
-    id: 'cells',
-    label: 'Cell details',
-    blurb: 'A cell’s name, its Grafana dashboard and its icon.'
-  },
-  {
-    id: 'gateways',
-    label: 'Gateway details',
-    blurb: 'Name, description, access URL and where the gateway sits. Not what it IS, and not what '
-      + 'the platform observed about its health.'
-  },
-  /* No link lanes. 0108 withdrew `cell_links`, `gateway_links` and `device_links`: no UI ever filed
-     one, and a link is attached directly through `link:manage`. LANE_BY_ID falls back rather than
-     filtering, so a decided row left over from before still renders under its raw lane name. */
+export const KINDS = [
+  { id: 'devices', label: 'Device details' },
+  { id: 'device_nameplate', label: 'Device nameplate' },
+  { id: 'areas', label: 'Area details' },
+  { id: 'cells', label: 'Cell details' },
+  { id: 'gateways', label: 'Gateway details' },
 ]
 
-const LANE_BY_ID = new Map(LANES.map(l => [l.id, l]))
+const KIND_BY_ID = new Map(KINDS.map(l => [l.id, l]))
 
 /**
  * A readable label for a proposable key. Presentation only, and it falls back rather than filters:
@@ -99,26 +78,13 @@ export function keyLabel(key) {
 }
 
 /**
- * Whether this session may decide this lane, mirroring `may_decide_proposal()`. The live lanes are
- * gated on `cell:manage`, `gateway:manage` and `link:manage`, held by exactly these two roles
- * today; the withdrawn schema lane is false for everybody. A mirror that is allowed to be wrong:
- * the database decides again on every call.
+ * Whether this session may decide this kind of change, mirroring `may_decide_proposal()`. Every
+ * live kind resolves to these two roles for a person; a decided-only schema row is false for
+ * everybody. A mirror that is allowed to be wrong: the database decides again on every call.
  */
 export function canDecide(entityType, userRole) {
   if (entityType === 'schemas') return false
   return userRole === 'Administrator' || userRole === 'Shopfloor_Manager'
-}
-
-/** How long a proposal has been waiting, in the coarsest unit that is still true. */
-export function ageLabel(iso, now = Date.now()) {
-  const ms = now - new Date(iso).getTime()
-  if (!Number.isFinite(ms) || ms < 0) return ''
-  const minutes = Math.floor(ms / 60000)
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.floor(hours / 24)}d ago`
 }
 
 /** `null` renders as an explicit word rather than as a blank a reader would take for "unchanged". */
@@ -151,7 +117,7 @@ export function locationNameMap(cells, areas) {
 /**
  * One before/after value. A resolved id shows its name and keeps the uuid in the tooltip; an id
  * nothing resolves falls back to the uuid rather than being hidden, which is the same rule the
- * lane and key labels follow -- an archived or deleted cell is a real state, and a reviewer
+ * kind and key labels follow -- an archived or deleted cell is a real state, and a reviewer
  * seeing a raw uuid is better served than one seeing a blank.
  */
 function ValueCell({ value, names }) {
@@ -161,8 +127,8 @@ function ValueCell({ value, names }) {
 }
 
 /**
- * What a proposal would change, as before / after pairs. The schema lane's patch names an act
- * (`{publish: true}`), not a column, so it gets a sentence instead of a diff.
+ * What a proposal would change, as before / after pairs. A schema row's patch names an act
+ * (`{publish: true}`), not a column, so it gets no diff.
  */
 export function diffRows(proposal) {
   const patch = proposal?.patch || {}
@@ -178,76 +144,51 @@ export function diffRows(proposal) {
   }))
 }
 
-/**
- * The message for a refused INSERT and the repair each needs. `23505` is the per-asset cap, and the
- * repair is to open the proposal you already have, so the caller is handed the row. `23514` is the
- * per-person ceiling.
- */
-export function refusalFor(error, existing) {
-  const code = error?.code
-  if (code === '23505') {
-    return {
-      message: existing
-        ? 'You already have an open proposal on this asset. Add to that one rather than opening a second.'
-        : 'You already have an open proposal on this asset.',
-      openExisting: Boolean(existing)
-    }
-  }
-  if (code === '23514') {
-    return { message: error?.message || 'You are at your limit for open proposals.', openExisting: false }
-  }
-  if (code === '42501') {
-    return { message: 'You are not permitted to do that.', openExisting: false }
-  }
-  return { message: error?.message || 'The proposal was refused.', openExisting: false }
+const STATUS_TONE = {
+  open: 'pending',
+  applied: 'success',
+  rejected: 'danger',
+  withdrawn: 'neutral',
+  expired: 'warning'
 }
 
-function StatusBadge({ status }) {
-  const cls = {
-    open: 'badge-pending',
-    applied: 'badge-online',
-    rejected: 'badge-offline',
-    withdrawn: 'badge-neutral',
-    expired: 'badge-warning'
-  }[status] || 'badge-neutral'
-  return <span className={`badge ${cls}`}>{status}</span>
+/** A proposal's status through the shared Badge. An unknown status renders neutral. */
+function ProposalStatus({ status }) {
+  return <Badge tone={STATUS_TONE[status] || 'neutral'} size="sm" dot>{status}</Badge>
 }
 
 /**
  * The proposer. `proposed_by_email` is stamped from the signed access token on INSERT, so it is
- * evidence rather than a typed name; the uuid is the fallback, because a token without an email is
- * a real state.
+ * evidence rather than a typed name. A machine identity has no email; `machineName` is the name an
+ * Administrator gave it, from `list_proposer_names()`. The uuid is the fallback for a principal
+ * with neither.
  */
-function ActorLabel({ id, email, currentUserId }) {
+export function ActorLabel({ id, email, machineName, currentUserId }) {
   if (!id) return <span className="context-field-empty">—</span>
   if (id === currentUserId) return <strong>you</strong>
   if (email) return <span title={id}>{email}</span>
+  if (machineName) {
+    return (
+      <span title={`A machine identity, ${id}`}>
+        {machineName} <span className="badge badge-neutral">machine</span>
+      </span>
+    )
+  }
   return <span className="mono" title={id}>{String(id).slice(0, 8)}</span>
 }
 
-/**
- * An absolute timestamp in the viewer's locale and zone, beside the relative one: 31m ago is for
- * triage, the wall-clock time is for a ticket.
- */
-export function absoluteTime(iso) {
-  if (!iso) return ''
-  const at = new Date(iso)
-  if (Number.isNaN(at.getTime())) return ''
-  return at.toLocaleString()
-}
-
-/** The before/after table, shared by the drawer and by nothing else -- see `diffRows`. */
+/** The before/after table, drawn in the drawer. */
 function DiffTable({ proposal, names }) {
   const rows = diffRows(proposal)
   if (proposal.entity_type === 'schemas') {
     return (
-      <p style={{ margin: 0 }}>
-        Publish this draft. Approving activates it, archives its predecessor and repoints every
-        attached device — in one transaction.
+      <p className="form-hint">
+        A request to publish a schema draft. That kind of proposal is withdrawn: it can no longer be
+        approved here, and the draft is published on the Schemas page.
       </p>
     )
   }
-  if (rows.length === 0) return <p style={{ margin: 0 }}>This proposal changes nothing.</p>
+  if (rows.length === 0) return <p className="form-hint">This proposal changes nothing.</p>
   return (
     <table className="modal-table">
       <thead>
@@ -257,10 +198,10 @@ function DiffTable({ proposal, names }) {
         {rows.map(r => (
           <tr key={r.key}>
             <td>{keyLabel(r.key)}</td>
-            <td className="text-muted"><ValueCell value={r.from} names={names} /></td>
+            <td className="cell-meta"><ValueCell value={r.from} names={names} /></td>
             <td>
               <strong><ValueCell value={r.to} names={names} /></strong>
-              {r.unchanged && <span className="badge badge-neutral"> unchanged</span>}
+              {r.unchanged && <Badge size="sm" className="badge-follow">unchanged</Badge>}
             </td>
           </tr>
         ))}
@@ -272,31 +213,14 @@ function DiffTable({ proposal, names }) {
 function RejectDialog({ onCancel, onConfirm, busy }) {
   const [reason, setReason] = useState('')
   const blank = reason.trim() === ''
-  // On the shared stack rather than a listener of its own: Escape must close the topmost layer and
-  // only that one, or answering "no" to a confirmation would take the page's other state with it.
-  useEscapeKey(onCancel)
   return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
-        <div className="modal-header-row">
-          <h3 className="modal-title">Reject this proposal</h3>
-        </div>
-        <div className="card-body">
-          {/* The reason is required by a CHECK constraint: a rejected proposal frees its slot at
-              once, so the reason is what makes a second attempt different from the first. */}
-          <label className="form-label" htmlFor="reject-reason">
-            Why? The proposer sees this, and it is the only thing they get other than “no”.
-          </label>
-          <textarea
-            id="reject-reason"
-            className="form-control"
-            rows={3}
-            value={reason}
-            onChange={e => setReason(e.target.value)}
-            placeholder="That machine is being retired next month."
-          />
-        </div>
-        <div className="modal-actions">
+    <Modal
+      title="Reject this proposal"
+      icon={<IconX size={18} />}
+      size="sm"
+      onClose={onCancel}
+      footer={
+        <>
           <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
           <button
             type="button"
@@ -306,50 +230,64 @@ function RejectDialog({ onCancel, onConfirm, busy }) {
           >
             Reject
           </button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      {/* A CHECK constraint requires the reason: a rejected proposal frees its slot at once, so
+          the reason is what makes a second attempt different from the first. */}
+      <label className="form-label" htmlFor="reject-reason">
+        Why? The proposer sees this, and it is the only thing they get other than “no”.
+      </label>
+      <textarea
+        id="reject-reason"
+        className="form-control"
+        rows={3}
+        value={reason}
+        onChange={e => setReason(e.target.value)}
+        placeholder="That machine is being retired next month."
+      />
+    </Modal>
   )
 }
 
-/* There is no composer on this page. The form that writes a proposal is the asset's own Edit
+/* There is no composer on this page. The form that writes a proposal is the entity's own Edit
    Details dialog, whose footer files a proposal for somebody who may not save it
    (utils/proposeFromForm.js). This page is a queue: what is waiting, what was decided, and the
-   drawer that decides one. Editing your own open proposal hands over to the asset's page. */
-
+   drawer that decides one. Editing your own open proposal hands over to the entity's page. */
 
 /**
  * One list of proposals, as a table. The row carries what you triage on; the drawer carries the
- * diff and every action.
+ * diff and every action. `loading` shows the first load in place of the rows.
  */
-function ProposalTable({ rows, selectedId, onSelect, emptyText }) {
+function ProposalTable({ rows, selectedId, onSelect, loading, filtered, emptyMessage, filteredMessage }) {
+  if (loading) return <LoadingState label="proposals" />
   if (rows.length === 0) {
-    /* With the glyph every other page's empty state carries: words alone in a card that usually
-       holds a table read as a load that failed rather than a queue that is clear. */
     return (
-      <div className="empty-state">
-        <div className="empty-icon"><IconInbox size={36} /></div>
-        <div className="empty-text">{emptyText}</div>
-      </div>
+      <EmptyState
+        icon={<IconInbox size={36} />}
+        filtered={filtered}
+        message={emptyMessage}
+        filteredMessage={filteredMessage}
+      />
     )
   }
   return (
     <div className="table-wrap">
       <table>
         <thead>
-          {/* No Proposed by column: a uuid resolves to nobody at a glance, and the drawer names the
-              proposer by email. Status and time are two columns because they are two facts. */}
+          {/* The drawer names the proposer. Status and time are two columns because they are two
+              facts. */}
           <tr>
-            <th title="The asset or schema this proposal is about">Subject</th>
-            <th title="Which lane, and therefore who may decide it">Change</th>
+            <th title="The device, area, cell or gateway this proposal is about">Subject</th>
+            <th title="Which kind of change this is">Change</th>
             <th title="The fields this proposal would change">Field(s) changed</th>
             <th title="Its current state">Status</th>
-            <th title="When it was filed, or when it was decided">When</th>
+            <th title="When it was decided, or when it was filed while it is still open">When</th>
           </tr>
         </thead>
         <tbody>
           {rows.map(p => {
-            const lane = LANE_BY_ID.get(p.entity_type)
+            const kind = KIND_BY_ID.get(p.entity_type)
             const diff = diffRows(p)
             const summary = p.entity_type === 'schemas'
               ? 'Publish this draft'
@@ -360,24 +298,24 @@ function ProposalTable({ rows, selectedId, onSelect, emptyText }) {
               <tr
                 key={p.id}
                 data-testid="proposal-row"
-                className={selectedId === p.id ? 'row-selected' : ''}
+                className={`row-selectable${selectedId === p.id ? ' row-selected' : ''}`}
                 onClick={rowSelectHandler(() => onSelect(p.id))}
                 title="Click to inspect this proposal in the details panel"
               >
                 <td>
                   <strong>{p.target_label}</strong>
                   {p.target_missing && (
-                    <span className="badge badge-warning" style={{ marginLeft: '8px' }}
-                          title="The target of this proposal no longer exists, so approving it will fail rather than recreate anything.">
+                    <Badge tone="warning" size="sm" className="badge-follow"
+                           title="The target of this proposal no longer exists, so approving it will fail rather than recreate anything.">
                       MISSING
-                    </span>
+                    </Badge>
                   )}
                 </td>
-                <td><span className="badge badge-neutral">{lane?.label || p.entity_type}</span></td>
-                <td className="text-muted">{summary}</td>
-                <td><StatusBadge status={p.status} /></td>
-                <td className="text-muted" title={absoluteTime(p.decided_at || p.proposed_at)}>
-                  {ageLabel(p.decided_at || p.proposed_at)}
+                <td><Badge size="sm">{kind?.label || p.entity_type}</Badge></td>
+                <td className="cell-meta">{summary}</td>
+                <td><ProposalStatus status={p.status} /></td>
+                <td className="cell-meta" title={formatDateTime(p.decided_at || p.proposed_at)}>
+                  {formatRelative(p.decided_at || p.proposed_at)}
                 </td>
               </tr>
             )
@@ -392,66 +330,56 @@ function ProposalTable({ rows, selectedId, onSelect, emptyText }) {
  * The filter both queues share. `entity_id` is searchable because a route from elsewhere arrives
  * pointed at one subject by uuid.
  */
-export function filterProposals(rows, lane, query) {
+export function filterProposals(rows, kind, query) {
   const needle = String(query || '').trim().toLowerCase()
   return rows.filter(p => {
-    if (lane !== 'all' && p.entity_type !== lane) return false
+    if (kind !== 'all' && p.entity_type !== kind) return false
     if (!needle) return true
-    // The fields somebody remembers about a request: subject, reason, rationale, proposer email,
-    // and the id.
-    return [p.target_label, p.decision_reason, p.rationale, p.proposed_by_email, p.entity_id]
+    // The fields somebody remembers about a request: subject, reason, rationale, the proposer's
+    // email or machine name, and the id.
+    return [p.target_label, p.decision_reason, p.rationale, p.proposed_by_email,
+      p.proposed_by_machine_name, p.entity_id]
       .some(v => String(v || '').toLowerCase().includes(needle))
   })
 }
 
 /** The kind-and-text filter bar, identical over both queues because the queues are one shape. */
-function ProposalFilters({ rows, lane, onLane, query, onQuery, placeholder, label }) {
-  const activeFilterCount = (lane !== 'all' ? 1 : 0) + (query ? 1 : 0)
+function ProposalFilters({ rows, kind, onKind, query, onQuery, placeholder, label }) {
+  const activeFilterCount = (kind !== 'all' ? 1 : 0) + (query ? 1 : 0)
   return (
     <div className="filter-bar">
       <select
-        className="form-control"
-        style={{ width: '190px' }}
-        value={lane}
-        onChange={e => onLane(e.target.value)}
+        className="form-control control-md"
+        value={kind}
+        onChange={e => onKind(e.target.value)}
         title="Filter by the kind of change"
         aria-label={`Filter ${label} by kind`}
       >
         <option value="all">All kinds ({rows.length})</option>
-        {LANES.map(l => (
+        {KINDS.map(l => (
           <option key={l.id} value={l.id}>
             {l.label} ({rows.filter(p => p.entity_type === l.id).length})
           </option>
         ))}
       </select>
-      <input
-        className="form-control"
-        style={{ width: '260px' }}
+      <SearchInput
+        width="lg"
         value={query}
-        onChange={e => onQuery(e.target.value)}
+        onChange={onQuery}
         placeholder={placeholder}
-        title={`Filter ${label} by what they are about`}
+        ariaLabel={`Filter ${label} by what they are about`}
       />
-      {activeFilterCount > 0 && (
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm filter-bar-spacer"
-          onClick={() => { onLane('all'); onQuery('') }}
-          title="Clear every filter"
-        >
-          <IconX size={13} /> Clear filters ({activeFilterCount})
-        </button>
-      )}
+      <ClearFilters count={activeFilterCount} onClear={() => { onKind('all'); onQuery('') }} />
     </div>
   )
 }
 
 export function ApprovalsTab({
-  showToast, hasPermission, userRole, currentUserId, onViewThread,
-  // Arrives from another page, one-shot: `initialSubject` points the working queue at one asset.
+  showToast, userRole, currentUserId, onViewTrail,
+  // Arrives from another page, one-shot: `initialSubject` points the working queue at one entity.
   // Cleared through `onClearFocus` so returning later does not reapply it.
   initialSubject = '', onClearFocus,
-  // Hand back to the asset's page, which is where the form that edits a proposal now lives.
+  // Hand back to the entity's page, where the form that edits a proposal lives.
   onOpenSubject
 }) {
   const [proposals, setProposals] = useState([])
@@ -459,14 +387,14 @@ export function ApprovalsTab({
   // to its uuid, which is what the page did before.
   const [locationNames, setLocationNames] = useState(() => new Map())
 
-  const [loading, setLoading]     = useState(true)
+  const [loading, setLoading] = useState(true)
 
   const [rejecting, setRejecting] = useState(null)
   const [busyId, setBusyId]       = useState(null)
   const [selectedId, setSelectedId] = useState(null)
-  const [decidedLane, setDecidedLane] = useState('all')
+  const [decidedKind, setDecidedKind] = useState('all')
   const [decidedQuery, setDecidedQuery] = useState('')
-  const [openLane, setOpenLane] = useState('all')
+  const [openKind, setOpenKind] = useState('all')
   // Set by the route effect below when the hand-over arrives, and freely editable afterwards --
   // a filter somebody cannot clear is a trap, not a shortcut.
   const [openQuery, setOpenQuery] = useState('')
@@ -509,23 +437,26 @@ export function ApprovalsTab({
     try { await loadAll() } catch { /* the poller reports a failing backend */ }
   }, [loadAll])
 
-  // OLDEST FIRST IN THE QUEUE, newest first in the record. A queue is worked from the front; a
-  // record is read from the most recent.
+  // Oldest first in the queue, which is worked from the front; newest decision first in the
+  // record, which is read from the most recent.
   const open = useMemo(
     () => proposals.filter(p => p.status === 'open')
       .sort((a, b) => new Date(a.proposed_at) - new Date(b.proposed_at)),
     [proposals]
   )
 
-  const decided = useMemo(() => proposals.filter(p => p.status !== 'open'), [proposals])
+  const decided = useMemo(
+    () => proposals.filter(p => p.status !== 'open')
+      .sort((a, b) => new Date(b.decided_at || b.proposed_at) - new Date(a.decided_at || a.proposed_at)),
+    [proposals]
+  )
 
   const decidedFiltered = useMemo(
-    () => filterProposals(decided, decidedLane, decidedQuery), [decided, decidedLane, decidedQuery])
+    () => filterProposals(decided, decidedKind, decidedQuery), [decided, decidedKind, decidedQuery])
 
-  // The working queue filters too: the device drawer routes here with the machine's id as the
-  // query.
+  // The working queue filters too: the device drawer routes here with the device's id as the query.
   const openFiltered = useMemo(
-    () => filterProposals(open, openLane, openQuery), [open, openLane, openQuery])
+    () => filterProposals(open, openKind, openQuery), [open, openKind, openQuery])
 
   // Resolved fresh every render, so a proposal that is decided out from under the drawer -- by the
   // poller, or by somebody else -- closes it rather than leaving a stale row on screen.
@@ -560,7 +491,6 @@ export function ApprovalsTab({
     }
   }
 
-  const canPropose = hasPermission?.(PERMISSION_UUIDS.PROPOSAL_CREATE)
   const mine = selected && selected.proposed_by === currentUserId
   const decidable = selected && selected.status === 'open' && canDecide(selected.entity_type, userRole)
 
@@ -579,20 +509,27 @@ export function ApprovalsTab({
         onClick: () => setRejecting(selected)
       }
     ] : []),
-    // Only when there is a row to open: `applied_thread_id` is set by an approval and by nothing
+    // Only when there is a row to open: `applied_trail_id` is set by an approval and by nothing
     // else.
-    ...(selected.applied_thread_id && onViewThread ? [{
-      label: 'View in Digital Thread', icon: <IconHistory size={13} />,
+    ...(selected.applied_trail_id && onViewTrail ? [{
+      label: 'View in Audit Trail', icon: <IconHistory size={13} />,
       title: 'The audit row this approval wrote, naming both the proposer and the approver',
-      onClick: () => onViewThread(selected)
+      // Filtered to the subject's own kind: `audit_trail_page()` compares `entity_type` exactly,
+      // and the approval row is filed under that kind's table. A deleted subject's rows are hidden
+      // by default, so the trail is asked to show them.
+      onClick: () => onViewTrail({
+        id: selected.entity_id,
+        type: ENTITY_KIND_BY_TABLE[selected.entity_type] || '',
+        purged: Boolean(selected.target_missing)
+      })
     }] : []),
     ...(mine && selected.status === 'open' ? [
-      /* Edit is a hand-over, not a dialog: the asset's page opens with Propose a Change seeded from
-         this proposal. One open proposal per asset per person, so a second field extends the
-         request. */
+      /* Edit is a hand-over, not a dialog: the entity's page opens with Propose a Change seeded
+         from this proposal. One open proposal per entity per person, so a second field extends
+         the request. */
       ...(onOpenSubject ? [{
         label: 'Add to this proposal', icon: <IconPencil size={13} />,
-        title: 'Open this asset, where the same dialog that edits it will extend your request',
+        title: 'Open this entity, where the same dialog that edits it will extend your request',
         onClick: () => onOpenSubject(selected)
       }] : []),
       {
@@ -605,23 +542,17 @@ export function ApprovalsTab({
     ] : [])
   ]
 
-  if (loading) {
-    return <div className="loading-wrap"><div className="spinner" /> Loading proposals…</div>
-  }
-
   return (
     <div className="page-layout">
       <div className="page-main">
 
-        {/* No Propose a Change card: the act starts on the asset's own page. */}
+        {/* No Propose a Change card: the act starts on the entity's own page. */}
         <PageHeading icon={<IconInbox size={15} />} title="Approvals">
-          A proposal is a request, not a change: nothing is written until somebody who may make
-          it approves. {canPropose
-            ? 'To ask for one, open the asset on its own page and use Propose a Change — the same dialog that edits it.'
-            : 'Your role can decide proposals but not file them.'}
+          Changes people have proposed but may not make themselves; nothing is written until someone
+          who may make the change approves it.
         </PageHeading>
 
-        <div className="card approvals-card">
+        <div className={`card approvals-card${open.length > 0 ? ' card-attention' : ''}`}>
           <div className="card-header">
             <h3 className="section-title">
               Awaiting a decision
@@ -629,11 +560,12 @@ export function ApprovalsTab({
                 label="About the open queue"
                 text="The working queue, oldest first. Select a row to see exactly what would change. Approving applies it in one transaction, so a proposal that breaks a rule fails here rather than later."
               />
+              <SectionCount total={open.length} shown={openFiltered.length} />
             </h3>
           </div>
           <div className="card-body">
             <ProposalFilters
-              rows={open} lane={openLane} onLane={setOpenLane}
+              rows={open} kind={openKind} onKind={setOpenKind}
               query={openQuery} onQuery={setOpenQuery}
               label="open proposals"
               placeholder="Search subject, proposer or rationale…"
@@ -643,9 +575,10 @@ export function ApprovalsTab({
             rows={openFiltered}
             selectedId={selectedId}
             onSelect={setSelectedId}
-            emptyText={openLane !== 'all' || openQuery
-              ? 'Nothing open matches that filter.'
-              : 'Nothing is waiting. A proposal appears here when somebody asks for a change they cannot make themselves.'}
+            loading={loading}
+            filtered={openKind !== 'all' || Boolean(openQuery)}
+            emptyMessage="Nothing is waiting. A proposal appears here when somebody asks for a change they cannot make themselves."
+            filteredMessage="Nothing open matches these filters."
           />
         </div>
 
@@ -655,25 +588,27 @@ export function ApprovalsTab({
               Decided
               <HelpTip
                 label="About decided proposals"
-                text="What was applied, rejected, withdrawn or left to expire, kept for the retention period an Administrator sets. What an approval actually changed lives in the Digital Thread, so pruning here destroys no record."
+                text="What was applied, rejected, withdrawn or left to expire, newest decision first, kept for the retention period an Administrator sets. What an approval changed lives in the Audit Trail."
               />
+              <SectionCount total={decided.length} shown={decidedFiltered.length} />
             </h3>
           </div>
           <div className="card-body">
             <ProposalFilters
-              rows={decided} lane={decidedLane} onLane={setDecidedLane}
+              rows={decided} kind={decidedKind} onKind={setDecidedKind}
               query={decidedQuery} onQuery={setDecidedQuery}
               label="decided proposals"
-              placeholder="Search subject, proposer, reason or rationale…"
+              placeholder="Search subject, proposer or reason…"
             />
           </div>
           <ProposalTable
             rows={decidedFiltered}
             selectedId={selectedId}
             onSelect={setSelectedId}
-            emptyText={decided.length === 0
-              ? 'Nothing has been decided yet.'
-              : 'No decided proposal matches the selected filter.'}
+            loading={loading}
+            filtered={decidedKind !== 'all' || Boolean(decidedQuery)}
+            emptyMessage="Nothing has been decided yet."
+            filteredMessage="No decided proposal matches these filters."
           />
         </div>
       </div>
@@ -687,37 +622,38 @@ export function ApprovalsTab({
         title={selected?.target_label || ''}
         subtitle={selected && (
           <>
-            <span className="badge badge-neutral" style={{ fontSize: '11px' }}>
-              {LANE_BY_ID.get(selected.entity_type)?.label || selected.entity_type}
-            </span>
-            <StatusBadge status={selected.status} />
+            <Badge size="sm">
+              {KIND_BY_ID.get(selected.entity_type)?.label || selected.entity_type}
+            </Badge>
+            <ProposalStatus status={selected.status} />
           </>
         )}
         fields={selected ? [
           {
             label: 'Proposed by',
             value: <ActorLabel id={selected.proposed_by} email={selected.proposed_by_email}
+                               machineName={selected.proposed_by_machine_name}
                                currentUserId={currentUserId} />,
-            title: 'Taken from the signed access token when the proposal was filed, not from a form.'
+            title: selected.proposed_by_email || !selected.proposed_by_machine_name
+              ? 'Taken from the signed access token when the proposal was filed, not from a form.'
+              : 'The name an Administrator gave this machine identity on the Access Control page.'
           },
           {
-            // BOTH READINGS, and the relative one is the parenthetical: this panel is where
-            // somebody goes to quote a time into a ticket, and "31m ago" cannot be quoted.
+            // Both readings, the relative one in brackets: "31m ago" cannot be quoted in a ticket.
             label: 'Proposed at',
-            value: `${absoluteTime(selected.proposed_at)} (${ageLabel(selected.proposed_at)})`,
+            value: `${formatDateTime(selected.proposed_at)} (${formatRelative(selected.proposed_at)})`,
             title: selected.proposed_at
           },
           ...(selected.decided_at ? [{
             label: selected.status === 'expired' ? 'Expired' : `${selected.status} by`,
-            // AN EXPIRED PROPOSAL NAMES NOBODY, and that is deliberate rather than missing data:
-            // the timer has no session and is not a person.
+            // An expired proposal names nobody: the timer has no session and is not a person.
             value: selected.decided_by
               ? <ActorLabel id={selected.decided_by} currentUserId={currentUserId} />
               : 'the expiry timer, which is not a person',
             title: selected.decided_at
           }, {
             label: 'Decided at',
-            value: `${absoluteTime(selected.decided_at)} (${ageLabel(selected.decided_at)})`,
+            value: `${formatDateTime(selected.decided_at)} (${formatRelative(selected.decided_at)})`,
             title: selected.decided_at
           }] : []),
           ...(selected.decision_reason
@@ -727,9 +663,9 @@ export function ApprovalsTab({
             ? [{ label: 'Why it was asked for', value: selected.rationale, full: true }]
             : []),
           { label: 'Proposal UUID', value: selected.id, mono: true, copyable: true },
-          ...(selected.applied_thread_id ? [{
-            label: 'Digital Thread row',
-            value: String(selected.applied_thread_id),
+          ...(selected.applied_trail_id ? [{
+            label: 'Audit Trail row',
+            value: String(selected.applied_trail_id),
             mono: true,
             title: 'The audit row this approval wrote, naming both the proposer and the approver.'
           }] : [])

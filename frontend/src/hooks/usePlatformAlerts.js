@@ -2,10 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { REALTIME_ENABLED } from '../constants'
 
-/** Reconciliation interval. Detection is the socket's job; this only repairs what it missed. */
-const RECONCILE_MS = 60000
+/**
+ * Reconciliation interval. Detection is the socket's job; this only repairs what it missed.
+ * AlertPill's footer states both intervals from these constants.
+ */
+export const RECONCILE_MS = 60000
 /** Fallback poll interval used only when Realtime is unavailable. */
-const POLL_INTERVAL_MS = 15000
+export const POLL_INTERVAL_MS = 15000
 
 /**
  * The live set of firing Grafana alerts, machine and platform alike, with a toast on each

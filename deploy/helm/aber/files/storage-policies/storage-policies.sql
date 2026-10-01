@@ -352,63 +352,80 @@ BEGIN
     'browser role writes, Administrator alone may delete).';
 END $$;
 
--- floor-plans: private, read by every signed-in role (the Site Map is the Operator's page); writes
+-- area-plans: private, read by every signed-in role (the Site Map is the Operator's page); writes
 -- are the roles that manage areas, confined to <area_id>/ naming an area that exists.
-DROP POLICY IF EXISTS "floor_plans_read_authenticated" ON storage.objects;
-CREATE POLICY "floor_plans_read_authenticated" ON storage.objects
+DROP POLICY IF EXISTS "area_plans_read_authenticated" ON storage.objects;
+CREATE POLICY "area_plans_read_authenticated" ON storage.objects
   FOR SELECT TO authenticated
-  USING (bucket_id = 'floor-plans');
+  USING (bucket_id = 'area-plans');
 
-DROP POLICY IF EXISTS "floor_plans_insert_privileged" ON storage.objects;
-CREATE POLICY "floor_plans_insert_privileged" ON storage.objects
+DROP POLICY IF EXISTS "area_plans_insert_privileged" ON storage.objects;
+CREATE POLICY "area_plans_insert_privileged" ON storage.objects
   FOR INSERT TO authenticated
   WITH CHECK (
-    bucket_id = 'floor-plans'
+    bucket_id = 'area-plans'
     AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
-    AND public.is_floor_plan_path(storage.objects.name)
+    AND public.is_area_plan_path(storage.objects.name)
   );
 
-DROP POLICY IF EXISTS "floor_plans_update_privileged" ON storage.objects;
-CREATE POLICY "floor_plans_update_privileged" ON storage.objects
+DROP POLICY IF EXISTS "area_plans_update_privileged" ON storage.objects;
+CREATE POLICY "area_plans_update_privileged" ON storage.objects
   FOR UPDATE TO authenticated
   USING (
-    bucket_id = 'floor-plans'
+    bucket_id = 'area-plans'
     AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
   )
   WITH CHECK (
-    bucket_id = 'floor-plans'
+    bucket_id = 'area-plans'
     AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
-    AND public.is_floor_plan_path(storage.objects.name)
+    AND public.is_area_plan_path(storage.objects.name)
   );
 
-DROP POLICY IF EXISTS "floor_plans_delete_privileged" ON storage.objects;
-CREATE POLICY "floor_plans_delete_privileged" ON storage.objects
+DROP POLICY IF EXISTS "area_plans_delete_privileged" ON storage.objects;
+CREATE POLICY "area_plans_delete_privileged" ON storage.objects
   FOR DELETE TO authenticated
   USING (
-    bucket_id = 'floor-plans'
+    bucket_id = 'area-plans'
     AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
   );
+
+-- The bucket's policies under its old name, floor-plans, and the path check they called. Dropped
+-- here because nothing drops a policy this file stops declaring, and the check cannot go before
+-- the two write policies that depend on it. storage-init moves the objects across.
+DROP POLICY IF EXISTS "floor_plans_read_authenticated" ON storage.objects;
+DROP POLICY IF EXISTS "floor_plans_insert_privileged" ON storage.objects;
+DROP POLICY IF EXISTS "floor_plans_update_privileged" ON storage.objects;
+DROP POLICY IF EXISTS "floor_plans_delete_privileged" ON storage.objects;
+DROP FUNCTION IF EXISTS public.is_floor_plan_path(text);
 
 DO $$
 DECLARE
   v_policies integer;
   v_unconfined integer;
+  v_retired integer;
 BEGIN
   SELECT count(*) INTO v_policies FROM pg_policies
    WHERE schemaname = 'storage' AND tablename = 'objects'
-     AND policyname LIKE 'floor_plans_%';
+     AND policyname LIKE 'area_plans_%';
   IF v_policies <> 4 THEN
-    RAISE EXCEPTION 'floor-plans has % policy/policies, expected 4 (select, insert, update, delete).', v_policies;
+    RAISE EXCEPTION 'area-plans has % policy/policies, expected 4 (select, insert, update, delete).', v_policies;
   END IF;
 
   SELECT count(*) INTO v_unconfined FROM pg_policies
    WHERE schemaname = 'storage' AND tablename = 'objects'
-     AND policyname LIKE 'floor_plans_%'
+     AND policyname LIKE 'area_plans_%'
      AND cmd IN ('INSERT', 'UPDATE')
-     AND coalesce(with_check, '') NOT LIKE '%is_floor_plan_path%';
+     AND coalesce(with_check, '') NOT LIKE '%is_area_plan_path%';
   IF v_unconfined <> 0 THEN
-    RAISE EXCEPTION 'floor-plans: % write policy/policies do not confine the path to an existing area.', v_unconfined;
+    RAISE EXCEPTION 'area-plans: % write policy/policies do not confine the path to an existing area.', v_unconfined;
   END IF;
 
-  RAISE NOTICE 'floor-plans policies reconciled (4 policies; writes confined to <area_id>/).';
+  SELECT count(*) INTO v_retired FROM pg_policies
+   WHERE schemaname = 'storage' AND tablename = 'objects'
+     AND policyname LIKE 'floor_plans_%';
+  IF v_retired <> 0 OR to_regprocedure('public.is_floor_plan_path(text)') IS NOT NULL THEN
+    RAISE EXCEPTION 'floor-plans: % policy/policies or the old path check survived the rename to area-plans.', v_retired;
+  END IF;
+
+  RAISE NOTICE 'area-plans policies reconciled (4 policies; writes confined to <area_id>/; floor-plans policies gone).';
 END $$;

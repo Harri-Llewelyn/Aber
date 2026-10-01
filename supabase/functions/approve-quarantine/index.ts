@@ -1,5 +1,4 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient } from "@supabase/supabase-js";
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
 import { isUuid } from "./isUuid.ts";
 import { resolveUserRole } from "../_shared/roles.ts";
@@ -128,7 +127,7 @@ export default async function handler(req: Request): Promise<Response> {
 
     // One atomic call. The RPC re-keys asset_config, updates the surviving device and deletes the
     // duplicate in one transaction. `user.id` is passed explicitly because
-    // log_digital_thread_event() records auth.uid(), and this client authenticates as service_role,
+    // log_audit_trail_event() records auth.uid(), and this client authenticates as service_role,
     // whose JWT carries no `sub`; the RPC sets the actor and re-checks their role against
     // public.user_roles.
     const { data, error: rpcError } = await supabaseAdmin.rpc("approve_quarantined_device", {
@@ -184,4 +183,4 @@ export default async function handler(req: Request): Promise<Response> {
   }
 }
 
-serve(handler);
+Deno.serve(handler);

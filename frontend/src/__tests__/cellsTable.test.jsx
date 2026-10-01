@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CellsTab } from '../components/tabs/CellsTab'
 import { api } from '../api'
+import { expectCardHeading } from '../test/cardHeading'
 
 /**
  * The Cells page as a table. The context drawer holds the UUID, both membership lists as linking
@@ -47,7 +48,7 @@ const renderCells = (props = {}, routes = {}) => {
   return render(
     <CellsTab
       showToast={vi.fn()} hasPermission={() => true}
-      onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} onViewThread={vi.fn()}
+      onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} onViewTrail={vi.fn()}
       {...props}
     />
   )
@@ -59,6 +60,12 @@ const panel = () => document.querySelector('.context-panel')
 
 const ready = async () => waitFor(() => expect(table()).toBeTruthy())
 
+// The list opens on Active; an archived cell is one filter away.
+const showArchived = async () => {
+  fireEvent.change(await screen.findByLabelText('Lifecycle'), { target: { value: 'archived' } })
+  await ready()
+}
+
 beforeEach(() => { vi.clearAllMocks() })
 
 // The shape of the list
@@ -69,7 +76,7 @@ describe('the cells table', () => {
     await ready()
 
     expect([...table().querySelectorAll('thead th')].map(h => h.textContent.trim()))
-      .toEqual(['Icon', 'Cell Name', 'Area', 'Cell UUID', 'Assigned Gateways', 'Assigned Devices'])
+      .toEqual(['Icon', 'Cell Name', 'Area', 'Cell UUID', 'Assigned Gateways', 'Devices'])
     expect(table().querySelectorAll('tbody tr')).toHaveLength(1)
   })
 
@@ -144,7 +151,7 @@ describe('assigned gateways and devices', () => {
     expect(within(rowFor('Assembly Line 1')).getByText(/Unknown_Node \(quarantined\)/)).toBeTruthy()
   })
 
-  it('says a zone is empty rather than leaving two blank cells', async () => {
+  it('says a cell is empty rather than leaving two blank cells', async () => {
     renderCells({}, {
       cells: [{ ...CELL, gateways: [], gateway_count: 0 }],
       devices: []
@@ -154,8 +161,8 @@ describe('assigned gateways and devices', () => {
     // A blank cell reads as contents that failed to load. This one is answering the question.
     const row = rowFor('Assembly Line 1')
     expect(within(row).getByText('No gateways assigned')).toBeTruthy()
-    expect(within(row).getByText('No devices located here')).toBeTruthy()
-    expect(within(row).getByText('empty')).toBeTruthy()
+    expect(within(row).getByText('No devices here')).toBeTruthy()
+    expect(within(row).getByText('Empty')).toBeTruthy()
   })
 })
 
@@ -178,7 +185,7 @@ describe('the row and its drawer', () => {
     await ready()
 
     const row = rowFor('Assembly Line 1')
-    for (const name of [/Archive/i, /^Edit/i, /Docs/i, /Thread/i]) {
+    for (const name of [/Archive/i, /^Edit/i, /Attached Links/i, /Audit Trail/i]) {
       expect(within(row).queryByRole('button', { name })).toBeNull()
     }
 
@@ -194,22 +201,23 @@ describe('the row and its drawer', () => {
     renderCells({}, {
       cells: [{ ...CELL, is_archived: true, auto_delete_at: '2026-12-01T00:00:00Z' }]
     })
-    await ready()
+    await showArchived()
 
     expect(within(rowFor('Assembly Line 1')).getByText('ARCHIVED')).toBeTruthy()
+    expect(rowFor('Assembly Line 1')).toHaveClass('row-archived')
 
     fireEvent.click(within(table()).getByText('Assembly Line 1'))
     await waitFor(() => expect(panel()).toBeTruthy())
-    expect(within(panel()).getByText(/Auto-purges on/)).toBeTruthy()
+    expect(within(panel()).getByText(/Auto-Purge: /)).toBeTruthy()
   })
 
   it('says permanent retention rather than falling silent when no timer is set', async () => {
     renderCells({}, { cells: [{ ...CELL, is_archived: true, auto_delete_at: null }] })
-    await ready()
+    await showArchived()
 
     fireEvent.click(within(table()).getByText('Assembly Line 1'))
     await waitFor(() => expect(panel()).toBeTruthy())
-    expect(within(panel()).getByText(/Permanent/)).toBeTruthy()
+    expect(within(panel()).getByText(/Never auto-purged/)).toBeTruthy()
   })
 
   it('shows no Retention field on a cell still in service', async () => {
@@ -232,7 +240,7 @@ describe('filters still narrow the table', () => {
     await ready()
     await waitFor(() => expect(table().querySelectorAll('tbody tr')).toHaveLength(2))
 
-    fireEvent.change(screen.getByPlaceholderText(/Search by Cell ID or name/), {
+    fireEvent.change(screen.getByPlaceholderText(/Search by Cell UUID or name/), {
       target: { value: 'paint' }
     })
 
@@ -244,11 +252,45 @@ describe('filters still narrow the table', () => {
     renderCells()
     await ready()
 
-    fireEvent.change(screen.getByPlaceholderText(/Search by Cell ID or name/), {
+    fireEvent.change(screen.getByPlaceholderText(/Search by Cell UUID or name/), {
       target: { value: 'no-such-cell' }
     })
 
     expect(table()).toBeNull()
-    expect(document.querySelector('.empty-state')).toHaveTextContent('No cells match the selected filter')
+    expect(document.querySelector('.empty-state')).toHaveTextContent('No cells match these filters.')
+  })
+
+  it('names the page in its card header, with no title tip', async () => {
+    renderCells({}, { cells: [] })
+    await waitFor(() => expect(document.querySelector('.empty-state')).toBeTruthy())
+    const header = expectCardHeading('Cells', /area/)
+    expect(header).toHaveTextContent('New Cell')
+  })
+
+  it('says there are none yet on an empty stack, and shows a count of 0', async () => {
+    renderCells({}, { cells: [] })
+    await waitFor(() => expect(document.querySelector('.empty-state')).toBeTruthy())
+    expect(document.querySelector('.empty-state')).toHaveTextContent('No cells yet. Add one, then file it in an area.')
+    expect(document.querySelector('.card-header .section-count')).toHaveTextContent('0')
+  })
+
+  it('opens on Active, counts the rows, and reads shown / total under a search', async () => {
+    renderCells({}, {
+      cells: [CELL, { ...CELL, cell_id: 'cell-2', cell_name: 'Paint Shop', gateways: [] }, { ...CELL, cell_id: 'cell-3', cell_name: 'Old Bay', is_archived: true }]
+    })
+    await ready()
+    expect(screen.getByLabelText('Lifecycle')).toHaveValue('active')
+    expect(within(table()).queryByText('Old Bay')).toBeNull()
+    expect(document.querySelector('.card-header .section-count')).toHaveTextContent('2')
+    fireEvent.change(screen.getByPlaceholderText(/Search by Cell UUID or name/), { target: { value: 'paint' } })
+    expect(document.querySelector('.card-header .section-count')).toHaveTextContent('1 / 2')
+  })
+
+  it('scrolls inside its card', async () => {
+    renderCells()
+    await ready()
+    expect(document.querySelector('.page-layout')).toHaveClass('page-fill')
+    expect(document.querySelector('.card')).toHaveClass('card-fill')
+    expect(document.querySelector('.card-fill > .table-wrap')).toBeTruthy()
   })
 })

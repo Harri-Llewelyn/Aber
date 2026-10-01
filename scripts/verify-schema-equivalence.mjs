@@ -116,8 +116,8 @@ const PSQL_VARS = {
   nodered_webhook_jwt_secret: 'probe-webhook-secret',
   nodered_redirect_uri: 'http://localhost:1880/auth/strategy/callback',
   bi_reader_password: 'probe-bi-reader',
-  supabase_functions_url: 'http://supabase-kong:8000/functions/v1',
-  supabase_anon_key: 'probe-anon-key',
+  supabase_functions_url: 'http://supabase-envoy:8000/functions/v1',
+  supabase_publishable_key: 'probe-publishable-key',
   gateway_revoke_secret: 'probe-revoke-secret',
   forge_sweep_secret: 'probe-sweep-secret',
 };
@@ -246,13 +246,13 @@ function dumpSchema(name) {
 // share.
 //
 // THREE TABLES ARE COUNTED BUT NOT DIGESTED, because their rows carry the time they were written
-// -- `digital_thread` stamps recorded_at, and the two liveness tables exist to hold a timestamp.
+// -- `audit_trail` stamps recorded_at, and the two liveness tables exist to hold a timestamp.
 // Two databases built a minute apart legitimately differ there, and digesting it would produce a
 // check that fails for the wrong reason every time it is run.
 //
-// THESE ARE PARTITION ROOTS, not table names. `digital_thread` is partitioned by month and its
+// THESE ARE PARTITION ROOTS, not table names. `audit_trail` is partitioned by month and its
 // rows live in the partitions, which is what `seedRows` resolves before matching here.
-const VOLATILE = ['digital_thread', 'directory_liveness_probe', 'playback_worker_status'];
+const VOLATILE = ['audit_trail', 'directory_liveness_probe', 'playback_worker_status'];
 
 // ONE TABLE IS NOT COMPARED AT ALL, and the reason is different from the one above. Its rows are
 // not a declaration a chain makes, they are a record of what that chain DID: `one_shot_migrations`
@@ -262,7 +262,7 @@ const VOLATILE = ['digital_thread', 'directory_liveness_probe', 'playback_worker
 // chain -- which is the one thing this ledger exists to prevent. So the short chain legitimately
 // holds fewer rows here than the long one, and will for every squash from now on.
 //
-// `digital_thread` is deliberately NOT in this list even though the same argument would fit it.
+// `audit_trail` is deliberately NOT in this list even though the same argument would fit it.
 // The audit trail records every seed a chain writes, so a declaration left behind by a fold shows
 // up here as a missing row -- which is exactly how the last four were found. Counting it is worth
 // more than the one difference it would excuse.
@@ -275,8 +275,8 @@ function seedRows(container) {
   // Built as one query per table through a DO block would need a temp table to return from, so
   // the list is assembled client-side instead: one round trip per table, on a local container.
   // EACH TABLE COMES BACK WITH ITS PARTITION ROOT, because VOLATILE names parents and `pg_tables`
-  // lists partitions. `digital_thread` is partitioned by month, so the rows are in
-  // `digital_thread_2026_09` -- a name no VOLATILE entry matches, which had the check digesting
+  // lists partitions. `audit_trail` is partitioned by month, so the rows are in
+  // `audit_trail_2026_09` -- a name no VOLATILE entry matches, which had the check digesting
   // `recorded_at` after all and reporting a difference between a chain and ITSELF.
   const listed = docker(['exec', container, 'psql', '-U', 'postgres', '-d', 'postgres', '-tAc',
     `SELECT t.tablename, coalesce(r.relname, t.tablename)
@@ -406,8 +406,8 @@ try {
   const sb = seedRows(B);
   const tables = [...new Set([...sa.keys(), ...sb.keys()])].sort();
   // HISTORICAL names partition roots, as VOLATILE does, but the report keys each PARTITION under
-  // its own name -- so the match has to take `digital_thread_2026_09` and `digital_thread_default`
-  // with `digital_thread`, or the rows would be counted under a name nothing lists.
+  // its own name -- so the match has to take `audit_trail_2026_09` and `audit_trail_default`
+  // with `audit_trail`, or the rows would be counted under a name nothing lists.
   const isHistory = (t) => HISTORICAL.some((h) => t === h || t.startsWith(`${h}_`));
   const history = tables.filter(isHistory);
   const differing = tables.filter((t) => !history.includes(t) && (sa.get(t) || '') !== (sb.get(t) || ''));

@@ -3,27 +3,27 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   ApprovalsTab,
+  ActorLabel,
   canDecide,
   diffRows,
-  refusalFor,
-  ageLabel,
-  absoluteTime,
   keyLabel,
-  LANES,
+  KINDS,
   filterProposals,
   locationNameMap
 } from '../components/tabs/ApprovalsTab'
 import { api } from '../api'
+import { ENTITY_KIND_BY_TABLE, ENTITY_TABLE_BY_KIND } from '../constants'
+import { formatDateTime } from '../utils/format'
 
 vi.mock('../api', () => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn() }
 }))
 
 /**
- * The Approvals page. The property worth guarding is the asymmetry: a `Shopfloor_Manager` decides
- * the asset lanes and only an `Administrator` decides a schema publication, and the page must not
- * offer a button the RPC will refuse. The second is the cap's repair: editing the proposal you
- * already have must be one click from the refusal.
+ * The Approvals page. The property worth guarding is the gate: an `Administrator` or a
+ * `Shopfloor_Manager` decides every live lane, nobody decides the withdrawn schema lane, and the
+ * page must not offer a button the RPC will refuse. The second is the cap's repair: editing the
+ * proposal you already have must be one click from the refusal.
  */
 
 const OPERATOR_ID = 'aaaaaaaa-0000-4000-8000-000000000001'
@@ -42,7 +42,7 @@ const deviceProposal = (over = {}) => ({
   decided_by: null,
   decided_at: null,
   decision_reason: null,
-  applied_thread_id: null,
+  applied_trail_id: null,
   target_label: 'Lathe_01',
   target_missing: false,
   current: { name: 'Lathe_01' },
@@ -62,7 +62,7 @@ const schemaProposal = (over = {}) => ({
   decided_by: null,
   decided_at: null,
   decision_reason: null,
-  applied_thread_id: null,
+  applied_trail_id: null,
   target_label: 'CNC_Mill v2',
   target_missing: false,
   current: { schema_name: 'CNC_Mill', version: 2, status: 'draft' },
@@ -72,8 +72,6 @@ const schemaProposal = (over = {}) => ({
 function mockLoad(proposals) {
   api.get.mockImplementation((path) => {
     if (path === '/api/v1/proposals') return Promise.resolve(proposals)
-    if (path === '/api/v1/assets') return Promise.resolve([{ id: 'dev-1', name: 'Lathe_01' }])
-    if (path.startsWith('/api/v1/proposals/allowed-keys/')) return Promise.resolve(['name', 'description'])
     return Promise.resolve([])
   })
 }
@@ -118,21 +116,21 @@ describe('who may decide which lane', () => {
   })
 
   it('lets an administrator decide every live lane', () => {
-    for (const lane of LANES.map(l => l.id)) {
+    for (const lane of KINDS.map(l => l.id)) {
       expect(canDecide(lane, 'Administrator'), lane).toBe(true)
     }
   })
 
   it('lets a manager decide every live lane too', () => {
-    // 0090 gates the five lanes it added on cell:manage, gateway:manage and link:manage -- all
-    // three held by exactly these two roles, so the answer is the same for both today.
-    for (const lane of LANES.map(l => l.id)) {
+    // Cells and gateways resolve cell:manage and gateway:manage, held by exactly these two roles,
+    // so the answer is the same for both today.
+    for (const lane of KINDS.map(l => l.id)) {
       expect(canDecide(lane, 'Shopfloor_Manager'), lane).toBe(true)
     }
   })
 
   it('lets an operator decide nothing', () => {
-    for (const lane of [...LANES.map(l => l.id), 'schemas']) {
+    for (const lane of [...KINDS.map(l => l.id), 'schemas']) {
       expect(canDecide(lane, 'Operator')).toBe(false)
     }
   })
@@ -207,7 +205,7 @@ describe('what a proposal says it would change', () => {
     mockLoad([schemaProposal()])
     renderTab({ userRole: 'Administrator' })
     await selectRow()
-    expect(screen.getByText(/archives its predecessor/i)).toBeInTheDocument()
+    expect(screen.getByText(/request to publish a schema draft/i)).toBeInTheDocument()
   })
 
   it('falls back to the raw key for one it has no label for', () => {
@@ -217,32 +215,6 @@ describe('what a proposal says it would change', () => {
     expect(keyLabel('serial_number')).toBe('Serial number')
   })
 })
-
-describe('the two caps fail differently', () => {
-  it('offers to open the proposal you already have', () => {
-    const existing = deviceProposal()
-    const refusal = refusalFor({ code: '23505' }, existing)
-    expect(refusal.openExisting).toBe(true)
-    expect(refusal.message).toMatch(/already have an open proposal/i)
-  })
-
-  it('does not offer that when the row is not in hand', () => {
-    expect(refusalFor({ code: '23505' }, undefined).openExisting).toBe(false)
-  })
-
-  it('passes the per-person ceiling through in the database wording', () => {
-    // The repair is different -- decide or withdraw something else -- and the message says how
-    // many are open, which no sentence written here could know.
-    const refusal = refusalFor({ code: '23514', message: 'you already have 10 open proposal(s)' }, null)
-    expect(refusal.openExisting).toBe(false)
-    expect(refusal.message).toMatch(/10 open/)
-  })
-
-  it('reports a refusal as a refusal', () => {
-    expect(refusalFor({ code: '42501' }, null).message).toMatch(/not permitted/i)
-  })
-})
-
 
 describe('rejecting', () => {
   it('will not send without a reason', async () => {
@@ -292,6 +264,21 @@ describe('the queue is worked from the front', () => {
     await screen.findAllByTestId('proposal-row')
     const cards = screen.getAllByTestId('proposal-row')
     expect(within(cards[0]).getByText('Older')).toBeInTheDocument()
+  })
+
+  it('gives every selectable row the pointer cursor, and a rejected proposal a readable badge', async () => {
+    mockLoad([
+      deviceProposal({ id: 'open-1', target_label: 'Open one' }),
+      deviceProposal({ id: 'rej-1', target_label: 'Rejected one', status: 'rejected', decided_by: MANAGER_ID, decided_at: '2026-09-05T00:00:00Z' })
+    ])
+    renderTab()
+
+    await screen.findAllByTestId('proposal-row')
+    for (const row of screen.getAllByTestId('proposal-row')) {
+      expect(row.className).toContain('row-selectable')
+    }
+    expect(document.querySelector('.badge-danger')).not.toBeNull()
+    expect(document.querySelector('.badge-offline')).toBeNull()
   })
 
   it('separates what is waiting from what was decided', async () => {
@@ -367,7 +354,7 @@ describe('finding a decision again', () => {
     renderTab()
     await screen.findAllByTestId('proposal-row')
 
-    const box = screen.getByTitle(/filter decided proposals/i)
+    const box = screen.getByLabelText(/filter decided proposals by what/i)
     fireEvent.change(box, { target: { value: 'retired' } })
     let rows = screen.getAllByTestId('proposal-row')
     expect(rows).toHaveLength(1)
@@ -384,10 +371,10 @@ describe('finding a decision again', () => {
     renderTab()
     await screen.findAllByTestId('proposal-row')
 
-    fireEvent.change(screen.getByTitle(/filter decided proposals/i), {
+    fireEvent.change(screen.getByLabelText(/filter decided proposals by what/i), {
       target: { value: 'nothing matches this' }
     })
-    expect(screen.getByText(/no decided proposal matches the selected filter/i)).toBeInTheDocument()
+    expect(screen.getByText(/no decided proposal matches these filters/i)).toBeInTheDocument()
   })
 
   it('does not filter the queue that is still waiting', async () => {
@@ -410,41 +397,82 @@ describe('finding a decision again', () => {
   })
 })
 
-describe('following an approval into the Digital Thread', () => {
+describe('following an approval into the Audit Trail', () => {
   it('offers the hand-over on a proposal that was applied', async () => {
-    const onViewThread = vi.fn()
+    const onViewTrail = vi.fn()
     mockLoad([deviceProposal({
       status: 'applied', decided_by: MANAGER_ID, decided_at: '2026-09-06T00:00:00Z',
-      applied_thread_id: 4321
+      applied_trail_id: 4321
     })])
-    renderTab({ onViewThread })
+    renderTab({ onViewTrail })
     await selectRow()
 
-    fireEvent.click(screen.getByRole('button', { name: /view in digital thread/i }))
+    fireEvent.click(screen.getByRole('button', { name: /view in audit trail/i }))
     // THE TARGET, NOT THE PROPOSAL. What a reader wants after an approval is the machine's history
     // with the approval in it, beside everything else that happened to it.
-    expect(onViewThread).toHaveBeenCalledWith(expect.objectContaining({ entity_id: 'dev-1' }))
+    expect(onViewTrail).toHaveBeenCalledWith({ id: 'dev-1', type: 'DEVICE', purged: false })
+  })
+
+  /* `audit_trail_page()` compares `entity_type` exactly, and the approval row is filed under the
+     lane's table. Filtered to DEVICE, a cell's or a nameplate's approval row is not listed. */
+  it.each([
+    ['cells', 'CELL'],
+    ['gateways', 'GATEWAY'],
+    ['areas', 'AREA'],
+    ['device_nameplate', 'NAMEPLATE']
+  ])('opens a %s approval filtered to %s', async (lane, kind) => {
+    const onViewTrail = vi.fn()
+    mockLoad([deviceProposal({
+      entity_type: lane, entity_id: `${lane}-1`, status: 'applied', decided_by: MANAGER_ID,
+      decided_at: '2026-09-06T00:00:00Z', applied_trail_id: 4321
+    })])
+    renderTab({ onViewTrail })
+    await selectRow()
+
+    fireEvent.click(screen.getByRole('button', { name: /view in audit trail/i }))
+    expect(onViewTrail).toHaveBeenCalledWith({ id: `${lane}-1`, type: kind, purged: false })
+  })
+
+  it('maps every lane to the kind whose filter asks for that lane', () => {
+    for (const { id } of KINDS) {
+      expect(ENTITY_TABLE_BY_KIND[ENTITY_KIND_BY_TABLE[id]], id).toBe(id)
+    }
+  })
+
+  it('asks for purged rows when the subject has been deleted', async () => {
+    // The trail hides a deleted entity's rows unless asked, and the approval row is one of them.
+    const onViewTrail = vi.fn()
+    mockLoad([deviceProposal({
+      entity_type: 'cells', entity_id: 'cell-gone', target_label: 'cell-gone', target_missing: true,
+      current: null, status: 'applied', decided_by: MANAGER_ID,
+      decided_at: '2026-09-06T00:00:00Z', applied_trail_id: 4321
+    })])
+    renderTab({ onViewTrail })
+    await selectRow()
+
+    fireEvent.click(screen.getByRole('button', { name: /view in audit trail/i }))
+    expect(onViewTrail).toHaveBeenCalledWith({ id: 'cell-gone', type: 'CELL', purged: true })
   })
 
   it('does not offer it on a rejection, which changed nothing', async () => {
-    // `applied_thread_id` is set by the approval and by nothing else. A dead button on the three
+    // `applied_trail_id` is set by the approval and by nothing else. A dead button on the three
     // outcomes that wrote no row would teach the reader the control lies.
-    const onViewThread = vi.fn()
+    const onViewTrail = vi.fn()
     mockLoad([deviceProposal({
       status: 'rejected', decided_by: MANAGER_ID, decided_at: '2026-09-06T00:00:00Z',
-      decision_reason: 'no', applied_thread_id: null
+      decision_reason: 'no', applied_trail_id: null
     })])
-    renderTab({ onViewThread })
+    renderTab({ onViewTrail })
     await selectRow()
-    expect(screen.queryByRole('button', { name: /view in digital thread/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /view in audit trail/i })).toBeNull()
   })
 
   it('does not offer it while the proposal is still open', async () => {
-    const onViewThread = vi.fn()
+    const onViewTrail = vi.fn()
     mockLoad([deviceProposal()])
-    renderTab({ onViewThread })
+    renderTab({ onViewTrail })
     await selectRow()
-    expect(screen.queryByRole('button', { name: /view in digital thread/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /view in audit trail/i })).toBeNull()
   })
 })
 
@@ -506,7 +534,7 @@ describe('the columns say one thing each', () => {
     renderTab()
     await selectRow()
     expect(screen.getByText('Proposed at')).toBeInTheDocument()
-    const shown = absoluteTime('2026-09-06T09:15:00Z')
+    const shown = formatDateTime('2026-09-06T09:15:00Z')
     expect(screen.getByText(new RegExp(shown.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))).toBeInTheDocument()
   })
 
@@ -525,8 +553,66 @@ describe('the columns say one thing each', () => {
     })])
     renderTab()
     await screen.findAllByTestId('proposal-row')
-    fireEvent.change(screen.getByTitle(/filter decided proposals/i), {
+    fireEvent.change(screen.getByLabelText(/filter decided proposals by what/i), {
       target: { value: 'ops.person' }
+    })
+    expect(screen.getAllByTestId('proposal-row')).toHaveLength(1)
+  })
+})
+
+
+describe('a machine proposer is named, and marked as a machine', () => {
+  // A machine identity has no email for its token to carry; `list_proposer_names()` gives the
+  // person deciding its proposal the name an Administrator gave it.
+  const MACHINE_ID = 'b1000000-0000-4000-8000-000000000009'
+
+  it('shows the name with a machine mark', () => {
+    render(<ActorLabel id={MACHINE_ID} machineName="Line 3 scheduler" currentUserId={MANAGER_ID} />)
+    expect(screen.getByText('Line 3 scheduler')).toBeInTheDocument()
+    expect(screen.getByText('machine')).toBeInTheDocument()
+    expect(screen.queryByText(MACHINE_ID.slice(0, 8))).toBeNull()
+  })
+
+  it('keeps the eight characters for a principal with no name and no email', () => {
+    render(<ActorLabel id={MACHINE_ID} machineName={null} currentUserId={MANAGER_ID} />)
+    expect(screen.getByText(MACHINE_ID.slice(0, 8))).toBeInTheDocument()
+    expect(screen.queryByText('machine')).toBeNull()
+  })
+
+  it('names a person by email, with no machine mark', () => {
+    render(<ActorLabel id={OPERATOR_ID} email="ops.person@aber.test" currentUserId={MANAGER_ID} />)
+    expect(screen.getByText('ops.person@aber.test')).toBeInTheDocument()
+    expect(screen.queryByText('machine')).toBeNull()
+  })
+
+  it('still says "you" and a dash where it always did', () => {
+    const { container } = render(<ActorLabel id={null} />)
+    expect(container.textContent).toBe('—')
+    render(<ActorLabel id={MANAGER_ID} machineName="Not me" currentUserId={MANAGER_ID} />)
+    expect(screen.getByText('you')).toBeInTheDocument()
+  })
+
+  it('names the machine in the drawer of the proposal it filed', async () => {
+    mockLoad([deviceProposal({
+      entity_type: 'cells', proposed_by: MACHINE_ID, proposed_by_email: null,
+      proposed_by_machine_name: 'Line 3 scheduler'
+    })])
+    renderTab({ currentUserId: MANAGER_ID })
+    await selectRow()
+    expect(screen.getByText('Line 3 scheduler')).toBeInTheDocument()
+    expect(screen.getByText('machine')).toBeInTheDocument()
+  })
+
+  it('finds a proposal by the machine that filed it', async () => {
+    mockLoad([
+      deviceProposal({ id: 'p-machine', proposed_by: MACHINE_ID, proposed_by_email: null,
+                       proposed_by_machine_name: 'Line 3 scheduler' }),
+      deviceProposal({ id: 'p-person', entity_id: 'dev-2' })
+    ])
+    renderTab()
+    await screen.findAllByTestId('proposal-row')
+    fireEvent.change(screen.getByLabelText(/filter open proposals by what/i), {
+      target: { value: 'scheduler' }
     })
     expect(screen.getAllByTestId('proposal-row')).toHaveLength(1)
   })
@@ -555,9 +641,9 @@ describe('arriving from another page', () => {
     await waitFor(() => expect(onClearFocus).toHaveBeenCalled())
   })
 
-  it('hands back to the asset rather than opening a form of its own', async () => {
-    // THE COMPOSER IS GONE. Extending your own open proposal happens in the asset's Edit Details
-    // dialog -- one form per asset -- so this drawer action is a route there, not a dialog here.
+  it('hands back to the entity rather than opening a form of its own', async () => {
+    // Extending your own open proposal happens in the entity's own dialog (Edit Details, or
+    // Digital Nameplate), so this drawer action is a route there, not a dialog here.
     const onOpenSubject = vi.fn()
     mockLoad([deviceProposal({ proposed_by: OPERATOR_ID })])
     renderTab({ userRole: 'Operator', currentUserId: OPERATOR_ID, onOpenSubject })
@@ -600,10 +686,10 @@ describe('the queue that is waiting can be filtered too', () => {
     renderTab()
     await screen.findAllByTestId('proposal-row')
 
-    fireEvent.change(screen.getByTitle(/filter open proposals/i), {
+    fireEvent.change(screen.getByLabelText(/filter open proposals by what/i), {
       target: { value: 'nothing matches this' }
     })
-    expect(screen.getByText(/nothing open matches that filter/i)).toBeInTheDocument()
+    expect(screen.getByText(/nothing open matches these filters/i)).toBeInTheDocument()
     expect(screen.queryByText(/nothing is waiting/i)).toBeNull()
   })
 
@@ -621,9 +707,7 @@ describe('the queue that is waiting can be filtered too', () => {
   })
 
   it('counts what it would clear, like every other filter bar', async () => {
-    /* This bar said "Clear filters" with no icon and no count while the asset pages said
-       "Clear filters (n)" with both. Two filters here, so unlike the Areas page the number
-       actually moves. */
+    /* The button reads "Clear filters (n)", and n moves because two filters can be set. */
     mockLoad([
       deviceProposal({ id: 'o1', target_label: 'Lathe_01' }),
       deviceProposal({ id: 'o2', entity_type: 'device_nameplate', target_label: 'Press_02' })
@@ -631,18 +715,18 @@ describe('the queue that is waiting can be filtered too', () => {
     renderTab()
     await screen.findAllByTestId('proposal-row')
 
-    expect(screen.queryByTitle('Clear every filter')).toBeNull()
+    expect(screen.queryByRole('button', { name: /clear filters/i })).toBeNull()
 
     fireEvent.change(screen.getByLabelText('Filter open proposals by kind'), {
       target: { value: 'device_nameplate' }
     })
-    expect(screen.getByTitle('Clear every filter')).toHaveTextContent('Clear filters (1)')
+    expect(screen.getByRole('button', { name: /clear filters/i })).toHaveTextContent('Clear filters (1)')
 
-    fireEvent.change(screen.getByTitle(/filter open proposals/i), { target: { value: 'Press' } })
-    expect(screen.getByTitle('Clear every filter')).toHaveTextContent('Clear filters (2)')
+    fireEvent.change(screen.getByLabelText(/filter open proposals by what/i), { target: { value: 'Press' } })
+    expect(screen.getByRole('button', { name: /clear filters/i })).toHaveTextContent('Clear filters (2)')
 
-    fireEvent.click(screen.getByTitle('Clear every filter'))
-    expect(screen.queryByTitle('Clear every filter')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /clear filters/i }))
+    expect(screen.queryByRole('button', { name: /clear filters/i })).toBeNull()
     expect(screen.getAllByTestId('proposal-row')).toHaveLength(2)
   })
 })
@@ -677,23 +761,11 @@ describe('filterProposals', () => {
   })
 })
 
-describe('ageLabel', () => {
-  const base = new Date('2026-09-07T12:00:00Z').getTime()
-  it('reads in the coarsest unit that is still true', () => {
-    expect(ageLabel('2026-09-07T11:59:30Z', base)).toBe('just now')
-    expect(ageLabel('2026-09-07T11:30:00Z', base)).toBe('30m ago')
-    expect(ageLabel('2026-09-07T09:00:00Z', base)).toBe('3h ago')
-    expect(ageLabel('2026-09-04T12:00:00Z', base)).toBe('3d ago')
-  })
-})
-
 describe('the page finishes loading what it asks for', () => {
   /**
-   * THE REGRESSION IS SILENT BY CONSTRUCTION. `loadAll` sets several pieces of state in sequence
-   * and `usePolling` swallows what it throws, so a ReferenceError partway down left the queue
-   * rendered, every later `setState` skipped, and the poll backing off to its 30s ceiling --
-   * which is exactly what a dead `setDrafts()` call did here from 2026-09-08. Asserting the LAST
-   * thing the load does is what makes the middle of it observable.
+   * `loadAll` sets several pieces of state in sequence and `usePolling` swallows what it throws,
+   * so an error partway down leaves the queue rendered and the rest of the load skipped. Asserting
+   * the last thing the load does makes the middle of it observable.
    */
   it('asks for nothing it no longer reads, and reaches the end of the load', async () => {
     api.get.mockImplementation((path) => {
@@ -751,7 +823,6 @@ describe('a relocation names the cells rather than their uuids', () => {
 
   const mockWithCells = () => api.get.mockImplementation((path) => {
     if (path === '/api/v1/proposals') return Promise.resolve([relocation])
-    if (path === '/api/v1/assets') return Promise.resolve([{ id: 'dev-1', name: 'Lathe_01' }])
     if (path === '/api/v1/cells') return Promise.resolve([
       { cell_id: 'cell-weld', cell_name: 'Weld Bay' },
       { cell_id: 'cell-paint', cell_name: 'Paint Line' }
@@ -768,7 +839,7 @@ describe('a relocation names the cells rather than their uuids', () => {
     expect(screen.queryByText('cell-weld')).toBeNull()
   })
 
-  /* The uuid is what the digital thread and the filter speak, so it is kept where it costs nothing. */
+  /* The uuid is what the audit trail and the filter speak, so it is kept where it costs nothing. */
   it('keeps the uuid in the tooltip', async () => {
     mockWithCells()
     renderTab()
@@ -786,5 +857,150 @@ describe('a relocation names the cells rather than their uuids', () => {
     renderTab()
     await selectRow()
     await waitFor(() => expect(screen.getByText('cell-weld')).toBeTruthy())
+  })
+})
+
+describe('a cell, a gateway or an area proposal names its subject', () => {
+  const CELL_ID = 'c0000000-0000-4000-8000-000000000001'
+  const GATEWAY_ID = 'a0000000-0000-4000-8000-000000000002'
+  const AREA_ID = 'e0000000-0000-4000-8000-000000000003'
+
+  // As `GET /api/v1/proposals` hands them over: named, with the row each patch would change.
+  const cellMove = (over = {}) => deviceProposal({
+    id: 'p-cell', entity_type: 'cells', entity_id: CELL_ID,
+    patch: { area_id: 'area-paint' }, target_label: 'Weld Bay',
+    current: { name: 'Weld Bay', area_id: 'area-yard' }, ...over
+  })
+  const gatewayUrl = (over = {}) => deviceProposal({
+    id: 'p-gateway', entity_type: 'gateways', entity_id: GATEWAY_ID,
+    patch: { access_url: 'https://line3.test' }, target_label: 'Line 3 edge',
+    current: { name: 'Line 3 edge', access_url: null }, ...over
+  })
+  const areaIcon = (over = {}) => deviceProposal({
+    id: 'p-area', entity_type: 'areas', entity_id: AREA_ID,
+    patch: { icon: 'Warehouse' }, target_label: 'North Shop',
+    current: { name: 'North Shop', icon: 'Factory' }, ...over
+  })
+
+  const mockSubjects = (proposals) => api.get.mockImplementation((path) => {
+    if (path === '/api/v1/proposals') return Promise.resolve(proposals)
+    if (path === '/api/v1/areas') return Promise.resolve([
+      { area_id: 'area-yard', area_name: 'Goods Yard', cells: [] },
+      { area_id: 'area-paint', area_name: 'Paint Shop', cells: [] }
+    ])
+    return Promise.resolve([])
+  })
+
+  /** Open the row naming `label` and read its drawer's before/after table as [field, now, proposed]. */
+  async function diffOf(label) {
+    const rows = await screen.findAllByTestId('proposal-row')
+    fireEvent.click(rows.find(r => within(r).queryByText(label)))
+    const table = document.querySelector('.modal-table')
+    return [...table.querySelectorAll('tbody tr')].map(tr => [...tr.cells].map(td => td.textContent))
+  }
+
+  it('shows each subject by name, never its uuid', async () => {
+    mockSubjects([cellMove(), gatewayUrl(), areaIcon()])
+    renderTab()
+    const rows = await screen.findAllByTestId('proposal-row')
+    const subjects = rows.map(r => r.querySelector('td strong').textContent).sort()
+    expect(subjects).toEqual(['Line 3 edge', 'North Shop', 'Weld Bay'])
+    for (const id of [CELL_ID, GATEWAY_ID, AREA_ID]) expect(screen.queryByText(id)).toBeNull()
+  })
+
+  it('diffs a cell against its current row, naming both areas', async () => {
+    mockSubjects([cellMove()])
+    renderTab()
+    expect(await diffOf('Weld Bay')).toEqual([['Area', 'Goods Yard', 'Paint Shop']])
+  })
+
+  it('diffs a gateway and an area against their current rows', async () => {
+    mockSubjects([gatewayUrl(), areaIcon()])
+    renderTab()
+    expect(await diffOf('Line 3 edge')).toEqual([['Access URL', '—', 'https://line3.test']])
+    expect(await diffOf('North Shop')).toEqual([['Icon', 'Factory', 'Warehouse']])
+  })
+
+  it('marks a subject that no longer exists', async () => {
+    mockSubjects([cellMove({ target_label: CELL_ID, target_missing: true, current: null })])
+    renderTab()
+    const [row] = await screen.findAllByTestId('proposal-row')
+    expect(within(row).getByText(CELL_ID)).toBeInTheDocument()
+    expect(within(row).getByText('MISSING')).toBeInTheDocument()
+  })
+
+  it('keeps the uuid when the subject could not be read, without calling it missing', async () => {
+    mockSubjects([gatewayUrl({ target_label: GATEWAY_ID, target_missing: false, current: null })])
+    renderTab()
+    const [row] = await screen.findAllByTestId('proposal-row')
+    expect(within(row).getByText(GATEWAY_ID)).toBeInTheDocument()
+    expect(within(row).queryByText('MISSING')).toBeNull()
+  })
+
+  it("finds a proposal by its subject's name", async () => {
+    mockSubjects([cellMove(), gatewayUrl(), areaIcon()])
+    renderTab()
+    await screen.findAllByTestId('proposal-row')
+    fireEvent.change(screen.getByLabelText(/filter open proposals by what/i), { target: { value: 'line 3' } })
+    const rows = screen.getAllByTestId('proposal-row')
+    expect(rows).toHaveLength(1)
+    expect(within(rows[0]).getByText('Line 3 edge')).toBeInTheDocument()
+  })
+})
+
+describe('the cards count, load in place and light up only when work waits', () => {
+  const decidedOne = (id, at) => deviceProposal({
+    id, target_label: id, status: 'applied', decided_by: MANAGER_ID, decided_at: at
+  })
+
+  it('shows a count on both cards, 0 included, and no attention tint while nothing waits', async () => {
+    mockLoad([])
+    renderTab()
+    await screen.findByText('Nothing is waiting. A proposal appears here when somebody asks for a change they cannot make themselves.')
+    const cards = document.querySelectorAll('.approvals-card')
+    expect(cards).toHaveLength(2)
+    for (const card of cards) {
+      expect(card.querySelector('.section-count')).toHaveTextContent('0')
+    }
+    expect(cards[0].className).not.toContain('card-attention')
+  })
+
+  it('tints the awaiting card while it holds something, and counts the narrowed rows', async () => {
+    mockLoad([
+      deviceProposal({ id: 'o1', target_label: 'Lathe_01' }),
+      deviceProposal({ id: 'o2', target_label: 'Press_02', entity_type: 'cells' })
+    ])
+    renderTab()
+    await screen.findAllByTestId('proposal-row')
+    const [awaiting] = document.querySelectorAll('.approvals-card')
+    expect(awaiting.className).toContain('card-attention')
+    expect(awaiting.querySelector('.section-count')).toHaveTextContent('2')
+
+    fireEvent.change(screen.getByLabelText('Filter open proposals by kind'), { target: { value: 'cells' } })
+    expect(awaiting.querySelector('.section-count')).toHaveTextContent('1 / 2')
+  })
+
+  it('keeps the heading and both cards on screen while the first load runs', () => {
+    api.get.mockImplementation(() => new Promise(() => {}))
+    renderTab()
+    expect(screen.getByRole('heading', { name: 'Approvals' })).toBeInTheDocument()
+    expect(screen.getAllByText('Loading proposals…')).toHaveLength(2)
+  })
+
+  it('lists the decided proposals by decision time, newest first', async () => {
+    mockLoad([
+      decidedOne('Decided-early', '2026-09-01T00:00:00Z'),
+      decidedOne('Decided-late', '2026-09-09T00:00:00Z')
+    ])
+    renderTab()
+    const rows = await screen.findAllByTestId('proposal-row')
+    expect(within(rows[0]).getByText('Decided-late')).toBeInTheDocument()
+  })
+
+  it('draws a status through the shared badge, dot included', async () => {
+    mockLoad([deviceProposal()])
+    renderTab()
+    const [row] = await screen.findAllByTestId('proposal-row')
+    expect(row.querySelector('.badge-pending .badge-dot')).not.toBeNull()
   })
 })

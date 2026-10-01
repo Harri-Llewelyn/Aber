@@ -3,9 +3,9 @@ import { withActivityTracking } from './lib/apiActivity';
 import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId } from './utils/sparkplugId';
 import { resolveDeviceLocation, normaliseScope, SCOPE_CELL, SCOPE_AREA_WIDE } from './utils/cellResolution';
-import { isSvgFile, readSvgPlan, decodeSvgBytes, floorPlanPath, FLOOR_PLAN_MAX_BYTES } from './utils/floorPlans';
+import { isSvgFile, readSvgPlan, decodeSvgBytes, areaPlanPath, AREA_PLAN_MAX_BYTES } from './utils/areaPlans';
 import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
-import { DIGITAL_THREAD_ACTIONS, ENTITY_TABLE_BY_KIND } from './constants';
+import { AUDIT_TRAIL_ACTIONS, ENTITY_TABLE_BY_KIND } from './constants';
 import { metricNameError } from './utils/metricGroup';
 import { readSetting } from './config';
 import {
@@ -27,6 +27,10 @@ import {
  * of the identifier, so the two must move together.
  */
 const NAMEPLATE_TEMPLATE_ID = 'https://admin-shell.io/idta/nameplate/3/0/Nameplate';
+
+/** The off-site destination's settings (0018); the secret key is in the vault, not here. */
+const OFFSITE_SETTING_KEYS = ['endpoint', 'region', 'bucket', 'prefix', 'access_key_id', 'recipient', 'path_style']
+  .map(k => `backup_offsite.${k}`);
 
 /**
  * Which nameplate fields a device can answer for itself, and the OPC UA concept that answers them.
@@ -107,6 +111,19 @@ async function loadDeviceLocations() {
 // submits exactly that.
 const emptyToNull = (v) => (v === '' || v === undefined ? null : v);
 
+/**
+ * `semantic_id` and `semantic_id_type` as every write stores them: the id trimmed, and the type NULL
+ * whenever the id is, so the pair is never half-populated. A type with no id would export as an AAS
+ * Reference with no key.
+ */
+const semanticIdPair = (body) => {
+  const semanticId = emptyToNull(String(body?.semantic_id ?? '').trim());
+  return {
+    semantic_id: semanticId,
+    semantic_id_type: semanticId ? emptyToNull(body?.semantic_id_type) : null
+  };
+};
+
 // The UI carries a device's gateway as `active_gateway_id`; the column is `gateway_id`.
 const gatewayIdFrom = (body) => emptyToNull(body.active_gateway_id ?? body.gateway_id);
 
@@ -127,7 +144,7 @@ function locationFieldsFrom(body) {
   return fields;
 }
 
-// A place on a floor plan is a fraction 0..1 or nothing; the form submits '' or null for nothing.
+// A place on an area plan is a fraction 0..1 or nothing; the form submits '' or null for nothing.
 const planCoordFrom = (v) => {
   if (v === undefined || v === null || String(v).trim() === '') return null;
   const n = Number(v);
@@ -135,38 +152,26 @@ const planCoordFrom = (v) => {
 };
 
 export const TELEMETRY_PAGE_SIZE = 500;
-// postgres_fdw pushes WHERE clauses to TimescaleDB but not LIMIT, so an unbounded
-// query materialises the whole matching range in Supabase before trimming. Cap it.
+// postgres_fdw ships a LIMIT to TimescaleDB only below about 6,300 rows; past that every matching
+// row crosses the wrapper before it is trimmed. Stay under it.
 const TELEMETRY_MAX_ROWS = 5000;
 
 /**
  * Ceiling on a single CSV export, across all selected metrics. Higher than TELEMETRY_MAX_ROWS
- * because an export is a deliberate act with a progress bar, but still bounded: postgres_fdw
- * pushes WHERE down and not LIMIT. On reaching it the export downloads the most recent rows and
- * says it was truncated.
+ * because an export is a deliberate act with a progress bar, but still bounded. On reaching it the
+ * export downloads the most recent rows and says it was truncated.
  */
 export const TELEMETRY_EXPORT_MAX_ROWS = 50000;
 
-/**
- * The lower time bound applied when a caller supplies none.
- *
- * `public.telemetry` is a postgres_fdw projection and the FDW pushes WHERE down but not LIMIT,
- * so a query with no time predicate makes TimescaleDB materialise an asset's entire history
- * before `.range()` applies. Every live caller already passes a window; this exists so the next
- * caller cannot reintroduce the unbounded scan by omitting an argument.
- */
 /**
  * Rollup resolutions a caller may ask for, and the relation each maps to.
  *
  * Continuous aggregates in TimescaleDB (timescaledb/aggregates.sql), exposed over the FDW. A
  * trend over a month is made cheap by there being fewer rows, not by asking for fewer.
  *
- * THE CSV EXPORT DEFAULTS TO RAW AND MAY BE ASKED FOR THESE. A bucket average is not a reading any
- * instrument produced, so raw stays the default and a rollup is never substituted for it silently
- * -- but past the raw retention window a rollup is the only thing that still answers, and refusing
- * to export one meant reporting "no telemetry in that range" for data the stack was holding
- * (issue #160). `relation` is also exported as TELEMETRY_RESOLUTION_RELATIONS so the export dialog
- * can match a resolution to its row in `telemetry_horizons`.
+ * The CSV export defaults to raw and may ask for these. A bucket average is not a reading any
+ * instrument produced, so a rollup is never substituted for raw silently; past the raw retention
+ * window it is the only thing that still answers.
  */
 const TELEMETRY_RESOLUTIONS = {
   '1m': { relation: 'telemetry_1m', bucketMinutes: 1 },
@@ -175,17 +180,22 @@ const TELEMETRY_RESOLUTIONS = {
 };
 
 /**
- * The relation each resolution reads, keyed as `telemetry_horizons` names them; `null` is raw.
- *
- * Derived from TELEMETRY_RESOLUTIONS rather than restated, so a resolution added there cannot be
- * missing here -- the failure that would produce is a picker offering a choice whose horizon is
- * silently unknown.
+ * The relation each resolution reads, keyed as `telemetry_horizons` names them. Exported for the
+ * test that checks the export dialog's resolution list against it; the app does not read it.
  */
 export const TELEMETRY_RESOLUTION_RELATIONS = Object.freeze({
   raw: 'telemetry',
   ...Object.fromEntries(Object.entries(TELEMETRY_RESOLUTIONS).map(([k, v]) => [k, v.relation]))
 });
 
+/**
+ * The lower time bound applied when a caller supplies none.
+ *
+ * `public.telemetry` is a postgres_fdw projection and a LIMIT ships only below about 6,300 rows, so
+ * a query with no time predicate can drag an asset's entire history across the wrapper before
+ * `.range()` applies. Every live caller already passes a window; this exists so the next caller
+ * cannot reintroduce the unbounded scan by omitting an argument.
+ */
 export const TELEMETRY_DEFAULT_WINDOW_MINUTES = 60;
 
 /**
@@ -219,16 +229,15 @@ function toTelemetryKey(assetId) {
 
 /**
  * Query the `telemetry` view, a postgres_fdw projection of the TimescaleDB hypertable exposed
- * through PostgREST (0001_baseline_schema.sql).
- */
-/**
+ * through PostgREST.
+ *
  * @param minutes  Relative window, "the last N minutes"; the primary form.
  * @param from,to  Absolute ISO bounds, for the export dialog. An explicit bound wins over
  *                 `minutes`.
  *
  * Every query leaves here with a lower time bound; see TELEMETRY_DEFAULT_WINDOW_MINUTES.
  */
-async function queryTelemetry({ assetId, assetIds, metricName, minutes, from: fromTime, to: toTime, limit, offset, resolution } = {}) {
+async function queryTelemetry({ assetId, metricName, minutes, from: fromTime, to: toTime, limit, offset, resolution } = {}) {
   const pageSize = Math.min(
     Number.isFinite(limit) && limit > 0 ? limit : TELEMETRY_PAGE_SIZE,
     TELEMETRY_MAX_ROWS
@@ -248,18 +257,9 @@ async function queryTelemetry({ assetId, assetIds, metricName, minutes, from: fr
   const timeColumn = rollup ? 'bucket' : 'time';
 
   const telemetryKey = toTelemetryKey(assetId);
-  // Set by a tag filter, which resolves to a whole group of devices. The Telemetry tab requires a
-  // time window on this path; the floor bounds the damage, it does not make a fleet query cheap.
-  const telemetryKeys = (assetIds || []).map(toTelemetryKey).filter(Boolean);
-
-  // An empty set means "a tag that matches no device", which must return nothing rather than
-  // silently widening to the whole fleet. Checked before the query is built so no request is
-  // issued at all.
-  if (!telemetryKey && assetIds && telemetryKeys.length === 0) return [];
 
   let query = supabase.from(relation).select('*');
   if (telemetryKey) query = query.eq('asset_id', telemetryKey);
-  else if (assetIds) query = query.in('asset_id', telemetryKeys);
   if (metricName) query = query.eq('metric_name', metricName);
 
   // Absolute bounds win over the relative window -- see the parameter note above. `to` is
@@ -284,18 +284,11 @@ async function queryTelemetry({ assetId, assetIds, metricName, minutes, from: fr
  * the cost is bounded by how many series exist. `minutes` is honoured as a staleness bound, so a
  * machine that last reported in March does not reappear with a March reading as current state.
  */
-async function queryLatestTelemetry({ assetId, assetIds, metricName, minutes } = {}) {
+async function queryLatestTelemetry({ assetId, minutes } = {}) {
   const telemetryKey = toTelemetryKey(assetId);
-  const telemetryKeys = (assetIds || []).map(toTelemetryKey).filter(Boolean);
-
-  // An empty set means "a tag that matches no device" -- return nothing rather than widening to
-  // the whole fleet. Checked before the query is built, as in queryTelemetry.
-  if (!telemetryKey && assetIds && telemetryKeys.length === 0) return [];
 
   let query = supabase.from('telemetry_latest').select('*');
   if (telemetryKey) query = query.eq('asset_id', telemetryKey);
-  else if (assetIds) query = query.in('asset_id', telemetryKeys);
-  if (metricName) query = query.eq('metric_name', metricName);
 
   const window = Number.isFinite(minutes) && minutes > 0 ? minutes : TELEMETRY_DEFAULT_WINDOW_MINUTES;
   query = query.gte('time', new Date(Date.now() - window * 60000).toISOString());
@@ -333,7 +326,7 @@ async function queryTelemetryHorizons() {
   }
 }
 
-const mapDigitalThreadRow = (t) => ({
+const mapAuditTrailRow = (t) => ({
   ...t,
   event_id: t.id || t.event_id,
   timestamp: t.recorded_at || t.timestamp,
@@ -360,28 +353,28 @@ const MODEL_3D_BUCKET = readSetting('VITE_MODEL_3D_BUCKET', 'asset-3d-models');
 const CAPTURE_BUCKET = readSetting('VITE_CAPTURE_BUCKET', 'broker-captures');
 
 /**
- * Floor plans. Private, and the name is fixed: scripts/storage-init.mjs and
+ * Area plans. Private, and the name is fixed: scripts/storage-init.mjs and
  * supabase/storage-policies.sql name it too. Objects live under `<area_id>/`, which the write
  * policy confines to an area that exists.
  */
-const FLOOR_PLAN_BUCKET = 'floor-plans';
+const AREA_PLAN_BUCKET = 'area-plans';
 
 /**
  * Object URLs for downloaded plans, by path. A plan is fetched once per session through the
  * authenticated client and handed to an <img> as a blob URL, so no signed URL expires under a
  * wall display and the SVG never becomes part of the page.
  */
-const floorPlanUrls = new Map();
+const areaPlanUrls = new Map();
 
 /** The blob URL for a stored plan, downloading it on first use. Null with no path. */
-export async function loadFloorPlanUrl(path) {
+export async function loadAreaPlanUrl(path) {
   if (!path) return null;
-  if (floorPlanUrls.has(path)) return floorPlanUrls.get(path);
-  const { data, error } = await supabase.storage.from(FLOOR_PLAN_BUCKET).download(path);
-  if (error) throw new Error(error.message || 'Could not load the floor plan');
+  if (areaPlanUrls.has(path)) return areaPlanUrls.get(path);
+  const { data, error } = await supabase.storage.from(AREA_PLAN_BUCKET).download(path);
+  if (error) throw new Error(error.message || 'Could not load the area plan');
   const blob = data.type === 'image/svg+xml' ? data : new Blob([data], { type: 'image/svg+xml' });
   const url = typeof URL.createObjectURL === 'function' ? URL.createObjectURL(blob) : null;
-  floorPlanUrls.set(path, url);
+  areaPlanUrls.set(path, url);
   return url;
 }
 
@@ -488,7 +481,7 @@ function withApiKey(signedUrl) {
   return signedUrl + (signedUrl.includes('?') ? '&' : '?') + `apikey=${SUPABASE_GATEWAY_KEY}`;
 }
 
-/** The public URL for a stored model path. Composed, never stored -- see archived migration 0035. */
+/** The public URL for a stored model path. Composed, never stored -- see archived migration 20260101000035_asset_3d_models.sql. */
 export function model3dPublicUrl(path) {
   if (!path) return null;
   return supabase.storage.from(MODEL_3D_BUCKET).getPublicUrl(path).data.publicUrl;
@@ -628,12 +621,6 @@ const apiMethods = {
   },
 
   /**
-   * Whether this deployment can enrol an appliance: `{ ready, addresses }`, where each address is
-   * `{ variable, value, problem }`. gateway-bundle's GET; it mints nothing and any signed-in user
-   * may ask. The Gateways page asks before offering a remote gateway, so the answer arrives
-   * before a row exists rather than as a refusal after.
-   */
-  /**
    * The one-liner: mints the enrolment token the way downloadGatewayBundle does and answers
    * JSON naming the command to paste, its expiry, the pin and the installer's address. A 503
    * names why this deployment cannot serve it (plain HTTP, no root mounted), and the caller
@@ -668,6 +655,12 @@ const apiMethods = {
     };
   },
 
+  /**
+   * Whether this deployment can enrol an appliance: `{ ready, addresses }`, where each address is
+   * `{ variable, value, problem }`. gateway-bundle's GET; it mints nothing and any signed-in user
+   * may ask. The Gateways page asks before offering a remote gateway, so the answer arrives
+   * before a row exists rather than as a refusal after.
+   */
   enrolmentReadiness: async () => {
     const { data: { session } } = await supabase.auth.getSession();
     const res = await fetch(`${SUPABASE_URL}/functions/v1/gateway-bundle`, {
@@ -704,7 +697,7 @@ const apiMethods = {
    * Principal id -> `{ name, purpose, created_by, created_at }` from `machine_principals` (0125).
    *
    * Administrator and Auditor at the database, matching `list_user_accounts()`: a name here labels
-   * digital-thread rows both roles may read. Empty for anybody else.
+   * audit-trail rows both roles may read. Empty for anybody else.
    */
   listMachinePrincipalNames: async () => {
     const { data, error } = await supabase
@@ -719,7 +712,7 @@ const apiMethods = {
    *
    * Through `list_user_accounts()` (0116) for the reason `listServicePrincipals()` goes through an
    * RPC: `auth.users` is not served by PostgREST. Administrator and Auditor only, matching the
-   * policy on the digital_thread rows these names label -- so a caller who may not ask is REFUSED
+   * policy on the audit_trail rows these names label -- so a caller who may not ask is REFUSED
    * rather than given an empty list, and the caller must treat a rejection as "not allowed to
    * know" rather than as "nobody is registered".
    */
@@ -802,12 +795,12 @@ const apiMethods = {
    *
    * All of them, not the latest per principal: a re-mint does not invalidate the previous token,
    * so two mints are two live credentials. tokenStatus() counts the unexpired ones. Only
-   * TOKEN_MINTED rows and only the columns the status derivation reads, since `digital_thread`
+   * TOKEN_MINTED rows and only the columns the status derivation reads, since `audit_trail`
    * cannot be pruned.
    */
   listServiceTokens: async () => {
     const { data, error } = await supabase
-      .from('digital_thread')
+      .from('audit_trail')
       .select('entity_id,recorded_at,new_data')
       .eq('action', 'TOKEN_MINTED')
       .eq('entity_type', 'service_principals')
@@ -888,11 +881,13 @@ const apiMethods = {
   /**
    * Create a machine identity that cannot sign in, with the name the page will list it by.
    *
-   * Through `create_machine_principal()` (0125), which is SECURITY DEFINER and checks has_role()
-   * itself. It takes permissions, not a role, from an allow-list (`telemetry:read`,
-   * `quarantine:view`, `digital_thread:read`), so widening `Operator` does not widen the identity.
-   * No token is issued here: the identity reaches nothing until `mintServiceToken()` signs one,
-   * which the page offers next.
+   * Through `create_machine_principal()` (0125, 0013), which is SECURITY DEFINER and checks
+   * has_role() itself. It takes permissions from an allow-list, not a role, so widening `Operator`
+   * does not widen the identity. Machines propose, people decide: three reads (`telemetry:read`,
+   * `quarantine:view`, `audit_trail:read`) and three writes (`archive:manage`,
+   * `proposal:create`, `schema:manage`). Anything else is refused, and the message thrown gives
+   * the reason. No token is issued here: the identity reaches nothing until `mintServiceToken()`
+   * signs one, which the page offers next.
    *
    * @returns {{ principal_id: string, permissions: string[] }} 0080's shape; the name is the
    *          caller's own argument
@@ -928,7 +923,7 @@ const apiMethods = {
    * Every gateway with what the platform knows about its broker credential.
    *
    * Two reads, not a join: `gateway_status` carries `enrolled_at` and `credential_revoked_at`
-   * for a remote gateway; a host-run one has only the CREDENTIAL_ISSUED row in `digital_thread`,
+   * for a remote gateway; a host-run one has only the CREDENTIAL_ISSUED row in `audit_trail`,
    * whose `entity_id` carries no foreign key by design. Only CREDENTIAL_ISSUED rows are selected
    * and only the newest per gateway is kept.
    */
@@ -942,7 +937,7 @@ const apiMethods = {
         .select('id,name,sparkplug_id,deployment,is_shadow,is_archived,status,enrolled_at,credential_revoked_at,live_status')
         .order('name'),
       supabase
-        .from('digital_thread')
+        .from('audit_trail')
         .select('entity_id,recorded_at,changed_by')
         .eq('action', 'CREDENTIAL_ISSUED')
         .eq('entity_type', 'gateways')
@@ -951,7 +946,7 @@ const apiMethods = {
 
     if (gatewaysRes.error) throw new Error(gatewaysRes.error.message || 'Could not read gateways');
 
-    // AN AUDIT READ THAT FAILS IS NOT FATAL. `digital_thread:read` is a separate permission, and a
+    // AN AUDIT READ THAT FAILS IS NOT FATAL. `audit_trail:read` is a separate permission, and a
     // caller without it should still see the gateway inventory -- with every host-run gateway
     // reading `No platform record`, which is exactly what that state means from where they stand.
     const issuedBy = new Map();
@@ -1074,14 +1069,115 @@ const apiMethods = {
   // Backups (0101). Administrator only on both tables and every RPC; the bytes never come here.
   // -------------------------------------------------------------------------------------------
 
-  /** Every backup that exists on the backup volume, newest first. */
-  listBackups: async () => {
+  /**
+   * One page of finished backup runs (`backup_jobs`), newest first. Each carries the backup it
+   * produced as `backup`, null for a failed or cancelled run and for one the retention window has
+   * pruned. `total` is every run matching `statuses`, not only the page returned.
+   */
+  listBackupRuns: async ({ statuses = ['COMPLETED', 'FAILED', 'CANCELLED'], limit = 30 } = {}) => {
+    const { data, error, count } = await supabase
+      .from('backup_jobs')
+      .select('*, backups(*)', { count: 'exact' })
+      .in('status', statuses)
+      .order('finished_at', { ascending: false })
+      .limit(limit);
+    if (error) throw new Error(error.message || 'Could not list backup runs');
+    // Embedded through backups.job_id, which is not unique, so PostgREST returns an array.
+    const rows = (data || []).map(({ backups, ...job }) => ({
+      ...job, backup: (Array.isArray(backups) ? backups[0] : backups) || null
+    }));
+    return { runs: rows, total: count ?? rows.length };
+  },
+
+  /**
+   * What the Backups page's current-state line needs, whatever the list's filter and page:
+   * the first job ever recorded, the latest completed one, and the latest that completed or failed.
+   */
+  backupRunSummary: async () => {
+    const columns = 'id, status, created_at, started_at, finished_at';
+    const [first, success, outcome] = await Promise.all([
+      supabase.from('backup_jobs').select(columns)
+        .order('created_at', { ascending: true }).limit(1).maybeSingle(),
+      supabase.from('backup_jobs').select(columns).eq('status', 'COMPLETED')
+        .order('finished_at', { ascending: false }).limit(1).maybeSingle(),
+      supabase.from('backup_jobs').select(columns).in('status', ['COMPLETED', 'FAILED'])
+        .order('finished_at', { ascending: false }).limit(1).maybeSingle()
+    ]);
+    const error = first.error || success.error || outcome.error;
+    if (error) throw new Error(error.message || 'Could not read backup jobs');
+    return {
+      firstRecordedAt: first.data?.created_at || null,
+      lastSuccess: success.data || null,
+      latestOutcome: outcome.data || null
+    };
+  },
+
+  /** The ids of the newest `count` backups, in backup_prunable()'s order: the retention floor. */
+  newestBackupIds: async (count) => {
     const { data, error } = await supabase
       .from('backups')
-      .select('*')
-      .order('taken_at', { ascending: false });
-    if (error) throw new Error(error.message || 'Could not list backups');
-    return data || [];
+      .select('id')
+      .order('taken_at', { ascending: false })
+      .order('stamp', { ascending: false })
+      .limit(count);
+    if (error) throw new Error(error.message || 'Could not read backups');
+    return (data || []).map(b => b.id);
+  },
+
+  /**
+   * The off-site destination as the settings hold it, and whether the secret key is in the vault.
+   * The rows are Administrator-only (`sensitive`), so anybody else reads an empty destination.
+   */
+  backupOffsiteDestination: async () => {
+    const [rows, credential] = await Promise.all([
+      supabase.from('system_settings').select('key,value').in('key', OFFSITE_SETTING_KEYS),
+      supabase.rpc('backup_offsite_credential_is_set')
+    ]);
+    const error = rows.error || credential.error;
+    if (error) throw new Error(error.message || 'Could not read the off-site destination');
+    const byKey = Object.fromEntries((rows.data || []).map(r => [r.key.replace('backup_offsite.', ''), r.value]));
+    return {
+      endpoint: byKey.endpoint || '',
+      region: byKey.region || '',
+      bucket: byKey.bucket || '',
+      prefix: byKey.prefix || '',
+      access_key_id: byKey.access_key_id || '',
+      recipient: byKey.recipient || '',
+      path_style: byKey.path_style === true,
+      credentialSet: credential.data === true
+    };
+  },
+
+  /** Every destination field in one call; a refused field saves none of them. Administrator only. */
+  setBackupOffsiteDestination: async (d) => {
+    const { error } = await supabase.rpc('set_backup_offsite_destination', {
+      p_endpoint: d.endpoint, p_region: d.region, p_bucket: d.bucket, p_prefix: d.prefix,
+      p_access_key_id: d.access_key_id, p_recipient: d.recipient, p_path_style: !!d.path_style
+    });
+    if (error) {
+      throw new Error(error.code === '42501'
+        ? 'Only an Administrator can set the off-site destination'
+        : (error.message || 'Could not save the off-site destination'));
+    }
+    return true;
+  },
+
+  /** The secret key, into the vault. Write-only: nothing reads it back. */
+  setBackupOffsiteCredential: async (secret) => {
+    const { error } = await supabase.rpc('set_backup_offsite_credential', { p_secret: secret });
+    if (error) {
+      throw new Error(error.code === '42501'
+        ? 'Only an Administrator can set the off-site credential'
+        : (error.message || 'Could not save the off-site credential'));
+    }
+    return true;
+  },
+
+  /** Stop copying: every field emptied and the secret deleted. Copies already made stay. */
+  clearBackupOffsiteDestination: async () => {
+    const { error } = await supabase.rpc('clear_backup_offsite_destination');
+    if (error) throw new Error(error.message || 'Could not remove the off-site destination');
+    return true;
   },
 
   /** The backup that is queued or running, or null. At most one, by a partial unique index. */
@@ -1095,18 +1191,6 @@ const apiMethods = {
       .maybeSingle();
     if (error) throw new Error(error.message || 'Could not read backup jobs');
     return data || null;
-  },
-
-  /** The last few finished jobs, so a failure is visible after its card has gone. */
-  recentBackupJobs: async (limit = 5) => {
-    const { data, error } = await supabase
-      .from('backup_jobs')
-      .select('*')
-      .in('status', ['COMPLETED', 'FAILED', 'CANCELLED'])
-      .order('finished_at', { ascending: false })
-      .limit(limit);
-    if (error) throw new Error(error.message || 'Could not read backup jobs');
-    return data || [];
   },
 
   /**
@@ -1236,8 +1320,7 @@ const apiMethods = {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       throw new Error('A capture is a JSON object. This file is not one.');
     }
-    // A capture recorded before 1.0 carries the key under the platform's former name.
-    const version = parsed.aber_capture_version ?? parsed.acs_capture_version;
+    const version = parsed.aber_capture_version;
     if (version === undefined) {
       // The likeliest wrong file in this dialog by a distance, since both are JSON and both are
       // things an engineer downloads from this same application.
@@ -1316,7 +1399,8 @@ const apiMethods = {
   /**
    * Gateways a capture may be published onto, with their devices and their credential state.
    *
-   * Simulated only, because `start_playback_job()` refuses anything else.
+   * The Playback gateway only (`is_shadow`; the filter below says why). `start_playback_job()`
+   * itself refuses any gateway that is not simulated.
    * `gateway_has_broker_credential` is a computed field: PostgREST exposes a function taking the
    * row type as a selectable column, so the gate's own predicate is what the dialog displays.
    */
@@ -1371,7 +1455,7 @@ const apiMethods = {
    * Held and current are different facts: the broker keeps one password per gateway, so every mint
    * after the first replaces one, and the reported id set does not change when it does.
    *
-   * Server-side, because the comparison is against `digital_thread`, which the dialog has no
+   * Server-side, because the comparison is against `audit_trail`, which the dialog has no
    * business reading.
    */
   playbackStaleCredentials: async () => {
@@ -1477,37 +1561,9 @@ const apiMethods = {
   },
 
   get: async (path, _options = {}) => {
-    const entityDigitalThreadMatch = path.match(/\/api\/v1\/(cells|gateways|devices|assets)\/([^/]+)\/digital-thread/);
-    if (entityDigitalThreadMatch) {
-      const rawEntityType = entityDigitalThreadMatch[1];
-      const entityId = entityDigitalThreadMatch[2];
-      const SINGULAR_MAP = { cells: 'cell', gateways: 'gateway', devices: 'device', assets: 'device' };
-      const singularType = SINGULAR_MAP[rawEntityType] || rawEntityType.replace(/s$/, '');
-
-      /**
-       * The entity types that belong to this entity's history as well as their own.
-       * `device_nameplate` rows are keyed by the device id, so a device's timeline includes them.
-       */
-      const ALSO_ABOUT = { device: ['device_nameplate'], devices: ['device_nameplate'] };
-      const alsoAbout = new Set(ALSO_ABOUT[singularType] || []);
-
-      let query = supabase.from('digital_thread').select('*').eq('entity_id', entityId);
-      const { data, error } = await query.order('recorded_at', { ascending: false });
-      if (error) throw error;
-
-      const filtered = (data || []).filter(t => {
-        if (!t.entity_type) return true;
-        const et = t.entity_type.toLowerCase();
-        return et === singularType || et === rawEntityType || et === `${singularType}s`
-          || alsoAbout.has(et);
-      });
-
-      return filtered.map(mapDigitalThreadRow);
-    }
-
     /**
      * The tombstones: rows that were archived and then deleted, one per entity, written by the
-     * database on the DELETE and readable by whoever may read the page or the thread's asset
+     * database on the DELETE and readable by whoever may read the page or the trail's asset
      * lane. Each carries the exports taken of it while it was alive, so the page can offer the
      * download after the row is gone.
      */
@@ -1519,7 +1575,7 @@ const apiMethods = {
       if (error) throw error;
       const rows = data || [];
       // Tolerated: the exports table is readable by the three bucket roles, and a reader admitted
-      // to the tombstones by `digital_thread:read` alone sees them without their downloads.
+      // to the tombstones by `audit_trail:read` alone sees them without their downloads.
       const { data: exportRows } = await supabase
         .from('asset_exports')
         .select('*')
@@ -1609,7 +1665,8 @@ const apiMethods = {
 
     if (path.startsWith('/api/v1/areas')) {
       // Cells embedded so the Areas page has membership in one round trip. Devices are not: a
-      // device's area is derived through its resolved cell, which is device_locations' answer.
+      // device's area is its resolved cell's, which is device_locations' answer, except an
+      // Area-Wide device, which carries its own `area_id`.
       const { data, error } = await supabase
         .from('areas')
         .select('*, cells(id, name, plan_x, plan_y, icon, is_archived)')
@@ -1736,7 +1793,7 @@ const apiMethods = {
       return data || [];
     }
 
-    if (path.startsWith('/api/v1/devices') || path.startsWith('/api/v1/assets')) {
+    if (path.startsWith('/api/v1/devices')) {
       // Embed the serving gateway so each device carries its resolved gateway name, and read
       // device_locations for the effective cell. The gateway's own cell is what the local fallback
       // resolves from.
@@ -1769,16 +1826,11 @@ const apiMethods = {
       }));
     }
 
-    if (path.includes('/digital-thread')) {
-      // Every one of these parameters was previously parsed by the caller, appended to the path,
-      // and then dropped on the floor here -- the Digital Thread tab's entity dropdown, search box
-      // and row limit all had no effect at all. They are honoured now.
+    if (path.includes('/audit-trail')) {
       const url = new URL(path, window.location.origin);
       const entityType = url.searchParams.get('entity_type');
-      // Pushed down as a SQL predicate (0115), matching the entity id and the audit-snapshot fields
-      // the timeline labels a lane from. It used to be resolved in the tab against the LIVE tables
-      // and sent as `entity_ids`, so searching for something deleted sent an empty list and drew an
-      // empty thread.
+      // Pushed down as a SQL predicate, matching the entity id and the audit-snapshot fields the
+      // timeline labels a lane from, so a deleted entity is still searchable by name.
       const search = (url.searchParams.get('search') || '').trim();
       const entityIds = url.searchParams.has('entity_ids')
         ? url.searchParams.get('entity_ids').split(',').filter(Boolean)
@@ -1800,25 +1852,23 @@ const apiMethods = {
       const hasCursor = beforeRecordedAt !== '' && beforeId !== '';
 
       // An EMPTY list must return nothing rather than everything -- "these ids, of which there are
-      // none" is not "no filter". The Digital Thread page no longer sends this: it asks the
-      // database to match the name (`search` above) rather than resolving one to ids here, which is
-      // what stopped a deleted entity being unsearchable. The parameter is kept because it is the
-      // right primitive for "this entity's history" and `p_search` cannot express an exact set.
+      // none" is not "no filter". The Audit Trail page searches by name (`search` above); this
+      // stays as the primitive for "this entity's history", which `p_search` cannot express.
       if (entityIds && entityIds.length === 0) return [];
 
       // The deleted-asset filter is a predicate, not a post-filter, which is why this is an RPC:
-      // "still exists" is an anti-join against three tables, and a filter applied after the limit
-      // pages through mixed rows and shows whichever fraction survived. `digital_thread_page()` also
+      // "still exists" is an anti-join against five tables, and a filter applied after the limit
+      // pages through mixed rows and shows whichever fraction survived. `audit_trail_page()` also
       // returns the purged count, which drives the control that reveals them.
       const includePurged = url.searchParams.get('include_purged') === 'true';
 
-      if (action && !Object.prototype.hasOwnProperty.call(DIGITAL_THREAD_ACTIONS, action)) {
+      if (action && !Object.prototype.hasOwnProperty.call(AUDIT_TRAIL_ACTIONS, action)) {
         // An action the client does not know about. Refusing beats widening: returning every row
         // for an unrecognised filter is how a caller ends up believing it has seen a filtered set.
         return [];
       }
 
-      const { data, error } = await supabase.rpc('digital_thread_page', {
+      const { data, error } = await supabase.rpc('audit_trail_page', {
         p_limit: Number.isFinite(limit) && limit > 0 ? limit : 200,
         p_include_purged: includePurged,
         // Normalised to the stored form: the trigger writes TG_TABLE_NAME ('cells' / 'gateways' /
@@ -1833,9 +1883,7 @@ const apiMethods = {
         p_search: search || null,
         p_since: since || null,
         p_until: until || null,
-        // Omitted entirely when there is no cursor, rather than sent as null: PostgREST resolves an RPC
-        // by the names it is given, so naming these against a database that has not applied the keyset
-        // migration would fail outright. Omitted, the call matches the seven-argument form.
+        // Sent only with a cursor, both halves or neither.
         ...(hasCursor
           ? { p_before_recorded_at: beforeRecordedAt, p_before_id: Number(beforeId) }
           : {}),
@@ -1843,20 +1891,17 @@ const apiMethods = {
       if (error) throw error;
 
       const payload = data || {};
-      // NOTHING IS FILTERED AFTER THIS POINT. There used to be a substring match here over the
-      // rendered `description`, which is synthesised below from the entity type and id -- so it
-      // searched the id by a longer route, and no caller ever sent the parameter that reached it.
-      // A filter applied after the page also makes `rows.length` say nothing about whether the
-      // database had more, which is why `next_cursor` is the only end-of-data signal.
-      const rows = (payload.events || []).map(mapDigitalThreadRow);
+      // Nothing is filtered after this point: a filter applied after the page would make
+      // `rows.length` say nothing about whether the database had more, which is why `next_cursor`
+      // is the only end-of-data signal.
+      const rows = (payload.events || []).map(mapAuditTrailRow);
 
       // The array is still the return value, with the page-level facts attached to it, so
       // `.length`, `.map`, destructuring and bare-array mocks keep working.
       rows.purgedAssets = Number(payload.purged_assets || 0);
       rows.truncated = Boolean(payload.truncated);
-      // How many rows the filters select in total (0115). NULL rather than 0 when the server did
-      // not say: a database without 0115 must render as "no total", not as "no events" -- and 0 is
-      // a real answer that an empty filter result gives.
+      // How many rows the filters select in total. NULL rather than 0 when the payload carries none,
+      // so "no total" is not read as "no events"; 0 is a real answer an empty filter result gives.
       rows.totalMatching = typeof payload.total_matching === 'number'
         ? payload.total_matching
         : null;
@@ -1927,14 +1972,16 @@ const apiMethods = {
 
     if (path.startsWith('/api/v1/mtconnect-vocabulary')) {
       // Reference data (generated; seeded by 0002_seed_data.sql), read-only to the app. Returned
-      // flat and bucketed by the caller -- it is ~600 short rows, fetched once per Schemas visit.
+      // flat and bucketed by the caller -- it is ~600 short rows, read once per visit to the Metrics
+      // or Vocabulary page.
       const { data, error } = await supabase
         .from('mtconnect_vocabulary')
         .select('*')
         .order('name', { ascending: true });
       if (error) throw error;
-      // semantic_id is the concept-level local IRI added by archived migration 0032 -- distinct from the
-      // observation-level id a catalog metric carries, which is built from the whole metric name.
+      // semantic_id is the concept-level local IRI added by archived migration
+      // 20260101000032_effectiveness_and_mtconnect_semantics.sql -- distinct from the observation-level
+      // id a catalog metric carries, which is built from the whole metric name.
       return (data || []).map(v => ({
         kind: v.kind, name: v.name, category: v.category, semantic_id: v.semantic_id ?? null
       }));
@@ -1960,7 +2007,7 @@ const apiMethods = {
     }
 
     if (path.startsWith('/api/v1/ashrae223-vocabulary')) {
-      // Reference data (archived migration 0013), generated from the open223 ontology. Ordered by the
+      // Reference data (archived migration 0013_ashrae223_vocabulary.sql), generated from the open223 ontology. Ordered by the
       // hierarchy the panel sections on, then by label -- the panel re-sorts, but arriving grouped
       // keeps a 640-row payload cheap to render on first paint.
       const { data, error } = await supabase
@@ -1992,6 +2039,18 @@ const apiMethods = {
       }));
     }
 
+    if (path.startsWith('/api/v1/idta-submodel-templates')) {
+      // Reference data (seeded by 0002_seed_data.sql), read-only to the app: each IDTA template
+      // element with the id and reference type the template issues for it, for the semantic id picker.
+      const { data, error } = await supabase
+        .from('idta_submodel_templates')
+        .select('template_id, template_name, template_version, id_short, semantic_id, semantic_id_type, description')
+        .order('template_id', { ascending: true })
+        .order('ordinal', { ascending: true });
+      if (error) throw error;
+      return data || [];
+    }
+
     // Checked before /metric-catalog: startsWith on the shorter path would otherwise not match,
     // but keeping the more specific route first makes the ordering intent explicit.
     if (path.startsWith('/api/v1/metric-groups')) {
@@ -2014,7 +2073,7 @@ const apiMethods = {
       return (data || []).map(m => ({
         metric_uuid: m.id,
         name: m.name,
-        // Generated column: the first dotted segment of the name, NULL when there isn't one.
+        // Generated column: the name's first `/`-separated segment, NULL when there isn't one.
         // See utils/metricGroup.js, which mirrors the derivation.
         metric_group: m.metric_group ?? null,
         datatype: m.datatype,
@@ -2025,7 +2084,7 @@ const apiMethods = {
         sub_type: m.sub_type ?? null,
         standard: m.standard ?? null,
         // AAS (IEC 63278) semanticId -- see 0001_baseline_schema.sql. NULL means unmapped, which is a
-        // legitimate state: MTConnect publishes no per-type identifier, so those stay NULL.
+        // legitimate state for a local extension: no vocabulary names it.
         semantic_id: m.semantic_id ?? null,
         semantic_id_type: m.semantic_id_type ?? null,
         description: m.description,
@@ -2088,27 +2147,16 @@ const apiMethods = {
       }));
     }
 
-    if (path.startsWith('/api/v1/stats')) {
-      const [qRes, docRes] = await Promise.all([
-        supabase.from('devices').select('id', { count: 'exact', head: true }).eq('is_quarantined', true),
-        supabase.from('links').select('id', { count: 'exact', head: true })
-      ]);
-      return {
-        quarantine_pending: qRes.count || 0,
-        links_attached: docRes.count || 0
-      };
-    }
-
-    // Latest value per (device, metric) inside a bounded recent window. Used by the
-    // Site Map, which only needs current state -- not the full history the
-    // export dialog pages through.
-    // How far back each resolution reaches. Four rows, evaluated on the TimescaleDB side
-    // (archived migration 0111) -- the retention SETTINGS cannot answer this, because a young stack holds
-    // less than its policy allows and a widened policy does not restore dropped chunks.
+    // How far back each resolution reaches. Four rows, evaluated on the TimescaleDB side (archived
+    // migration 0111_how_far_back_each_telemetry_resolution_reaches.sql) -- the retention SETTINGS
+    // cannot answer this, because a young stack holds less than its policy allows and a widened
+    // policy does not restore dropped chunks.
     if (path.startsWith('/api/v1/telemetry/horizons')) {
       return queryTelemetryHorizons();
     }
 
+    // Latest value per (device, metric) inside a bounded recent window, for the Devices page, which
+    // needs current state rather than the history the export dialog pages through.
     if (path.startsWith('/api/v1/telemetry/latest')) {
       const url = new URL(path, window.location.origin);
       const minutes = Number.parseInt(url.searchParams.get('minutes') || '60', 10);
@@ -2117,14 +2165,8 @@ const apiMethods = {
 
     if (path.startsWith('/api/v1/telemetry')) {
       const url = new URL(path, window.location.origin);
-      // asset_ids (plural) is how a tag filter asks for a whole group of devices at once. Absent
-      // means "no device restriction"; present but empty means "a tag nobody matches".
-      const assetIds = url.searchParams.has('asset_ids')
-        ? url.searchParams.get('asset_ids').split(',').filter(Boolean)
-        : undefined;
       return queryTelemetry({
         assetId: url.searchParams.get('asset_id'),
-        assetIds,
         metricName: url.searchParams.get('metric_name'),
         minutes: Number.parseInt(url.searchParams.get('minutes') || '', 10),
         // Absolute bounds, used by the CSV export's custom range. Null when absent, so the
@@ -2157,71 +2199,69 @@ const apiMethods = {
       const rows = data || [];
       if (rows.length === 0) return [];
 
-      const deviceIds = [...new Set(rows
-        .filter(r => r.entity_type === 'devices' || r.entity_type === 'device_nameplate')
-        .map(r => r.entity_id))];
-      const schemaIds = [...new Set(rows
-        .filter(r => r.entity_type === 'schemas')
+      const idsOf = (...types) => [...new Set(rows
+        .filter(r => types.includes(r.entity_type))
         .map(r => r.entity_id))];
 
-      const [devicesRes, nameplatesRes, schemasRes] = await Promise.all([
-        deviceIds.length
-          ? supabase.from('devices')
-              .select('id,name,description,asset_type,connection_method,cell_id,location_scope,model_3d_path,is_archived')
-              .in('id', deviceIds)
-          : Promise.resolve({ data: [] }),
-        deviceIds.length
-          ? supabase.from('device_nameplate').select('*').in('device_id', deviceIds)
-          : Promise.resolve({ data: [] }),
-        schemaIds.length
-          ? supabase.from('schemas').select('id,schema_name,version,status,parent_schema_id')
-              .in('id', schemaIds)
-          : Promise.resolve({ data: [] })
+      // One read per subject table, for this page's ids only. A read that fails resolves to null:
+      // its rows keep their uuid and no diff, and are not marked missing, because a failed read is
+      // not evidence the subject is gone.
+      const readByIds = async (table, columns, key, ids) => {
+        if (ids.length === 0) return new Map();
+        try {
+          const { data, error } = await supabase.from(table).select(columns).in(key, ids);
+          if (error) return null;
+          return new Map((data || []).map(row => [row[key], row]));
+        } catch {
+          return null;
+        }
+      };
+
+      // Each read names every column `proposable_columns()` lets its lane patch, or the drawer's Now
+      // column reads blank for that field. apiProposals.test.js checks this against the migrations.
+      const deviceIds = idsOf('devices', 'device_nameplate');
+      const [devices, nameplates, schemas, areas, cells, gateways, proposersRes] = await Promise.all([
+        readByIds('devices',
+          'id,name,description,asset_type,connection_method,cell_id,area_id,location_scope,model_3d_path,is_archived',
+          'id', deviceIds),
+        readByIds('device_nameplate', '*', 'device_id', deviceIds),
+        readByIds('schemas', 'id,schema_name,version,status,parent_schema_id', 'id', idsOf('schemas')),
+        readByIds('areas', 'id,name,description,icon', 'id', idsOf('areas')),
+        readByIds('cells', 'id,name,grafana_url,icon,area_id,plan_x,plan_y,description', 'id',
+          idsOf('cells')),
+        readByIds('gateways', 'id,name,sparkplug_id,description,cell_id,area_id,location_scope,access_url',
+          'id', idsOf('gateways')),
+        // The machines behind the proposals this caller may decide (0022); empty for anyone else.
+        // An error leaves the proposer as its uuid rather than failing the queue.
+        Promise.resolve(supabase.rpc('list_proposer_names')).catch(() => ({ data: [] }))
       ]);
 
-      const devices = new Map((devicesRes.data || []).map(d => [d.id, d]));
-      const nameplates = new Map((nameplatesRes.data || []).map(n => [n.device_id, n]));
-      const schemas = new Map((schemasRes.data || []).map(s => [s.id, s]));
+      const machineNames = new Map((proposersRes?.data || []).map(m => [m.principal_id, m.name]));
+
+      // Per lane: the read that holds the subject and how to name it. A nameplate's subject is its
+      // device and its `current` is the nameplate row, `{}` until the first approval creates it.
+      const subjects = {
+        devices:          { found: devices,  label: d => d.name },
+        device_nameplate: { found: devices,  label: d => d.name,
+                            current: id => (nameplates ? nameplates.get(id) || {} : null) },
+        schemas:          { found: schemas,  label: s => `${s.schema_name} v${s.version}` },
+        areas:            { found: areas,    label: a => a.name },
+        cells:            { found: cells,    label: c => c.name },
+        gateways:         { found: gateways, label: g => g.name || g.sparkplug_id }
+      };
 
       return rows.map(r => {
-        // `current` is what the patch would change FROM, so the page can show a diff rather than
-        // only what was asked for. A nameplate with no row yet is `{}` and not an error: the row is
-        // created by whoever first asserts something about the asset.
-        let current = null;
-        let targetLabel = r.entity_id;
-        let targetMissing = false;
-
-        if (r.entity_type === 'devices') {
-          const d = devices.get(r.entity_id);
-          current = d || null;
-          targetLabel = d?.name || r.entity_id;
-          targetMissing = !d;
-        } else if (r.entity_type === 'device_nameplate') {
-          const d = devices.get(r.entity_id);
-          current = nameplates.get(r.entity_id) || {};
-          targetLabel = d?.name || r.entity_id;
-          targetMissing = !d;
-        } else if (r.entity_type === 'schemas') {
-          const sc = schemas.get(r.entity_id);
-          current = sc || null;
-          targetLabel = sc ? `${sc.schema_name} v${sc.version}` : r.entity_id;
-          targetMissing = !sc;
-        }
-
-        return { ...r, target_label: targetLabel, target_missing: targetMissing, current };
+        const lane = subjects[r.entity_type];
+        const subject = lane?.found?.get(r.entity_id) || null;
+        return {
+          ...r,
+          target_label: (subject && lane.label(subject)) || r.entity_id,
+          target_missing: Boolean(lane?.found) && !subject,
+          // What the patch would change FROM, so the drawer shows a diff and not only the ask.
+          current: lane?.current ? lane.current(r.entity_id) : subject,
+          proposed_by_machine_name: machineNames.get(r.proposed_by) || null
+        };
       });
-    }
-
-    /**
-     * Which keys a lane admits, asked of the database. `proposable_columns()` is the only place
-     * that answer exists (the validation trigger and the apply path both read it) and is granted to
-     * `authenticated` so the form can ask.
-     */
-    if (/^\/api\/v1\/proposals\/allowed-keys\/[^/]+$/.test(path)) {
-      const entityType = decodeURIComponent(path.split('/')[5]);
-      const { data, error } = await supabase.rpc('proposable_columns', { p_entity_type: entityType });
-      if (error) throw error;
-      return data || [];
     }
 
     throw new Error('Unhandled API path: ' + path);
@@ -2267,17 +2307,36 @@ const apiMethods = {
       return data;
     }
 
+    // A metric's lifecycle (#468). Matched before the generic `/restore` below, which would write
+    // `is_archived` to a table named after the path. Restore clears `superseded_by` with the flag.
+    // No row back means RLS refused the UPDATE (Administrator only), so it is not a success.
+    const metricLifecycle = path.match(/^\/api\/v1\/metric-catalog\/([^/]+)\/(deprecate|restore)$/);
+    if (metricLifecycle) {
+      const [, id, action] = metricLifecycle;
+      const change = action === 'deprecate'
+        ? { deprecated: true, superseded_by: emptyToNull(body?.superseded_by) }
+        : { deprecated: false, superseded_by: null };
+      const { data, error } = await supabase.from('metric_catalog').update(change).eq('id', id).select();
+      if (error) throw error;
+      if (!data?.length) {
+        throw new Error(
+          `Metric not ${action === 'deprecate' ? 'deprecated' : 'restored'} — it may no longer exist, ` +
+          'or you may not have permission to change the catalog.'
+        );
+      }
+      return data[0];
+    }
+
     if (path.includes('/archive')) {
       const parts = path.split('/');
       const entityType = parts[3];
       const id = parts[4];
-      const table = entityType === 'assets' ? 'devices' : entityType;
       const now = new Date().toISOString();
       const days = body?.auto_delete_days;
       const auto_delete_at = days ? new Date(Date.now() + days * 86400000).toISOString() : null;
 
       let query = supabase
-        .from(table)
+        .from(entityType)
         .update({ is_archived: true, archived_at: now, auto_delete_at });
       query = query.eq('id', id);
 
@@ -2290,10 +2349,9 @@ const apiMethods = {
       const parts = path.split('/');
       const entityType = parts[3];
       const id = parts[4];
-      const table = entityType === 'assets' ? 'devices' : entityType;
 
       let query = supabase
-        .from(table)
+        .from(entityType)
         .update({ is_archived: false, archived_at: null, auto_delete_at: null });
       query = query.eq('id', id);
 
@@ -2426,26 +2484,12 @@ const apiMethods = {
         units: emptyToNull(body.units),
         sub_type: emptyToNull(body.sub_type),
         standard: emptyToNull(body.standard),
-        semantic_id: emptyToNull(body.semantic_id),
-        // Only meaningful alongside an id. Sent as NULL when the id is blank so the pair cannot
-        // end up half-populated, which would export as a Reference with a type and no value.
-        semantic_id_type: emptyToNull(body.semantic_id) ? emptyToNull(body.semantic_id_type) : null,
+        ...semanticIdPair(body),
         description: body.description || null
       }).select();
       if (error) throw error;
       const item = data?.[0] || {};
       return { metric_uuid: item.id || '', ...item };
-    }
-
-    if (path.includes('/metric-catalog/') && path.endsWith('/deprecate')) {
-      const parts = path.split('/');
-      const id = parts[4];
-      const { data, error } = await supabase.from('metric_catalog').update({
-        deprecated: true,
-        superseded_by: emptyToNull(body?.superseded_by)
-      }).eq('id', id).select();
-      if (error) throw error;
-      return data?.[0] || {};
     }
 
     if (path === '/api/v1/schemas/validate') {
@@ -2462,7 +2506,7 @@ const apiMethods = {
           }
         }
       }
-      return { valid: true, message: 'Payload strictly conforms to target JSON schema' };
+      return { valid: true, message: 'All required fields are present.' };
     }
 
     // Both are RPCs rather than table writes: `version` is computed from the parent and `publish`
@@ -2525,8 +2569,7 @@ const apiMethods = {
         schema_name: body.schema_name,
         description: body.description,
         schema_definition: body.schema_definition,
-        semantic_id: emptyToNull(body.semantic_id),
-        semantic_id_type: emptyToNull(body.semantic_id) ? emptyToNull(body.semantic_id_type) : null,
+        ...semanticIdPair(body),
         // A newly built schema is v1 and in force immediately; `version` and `status` are left to their
         // column defaults because sending them is what the provenance trigger refuses.
         change_description: emptyToNull(body.change_description) || 'Initial release'
@@ -2537,7 +2580,7 @@ const apiMethods = {
     }
 
     /**
-     * The per-asset bundle: the AASX with the device's thread, its live telemetry and a manifest
+     * The per-asset bundle: the AASX with the device's trail, its live telemetry and a manifest
      * naming the cold objects, stored beside the cold tier and recorded in `asset_exports` by the
      * function. Fetched directly for the reason the AASX path is: the body is a ZIP. The counts,
      * and whether the copy was stored, ride in the same header.
@@ -2626,41 +2669,6 @@ const apiMethods = {
       return data;
     }
 
-    if (path.includes('/archive')) {
-      const parts = path.split('/');
-      const entityType = parts[3];
-      const id = parts[4];
-      const table = entityType === 'assets' ? 'devices' : entityType;
-      const now = new Date().toISOString();
-      const days = body?.auto_delete_days;
-      const auto_delete_at = days ? new Date(Date.now() + days * 86400000).toISOString() : null;
-
-      let query = supabase
-        .from(table)
-        .update({ is_archived: true, archived_at: now, auto_delete_at });
-      query = query.eq('id', id);
-
-      const { data, error } = await query.select();
-      if (error) throw error;
-      return data[0] || {};
-    }
-
-    if (path.includes('/restore')) {
-      const parts = path.split('/');
-      const entityType = parts[3];
-      const id = parts[4];
-      const table = entityType === 'assets' ? 'devices' : entityType;
-
-      let query = supabase
-        .from(table)
-        .update({ is_archived: false, archived_at: null, auto_delete_at: null });
-      query = query.eq('id', id);
-
-      const { data, error } = await query.select();
-      if (error) throw error;
-      return data[0] || {};
-    }
-
     if (path.startsWith('/api/v1/links/')) {
       const id = path.split('/')[4];
       const { data, error } = await supabase.from('links').update({
@@ -2676,13 +2684,34 @@ const apiMethods = {
     const parts = path.split('/');
     const id = parts[parts.length - 1];
 
-    // Editing a draft version's metric set. No status guard here beyond sending only the editable
-    // keys: `prevent_active_schema_mutation()` refuses this write against an active or archived row.
+    /**
+     * Correct a catalog metric's semantic id. Only the pair is sent: `name` and `datatype` are what
+     * devices publish, and enforce_metric_catalog_immutability() refuses both regardless. No row
+     * back means RLS refused the UPDATE (Administrator only), so it is not a success.
+     */
+    if (/^\/api\/v1\/metric-catalog\/[^/]+$/.test(path)) {
+      const { data, error } = await supabase
+        .from('metric_catalog').update(semanticIdPair(body)).eq('id', id).select();
+      if (error) throw error;
+      if (!data?.length) {
+        throw new Error(
+          'Semantic id not changed — the metric may no longer exist, or you may not have permission ' +
+          'to change the catalog.'
+        );
+      }
+      return data[0];
+    }
+
+    // Editing a draft version: its metric set, description and semantic id. No status guard here
+    // beyond sending only the editable keys: `prevent_active_schema_mutation()` refuses this write
+    // against an active or archived row.
     if (path.startsWith('/api/v1/schemas/')) {
       const patch = {};
       if ('schema_definition' in body) patch.schema_definition = body.schema_definition;
       if ('description' in body) patch.description = body.description;
       if ('change_description' in body) patch.change_description = emptyToNull(body.change_description);
+      // The pair travels together, so clearing the id clears the type with it.
+      if ('semantic_id' in body) Object.assign(patch, semanticIdPair(body));
 
       const { data, error } = await supabase.from('schemas').update(patch).eq('id', id).select();
       if (error) throw error;
@@ -2783,11 +2812,6 @@ const apiMethods = {
       const patch = {
         name: body.asset_name
       };
-      // Guarded like the optional fields below, not assigned unconditionally: both are what the
-      // platform observed rather than what an operator asked for, and no edit form sends either.
-      if ('status' in body) patch.status = body.status;
-      if ('is_quarantined' in body) patch.is_quarantined = body.is_quarantined;
-      if ('asset_type' in body) patch.asset_type = emptyToNull(body.asset_type);
       // emptyToNull, so clearing the field in the form stores NULL rather than ''. Absent and empty
       // are the same thing to every reader of a description, and two representations of one state is
       // how a `WHERE description IS NULL` starts missing rows.
@@ -2812,36 +2836,28 @@ const apiMethods = {
     throw new Error('Unhandled API path: ' + path);
   },
 
-  /*
-   * Change one setting's value.
-   *
-   * PATCH semantics through `.update()`, not PUT: `value` is the only column `authenticated`
-   * holds a grant on. `.select()` is not optional: RLS makes a non-Administrator's update affect
-   * zero rows without erroring, and returning the row lets the page tell "saved" from "silently
-   * not saved".
-   */
   /**
-   * Attach a floor plan to an area. The file is read first so an SVG with no stated size is
+   * Attach a plan to an area. The file is read first so an SVG with no stated size is
    * refused before anything is uploaded; the object goes up, then the row records its path and
    * aspect; a failed row write removes the object, and a successful one removes the plan it
    * replaced. Each upload takes a new path, so a cached blob URL never shows a stale drawing.
    */
-  uploadFloorPlan: async (area, file) => {
-    if (!isSvgFile(file)) throw new Error('A floor plan is an SVG file.');
-    if (file.size > FLOOR_PLAN_MAX_BYTES) {
-      throw new Error(`"${file.name}" is larger than the ${Math.round(FLOOR_PLAN_MAX_BYTES / 1048576)} MiB limit for a floor plan.`);
+  uploadAreaPlan: async (area, file) => {
+    if (!isSvgFile(file)) throw new Error('An area plan is an SVG file.');
+    if (file.size > AREA_PLAN_MAX_BYTES) {
+      throw new Error(`"${file.name}" is larger than the ${Math.round(AREA_PLAN_MAX_BYTES / 1048576)} MiB limit for an area plan.`);
     }
     const { aspect, problem } = readSvgPlan(decodeSvgBytes(await file.arrayBuffer()));
     if (problem) throw new Error(problem);
 
     const areaId = area.area_id ?? area.id;
-    const path = floorPlanPath({ area_id: areaId });
+    const path = areaPlanPath({ area_id: areaId });
     const { error: uploadError } = await supabase.storage
-      .from(FLOOR_PLAN_BUCKET)
+      .from(AREA_PLAN_BUCKET)
       .upload(path, file, { upsert: false, contentType: 'image/svg+xml' });
     if (uploadError) {
       if (/row-level security|Unauthorized/i.test(uploadError.message || '')) {
-        throw new Error('You do not have permission to upload a floor plan.');
+        throw new Error('You do not have permission to upload an area plan.');
       }
       throw new Error(uploadError.message || 'Upload failed');
     }
@@ -2852,13 +2868,13 @@ const apiMethods = {
       .eq('id', areaId)
       .select();
     if (error || !data?.length) {
-      await supabase.storage.from(FLOOR_PLAN_BUCKET).remove([path]);
+      await supabase.storage.from(AREA_PLAN_BUCKET).remove([path]);
       throw new Error(error?.message || 'Could not attach the plan to the area');
     }
 
     const previous = area.plan_path;
     if (previous && previous !== path) {
-      await supabase.storage.from(FLOOR_PLAN_BUCKET).remove([previous]).catch(() => {});
+      await supabase.storage.from(AREA_PLAN_BUCKET).remove([previous]).catch(() => {});
     }
     return { ...data[0], area_id: data[0].id };
   },
@@ -2868,7 +2884,7 @@ const apiMethods = {
    * stranded object, never an area pointing at a drawing that is gone. Cell places in the area are
    * kept, since the default outline shares the plan's coordinate space.
    */
-  removeFloorPlan: async (area) => {
+  removeAreaPlan: async (area) => {
     const areaId = area.area_id ?? area.id;
     const { data, error } = await supabase
       .from('areas')
@@ -2878,11 +2894,19 @@ const apiMethods = {
     if (error) throw new Error(error.message || 'Could not detach the plan');
     if (!data?.length) throw new Error('You do not have permission to change this area.');
     if (area.plan_path) {
-      await supabase.storage.from(FLOOR_PLAN_BUCKET).remove([area.plan_path]).catch(() => {});
+      await supabase.storage.from(AREA_PLAN_BUCKET).remove([area.plan_path]).catch(() => {});
     }
     return { ...data[0], area_id: data[0].id };
   },
 
+  /**
+   * Change one setting's value.
+   *
+   * PATCH semantics through `.update()`, not PUT: `value` is the only column `authenticated`
+   * holds a grant on. `.select()` is not optional: RLS makes a non-Administrator's update affect
+   * zero rows without erroring, and returning the row lets the page tell "saved" from "silently
+   * not saved".
+   */
   patchSetting: async (key, value) => {
     const { data, error } = await supabase
       .from('system_settings')
@@ -2957,7 +2981,7 @@ const apiMethods = {
     ]);
 
     // AN EXACT MATCH FIRST, then alphabetical. Somebody who typed a full name wants that row, and
-    // it would otherwise sit wherever its table happened to fall among the four.
+    // it would otherwise sit wherever its table happened to fall among the five.
     const lowered = needle.toLowerCase();
     return found.flat().sort((a, b) => {
       const aExact = String(a.name || '').toLowerCase() === lowered;
@@ -2986,7 +3010,7 @@ const apiMethods = {
       const { error } = await supabase.from('areas').delete().eq('id', id);
       if (error) throw error;
       const planPath = rows?.[0]?.plan_path;
-      if (planPath) await supabase.storage.from(FLOOR_PLAN_BUCKET).remove([planPath]).catch(() => {});
+      if (planPath) await supabase.storage.from(AREA_PLAN_BUCKET).remove([planPath]).catch(() => {});
       return true;
     }
 

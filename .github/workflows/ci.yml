@@ -516,7 +516,7 @@ jobs:
           done
 
           # Permitted but not deployed is also a refusal: autoscaling a disabled workload rendered no
-          # HPA and no error, which is issue #31's third door. This used `supabase-kong`, permitted
+          # HPA and no error, which is issue #31's third door. This used Kong's workload name, permitted
           # and never deployed -- a free example until Kong was deleted, after which the name became
           # UNKNOWN and this case quietly became a duplicate of the one above. A component that IS
           # deployed, turned off here, reaches the same door and cannot go stale the same way.
@@ -555,9 +555,12 @@ jobs:
           expect_failure "sparkplug group spanning topic levels" "which is not one topic level" \
             -f "$DEV" --set ingestion.sparkplugGroup=plant/a
 
-          # A nightly backup that writes nowhere is worse than none, because it looks like one.
-          expect_failure "backup to s3 with no bucket" "backup.s3.bucket is empty" \
+          # The CronJob's s3 destination is retired: an old values file naming it must fail rather
+          # than render a PVC-only backup that reads as the off-site copy it asked for.
+          expect_failure "the retired s3 backup destination" "backup.destination and backup.s3 are retired" \
             -f "$DEV" --set backup.enabled=true --set backup.destination=s3
+          expect_failure "the retired backup.s3 values" "backup.destination and backup.s3 are retired" \
+            -f "$DEV" --set backup.enabled=true --set backup.s3.bucket=nightly
 
           # Withdrawing plaintext 1883 without adding TLS leaves the external broker Service with NO
           # PORTS. The API server does refuse that -- as `spec.ports: Required value` on a Service,
@@ -692,23 +695,17 @@ jobs:
           if dnsprotos != {'UDP', 'TCP'}:
               errors.append(f"DNS egress must allow both UDP and TCP 53; got {dnsprotos or 'nothing'}")
 
-          # The gateway is named by the render: NetworkPolicy selects pod labels (`supabase-envoy`) while
-          # the Service kept the `supabase-kong` name. Derived so the assertion reads against either.
-          seen = {f[0] for f in egress} | {f[1] for f in egress}
-          GATEWAY = 'supabase-envoy' if 'supabase-envoy' in seen else 'supabase-kong'
-          print(f"  gateway component in the rendered policies: {GATEWAY}")
-
           # The flows whose absence is silent and expensive.
           REQUIRED = [
               # pg_net posts directly to Node-RED (webhook_endpoints seeds http://node-red:1880/hooks/quarantine)
               # with no retries and no DLQ. Block it and every quarantine notification is dropped silently.
               ('supabase-db', 'node-red', 1880, 'pg_net quarantine webhook (no retries/DLQ)'),
-              ('supabase-db', GATEWAY, 8000, 'pg_net to edge functions'),
+              ('supabase-db', 'supabase-envoy', 8000, 'pg_net to edge functions'),
               # M2/M6: public.telemetry is a postgres_fdw projection.
               ('supabase-db', 'timescaledb', 5432, 'postgres_fdw'),
               ('ingestion', 'mosquitto', 1883, 'the spBv1.0/# subscription'),
               ('ingestion', 'timescaledb', 5432, 'telemetry writes'),
-              (GATEWAY, 'realtime', 4000, 'the WebSocket change feed'),
+              ('supabase-envoy', 'realtime', 4000, 'the WebSocket change feed'),
           ]
           for src, dst, port, why in REQUIRED:
               if (src, dst, port) not in egress:
@@ -773,10 +770,9 @@ jobs:
           allowed = peers_by_port(spec)
           if spec.get('policyTypes') != ['Ingress']:
               errors.append(f"the forge policy must be Ingress-only; got {spec.get('policyTypes')}")
-          gw = 'supabase-envoy' if any('supabase-envoy' in v for v in allowed.values()) else 'supabase-kong'
           # The door and the API, and NOTHING else on 3000: every other pod that reaches it is a user.
-          if allowed.get(3000) != {gw, 'supabase-functions'}:
-              errors.append(f"3000 must be reachable by exactly {{{gw}, supabase-functions}}; got {allowed.get(3000)}")
+          if allowed.get(3000) != {'supabase-envoy', 'supabase-functions'}:
+              errors.append(f"3000 must be reachable by exactly {{supabase-envoy, supabase-functions}}; got {allowed.get(3000)}")
           # PORT 22, AND THE REASON THIS ASSERTION EXISTS. A policy is a whitelist for the pod it
           # SELECTS, not the ports it names -- so selecting the Gitea pod closes 22 unless 22 is
           # listed. A draft that named only 3000 took an appliance's clone from an SSH banner to
@@ -1424,7 +1420,7 @@ jobs:
 
       # The suites under `scripts/lib/`: the two copies of the flow shape check, the appliance's
       # converge script, the mosquitto credential merge, the orphan sweep's filter and the service
-      # JWT. Explicit file paths, not the
+      # JWT; and node-red-init's move of a volume's flow. Explicit file paths, not the
       # directory (see `npm run test:lib`). The converge suite needs `jq` on PATH, which this
       # runner has and a Windows development box does not; it skips loudly rather than silently.
       - name: Run Node Library Suites
@@ -1538,7 +1534,7 @@ jobs:
       - name: Verify The Live Gateway Surface — Envoy, In-Cluster
         run: |
           set -eu
-          kubectl -n $NS port-forward svc/supabase-kong 18080:8000 >/tmp/port-forward.log 2>&1 &
+          kubectl -n $NS port-forward svc/supabase-envoy 18080:8000 >/tmp/port-forward.log 2>&1 &
           PF=$!
           trap 'kill $PF 2>/dev/null || true' EXIT
           # Wait for the tunnel, not for a 2xx: every gated route answers 401 to an unauthenticated
@@ -1665,9 +1661,9 @@ jobs:
 
           kubectl -n $NS port-forward svc/i3x-service 18090:8090 >/tmp/pf-i3x.log 2>&1 &
           PFI=$!
-          kubectl -n $NS port-forward svc/supabase-kong 18080:8000 >/tmp/pf-kong.log 2>&1 &
-          PFK=$!
-          trap 'kill $PFI $PFK 2>/dev/null || true' EXIT
+          kubectl -n $NS port-forward svc/supabase-envoy 18080:8000 >/tmp/pf-envoy.log 2>&1 &
+          PFE=$!
+          trap 'kill $PFI $PFE 2>/dev/null || true' EXIT
           sleep 3
 
           KEY=$(kubectl -n $NS get secret $RELEASE-secrets -o jsonpath='{.data.SUPABASE_PUBLISHABLE_KEY}' | base64 -d)

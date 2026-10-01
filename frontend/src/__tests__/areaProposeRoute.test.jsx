@@ -6,18 +6,16 @@ import { PERMISSION_UUIDS } from '../constants'
 import { api } from '../api'
 
 /**
- * Areas gained a page in 0097 and a proposal lane only in 0123. Until then an Operator holding
- * `proposal:create` -- who could ask for a change to a device, a nameplate, a cell or a gateway --
- * was shown a greyed-out Edit Details on the one rung between the site and its cells, with nothing
- * to do about it. The mirror of deviceProposeRoute, for the lane that was missing.
+ * An Operator holding `proposal:create` who may not edit an area is offered Propose a Change on it,
+ * as on a device, a cell or a gateway. The mirror of deviceProposeRoute.
  */
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
   return {
     ...actual,
-    loadFloorPlanUrl: vi.fn().mockResolvedValue('blob:plan-1'),
-    api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), uploadFloorPlan: vi.fn(), removeFloorPlan: vi.fn() }
+    loadAreaPlanUrl: vi.fn().mockResolvedValue('blob:plan-1'),
+    api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), uploadAreaPlan: vi.fn(), removeAreaPlan: vi.fn() }
   }
 })
 
@@ -25,7 +23,7 @@ const AREA_ID = 'bbbbbbbb-0000-4000-8000-000000000001'
 
 const area = (overrides = {}) => ({
   area_id: AREA_ID,
-  area_name: 'Building A',
+  area_name: 'North Shop',
   description: 'The old wing',
   icon: 'Factory',
   cells: [],
@@ -40,7 +38,7 @@ const proposal = (overrides = {}) => ({
   entity_type: 'areas',
   entity_id: AREA_ID,
   status: 'open',
-  patch: { name: 'Building One' },
+  patch: { name: 'Press Hall' },
   proposed_at: new Date().toISOString(),
   ...overrides
 })
@@ -66,10 +64,10 @@ const show = async (hasPermission, rows = [area()], proposals = []) => {
       onSelectGateway={vi.fn()}
     />
   )
-  await waitFor(() => expect(screen.getByText('Building A')).toBeTruthy())
+  await waitFor(() => expect(screen.getByText('North Shop')).toBeTruthy())
 }
 
-const openPanel = (name = 'Building A') => {
+const openPanel = (name = 'North Shop') => {
   fireEvent.click(within(document.querySelector('.page-main')).getByText(name))
   return within(document.querySelector('.context-panel'))
 }
@@ -123,7 +121,7 @@ describe('proposing a change to an area', () => {
     openPanel()
     clickAction('Propose a Change')
 
-    fireEvent.change(screen.getByLabelText('Area Name'), { target: { value: 'Building One' } })
+    fireEvent.change(screen.getByLabelText('Area Name'), { target: { value: 'Press Hall' } })
     fireEvent.change(screen.getByLabelText('Why (optional)'), { target: { value: 'renamed on site' } })
     fireEvent.click(footer().getByRole('button', { name: /Propose a change/i }))
 
@@ -134,7 +132,7 @@ describe('proposing a change to an area', () => {
       entity_type: 'areas',
       entity_id: AREA_ID,
       // Only what moved, and under the COLUMN name rather than the form's.
-      patch: { name: 'Building One' },
+      patch: { name: 'Press Hall' },
       rationale: 'renamed on site'
     })
   })
@@ -147,7 +145,7 @@ describe('proposing a change to an area', () => {
     clickAction('Propose a Change')
 
     // The earlier request is back in the box.
-    expect(screen.getByLabelText('Area Name')).toHaveValue('Building One')
+    expect(screen.getByLabelText('Area Name')).toHaveValue('Press Hall')
     expect(footer().getByRole('button', { name: /Update your proposal/i })).toBeTruthy()
 
     fireEvent.change(screen.getByLabelText('Description (Optional)'), { target: { value: 'The new wing' } })

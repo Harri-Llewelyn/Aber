@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  */
 
 // Recording stub for the PostgREST query builder. Each `from()` starts a fresh chain and pushes the
-// call record onto `calls`. `rpcCalls` is separate so `callFor('digital_thread')` still means the
+// call record onto `calls`. `rpcCalls` is separate so `callFor('audit_trail')` still means the
 // table was queried.
 const state = { calls: [], rpcCalls: [], responses: {} };
 
@@ -37,19 +37,19 @@ function makeBuilder(table) {
 vi.mock('../lib/supabaseClient', () => ({
   supabase: {
     from: vi.fn((table) => makeBuilder(table)),
-    // The Digital Thread page is an RPC since 0039. Calls are recorded so the tests below can
+    // The Audit Trail page is an RPC since 0039. Calls are recorded so the tests below can
     // assert the ARGUMENTS, which is where its filters live now.
     rpc: vi.fn((fn, args) => {
       state.rpcCalls.push({ fn, args });
       return Promise.resolve({
         data: {
-          events: (state.responses.digital_thread || { data: [] }).data || [],
+          events: (state.responses.audit_trail || { data: [] }).data || [],
           purged_assets: 0,
           truncated: false,
-          // Only when a test asks for one. A server without 0115 returns no such key at all, and
-          // the attachment has to tell that apart from a total of zero.
-          ...(state.responses.digital_thread?.total_matching !== undefined
-            ? { total_matching: state.responses.digital_thread.total_matching }
+          // Only when a test asks for one: a payload without the key has to be told apart from a
+          // total of zero.
+          ...(state.responses.audit_trail?.total_matching !== undefined
+            ? { total_matching: state.responses.audit_trail.total_matching }
             : {})
         },
         error: null
@@ -263,10 +263,6 @@ describe('device liveness is never asserted by the UI', () => {
     expect(callFor('devices').payload).not.toHaveProperty('is_quarantined');
   });
 
-  it('still writes a status the caller does state, so the quarantine paths keep working', async () => {
-    await api.put('/api/v1/devices/dev-1', { asset_name: 'CNC_01', status: 'OFFLINE', is_quarantined: false });
-    expect(callFor('devices').payload).toMatchObject({ status: 'OFFLINE', is_quarantined: false });
-  });
 });
 
 describe('device DBIRTH parameters', () => {
@@ -298,6 +294,98 @@ describe('device DBIRTH parameters', () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ metric_name: 'firmware_version', val_string: 'v3.2.0-industrial', datatype: 12 });
+  });
+});
+
+describe('a metric is deprecated and restored (#468)', () => {
+  const written = { data: [{ id: 'm9' }], error: null };
+
+  it('restores by clearing the flag and the replacement pointer together', async () => {
+    state.responses.metric_catalog = written;
+    await api.post('/api/v1/metric-catalog/m9/restore');
+
+    const call = callFor('metric_catalog');
+    expect(call.op).toBe('update');
+    expect(call.payload).toEqual({ deprecated: false, superseded_by: null });
+    expect(call.filters).toContainEqual(['eq', 'id', 'm9']);
+  });
+
+  it('is not taken by the generic archive restore, which would write is_archived', async () => {
+    state.responses.metric_catalog = written;
+    await api.post('/api/v1/metric-catalog/m9/restore');
+    expect(state.calls.map(c => c.table)).toEqual(['metric_catalog']);
+  });
+
+  it('deprecates with the replacement it was given', async () => {
+    state.responses.metric_catalog = written;
+    await api.post('/api/v1/metric-catalog/m9/deprecate', { superseded_by: 'm2' });
+    expect(callFor('metric_catalog').payload).toEqual({ deprecated: true, superseded_by: 'm2' });
+  });
+
+  it('treats no row back as refused rather than done', async () => {
+    // metric_catalog_update_privileged admits Administrators only; anyone else matches no row and
+    // PostgREST reports success with an empty array.
+    await expect(api.post('/api/v1/metric-catalog/m9/restore')).rejects.toThrow(/^Metric not restored/);
+    await expect(api.post('/api/v1/metric-catalog/m9/deprecate', {})).rejects.toThrow(/^Metric not deprecated/);
+  });
+});
+
+describe('a semantic id is corrected, never half-populated', () => {
+  const written = { data: [{ id: 'row' }], error: null };
+
+  it('sends a metric only its semantic id and type, whatever else the body carries', async () => {
+    state.responses.metric_catalog = written;
+    await api.put('/api/v1/metric-catalog/m2', {
+      semantic_id: ' 0112/2///61987#ABA565#009 ', semantic_id_type: 'IRDI', name: 'Renamed', datatype: 10
+    });
+
+    const call = callFor('metric_catalog');
+    expect(call.op).toBe('update');
+    expect(call.payload).toEqual({ semantic_id: '0112/2///61987#ABA565#009', semantic_id_type: 'IRDI' });
+    expect(call.filters).toContainEqual(['eq', 'id', 'm2']);
+  });
+
+  it('clears a metric’s type with its id', async () => {
+    state.responses.metric_catalog = written;
+    await api.put('/api/v1/metric-catalog/m2', { semantic_id: '', semantic_id_type: 'IRI' });
+    expect(callFor('metric_catalog').payload).toEqual({ semantic_id: null, semantic_id_type: null });
+  });
+
+  it('treats no metric row back as refused rather than done', async () => {
+    // metric_catalog_update_privileged admits Administrators only; anyone else matches no row.
+    await expect(api.put('/api/v1/metric-catalog/m2', { semantic_id: 'urn:x', semantic_id_type: 'IRI' }))
+      .rejects.toThrow(/^Semantic id not changed/);
+  });
+
+  it('forwards a draft schema’s pair with the same rule', async () => {
+    state.responses.schemas = written;
+    await api.put('/api/v1/schemas/v2', {
+      schema_definition: { type: 'object' }, description: 'd', change_description: 'c',
+      semantic_id: 'https://admin-shell.io/idta/nameplate/3/0/Nameplate', semantic_id_type: 'IRI'
+    });
+    expect(callFor('schemas').payload).toMatchObject({
+      semantic_id: 'https://admin-shell.io/idta/nameplate/3/0/Nameplate', semantic_id_type: 'IRI'
+    });
+  });
+
+  it('clears a draft schema’s type with its id', async () => {
+    state.responses.schemas = written;
+    await api.put('/api/v1/schemas/v2', { semantic_id: '   ', semantic_id_type: 'IRDI' });
+    expect(callFor('schemas').payload).toEqual({ semantic_id: null, semantic_id_type: null });
+  });
+
+  it('leaves a draft’s pair alone when the save does not mention it', async () => {
+    state.responses.schemas = written;
+    await api.put('/api/v1/schemas/v2', { description: 'only this' });
+    expect(callFor('schemas').payload).toEqual({ description: 'only this' });
+  });
+
+  it('applies the rule on create too', async () => {
+    state.responses.metric_catalog = written;
+    await api.post('/api/v1/metric-catalog', {
+      name: 'Axes/ANGLE', datatype: 10, semantic_id: '', semantic_id_type: 'IRI'
+    });
+    expect(callFor('metric_catalog').payload).toMatchObject({ semantic_id: null, semantic_id_type: null });
   });
 });
 
@@ -369,83 +457,47 @@ describe('telemetry queries', () => {
   });
 });
 
-describe('telemetry filtering by device tag', () => {
-  it('expands asset_ids into a single IN over the telemetry view', async () => {
-    // A tag filter resolves to a whole group of devices client-side, because a device's tags are
-    // derived from its schema and the database does not model them.
-    await api.get('/api/v1/telemetry?asset_ids=dev200000000000400080000,dev300000000000400080000');
-    expect(callFor('telemetry').filters).toContainEqual([
-      'in', 'asset_id', ['dev200000000000400080000', 'dev300000000000400080000']
-    ]);
-  });
-
-  it('translates device UUIDs in asset_ids to Sparkplug keys', async () => {
-    // telemetry.asset_id is keyed by sparkplug_id; the UI works in UUIDs. Same local derivation
-    // as the single-device path: 'dev' + the first 21 unhyphenated hex characters.
-    await api.get('/api/v1/telemetry?asset_ids=ccd19944-8805-4c11-ae66-ea0d2c50f40c');
-    const [, , keys] = callFor('telemetry').filters.find(f => f[0] === 'in');
-    expect(keys).toEqual(['devccd1994488054c11ae66e']);
-  });
-
-  it('returns nothing — not everything — for a tag that matches no device', async () => {
-    // The failure mode this guards: an empty IN list silently widening to the whole fleet.
-    const rows = await api.get('/api/v1/telemetry?asset_ids=');
-    expect(rows).toEqual([]);
-    expect(callFor('telemetry')).toBeUndefined();
-  });
-
-  it('lets an explicitly chosen device win over a tag', async () => {
-    await api.get('/api/v1/telemetry?asset_id=dev200000000000400080000&asset_ids=dev300000000000400080000');
-    const filters = callFor('telemetry').filters;
-    expect(filters).toContainEqual(['eq', 'asset_id', 'dev200000000000400080000']);
-    expect(filters.find(f => f[0] === 'in')).toBeUndefined();
-  });
-});
-
-describe('digital thread filtering', () => {
-  /* The filters are RPC arguments: `digital_thread_page()` hides deleted entities with an anti-join
+describe('audit trail filtering', () => {
+  /* The filters are RPC arguments: `audit_trail_page()` hides deleted entities with an anti-join
      PostgREST cannot express. */
-  const rpcArgs = () => state.rpcCalls.find(c => c.fn === 'digital_thread_page')?.args;
+  const rpcArgs = () => state.rpcCalls.find(c => c.fn === 'audit_trail_page')?.args;
 
   it('normalises the UI entity type to the table name the trigger records', async () => {
-    // log_digital_thread_event() writes TG_TABLE_NAME ('devices'); the dropdown offers 'DEVICE'.
+    // log_audit_trail_event() writes TG_TABLE_NAME ('devices'); the dropdown offers 'DEVICE'.
     // An exact match would never have hit even once the parameter was honoured at all.
-    await api.get('/api/v1/digital-thread?entity_type=DEVICE');
+    await api.get('/api/v1/audit-trail?entity_type=DEVICE');
     expect(rpcArgs().p_entity_type).toBe('devices');
   });
 
   it('honours the row limit', async () => {
-    await api.get('/api/v1/digital-thread?limit=200');
+    await api.get('/api/v1/audit-trail?limit=200');
     expect(rpcArgs().p_limit).toBe(200);
   });
 
   it('restricts to the entity ids carrying a device tag', async () => {
-    await api.get('/api/v1/digital-thread?entity_ids=dev-a,dev-b');
+    await api.get('/api/v1/audit-trail?entity_ids=dev-a,dev-b');
     expect(rpcArgs().p_entity_ids).toEqual(['dev-a', 'dev-b']);
   });
 
   it('hides deleted entities unless asked, as a predicate rather than afterwards', async () => {
     // THE ONE THIS MIGRATION EXISTS FOR. Applied in the query, the 200-row budget is spent on rows
     // that will be shown; applied afterwards, it was spent on rows that were then thrown away.
-    await api.get('/api/v1/digital-thread');
+    await api.get('/api/v1/audit-trail');
     expect(rpcArgs().p_include_purged).toBe(false);
     state.rpcCalls.length = 0;
-    await api.get('/api/v1/digital-thread?include_purged=true');
+    await api.get('/api/v1/audit-trail?include_purged=true');
     expect(rpcArgs().p_include_purged).toBe(true);
   });
 
-  /* The keyset cursor and the compatibility rule around it. PostgREST resolves an RPC by the
-     argument names given, so naming the cursor arguments against a database without them fails with
-     "function does not exist" rather than falling back. Omitted, the call matches the
-     seven-argument form and the page renders unpaged. */
+  /* The keyset cursor is sent only when there is one. */
   it('omits the cursor arguments entirely when there is no cursor', async () => {
-    await api.get('/api/v1/digital-thread');
+    await api.get('/api/v1/audit-trail');
     expect(rpcArgs()).not.toHaveProperty('p_before_recorded_at');
     expect(rpcArgs()).not.toHaveProperty('p_before_id');
   });
 
   it('sends both halves of the cursor when paging, because recorded_at is not unique', async () => {
-    await api.get('/api/v1/digital-thread?before_recorded_at=2026-01-01T00%3A00%3A00Z&before_id=41');
+    await api.get('/api/v1/audit-trail?before_recorded_at=2026-01-01T00%3A00%3A00Z&before_id=41');
     expect(rpcArgs().p_before_recorded_at).toBe('2026-01-01T00:00:00Z');
     // A NUMBER, not the string off the query. `p_before_id` is bigint and the row comparison
     // against a text argument would not resolve.
@@ -454,26 +506,26 @@ describe('digital thread filtering', () => {
 
   it('ignores a half-cursor rather than sending one', async () => {
     // `(recorded_at, id) < (NULL, 41)` is NULL, which filters out every row -- so a half-cursor
-    // reads as "end of thread" on a thread that has plenty. Neither half goes without the other.
-    await api.get('/api/v1/digital-thread?before_id=41');
+    // reads as "end of trail" on a trail that has plenty. Neither half goes without the other.
+    await api.get('/api/v1/audit-trail?before_id=41');
     expect(rpcArgs()).not.toHaveProperty('p_before_id');
     state.rpcCalls.length = 0;
-    await api.get('/api/v1/digital-thread?before_recorded_at=2026-01-01T00%3A00%3A00Z');
+    await api.get('/api/v1/audit-trail?before_recorded_at=2026-01-01T00%3A00%3A00Z');
     expect(rpcArgs()).not.toHaveProperty('p_before_recorded_at');
   });
 
   it('returns nothing for a tag that matches no device', async () => {
-    const rows = await api.get('/api/v1/digital-thread?entity_ids=');
+    const rows = await api.get('/api/v1/audit-trail?entity_ids=');
     expect(rows).toEqual([]);
     expect(rpcArgs()).toBeUndefined();
   });
 
   it('hands the search to the database instead of filtering the page', async () => {
     /* It used to be resolved in the tab against the LIVE lists and sent as `entity_ids`, so a name
-       that had been deleted matched nothing there, sent an EMPTY list, and drew an empty thread.
+       that had been deleted matched nothing there, sent an EMPTY list, and drew an empty trail.
        `p_search` (0115) matches the id and the audit-snapshot fields the timeline labels a lane
        from, where a deleted entity still has a name. */
-    await api.get('/api/v1/digital-thread?search=Press_02');
+    await api.get('/api/v1/audit-trail?search=Press_02');
     expect(rpcArgs().p_search).toBe('Press_02');
     expect(rpcArgs().p_entity_ids).toBeNull();
   });
@@ -481,9 +533,9 @@ describe('digital thread filtering', () => {
   it('sends no search rather than an empty one', async () => {
     // `''` would be a predicate matching every row through a LIKE, which is the same answer as no
     // filter but arrived at by scanning for it.
-    await api.get('/api/v1/digital-thread');
+    await api.get('/api/v1/audit-trail');
     expect(rpcArgs().p_search).toBeNull();
-    await api.get('/api/v1/digital-thread?search=%20%20');
+    await api.get('/api/v1/audit-trail?search=%20%20');
     expect(rpcArgs().p_search).toBeNull();
   });
 
@@ -492,7 +544,7 @@ describe('digital thread filtering', () => {
        from the entity type and id -- so it searched the id by a longer route, and no caller ever
        sent the parameter that reached it. A filter applied after the page also makes `rows.length`
        say nothing about whether the database had more. */
-    state.responses.digital_thread = {
+    state.responses.audit_trail = {
       data: [
         { id: 1, entity_type: 'devices', entity_id: 'dev-alpha', action: 'INSERT', recorded_at: '2026-01-01T00:00:00Z' },
         { id: 2, entity_type: 'cells', entity_id: 'cell-beta', action: 'UPDATE', recorded_at: '2026-01-01T00:00:01Z' }
@@ -500,31 +552,31 @@ describe('digital thread filtering', () => {
       error: null
     };
 
-    const rows = await api.get('/api/v1/digital-thread?search=ALPHA');
+    const rows = await api.get('/api/v1/audit-trail?search=ALPHA');
     expect(rows.map(r => r.entity_id)).toEqual(['dev-alpha', 'cell-beta']);
   });
 
   it('attaches the match total, and tells a missing one from a total of zero', async () => {
-    // `total_matching` (0115) is how the page says "200 of 467" rather than "200 events". Zero is
-    // a real answer -- a filter that matches nothing -- so the absent case has to be null, or a
-    // server without 0115 renders as a thread with no events in it.
+    // `total_matching` is how the page says "200 of 467" rather than "200 events". Zero is a real
+    // answer -- a filter that matches nothing -- so the absent case has to be null, or a payload
+    // without a total renders as a trail with no events in it.
     const rows = [{ id: 1, entity_type: 'devices', entity_id: 'dev-a', action: 'INSERT', recorded_at: '2026-01-01T00:00:00Z' }];
 
-    state.responses.digital_thread = { data: rows, total_matching: 467 };
-    expect((await api.get('/api/v1/digital-thread')).totalMatching).toBe(467);
+    state.responses.audit_trail = { data: rows, total_matching: 467 };
+    expect((await api.get('/api/v1/audit-trail')).totalMatching).toBe(467);
 
-    state.responses.digital_thread = { data: [], total_matching: 0 };
-    expect((await api.get('/api/v1/digital-thread')).totalMatching).toBe(0);
+    state.responses.audit_trail = { data: [], total_matching: 0 };
+    expect((await api.get('/api/v1/audit-trail')).totalMatching).toBe(0);
 
-    state.responses.digital_thread = { data: rows };
-    expect((await api.get('/api/v1/digital-thread')).totalMatching).toBeNull();
+    state.responses.audit_trail = { data: rows };
+    expect((await api.get('/api/v1/audit-trail')).totalMatching).toBeNull();
   });
 
   it('returns every event when no filter is supplied', async () => {
-    state.responses.digital_thread = {
+    state.responses.audit_trail = {
       data: [{ id: 1, entity_type: 'devices', entity_id: 'dev-a', action: 'INSERT', recorded_at: '2026-01-01T00:00:00Z' }],
       error: null
     };
-    expect(await api.get('/api/v1/digital-thread')).toHaveLength(1);
+    expect(await api.get('/api/v1/audit-trail')).toHaveLength(1);
   });
 });

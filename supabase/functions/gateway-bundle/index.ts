@@ -1,6 +1,5 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { zipSync, strToU8 } from "https://esm.sh/fflate@0.8.2";
+import { createClient } from "@supabase/supabase-js";
+import { strToU8 } from "fflate";
 
 import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
@@ -9,6 +8,7 @@ import { brokerPublicHost, platformPublicUrl } from "../_shared/publicAddresses.
 import { BUNDLE_VERSION, newCredentialSecret, renderGatewayEnv } from "../_shared/gatewayEnv.ts";
 import { platformRootPem, spkiPin } from "../_shared/caPin.ts";
 import { installerTransport } from "../_shared/installer.ts";
+import { zip } from "../_shared/zip.ts";
 import { GATEWAY_PLATFORM_FILES } from "../_shared/gatewayPlatform.generated.ts";
 
 /**
@@ -448,7 +448,7 @@ The second command prints the Node-RED editor password. It is shown ONCE.
 See README.md for the rest, including what to do if the token has expired.
 `);
 
-    const archive = zipSync(files, {
+    const archive = zip(files, {
       // Stored, not deflated: small text files that can be read with `unzip -p` on a machine with
       // no tooling.
       level: 0,
@@ -488,4 +488,4 @@ See README.md for the rest, including what to do if the token has expired.
   }
 }
 
-serve(handler);
+Deno.serve(handler);

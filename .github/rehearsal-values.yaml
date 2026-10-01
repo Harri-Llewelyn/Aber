@@ -19,7 +19,6 @@
 # default (custom, .dump), so the rehearsal restores what a default install writes.
 backup:
   enabled: true
-  destination: pvc
   includeStorage: true
   includeForge: true
   includeBroker: true
@@ -27,7 +26,7 @@ backupService:
   enabled: true
 
 # --- The state the backup carries, beyond the two databases --------------------------------------
-# Storage (the 3D model objects), the forge (every gateway's repository and the SSH host keys) and
+# Storage (every bucket's objects), the forge (every gateway's repository and the SSH host keys) and
 # the broker (the Dynamic Security document: every issued gateway account) are on by default and
 # stay on. The broker's credential sidecar is not needed to seed or read the document.
 gatewayCredential:

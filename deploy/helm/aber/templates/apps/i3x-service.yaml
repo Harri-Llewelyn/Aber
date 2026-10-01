@@ -36,6 +36,9 @@ spec:
     metadata:
       labels:
         {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+      annotations:
+        # Roll the server when its broker account is renamed; env from a Secret is read at start.
+        checksum/broker-account: {{ .Values.secrets.mqttI3xUser | default "" | sha256sum }}
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
@@ -54,7 +57,7 @@ spec:
         */}}
         {{- $brokerPort := ternary 8883 1883 (and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients) }}
         {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-mosquitto" "command" (printf "nc -z mosquitto %d" (int $brokerPort)) "describe" (printf "mosquitto:%d (the spBv1.0/# subscription that feeds every i3X value)" (int $brokerPort))) | nindent 8 }}
-        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-gateway" "image" "curlimages/curl:8.10.1" "command" (printf "curl -s -o /dev/null %s/rest/v1/" (include "aber.supabase.internalUrl" .)) "describe" "supabase-kong (every metadata read is a PostgREST call made as the caller)") | nindent 8 }}
+        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-gateway" "image" "curlimages/curl:8.10.1" "command" (printf "curl -s -o /dev/null %s/rest/v1/" (include "aber.supabase.internalUrl" .)) "describe" "supabase-envoy (every metadata read is a PostgREST call made as the caller)") | nindent 8 }}
       containers:
         - name: i3x-service
           image: {{ include "aber.image" (dict "image" .Values.i3xService.image "ctx" $) | quote }}
@@ -92,15 +95,21 @@ spec:
               value: {{ .Values.i3xService.subscriptionTtlSeconds | quote }}
             - name: I3X_SUBSCRIPTION_QUEUE_LIMIT
               value: {{ .Values.i3xService.subscriptionQueueLimit | quote }}
+            - name: I3X_MAX_SUBSCRIPTIONS_PER_PRINCIPAL
+              value: {{ .Values.i3xService.maxSubscriptionsPerPrincipal | quote }}
+            - name: I3X_MAX_SUBSCRIPTIONS
+              value: {{ .Values.i3xService.maxSubscriptions | quote }}
+            - name: I3X_MAX_STREAMS
+              value: {{ .Values.i3xService.maxStreams | quote }}
+            - name: I3X_HISTORY_MAX_ROWS
+              value: {{ .Values.i3xService.historyMaxRows | quote }}
+            - name: I3X_MAX_COMPONENTS
+              value: {{ .Values.i3xService.maxComponents | quote }}
             - name: I3X_SERVER_NAME
               value: {{ .Values.i3xService.serverName | quote }}
-            {{/*
-              The site's group, used to key the address space when a Sparkplug topic carries none.
-              The server read this from the environment before the chart set it, and fell back to
-              a literal on every deployment; 0131 makes it one value the whole stack agrees on.
-            */}}
-            - name: SPARKPLUG_GROUP
-              value: {{ include "aber.sparkplugGroup" . | quote }}
+            # Reported by GET /info as `serverVersion`: the release, not the image tag override.
+            - name: I3X_SERVER_VERSION
+              value: {{ .Chart.AppVersion | quote }}
             - name: PYTHONUNBUFFERED
               value: "1"
           # GET /info is the health probe, and that is a design property rather than a convenience:

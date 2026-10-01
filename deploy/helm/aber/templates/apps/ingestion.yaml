@@ -30,7 +30,7 @@ spec:
         whenever the timestamps differ by a microsecond -- which they do, because each replica
         stamps its own.
       * DUPLICATED QUARANTINE DECISIONS. Both replicas race to insert the same row and each writes
-        a digital_thread audit row via the trigger. That table is APPEND-ONLY, so the noise is
+        an audit_trail row via the trigger. That table is APPEND-ONLY, so the noise is
         permanent.
       * DOUBLED HEARTBEATS, firing the pg_net quarantine webhook's UPDATE trigger twice per beat.
 
@@ -51,10 +51,12 @@ spec:
     metadata:
       labels:
         {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
-      {{- if .Values.ingestion.metrics.enabled }}
       annotations:
+        # Roll the daemon when its broker account is renamed; env from a Secret is read at start.
+        checksum/broker-account: {{ .Values.secrets.mqttIngestionUser | default "" | sha256sum }}
+        {{- if .Values.ingestion.metrics.enabled }}
         {{- include "aber.scrapeAnnotations" (dict "port" .Values.ingestion.metrics.port "path" "/metrics") | nindent 8 }}
-      {{- end }}
+        {{- end }}
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
@@ -63,7 +65,7 @@ spec:
       initContainers:
         {{/*
           Waits for the API gateway, which is how EVERY device lookup is made (SUPABASE_URL is
-          http://supabase-kong:8000).
+          http://supabase-envoy:8000).
 
           ORDERING ONLY. The property that makes an unresolvable lookup harmless lives in
           ingestion.py: an unreachable directory raises DirectoryUnavailable instead of resolving
@@ -71,7 +73,7 @@ spec:
           quarantine row, which persists and needs an operator to clear. Relying on start order
           for that would leave the same fault reachable any time the gateway restarts.
         */}}
-        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-gateway" "image" "curlimages/curl:8.10.1" "command" "curl -sf -o /dev/null http://supabase-kong:8000/auth/v1/health" "describe" "supabase-kong (every device lookup is routed through it)") | nindent 8 }}
+        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-gateway" "image" "curlimages/curl:8.10.1" "command" "curl -sf -o /dev/null http://supabase-envoy:8000/auth/v1/health" "describe" "supabase-envoy (every device lookup is routed through it)") | nindent 8 }}
         {{/*
           Waits for the historian's SCHEMA, not just for the server. The daemon writes to the
           `telemetry` hypertable on its first DDATA, and TimescaleDB's bootstrap scripts run only on

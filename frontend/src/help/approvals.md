@@ -2,18 +2,23 @@
 
 One queue for every change somebody proposes but may not make themselves. An Operator proposes; an Administrator or Shopfloor_Manager approves — and approving is what performs the change. Nothing is written when a proposal is filed.
 
+A machine identity can propose too, if an Administrator gave it that permission. Its proposals name it by the name it was given, marked **machine**, and a person still decides them.
+
 ## What the controls do
 
-- **Propose a change** opens the composer. Pick what kind of change it is, pick the asset, fill in only the fields you want changed, and say why. A field you leave alone is not part of the proposal.
+- There is no form on this page. A change is asked for on the entity's own page: open the device, area, cell or gateway and use **Propose a Change**, which opens the same dialog that edits it. A nameplate change starts from the device's **Digital Nameplate…**. Change only what you want changed, and say why. A field you leave alone is not part of the proposal.
+- Selecting a proposal opens it beside the queue, with **What would change**: each field, its value now and the value proposed. A field already at the proposed value is marked **unchanged**. A subject that no longer exists is marked **MISSING**, and approving it fails rather than recreating anything.
 - **Approve** applies the change there and then, in one transaction, as you. **Reject** refuses it and requires a reason. **Withdraw** is your own proposal's exit, and only the person who filed it can use it.
-- **Edit** reopens your own proposal while it is still open, so you can add to it rather than filing a second one.
-- The fields the composer offers come from the database, not from this page. A field that is not offered is one no proposal may name.
+- **Add to this proposal** takes you to the entity's page with your open proposal loaded into its dialog, so you can add to it rather than filing a second one.
+- Each card has a **kind** filter, a search box (the subject, the proposer, the reason or rationale, or an id) and **Clear filters**. The count beside each title is the number of rows in the card, and reads "shown / total" while a filter narrows it. **Awaiting a decision** is tinted while it holds something.
+- The columns are **Subject**, **Change** (the kind of change), **Field(s) changed**, **Status** and **When**. Hover a time for the full date. The drawer adds who proposed it, when it was proposed and decided, the reason, the rationale, the proposal's UUID and the Audit Trail row.
+- The database decides which fields a proposal may name, and checks again at approval. The dialog disables a field no proposal may name, and says why.
 
 ## What the states mean
 
-**Awaiting a decision** is the working queue, oldest first, because a queue is worked from the front. **Decided** is the record, newest first.
+**Awaiting a decision** is the working queue, oldest first, because a queue is worked from the front. **Decided** is the record, newest decision first.
 
-- **applied** — approved, and the change was made. The Digital Thread carries a row naming both the person who asked and the person who authorised it, and **View in Digital Thread** on the proposal opens the target's history at it. Only an applied proposal has one: the other three outcomes changed nothing.
+- **applied** — approved, and the change was made. The Audit Trail carries a row naming both the person who asked and the person who authorised it, and **View in Audit Trail** on the proposal opens the Audit Trail filtered to that entity's kind and searching for its id, with deleted entities shown if the target is gone. It does not select the row. Only an applied proposal has one: the other three outcomes changed nothing.
 - **rejected** — refused, with a reason. The slot is freed immediately and the same change can be proposed again straight away; the reason is what should make the second attempt different from the first.
 - **withdrawn** — the proposer took it back.
 - **expired** — nobody decided in time and it closed on a timer. It names no approver, because a timer is not a person. The Administrator sets the window on the Settings page.
@@ -24,19 +29,24 @@ One queue for every change somebody proposes but may not make themselves. An Ope
 
 **A ceiling on how many proposals you can have open at once.** This one bounds how much is queued for reviewers. Decide or withdraw something before adding more. The number is a setting an Administrator owns.
 
-## Who can approve what
+## The kinds of change, and who decides them
 
-Not every lane has the same approver, and this is deliberate rather than an oversight.
+A proposal is filed as one kind of change, for the kind of entity it changes, and names only the fields that kind lists.
 
-- **Device details** and **Device nameplate** — an Administrator or a Shopfloor_Manager.
-- **Schema publication** — an **Administrator only**. Publishing a schema decides what ingestion accepts as conformant across every device attached to it, which is a platform decision rather than a shopfloor one.
+- **Device details** — name, description, connection method, and where it sits: cell, area and location scope. Not its type or its 3D model.
+- **Device nameplate** — the Digital Nameplate: manufacturer, product designation and type, serial number, year of construction, date of manufacture, hardware, firmware and software versions, country of origin and product URI.
+- **Area details** — name, description and icon. The name is also a segment of every `uns/` topic beneath the area.
+- **Cell details** — name, description, Grafana dashboard, icon, and its area and place on the plan.
+- **Gateway details** — name, description, access URL, and where it sits: cell, area and location scope. Not what it is, such as its deployment, and not what the platform observed about its health.
 
-So a Shopfloor_Manager who approves nameplate edits all day will not see Approve on a schema proposal. That is the gate, not a fault.
+An Administrator or a Shopfloor_Manager decides every lane. A machine identity never does: it may propose, but nothing it can be granted lets it approve.
+
+A proposal to publish a schema draft is a kind that no longer exists. Nothing can be filed as one and nobody can decide one: whoever may create a schema draft may also publish it, on the Schemas page. An old one still appears in the record under its raw name.
 
 ## What this page cannot do
 
 **It cannot approve something invalid.** Because the approval performs the write, every constraint on the target runs at that moment — so a proposal that would break a rule fails **at approval** and stays open, with the database's own explanation. That is deliberate: a queue that accepted a change it could not apply would record something that never happened.
 
-**It is not a way around a permission.** Proposing is a write to this queue and to nothing else. An Operator still cannot edit a device, a nameplate or a schema directly, and approving runs as the approver with their authority re-checked by the database — never as the proposer.
+**It is not a way around a permission.** Proposing is a write to this queue and to nothing else. An Operator still cannot edit a device, its nameplate, an area, a cell or a gateway directly, and approving runs as the approver with their authority re-checked by the database — never as the proposer.
 
-**It does not cover Node-RED flows yet.** A flow lives on the gateway rather than in a column here, and that lane is still to be built.
+**It does not cover Node-RED flows.** A gateway's flow lives in its own repository in the forge, and a change to it is a pull request that an administrator approves there. The Gateways page's help describes it.

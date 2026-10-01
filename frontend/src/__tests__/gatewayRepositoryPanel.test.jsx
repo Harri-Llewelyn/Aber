@@ -146,13 +146,12 @@ describe('GatewayRepositoryPanel — host-run gateways', () => {
     expect(screen.queryAllByRole('link')).toHaveLength(0)
   })
 
-  it('does not call it a host-run gateway', () => {
+  it('never calls it virtual', () => {
     render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, deployment: 'host' }} canOpenForge />)
     expect(screen.queryByText(/virtual/i)).toBeNull()
   })
 
-  // Simulated is host-run, so it reached the host text, which says its connector runs in Node-RED.
-  // Nothing says what generates a simulated gateway's readings: the load generator is one.
+  // Each type gets its own sentence: a Simulated gateway's readings need not come from Node-RED.
   it('says a simulated gateway is simulated, without claiming Node-RED runs it', () => {
     render(<GatewayRepositoryPanel gateway={{ ...GATEWAY, deployment: 'host', is_simulated: true }} canOpenForge />)
     expect(screen.getByText(/A simulated gateway has no repository of its own/i)).toBeInTheDocument()

@@ -9,7 +9,7 @@
 THE GATEWAY (docs/gateway.md). CI runs `check-gateway-surface.mjs --runtime --authenticated`
 against the k3d stack; to re-run it by hand:
 
-  kubectl -n <ns> port-forward svc/supabase-kong 18080:8000
+  kubectl -n <ns> port-forward svc/supabase-envoy 18080:8000
   SUPABASE_PUBLISHABLE_KEY=<the cluster's, from its Secret>
     node scripts/check-gateway-surface.mjs --runtime --authenticated http://127.0.0.1:18080
 
@@ -38,11 +38,11 @@ apiVersion: v1
 kind: Service
 metadata:
   {{/*
-  NAMED FROM VALUES. `http://supabase-kong:8000` is carried by Studio, the edge runtime, Grafana's
-  token_url and api_url, Node-RED's token and userinfo URLs, the ingestion daemon and both e2e
-  Jobs; Kubernetes has no Service aliasing, so the gateway keeps the name every consumer carries.
+  Every in-cluster consumer carries `http://supabase-envoy:8000` (aber.supabase.internalUrl,
+  grafana.ini, the contact point, the i3X and ingestion defaults). Kubernetes has no Service
+  aliasing, so renaming this Service means renaming every one of them.
   */}}
-  name: {{ .Values.supabaseEnvoy.serviceName }}
+  name: {{ $component }}
   labels:
     {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
 spec:

@@ -147,6 +147,8 @@ class FakeProtoPayload:
 def reset_module_state():
     """Clear the process-wide caches, so ordering cannot decide a result."""
     ingestion._alias_map.clear()
+    ingestion._alias_datatypes.clear()
+    ingestion._name_datatypes.clear()
     ingestion._rebirth_requested.clear()
     ingestion._device_seen.clear()
     ingestion._last_seq.clear()
@@ -419,6 +421,157 @@ class TestSparseDdataIngestion(unittest.TestCase):
             ("safety_interlock", None, None, False),
             ("Systems/TEMPERATURE", 95.0, None, None),
         ]))
+
+
+INT8, INT16, INT32, INT64, UINT8, UINT16, UINT32, UINT64 = 1, 2, 3, 4, 5, 6, 7, 8
+
+# (datatype, value) at each signed type's minimum, -1 and maximum, and each unsigned type's maximum.
+SIGNED_CASES = [
+    (INT8, -128), (INT8, -1), (INT8, 127),
+    (INT16, -32768), (INT16, -1), (INT16, 32767),
+    (INT32, -2 ** 31), (INT32, -1), (INT32, 2 ** 31 - 1),
+    (INT64, -2 ** 63), (INT64, -1), (INT64, 2 ** 63 - 1),
+]
+UNSIGNED_CASES = [(UINT8, 255), (UINT16, 65535), (UINT32, 2 ** 32 - 1), (UINT64, 2 ** 64 - 1)]
+
+
+class IntMetric:
+    """
+    An integer metric as the protobuf wire carries it: `int_value` is a uint32 and `long_value` a
+    uint64, so a signed value arrives as its two's-complement pattern. Refuses a negative, as
+    protobuf does, so a test cannot pass by handing the daemon the answer.
+    """
+
+    def __init__(self, name="", alias=None, datatype=None, int_value=None, long_value=None):
+        assert int_value is None or 0 <= int_value < 2 ** 32
+        assert long_value is None or 0 <= long_value < 2 ** 64
+        self.name = name
+        self.alias = alias if alias is not None else 0
+        self.datatype = datatype or 0
+        self.int_value = int_value or 0
+        self.long_value = long_value or 0
+        self.timestamp = 0
+        self._present = {field for field, value in (
+            ("alias", alias), ("datatype", datatype),
+            ("int_value", int_value), ("long_value", long_value),
+        ) if value is not None}
+
+    def HasField(self, field):
+        return field in self._present
+
+
+def on_the_wire(datatype, value):
+    """The field and pattern Eclipse Tahu's Java encoder sends: Int8-32 sign-extended into the uint32."""
+    if datatype in (INT64, UINT64):
+        return {"long_value": value & (2 ** 64 - 1)}
+    return {"int_value": value & (2 ** 32 - 1)}
+
+
+class TestSignedIntegerDdata(unittest.TestCase):
+    """
+    A signed Sparkplug integer is written as the number the device sent, not its unsigned pattern.
+
+    DDATA may carry only an alias, or only a name, and no datatype: the datatype comes from the
+    birth. Borrows the cursor-level fake above rather than inheriting it, so its tests run once.
+    """
+
+    tearDown = TestSparseDdataIngestion.tearDown
+    telemetry_writes = TestSparseDdataIngestion.telemetry_writes
+
+    def setUp(self):
+        TestSparseDdataIngestion.setUp(self)
+        self._real["supabase_client"] = ingestion.supabase_client
+        ingestion.supabase_client = None  # process_dbirth() registers the birth, then returns
+
+    def birth(self, *metrics, device=DEVICE):
+        ingestion.process_dbirth(device, NODE, DataPayload(list(metrics)), group_id=GROUP)
+
+    def written(self, device=DEVICE, *metrics):
+        self.execute_values.reset_mock()
+        ingestion.process_ddata(device, NODE, DataPayload(list(metrics)), group_id=GROUP,
+                                client=MagicMock())
+        ingestion._writer.flush()
+        return {name: value for name, value, _s, _b in self.telemetry_writes()}
+
+    def cases(self):
+        """Each case under its own name and alias, declared in one DBIRTH."""
+        return [("m%d" % i, 100 + i, datatype, value)
+                for i, (datatype, value) in enumerate(SIGNED_CASES + UNSIGNED_CASES)]
+
+    def test_an_aliased_ddata_reads_each_width_at_its_limits(self):
+        cases = self.cases()
+        self.birth(*[IntMetric(name, alias=alias, datatype=datatype, **on_the_wire(datatype, 0))
+                     for name, alias, datatype, _ in cases])
+        written = self.written(DEVICE, *[IntMetric(alias=alias, **on_the_wire(datatype, value))
+                                         for _, alias, datatype, value in cases])
+        for name, _, datatype, value in cases:
+            with self.subTest(datatype=datatype, value=value):
+                self.assertEqual(written[name], float(value))
+
+    def test_a_named_ddata_reads_each_width_at_its_limits(self):
+        cases = self.cases()
+        self.birth(*[IntMetric(name, datatype=datatype, **on_the_wire(datatype, 0))
+                     for name, _, datatype, _ in cases])
+        written = self.written(DEVICE, *[IntMetric(name, **on_the_wire(datatype, value))
+                                         for name, _, datatype, value in cases])
+        for name, _, datatype, value in cases:
+            with self.subTest(datatype=datatype, value=value):
+                self.assertEqual(written[name], float(value))
+
+    def test_an_unsigned_maximum_stays_positive(self):
+        self.birth(IntMetric("count", alias=1, datatype=UINT32, int_value=0))
+        written = self.written(DEVICE, IntMetric(alias=1, int_value=2 ** 32 - 1))
+        self.assertEqual(written["count"], 4294967295.0)
+
+    def test_a_narrow_type_sent_at_its_own_width_reads_the_same(self):
+        # Tahu's Python encoder sends an Int8 of -5 as 0xFB rather than 0xFFFFFFFB.
+        self.birth(IntMetric("offset", datatype=INT8, int_value=0))
+        self.assertEqual(self.written(DEVICE, IntMetric("offset", int_value=0xFB))["offset"], -5.0)
+
+    def test_a_datatype_on_the_ddata_itself_is_used(self):
+        written = self.written(DEVICE, IntMetric("offset", datatype=INT32, int_value=2 ** 32 - 5))
+        self.assertEqual(written["offset"], -5.0)
+
+    def test_the_datatype_is_per_device_not_per_node(self):
+        other = "dev330000000000400080000"
+        self.birth(IntMetric("offset", datatype=INT32, int_value=0))
+        self.birth(IntMetric("offset", datatype=UINT32, int_value=0), device=other)
+        self.assertEqual(self.written(DEVICE, IntMetric("offset", int_value=2 ** 32 - 1))["offset"], -1.0)
+        self.assertEqual(self.written(other, IntMetric("offset", int_value=2 ** 32 - 1))["offset"],
+                         4294967295.0)
+
+    def test_an_nbirth_forgets_the_datatypes_it_does_not_redeclare(self):
+        self.birth(IntMetric("offset", alias=1, datatype=INT32, int_value=0))
+        ingestion.register_birth_aliases(GROUP, NODE, DataPayload([IntMetric("offset", alias=1)]),
+                                         reset=True)
+        self.assertEqual(self.written(DEVICE, IntMetric(alias=1, int_value=2 ** 32 - 1))["offset"],
+                         4294967295.0)
+
+    def test_an_undeclared_datatype_is_stored_unsigned_and_counted(self):
+        # No birth seen: the conservative reading is the one made before datatypes were read.
+        before = ingestion.counter_snapshot().get("metrics_integer_datatype_unknown", 0)
+        written = self.written(DEVICE, IntMetric("offset", int_value=2 ** 32 - 5))
+        self.assertEqual(written["offset"], 4294967291.0)
+        self.assertEqual(
+            ingestion.counter_snapshot().get("metrics_integer_datatype_unknown", 0), before + 1)
+
+    def test_birth_parameters_are_read_signed(self):
+        ingestion.supabase_client = MagicMock()
+        ingestion.store_birth_parameters(DEVICE, DataPayload([
+            IntMetric("offset", datatype=INT16, int_value=2 ** 32 - 300),
+            IntMetric("drift", datatype=INT64, long_value=2 ** 64 - 7),
+        ]))
+        rows = ingestion.supabase_client.rpc.call_args[0][1]["p_rows"]
+        self.assertEqual({r["metric_name"]: r["val_double"] for r in rows},
+                         {"offset": -300.0, "drift": -7.0})
+
+    def test_a_gateway_health_integer_is_read_signed(self):
+        # A negative free-space figure is refused; read unsigned it was recorded as 18 EB.
+        ingestion.register_birth_aliases(GROUP, NODE, DataPayload([
+            IntMetric("Disk_Free_Bytes", alias=9, datatype=INT64, long_value=0)]), reset=True)
+        health = ingestion.extract_gateway_health(
+            GROUP, NODE, DataPayload([IntMetric(alias=9, long_value=2 ** 64 - 1)]))
+        self.assertNotIn("disk_free_bytes", health)
 
 
 if __name__ == "__main__":

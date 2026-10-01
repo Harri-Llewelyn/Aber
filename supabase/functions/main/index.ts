@@ -2,7 +2,7 @@
  * Edge Function router (main service). supabase/edge-runtime does not execute functions via
  * in-process `import()`; each function is spawned as an isolated user worker via
  * EdgeRuntime.userWorkers.create() and handed the request, so every function keeps its own
- * `serve(handler)` entry point. This stack runs with VERIFY_JWT="false" because each function
+ * `Deno.serve(handler)` entry point. This stack runs with VERIFY_JWT="false" because each function
  * performs its own role check and fails closed.
  */
 
@@ -118,7 +118,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
 
   // Composes an AAS shell. Needs the service-role key to read across the tables a shell
   // aggregates, plus the identifiers and endpoints the document embeds. The last two bound the
-  // `bundle` format's telemetry and thread parts; each has a default in the function, so neither
+  // `bundle` format's telemetry and trail parts; each has a default in the function, so neither
   // is plumbed through the chart.
   "aas-export": [
     "SUPABASE_SERVICE_ROLE_KEY",
@@ -128,7 +128,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "AAS_MAX_BUNDLED_MODEL_BYTES",
     "STORAGE_MODEL_BUCKET",
     "ASSET_EXPORT_MAX_TELEMETRY_ROWS",
-    "ASSET_EXPORT_MAX_THREAD_ROWS",
+    "ASSET_EXPORT_MAX_TRAIL_ROWS",
   ],
 
   // The IDTA 02001/02002 read surface over the same mapping aas-export uses. No service-role key: a
@@ -271,6 +271,7 @@ Deno.serve(async (req: Request) => {
       servicePath,
       memoryLimitMb: 150,
       workerTimeoutMs: 60 * 1000,
+      // The image's module cache is the only source of dependencies; true would refetch them.
       noModuleCache: false,
       importMapPath: null,
       envVars,

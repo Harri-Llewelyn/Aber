@@ -22,7 +22,7 @@ Two more that are equally load-bearing:
   * DB_USER is supabase_admin, NOT authenticator. Realtime needs REPLICATION privilege to create
     its logical slot and the scoped PostgREST role does not have it.
   * RLS_ENABLED is required, not optional. RLS is evaluated per change per subscriber, and
-    digital_thread is restricted to privileged roles -- that has to hold over the socket exactly as
+    audit_trail is restricted to privileged roles -- that has to hold over the socket exactly as
     it does over PostgREST.
 =================================================================================================
 */}}
@@ -148,7 +148,7 @@ spec:
             # the container on "unbound variable" before the Elixir app starts.
             - name: RLIMIT_NOFILE
               value: "10000"
-            # RLS is evaluated per change, per subscriber. digital_thread is restricted to
+            # RLS is evaluated per change, per subscriber. audit_trail is restricted to
             # privileged roles and that must hold over the socket exactly as over PostgREST.
             - name: RLS_ENABLED
               value: "true"

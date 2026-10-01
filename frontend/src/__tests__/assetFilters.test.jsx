@@ -102,9 +102,8 @@ const allowAll = () => true
 const noop = () => {}
 
 /**
- * The devices table, found by a column only it has. Was "the last table on the page", which was
- * true only while the quarantine queue rendered above it -- the queue is now a card of its own
- * below, and position silently selected the wrong table rather than failing.
+ * The devices table, found by a column only it has. The Quarantine queue is a card of its own above
+ * the roster, so position would select the wrong table rather than fail.
  */
 const deviceTableRows = () => {
   const table = [...document.querySelectorAll('table')]
@@ -194,7 +193,7 @@ describe('DevicesTab filters', () => {
 
     // Scoped to the row: "Online" is also the text of an option in the filter above it.
     const row = screen.getByText('Robot_03').closest('tr')
-    expect(within(row).getByText('Awaiting first birth')).toBeTruthy()
+    expect(within(row).getByText(/^awaiting first birth$/i)).toBeTruthy()
     expect(within(row).queryByText('Online')).toBeNull()
     expect(row.querySelector('.badge-online')).toBeNull()
   })
@@ -209,18 +208,18 @@ describe('DevicesTab filters', () => {
     fireEvent.click(screen.getByRole('button', { name: /Needs attention/i }))
 
     await waitFor(() => expect(screen.queryByText('CNC_01')).toBeNull())
-    // Robot_03 is overdue its first birth; the quarantined device is listed in the queue above.
+    // Robot_03 is overdue its first birth; the quarantined device is in the Quarantine queue above.
     expect(screen.getByText('Robot_03')).toBeTruthy()
   })
 
-  // A quarantined device renders in the onboarding queue only, not again in the table below with
+  // A quarantined device renders in the Quarantine queue only, not again in the roster below it with
   // edit/archive actions that do not apply to it.
-  it('lists a quarantined device in the onboarding queue but not in the devices table', async () => {
+  it('lists a quarantined device in the Quarantine queue but not in the devices table', async () => {
     api.get.mockImplementation(routeGet())
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
-    // Present on the page exactly once -- in the quarantine queue.
+    // Present on the page exactly once -- in the Quarantine queue.
     expect(screen.getAllByText('Unknown_Thing')).toHaveLength(1)
 
     // ...and that one occurrence is not in the devices table.
@@ -235,7 +234,7 @@ describe('DevicesTab filters', () => {
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
     // gw-2 / cell-2 is the quarantined device's gateway. Only Robot_03 should surface.
-    fireEvent.change(screen.getByTitle('Filter by serving edge gateway'), { target: { value: 'gw-2' } })
+    fireEvent.change(screen.getByTitle('Filter by serving gateway'), { target: { value: 'gw-2' } })
 
     await waitFor(() => expect(screen.queryByText('CNC_01')).toBeNull())
     const tableNames = deviceTableRows().map(r => r.textContent)
@@ -244,7 +243,7 @@ describe('DevicesTab filters', () => {
   })
 
   // The badge must agree with what switching the filter on reveals. Quarantined devices are counted
-  // by the queue's own badge.
+  // by the Quarantine queue's own count.
   it('excludes quarantined devices from the needs-attention count', async () => {
     api.get.mockImplementation(routeGet())
     renderDevices()
@@ -259,7 +258,7 @@ describe('DevicesTab filters', () => {
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
-    fireEvent.change(screen.getByTitle('Filter by serving edge gateway'), { target: { value: 'gw-2' } })
+    fireEvent.change(screen.getByTitle('Filter by serving gateway'), { target: { value: 'gw-2' } })
     await waitFor(() => expect(screen.queryByText('CNC_01')).toBeNull())
     expect(screen.getByText('Robot_03')).toBeTruthy()
   })
@@ -270,12 +269,12 @@ describe('DevicesTab filters', () => {
     await waitFor(() => expect(screen.getByText('Robot_03')).toBeTruthy())
 
     fireEvent.change(screen.getByTitle('Filter by operational state'), { target: { value: 'offline' } })
-    const clear = await screen.findByTitle('Clear every filter')
+    const clear = await screen.findByRole('button', { name: /Clear filters/ })
     expect(clear.textContent).toContain('2')
 
     fireEvent.click(clear)
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
-    expect(screen.queryByTitle('Clear every filter')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Clear filters/ })).toBeNull()
   })
 })
 
@@ -289,7 +288,7 @@ describe('GatewaysTab filters', () => {
     await waitFor(() => expect(screen.getByText('Line_A_Gateway')).toBeTruthy())
 
     // Both rows have status: 'ONLINE' stored; only one is live.
-    fireEvent.change(screen.getByTitle(/live heartbeat status/i), { target: { value: 'STALE' } })
+    fireEvent.change(screen.getByTitle(/Stale is a heartbeat older than 90 seconds/i), { target: { value: 'STALE' } })
     await waitFor(() => expect(screen.queryByText('Line_A_Gateway')).toBeNull())
     expect(screen.getByText('Sim_Gateway')).toBeTruthy()
   })
@@ -360,5 +359,5 @@ describe('CellsTab filters', () => {
   })
 })
 
-// The fleet-wide metric filter has no equivalent in the per-device telemetry drawer; see
-// deviceTelemetryAccordion.test.jsx.
+// The fleet-wide metric filter has no equivalent in the per-device telemetry modal; see
+// telemetryModal.test.jsx.

@@ -325,7 +325,7 @@ class TestInventory(CredentialServiceBase):
             self.assertNotIn(leaked, text, f"the inventory leaked {leaked}")
         self.assertEqual(set(payload), {"clients", "roles", "read_at"})
         # The platform principals and the policy's roles are there, with their rules.
-        self.assertIn("factoryplus_ingestion", [c["username"] for c in payload["clients"]])
+        self.assertIn("aber_ingestion", [c["username"] for c in payload["clients"]])
         gateway_role = next(r for r in payload["roles"] if r["rolename"] == "gateway")
         self.assertTrue(any(a["topic"] == "spBv1.0/#" for a in gateway_role["acls"]))
 

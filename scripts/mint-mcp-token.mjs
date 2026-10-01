@@ -11,30 +11,32 @@
 // WHAT THIS SIGNS, AND WHY IT IS NOT A BACK DOOR. The same HS256 secret the whole stack shares, so
 // PostgREST validates it exactly as it validates a GoTrue token -- there is no second trust path.
 // The subject is `b0000000-0000-4000-8000-000000000001`, the read-only principal seeded by
-// archived migration 0034, which holds `telemetry:read` and nothing else (0080 moved it off `Operator`):
-// it reads every relation the i3X address
-// space is assembled from and writes nothing, and it cannot read `digital_thread`.
+// archived migration 0034, which holds `telemetry:read` and nothing else (0080 moved it off
+// `Operator`): it reads every relation the i3X address space is assembled from and writes nothing,
+// and it cannot read `audit_trail`.
 //
 // GOTRUE_JWT_EXP DOES NOT APPLY. It governs what GoTrue ISSUES; a JWT signed here is validated on
-// signature and `exp` alone. That is the whole mechanism, and it is worth being clear that it is a
-// deliberate use of the stack's own trust anchor rather than a way around expiry.
+// its signature and `exp`, and by PostgREST against the revocation denylists. That is the whole
+// mechanism, and it is a deliberate use of the stack's own trust anchor rather than a way around
+// expiry.
 //
 // THE EXPIRY IS A REAL DECISION, NOT A DEFAULT TO IGNORE. This token is pasted into a file on
-// somebody's laptop -- `claude_desktop_config.json` -- and there is NO REVOCATION: PostgREST checks
-// the signature, not a session table. Revoking means rotating SUPABASE_JWT_SECRET, which
-// invalidates every token in the stack including the anon and service_role keys. So the expiry is
-// the only bound that exists, 90 days is the default for that reason, and a laptop that walks out
-// of the building is a credential that walks with it.
+// somebody's laptop -- `claude_desktop_config.json`. `revoke_service_token('<jti>')` withdraws it
+// from PostgREST, and so from i3X, which authenticates every request through PostgREST. Storage,
+// realtime and the edge runtime check only the signature and accept it until it expires, so for
+// them the expiry is the only bound: 30 days is the default and 90 the ceiling. Never rotate
+// SUPABASE_JWT_SECRET to withdraw one token; that invalidates every token in the stack.
 //
-// IT RECORDS BEFORE IT PRINTS, AND THAT ORDER IS THE POINT (Machine Identities, supabase/README.md). The token exists nowhere
-// until this process writes it to stdout -- signing is local computation -- so a failure to record
-// costs an audit row describing a token nobody holds, which is harmless. The reverse order costs an
-// unrevocable credential in the wild with no record of it, which is the worst outcome available.
+// IT RECORDS BEFORE IT PRINTS, AND THAT ORDER IS THE POINT (Machine Identities, supabase/README.md).
+// The token exists nowhere until this process writes it to stdout -- signing is local computation --
+// so a failure to record costs an audit row describing a token nobody holds, which is harmless. The
+// reverse order costs a credential in the wild with no record of it, which revoke_service_token()
+// cannot withdraw: it refuses a jti with no TOKEN_MINTED row.
 //
 // So `record_service_token_issued()` (0043) is called FIRST, and if it refuses, nothing is printed
 // and this exits non-zero. That RPC enforces the same 90-day ceiling this script does -- deliberate
-// duplication, because the ceiling bounds something that cannot be revoked and should not be
-// removable by editing one file.
+// duplication, because the ceiling is the only bound storage, realtime and the edge runtime honour,
+// and it should not be removable by editing one file.
 //
 // Usage:
 //   node scripts/mint-mcp-token.mjs                    # 30 days, the MCP principal
@@ -52,10 +54,11 @@ const DEFAULT_SUBJECT = 'b0000000-0000-4000-8000-000000000001';
 /**
  * THE CEILING, MIRRORED BY `service_token_max_days()` IN 0043.
  *
- * 90 IS THE MAXIMUM AND 30 THE DEFAULT. These tokens cannot be revoked, so the expiry is the only
- * bound that exists -- and a bound that applies only when somebody remembers to pass a flag is not
- * one. Asking for more is an error rather than a clamp, because silently issuing something shorter
- * than requested is how an operator ends up surprised by an expiry.
+ * 90 IS THE MAXIMUM AND 30 THE DEFAULT. Revocation reaches PostgREST and i3X but not storage,
+ * realtime or the edge runtime, so for those the expiry is the only bound -- and a bound that
+ * applies only when somebody remembers to pass a flag is not one. Asking for more is an error rather
+ * than a clamp, because silently issuing something shorter than requested is how an operator ends up
+ * surprised by an expiry.
  */
 const MAX_DAYS = 90;
 const DEFAULT_DAYS = 30;
@@ -67,6 +70,10 @@ const days = daysArg >= 0 ? Number(args[daysArg + 1]) : DEFAULT_DAYS;
 
 const principalArg = args.indexOf('--principal');
 const SUBJECT = principalArg >= 0 ? String(args[principalArg + 1] ?? '') : DEFAULT_SUBJECT;
+// Only the seeded MCP principal is known to be read-only; another may hold write permissions.
+const PRINCIPAL_LABEL = SUBJECT === DEFAULT_SUBJECT
+  ? `read-only principal ${SUBJECT} (telemetry:read)`
+  : `principal ${SUBJECT}`;
 
 if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(SUBJECT)) {
   console.error(`--principal must be a service principal's UUID, got '${SUBJECT}'.`);
@@ -82,9 +89,9 @@ if (!Number.isFinite(days) || days <= 0) {
 if (days > MAX_DAYS) {
   console.error(`--days may not exceed ${MAX_DAYS}, got ${days}.`);
   console.error(
-    'These tokens CANNOT BE REVOKED: PostgREST checks the signature, not a session table, so the\n' +
-    'only way to invalidate one is rotating SUPABASE_JWT_SECRET -- which invalidates every token\n' +
-    'in the stack, including the anon and service_role keys. The expiry is the only bound there is.'
+    'Revoking a token reaches PostgREST and i3X, but storage, realtime and the edge runtime check\n' +
+    'only the signature, so for them the expiry is the only bound. Never rotate SUPABASE_JWT_SECRET\n' +
+    'to withdraw one token: that invalidates every token in the stack.'
   );
   process.exit(1);
 }
@@ -114,9 +121,9 @@ const payload = b64url(
     role: 'authenticated',
     iat: now,
     exp,
-    // NOT A REVOCATION HANDLE, and 0043 says so too. Nothing consults it at validation time. It
-    // exists so the audit row can name WHICH token it describes: a re-mint is a second live
-    // credential rather than a replacement, and without this the two are indistinguishable.
+    // THE REVOCATION HANDLE: revoke_service_token() denylists it and auth_pre_request() refuses it.
+    // The audit row names it too, so a re-mint -- a second live credential, not a replacement -- is
+    // told apart from the first.
     jti,
   })
 );
@@ -151,7 +158,7 @@ const serviceKey = creds.SUPABASE_SERVICE_ROLE_KEY;
 if (!serviceKey || !creds.SUPABASE_PUBLISHABLE_KEY) {
   console.error(missingCredentialAdvice(serviceKey ? 'SUPABASE_PUBLISHABLE_KEY' : 'SUPABASE_SERVICE_ROLE_KEY'));
   console.error(
-    'It is needed to record the issue in the Digital Thread, which happens BEFORE the token is\n' +
+    'It is needed to record the issue in the Audit Trail, which happens BEFORE the token is\n' +
     'printed -- a token that cannot be recorded is not handed out.'
   );
   process.exit(1);
@@ -189,7 +196,7 @@ try {
 
 if (!response.ok) {
   const detail = (await response.text()).slice(0, 500);
-  console.error(`The Digital Thread refused to record this issue (HTTP ${response.status}):`);
+  console.error(`The Audit Trail refused to record this issue (HTTP ${response.status}):`);
   console.error(detail);
   console.error(
     '\nNO TOKEN HAS BEEN PRINTED. That is deliberate: a credential nobody can revoke must not\n' +
@@ -213,6 +220,8 @@ if (asJson) {
               // Must include /v1 -- the client does not append it, and without it `connect` fails
               // in a way that reads as the server being down.
               I3X_BASE_URL: 'http://localhost:8090/v1',
+              // i3x-mcp defaults to `none` and would send no Authorization at all.
+              I3X_AUTH_SCHEME: 'bearer',
               I3X_TOKEN: token,
             },
           },
@@ -222,21 +231,13 @@ if (asJson) {
       2
     )
   );
-  console.error(`\n# read-only principal ${SUBJECT}, valid until ${until} (jti ${jti})`);
-  console.error('# recorded in the Digital Thread as TOKEN_MINTED; revoke with revoke_service_token');
+  console.error(`\n# ${PRINCIPAL_LABEL}, valid until ${until} (jti ${jti})`);
+  console.error('# recorded in the Audit Trail as TOKEN_MINTED; revoke with revoke_service_token');
 } else {
   console.log(token);
-  console.error(`\n# read-only principal ${SUBJECT} (telemetry:read), valid until ${until}`);
-  // THESE TWO LINES SAID REVOCATION WAS IMPOSSIBLE, AND 0074 MADE THAT FALSE. They read: "There is
-  // no revocation short of rotating SUPABASE_JWT_SECRET, which invalidates every token in the
-  // stack." An operator who believed it would rotate the secret to withdraw one credential and take
-  // the whole stack down with it -- which is why this is corrected at the same time as the
-  // mechanism rather than left for the docs pass.
-  //
-  // THE SCOPE IS PART OF THE MESSAGE. `auth_pre_request()` is a PostgREST hook, so a revoked token
-  // still satisfies storage, realtime, the edge runtime and Studio, each of which verifies the
-  // signature for itself. Printing "revocable" without that qualifier would trade one wrong belief
-  // for another.
+  console.error(`\n# ${PRINCIPAL_LABEL}, valid until ${until}`);
+  // The revocation and its scope go together: auth_pre_request() is a PostgREST hook, so a revoked
+  // token still reaches every service that verifies the signature itself (i3x/README.md, "The token").
   console.error(`# Paste as I3X_TOKEN. jti ${jti} — revoke it against the API with`);
   console.error(`# SELECT revoke_service_token('${jti}'); storage, realtime and the edge`);
   console.error('# functions verify the signature only and will still accept it until it expires.');
