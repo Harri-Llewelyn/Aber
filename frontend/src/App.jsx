@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, lazy, Suspense } from 'react'
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import { supabase } from './lib/supabaseClient'
 import { usePermissions } from './hooks/usePermissions'
 import { useAppRouting } from './hooks/useAppRouting'
@@ -474,7 +474,10 @@ function Dashboard({ session, onSignOut }) {
 
   // Grafana's firing alerts, via platform_alerts. Owned by App rather than a tab so an alert is
   // visible whichever page is open.
-  const firingAlerts = usePlatformAlerts(showToast)
+  // A platform-alert toast opens the pill's list and goes away.
+  const [alertsOpen, setAlertsOpen] = useState(false)
+  const openAlertsFromToast = useCallback((id) => { setAlertsOpen(true); dismissToast(id) }, [dismissToast])
+  const firingAlerts = usePlatformAlerts(showToast, openAlertsFromToast)
 
   // The page's rail label, and the pill's count, so the tab and the bar never disagree.
   useDocumentTitle(TABS.find(t => t.id === tab)?.label, firingAlerts.length)
@@ -547,6 +550,8 @@ function Dashboard({ session, onSignOut }) {
             alerts={firingAlerts}
             onSelectDevice={showDevice}
             onSelectGateway={showGateway}
+            open={alertsOpen}
+            onOpenChange={setAlertsOpen}
           />
 
           {/* What the toasts said, beside what is wrong now and separate from it: the pill's count

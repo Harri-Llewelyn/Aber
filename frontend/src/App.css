@@ -2197,6 +2197,20 @@ td.row-actions, th.row-actions {
 /* Wraps anywhere: an error can carry a long identifier with no spaces in it. */
 .toast-msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 
+/* A toast that opens something: the message is a button drawn as text, so only the cursor and the
+   focus ring say it is clickable. */
+.toast-open {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.toast-open:hover { text-decoration: underline; }
+.toast-open:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+
 /* 24px, the WCAG 2.2 minimum target. Takes the toast's own ink, which each type measures on its tint. */
 .toast-dismiss {
   display: inline-flex;

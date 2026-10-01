@@ -48,8 +48,10 @@ export function clearStoredHistory() {
 
 /**
  * The toasts on screen and the notification history behind the top bar's bell. `showToast(msg,
- * type)` is the only way in: each call shows a toast and records the same message in the history.
- * Every callback is stable, so passing them down re-renders nothing.
+ * type, options)` is the only way in: each call shows a toast and records a message in the history,
+ * the same one unless `options.detail` gives the history a longer text than the toast carries.
+ * `options.onOpen` makes the toast clickable (see Toast). Every callback is stable, so passing them
+ * down re-renders nothing.
  */
 export function useToast() {
   const [toasts, setToasts] = useState([])
@@ -60,21 +62,24 @@ export function useToast() {
 
   useEffect(() => { writeStoredHistory(history) }, [history])
 
-  const showToast = useCallback((msg, type = 'success') => {
+  const showToast = useCallback((msg, type = 'success', { detail, onOpen } = {}) => {
     const entry = {
       id: nextId.current++,
       msg: msg == null ? '' : String(msg),
       type: TOAST_TYPES.includes(type) ? type : 'info',
       at: Date.now()
     }
-    const same = (e) => e.msg === entry.msg && e.type === entry.type
+    const toast = onOpen ? { ...entry, onOpen } : entry
+    const recordedMsg = detail == null ? entry.msg : String(detail)
+    const sameToast = (e) => e.msg === entry.msg && e.type === entry.type
+    const sameEntry = (e) => e.msg === recordedMsg && e.type === entry.type
     // A message already on screen is replaced rather than stacked, so it restarts its timer and a
     // failure repeated by a poll shows once.
-    setToasts(prev => [...prev.filter(t => !same(t)), entry].slice(-MAX_VISIBLE_TOASTS))
+    setToasts(prev => [...prev.filter(t => !sameToast(t)), toast].slice(-MAX_VISIBLE_TOASTS))
     // A repeat of the newest entry is counted on it rather than filling the list.
     setHistory(prev => {
-      const repeat = prev.length > 0 && same(prev[0])
-      const recorded = { ...entry, read: false, count: repeat ? prev[0].count + 1 : 1 }
+      const repeat = prev.length > 0 && sameEntry(prev[0])
+      const recorded = { ...entry, msg: recordedMsg, read: false, count: repeat ? prev[0].count + 1 : 1 }
       return [recorded, ...(repeat ? prev.slice(1) : prev)].slice(0, HISTORY_LIMIT)
     })
   }, [])
