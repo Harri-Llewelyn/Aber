@@ -10,7 +10,7 @@
 
     "THE DASHBOARD IS THE DELIVERABLE, more than the PRs are. It is one issue listing every available update including the ones deliberately held back, which is exactly the artefact the manual audit produced and then threw away.",
 
-    "SCHEDULING IS MONTHLY, AND THE WORKFLOW CRON IS NOT. Routine currency work opens on the first of the month (the window is the whole day, since the cron that invokes Renovate fires hours after its nominal time and a morning window never matched), because a weekly batch of pull requests is a standing tax on whoever has to read them and the thing being defended against moves over months, not days. The workflow that INVOKES Renovate still runs daily, and that is deliberate rather than sloppy: Renovate can only act while the process is running, so a monthly cron would silently make vulnerabilityAlerts monthly too -- and those are supposed to ignore the schedule entirely. Daily invocation plus a monthly window means routine noise once a month and a security advisory picked up within a day. A release must be three days old before it becomes a PR, so one that is pulled within days never does; vulnerability alerts are exempt from that wait."
+    "SCHEDULING IS MONTHLY, AND THE WORKFLOW CRON IS NOT. Routine currency work opens on the first of the month (the window is the whole day, since the cron that invokes Renovate fires hours after its nominal time and a morning window never matched), because a weekly batch of pull requests is a standing tax on whoever has to read them and the thing being defended against moves over months, not days. The workflow that INVOKES Renovate still runs daily, and that is deliberate rather than sloppy: Renovate can only act while the process is running, so a monthly cron would silently make vulnerabilityAlerts monthly too -- and those are supposed to ignore the schedule entirely. Daily invocation plus a monthly window means routine noise once a month and a security advisory picked up within a day. A release must be three days old before it becomes a PR, so one that is pulled within days never does; the Supabase set and the historian wait seven, and vulnerability alerts wait for nothing."
   ],
 
   "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
@@ -42,12 +42,14 @@
   "packageRules": [
     {
       "description": "Images built from this repository. The tag is set at deploy time and is empty in values.yaml, so there is no upstream to track.",
+      "minimumReleaseAge": null,
       "matchDatasources": ["docker"],
       "matchPackageNames": ["/^ghcr\\.io\\/harri-llewelyn\\/aber\\//"],
       "enabled": false
     },
     {
       "description": "THE COORDINATED SET. One PR or none: these move together upstream and are tested together, and the correct target is usually upstream Supabase's own pin rather than the newest tag. dependencyDashboardApproval means Renovate lists them and waits to be asked, because the decision needs a person to compare against supabase/supabase docker/docker-compose.yml. See issue #49.",
+      "minimumReleaseAge": "7 days",
       "groupName": "Supabase component set",
       "matchDatasources": ["docker"],
       "matchPackageNames": [
@@ -65,6 +67,7 @@
     },
     {
       "description": "THE DENO THAT RESOLVES THE EDGE FUNCTIONS is the Deno supabase/edge-runtime embeds (`edge-runtime --version`), not the newest: the functions image's `modules` stage and the top-level constraints.deno (which the deno manager maintains supabase/functions/deno.lock with) both name it, and a lock written by another Deno can be a format the build cannot read. It moves by hand when edge-runtime does.",
+      "minimumReleaseAge": null,
       "matchDatasources": ["docker"],
       "matchPackageNames": ["denoland/deno"],
       "matchFileNames": ["supabase/functions/Dockerfile"],
@@ -72,6 +75,7 @@
     },
     {
       "description": "The historian. Not grouped with anything: a patch bump is usually safe and is still the one change that can take the telemetry store with it.",
+      "minimumReleaseAge": "7 days",
       "matchDatasources": ["docker"],
       "matchPackageNames": ["timescale/timescaledb"],
       "labels": ["dependencies", "data-path"]
@@ -84,6 +88,7 @@
     },
     {
       "description": "Security updates outrank everything else in the queue.",
+      "minimumReleaseAge": null,
       "matchUpdateTypes": ["patch", "minor", "major"],
       "isVulnerabilityAlert": true,
       "prPriority": 10
