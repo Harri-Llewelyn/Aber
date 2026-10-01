@@ -1121,27 +1121,34 @@ html, body, #root {
 }
 .list-foot-end { font-size: 12px; color: var(--text-muted); }
 
-/* A cell rendered as an action -- used for counts that navigate elsewhere (e.g. a schema's
-   device count opening the Devices page filtered to it). Reads as a link, not a button. */
+/* A count that navigates elsewhere (a schema's device count opening Devices filtered to it): a text
+   link in the accent colour, underlined on hover and focus. A count pill inside it loses its pill. */
 .count-link {
   background: none;
   border: none;
   padding: 0;
   cursor: pointer;
   font: inherit;
-}
-
-.count-link:hover .section-count,
-.count-link:focus-visible .section-count {
-  background: var(--accent);
-  color: var(--bg-card);
-}
-
-.count-link:disabled { cursor: default; }
-.count-link:disabled:hover .section-count {
-  background: var(--accent-dim);
   color: var(--accent);
 }
+
+.count-link:hover,
+.count-link:focus-visible { text-decoration: underline; }
+.count-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
+
+.count-link .section-count {
+  background: none;
+  color: inherit;
+  padding: 0;
+  min-width: 0;
+  height: auto;
+  margin-left: 0;
+  border-radius: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.count-link:disabled { cursor: default; color: var(--text-muted); text-decoration: none; }
 
 /* ===== Table ===== */
 .table-wrap {
@@ -1385,10 +1392,11 @@ tbody tr:hover { background: var(--bg-glass); }
 .table-group-button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 
+/* Monospace is a typeface, not a cue: it takes the text colour. Accent marks a real link. */
 .mono {
   font-family: var(--font-mono);
   font-size: 13px;
-  color: var(--accent);
+  color: var(--text-primary);
 }
 
 /* A secondary cell: a timestamp, an age, anything read only after the row has been identified
@@ -1486,65 +1494,51 @@ td.row-actions, th.row-actions {
 .table-directory .cell-version { overflow-wrap: anywhere; }
 .table-directory .cell-version .mono { font-size: 12px; }
 
-/* An endpoint reads as a control, and its shape says which: an accent-bordered one opens, a muted
-   one copies. */
+/* An endpoint that opens is a link chip: accent text. */
 .endpoint-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 100%;
-  padding: 3px 8px;
-  font-size: 12px;
-  line-height: 1.5;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--bg-card);
   text-decoration: none;
-  cursor: pointer;
   overflow-wrap: anywhere;
-  text-align: left;
-  transition: var(--transition);
 }
-
-/* Openable: accent text and an accent border on hover, matching how every other navigation
-   affordance in the app signals that it goes somewhere. */
 .endpoint-open { color: var(--accent); }
-.endpoint-open:hover { border-color: var(--accent); background: var(--bg-surface); }
-
-/* Copyable: deliberately quieter. It is useful, but it is not a destination, and colouring it
-   like one would put the two back on equal footing. */
-.endpoint-copy { color: var(--text-muted); font-family: inherit; }
-.endpoint-copy:hover { border-color: var(--text-muted); background: var(--bg-surface); }
-
-/* Keyboard reachability is not optional here: the copy variant is the ONLY way to obtain a
-   broker or database address from this page. */
-.endpoint-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.endpoint-open:hover { border-color: var(--accent); }
 
 /* Between the category cards. Deliberately not `.card + .card`: several pages stack cards that
    are meant to sit tight against each other. */
 .directory-group + .directory-group { margin-top: var(--stack); }
 
-/* Copyable identifiers: every Sparkplug id shown is click-to-copy, styled to read as inline text
-   while still being a real <button>. */
-.copyable-id {
+/* The one chip shape for what copies and what opens: bordered, monospace, an icon at rest. The copy
+   chip is quiet text; the link chip (.endpoint-open) is accent text. The icon says which is which. */
+.copyable-id,
+.endpoint-action {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  max-width: 100%;
   padding: 2px 6px;
-  margin: -2px -6px;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   text-align: left;
-  max-width: 100%;
+  transition: var(--transition);
+}
+
+/* The vertical margin cancels the padding, so a chip adds only its border to a row. */
+.copyable-id {
+  margin: -2px 0;
+  color: var(--text-muted);
 }
 
 .copyable-id:hover,
-.copyable-id:focus-visible {
-  background: var(--bg-glass);
-  border-color: var(--border-hover);
+.endpoint-action:hover {
+  background: var(--bg-surface);
 }
+.copyable-id:hover { border-color: var(--text-muted); }
+
+.copyable-id:focus-visible,
+.endpoint-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .copyable-id-value {
   overflow: hidden;
@@ -1552,9 +1546,19 @@ td.row-actions, th.row-actions {
   white-space: nowrap;
 }
 
-/* Opt-in wrapping, for values that are worth reading in full rather than identifying at a glance
-   -- a Sparkplug topic template is ~70 characters and would otherwise be an ellipsis in a modal.
-   Truncation stays the default because that is what a dense table row needs. */
+/* `truncate="start"`: the value is split in two spans. The head gives way with an ellipsis, the tail
+   (the end of the value) never shrinks, so the part that tells two values apart stays visible. */
+.copyable-id-value-start { display: flex; }
+.copyable-id-head {
+  flex: 0 1 auto;
+  min-width: 1.2ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.copyable-id-tail { flex: none; }
+
+/* Opt-in wrapping, for values worth reading in full: a Sparkplug topic template is ~70 characters
+   and would otherwise be an ellipsis in a modal. Truncation stays the default for a dense row. */
 .copyable-id-wrap {
   align-items: flex-start;
 }
@@ -1565,15 +1569,7 @@ td.row-actions, th.row-actions {
   overflow-wrap: anywhere;
 }
 
-/* Revealed on hover/focus so a dense table is not peppered with icons. */
-.copyable-id-icon {
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
-
-.copyable-id:hover .copyable-id-icon,
-.copyable-id:focus-visible .copyable-id-icon { opacity: 0.7; }
+.copyable-id-icon { flex-shrink: 0; }
 
 .copyable-id-error {
   flex-shrink: 0;
@@ -1711,6 +1707,18 @@ td.row-actions, th.row-actions {
   border: 1px solid rgba(255, 77, 109, 0.25);
 }
 .btn-danger:hover { background: rgba(255, 77, 109, 0.2); box-shadow: 0 0 12px rgba(255, 77, 109, 0.2); }
+
+/* An action that is risky but not destructive: amber fill, --warning-contrast ink. Pair it with an
+   icon or a word, since colour alone is not a signal. */
+.btn-warning {
+  background: var(--warning);
+  color: var(--warning-contrast);
+}
+.btn-warning:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--warning) 40%, transparent);
+}
+.btn-warning:focus-visible { outline: 2px solid var(--warning); outline-offset: 2px; }
 
 /* A destructive action in a table row: it rests as an ordinary ghost button and takes the danger
    colour once pointed at. --text-muted so it is readable at rest. Compounded with .btn-danger,
@@ -1952,6 +1960,16 @@ td.row-actions, th.row-actions {
 
 /* Placeholders bound to the theme explicitly rather than the browser default. --text-muted, not
    --text-dim, which measures 2.45:1 against --bg-base in dark mode. */
+/* A field that cannot be edited: the page background, muted text, no focus ring. */
+.form-control:disabled,
+.form-control[readonly] {
+  background: var(--bg-base);
+  color: var(--text-muted);
+  border-color: var(--border);
+  box-shadow: none;
+}
+.form-control:disabled { cursor: not-allowed; }
+
 .form-control::placeholder {
   color: var(--text-muted);
   opacity: 1; /* Firefox dims placeholders by default, compounding the contrast problem. */

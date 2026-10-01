@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { IconCopy, IconCheck } from './Icons'
 
 const FEEDBACK_MS = 1600
+const TAIL_CHARS = 24
 
 /**
  * Copy the given text, returning true on success. `navigator.clipboard` exists only in a secure
@@ -44,11 +45,16 @@ export async function copyText(text) {
  * a mint command. `value` is still what is copied, and the aria label still names it.
  */
 /**
+ * `truncate` says which end gives way when the value does not fit: `"end"` (the default) cuts the
+ * end, `"start"` keeps the last `TAIL_CHARS` characters and cuts the middle, so the part that tells two
+ * long ids apart stays visible. The tooltip, the aria label and the copy always carry the full value.
+ */
+/**
  * `variant="button"` styles it as `.btn-ghost`: the understated `.copyable-id` is right for an id
  * in a cell and wrong for a fixed label, which reads as low-contrast text. The icon class is
  * dropped because its reveal selector depends on the base class.
  */
-export default function CopyableId({ value, label = 'identifier', title, onNotify, className = '', display, variant }) {
+export default function CopyableId({ value, label = 'identifier', title, onNotify, className = '', display, variant, truncate = 'end' }) {
   const asButton = variant === 'button'
   const [state, setState] = useState(null) // 'copied' | 'failed'
   const timer = useRef(null)
@@ -75,6 +81,9 @@ export default function CopyableId({ value, label = 'identifier', title, onNotif
     }
   }
 
+  const shown = display || value
+  const split = !asButton && truncate === 'start' && shown.length > TAIL_CHARS
+
   return (
     <button
       type="button"
@@ -90,7 +99,13 @@ export default function CopyableId({ value, label = 'identifier', title, onNotif
       {asButton
         ? (state === 'copied' ? <IconCheck size={13} /> : <IconCopy size={13} />)
         : null}
-      <span className={asButton ? undefined : 'copyable-id-value'}>{display || value}</span>
+      {asButton ? <span>{shown}</span> : (
+        <span className={`copyable-id-value${split ? ' copyable-id-value-start' : ''}`}>
+          {split
+            ? <><span className="copyable-id-head">{shown.slice(0, -TAIL_CHARS)}</span><span className="copyable-id-tail">{shown.slice(-TAIL_CHARS)}</span></>
+            : shown}
+        </span>
+      )}
       {!asButton && (state === 'copied'
         ? <IconCheck size={12} className="copyable-id-icon" />
         : <IconCopy size={12} className="copyable-id-icon" />)}

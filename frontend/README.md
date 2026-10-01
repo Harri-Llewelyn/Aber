@@ -80,6 +80,15 @@ three languages. See [Migrated design notes](#migrated-design-notes) for what th
 is a UI affordance only — RLS is the enforcement, and every gated action is independently refused
 by the database.
 
+### What looks clickable
+
+Only what acts looks clickable. `.mono` is a typeface and takes the text colour; accent colour
+means a real link (the Directory's open chip, a `.count-link`). A value that copies is a
+`CopyableId`: a bordered monospace chip with its copy icon at rest and a tick after a copy. A long
+id passes `truncate="start"` to keep its end (`…/iso22400/EFFECTIVENESS`); the tooltip and the copy
+carry the full value. A read-only or disabled `.form-control` takes the page background and muted
+text, and `.btn-warning` is the amber button for a risky action that is not destructive.
+
 ### Derived lists in a tab are memoised, and the dependency list is the contract
 
 `DevicesTab` holds around thirty pieces of state, so *any* of them — opening a modal, a Realtime

@@ -92,4 +92,49 @@ describe('CopyableId', () => {
     expect(screen.queryByRole('button')).toBeNull();
     expect(screen.getByText('—')).toBeTruthy();
   });
+
+  it('shows its copy icon at rest and a tick after a copy', async () => {
+    setClipboard({ writeText: vi.fn().mockResolvedValue() });
+    const { container } = render(<CopyableId value={VALUE} label="id" />);
+    const button = screen.getByRole('button');
+    const before = button.querySelector('svg.copyable-id-icon');
+    expect(before).toBeTruthy();
+    fireEvent.click(button);
+    await waitFor(() => expect(button.querySelector('svg.copyable-id-icon')).not.toBe(before));
+    expect(container.querySelectorAll('svg.copyable-id-icon')).toHaveLength(1);
+  });
+
+  describe('truncate', () => {
+    const LONG = 'https://aber.local/semantics/iso22400/EFFECTIVENESS';
+
+    it('cuts the end by default: one span, no tail', () => {
+      render(<CopyableId value={LONG} />);
+      expect(document.querySelector('.copyable-id-tail')).toBeNull();
+      expect(document.querySelector('.copyable-id-value').textContent).toBe(LONG);
+    });
+
+    it('"start" keeps the end of the value in a tail that never shrinks', () => {
+      render(<CopyableId value={LONG} truncate="start" />);
+      const head = document.querySelector('.copyable-id-head');
+      const tail = document.querySelector('.copyable-id-tail');
+      expect(tail.textContent.endsWith('/EFFECTIVENESS')).toBe(true);
+      expect(tail.textContent).toContain('iso22400/');
+      expect(head.textContent + tail.textContent).toBe(LONG);
+    });
+
+    it('"start" still copies and names the full value', async () => {
+      const writeText = vi.fn().mockResolvedValue();
+      setClipboard({ writeText });
+      render(<CopyableId value={LONG} label="semantic id" truncate="start" />);
+      const button = screen.getByRole('button', { name: `Copy semantic id ${LONG}` });
+      expect(button.title).toContain('semantic id');
+      fireEvent.click(button);
+      expect(writeText).toHaveBeenCalledWith(LONG);
+    });
+
+    it('"start" leaves a value shorter than the tail whole', () => {
+      render(<CopyableId value="short-id" truncate="start" />);
+      expect(document.querySelector('.copyable-id-tail')).toBeNull();
+    });
+  });
 });
