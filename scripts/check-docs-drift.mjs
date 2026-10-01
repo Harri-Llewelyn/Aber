@@ -631,6 +631,27 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 8c. The Trivy that CI installs is the release scan:config runs locally, so a finding reproduces
+// on a laptop. Renovate bumps the local image; the CI pin and its checksum are refreshed by hand.
+// -------------------------------------------------------------------------------------------------
+{
+  const action = read('.github/actions/install-trivy/action.yml');
+  const local = read('scripts/scan-config.mjs');
+  const ci = action.match(/TRIVY_VERSION:\s*([0-9.]+)/)?.[1];
+  const pinned = local.match(/aquasec\/trivy:([0-9.]+)@/)?.[1];
+  if (!ci || !pinned) {
+    fail('check 8c cannot find the Trivy version in install-trivy/action.yml or scan-config.mjs');
+  } else if (ci !== pinned) {
+    fail(
+      `CI installs Trivy ${ci} and scan:config runs ${pinned}. Move install-trivy to ${pinned} ` +
+      'and replace TRIVY_SHA256 from that release\'s checksums file.'
+    );
+  } else {
+    pass(`CI and scan:config run the same Trivy release (${ci})`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 9. Migration filenames carry unique numeric prefixes. db-init applies `/migrations/*.sql` in glob
 // order with no ledger, so the filename is the execution order; two files sharing a prefix run in
 // an order decided by whatever follows the number.
