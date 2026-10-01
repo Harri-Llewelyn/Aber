@@ -3631,9 +3631,6 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
 .context-field-value.mono {
   font-family: var(--font-mono);
   font-size: 11px;
-  /* Overrides `.mono`'s accent colour: in this panel a monospace value is a plain fact, not a
-     link, and colouring every id would make the whole list read as actionable. */
-  color: var(--text-primary);
 }
 
 /* A field whose value is the problem, such as a gateway CA inside its expiry window. Colour only,

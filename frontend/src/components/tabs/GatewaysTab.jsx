@@ -979,7 +979,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           !selected.is_archived && selected.deployment === 'host' && canManage && {
             label: 'Generate Broker Credential',
             icon: <IconLock size={13} />,
-            primary: true,
+            // Setup outranks the console only while the gateway has never published.
+            primary: isGatewayPending(selected),
             onClick: () => setCredentialForGw({
               gateway_id: selected.gateway_id,
               gateway_name: selected.gateway_name,

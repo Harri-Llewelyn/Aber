@@ -79,15 +79,22 @@ describe('gateway row actions', () => {
     expect(screen.queryByTestId('gateway-actions-gw-1')).not.toBeInTheDocument()
   })
 
-  it('lists Launch UI as the link to the gateway\'s own console, behind the one primary action', async () => {
+  it('lists Launch UI as the link to the gateway\'s own console, and its one primary action', async () => {
     await show([gateway()])
     const launch = openPanel().getByRole('link', { name: /Launch UI/i })
 
-    // The page marks Launch UI and Generate Broker Credential primary; the panel keeps the first.
-    expect(launch.className).not.toMatch(/btn-primary/)
+    expect(launch.className).toMatch(/btn-primary/)
     expect(document.querySelectorAll('.context-action.btn-primary')).toHaveLength(1)
     expect(launch.getAttribute('href')).toBe('http://localhost:1880')
     expect(launch.getAttribute('rel')).toContain('noopener')
+  })
+
+  it('puts Generate Broker Credential first while a host gateway has never published', async () => {
+    await show([gateway({ status: 'AWAITING_BIRTH' })])
+    const panel = openPanel()
+
+    expect(panel.getByRole('button', { name: /Generate Broker Credential/i }).className).toMatch(/btn-primary/)
+    expect(panel.getByRole('link', { name: /Launch UI/i }).className).not.toMatch(/btn-primary/)
   })
 
   it('omits Launch UI for a gateway with no access URL', async () => {
