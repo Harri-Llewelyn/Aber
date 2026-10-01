@@ -297,6 +297,29 @@ supplies no release version, is not evidence of drift.
 
 ## Tabs
 
+**A page has one card.** Its title and description are the card's `CardHeading`. The seamless tab bar
+(`common/TabStrip.jsx`, one underline style, no pills) sits under the heading and shows one tab's
+content at a time; the card scrolls, the page does not. Under the bar is a toolbar row, the existing
+`.filter-bar`: the tab's "?" `HelpTip` first, its filters next, its actions in `.filter-bar-actions`
+at the right. Tabs carry no counts. A tab with work waiting takes `attention={n}`: the label turns
+the warning colour and gains an icon and the number, only while n is above 0. A row that outgrows one
+line keeps search, status and the key toggle and moves the rest into `common/FiltersPopover.jsx`.
+
+```jsx
+<div className="card">
+  <CardHeading title="Devices" description="…" />
+  <TabStrip ariaLabel="Devices view" value={tab} onChange={setTab}
+    tabs={[{ id: 'roster', label: 'Roster' }, { id: 'quarantine', label: 'Quarantine', attention: waiting }]} />
+  <div className="filter-bar">
+    <HelpTip text="…" />
+    <SearchInput … />
+    <FiltersPopover activeCount={extraCount} onClear={clearExtras}>{/* the other controls */}</FiltersPopover>
+    <div className="filter-bar-actions"><button className="btn btn-sm btn-primary">New …</button></div>
+  </div>
+  {/* the tab's content */}
+</div>
+```
+
 | Tab | Notes |
 | :--- | :--- |
 | `SiteMapTab` | The Site Map page (tab id `site-map`), one card: the enterprise (the gateways' Sparkplug group) and the site (the `site.name` setting) named at the top, then **Site-Wide, Simulated and Unassigned as three coloured lanes** that open the context panel, then every area drawn as its plan (`common/AreaPlan.jsx`) with its cells as pins, one to three areas to a row by how many there are. Read only: nothing is filed or placed here. One context panel serves a lane, an area (its plan, its unplaced cells and its Area-Wide assets) or a cell; cells in no area sit in a tray under the grid. The counts the page used to carry are the rail's signals (`hooks/useNavSignals.js`) |

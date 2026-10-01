@@ -213,12 +213,12 @@ describe('the playback lane', () => {
     path.includes('gateways') ? [GATEWAY, SHADOW_GATEWAY] : [DEVICE, SHADOW_DEVICE]
   ))
 
-  it('counts capture subjects on the tabs, not everything the stack registered', async () => {
+  it('carries no count on the subject tabs', async () => {
     bothLanes()
     renderTab()
     expect(await screen.findByText('Line 1 Gateway')).toBeInTheDocument()
-    expect(within(screen.getByRole('tab', { name: /gateways/i })).getByText('1')).toBeInTheDocument()
-    expect(within(screen.getByRole('tab', { name: /devices/i })).getByText('1')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Gateways' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Devices' })).toBeInTheDocument()
   })
 
   it('offers no playback gateway in the device tab gateway filter', async () => {

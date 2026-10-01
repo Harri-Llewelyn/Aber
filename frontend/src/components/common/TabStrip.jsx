@@ -1,23 +1,23 @@
 import React, { useRef } from 'react'
+import { IconAlertTriangle } from './Icons'
 
 /**
- * A row of pill buttons that switches between sections (the WAI-ARIA tabs pattern). It renders
- * `role="tablist"` with `role="tab"` buttons, `aria-selected`, and a roving tabIndex: only the
- * selected tab is in the Tab order, Left and Right move to the neighbour and select it, and Home and
- * End jump to the first and last. The row wraps on a narrow window.
- *
- * PLACEMENT. Tabs that switch the whole page (Access Control, Settings, Vocabulary) sit ABOVE the
- * cards, under the page heading: `placement="page"`, the default, which adds the stack gap beneath.
- * Tabs that switch the content of ONE card (Capture's subjects) sit in that card's header, pushed
- * right: `placement="card"`.
+ * The seamless tab bar (the WAI-ARIA tabs pattern): an underline row that sits inside a page's one
+ * card, under its CardHeading, with its bottom rule flush with the card edge. The selected tab takes
+ * the text colour and an accent underline. It renders `role="tablist"` with `role="tab"` buttons,
+ * `aria-selected`, and a roving tabIndex: only the selected tab is in the Tab order, Left and Right
+ * move to the neighbour and select it (wrapping), and Home and End jump to the first and last. The
+ * row wraps on a narrow window.
  *
  *   <TabStrip ariaLabel="Settings category" value={category} onChange={setCategory}
- *     tabs={groups.map(g => ({ id: g.category, label: g.category, count: g.settings.length }))} />
+ *     tabs={[{ id: 'general', label: 'General' }, { id: 'quarantine', label: 'Quarantine', attention: waiting }]} />
  *
- * `tabs` is `[{ id, label, count?, title? }]`. A `count` draws the count pill after the label, 0
- * included. `onChange(id)` runs on a click and on an arrow key alike, so do any reset there.
+ * `tabs` is `[{ id, label, title?, attention? }]`. Tabs carry no counts. `attention` is the number of
+ * items waiting behind the tab: above 0 the label takes the warning colour, a warning icon and the
+ * number, and the accessible name reads "Quarantine, 3 waiting"; at 0 or absent nothing extra
+ * renders. `onChange(id)` runs on a click and on an arrow key alike, so do any reset there.
  */
-export function TabStrip({ tabs, value, onChange, ariaLabel, placement = 'page' }) {
+export function TabStrip({ tabs, value, onChange, ariaLabel }) {
   const refs = useRef([])
   const selectedIndex = Math.max(0, tabs.findIndex(t => t.id === value))
 
@@ -42,13 +42,10 @@ export function TabStrip({ tabs, value, onChange, ariaLabel, placement = 'page' 
   }
 
   return (
-    <div
-      role="tablist"
-      aria-label={ariaLabel}
-      className={`tab-strip ${placement === 'card' ? 'tab-strip-card' : 'tab-strip-page'}`}
-    >
+    <div role="tablist" aria-label={ariaLabel} className="tab-strip">
       {tabs.map((tab, i) => {
         const selected = i === selectedIndex
+        const waiting = tab.attention > 0
         return (
           <button
             key={tab.id}
@@ -56,14 +53,19 @@ export function TabStrip({ tabs, value, onChange, ariaLabel, placement = 'page' 
             type="button"
             role="tab"
             aria-selected={selected}
+            aria-label={waiting ? `${tab.label}, ${tab.attention} waiting` : undefined}
             tabIndex={selected ? 0 : -1}
-            className={`btn btn-sm ${selected ? 'btn-primary' : 'btn-ghost'}`}
+            className={`tab-strip-tab${selected ? ' tab-strip-tab-selected' : ''}${waiting ? ' tab-strip-tab-attention' : ''}`}
             title={tab.title}
             onClick={() => onChange(tab.id)}
             onKeyDown={e => onKeyDown(e, i)}
           >
             {tab.label}
-            {tab.count != null && <> <span className="section-count">{tab.count}</span></>}
+            {waiting && (
+              <span className="tab-strip-attention" aria-hidden="true">
+                <IconAlertTriangle size={13} />{tab.attention}
+              </span>
+            )}
           </button>
         )
       })}

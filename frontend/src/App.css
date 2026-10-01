@@ -808,14 +808,55 @@ html, body, #root {
   color: var(--text-primary);
 }
 
-/* A row of tab pills; see TabStrip. Wraps on a narrow window. */
+/* The seamless tab bar; see TabStrip. An underline row: the bar's rule runs the full width and the
+   selected tab's accent underline sits on it. Wraps on a narrow window. Above a card it is a
+   standalone row; inside a card it keeps the card's inset and has no gap beneath. */
 .tab-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 0 4px;
+  margin-bottom: var(--stack);
+  border-bottom: 1px solid var(--border);
 }
-.tab-strip-page { margin-bottom: var(--stack); }
-.tab-strip-card { margin-left: auto; }
+.card > .tab-strip { margin-bottom: 0; padding: 0 var(--inset); }
+/* In a card header the bar takes its own line and runs flush over the header's padding and rule. */
+.card-header > .tab-strip {
+  flex-basis: 100%;
+  margin: 0 calc(-1 * var(--inset)) -12px;
+  padding: 0 var(--inset);
+  border-bottom: none;
+}
+.tab-strip-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: -1px;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.tab-strip-tab:hover { color: var(--text-primary); }
+.tab-strip-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tab-strip-tab-selected {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+/* Work waits behind the tab: the warning colour, with the icon and the number beside it. */
+.tab-strip-tab-attention,
+.tab-strip-tab-attention:hover { color: var(--warning-text); }
+.tab-strip-attention {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+}
 
 .section-count {
   display: inline-flex;
@@ -967,6 +1008,17 @@ html, body, #root {
   border-radius: var(--radius);
 }
 
+/* The toolbar row under a card's tab bar: flush, chromeless, ruled off from the content below. The
+   tab's "?" HelpTip comes first, its filters follow, and its actions go in .filter-bar-actions. */
+.card > .tab-strip + .filter-bar {
+  margin-bottom: 0;
+  padding: 10px var(--inset);
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+}
+
 .filter-bar .form-control {
   height: 34px;
   padding-top: 0;
@@ -977,10 +1029,11 @@ html, body, #root {
 /* Pushes everything after it to the right-hand end of the bar. */
 .filter-bar-spacer { margin-left: auto; }
 
-/* A group at the right-hand end, for export and refresh controls that fold into the filter row. The
-   spacer is on the group rather than its first child, so the end stays stable when a control is
-   conditional. */
+/* A group at the right-hand end, for a tab's actions and for export and refresh controls that fold
+   into the filter row. The margin is on the group rather than its first child, so the end stays
+   stable when a control is conditional. */
 .filter-bar-actions {
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -994,6 +1047,35 @@ html, body, #root {
 
 /* The "Clear filters (N)" button: always the right-hand end of the bar, wrapped or not. */
 .filter-bar-clear { margin-left: auto; }
+
+/* The Filters popover: fixed under its button (see FiltersPopover), on the popover rung. */
+.filters-popover {
+  position: fixed;
+  z-index: 200;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+.filters-popover-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px var(--inset-tight);
+  overflow-y: auto;
+}
+.filters-popover-controls .form-control { width: 100%; }
+.filters-popover-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px var(--inset-tight);
+  border-top: 1px solid var(--border);
+}
 
 /* SearchInput: a form control with a leading icon and a clear button inside its right edge. The
    native search cancel is hidden, since the clear button replaces it. */
