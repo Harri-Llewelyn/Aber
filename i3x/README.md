@@ -5,12 +5,14 @@ eXchange) server over this stack's existing model.
 
 **What is verified, and by what.** Two results, each covering only what it tests:
 
-- **CESMII's conformance suite: `1.0 Compatible`**, 52 passed and 0 failed of its 60 tests at
-  `3eae7ea4` (cesmii/i3X, 2026-09-25), the ref CI pins: the Implementation Guide's 1.0 final. The
-  one commit since the previous pin (`5010274f`) changed that guide only, so the suite is
-  unchanged. The suite is written for any i3X server, so it tests shape (envelopes, status codes,
-  that every edge has its inverse), and it skips what it cannot provoke, SUB-07 and SUB-13 among
-  them ([Testing](#testing)). Not *Full 1.0 Compliance*, deliberately: that requires the optional
+- **CESMII's conformance suite: `1.0 Compatible`**, 52 passed and 0 failed of its 60 tests
+  against a seeded plant, at `3eae7ea4` (cesmii/i3X, 2026-09-25), the ref CI pins: the
+  Implementation Guide's 1.0 final. The one commit since the previous pin (`5010274f`) changed that
+  guide only, so the suite is unchanged. CI counts 48: it runs the suite after `validate.py` has
+  removed its plant, so QRY-05, 06, 08 and 11 find no compositions or history and skip. The suite
+  is written for any i3X server, so it tests shape (envelopes, status codes, that every edge has
+  its inverse), and it skips what it cannot provoke, SUB-07 and SUB-13 among them
+  ([Testing](#testing)). Not *Full 1.0 Compliance*, deliberately: that requires the optional
   Update methods, which this server refuses ([Writes](#writes-are-refused)).
 - **Aber's live checks: `ingestion/validate.py` checks 12a–12z and 17a–17g pass.** They seed a
   plant through the Directory and compare what this server says about it with what the Directory
