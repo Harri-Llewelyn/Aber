@@ -79,11 +79,13 @@ describe('gateway row actions', () => {
     expect(screen.queryByTestId('gateway-actions-gw-1')).not.toBeInTheDocument()
   })
 
-  it('keeps Launch UI prominent, as the link to the gateway\'s own console', async () => {
+  it('lists Launch UI as the link to the gateway\'s own console, behind the one primary action', async () => {
     await show([gateway()])
     const launch = openPanel().getByRole('link', { name: /Launch UI/i })
 
-    expect(launch.className).toMatch(/btn-primary/)
+    // The page marks Launch UI and Generate Broker Credential primary; the panel keeps the first.
+    expect(launch.className).not.toMatch(/btn-primary/)
+    expect(document.querySelectorAll('.context-action.btn-primary')).toHaveLength(1)
     expect(launch.getAttribute('href')).toBe('http://localhost:1880')
     expect(launch.getAttribute('rel')).toContain('noopener')
   })
