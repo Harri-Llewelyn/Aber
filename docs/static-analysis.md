@@ -39,9 +39,8 @@ registry metadata on every run, need network access. CI does not run them yet (#
 
 Fix the finding if you can. When the finding is correct but the code is right anyway, add its key
 to the allow-list with a reason a reviewer can check. When the finding is a fault being fixed
-elsewhere, name the issue: most of `config-allowlist.json` points to #419 and the workflow findings
-in `semgrep-allowlist.json` point to #421, so each fix there deletes entries. Never accept a secret
-that is not committed yet. Remove it before the commit.
+elsewhere, name the issue: most of `config-allowlist.json` points to #419, so each fix there
+deletes entries. Never accept a secret that is not committed yet. Remove it before the commit.
 
 Each key is chosen to survive unrelated edits:
 
