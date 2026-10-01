@@ -1782,3 +1782,45 @@ jobs:
       - name: Tear Down
         if: always()
         run: k3d cluster delete aber || true
+
+  # gitleaks over every commit the checkout holds, and the working tree. Runs on every push,
+  # documentation included: a secret pasted into a README is what it exists for. fetch-depth 0,
+  # because it reads history, and a shallow clone would scan one commit and say so.
+  secret-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+
+      - name: Scan Every Commit And The Working Tree
+        run: npm run scan:secrets
+
+  # The other eight checks in docs/static-analysis.md. Gated like k8s-validation: they judge code,
+  # and a documentation-only push cannot change what they find. Each runs in a pinned container or
+  # from a pinned lockfile, so the runner needs Docker (present), Node and Helm.
+  static-analysis:
+    name: Static Analysis
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.16.3
+
+      - name: Run The Static Checks
+        run: node scripts/lint-all.mjs --skip=secrets

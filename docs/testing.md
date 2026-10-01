@@ -681,7 +681,7 @@ checks 12 and 17 compare its answers about a seeded plant with the Directory's, 
 subscriptions with what the run publishes, the meaning neither the conformance suite nor the unit
 suite can see.
 
-CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs five jobs:
+CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs seven jobs:
 
 | Job | Covers |
 | :--- | :--- |
@@ -690,10 +690,12 @@ CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs five jobs:
 | **helm-chart** | `helm lint`, render, API-schema validation, chart guard rails |
 | **edge-function-auth-test** | Auth ladders and RLS against a real Postgres |
 | **k8s-validation** | k3d cluster through `dev-cluster up --e2e`: `helm test`, `validate.py` in-cluster, the stack lane through port-forwards, the i3X conformance suite, ingress assertions |
+| **secret-scan** | gitleaks over every commit in a full clone and the working tree, on every push |
+| **static-analysis** | The other eight checks of [`docs/static-analysis.md`](static-analysis.md), in pinned containers; skipped with the end-to-end stack on a documentation-only push |
 
-**The last one is the `changes` gate**: most of the workflow's minutes are spent there, and a change
-that touches only documentation cannot alter what it asserts. The gate fails open, so a diff range
-it cannot compute runs it anyway.
+**k8s-validation and static-analysis sit behind the `changes` gate**: most of the workflow's minutes are
+spent there, and a change that touches only documentation cannot alter what they assert. The gate fails
+open, so a diff range it cannot compute runs them anyway. secret-scan runs on every push.
 
 ## Keeping the pinned versions current
 
