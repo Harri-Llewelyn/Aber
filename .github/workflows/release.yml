@@ -77,11 +77,15 @@ jobs:
 
       - name: Resolve Version
         id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -eu
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION='${{ inputs.version }}'
-            PUSH='${{ inputs.dry_run == false }}'
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION="$INPUT_VERSION"
+            if [ "$INPUT_DRY_RUN" = "false" ]; then PUSH=true; else PUSH=false; fi
           else
             VERSION="${GITHUB_REF_NAME#v}"
             PUSH=true
