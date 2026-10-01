@@ -357,7 +357,9 @@ jobs:
       # ingestion base is reported twice; skipping test-runner would leave its own layers unscanned.
       - name: Scan Both
         run: |
-          set -uo pipefail   # NOT -e: a finding in one must not hide the other's result.
+          # Each command's failure is caught with `||` (the runner's bash has -e): a finding in one
+          # must not hide the other's result.
+          set -uo pipefail
           FAILED=0
           for t in ingestion test-runner; do
             echo "::group::$t"
