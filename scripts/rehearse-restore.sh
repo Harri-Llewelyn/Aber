@@ -355,6 +355,14 @@ cmd_backup() {
   local token job status backup_id stamp
   token="$(signin_token)"
 
+  # A fresh stack's service queues a missed scheduled backup at start, and request_backup() refuses
+  # while a job is queued or running.
+  local idle=0
+  while [ "$(rest "$token" GET '/backup_jobs?status=in.(PENDING,RUNNING)&select=id' | jq 'length')" != "0" ]; do
+    [ "$idle" -lt "$BACKUP_TIMEOUT_SECONDS" ] || die "a backup job was still queued or running after ${idle}s"
+    sleep 5; idle=$((idle + 5))
+  done
+
   log "asking for a backup as the rehearsal Administrator"
   job=$(rest "$token" POST /rpc/request_backup '{"p_note":"restore rehearsal"}' | jq -r '.')
   [[ "$job" =~ ^[0-9a-f-]{36}$ ]] || die "request_backup() did not return a job id: $job"

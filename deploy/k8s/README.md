@@ -1338,7 +1338,18 @@ timescaledb:
 spooling on its own data volume; a segment is pushed when it fills or after
 `archiveTimeoutSeconds` (60), which bounds how much a restore can lose on a quiet historian. The
 `pgbackrest` sidecar in the pod takes the daily backup at `hourUtc` (full on `fullOn`) and records
-each run in `public.physical_backup_runs`. Two alerts watch it: **Historian Backup Stale** (no
+each run in `public.physical_backup_runs`.
+
+- **A missed hour is taken late, once.** The sidecar checks the clock every minute rather than
+  sleeping until the hour. When the latest `hourUtc` has passed and no backup has been attempted
+  since, it takes one and logs `missed the <date> 01:00 UTC backup; taking it now`. A pod that was
+  down, a suspended host and a restart across the hour all meet that rule.
+- **A failed run counts as the attempt.** It is not retried until the next day's hour; Historian
+  Backup Stale reports it.
+- **A full whenever the newest is over seven days old**, whatever the day, so `retainFull` keeps
+  expiring when a `fullOn` day is missed.
+
+Two alerts watch it: **Historian Backup Stale** (no
 successful backup for 36 hours) and **Historian WAL Archiving Failing** (the last attempt failed and
 nothing has been archived for 10 minutes). While archiving fails, unarchived WAL collects on the
 data volume up to `archiveQueueMax`, after which pgBackRest drops it and a restore cannot cross the

@@ -309,8 +309,9 @@ timescaledb:
   physicalBackup:
     enabled: false
     # The hour (UTC, 0-23) the daily backup starts, and the day of the week (0 = Sunday) it is a
-    # full backup; a differential on the other six. Not a cron string: the sidecar that runs it
-    # has no cron daemon.
+    # full backup; a differential on the other six, or a full whenever the newest is over seven
+    # days old. Not a cron string: the sidecar checks the clock once a minute, so an hour missed
+    # while the historian was down is taken late, once, when it is back.
     hourUtc: 1
     fullOn: 0
     # Full backups kept. Each full carries the differentials and the WAL taken after it, so 2 keeps
@@ -1511,7 +1512,10 @@ autoscaling:
 # no replication and neither database is replicated.
 backup:
   enabled: false
-  # 02:30 daily; not "@daily" (midnight), the same minute as every other default job.
+  # 02:30 daily; not "@daily" (midnight), the same minute as every other default job. A run missed
+  # while the stack was down is taken late, once: the CronJob up to a day after it, the backup
+  # service when no scheduled backup was queued in the last 25 hours (a schedule that runs every
+  # day only; any other is not caught up).
   schedule: "30 2 * * *"
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

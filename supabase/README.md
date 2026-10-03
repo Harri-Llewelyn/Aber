@@ -4996,6 +4996,17 @@ the chart), or removes the job when that is empty, so a stack with no service qu
 nobody will take. On Kubernetes, enabling the service retires the CronJob; the PVC is shared, and
 the service's directories sit beside the CronJob's flat files.
 
+**A scheduled backup missed while the stack was down is taken late, once.** pg_cron does not run
+a slot that passed while `supabase-db` was down, and the service may stay up through that. So at
+start and every 5 minutes the service queues a scheduled backup when no `origin = 'scheduled'` job
+was queued in the last 25 hours, a day plus an hour so it never races pg_cron for the normal slot,
+and logs `missed the scheduled backup (...); queueing it now`. It counts jobs queued, not jobs that
+succeeded: a failed catch-up is not retried before the next slot, and Backup Stale reports it.
+`enqueue_scheduled_backup()` still refuses while a job is queued or running. The rule assumes a
+schedule that runs every day, as the stale alerts do; with any other `BACKUP_SCHEDULE` the service
+says so at start and catches nothing up, since reading the previous slot from a cron string would
+need a cron evaluator. On a fresh stack this takes the first backup as the service starts.
+
 **Retention is decided once, here.** A scheduled backup is pruned by the service once it is older
 than `BACKUP_RETENTION_DAYS`; the files go first and `backup_forget()` removes the row and writes
 `BACKUP_PRUNED`. A requested backup is **pinned** at birth and the window does not apply until an

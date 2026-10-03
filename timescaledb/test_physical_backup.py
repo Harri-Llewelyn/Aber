@@ -12,6 +12,10 @@ freshly installed stack has one within minutes; the suite waits up to BACKUP_WAI
 What it asserts is the chain an operator relies on: the run was recorded (the Historian Backup
 Stale alert reads that table), the repository agrees, and a WAL segment switched now arrives in the
 archive, which is what makes a restore reach past the backup.
+
+ScheduleTestCase is the sidecar's minute loop: when a slot is due (a missed one is taken late,
+once) and which type it takes. It needs only physical_backup.sql, so it runs whether or not
+physical backup is on; it asks about days in 2100, so no real run counts, and rolls back every row.
 """
 import json
 import os
@@ -19,6 +23,7 @@ import shutil
 import subprocess
 import time
 import unittest
+from datetime import datetime, timedelta, timezone
 
 import psycopg2
 
@@ -119,6 +124,110 @@ class PhysicalBackupTestCase(unittest.TestCase):
         can_read, can_write = rows[0]
         self.assertTrue(can_read, "the Historian Backup Stale alert reads this table as metrics_reader")
         self.assertFalse(can_write, "only the superuser records a run")
+
+
+def utc(*args):
+    return datetime(*args, tzinfo=timezone.utc)
+
+
+# A Wednesday, so fullOn 0 (Sunday) is not today's weekday rule.
+TODAY = utc(2100, 1, 6)
+assert TODAY.weekday() == 2
+
+
+def info(*fulls_days_ago, diffs_days_ago=()):
+    """`pgbackrest info --output=json` holding full and diff backups that stopped so long before TODAY."""
+    backups = [{"type": t, "timestamp": {"stop": int((TODAY - timedelta(days=d)).timestamp())}}
+               for t, days in (("full", fulls_days_ago), ("diff", diffs_days_ago)) for d in days]
+    backups.sort(key=lambda b: b["timestamp"]["stop"])
+    return json.dumps([{"name": "historian", "backup": backups}])
+
+
+class ScheduleTestCase(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        if not DB_PASSWORD:
+            raise unittest.SkipTest("DB_PASSWORD is unset; run this through `npm run dev:test`.")
+        cls.conn = psycopg2.connect(
+            host=DB_HOST, port=DB_PORT, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.conn.close()
+
+    def setUp(self):
+        self.cur = self.conn.cursor()
+
+    def tearDown(self):
+        self.cur.close()
+        self.conn.rollback()
+
+    def ran(self, kind, started, succeeded=True):
+        self.cur.execute(
+            "INSERT INTO public.physical_backup_runs (kind, started_at, succeeded) VALUES (%s, %s, %s)",
+            (kind, started, succeeded))
+
+    def missed(self, now, hour=1):
+        self.cur.execute("SELECT public.physical_backup_missed_slot(%s, %s)", (hour, now))
+        return self.cur.fetchone()[0]
+
+    def type_for(self, slot, repository, full_on=0):
+        self.cur.execute("SELECT public.physical_backup_type(%s, %s, %s::jsonb, %s)",
+                         (full_on, slot, repository, TODAY + timedelta(hours=9)))
+        return self.cur.fetchone()[0]
+
+    def test_a_start_before_the_hour_waits_for_it(self):
+        self.ran("diff", utc(2100, 1, 5, 1, 0, 30))
+        self.assertIsNone(self.missed(utc(2100, 1, 6, 0, 30)))
+
+    def test_a_start_after_the_hour_with_a_run_since_takes_nothing(self):
+        self.ran("diff", utc(2100, 1, 6, 1, 0, 20))
+        self.assertIsNone(self.missed(utc(2100, 1, 6, 9, 0)))
+
+    def test_a_start_after_the_hour_without_one_takes_the_slot(self):
+        self.ran("diff", utc(2100, 1, 5, 1, 0, 30))
+        # The archive check at start is not a backup.
+        self.ran("check", utc(2100, 1, 6, 2, 0))
+        self.assertEqual(self.missed(utc(2100, 1, 6, 9, 0)), utc(2100, 1, 6, 1))
+
+    def test_the_slot_is_due_on_the_minute(self):
+        self.assertEqual(self.missed(utc(2100, 1, 6, 1, 0)), utc(2100, 1, 6, 1))
+        self.assertEqual(self.missed(utc(2100, 1, 6, 0, 59)), utc(2100, 1, 5, 1))
+
+    def test_a_failed_run_is_the_slots_attempt(self):
+        # Retrying belongs to the stale alert; a catch-up is one run for one missed slot.
+        self.ran("diff", utc(2100, 1, 6, 1, 0, 20), succeeded=False)
+        self.assertIsNone(self.missed(utc(2100, 1, 6, 9, 0)))
+
+    def test_a_late_hour_reaches_back_across_midnight(self):
+        self.assertEqual(self.missed(utc(2100, 1, 6, 0, 30), hour=23), utc(2100, 1, 5, 23))
+
+    def test_a_differential_while_the_newest_full_is_recent(self):
+        self.assertEqual(self.type_for(TODAY + timedelta(hours=1), info(3, diffs_days_ago=(2, 1))), "diff")
+
+    def test_a_full_on_its_weekday(self):
+        self.assertEqual(self.type_for(TODAY + timedelta(hours=1), info(1), full_on=3), "full")
+
+    def test_an_overdue_full_is_taken_whatever_the_day(self):
+        # Sunday was missed: the newest full is eight days old.
+        self.assertEqual(self.type_for(TODAY + timedelta(hours=1), info(8, diffs_days_ago=(2, 1))), "full")
+
+    def test_a_repository_without_a_full_takes_one(self):
+        self.assertEqual(self.type_for(TODAY + timedelta(hours=1), info()), "full")
+
+    def test_an_unreadable_repository_keeps_the_weekday_rule(self):
+        self.assertEqual(self.type_for(TODAY + timedelta(hours=1), "[]"), "diff")
+
+    def test_nobody_but_the_superuser_runs_the_schedule(self):
+        for signature in ("public.physical_backup_missed_slot(integer, timestamptz)",
+                          "public.physical_backup_type(integer, timestamptz, jsonb, timestamptz)"):
+            self.cur.execute(
+                "SELECT count(*) FROM pg_proc p, "
+                "aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a "
+                "WHERE p.oid = %s::regprocedure AND a.grantee = 0", (signature,))
+            self.assertEqual(self.cur.fetchone()[0], 0, f"PUBLIC may execute {signature}")
 
 
 if __name__ == "__main__":

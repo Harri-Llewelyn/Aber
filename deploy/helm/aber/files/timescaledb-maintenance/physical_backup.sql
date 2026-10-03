@@ -58,3 +58,47 @@ $$;
 -- EXECUTE is granted to PUBLIC on creation; the sidecar connects as the superuser.
 REVOKE ALL ON FUNCTION public.physical_backup_record(text, timestamptz, boolean, text, jsonb)
   FROM PUBLIC;
+
+-- The newest daily slot at p_hour UTC at or before p_now, when no backup has been attempted since
+-- it; NULL otherwise. A failed run is an attempt: retrying is the stale alert's call, not the loop's.
+CREATE OR REPLACE FUNCTION public.physical_backup_missed_slot(
+    p_hour integer, p_now timestamptz DEFAULT now())
+RETURNS timestamptz
+LANGUAGE sql STABLE
+SET search_path = pg_catalog, public
+AS $$
+  WITH today AS (
+    SELECT (date_trunc('day', p_now AT TIME ZONE 'UTC') + make_interval(hours => p_hour))
+             AT TIME ZONE 'UTC' AS at
+  ), slot AS (
+    SELECT CASE WHEN at <= p_now THEN at ELSE at - interval '1 day' END AS at FROM today
+  )
+  SELECT s.at FROM slot s
+   WHERE NOT EXISTS (SELECT 1 FROM public.physical_backup_runs r
+                      WHERE r.kind IN ('full', 'diff', 'incr') AND r.started_at >= s.at);
+$$;
+
+-- The type to take for p_slot: full on p_full_on's weekday (0 = Sunday), or when the repository's
+-- newest full stopped more than seven days before p_now, so retainFull can expire when Sundays are
+-- missed. p_info is `pgbackrest info --output=json`; one that failed to read ('[]') leaves the
+-- weekday rule alone.
+CREATE OR REPLACE FUNCTION public.physical_backup_type(
+    p_full_on integer, p_slot timestamptz, p_info jsonb, p_now timestamptz DEFAULT now())
+RETURNS text
+LANGUAGE sql STABLE
+SET search_path = pg_catalog, public
+AS $$
+  SELECT CASE
+           WHEN extract(dow FROM p_slot AT TIME ZONE 'UTC') = p_full_on THEN 'full'
+           WHEN p_info -> 0 -> 'backup' IS NULL THEN 'diff'
+           WHEN f.newest IS NULL OR f.newest < p_now - interval '7 days' THEN 'full'
+           ELSE 'diff'
+         END
+    FROM (SELECT to_timestamp(max((b -> 'timestamp' ->> 'stop')::bigint)) AS newest
+            FROM jsonb_array_elements(coalesce(p_info -> 0 -> 'backup', '[]'::jsonb)) b
+           WHERE b ->> 'type' = 'full') f;
+$$;
+
+REVOKE ALL ON FUNCTION public.physical_backup_missed_slot(integer, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.physical_backup_type(integer, timestamptz, jsonb, timestamptz)
+  FROM PUBLIC;

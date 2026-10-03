@@ -76,9 +76,9 @@ spec:
   # NEVER concurrent. Two pg_dumps of the historian at once double the IO on a database that is also
   # taking live writes, and they would interleave into the same directory.
   concurrencyPolicy: Forbid
-  # A missed window (node down, cluster upgrade) is skipped, not caught up on: running yesterday's
-  # backup now produces a dump labelled with today's date and nothing gained.
-  startingDeadlineSeconds: 3600
+  # A window missed while the cluster was down or upgrading is run late, once, up to a day after
+  # it: the late backup is the newest restore point, and its stamp is when it was taken.
+  startingDeadlineSeconds: 86400
   successfulJobsHistoryLimit: {{ .Values.backup.successfulJobsHistoryLimit }}
   failedJobsHistoryLimit: {{ .Values.backup.failedJobsHistoryLimit }}
   jobTemplate:

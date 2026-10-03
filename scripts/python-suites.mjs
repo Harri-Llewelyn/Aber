@@ -804,7 +804,8 @@ export const SUITES = {
       'who asked and that the service wrote it; a queued request refuses a twin, can be cancelled ' +
       'and says why; a pinned backup is released once; the prune after a failed job leaves the ' +
       'newest three; and a backup reaches a MinIO encrypted, decrypts to its digest, and a pruned ' +
-      'one takes its copy with it. Stops the service container briefly.',
+      'one takes its copy with it; a service started after a missed scheduled slot queues it once, ' +
+      'and does not retry it before the next slot when it fails. Stops the service container briefly.',
   },
   'supabase/functions/gateway-bundle/test_gateway_bundle.py': {
     lanes: ['stack'],
@@ -927,7 +928,8 @@ export const SUITES = {
     why:
       'The historian backup sidecar took a full backup, recorded it where the Historian Backup ' +
       'Stale alert reads, and a WAL segment switched now reaches the repository. Skips when ' +
-      'physical backup is off; the dev loop turns it on with a posix repository.',
+      'physical backup is off; the dev loop turns it on with a posix repository. The minute ' +
+      'loop rules (a missed slot is taken late, once; an overdue full) run either way.',
   },
   'timescaledb/test_extension_version.py': {
     lanes: ['stack'],

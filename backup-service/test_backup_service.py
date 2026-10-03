@@ -8,12 +8,13 @@ on, the internal CA, each with the digest the row records, and a manifest restor
 can read; the trail records who asked and that the service wrote it; a request nobody has
 claimed is refused a twin, can be cancelled, and says why; a pinned backup is released once; a
 RUNNING job no service is running is failed, so a restored database does not refuse backups; a
-failed job is followed by a prune that leaves the newest three backups alone; and, with a MinIO of
+failed job is followed by a prune that leaves the newest three backups alone; with a MinIO of
 the test's own as the destination, a backup is copied off site encrypted to a key the stack never
-holds, and a pruned backup takes its copy with it.
+holds, and a pruned backup takes its copy with it; and a service started after a missed scheduled
+slot queues that backup once, and does not retry it before the next slot when it fails.
 
 Needs the stack up with the backup-service container, the seeded personas and both keys. The
-cancel test stops the service container for a few seconds. The off-site test applies
+cancel and catch-up tests stop the service container for a few seconds. The off-site test applies
 test-harness/restore-rehearsal/minio.yaml and deletes its namespace afterwards; it skips on a stack
 that already has a destination, or NetworkPolicies. Skips without the keys.
 
@@ -471,6 +472,60 @@ class BackupServiceTests(unittest.TestCase):
         else:
             self.assertEqual(psql(f"SELECT count(*) FROM public.backups WHERE stamp = '{old}'"), "1")
             self.assertEqual(len(remaining.get("Contents", [])), 1, "the floor kept the backup and not its copy")
+
+    def test_09_a_missed_scheduled_backup_is_queued_once_and_a_failure_waits_for_the_next_slot(self):
+        # A stack that was down at the scheduled time: no scheduled job in the last 25 hours. The
+        # service queues one at start; here it fails (refused at backup_finalise(), as in test_07),
+        # and a restart before the next slot queues nothing, since the failed run was the attempt.
+        schedule = service("printenv", "BACKUP_SCHEDULE", check=False).split()
+        if len(schedule) != 5 or schedule[2:] != ["*", "*", "*"]:
+            self.skipTest(f"BACKUP_SCHEDULE {' '.join(schedule)!r} does not run every day, so nothing is caught up")
+        self.wait_for_idle()
+        stack_exec.stop("backup-service")
+        shifted = ""
+        try:
+            since = psql("SELECT now()")
+            shifted = psql(
+                "WITH s AS (UPDATE public.backup_jobs SET created_at = created_at - interval '2 days' "
+                "WHERE origin = 'scheduled' AND created_at > now() - interval '25 hours' RETURNING id) "
+                "SELECT coalesce(string_agg(quote_literal(id::text), ','), '') FROM s")
+            psql(
+                "CREATE OR REPLACE FUNCTION public.test_backup_service_refuse() RETURNS trigger "
+                "LANGUAGE plpgsql AS $$ BEGIN IF NEW.origin = 'scheduled' THEN "
+                "RAISE EXCEPTION 'test_backup_service.py refused this backup'; END IF; RETURN NEW; END $$"
+            )
+            psql(
+                "CREATE OR REPLACE TRIGGER test_backup_service_refuse BEFORE INSERT ON public.backups "
+                "FOR EACH ROW EXECUTE FUNCTION public.test_backup_service_refuse()"
+            )
+            stack_exec.start("backup-service")
+
+            scheduled = f"FROM public.backup_jobs WHERE origin = 'scheduled' AND created_at >= '{since}'"
+            deadline = time.time() + BACKUP_TIMEOUT_SECONDS
+            while time.time() < deadline:
+                if psql(f"SELECT count(*) {scheduled} AND status IN ('COMPLETED', 'FAILED', 'CANCELLED')") != "0":
+                    break
+                time.sleep(3)
+            rows = psql(f"SELECT status || ' ' || coalesce(error, '') {scheduled}").splitlines()
+            self.assertEqual(len(rows), 1, f"the service queued {len(rows)} scheduled job(s) at start: {rows}")
+            self.assertTrue(rows[0].startswith("FAILED") and "refused this backup" in rows[0], rows[0])
+
+            stack_exec.stop("backup-service")
+            stack_exec.start("backup-service")
+            deadline = time.time() + 120
+            logs = ""
+            while time.time() < deadline and "catch-up: nothing missed" not in logs:
+                time.sleep(3)
+                logs = kubectl("logs", "deploy/backup-service", namespace=stack_exec.NAMESPACE, check=False)
+            self.assertIn("catch-up: nothing missed", logs, "the restarted service did not report its catch-up check")
+            self.assertEqual(psql(f"SELECT count(*) {scheduled}"), "1", "a failed catch-up was retried before the next slot")
+        finally:
+            psql("DROP TRIGGER IF EXISTS test_backup_service_refuse ON public.backups")
+            psql("DROP FUNCTION IF EXISTS public.test_backup_service_refuse()")
+            if shifted:
+                psql(f"UPDATE public.backup_jobs SET created_at = created_at + interval '2 days' WHERE id IN ({shifted})")
+            if not stack_exec.running("backup-service"):
+                stack_exec.start("backup-service")
 
     @staticmethod
     def unrecorded_directories():

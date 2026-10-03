@@ -355,6 +355,16 @@ because PostgreSQL grants it on creation; the sidecar connects as the superuser.
 falls back to the first recorded run, then to the server's start, so a stack that has just
 switched backup on is not reported as a day late.
 
+**The schedule is two questions the sidecar asks every minute.** `physical_backup_missed_slot()`
+returns the latest daily slot at `hourUtc` when no `full`, `diff` or `incr` run started at or
+after it, so a slot missed while the pod was down or the host was suspended is taken late, once.
+A failed run is that slot's attempt: retrying on every check would fill the table with failures,
+and reporting a failing backup is Historian Backup Stale's job. `physical_backup_type()` names the
+type: full on `fullOn`, or whenever the repository's newest full stopped more than seven days ago,
+so a missed Sunday does not leave differentials building on a full that `retainFull` can never
+expire. Both are SQL rather than shell so `test_physical_backup.py` can ask them about any moment
+in a rolled-back transaction; both are revoked from PUBLIC.
+
 ## `roles.sql`
 
 **Each block is the authority on its role's reach.** Grants are re-issued and revokes re-issued

@@ -620,6 +620,31 @@ function sweepPartials() {
 
 let stopping = false;
 
+// pg_cron does not run a slot that passed while supabase-db was down, so a missed scheduled backup
+// is queued late, once: when no scheduled job was queued in the last 25 hours, a day plus an hour
+// so it never races pg_cron for the normal slot. That assumes a schedule that runs every day, as
+// the stale alerts do; any other leaves catch-up off. enqueue_scheduled_backup() refuses while a
+// job is queued or running.
+const CATCH_UP_EVERY_MS = 5 * 60 * 1000;
+const CATCH_UP = /^\S+\s+\S+\s+\*\s+\*\s+\*$/.test(SCHEDULE);
+let caughtUpAt = 0;
+
+// Empty when a scheduled job was queued in the last 25 hours; 't' queued now; 'f' refused because
+// another job is queued or running, so asked again on the next check. The first check says which.
+function catchUp() {
+  const first = caughtUpAt === 0;
+  caughtUpAt = Date.now();
+  try {
+    const queued = sql(
+      'SELECT public.enqueue_scheduled_backup() WHERE NOT EXISTS (SELECT 1 FROM public.backup_jobs '
+      + "WHERE origin = 'scheduled' AND created_at > now() - interval '25 hours')"
+    );
+    if (queued === 't') log(`missed the scheduled backup (${SCHEDULE}): none was queued in the last 25 hours; queueing it now`);
+    else if (first && queued === 'f') log('catch-up: a scheduled backup is due and another job is in flight; checking again in 5 minutes');
+    else if (first) log('catch-up: nothing missed; a scheduled backup was queued in the last 25 hours');
+  } catch (err) { log(`catch-up: ${err.message}`); }
+}
+
 // A RUNNING row while this process runs nothing is a job no process is running: a previous
 // process's, or restored with the database from a backup taken while it ran. Failed before each
 // claim, not only at start; left standing it would refuse every new backup.
@@ -629,6 +654,7 @@ async function tick() {
   try {
     const stale = db.reconcile('no backup service was running this job: the service restarted, or the database was restored from a backup taken while it ran');
     if (Number(stale) > 0) log(`failed ${stale} job(s) that no service was running`);
+    if (CATCH_UP && Date.now() - caughtUpAt >= CATCH_UP_EVERY_MS) catchUp();
     job = db.claim();
   } catch (err) { log(`claim: ${err.message}`); return; }
   if (!job) {
@@ -660,6 +686,11 @@ async function main() {
   // stack with no service queues nothing nobody will take.
   const scheduled = db.schedule(SCHEDULE);
   log(scheduled === 't' ? `scheduled backups: ${SCHEDULE}` : 'scheduled backups: off (BACKUP_SCHEDULE is empty)');
+  if (scheduled === 't') {
+    log(CATCH_UP
+      ? 'a missed scheduled backup is queued late: checked now and every 5 minutes'
+      : 'missed scheduled backups are not caught up: BACKUP_SCHEDULE does not run every day');
+  }
   log(`retention: ${RETENTION_DAYS > 0 ? `${RETENTION_DAYS} days` : 'off'}; format: ${FORMAT}; polling every ${POLL_SECONDS}s`);
   await prune();
 

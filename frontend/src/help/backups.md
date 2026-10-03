@@ -4,7 +4,7 @@ Take a backup of the whole platform without a shell, and see every backup run: w
 
 **The historian in a backup holds raw telemetry for the raw window (14 days unless the site changed it) and the 1-minute, 5-minute and 1-hour rollups.** Raw readings older than the window are only on cold storage, which no backup includes.
 
-**Where the historian has its own physical backup, it is not in these.** The components then list no historian, and the historian is backed up daily by the database itself, with every change archived in between, so it can be restored to any moment rather than to the last backup. Restoring it is a runbook run from a shell.
+**Where the historian has its own physical backup, it is not in these.** The components then list no historian, and the historian is backed up daily by the database itself, with every change archived in between, so it can be restored to any moment rather than to the last backup. A night it missed while the platform was off is taken when the historian is back. Restoring it is a runbook run from a shell.
 
 ## What the controls do
 
@@ -23,6 +23,8 @@ One line above the list answers this, and appears only when the answer is no:
 - **No backup has succeeded in 36 hours**, so the nightly schedule has missed a night. This is also what a stopped backup service looks like: a service that is not running records no failure. Before the first success, the hours count from the first backup queued.
 
 Either line clears itself on the next successful backup. On a stack where the backup service has never run, there is nothing to report, and the page says no backups exist yet. The Grafana alert **Backup Stale** fires on the same 36 hours, so the condition reaches the alert counter in the top bar without anyone opening this page.
+
+**A scheduled backup missed while the platform was off is taken late, once.** When no scheduled backup was queued in the last 25 hours, the service queues one as soon as it is running, so a stack switched off overnight takes its backup when it is next up. It is listed as **Scheduled**, at the time it was taken. A late backup that fails is not tried again before the next night; the line above reports it.
 
 ## What the list shows
 
