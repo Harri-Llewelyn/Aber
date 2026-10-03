@@ -47,3 +47,7 @@ dd22ff94908f8f92280868a3e067373f3e3b55b5:supabase/README.md:generic-api-key:2030
 # A SHA-256 pin inside a curl | openssl command in a unit test, not an auth header.
 61ad5b24aed3f92dd397bc1848dbf90a826d96e1:frontend/src/__tests__/gatewayBundleModal.test.jsx:curl-auth-header:453
 99e48ba798063704a03f9724477e6743e99df397:frontend/src/__tests__/gatewayBundleModal.test.jsx:curl-auth-header:453
+
+# A made-up site key in a unit test. archive.site_key is the plain prefix archived objects are
+# filed under, not a credential.
+09a3cf3886312e452056242c9bf9633a94d76b24:frontend/src/__tests__/coldStorageDestinationModal.test.jsx:generic-api-key:25
