@@ -154,7 +154,7 @@ const SPECS = [
     // PackML reaches this vocabulary as an OPC UA companion specification rather than as a
     // standard of its own, and that is a provenance decision, not a shortcut. ISA-TR88.00.02 is
     // paywalled and publishes no concept identifiers; OPC 30050 is the same state model under the
-    // OPC Foundation MIT licence WITH resolvable ids. Seeding from 30050 and then labelling the
+    // OPC Foundation MIT licence, with a published namespace. Seeding from 30050 and then labelling the
     // rows `PackML` would assert a source nobody read, so `standard` stays 'OPC UA' and the
     // companion spec says which document.
     //
@@ -436,6 +436,7 @@ for (const spec of SPECS) {
     }
     const member = memberOf(candidates[0], entry.name, doc, where);
     const datatype = resolveDataType(member, doc, where);
+    // Derived, not issued: the OPC Foundation publishes the namespace URI, not this IRI.
     const semanticId = `${spec.namespaceUri}${entry.name}`;
     const nodeId = `nsu=${spec.namespaceUri};s=${entry.path ?? `${entry.type}/${entry.name}`}`;
 

@@ -32,8 +32,8 @@ const BLOCKS = [
 
 /**
  * The namespaces the generator builds semantic ids from, mirrored so the check can assert the form
- * independently. These are the real external namespaces: OPC publishes resolvable concept
- * identifiers.
+ * independently. The OPC Foundation publishes these namespace URIs; the ids built from them are
+ * derived here, not issued.
  */
 const NAMESPACES = {
   'OPC 40501 Machine Tools': 'http://opcfoundation.org/UA/MachineTool/',

@@ -154,7 +154,15 @@ so that `companion_spec` keeps meaning one document; ECM is a dependency, not a 
 **PackML is not a paid dependency.** ISA-TR88.00.02-2022 is paywalled, and ISA and OMAC publish no
 concept IRIs. The state model is also published as the OPC UA companion specification **OPC
 30050**, whose NodeSet carries the full state model and per-state descriptions under the MIT
-licence, so PackML gets external IRIs rather than locally minted ones.
+licence, so PackML is read from a published source rather than transcribed.
+
+**An OPC UA semantic id is derived from a published namespace, not issued.** Every
+`opcua_vocabulary` id, generated or hand-written, is the specification's namespace URI plus the
+member's browse name, for example
+`http://opcfoundation.org/UA/PackML/MachSpeed`. The OPC Foundation publishes the namespace,
+not that IRI, and nothing resolves it. MTConnect takes the opposite stance: its ids are minted
+under `https://aber.local/semantics/mtconnect/v2.0/`, because an IRI under mtconnect.org would
+claim an identifier MTConnect never issued. The `opcua_vocabulary` table comment says the same.
 
 **ASHRAE 223P's ontology declares its own licence.** The standard is in public review, but the
 ontology is openly published under Apache-2.0, asserted in-band by the rights holder:
