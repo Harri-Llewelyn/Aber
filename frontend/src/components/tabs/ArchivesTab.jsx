@@ -74,7 +74,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
   /**
    * The manual half of the retention policy: the same destruction the auto-purge timer does, on
    * demand. A real DELETE: the row leaves the table, the audit trail keeps its history, and the
-   * database writes the tombstone the second card lists.
+   * database writes the tombstone the Retired tab lists.
    */
   const purge = async (item) => {
     try {
