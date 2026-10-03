@@ -460,12 +460,10 @@ export function DirectoryTab({ showToast, initialSection = '', onClearSection })
               value={active.id}
               onChange={setGroupId}
               tabs={groups.map(g => ({ id: g.id, label: g.title }))}
+              help={<HelpTip label={`About ${active.title}`} text={active.description} />}
             />
-            {/* The group's "?" and nothing else: a tab holds a dozen rows at most, so there is no
-                search box or type picker. */}
-            <div className="filter-bar">
-              <HelpTip label={`About ${active.title}`} text={active.description} />
-            </div>
+            {/* No toolbar row: a tab holds a dozen rows at most, so there is no search box or type
+                picker. */}
             <ServiceTable rows={active.rows} onNotify={showToast} />
           </>)}
         </div>

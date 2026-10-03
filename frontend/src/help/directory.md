@@ -2,7 +2,7 @@
 
 Every service this stack runs, what it is for, and how to reach it. The page exists because the answer to "which port is Grafana on" should not be a search through a deployment file, and because on Kubernetes there is no port to find at all.
 
-The services are grouped by what they are for, one tab each: **Applications & User Interfaces** (the things with a front door), **Ingestion & Messaging** (the path a reading takes from a machine to the historian) and **Data & Backend Infrastructure** (what the other two are built on). A service of a type none of those claims lands in **Other Registered Services**, a tab that appears only while something is in it, because it is the sign of a type nobody anticipated. A group with nothing in it has no tab. The `?` at the start of the row under the tabs says what the open group is. The page reads again every 3 seconds, so **Liveness** changes without a reload.
+The services are grouped by what they are for, one tab each: **Applications & User Interfaces** (the things with a front door), **Ingestion & Messaging** (the path a reading takes from a machine to the historian) and **Data & Backend Infrastructure** (what the other two are built on). A service of a type none of those claims lands in **Other Registered Services**, a tab that appears only while something is in it, because it is the sign of a type nobody anticipated. A group with nothing in it has no tab. The `?` straight after the tab names says what the open group is. The page reads again every 3 seconds, so **Liveness** changes without a reload.
 
 ## What the controls do
 

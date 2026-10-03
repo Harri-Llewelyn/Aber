@@ -117,9 +117,9 @@ describe('DirectoryTab service groups', () => {
     expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual([APPS, INGEST, DATA])
     expect(tab(APPS)).toHaveAttribute('aria-selected', 'true')
     expect(document.querySelectorAll('table')).toHaveLength(1)
-    // The bar is straight inside the card under its heading, with the toolbar row under the bar.
+    // The bar is straight inside the card under its heading, with the table straight under the bar.
     expect(document.querySelector('.card > .card-heading + .tab-strip')).toBeTruthy()
-    expect(document.querySelector('.card > .tab-strip + .filter-bar')).toBeTruthy()
+    expect(document.querySelector('.card > .tab-strip + .table-wrap')).toBeTruthy()
   })
 
   it('opens the group a search-bar card names, then drops the request', async () => {
@@ -173,14 +173,14 @@ describe('DirectoryTab service groups', () => {
     expect(tab(INGEST)).toHaveAttribute('aria-selected', 'true')
   })
 
-  it('explains each group with the "?" that starts its toolbar, and counts nothing', async () => {
+  it('explains the selected group with the "?" after the tab names, and counts nothing', async () => {
     await renderTab()
 
     for (const title of [APPS, INGEST, DATA]) {
       openTab(title)
-      const bar = document.querySelector('.filter-bar')
-      expect(bar.firstElementChild).toHaveClass('help-tip')
-      expect(bar.firstElementChild).toHaveAttribute('aria-label', `About ${title}`)
+      const tips = document.querySelectorAll('.tab-strip-help > .help-tip')
+      expect(tips).toHaveLength(1)
+      expect(tips[0]).toHaveAttribute('aria-label', `About ${title}`)
     }
     expect(document.querySelector('.section-count')).toBeNull()
     for (const t of screen.getAllByRole('tab')) expect(t.textContent).not.toMatch(/\d/)
@@ -445,10 +445,10 @@ describe('DirectoryTab refresh', () => {
 
   afterEach(() => { vi.useRealTimers() })
 
-  it('carries no search, no type picker and no Refresh button: its toolbar holds the "?" alone', async () => {
+  it('carries no search, no type picker and no Refresh button, so it draws no toolbar row', async () => {
     await renderTab()
 
-    expect([...document.querySelector('.filter-bar').children].map(c => c.className)).toEqual(['help-tip'])
+    expect(document.querySelector('.filter-bar')).toBeNull()
     expect(document.querySelector('.page-actions')).toBeNull()
     expect(screen.queryByPlaceholderText(/Search services/)).not.toBeInTheDocument()
     expect(screen.queryByTitle(/Show only one kind of service/)).not.toBeInTheDocument()
