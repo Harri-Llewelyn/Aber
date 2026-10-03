@@ -442,9 +442,6 @@ describe('Vocabulary page — Expand all / Collapse all', () => {
 })
 
 describe('Vocabulary page — a chip that starts a metric', () => {
-  const rule = (selector) =>
-    APP_CSS.match(new RegExp(`\\n${selector.replace(/[.:()\\-]/g, '\\$&')} \\{([^}]*)\\}`))?.[1]
-
   it('carries a "+" and an accessible name saying what it does; a chip that cannot has neither', async () => {
     renderTab()
     await ready()
@@ -463,7 +460,7 @@ describe('Vocabulary page — a chip that starts a metric', () => {
   })
 
   it('shows the "+" on hover and on keyboard focus, not at rest', () => {
-    expect(rule('.vocab-chip-plus')).toMatch(/visibility:\s*hidden/)
+    expect(APP_CSS).toMatch(/\n\.vocab-chip-plus \{[^}]*visibility: hidden;/)
     expect(APP_CSS).toMatch(
       /\n\.vocab-chip-action:hover \.vocab-chip-plus,\n\.vocab-chip-action:focus-visible \.vocab-chip-plus \{ visibility: visible; \}/
     )
