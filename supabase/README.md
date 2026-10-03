@@ -4715,12 +4715,21 @@ self-check asserts that absence directly.
 every authenticated user, deliberately: a setting shapes what a page renders, so an
 Administrator-only `SELECT` would break that page for everyone else in a way that reads as a bug.
 
-**Secrets belong in Supabase Vault, managed through Supabase Studio.** The mechanism is already in
-use here — `0002` and `0006` store the Node-RED admin token and webhook secret through
-`vault.create_secret()` — and Studio ships a Vault UI. Building a second
-secrets interface would duplicate a maintained upstream component and put a security-sensitive
-surface into this codebase to own. **Note the trust boundary:** Studio is not gated by this
-schema's RLS or `user_roles`. It is protected by network placement and grants database-level
+**Secrets live in Supabase Vault, and who issued a secret decides how it gets there.**
+
+- **A stack-internal secret is seeded from chart values and is never editable.** It is a value the
+  stack generates or is told once at install, such as `supabase_functions_url`,
+  `gateway_revoke_secret` or `forge_sweep_secret`. `0002` writes it from db-init's variables on
+  every boot, and no page or function changes it.
+- **A foreign credential is set by an `Administrator` from the page that uses it**, through a
+  write-only `SECURITY DEFINER` writer. It is issued by a system this stack does not own and
+  rotates on that system's schedule. The cold archive's S3 key is set from the Cold Storage page by
+  `set_archive_credential()`, and the off-site backup key from the Backups page by
+  `set_backup_offsite_credential()`. Each writer has an `..._is_set()` companion that answers
+  whether a value is stored, never what it is; nothing reads the value back to a page.
+
+Supabase Studio's Vault UI remains the escape hatch for anything else. **Note the trust boundary:**
+Studio is not gated by this schema's RLS or `user_roles`. It is protected by network placement and grants database-level
 access well beyond what an `Administrator` in the dashboard holds, so the two are not the same
 permission and are not necessarily the same person.
 
