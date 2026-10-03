@@ -48,7 +48,7 @@ export const STANDARD_OPTIONS = [
 
 /**
  * The AAS (IEC 63278) Reference types `semantic_id_type` may take. Mirrors the CHECK constraints
- * 0012_a_semantic_id_is_an_iri_or_an_irdi.sql leaves on `schemas` and `metric_catalog`; keep them in
+ * 0145_a_semantic_id_is_an_iri_or_an_irdi.sql leaves on `schemas` and `metric_catalog`; keep them in
  * step. Both export as an ExternalReference, which is all the exporter can emit.
  */
 export const SEMANTIC_ID_TYPES = ['IRI', 'IRDI']

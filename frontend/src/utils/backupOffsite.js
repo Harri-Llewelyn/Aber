@@ -1,5 +1,5 @@
 /**
- * The off-site destination's settings (seeded by 0018), which the Backups page's destination dialog
+ * The off-site destination's settings (seeded by 0151), which the Backups page's destination dialog
  * edits. The Settings page does not render them, so each value has one editor. The secret key is in
  * the vault, not here.
  */

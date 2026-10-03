@@ -963,8 +963,7 @@ ingestion:
   # FIXED AT INSTALL. It is seeded into the read-only `sparkplug.group_id` setting on the first
   # boot, shown on the Settings page, and db-init REFUSES a later boot whose value differs --
   # because changing the group re-addresses every gateway, every appliance bundle and every row of
-  # history keyed on the old pair. That is a migration, not a preference. An install from before
-  # 1.0 names the group it already has (`ACS-Cymru` is moved to `Aber` by 0003; docs/upgrades.md).
+  # history keyed on the old pair. That is a migration, not a preference.
   #
   # One topic level: no `/`, `+`, `#` or whitespace.
   sparkplugGroup: ""

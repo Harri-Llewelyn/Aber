@@ -352,7 +352,7 @@ export function BackupsTab({ showToast }) {
  * The page's one statement about now, or null. A failure stands until a backup succeeds after it.
  * A last success older than BACKUP_STALE_HOURS (before the first success, the first job recorded)
  * covers a service that is not running, which records no failure. Same clock as the view the
- * Backup Stale rule reads (0011).
+ * Backup Stale rule reads (0144).
  */
 function backupState(summary, now = Date.now()) {
   if (!summary?.firstRecordedAt) return null

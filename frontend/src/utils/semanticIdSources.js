@@ -40,7 +40,7 @@ export function vocabularySuggestion(standard, entryName, semanticId) {
 
 /**
  * The suggestion Add Metric makes for a catalog row's standard and type, so Edit can offer it back.
- * The type is the last name segment once a trailing `sub_type` is removed, as migration 0009 finds
+ * The type is the last name segment once a trailing `sub_type` is removed, as archived migration 0142 finds
  * it. OPC UA names shared by two companion specifications are told apart by the group, which is the
  * first segment of the point's browse path. `null` for a local extension, or an entry the
  * vocabulary no longer holds.

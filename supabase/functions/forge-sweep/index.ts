@@ -30,7 +30,7 @@ import { serviceRoleClient } from "../_shared/serviceClient.ts";
  * from `user_roles` and the forge's lists, never from a parameter, so a caller holding the secret
  * can only make the forge more correct, and sooner.
  *
- * One pass at a time (0025): every step reads the forge and then writes, so two passes at once
+ * One pass at a time (0156): every step reads the forge and then writes, so two passes at once
  * both write. A call that finds another pass holding the lease answers 200 `already_sweeping`.
  */
 

@@ -206,7 +206,7 @@ signing dependency to a fire-and-forget notification path.
 
 `NODERED_ADMIN_TOKEN` survives as **break-glass only**: `settings.js` reads it from Node-RED's
 environment and accepts it on the admin API when set, for when Supabase Auth is down and the flows
-still have to be reachable. It is empty by default, and the database keeps no copy of it (`0031`).
+still have to be reachable. It is empty by default, and the database keeps no copy of it (`0161`).
 
 ### Other things that fail in a way that does not look like their cause
 

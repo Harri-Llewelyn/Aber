@@ -1219,7 +1219,7 @@ credentials and the age identity outside the cluster: the Vault holding the secr
 every backup. **Under `networkPolicy.enabled` the endpoint needs an egress rule**, listed in
 `backupService.offsiteEgress`, or every copy fails at connect time. The design and the runbook that
 starts from the bucket are in
-[`../../supabase/README.md`](../../supabase/README.md#an-encrypted-copy-off-site-0018).
+[`../../supabase/README.md`](../../supabase/README.md#an-encrypted-copy-off-site-0151).
 
 The CronJob writes to the PVC only. Its `backup.destination: s3` and `backup.s3.*` are retired, and
 a values file that still sets them fails the render: the upload could not run, having no `aws` CLI

@@ -27,7 +27,7 @@ them.
 | :--- | :--- |
 | A restore is rehearsed from a backup the service took | [#338](https://github.com/Harri-Llewelyn/Aber/issues/338), behind [#155](https://github.com/Harri-Llewelyn/Aber/issues/155) |
 | The documentation, code and comments are audited against the codebase | [#339](https://github.com/Harri-Llewelyn/Aber/issues/339); the sweep method and the two surfaces it must not touch are in [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
-| The migration chain folds back into the baseline | [#340](https://github.com/Harri-Llewelyn/Aber/issues/340); the four rules the fold carries in are in [`supabase/README.md`](../supabase/README.md#the-four-rules-the-next-fold-carries-in) |
+| The migration chain folds back into the baseline | [#340](https://github.com/Harri-Llewelyn/Aber/issues/340); the five rules the fold carries in are in [`supabase/README.md`](../supabase/README.md#the-five-rules-the-next-fold-carries-in) |
 
 **Retired entries, and where their substance went.**
 

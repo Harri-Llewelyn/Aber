@@ -747,7 +747,7 @@ const apiMethods = {
   },
 
   /**
-   * How long raw telemetry is kept, and whether the archiver last reported archiving on (0005).
+   * How long raw telemetry is kept, and whether the archiver last reported archiving on (0138).
    * Null when the historian could not be read, which is not the same as "kept indefinitely".
    */
   rawTelemetryWindow: async () => {
@@ -910,7 +910,7 @@ const apiMethods = {
   /**
    * Create a machine identity that cannot sign in, with the name the page will list it by.
    *
-   * Through `create_machine_principal()` (0125, 0013), which is SECURITY DEFINER and checks
+   * Through `create_machine_principal()` (0125, 0146), which is SECURITY DEFINER and checks
    * has_role() itself. It takes permissions from an allow-list, not a role, so widening `Operator`
    * does not widen the identity. Machines propose, people decide: three reads (`telemetry:read`,
    * `quarantine:view`, `audit_trail:read`) and three writes (`archive:manage`,
@@ -1252,7 +1252,7 @@ const apiMethods = {
   },
 
   /**
-   * The historian's physical backup (0026), read over the FDW: its schedule, last success,
+   * The historian's physical backup (0157), read over the FDW: its schedule, last success,
    * repository size, a failure newer than the last success, and the latest request. Null when the
    * historian cannot be read, which the page reports as unreachable rather than as nothing to say.
    */
@@ -2180,7 +2180,7 @@ const apiMethods = {
         // a row that predates the column reads UNKNOWN, and the Directory page says so in words
         // instead of guessing on its behalf.
         exposure: s.exposure,
-        // The image the release deploys for the service (0007); null when nothing recorded one.
+        // The image the release deploys for the service (0140); null when nothing recorded one.
         image: s.image ?? null,
         status: s.status,
         last_heartbeat: s.last_heartbeat
@@ -2271,7 +2271,7 @@ const apiMethods = {
           idsOf('cells')),
         readByIds('gateways', 'id,name,sparkplug_id,description,cell_id,area_id,location_scope,access_url',
           'id', idsOf('gateways')),
-        // The machines behind the proposals this caller may decide (0022); empty for anyone else.
+        // The machines behind the proposals this caller may decide (0154); empty for anyone else.
         // An error leaves the proposer as its uuid rather than failing the queue.
         Promise.resolve(supabase.rpc('list_proposer_names')).catch(() => ({ data: [] }))
       ]);

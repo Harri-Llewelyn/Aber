@@ -372,7 +372,7 @@ inserts one through `physical_backup_request()` when it claims a requested platf
 waits at a time (a partial unique index), and the sidecar's minute loop claims it
 (`physical_backup_claim_request()`) and takes a differential; the first run recorded after the claim
 is its answer. All three gates are superuser only. The platform maps the three tables as foreign
-tables (migration 0026), and `fdw_reader` may read them, granted in `roles.sql` because this file
+tables (archived migration 0157), and `fdw_reader` may read them, granted in `roles.sql` because this file
 runs before `roles.sql` creates the role on a fresh volume.
 
 ## `roles.sql`

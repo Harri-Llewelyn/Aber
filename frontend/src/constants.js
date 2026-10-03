@@ -108,7 +108,7 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   { kind: 'ACCESS',           table: 'user_roles',         label: 'Role assignments',   domain: 'security' },
   { kind: 'SERVICE IDENTITY', table: 'service_principals', label: 'Machine identities', domain: 'security' },
   { kind: 'SCHEMA',           table: 'schemas',            label: 'Schemas',            domain: 'asset' },
-  // Deprecate and restore are UPDATEs on the catalog row (0010, #468).
+  // Deprecate and restore are UPDATEs on the catalog row (0143, #468).
   { kind: 'METRIC',           table: 'metric_catalog',     label: 'Metric catalog',     domain: 'asset' },
   { kind: 'SETTING',          table: 'system_settings',    label: 'Settings',           domain: 'security' },
   // Without these two a proposal row lands with no kind, unlabelled and unfilterable.

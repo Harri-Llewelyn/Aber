@@ -17,7 +17,7 @@ own sweep_forge() answers true, which is
 "asked" -- that call is asynchronous, and the function itself is what the rest of this file drives
 directly.
 
-ONE PASS AT A TIME (0025). A pass claims a lease and a call that finds it held answers
+ONE PASS AT A TIME (0156). A pass claims a lease and a call that finds it held answers
 `already_sweeping`. Every test here holds that lease from setUp to cleanup and runs its own passes
 under it (`x-sweep-lease`), so the database's own asks -- the schedule, an archive's trigger, one
 a previous test queued -- are refused while it runs, and the report a test reads is the report of
@@ -207,7 +207,7 @@ class TestTheSecret(ForgeSweepBase):
 
 class TestOnePassAtATime(ForgeSweepBase):
     """
-    THE LEASE (0025). Two passes at once each list what the forge holds and each write what is
+    THE LEASE (0156). Two passes at once each list what the forge holds and each write what is
     missing: two webhooks on one repository was the case seen. The test holds the lease, which is
     what any call meets while another pass runs.
     """

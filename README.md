@@ -189,9 +189,11 @@ neither of which is HTTP and so neither of which can ride an Ingress.
 ## The schema every install applies
 
 Every file in `supabase/migrations/` is applied by the `db-init` Job on every install and upgrade, and re-applied
-harmlessly each time. The schema baseline (`0001`) and seed data (`0002`) fold the incremental
-chain kept in [`supabase/migrations/archive/`](supabase/migrations/archive/README.md), whose
-lower numbers are reused by live migrations, so each of those says "archived". The chain is how
+harmlessly each time. At 1.0 there are two, the schema baseline (`0001`) and the seed data
+(`0002`), which fold the incremental chain kept in
+[`supabase/migrations/archive/`](supabase/migrations/archive/README.md): the 197 files four squashes
+retired. An archived number is never issued again, so the next migration is `0163` and a cited
+number names one file for good (the archive's two `0074`s predate the rule). The chain is how
 the schema came to be: archived `0003` audit immutability, archived `0004`, archived `0005`,
 archived `0006` Node-RED SSO, archived `0007` metric-name format, archived `0008` Sparkplug
 group, archived `0009` withdraws residual `anon` function grants, archived `0010` telemetry
@@ -234,7 +236,7 @@ six machines an operator files in one gesture carry one `causation_id` instead o
 batch that fails partway leaves nothing behind — and `0034` seeds the **read-only principal the MCP
 client authenticates as**, which reads the i3X address space, writes nothing and cannot see the
 audit trail; it now holds no role, only a `telemetry:read` grant of its own, and
-`0032_machine_principals_hold_no_role.sql` corrects the `user_roles` comment that said otherwise
+`0162_machine_principals_hold_no_role.sql` corrects the `user_roles` comment that said otherwise
 (`scripts/mint-mcp-token.mjs` signs its long-lived token) — and `0035`
 gives `gateways` the columns an appliance **reports about itself** on the heartbeat it already
 publishes, chiefly `cert_expires_at`: the internal CA is hand-distributed into every appliance's
@@ -529,11 +531,11 @@ provider, so none can sign in — and a trigger on `user_roles` refuses any of t
 `Operator` for the people who hold it cannot widen them by accident. An Administrator can create a
 further one from the **Access Control** page (`0125`): a name, a purpose and permissions from a
 fixed menu, then its first token shown once. Such an identity reaches the database only, never the
-broker. **Machines propose, people decide** (`0013`): the menu is four reads and two writes, filing
+broker. **Machines propose, people decide** (`0146`): the menu is four reads and two writes, filing
 change proposals and versioning schemas, and `create_machine_principal()` refuses a machine device
 writes, quarantine and proposal decisions, and access control, each with its reason. The Audit
-Trail files a machine's writes as a service's whatever it declares (`0020`), and the person
-deciding its proposal sees it by name (`0022`).
+Trail files a machine's writes as a service's whatever it declares (`0152`), and the person
+deciding its proposal sees it by name (`0154`).
 
 **The ingestion daemon does not hold `SUPABASE_SERVICE_ROLE_KEY`.** It used to, and that was the one
 credential whose compromise no policy written anywhere else could contain, sitting in the process
