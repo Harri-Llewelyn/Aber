@@ -5335,7 +5335,33 @@ pre.gateway-code-wrap { white-space: pre-wrap; }
   cursor: help;
 }
 
-/* CAPTURE: the drop zones and the small gaps in the details panel. */
+/* CAPTURE: the card, its in-flight strips, the file drop, and the small gaps in the details panel. */
+.capture-card { position: relative; }
+/* The capture and playback strips, ruled off from the table; collapsed when every strip is absent. */
+.capture-strips {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.capture-strips:empty { display: none; }
+.capture-card tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* A file dragged over the card: an accent frame and a line saying what a drop does. */
+.capture-card-drop { border-color: var(--accent); }
+.capture-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 2px dashed var(--accent);
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  pointer-events: none;
+}
 .capture-drop {
   padding: 12px;
   text-align: center;
@@ -5345,7 +5371,6 @@ pre.gateway-code-wrap { white-space: pre-wrap; }
   font-size: 12px;
   color: var(--text-muted);
 }
-.capture-drop-play { margin-top: 12px; }
 .capture-drop-active {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 6%, transparent);
