@@ -16,6 +16,7 @@ import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { Modal } from '../common/Modal'
 import { SemanticIdField } from '../common/SemanticIdField'
+import { MetricGroupHeading } from './SchemaBuilderModal'
 
 /**
  * One modal, two modes, decided by the schema's status. Read-only is the default and is the same
@@ -245,6 +246,7 @@ export function SchemaDetailModal({
       }
       icon={editable ? <IconGitBranch size={18} /> : <IconLock size={18} />}
       size="lg"
+      fill={editable}
       onClose={onClose}
       footer={footer}
     >
@@ -315,7 +317,12 @@ export function SchemaDetailModal({
         onChange={setSemantic}
       />
 
-      <div className="form-group">
+      {/* While editing, the catalog picker is the dialog's working list: it takes the height the
+          window leaves (Modal `fill`) rather than a fixed cap. */}
+      <div
+        className={`form-group${editable ? ' modal-fill' : ''}`}
+        style={editable ? { display: 'flex', flexDirection: 'column', minHeight: '240px' } : undefined}
+      >
         <label className="form-label">
           Metrics <span className="section-count">{selectedNames.size}</span>
           {editable && (added.length > 0 || removed.length > 0) && (
@@ -337,17 +344,16 @@ export function SchemaDetailModal({
               placeholder="Search catalog metrics…"
               aria-label="Search catalog metrics"
             />
-            <div style={{ maxHeight: '240px', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+            <div style={{ flex: '1 1 auto', minHeight: '160px', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
               {filteredCatalog.length === 0 ? (
                 <div style={{ padding: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>No matching catalog metrics.</div>
               ) : (
                 groupCatalog(filteredCatalog).map(group => (
                   <div key={group.label}>
-                    <div
-                      style={{ position: 'sticky', top: 0, background: 'var(--bg-glass)', backdropFilter: 'blur(4px)', padding: '5px 12px', borderBottom: '1px solid var(--border)', fontSize: '11px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: group.isUngrouped ? 'var(--text-muted)' : 'var(--accent)' }}
-                    >
-                      {group.label} <span style={{ opacity: 0.7 }}>({group.metrics.length})</span>
-                    </div>
+                    <MetricGroupHeading
+                      group={group}
+                      picked={group.metrics.filter(m => selectedNames.has(m.name)).length}
+                    />
                     {group.metrics.map(m => (
                       <label key={m.metric_uuid} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}>
                         <input

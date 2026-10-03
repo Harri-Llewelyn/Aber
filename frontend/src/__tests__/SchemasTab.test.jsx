@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SchemasTab } from '../components/tabs/SchemasTab'
 import { api } from '../api'
@@ -51,6 +51,115 @@ describe('the schemas card header', () => {
     await waitForRegistry()
     const header = expectCardHeading('Schemas', /modelled to publish/)
     expect(header).toHaveTextContent('Build Schema from Catalog')
+  })
+})
+
+/**
+ * The registry rows: the Devices column is a link that says what it counts, a row opens the
+ * drawer by mouse and by keyboard, and the drawer carries the schema's icon and one primary.
+ */
+describe('the registry rows', () => {
+  const schema = (n, name) => ({
+    schema_uuid: `${n}${n}${n}${n}0000-0000-4000-8000-00000000000${n}`, schema_name: name,
+    version: 1, status: 'active', parent_schema_id: null, schema_definition: { properties: {} }
+  })
+  const S1 = schema(1, 'Three_Devices')
+  const S2 = schema(2, 'One_Device')
+  const S3 = schema(3, 'No_Devices')
+  const device = (id, schemaId) => ({ asset_id: id, asset_name: id, schema_id: schemaId })
+
+  let onSelectSchema
+  const renderRegistry = async () => {
+    onSelectSchema = vi.fn()
+    api.get.mockImplementation((path) => Promise.resolve({
+      '/api/v1/schemas': [S1, S2, S3],
+      '/api/v1/metric-catalog': CATALOG,
+      '/api/v1/devices': [device('d1', S1.schema_uuid), device('d2', S1.schema_uuid), device('d3', S1.schema_uuid), device('d4', S2.schema_uuid)]
+    }[path] || []))
+    render(<SchemasTab showToast={vi.fn()} hasPermission={() => true} onSelectSchema={onSelectSchema} />)
+    await waitFor(() => expect(screen.getByText('Three_Devices')).toBeTruthy())
+  }
+  const devicesCell = (name) => screen.getByText(name).closest('tr').lastElementChild
+
+  it('words the Devices link "3 devices" and "1 device", with a plain dash at zero', async () => {
+    await renderRegistry()
+
+    expect(devicesCell('Three_Devices').querySelector('button.count-link')).toHaveTextContent(/^3 devices$/)
+    expect(devicesCell('One_Device').querySelector('button.count-link')).toHaveTextContent(/^1 device$/)
+    expect(devicesCell('No_Devices')).toHaveTextContent(/^—$/)
+    expect(devicesCell('No_Devices').querySelector('button')).toBeNull()
+    // No pill markup anywhere in the column, and none on the card heading.
+    expect(document.querySelector('tbody .section-count')).toBeNull()
+    expect(document.querySelector('.card-heading .section-count')).toBeNull()
+  })
+
+  it('opens the Devices page filtered to the schema, without opening the drawer', async () => {
+    await renderRegistry()
+
+    fireEvent.click(screen.getByRole('button', { name: '3 devices' }))
+    expect(onSelectSchema).toHaveBeenCalledWith(S1.schema_uuid)
+    expect(document.querySelector('.row-selected')).toBeNull()
+  })
+
+  it('opens the drawer from the row on Enter and on Space, and only from the row itself', async () => {
+    await renderRegistry()
+    const row = screen.getByText('Three_Devices').closest('tr')
+    expect(row).toHaveClass('row-selectable')
+    expect(row).toHaveAttribute('tabIndex', '0')
+
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(row).toHaveClass('row-selected')
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(row).not.toHaveClass('row-selected')
+
+    // Enter on the link inside the row is the link's, not the row's.
+    fireEvent.keyDown(screen.getByRole('button', { name: '3 devices' }), { key: 'Enter' })
+    expect(row).not.toHaveClass('row-selected')
+  })
+
+  it('titles the drawer with the schema icon and lists one primary action first', async () => {
+    await renderRegistry()
+    fireEvent.click(screen.getByText('Three_Devices'))
+
+    const panel = document.querySelector('.context-panel')
+    expect(panel.querySelector('.context-panel-icon svg')).toBeTruthy()
+    const primaries = panel.querySelectorAll('.context-panel-actions .btn-primary')
+    expect(primaries).toHaveLength(1)
+    expect(panel.querySelector('.context-panel-actions .context-action')).toBe(primaries[0])
+    expect(primaries[0]).toBe(within(panel).getByRole('button', { name: /View Schema Detail/ }))
+  })
+})
+
+/** A picker's group heading counts what is ticked in it, not how big the group is. */
+describe('the builder group headings', () => {
+  const PICKER = [
+    { metric_uuid: 'a1', name: 'Axes/DISPLACEMENT', datatype: 10, standard: 'MTConnect', deprecated: false },
+    { metric_uuid: 'a2', name: 'Axes/VELOCITY', datatype: 10, standard: 'MTConnect', deprecated: false },
+    { metric_uuid: 'c1', name: 'Controller/EXECUTION', datatype: 12, standard: 'MTConnect', deprecated: false }
+  ]
+
+  const band = (label) => [...document.querySelectorAll('.modal .metric-picker-group')]
+    .find(b => b.querySelector('.table-group-label').textContent === label)
+
+  it('says nothing until a metric is ticked, then "N selected"; the overall count stays', async () => {
+    api.get.mockImplementation((path) => Promise.resolve(
+      path === '/api/v1/metric-catalog' ? PICKER : []))
+    renderTab()
+    await waitForRegistry()
+    fireEvent.click(screen.getByRole('button', { name: /Build Schema from Catalog/ }))
+    await waitFor(() => expect(band('Axes')).toBeTruthy())
+
+    expect(band('Axes')).toHaveTextContent(/^Axes$/)
+    expect(band('Controller')).toHaveTextContent(/^Controller$/)
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Axes\/DISPLACEMENT/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /Axes\/VELOCITY/ }))
+    expect(band('Axes')).toHaveTextContent(/^Axes2 selected$/)
+    expect(band('Controller')).toHaveTextContent(/^Controller$/)
+    expect(screen.getByText('2 selected', { selector: '.form-label .section-count' })).toBeTruthy()
+
+    // The opaque band is a class, not an inline glass tint.
+    expect(band('Axes').getAttribute('style')).toBeNull()
   })
 })
 

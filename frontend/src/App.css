@@ -5190,6 +5190,25 @@ pre.gateway-code-wrap { white-space: pre-wrap; }
 
 .schema-change-cell { max-width: 280px; }
 
+/* A group heading in the schema dialogs' metric pickers: the opaque band the tables' group rows use,
+   pinned to the top of the list while its own metrics are in view. The label is `.table-group-label`. */
+.metric-picker-group {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 12px;
+  background: var(--bg-base);
+  border-bottom: 1px solid var(--border);
+}
+
+.metric-picker-group-selected {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .validate-payload-input {
   height: 150px;
   font-size: 12px;

@@ -459,6 +459,42 @@ describe('Detail modal — read-only vs draft', () => {
 
     expect(screen.queryByText(/Version History/)).toBeNull()
   })
+
+  // The group band says what is ticked in it, not how big it is, as the builder's does.
+  it('heads each picker group with what is selected in it, on the opaque band', async () => {
+    schemaRows = [V1, DRAFT_V2]
+    renderTab()
+    await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
+    fireEvent.click(panelFor('Robot_Arm_Schema_v2').getByText('Edit Draft'))
+
+    const band = (label) => [...document.querySelectorAll('.modal .metric-picker-group')]
+      .find(b => b.querySelector('.table-group-label').textContent === label)
+    // The draft carries Systems/TEMPERATURE; nothing in Controller is ticked.
+    expect(band('Systems')).toHaveTextContent(/^Systems1 selected$/)
+    expect(band('Controller')).toHaveTextContent(/^Controller$/)
+    expect(band('Systems').getAttribute('style')).toBeNull()
+
+    fireEvent.click(screen.getByLabelText('Systems/SPINDLE_TEMPERATURE'))
+    expect(band('Systems')).toHaveTextContent(/2 selected$/)
+  })
+
+  // While editing, the picker takes the height the window leaves rather than a fixed cap.
+  it('lets the draft picker fill the dialog, and leaves a published version as it was', async () => {
+    schemaRows = [V1, DRAFT_V2]
+    renderTab()
+    await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
+    fireEvent.click(panelFor('Robot_Arm_Schema_v2').getByText('Edit Draft'))
+
+    const draftBody = document.querySelector('.modal .modal-body')
+    expect(draftBody).toHaveClass('modal-body-fill')
+    const fill = draftBody.querySelector(':scope > .modal-fill')
+    expect(fill).toContainElement(screen.getByLabelText('Systems/SPINDLE_TEMPERATURE'))
+    expect(fill.innerHTML).not.toMatch(/max-height/)
+
+    fireEvent.click(screen.getByText('Close'))
+    fireEvent.click(panelFor('Robot_Arm_Schema').getByText('View Schema Detail'))
+    expect(document.querySelector('.modal .modal-body')).not.toHaveClass('modal-body-fill')
+  })
 })
 
 /**
