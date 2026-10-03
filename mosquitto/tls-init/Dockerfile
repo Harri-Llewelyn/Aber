@@ -16,8 +16,8 @@
 # node-red/Dockerfile, which exists for exactly the same reason with different packages).
 #
 # THE BASE IS PINNED for the same reason node-red/Dockerfile's is: OpenSSL 3.x changed how `-subj`
-# is parsed (see the escaping note in the script -- a literal `+` in "Factory+" is an RDN separator
-# and silently produced a malformed subject on 3.5), so the certificate this produces is coupled to
+# is parsed (see the escaping note in the script -- an unescaped `+` in a subject value is an RDN
+# separator), so the certificate this produces is coupled to
 # a major version of a tool, and "whatever :latest is today" is not a version.
 FROM node:24-alpine
 

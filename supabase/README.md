@@ -517,11 +517,10 @@ from one group to a request from another — precisely the collision this closes
 
 ### The group belongs to the site, and is fixed at install (archived migration 0131)
 
-`gateways.sparkplug_group` defaulted to the literal `ACS-Cymru` — the platform vendor's name — so
-every site published its own machine data under it. The group is the first segment of the namespace
-a plant's data lives in, and it belongs to the plant.
+The group is the first segment of the namespace a plant's data lives in, and it belongs to the
+plant, not to the platform: a literal default would publish every site's machine data under one name.
 
-It is now `ingestion.sparkplugGroup` in the chart, and it has **no default**: the render refuses
+It is `ingestion.sparkplugGroup` in the chart, and it has **no default**: the render refuses
 until the site names one, as it does for `ingestion.primaryHostId`. `0131` seeds it into the
 `sparkplug.group_id` setting on the first boot, and the column defaults to
 `sparkplug_group_default()`, which reads that row and raises if it is absent.
@@ -1735,9 +1734,8 @@ and does not call a catalog row deleted (the catalog has no DELETE policy).
 ### The trail draws every lane (archived migration 0128)
 
 **The Audit Trail no longer caps its lanes, so the setting that sized the cap has no reader.**
-`ui.digital_thread_lane_limit` folded every lane past the thirtieth behind a "Show all lanes"
-button at the foot of the page. Lanes are ordered busiest-first across the whole page, so the
-hidden ones belonged to every section, and pressing a button at the bottom expanded rows at the
+It folded every lane past the thirtieth behind a "Show all lanes" button at the foot of the page.
+Lanes are ordered busiest-first across the whole page, so the hidden ones belonged to every section, and pressing a button at the bottom expanded rows at the
 top — which is what users reported. The cap was a render guard from when the page grew with its
 content; the timeline now scrolls inside the card, and a page holds at most 200 events, so there is
 nothing left for it to guard.
@@ -2220,9 +2218,7 @@ other's replay.
   approved proposal writes the same columns.
 - **The plan is an object, never markup.** `areas.plan_path` names an object in the private
   `area-plans` bucket under `<area_id>/`; `is_area_plan_path()` confines the bucket's write
-  policies to an area that exists. The bucket and the check were `floor-plans` and
-  `is_floor_plan_path()` until 1.0 ([Storage buckets](#storage-buckets-and-why-they-differ) has
-  how they moved). `plan_aspect` is read from the SVG at upload, because a place is
+  policies to an area that exists. `plan_aspect` is read from the SVG at upload, because a place is
   a fraction and the aspect is what turns it back into a distance. The dashboard renders a plan
   through an `<img>` fed a blob URL, where an SVG's scripts, foreign objects and external
   references cannot run.
@@ -4392,12 +4388,8 @@ needed `**` for the same reach.
 
 **Reconciled, not only created.** `ensureBranchProtection()` adds the context to a repository that
 predates it, keeping whatever else `main` already requires, so the fifteen-minute sweep brings an
-older gateway up without anybody visiting it. It also removes the context's name from before the
-rename to Aber, `acs/flow-shape`: nothing posts that name any more, so a rule that kept requiring it
-beside the new one would refuse every merge. A proposal whose head was checked under the old name
-carries no status under the new one until its next push. `test_forge_events.py` covers the four
-answers and that a proposal moves no column; `test_forge_sweep.py` covers the reconcile and the
-rename.
+older gateway up without anybody visiting it. `test_forge_events.py` covers the four answers and
+that a proposal moves no column; `test_forge_sweep.py` covers the reconcile.
 
 ### A gateway that needs code of its own (archived migration 0106)
 
@@ -4642,15 +4634,12 @@ the seed rewrites the three revocation secrets on every boot, so that needed no 
 
 ## The Directory names Node-RED for what it runs (`0155`)
 
-The Node-RED row was seeded as *Node-RED (Virtual Edge Gateway Simulator)*, from when the stack
-shipped a demonstration simulator. That simulator is retired and `deployment` replaced
-`is_virtual`; what the platform's Node-RED runs now is the host-run gateways, so `0002` seeds
-*Node-RED (Host-Run Gateways)*. Nothing joins on this name: `directory_liveness_job_map()` does not map
+`0002` seeds the Node-RED row as *Node-RED (Host-Run Gateways)*, because what the platform's
+Node-RED runs is the host-run gateways. Nothing joins on this name: `directory_liveness_job_map()` does not map
 Node-RED, and the public-URL update keys on the row's id.
 
-The same pass renamed the vault secret the revocation and sweep calls pass the gateway's key
-check with, from `supabase_anon_key` to `supabase_publishable_key`, since the legacy anon key is
-retired and the secret holds the publishable key. `0002` writes that secret from db-init's
+The revocation and sweep calls pass the gateway's key check with the vault secret
+`supabase_publishable_key`, which holds the publishable key. `0002` writes it from db-init's
 variable on every boot.
 
 ## The Directory observes both databases (archived migration 0127)
@@ -5353,14 +5342,6 @@ tombstone points at the object — removing one is a decision about the record, 
 lives on, and private because a plan is a drawing of the plant and SVG is active content: the
 bucket admits `image/svg+xml` only, and the dashboard never inlines it.
 
-**It was `floor-plans` until 1.0.** The name first outlived the retirement of floors as a modelled
-level, on the grounds that the drawing was still a floor plan; it was renamed with every other
-identifier that still said floor, because after 1.0 a bucket name cannot change without an upgrade
-path. `storage-policies.sql` drops the four `floor_plans_*` policies and then
-`is_floor_plan_path()`, which the two write policies called, and `storage-init.mjs` moves the
-objects (below). `areas.plan_path` holds only the object key, `<area_id>/<file>.svg`, so no row
-changes.
-
 ### How `storage-init.mjs` creates them
 
 **Not a SQL migration.** `storage.buckets` is owned by storage-api, which runs its own migrations
@@ -5386,18 +5367,6 @@ so a bucket created by an older revision of the script or by hand in Studio is b
 current settings, a changed size limit takes effect on the next boot rather than needing the bucket
 dropped, and for the private buckets `public: false` is re-asserted. The buckets are created
 sequentially, not with `Promise.all`, so a failure part-way through names the bucket that failed.
-
-**A renamed bucket is moved, then deleted.** Nothing else removes a bucket: this script only
-creates and reconciles, and `storage-policies.sql` only replaces what it names, which is why the
-retired `gateway-backups` bucket had to be deleted from the dev cluster by hand. `RENAMED_BUCKETS`
-lists each old name with its new one. After every bucket above exists, the script lists the old
-bucket's objects folder by folder, moves each into the new bucket under the same key
-(`POST /object/move` with `destinationBucket`), and deletes the old bucket, which storage-api
-allows only once it is empty. A move that fails stops the Job before the delete, so the objects
-still unmoved stay where they were and the next upgrade picks them up. An old bucket that no longer
-exists is the settled state: the second run lists nothing, moves nothing and logs that it is gone.
-The only entry is `floor-plans` to `area-plans`. A restored backup that predates the rename brings
-`floor-plans` back, and the next upgrade moves it the same way.
 
 **The buckets are a list in code, not parameters.** They differ in the setting that matters most,
 whether they are public, and expressing that as an environment variable would leave "is this

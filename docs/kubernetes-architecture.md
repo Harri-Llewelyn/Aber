@@ -663,10 +663,10 @@ listed there):
 
 - **`/mosquitto/config` is one assembled `emptyDir`, not a ConfigMap mount.** The TLS stanza is
   appended to `mosquitto.conf` when certificates exist, and a ConfigMap mount is read-only.
-- **There is no shared `factoryplus` account any more.** One credential with `readwrite spBv1.0/#`
-  meant anything holding it could forge `DBIRTH`/`DDATA` for any machine on the site — a forgery
+- **There is no shared broker account.** One credential with `readwrite spBv1.0/#` would let
+  anything holding it forge `DBIRTH`/`DDATA` for any machine on the site — a forgery
   `verify_gateway_binding()` cannot detect, since a message published under a correctly bound device
-  satisfies it by construction. Confined principals replace it; a gateway's username MUST be its
+  satisfies it by construction. Each principal is confined instead; a gateway's username MUST be its
   `sparkplug_id` (the chart fails the render otherwise; a friendly name authenticates and is then
   silently dropped by the broker).
 - **The readiness probe is a real authenticated `mosquitto_sub`, not `tcpSocket`.** The broker runs

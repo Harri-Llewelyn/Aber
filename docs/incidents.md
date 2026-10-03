@@ -114,7 +114,7 @@ both directions, rather than by observing that it still passes.
 ## The pgsodium root key lived in the container, not the volume
 
 **Where the fix lives:** the `pgsodium_getkey.sh` ConfigMap in
-`deploy/helm/acs-cymru/templates/data/supabase-db-statefulset.yaml`, named by both
+`deploy/helm/aber/templates/data/supabase-db-statefulset.yaml`, named by both
 `-c pgsodium.getkey_script` and `-c vault.getkey_script`; it keeps the key on the data volume.
 **Symptom:** after `docker compose down` and `up`, migration `0006` failed with
 `pgsodium_crypto_aead_det_decrypt_by_id: invalid ciphertext` and `supabase-db-init` exited 3. On
@@ -203,7 +203,7 @@ wholesale rather than degrading. No static check can know what an allowlist will
 containers back after a host reboot it starts them in its own order, and on this stack ingestion started
 453 ms before timescaledb and met a refused connection. Two startup steps depended on a database being up and
 neither retried: the historian connection (only a write set `_ts_conn`, and on a stack with nothing publishing
-there is no first write, so `acs_ingestion_db_connected` read 0 for ever) and `capture_worker.reconcile()`
+there is no first write, so `aber_ingestion_db_connected` read 0 for ever) and `capture_worker.reconcile()`
 (a job left at RECORDING kept matching the single-flight index). The healer thread retries both, with their
 different dependencies, and stays resident so the gauge answers "can this daemon reach the historian" rather
 than "has a write succeeded since boot". The startup connection is also kept rather than closed after the
@@ -228,10 +228,10 @@ daemon is on MQTT 5 because the platform is, and it gains nothing measurable fro
 
 ## CI waited for a message count on a stack with no publisher
 
-**Where the fix lives:** `ingestion/ingestion.py`, `_mqtt_subscribed` and `acs_ingestion_mqtt_connected`; `scripts/wait-for-ingestion-consuming.sh`.
-**Symptom:** the Compose job deadlocked for 180 seconds with `acs_ingestion_up=1` and zero messages.
+**Where the fix lives:** `ingestion/ingestion.py`, `_mqtt_subscribed` and `aber_ingestion_mqtt_connected`; `scripts/wait-for-ingestion-consuming.sh`.
+**Symptom:** the Compose job deadlocked for 180 seconds with `aber_ingestion_up=1` and zero messages.
 
-The gate that waited for the ingestion daemon to be consuming polled `sum(acs_ingestion_messages_total) > 0`,
+The gate that waited for the ingestion daemon to be consuming polled `sum(aber_ingestion_messages_total) > 0`,
 on the reasoning that the simulators publish continuously. The simulator became opt-in, so on a stack with no
 publisher the count was unreachable and the wait ran out. The daemon was subscribed the whole time and nothing
 could say so: "the process is running" and "the daemon is receiving Sparkplug messages" are different states.
@@ -242,7 +242,7 @@ subscribed receives nothing.
 
 ## The e2e suite published its whole scenario before the daemon subscribed
 
-**Where the fix lives:** `deploy/helm/acs-cymru/templates/jobs/e2e-validate-job.yaml`, the
+**Where the fix lives:** `deploy/helm/aber/templates/jobs/e2e-validate-job.yaml`, the
 `wait-for-ingestion` initContainer.
 
 **Symptom:** twelve checks failed at once -- quarantine, birth parameters, birth-metric observation,
@@ -258,7 +258,7 @@ The e2e suite is a plain Job, created at install time, and the daemon is held be
 the telemetry hypertable, so on a slow node it reaches the broker minutes later. Nothing ordered the
 two, and the CI workflow's own "wait for the ingestion daemon to be consuming" step cannot: a
 workflow step runs concurrently with a Job that Kubernetes has already created. The Job waits on
-`acs_ingestion_mqtt_connected` itself, which is scraped from the headless metrics Service because
+`aber_ingestion_mqtt_connected` itself, which is scraped from the headless metrics Service because
 that sets `publishNotReadyAddresses` -- the daemon being unready is the state this has to observe.
 
 ---
@@ -268,7 +268,7 @@ that sets `publishNotReadyAddresses` -- the daemon being unready is the state th
 **Where the fix lives:** `ingestion/validate.py` (refuses to start without `MQTT_VALIDATOR_USER` / `MQTT_VALIDATOR_PASSWORD`); the e2e job's `. ./.env`.
 **Symptom:** a developer running a plain `npm run setup` got nine validate.py failures about telemetry, aliases and rebirth that named nothing relevant, while CI stayed green.
 
-validate.py defaulted its broker password to the literal `acscymru123`. CI runs `setup.mjs --demo`, which
+validate.py defaulted its broker password to a literal password. CI runs `setup.mjs --demo`, which
 copies `.env.example` verbatim, and `.env.example` set `MQTT_VALIDATOR_PASSWORD` to exactly that string, so the
 default matched the account by coincidence. A real setup mints a random password per principal, and the broker
 rejected the validator. The script now reads the two variables and refuses to start without them, which makes

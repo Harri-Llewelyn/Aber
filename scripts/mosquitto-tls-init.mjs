@@ -147,7 +147,7 @@ function dn(value) {
 }
 
 const ORG = dn('Aber');
-const ORG_UNIT = dn('Asset Tracking Platform');
+const ORG_UNIT = dn('Shopfloor data platform');
 
 // -------------------------------------------------------------------------------------------------
 // Inspection

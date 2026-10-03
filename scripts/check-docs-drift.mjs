@@ -2467,11 +2467,6 @@ function edgeFunctionNames() {
         what: 'the header counter-example showing the predicate that must NOT be used',
       },
       {
-        file: 'README.md',
-        needle: `**${days}-day retention window**`,
-        what: 'the migration narrative',
-      },
-      {
         file: 'supabase/README.md',
         needle: `kept for ${days} days`,
         what: 'the retention section headline',
@@ -2906,8 +2901,8 @@ function edgeFunctionNames() {
 // carrying "deleted", "retired", "removed", "replaced", "gone", "former" or "proposed" is history
 // rather than a pointer. That is the whole exemption, so a stale citation cannot hide behind a
 // file's reputation. Exempt wholesale: `docs/incidents.md`, where naming the path an incident
-// happened to is the point; `docs/roadmap.md` and `docs/postgres-17-migration-plan.md`, the
-// records of what retired; `supabase/migrations/archive/`, which is never executed; and
+// happened to is the point; `docs/roadmap.md`, the record of what retired;
+// `supabase/migrations/archive/`, which is never executed; and
 // `supabase/config.toml`, the Supabase CLI's stock file.
 //
 // A CITATION IS RESOLVED THE WAY A READER WOULD RESOLVE IT: a leading `../` against the citing
@@ -2918,7 +2913,7 @@ function edgeFunctionNames() {
 // -------------------------------------------------------------------------------------------------
 {
   const PAST = /\b(deleted|retired|removed|replaced|gone|superseded|former|formerly|proposed)\b/i;
-  const EXEMPT = ['docs/incidents.md', 'docs/roadmap.md', 'docs/postgres-17-migration-plan.md', 'supabase/config.toml'];
+  const EXEMPT = ['docs/incidents.md', 'docs/roadmap.md', 'supabase/config.toml'];
   const scanned = allFiles.filter(
     (f) =>
       !EXEMPT.includes(f) &&
@@ -3064,7 +3059,7 @@ function edgeFunctionNames() {
 // `docker compose up` in the remote-gateway runbook is correct. What cannot be true is a SECOND
 // target for the platform, so the phrases below are the ones that assert one.
 //
-// The four documents that carry the comparison as history are exempt, each opening with a note
+// The three documents that carry the comparison as history are exempt, each opening with a note
 // saying so, and this file is exempt because it has to name the phrases to look for them.
 // -------------------------------------------------------------------------------------------------
 {
@@ -3072,7 +3067,6 @@ function edgeFunctionNames() {
     'docs/incidents.md',
     'docs/roadmap.md',
     'docs/kubernetes-architecture.md',
-    'docs/postgres-17-migration-plan.md',
     'scripts/check-docs-drift.mjs',
   ];
   // AN INTERVENING WORD IS THE HOLE THE FIRST PASS LEFT. "both deployment targets" and "one of
@@ -3214,7 +3208,6 @@ function edgeFunctionNames() {
   const KEPT = [
     ['supabase/migrations/archive/', null, 'never executed: the record of what each archived migration did'],
     ['docs/incidents.md', null, 'names what each incident happened to'],
-    ['docs/postgres-17-migration-plan.md', null, 'marked Historical'],
     ['.gitleaksignore', null, 'its fingerprints name historical paths and must match them exactly'],
     [['scripts/storage-init.mjs', 'deploy/helm/aber/files/scripts/storage-init.mjs'], "{ from: 'floor-plans', to: 'area-plans' }", 'RENAMED_BUCKETS moves the old bucket'],
     [STORAGE_POLICIES, ['under its old name, floor-plans', "policyname LIKE 'floor_plans_%'", 'floor-plans policies gone'],
@@ -3228,24 +3221,14 @@ function edgeFunctionNames() {
     ['node-red/node-red-init.mjs', ["['.factoryplus-seeded'", 'LEGACY_TLS_NODE =', 'LEGACY_CREDENTIALS_ENV_KEY ='], 'moves the old names on the volume'],
     ['node-red/node-red-init.test.mjs', /factoryplus-tls-config/, 'plants the old tls-config node and asserts it moves'],
     ['node-red/node-red-init.test.mjs', /acsCredentialsEnv/, 'plants the old broker-node property and asserts it moves'],
-    ['supabase/migrations/test_forge_follows_the_archive.py', "'supabase_anon_key'", 'asserts the old vault name is gone'],
     ['frontend/src/searchIndex.js', /floor plan/, 'search keywords find a page by its old word'],
     ['ingestion/README.md', "ACS's `acs-edge`", 'names the upstream ACS component'],
     ['test-harness/load_generator.py', 'NOT the demonstration simulator', 'says what the load generator is not'],
     ['test-harness/README.md', 'Not the demonstration simulator', 'says what the load generator is not'],
     ['deploy/helm/aber/values.yaml', 'The demonstration simulator was removed', 'history, beside the value it explains'],
-    ['deploy/k8s/README.md', 'There is no shared broker account.', 'the retired shared broker account'],
-    ['docs/upgrades.md', ['| Was | Is | What a site does |', 'the chart was `acs-cymru` until'], 'the 1.0 table: what each rename asks of a site'],
     ['docs/gateway.md', "Envoy kept the Kong Service's name", "the gateway's History"],
     ['mosquitto/README.md', 'RETIRED_PLATFORM_USERNAMES', 'the removal of the old accounts'],
-    ['README.md', ['The chain is how', 'It used to come up with a four-cell simulated shopfloor'],
-      'the archived chain, and what a fresh install used to hold'],
-    ['supabase/README.md', [
-      'defaulted to the literal `ACS-Cymru`', 'The bucket and the check were `floor-plans`',
-      'rename to Aber, `acs/flow-shape`', 'The Node-RED row was seeded as', 'The same pass renamed the vault secret',
-      'It was `floor-plans` until 1.0.', 'The only entry is `floor-plans` to `area-plans`',
-      '`ui.digital_thread_lane_limit` folded every lane',
-    ], 'history: what each name was and how it moved'],
+    ['README.md', 'It used to come up with a four-cell simulated shopfloor', 'what a fresh install used to hold'],
     ['frontend/src/__tests__/auditTrailPurgedEntity.test.jsx', /ui\.digital_thread_lane_limit/, 'an old row on the trail names the retired setting'],
     ['frontend/src/constants.js', 'export const RENAMED_TABS', 'the old route opens the Audit Trail'],
     ['frontend/src/__tests__/appRouting.test.jsx', /\/digital-thread/, 'tests the old route'],

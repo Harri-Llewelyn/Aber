@@ -87,7 +87,7 @@ spec:
     organizations:
       - Aber
     organizationalUnits:
-      - Asset Tracking Platform
+      - Shopfloor data platform
   secretName: aber-ca-key-pair
   # Ten years. A root is redistributed by hand to browsers, gateways and operator laptops, so its
   # renewal is an organisational event, not an automated one -- the point of a long life is that the

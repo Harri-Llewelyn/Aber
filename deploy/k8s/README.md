@@ -543,7 +543,7 @@ rather than creating it, because the root's private key must outlive any release
 #### 0. Install cert-manager — once per cluster
 
 Not bundled as a chart dependency: it installs CRDs and a cluster-wide webhook, which is cluster
-administration rather than something an application release should own — and two Factory+ releases in
+administration rather than something an application release should own — and two Aber releases in
 one cluster would then fight over it.
 
 ```bash
@@ -1677,7 +1677,7 @@ the root filesystem is an overlay the exporter excludes, so Root Disk Used is bl
   mapped binary (about 170 MiB) and page cache, which is why the limit is 768Mi.
 - **Mosquitto's metrics are prefixed `broker_`, not `mosquitto_`.** Alerts and dashboards written
   against the latter match nothing and render as empty panels rather than as errors.
-- **Grafana is inside the thing being monitored.** A `supabase-db` failure takes the Factory+
+- **Grafana is inside the thing being monitored.** A `supabase-db` failure takes the platform's
   dashboards down with it, and the alert webhook with them. Send alerts off-cluster, or use the
   external arrangement below.
 
@@ -1858,10 +1858,9 @@ and a `password_file` left by a release from before the plugin, which the initCo
 once — every appliance's password intact — and leaves in place. It is created empty on first
 install and preserved thereafter (`resource-policy: keep` plus a `lookup` through a re-render).
 
-> **There is no shared broker account.** `acs-cymru`, which held `readwrite spBv1.0/#` and was
-> used by ingestion, i3X, Node-RED and the validator alike, has been deleted — it could forge
+> **There is no shared broker account.** One credential holding `readwrite spBv1.0/#` could forge
 > `DBIRTH`/`DDATA` for any machine on the site, which `verify_gateway_binding()` cannot detect for
-> a correctly bound device. The roles in `mosquitto/dynsec-roles.json` now confine
+> a correctly bound device. The roles in `mosquitto/dynsec-roles.json` confine
 > `aber_ingestion` (read plus NCMD only), `aber_i3x` (read only), `aber_monitor`
 > (`$SYS` only), the plugin's admin (`$CONTROL` only) and every gateway (its own edge node, through
 > a role generated for it). **The gateway usernames must be `sparkplug_id`s** — the chart fails the

@@ -105,8 +105,7 @@ class MaintenancePathTestCase(unittest.TestCase):
 
         `ALTER EXTENSION` is refused once a connection has loaded the old version's library, and
         every other file in this directory uses the API surface the update changes -- the
-        compression/columnstore rename in docs/postgres-17-migration-plan.md being the case that
-        makes it concrete.
+        compression/columnstore rename being the case that makes it concrete.
         """
         path, prefix = HELM_JOB, "-f /sql/"
         text = path.read_text(encoding="utf-8")

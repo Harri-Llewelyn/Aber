@@ -79,9 +79,9 @@ a healthy stack before this file existed:
 `default_version` is what the image ships; `installed_version` is what the database is running.
 The gap was the defect, and it widened on every bump.
 
-**Why first, and why its own session.** `docs/postgres-17-migration-plan.md` records what the API
-surface can do across a version boundary: compression became columnstore, the entry points became
-procedures requiring `CALL`, and the options changed shape. Verifying an upgrade path over a
+**Why first, and why its own session.** The extension's API surface changes across a version
+boundary: compression became columnstore, the entry points became procedures requiring `CALL`, and
+the options changed shape. Verifying an upgrade path over a
 database carrying the legacy settings assumes the extension updates at all, and that is what this
 file guarantees before any of the others run.
 

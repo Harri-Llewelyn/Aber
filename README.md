@@ -193,94 +193,9 @@ harmlessly each time. At 1.0 there are two, the schema baseline (`0001`) and the
 (`0002`), which fold the incremental chain kept in
 [`supabase/migrations/archive/`](supabase/migrations/archive/README.md): the 197 files four squashes
 retired. An archived number is never issued again, so the next migration is `0163` and a cited
-number names one file for good (the archive's two `0074`s predate the rule). The chain is how
-the schema came to be: archived `0003` audit immutability, archived `0004`, archived `0005`,
-archived `0006` Node-RED SSO, archived `0007` metric-name format, archived `0008` Sparkplug
-group, archived `0009` withdraws residual `anon` function grants, archived `0010` telemetry
-rollups and latest-value view, archived `0011` IDTA Digital Nameplate and per-device nameplate
-data, archived `0012` permitted values of a
-discrete metric, archived `0013` ASHRAE 223P vocabulary, archived `0014` repoints locally-minted semantic
-identifiers onto the `acs-cymru.local` namespace, `0015` moves the default Sparkplug group to
-`ACS-Cymru`, `0016` drops the dashboard's own service-directory entry and renames the Node-RED
-one to say it is the simulator, `0018` pre-registers the demonstrator's metric set with each
-row's standard and published semantic id, `0019` adds the 223P supply-air-flow metric the
-shopfloor simulator needed, `0020` retires the introductory single-device simulator and moves its
-schema and IDTA nameplate onto the demonstration mill, `0021` gives each shopfloor cell an icon from
-a closed set, `0023` adds the `platform_alerts` occurrence log Grafana alerting writes into and publishes it for
-Realtime, `0024` adds an optional free-text `description` to devices and gateways, `0025` adds
-Remote-gateway enrolment — a `gateway_enrollment_tokens` table reachable only by `service_role`,
-the RPCs that issue and atomically redeem a single-use token, and the `PENDING_ENROLLMENT` /
-`AWAITING_BIRTH` lifecycle states — `0026` stamps every audit row with the transaction that wrote
-it (`audit_trail.causation_id`, from `txid_current()`) so the several rows one operator action
-produces can be read back as one act, and adds `record_ingestion_rejection()` — the narrow
-SECURITY DEFINER gate through which the ingestion daemon records a payload it judged
-non-conforming, replacing `service_role`'s direct INSERT on the audit table — and `0027` maps the
-historian's storage footprint over `postgres_fdw` and unions it with Supabase's own table sizes as
-`public.storage_footprint`, read by Grafana's `supabase` datasource — `0028` generalises the alert
-table from `device_alerts` to `platform_alerts`, whose subject is `(entity_type, entity_id)` rather
-than a device, because the platform alert rules cover a gateway and the fleet and neither
-fits a row that must name a machine — `0029` adds `public.platform_health`, the narrow view
-those rules evaluate so the Grafana reader never needs the asset inventory, and `0074` adds its
-`expected_publishers` count so that "ingestion has recorded nothing" only alerts when devices exist
-that ought to be publishing — and `0030` gives that
-alert table a **7-day retention window**, pruned nightly by `pg_cron`, whose predicate ages out
-closed and superseded occurrences but never the newest firing row of a fingerprint — and `0031`
-adds `public.system_settings`, the runtime configuration plane an `Administrator` edits from the
-dashboard instead of a values file, whose **key set is closed**: RLS grants UPDATE and nothing
-else, so a new setting arrives by migration beside the code that reads it — and `0032` gives that
-table **numeric bounds** and moves the alert retention window into it as `alerts.retention_days`,
-replacing `prune_platform_alerts()` with a version that reads the setting, so the answer to "how
-long do we keep alerts" is on a page rather than in a migration — and `0033` adds
-`relocate_devices()`, which applies a whole shopfloor rearrangement in **one transaction** so the
-six machines an operator files in one gesture carry one `causation_id` instead of six, and so a
-batch that fails partway leaves nothing behind — and `0034` seeds the **read-only principal the MCP
-client authenticates as**, which reads the i3X address space, writes nothing and cannot see the
-audit trail; it now holds no role, only a `telemetry:read` grant of its own, and
-`0162_machine_principals_hold_no_role.sql` corrects the `user_roles` comment that said otherwise
-(`scripts/mint-mcp-token.mjs` signs its long-lived token) — and `0035`
-gives `gateways` the columns an appliance **reports about itself** on the heartbeat it already
-publishes, chiefly `cert_expires_at`: the internal CA is hand-distributed into every appliance's
-trust store, so re-minting it takes the whole fleet offline at once with no other signal — and
-`0036` adds `public.gateway_health`, the **third** narrow view the Grafana reader may select,
-after `0027`'s and `0029`'s: it backs the gateway dashboard and the certificate alert while
-leaving the asset inventory `0029` deliberately withheld exactly where it is — and `0038` makes
-**archiving or deleting a gateway revoke its broker credential**, by disabling the account at the
-broker, which drops its live session: nothing in the credential service can delete an account, so
-a delete verb that could stop the whole fleet publishing is not one it carries — and `0037`
-makes **archiving a gateway withdraw its outstanding enrolment bundle**, and enrolment refuse
-an archived gateway at all: a bundle downloaded and never instantiated was still redeemable
-after the gateway was archived, which issued a real broker credential and resurrected the row
-to `ONLINE` — and `0039` adds `0041` gives a **host-run gateway a
-"Generate broker credential" path that needs no shell**: `authorize_host_gateway_credential()`
-gates by role and refuses a Remote or archived gateway, and
-`record_gateway_credential_issued()` writes the `CREDENTIAL_ISSUED` audit row attributed to the
-operator who asked — the two are separate so that a credential service that is down cannot produce
-a record of a mint that never happened, and a mint that succeeds cannot go unrecorded — and `0042`
-adds `list_service_principals()`, the **Administrator-only read behind the Service Identities
-section**: `auth.users` is GoTrue's and is not served by PostgREST at all, and `user_roles` is
-deliberately unreachable from a browser, so the alternative to a four-column function is a broad
-grant on the two tables that decide who is who — and `0043` adds
-`record_service_token_issued()`, which writes a **`TOKEN_MINTED`** row for a long-lived JWT and
-refuses two things outright: a subject that can sign in, and any expiry beyond
-`service_token_max_days()` — **90 days**, because a revocation (`0074`) reaches PostgREST alone and
-the expiry is the only bound on every other service — and `0044` adds `create_service_principal()`,
-which creates a machine identity the way `0034` does (`id` alone, so it has no email, no password
-and no identity provider) and accepted **only a read-only role** while no token could be revoked;
-what a machine may hold now is under [Machine identities](#machine-identities) — and `0045` scopes `audit_trail_page()`'s
-**deleted-asset filter to the three types that have a table behind them**: `0039` derived it as an
-anti-join against cells, gateways and devices and deliberately did not narrow it by entity type, so
-`service_principals` rows answered *"absent from all three"* and **the audit trail this feature
-exists to produce was hidden as deleted** — and `0039`
-adds `audit_trail_page()`, which applies the **deleted-asset
-filter as a predicate rather than in the browser**, so the page's row budget is spent on rows
-it will actually show: hiding them afterwards had the page list four assets on a stack of
-twenty-six, and render an empty Gateways section on a fleet of four healthy gateways — and `0040`
-**retires the demonstration shopfloor from the seed**, so a fresh install comes up with no assets
-at all; it
-is the one migration in the chain that must run **exactly once** rather than on every boot, because
-the rows it removes are rows an operator may deliberately want back, and a delete replayed every
-boot would silently undo every provisioning run — which is what `public.one_shot_migrations` is
-for — plus demo accounts (`supabase/seed.sql`).
+number names one file for good (the archive's two `0074`s predate the rule). The archive's
+README says why each squash was shaped as it was, and each archived file states the decision it
+made. The demo user accounts are seeded separately, by `supabase/seed.sql`.
 
 > **The archive has no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because archived `0005` already implements one; a second declaration of

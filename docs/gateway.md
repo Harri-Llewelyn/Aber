@@ -157,8 +157,7 @@ before 1.0 the Service took its workload's name, `supabase-envoy`, like every ot
 ([#532](https://github.com/Harri-Llewelyn/Aber/issues/532)). That superseded the decision of
 2026-09-11, and it removed the scaffolding that let the chart and CI read either name: the
 `supabaseEnvoy.serviceName` value, the NetworkPolicy's Service-to-component bridge, and CI's
-derived gateway name. What the rename asks of a site is in
-[`upgrades.md`](upgrades.md#what-10-renames-and-what-each-rename-asks-of-a-site).
+derived gateway name.
 
 ### What Kong taught
 
