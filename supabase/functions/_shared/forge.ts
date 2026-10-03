@@ -139,12 +139,6 @@ const WEBHOOK_BRANCH_FILTER = "*";
 export const FLOW_SHAPE_CONTEXT = "aber/flow-shape";
 
 /**
- * The names the shape check was posted under before, which nothing posts any more. A rule still
- * requiring one could never be satisfied, so ensureBranchProtection() takes them out.
- */
-const RETIRED_FLOW_SHAPE_CONTEXTS = ["acs/flow-shape"];
-
-/**
  * The platform playbook's own organisation and repository: one repository the whole fleet reads,
  * outside `gateways` so that organisation's rules (both teams may create repositories; the sweep
  * protects whatever it finds) do not apply. Its `main` admits pushes from the machine account
@@ -445,9 +439,8 @@ async function dropCopiedManifest(cfg: ForgeConfig, name: string): Promise<void>
  * An existing protection is left as an administrator may have tuned it, except for the three
  * things this rule is for: `enable_push` and `push_whitelist_deploy_keys` are closed again if
  * either is found open, because the appliance's key is writable and this rule is what makes it a
- * reporting key; and the shape check is added back to the required contexts under its current
- * name, keeping whatever else is required beside it and dropping a retired name, which nothing
- * posts and would block every merge. Returns whether anything was changed. `seedTemplate` is for a
+ * reporting key; and the shape check is added back to the required contexts, keeping whatever
+ * else is required beside it. Returns whether anything was changed. `seedTemplate` is for a
  * gateway's repository; a playbook made by hand is protected the same way and is not a gateway's
  * incident log.
  */
@@ -466,14 +459,11 @@ export async function ensureBranchProtection(
     };
     const open = rule.enable_push || rule.push_whitelist_deploy_keys;
     const required = rule.status_check_contexts ?? [];
-    const retired = required.filter((c) => RETIRED_FLOW_SHAPE_CONTEXTS.includes(c));
-    const unchecked = !rule.enable_status_check || !required.includes(FLOW_SHAPE_CONTEXT) || retired.length > 0;
+    const unchecked = !rule.enable_status_check || !required.includes(FLOW_SHAPE_CONTEXT);
     if (!open && !unchecked) return false;
     // The contexts already required are kept: an administrator may have added one, and this is
     // about `aber/flow-shape` being among them rather than about it being the only one.
-    const contexts = [
-      ...new Set([...required.filter((c) => !RETIRED_FLOW_SHAPE_CONTEXTS.includes(c)), FLOW_SHAPE_CONTEXT]),
-    ];
+    const contexts = [...new Set([...required, FLOW_SHAPE_CONTEXT])];
     const closed = await forgeApi(cfg, "PATCH", `/repos/${FORGE_ORGANISATION}/${name}/branch_protections/main`, {
       enable_push: false,
       push_whitelist_deploy_keys: false,
@@ -483,7 +473,6 @@ export async function ensureBranchProtection(
     if (!closed.ok) throw await refused(`could not close 'main' on '${name}' to pushes`, closed);
     if (open) console.warn(`forge: 'main' on '${name}' admitted pushes; closed again`);
     if (unchecked) console.log(`forge: 'main' on '${name}' now requires ${FLOW_SHAPE_CONTEXT}`);
-    if (retired.length) console.log(`forge: 'main' on '${name}' no longer requires ${retired.join(", ")}`);
     return true;
   }
   if (existing.status !== 404) {

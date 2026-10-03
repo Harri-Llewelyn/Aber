@@ -69,8 +69,6 @@ PLATFORM_ORGANISATION = "platform"
 PLATFORM_REPOSITORY = "gateway-platform"
 CUSTOM_EXAMPLE_REPOSITORY = "gateway-custom-example"
 FLOW_SHAPE_CONTEXT = "aber/flow-shape"
-# The shape check's name before the rename to Aber; the sweep removes it from a rule.
-RETIRED_FLOW_SHAPE_CONTEXT = "acs/flow-shape"
 
 # Differs from every other suite's fixture id in its FIRST block: sparkplug_id is the first 21 hex
 # characters of the uuid, so ids that differ only at the end collide on the generated id.
@@ -518,16 +516,15 @@ class TestRepositories(ForgeSweepBase):
         self.assertEqual(status, 200, body)
         self.assertNotIn(self.repo, body["protected"], body)
 
-    def test_main_requires_the_shape_check_under_its_current_name_only(self):
+    def test_main_requires_the_shape_check_beside_a_context_an_administrator_added(self):
         """
-        The rule a repository enrolled before the rename to Aber carries: the shape check under its
-        old name, which nothing posts any more, so no proposal could ever be merged. The sweep
-        replaces it and keeps a context an administrator added.
+        A rule whose required contexts were replaced by hand: the sweep adds the shape check back
+        and keeps the context the administrator added.
         """
         self.enrol()
         status, _ = forge(f"/repos/{ORGANISATION}/{self.repo}/branch_protections/main", method="PATCH",
                           body={"enable_status_check": True,
-                                "status_check_contexts": [RETIRED_FLOW_SHAPE_CONTEXT, "site/extra-check"]})
+                                "status_check_contexts": ["site/extra-check"]})
         self.assertEqual(status, 200)
 
         status, body = sweep()
