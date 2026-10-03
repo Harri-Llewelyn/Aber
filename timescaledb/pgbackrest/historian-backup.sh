@@ -7,8 +7,9 @@
 # whether the day's BACKUP_HOUR_UTC slot has passed with no backup attempted since, and if so takes
 # one: the type physical_backup_type() names (full on BACKUP_FULL_ON, 0 = Sunday, or when the
 # newest full is over seven days old; a differential otherwise). A restart, a suspended host and a
-# missed hour all meet the same rule, so a missed slot is taken late, once. pgBackRest expires what
-# retention no longer needs at the end of each backup.
+# missed hour all meet the same rule, so a missed slot is taken late, once. The same step takes a
+# differential when the Backups page has asked for one (physical_backup_requests). pgBackRest
+# expires what retention no longer needs at the end of each backup.
 #
 # Every run is recorded in public.physical_backup_runs, which the Historian Backup Stale alert
 # reads. A failed run is recorded and counts as the slot's attempt.
@@ -69,6 +70,11 @@ SELECT public.physical_backup_type(:'full_on'::integer, to_timestamp(:'slot'::bi
 SQL
 }
 
+# The id of a backup the Backups page asked for, now claimed, or nothing.
+claim_request() {
+  psql_run -c 'SELECT public.physical_backup_claim_request()'
+}
+
 next_slot() {
   now=$(date -u +%s)
   next=$(( now - now % 86400 + HOUR * 3600 ))
@@ -80,7 +86,7 @@ until pg_isready -q -h "$SOCKET"; do sleep 5; done
 # The functions are created by the maintenance Job, which runs after the server is up on a fresh
 # install and after this container restarts on an upgrade; a backup taken before them would be
 # missing from the table the alert reads. Waits for the newest one this script calls.
-until [ "$(psql_run -c "SELECT to_regprocedure('public.physical_backup_missed_slot(integer, timestamptz)') IS NOT NULL" 2>/dev/null)" = t ]; do
+until [ "$(psql_run -c "SELECT to_regprocedure('public.physical_backup_claim_request()') IS NOT NULL" 2>/dev/null)" = t ]; do
   sleep 10
 done
 
@@ -92,6 +98,10 @@ esac
 # period while it sleeps.
 trap 'log "stopping"; exit 0' TERM INT
 log "server is up"
+# What the Backups page reads to say when the next backup is due.
+psql_run -v hour="$HOUR" -v full_on="$FULL_ON" -f - >/dev/null <<'SQL' || log "could not record the schedule"
+SELECT public.physical_backup_record_schedule(:'hour'::integer, :'full_on'::integer);
+SQL
 
 # stanza-create succeeds on a stanza that exists and matches this database. It fails when the
 # repository holds a different database's stanza, which needs a person: see the runbook.
@@ -119,6 +129,7 @@ while :; do
     failing=1
     slot=''
   fi
+  request=$(claim_request 2>/dev/null) || request=''
   if [ -n "$slot" ] && [ "$slot" != "$last" ]; then
     last=$slot
     at=${slot%%|*}
@@ -128,7 +139,12 @@ while :; do
     if [ $(( $(date -u +%s) - at )) -gt 300 ]; then
       log "missed the ${slot#*|} UTC backup; taking it now ($type)"
     fi
+    [ -z "$request" ] || log "this backup also answers the one asked for on the Backups page"
     backup "$type" || true
+    announced=''
+  elif [ -n "$request" ]; then
+    log "a backup was asked for on the Backups page; taking a differential now"
+    backup diff || true
     announced=''
   elif [ -z "$announced" ]; then
     next_slot

@@ -365,6 +365,16 @@ so a missed Sunday does not leave differentials building on a full that `retainF
 expire. Both are SQL rather than shell so `test_physical_backup.py` can ask them about any moment
 in a rolled-back transaction; both are revoked from PUBLIC.
 
+**What the Backups page reads.** `physical_backup_schedule` is one row, the `hourUtc` and `fullOn`
+the sidecar started with (`physical_backup_record_schedule()`), so the page can say when the next
+backup is due. `physical_backup_requests` holds the backups the page asked for: the backup service
+inserts one through `physical_backup_request()` when it claims a requested platform backup, one
+waits at a time (a partial unique index), and the sidecar's minute loop claims it
+(`physical_backup_claim_request()`) and takes a differential; the first run recorded after the claim
+is its answer. All three gates are superuser only. The platform maps the three tables as foreign
+tables (migration 0026), and `fdw_reader` may read them, granted in `roles.sql` because this file
+runs before `roles.sql` creates the role on a fresh volume.
+
 ## `roles.sql`
 
 **Each block is the authority on its role's reach.** Grants are re-issued and revokes re-issued
@@ -451,7 +461,8 @@ whether archiving is on, which decides what the retention job may drop.
 ### `fdw_reader`
 
 What Supabase's foreign tables connect as. Read-only, and only the projection: `telemetry`,
-`telemetry_latest`, the three rollups, `telemetry_horizons` and `storage_footprint`. Nothing on
+`telemetry_latest`, the three rollups, `telemetry_horizons`, `storage_footprint` and the three
+physical backup tables the Backups page reads. Nothing on
 the Supabase side writes through the FDW, so INSERT would be a grant with no caller. Without this
 role the public user mapping runs as the historian superuser, so a widened local grant or a new
 foreign table would inherit superuser reach.

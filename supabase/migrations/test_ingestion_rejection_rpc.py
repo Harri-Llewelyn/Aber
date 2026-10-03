@@ -279,7 +279,7 @@ class ServiceRoleCannotForgeAuditRowsTestCase(unittest.TestCase):
             """)
 
     def test_service_role_still_cannot_update_or_delete(self):
-        """0003's append-only trigger, re-asserted because 0026 rewrites the grants around it."""
+        """0003's append-only trigger, re-asserted because archived migration 0026 rewrites the grants around it."""
         for statement in (
             "UPDATE public.audit_trail SET action = 'TAMPERED' WHERE id = "
             "(SELECT id FROM public.audit_trail ORDER BY id DESC LIMIT 1)",

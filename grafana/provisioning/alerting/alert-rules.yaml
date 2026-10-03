@@ -1947,7 +1947,8 @@ groups:
           summary: >-
             The historian has had no successful physical backup for
             {{ humanizeDuration $values.B.Value }}. A restore can reach no later than the last one.
-            The sidecar's log names the cause: kubectl -n aber logs timescaledb-0 -c pgbackrest
+            The Backups page shows the last failure's reason, and Take a backup there asks for one.
+            The sidecar's log has the rest: kubectl -n aber logs timescaledb-0 -c pgbackrest
         data:
           - refId: A
             relativeTimeRange:

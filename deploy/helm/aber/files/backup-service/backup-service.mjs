@@ -92,20 +92,21 @@ const DUMP_EXT = FORMAT === 'plain' ? 'sql.gz' : 'dump';
 // schemas the image ships; the custom format carries the same as a flag at restore time.
 const DUMP_ARGS = FORMAT === 'plain' ? ['-Fp', '-Z6', '--clean', '--if-exists'] : ['-Fc'];
 
-// One statement as supabase_admin, the session pg_dump needs anyway, with values passed as psql
-// variables and interpolated as quoted literals, so nothing here concatenates a value into SQL. On
-// stdin, because psql substitutes variables in a script it reads and not in a -c command.
-function sql(statement, vars = {}) {
+// One statement as supabase_admin (or the historian's superuser, given TIMESCALE), the session
+// pg_dump needs anyway, with values passed as psql variables and interpolated as quoted literals, so
+// nothing here concatenates a value into SQL. On stdin, because psql substitutes variables in a
+// script it reads and not in a -c command.
+function sql(statement, vars = {}, target = SUPABASE) {
   const args = [
     '-X', '-q', '-At', '-v', 'ON_ERROR_STOP=1',
-    '-h', SUPABASE.host, '-p', SUPABASE.port, '-U', SUPABASE.user, '-d', SUPABASE.db,
+    '-h', target.host, '-p', target.port, '-U', target.user, '-d', target.db,
   ];
   for (const [name, value] of Object.entries(vars)) args.push('-v', `${name}=${value}`);
   args.push('-f', '-');
   const r = spawnSync('psql', args, {
     encoding: 'utf8',
     input: `${statement};\n`,
-    env: { ...process.env, PGPASSWORD: SUPABASE.password, PGCONNECT_TIMEOUT: '10' },
+    env: { ...process.env, PGPASSWORD: target.password, PGCONNECT_TIMEOUT: '10' },
     maxBuffer: 1 << 24,
   });
   if (r.status !== 0) {
@@ -645,6 +646,17 @@ function catchUp() {
   } catch (err) { log(`catch-up: ${err.message}`); }
 }
 
+// While pgBackRest backs the historian up, a backup an Administrator asks for asks the historian's
+// sidecar for a differential too, through physical_backup_request() (superuser only). Not waited
+// for, and a failure here never fails the platform backup: the Backups page shows the historian's
+// request and its result on their own.
+function requestHistorianBackup(job) {
+  try {
+    const id = sql("SELECT public.physical_backup_request(:'job_id')", { job_id: job.id }, TIMESCALE);
+    log(`historian: asked the backup sidecar for a differential (request ${id})`);
+  } catch (err) { log(`historian: could not ask for a backup: ${err.message}`); }
+}
+
 // A RUNNING row while this process runs nothing is a job no process is running: a previous
 // process's, or restored with the database from a backup taken while it ran. Failed before each
 // claim, not only at start; left standing it would refuse every new backup.
@@ -661,6 +673,7 @@ async function tick() {
     await copyOffsite();
     return;
   }
+  if (job.origin === 'requested' && !DUMP_TIMESCALE) requestHistorianBackup(job);
   try {
     await takeBackup(job);
   } catch (err) {

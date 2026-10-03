@@ -46,4 +46,6 @@ window.__ABER_CONFIG__ = window.__ABER_CONFIG__ || {
   VITE_RELEASE_VERSION: '',
   // backup.retentionDays. Blank: the Backups page does not say which backups the window has passed.
   VITE_BACKUP_RETENTION_DAYS: '',
+  // 'true' while timescaledb.physicalBackup is on. Blank: the Backups page shows no historian row.
+  VITE_HISTORIAN_PHYSICAL_BACKUP: '',
 };

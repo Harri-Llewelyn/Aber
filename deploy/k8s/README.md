@@ -1355,6 +1355,11 @@ nothing has been archived for 10 minutes). While archiving fails, unarchived WAL
 data volume up to `archiveQueueMax`, after which pgBackRest drops it and a restore cannot cross the
 gap; that is what the second alert is there to prevent.
 
+**The Backups page shows it**, on a Historian line above the list: the last backup with its type
+and label, when the next is due, the repository's size, and the last failure with pgBackRest's
+reason. **Take a backup** there also asks the sidecar for a differential, which it takes within a
+minute without the platform backup waiting for it. From a shell:
+
 ```bash
 kubectl -n aber exec timescaledb-0 -c pgbackrest -- pgbackrest --stanza=historian info
 kubectl -n aber exec timescaledb-0 -c pgbackrest -- /bin/sh /opt/aber/historian-backup.sh full

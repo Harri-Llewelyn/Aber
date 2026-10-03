@@ -5007,6 +5007,32 @@ schedule that runs every day, as the stale alerts do; with any other `BACKUP_SCH
 says so at start and catches nothing up, since reading the previous slot from a cron string would
 need a cron evaluator. On a fresh stack this takes the first backup as the service starts.
 
+**The historian on the Backups page (0026).** While `timescaledb.physicalBackup` is on, the
+service's backups skip the historian (`DUMP_TIMESCALE=false`) and pgBackRest backs it up instead,
+so the page shows that backup on a line of its own. The chart tells the page whether to
+(`VITE_HISTORIAN_PHYSICAL_BACKUP`).
+
+- **The read.** `0026` maps three historian tables as foreign tables, as `timescale.telemetry_archive_manifest`
+  is: `physical_backup_runs`, the sidecar's one-row `physical_backup_schedule` (its `hourUtc` and
+  `fullOn`, recorded at start) and `physical_backup_requests`. `historian_backup_state()` reads them
+  as one row: the schedule, the last success with its type and label, the newest full, the
+  repository's size, the last failure when it is newer than the last success, and the latest
+  request with the run that answered it. It is plpgsql with `EXCEPTION WHEN OTHERS THEN RETURN`, as
+  `cold_archive_backlog_state()` is: postgres_fdw raises on connect, so an unreachable historian
+  yields no row rather than an error, and the page says the historian cannot be read. Administrator
+  only, checked in its body; it runs as `postgres`, so it reaches the historian through the
+  `postgres` user mapping. `fdw_reader` is granted `SELECT` on the three tables as well, in
+  `timescaledb/roles.sql` beside its other grants, for a read through the public mapping.
+- **The page's state line** uses the platform line's rule on Historian Backup Stale's clock: a
+  failure newer than the last success, or no success for 36 hours counted from the last success
+  (before the first, from the first recorded run).
+- **Take a backup asks the historian too.** On claiming a requested job, the service calls
+  `physical_backup_request()` in the historian as its superuser, and carries on with the platform
+  backup without waiting. The sidecar's minute loop claims the request
+  (`physical_backup_claim_request()`), takes a differential and records it; the first run recorded
+  after the claim is the request's answer, which the page shows. One request waits at a time, and a
+  failure to ask is logged and never fails the platform backup, which keeps the two backups apart.
+
 **Retention is decided once, here.** A scheduled backup is pruned by the service once it is older
 than `BACKUP_RETENTION_DAYS`; the files go first and `backup_forget()` removes the row and writes
 `BACKUP_PRUNED`. A requested backup is **pinned** at birth and the window does not apply until an

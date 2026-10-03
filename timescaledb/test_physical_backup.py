@@ -11,11 +11,13 @@ The sidecar takes a full backup as soon as the server is up on a repository hold
 freshly installed stack has one within minutes; the suite waits up to BACKUP_WAIT_SECONDS for it.
 What it asserts is the chain an operator relies on: the run was recorded (the Historian Backup
 Stale alert reads that table), the repository agrees, and a WAL segment switched now arrives in the
-archive, which is what makes a restore reach past the backup.
+archive, which is what makes a restore reach past the backup. A backup asked for from the Backups
+page is taken once, by the sidecar's minute loop, and recorded.
 
-ScheduleTestCase is the sidecar's minute loop: when a slot is due (a missed one is taken late,
-once) and which type it takes. It needs only physical_backup.sql, so it runs whether or not
-physical backup is on; it asks about days in 2100, so no real run counts, and rolls back every row.
+ScheduleTestCase is that loop's rules: when a slot is due (a missed one is taken late, once), which
+type it takes, one waiting request claimed once, and the schedule the page reads. It needs only
+physical_backup.sql, so it runs whether or not physical backup is on; it asks about days in 2100,
+so no real run counts, and rolls back every row.
 """
 import json
 import os
@@ -115,6 +117,36 @@ class PhysicalBackupTestCase(unittest.TestCase):
         self.assertGreaterEqual(last, segment)
         if failed_at is not None:
             self.assertGreater(archived_at, failed_at, "archiving failed after its last success")
+
+    def test_a_requested_backup_is_taken_once_and_recorded(self):
+        # Asked the way the backup service asks, through the superuser-only gate; the sidecar's
+        # minute loop claims it and takes a differential.
+        (request,) = self.query("SELECT public.physical_backup_request('test_physical_backup.py')")[0]
+        deadline = time.time() + WAIT
+        answer = []
+        while time.time() < deadline:
+            (claimed,) = self.query(
+                "SELECT claimed_at FROM public.physical_backup_requests WHERE id = %s", request)[0]
+            if claimed is not None:
+                answer = self.query(
+                    "SELECT id, kind, succeeded, detail FROM public.physical_backup_runs "
+                    "WHERE kind <> 'check' AND finished_at >= %s ORDER BY finished_at", claimed)
+                if answer:
+                    break
+            time.sleep(5)
+        self.assertTrue(answer, f"request {request} was not answered within {WAIT}s. "
+                                f"kubectl -n {NAMESPACE} logs timescaledb-0 -c pgbackrest")
+        _, kind, succeeded, detail = answer[0]
+        self.assertTrue(succeeded, detail)
+        self.assertIn(kind, ("diff", "full"))
+
+        # Once: a minute's step later nothing more was taken for it, and nothing waits.
+        time.sleep(70)
+        runs = self.query("SELECT count(*) FROM public.physical_backup_runs "
+                          "WHERE kind <> 'check' AND finished_at >= %s", claimed)[0][0]
+        self.assertEqual(runs, 1, "the request was taken more than once")
+        self.assertEqual(self.query(
+            "SELECT count(*) FROM public.physical_backup_requests WHERE claimed_at IS NULL")[0][0], 0)
 
     def test_the_exporter_role_can_read_the_record(self):
         rows = self.query(
@@ -220,9 +252,40 @@ class ScheduleTestCase(unittest.TestCase):
     def test_an_unreadable_repository_keeps_the_weekday_rule(self):
         self.assertEqual(self.type_for(TODAY + timedelta(hours=1), "[]"), "diff")
 
+    def test_one_request_waits_and_one_claim_takes_it(self):
+        self.cur.execute("DELETE FROM public.physical_backup_requests WHERE claimed_at IS NULL")
+        self.cur.execute("SELECT public.physical_backup_request('a'), public.physical_backup_request('b')")
+        first, second = self.cur.fetchone()
+        self.assertEqual(first, second, "asking again while one waits returns the waiting request")
+        self.cur.execute("SELECT public.physical_backup_claim_request()")
+        self.assertEqual(self.cur.fetchone()[0], first)
+        self.cur.execute("SELECT public.physical_backup_claim_request()")
+        self.assertIsNone(self.cur.fetchone()[0], "a request is claimed once")
+        self.cur.execute("SELECT public.physical_backup_request('c')")
+        self.assertGreater(self.cur.fetchone()[0], first)
+
+    def test_the_schedule_is_one_row_holding_the_latest(self):
+        self.cur.execute("SELECT public.physical_backup_record_schedule(1, 0)")
+        self.cur.execute("SELECT public.physical_backup_record_schedule(3, 6)")
+        self.cur.execute("SELECT hour_utc, full_on FROM public.physical_backup_schedule")
+        self.assertEqual(self.cur.fetchall(), [(3, 6)])
+
+    def test_the_platform_reads_what_the_page_needs_and_writes_none_of_it(self):
+        self.cur.execute("SELECT 1 FROM pg_roles WHERE rolname = 'fdw_reader'")
+        if self.cur.fetchone() is None:
+            self.skipTest("fdw_reader exists only where roles.sql has run")
+        for table in ("physical_backup_runs", "physical_backup_schedule", "physical_backup_requests"):
+            self.cur.execute("SELECT has_table_privilege('fdw_reader', %s, 'SELECT'), "
+                             "has_table_privilege('fdw_reader', %s, 'INSERT, UPDATE, DELETE')",
+                             (f"public.{table}", f"public.{table}"))
+            self.assertEqual(self.cur.fetchone(), (True, False), table)
+
     def test_nobody_but_the_superuser_runs_the_schedule(self):
         for signature in ("public.physical_backup_missed_slot(integer, timestamptz)",
-                          "public.physical_backup_type(integer, timestamptz, jsonb, timestamptz)"):
+                          "public.physical_backup_type(integer, timestamptz, jsonb, timestamptz)",
+                          "public.physical_backup_record_schedule(integer, integer)",
+                          "public.physical_backup_request(text)",
+                          "public.physical_backup_claim_request()"):
             self.cur.execute(
                 "SELECT count(*) FROM pg_proc p, "
                 "aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a "

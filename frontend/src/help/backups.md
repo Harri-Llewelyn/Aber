@@ -4,11 +4,11 @@ Take a backup of the whole platform without a shell, and see every backup run: w
 
 **The historian in a backup holds raw telemetry for the raw window (14 days unless the site changed it) and the 1-minute, 5-minute and 1-hour rollups.** Raw readings older than the window are only on cold storage, which no backup includes.
 
-**Where the historian has its own physical backup, it is not in these.** The components then list no historian, and the historian is backed up daily by the database itself, with every change archived in between, so it can be restored to any moment rather than to the last backup. A night it missed while the platform was off is taken when the historian is back. Restoring it is a runbook run from a shell.
+**Where the historian has its own physical backup, it is not in these.** The components then list no historian, and the historian is backed up daily by the database itself, with every change archived in between, so it can be restored to any moment rather than to the last backup. The **Historian** line above the list shows that backup; see **The historian's own backup** below.
 
 ## What the controls do
 
-- **Take a backup** queues one now. The note is kept with the backup and is the thing to read when choosing which one to restore from, so say why it was taken.
+- **Take a backup** queues one now. The note is kept with the backup and is the thing to read when choosing which one to restore from, so say why it was taken. Where the historian has its own backup, it also asks the historian for a differential of its own, so one press answers both stale alerts.
 - **Cancel** withdraws a request the service has not yet claimed. A running backup cannot be cancelled; it finishes or fails.
 - **Release** lets the retention window apply to a backup that was taken on request. Nothing is deleted at that moment: the service prunes it on its next pass, and only once it is older than the window and not one of the newest three.
 - **Set a destination** (**Complete the destination** while a field is missing, **Change destination** once one is set), beside **Take a backup**, opens the off-site destination: the S3 endpoint, region, bucket, key prefix, access key ID and secret key, and the age public key every file is encrypted to. **Address the bucket by path** is for MinIO and most self-hosted stores; leave it off for AWS, R2 and B2. **Remove the destination** stops the copies and deletes the secret key; copies already made stay in the bucket.
@@ -25,6 +25,25 @@ One line above the list answers this, and appears only when the answer is no:
 Either line clears itself on the next successful backup. On a stack where the backup service has never run, there is nothing to report, and the page says no backups exist yet. The Grafana alert **Backup Stale** fires on the same 36 hours, so the condition reaches the alert counter in the top bar without anyone opening this page.
 
 **A scheduled backup missed while the platform was off is taken late, once.** When no scheduled backup was queued in the last 25 hours, the service queues one as soon as it is running, so a stack switched off overnight takes its backup when it is next up. It is listed as **Scheduled**, at the time it was taken. A late backup that fails is not tried again before the next night; the line above reports it.
+
+## The historian's own backup
+
+Where the historian has its own physical backup, a **Historian** line sits above the list. It shows:
+
+- **the last backup**, as an age, with its type (full or differential) and the label the backup tool gave it;
+- **when the next one is due**: daily at the hour the site set, a full backup on its weekday or whenever the newest full is over a week old, a differential otherwise. **Due now** means a night was missed, for instance while the platform was off, and the historian is about to take it;
+- **how much the repository holds**, every backup it keeps without the archived changes;
+- **a backup asked for here**: **queued** until the historian picks it up, which it does within a minute, **being taken**, then **taken** or **failed**. **Not picked up** means the historian's backup container is not running.
+
+Select the line for its panel: the label, the schedule and, after a failure, the whole of the reason.
+
+A line above it appears only when the answer is no, on the same 36 hours as the platform's:
+
+- **The historian's last backup failed**, and none has succeeded since, with the start of the reason.
+- **No historian backup has succeeded in 36 hours**. Before the first success, the hours count from when its backup was switched on.
+- **The historian cannot be read**, when its database does not answer. The page then cannot say whether its backup works, and says so rather than showing nothing.
+
+**Take a backup** does not wait for the historian: the platform backup completes on its own, and the Historian line shows the request and then its result. The Grafana alert **Historian Backup Stale** fires on the same 36 hours. Restoring the historian is a runbook run from a shell.
 
 ## What the list shows
 

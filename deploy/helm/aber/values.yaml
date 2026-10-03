@@ -305,7 +305,8 @@ timescaledb:
   # historian holds now, rollups included. See deploy/k8s/README.md, "Backing up the historian".
   #
   # Turning it on restarts the historian (archive_mode is read at start) and takes a full backup
-  # as soon as the server is up. While it is on, the nightly logical dump skips the historian.
+  # as soon as the server is up. While it is on, the nightly logical dump skips the historian, and
+  # the Backups page shows this backup and asks for a differential with each Take a backup.
   physicalBackup:
     enabled: false
     # The hour (UTC, 0-23) the daily backup starts, and the day of the week (0 = Sunday) it is a

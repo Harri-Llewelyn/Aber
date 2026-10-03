@@ -1,7 +1,9 @@
 -- The historian's physical backup runs, one row per run of the pgbackrest sidecar, written only by
 -- physical_backup_record(), which only the superuser can execute. The exporter reads it for the
--- Historian Backup Stale alert. Empty while timescaledb.physicalBackup is off. Reconciled on every
--- boot, idempotent. Reasoning: timescaledb/README.md.
+-- Historian Backup Stale alert, and the Backups page through the platform's foreign tables, with
+-- the sidecar's schedule and the backups the page asked for. Empty while
+-- timescaledb.physicalBackup is off. Reconciled on every boot, idempotent. Reasoning:
+-- timescaledb/README.md.
 \set ON_ERROR_STOP on
 
 CREATE TABLE IF NOT EXISTS public.physical_backup_runs (
@@ -102,3 +104,66 @@ $$;
 REVOKE ALL ON FUNCTION public.physical_backup_missed_slot(integer, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.physical_backup_type(integer, timestamptz, jsonb, timestamptz)
   FROM PUBLIC;
+
+-- The schedule the sidecar last started with, so the Backups page can say when the next backup is
+-- due. One row, written at start through physical_backup_record_schedule().
+CREATE TABLE IF NOT EXISTS public.physical_backup_schedule (
+    singleton   boolean     PRIMARY KEY DEFAULT true CHECK (singleton),
+    hour_utc    integer     NOT NULL CHECK (hour_utc BETWEEN 0 AND 23),
+    full_on     integer     NOT NULL CHECK (full_on BETWEEN 0 AND 6),
+    recorded_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE OR REPLACE FUNCTION public.physical_backup_record_schedule(p_hour integer, p_full_on integer)
+RETURNS void
+LANGUAGE sql
+SET search_path = pg_catalog, public
+AS $$
+  INSERT INTO public.physical_backup_schedule (hour_utc, full_on) VALUES (p_hour, p_full_on)
+  ON CONFLICT (singleton) DO UPDATE
+    SET hour_utc = EXCLUDED.hour_utc, full_on = EXCLUDED.full_on, recorded_at = now();
+$$;
+
+-- A backup asked for on the Backups page. The backup service inserts one through
+-- physical_backup_request() when it claims a requested platform backup; the sidecar's minute loop
+-- claims it and takes a differential. job_id is the platform's backup_jobs row that asked.
+CREATE TABLE IF NOT EXISTS public.physical_backup_requests (
+    id           bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    requested_at timestamptz NOT NULL DEFAULT now(),
+    job_id       text,
+    claimed_at   timestamptz
+);
+
+-- One request waits at a time: asking again while one waits returns it.
+CREATE UNIQUE INDEX IF NOT EXISTS physical_backup_requests_one_waiting
+    ON public.physical_backup_requests ((true)) WHERE claimed_at IS NULL;
+
+CREATE OR REPLACE FUNCTION public.physical_backup_request(p_job_id text)
+RETURNS bigint
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  INSERT INTO public.physical_backup_requests (job_id) VALUES (p_job_id) ON CONFLICT DO NOTHING;
+  DELETE FROM public.physical_backup_requests WHERE requested_at < now() - interval '90 days';
+  RETURN (SELECT id FROM public.physical_backup_requests WHERE claimed_at IS NULL);
+END
+$$;
+
+-- The waiting request, marked claimed; its id, or NULL when none waits. The backup the sidecar
+-- takes next is its answer: the first run recorded after claimed_at.
+CREATE OR REPLACE FUNCTION public.physical_backup_claim_request()
+RETURNS bigint
+LANGUAGE sql
+SET search_path = pg_catalog, public
+AS $$
+  WITH claimed AS (
+    UPDATE public.physical_backup_requests SET claimed_at = now()
+     WHERE claimed_at IS NULL RETURNING id
+  )
+  SELECT max(id) FROM claimed;
+$$;
+
+REVOKE ALL ON FUNCTION public.physical_backup_record_schedule(integer, integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.physical_backup_request(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.physical_backup_claim_request() FROM PUBLIC;

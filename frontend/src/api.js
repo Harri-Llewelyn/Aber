@@ -1252,6 +1252,17 @@ const apiMethods = {
   },
 
   /**
+   * The historian's physical backup (0026), read over the FDW: its schedule, last success,
+   * repository size, a failure newer than the last success, and the latest request. Null when the
+   * historian cannot be read, which the page reports as unreachable rather than as nothing to say.
+   */
+  historianBackupState: async () => {
+    const { data, error } = await supabase.rpc('historian_backup_state');
+    if (error) throw new Error(error.message || 'Could not read the historian\'s backup');
+    return (Array.isArray(data) ? data[0] : data) || null;
+  },
+
+  /**
    * Every stored capture, with the subject it was recorded from.
    *
    * Read from the table, not from storage: the row carries the note, the message count and the

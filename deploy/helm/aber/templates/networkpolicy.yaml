@@ -101,7 +101,7 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "backup"             "to" "supabase-db"        "port" 5432 "why" "pg_dump")
   (dict "from" "backup"             "to" "timescaledb"        "port" 5432 "why" "pg_dump")
   (dict "from" "backup-service"     "to" "supabase-db"        "port" 5432 "why" "pg_dump, and the job queue it claims from")
-  (dict "from" "backup-service"     "to" "timescaledb"        "port" 5432 "why" "pg_dump")
+  (dict "from" "backup-service"     "to" "timescaledb"        "port" 5432 "why" "pg_dump, or asking the pgBackRest sidecar for a backup")
 
   (dict "from" "alloy"              "to" "prometheus"         "port" 9090 "why" "remote-write of every scraped series")
   (dict "from" "alloy"              "to" "loki"               "port" 3100 "why" "the log push")

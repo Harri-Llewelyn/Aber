@@ -56,6 +56,8 @@ window.__ABER_CONFIG__ = window.__ABER_CONFIG__ || {
   VITE_RELEASE_VERSION: %q,
   // The window the backup service prunes by, so the Backups page can say why an older one is kept.
   VITE_BACKUP_RETENTION_DAYS: %q,
+  // true while timescaledb.physicalBackup is on: the Backups page shows the historian's own backup.
+  VITE_HISTORIAN_PHYSICAL_BACKUP: %q,
 };
 `
   (include "aber.supabaseUrl" .)
@@ -68,7 +70,8 @@ window.__ABER_CONFIG__ = window.__ABER_CONFIG__ || {
   .Values.supabaseStorage.bucket
   .Values.supabaseStorage.captureBucket
   .Chart.AppVersion
-  (.Values.backup.retentionDays | toString) -}}
+  (.Values.backup.retentionDays | toString)
+  (include "aber.physicalBackupOn" .) -}}
 ---
 {{/*
 =================================================================================================

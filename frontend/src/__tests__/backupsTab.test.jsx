@@ -1,7 +1,7 @@
 import React from 'react'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { BackupsTab, BACKUP_STALE_HOURS, keptBecause } from '../components/tabs/BackupsTab'
+import { BackupsTab, BACKUP_STALE_HOURS, historianState, keptBecause, nextHistorianBackup } from '../components/tabs/BackupsTab'
 import { tabIsVisible, TABS, groupedNav } from '../navigation'
 
 /**
@@ -28,7 +28,8 @@ vi.mock('../api', async () => {
       clearBackupOffsiteDestination: vi.fn(),
       requestBackup: vi.fn(),
       cancelBackupJob: vi.fn(),
-      releaseBackup: vi.fn()
+      releaseBackup: vi.fn(),
+      historianBackupState: vi.fn()
     }
   }
 })
@@ -109,6 +110,7 @@ beforeEach(() => {
   api.backupOffsiteDestination.mockResolvedValue({
     endpoint: '', region: '', bucket: '', prefix: '', access_key_id: '', recipient: '', path_style: false, credentialSet: false
   })
+  api.historianBackupState.mockResolvedValue(null)
   delete globalThis.__ABER_CONFIG__
 })
 
@@ -673,6 +675,173 @@ describe('asking', () => {
     api.activeBackupJob.mockResolvedValue({ id: 'j-4', status: 'PENDING', origin: 'requested', created_at: new Date(Date.now() - 10 * 60 * 1000).toISOString() })
     renderTab()
     expect(await screen.findByText(/No backup service has claimed this/)).toBeInTheDocument()
+  })
+})
+
+describe('the historian row', () => {
+  const physical = () => { globalThis.__ABER_CONFIG__ = { VITE_HISTORIAN_PHYSICAL_BACKUP: 'true' } }
+  const row = () => screen.queryByTestId('historian-row')
+  const line = () => screen.queryByTestId('historian-state')
+  /** A historian backing itself up daily at 01:00 UTC, full on Sundays, last good two hours ago. */
+  const CURRENT = {
+    hour_utc: 1, full_on: 0, first_recorded_at: hoursAgo(24 * 20),
+    last_attempt_at: hoursAgo(2), last_success_at: hoursAgo(2), last_success_kind: 'diff',
+    last_success_label: '20261003-010002F_20261003-010004D', last_full_at: hoursAgo(24 * 3),
+    repo_bytes: 3 * 1024 * 1024 * 1024, last_failure_at: null, last_failure_kind: null, last_failure_detail: null,
+    request_at: null, request_claimed_at: null, request_finished_at: null, request_succeeded: null
+  }
+  const serveHistorian = (h) => api.historianBackupState.mockResolvedValue(h)
+
+  it('is absent, and never read, while the historian has no physical backup', async () => {
+    renderTab()
+    await screen.findByTestId('run-j-1')
+    expect(row()).toBeNull()
+    expect(line()).toBeNull()
+    expect(api.historianBackupState).not.toHaveBeenCalled()
+  })
+
+  it('shows a current backup with its age, type, label, the next one and the repository, and no line', async () => {
+    physical()
+    serveHistorian(CURRENT)
+    renderTab()
+    const strip = await screen.findByTestId('historian-row')
+    expect(strip).toHaveTextContent('Last backup 2h ago, differential')
+    expect(strip).toHaveTextContent('20261003-010002F_20261003-010004D')
+    expect(strip).toHaveTextContent(/Next .*(differential|full)/)
+    expect(strip).toHaveTextContent('3.0 GiB in the repository')
+    expect(line()).toBeNull()
+  })
+
+  it('says a historian never backed up has no backup yet, and stays quiet while that is recent', async () => {
+    physical()
+    serveHistorian({ ...CURRENT, first_recorded_at: hoursAgo(1), last_attempt_at: null, last_success_at: null,
+      last_success_kind: null, last_success_label: null, last_full_at: null, repo_bytes: 0 })
+    renderTab()
+    expect(await screen.findByTestId('historian-row')).toHaveTextContent('No backup yet')
+    expect(row()).toHaveTextContent('Next: due now')
+    expect(line()).toBeNull()
+  })
+
+  it(`reports a last success older than ${BACKUP_STALE_HOURS} hours`, async () => {
+    physical()
+    serveHistorian({ ...CURRENT, last_success_at: hoursAgo(BACKUP_STALE_HOURS + 6), last_attempt_at: hoursAgo(BACKUP_STALE_HOURS + 6) })
+    renderTab()
+    expect(await screen.findByTestId('historian-state')).toHaveTextContent(`No historian backup has succeeded in ${BACKUP_STALE_HOURS} hours`)
+    expect(line()).toHaveClass('callout-warning')
+    expect(line()).toHaveTextContent('The last good one finished')
+    expect(row()).not.toBeNull()
+  })
+
+  it('reports a failure newer than the last success with pgBackRest\'s reason, whole in the panel', async () => {
+    physical()
+    const reason = `ERROR: [082]: WAL segment 000000010000000000000042 was not archived before the 60000ms timeout ${'x'.repeat(200)}`
+    serveHistorian({ ...CURRENT, last_failure_at: hoursAgo(1), last_failure_kind: 'diff', last_failure_detail: reason })
+    renderTab()
+    const state = await screen.findByTestId('historian-state')
+    expect(state).toHaveClass('callout-danger')
+    expect(state).toHaveTextContent("The historian's last backup failed")
+    expect(within(state).getByTitle(reason)).toHaveClass('truncate')
+
+    fireEvent.click(screen.getByTestId('historian-row'))
+    const open = panel()
+    expect(open).toHaveAttribute('aria-label', expect.stringMatching(/historian backup/))
+    expect(within(open).getByText(reason)).toBeInTheDocument()
+    expect(open).toHaveTextContent('Failed')
+  })
+
+  it('says the historian is unreachable, never a blank, when the read returns no row or fails', async () => {
+    physical()
+    serveHistorian(null)
+    renderTab()
+    expect(await screen.findByTestId('historian-state')).toHaveTextContent('The historian cannot be read')
+    expect(row()).toBeNull()
+
+    api.historianBackupState.mockRejectedValue(new Error('boom'))
+    const { unmount } = renderTab()
+    await waitFor(() => expect(screen.getAllByTestId('historian-state')).toHaveLength(2))
+    expect(screen.queryByText('boom')).toBeNull()
+    unmount()
+  })
+
+  it('shows a request as queued, then being taken, then its result', async () => {
+    physical()
+    serveHistorian({ ...CURRENT, request_at: new Date().toISOString() })
+    const first = renderTab()
+    expect(await screen.findByTestId('historian-row')).toHaveTextContent('Requested: queued')
+    first.unmount()
+
+    serveHistorian({ ...CURRENT, request_at: hoursAgo(0.1), request_claimed_at: hoursAgo(0.05) })
+    const second = renderTab()
+    expect(await screen.findByTestId('historian-row')).toHaveTextContent('Requested: being taken')
+    second.unmount()
+
+    serveHistorian({ ...CURRENT, request_at: hoursAgo(1), request_claimed_at: hoursAgo(1), request_finished_at: hoursAgo(0.9), request_succeeded: true })
+    renderTab()
+    expect(await screen.findByTestId('historian-row')).toHaveTextContent('Requested: taken')
+  })
+
+  it('says a request waiting past a few minutes was not picked up', async () => {
+    physical()
+    serveHistorian({ ...CURRENT, request_at: hoursAgo(0.5) })
+    renderTab()
+    expect(await screen.findByTestId('historian-row')).toHaveTextContent('Requested: not picked up')
+  })
+
+  it('opens its panel with the schedule and the repository, and closes it on a second click', async () => {
+    physical()
+    serveHistorian(CURRENT)
+    renderTab()
+    const strip = await screen.findByTestId('historian-row')
+    fireEvent.click(strip)
+    expect(strip).toHaveAttribute('aria-pressed', 'true')
+    const open = panel()
+    expect(open).toHaveTextContent('Daily at 01:00 UTC: a full backup on Sundays')
+    expect(open).toHaveTextContent('3.0 GiB, every backup it holds, WAL excluded')
+    expect(within(open).getByText('20261003-010002F_20261003-010004D')).toBeInTheDocument()
+    fireEvent.click(strip)
+    expect(panel()).toBeNull()
+  })
+
+  it('says Take a backup asks the historian for a differential, and lists no historian in the platform backup', async () => {
+    physical()
+    serveHistorian(CURRENT)
+    renderTab()
+    await screen.findByTestId('historian-row')
+    const modal = openDialog()
+    expect(modal).toHaveTextContent("The historian's own backup takes a differential at the same time")
+    expect(modal).not.toHaveTextContent('the historian,')
+  })
+})
+
+describe('when the historian is next backed up', () => {
+  const at = (iso) => new Date(iso).getTime()
+  // Saturday 3 October 2026, 09:00 UTC.
+  const NOW = at('2026-10-03T09:00:00Z')
+  const base = { hour_utc: 1, full_on: 0, last_full_at: '2026-09-27T01:05:00Z' }
+
+  it('is tomorrow at the hour once today\'s slot was attempted', () => {
+    expect(nextHistorianBackup({ ...base, last_attempt_at: '2026-10-03T01:00:10Z' }, NOW))
+      .toEqual({ at: at('2026-10-04T01:00:00Z'), due: false, kind: 'full' })
+  })
+
+  it('is due now while the latest slot has not been attempted', () => {
+    expect(nextHistorianBackup({ ...base, last_attempt_at: '2026-10-02T01:00:10Z' }, NOW))
+      .toMatchObject({ at: at('2026-10-03T01:00:00Z'), due: true })
+  })
+
+  it('is a differential between fulls, and a full once the newest is over a week old', () => {
+    const recent = { ...base, last_full_at: '2026-10-01T01:05:00Z', last_attempt_at: '2026-10-03T01:00:10Z', full_on: 3 }
+    expect(nextHistorianBackup(recent, NOW).kind).toBe('diff')
+    expect(nextHistorianBackup({ ...recent, last_full_at: '2026-09-24T01:05:00Z' }, NOW).kind).toBe('full')
+  })
+
+  it('is not known without a schedule', () => {
+    expect(nextHistorianBackup({ hour_utc: null }, NOW)).toBeNull()
+  })
+
+  it('reads unreachable from no row, and nothing from a historian that is off', () => {
+    expect(historianState(null)).toEqual({ kind: 'unreachable' })
+    expect(historianState(undefined)).toBeNull()
   })
 })
 
