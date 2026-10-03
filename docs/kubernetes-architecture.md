@@ -1151,9 +1151,9 @@ whole design, and it is not stylistic: a hand-written pair of policies lets you 
 and forget ingress on B. The packet is then dropped at the destination, the source sees a timeout,
 and *nothing logs a policy decision* — so it reads as the destination being slow or down. Deriving
 both from one edge makes that class of mistake unrepresentable, and **CI asserts the symmetry holds**
-in the rendered output: 40 pod-to-pod flows, 35 policies, symmetric.
+in the rendered output, with every flow below present.
 
-Two rules matter more than the rest:
+Three rules matter more than the rest:
 
 - **DNS egress for every pod, on UDP *and* TCP 53.** The one most often forgotten, and without it
   nothing resolves — the symptom is "could not translate host name", which reads as a wrong hostname
@@ -1163,9 +1163,13 @@ Two rules matter more than the rest:
 - **`supabase-db → node-red:1880`.** The obvious `pg_net` allow-list is the gateway and the edge runtime,
   and **a webhook to Node-RED goes through neither**: pg_net posts a `webhook_endpoints` row's URL
   directly, and Node-RED is where a site serves one with a flow of its own. None is seeded since
-  `0031` removed the quarantine hook nothing served. pg_net has no retries, no ordering and no DLQ, so
+  `0161` removed the quarantine hook nothing served. pg_net has no retries, no ordering and no DLQ, so
   blocking it drops every notification with no error, no queue and no log — the first sign is an
   operator noticing alerts stopped weeks earlier. CI asserts this flow specifically.
+- **`supabase-db → prometheus:9090`.** `refresh_directory_liveness()` asks Prometheus which targets
+  are up, through `pg_net` from the database. Blocked, the reply never arrives and the probe sets
+  every Directory row to `UNKNOWN` on each run, which reads as nothing being scraped. CI asserts this
+  flow too.
 
 **Two knobs cannot be inferred and are the reason this is opt-in:** which namespace CoreDNS is in,
 and which namespace the ingress controller is in. A wrong value on the second means every route 502s
@@ -1328,16 +1332,14 @@ onto `appVersion`, because they carry couplings: realtime and storage-api migrat
 boot, Studio is Zod-coupled to a postgres-meta version, and Node-RED is what the generated
 `settings.js` depends on. A chart bump must not silently change which Postgres the databases run.
 
-**`aber.primaryHostId` is required with no default; `aber.sparkplugGroup` has one.** Every gateway
+**`aber.primaryHostId` and `aber.sparkplugGroup` are required, with no default.** Every gateway
 on site is configured to watch `spBv1.0/STATE/<id>`, which makes the host id part of the contract
 with equipment this chart has never seen, so it is named once by the deployment and the render
 fails without it rather than the daemon refusing to start naming only an env var. The group id is
 the second segment of every topic and the enterprise segment of the Unified Namespace; it is fixed
 at install, seeded into the `sparkplug.group_id` setting on the first boot, and a later value that
 differs is refused because changing it re-addresses every gateway rather than changing a
-preference. Its default is `Aber`: a stack installed before 1.0 holds the platform's former name,
-and migration `0003` moves it on the first boot under this chart, so rendering the default for it
-is the rename, not a disagreement. Both are validated to one topic level, since a `/`, `+`, `#` or
+preference. Both are validated to one topic level, since a `/`, `+`, `#` or
 whitespace in either addresses a subtree nothing grants, and the broker drops the publish silently
 at QoS 0. The Directory prefix is derived from the group unless named, and the broker's ingestion
 role is granted `<prefix>/#` at reconcile time from the same value; the two could disagree when
