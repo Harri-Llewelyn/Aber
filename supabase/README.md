@@ -4476,7 +4476,10 @@ the installer, and not the broker's, which is allowed to differ. The same key is
 HTTP by the frontend at `/.well-known/aber/ca.pem` (`nginx.conf`, `frontend.yaml`), which is
 where stage 0 fetches it; the chart hands the functions that address as `ABER_CA_URL`. The mount is
 optional so the pods start before cert-manager has issued; a functions pod that started before
-the issue offers no command until it is restarted, and the readiness answer says so.
+the issue offers no command until it is restarted, and the readiness answer says so. The same
+root reaches the appliance's `bootstrap` container as `platform-root.pem` beside the compose
+project, which its `NODE_EXTRA_CA_CERTS` names: the installer copies the root stage 0 verified,
+and the ZIP bundle carries `ABER_CA_PEM`, or an empty file when there is none.
 
 **HTTPS or nothing.** [`_shared/installer.ts`](functions/_shared/installer.ts) refuses a
 plain-HTTP public URL for the whole route, in both functions, so a command is never minted for a

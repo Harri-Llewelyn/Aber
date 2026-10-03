@@ -51,7 +51,8 @@ over plain HTTP, checks its public key against the pin minted beside the token, 
 then fetches `install.sh` from the platform over TLS with the token in a header. The installer
 puts the packages the playbook needs in place, fetches this playbook (as a zip, from the platform:
 the forge refuses anonymous reads and the appliance has no key yet), runs it, writes the
-appliance's `.env`, and enrols by starting the compose project. Install first, enrol last: every
+appliance's `.env` and, beside it, the pinned root as `platform-root.pem` (the enrolment container
+trusts that file, not the host's store), and enrols by starting the compose project. Install first, enrol last: every
 step before enrolment can be re-run with the same command, and the token is spent only by the
 enrolment. The runbook is in `docs/remote-gateways.md`.
 

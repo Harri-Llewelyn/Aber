@@ -82,7 +82,9 @@ route to the platform. Paste the command. It is two stages in one line:
   header and runs it as root with the token and the pin in its environment. The installer puts
   the packages the playbook needs in place, fetches the platform playbook and runs it (packages,
   upgrades, chrony, Docker, the compose project; §12), writes the appliance's `.env` from a
-  token-gated fetch, and **enrols last** by starting the compose project. Every step before
+  token-gated fetch, copies the pinned root beside it as `platform-root.pem` (the enrolment
+  container trusts that file, not the host's store), and **enrols last** by starting the compose
+  project. Every step before
   enrolment is idempotent and the same command can be pasted again; only enrolment spends the
   token, and the installer refuses to run on an appliance that has enrolled.
 
@@ -153,15 +155,23 @@ bundle-installed appliance until somebody runs the platform playbook on it once 
 aber-gateway-<name>-<sparkplug_id>/
 ├── .env                  generated per gateway — the only file that differs between bundles
 ├── GATEWAY.txt           which gateway this is, and the two commands. Self-identifying on a USB stick
-├── docker-compose.yml     bootstrap (one-shot) + node-red
+├── platform-root.pem     the root that issued the platform's certificate; empty when it is publicly trusted
+├── docker-compose.yml     bootstrap (one-shot) + node-red + flow-sync + node-exporter
 ├── Dockerfile             thin layer on a pinned nodered/node-red
 ├── bootstrap.mjs          first-boot provisioning
+├── flow-sync.mjs          converges the flow to what was approved in the forge
 ├── flows.template.json    the sample flow, with placeholders
 └── README.md              the appliance-side copy of this procedure
 ```
 
-Everything except `.env` and `GATEWAY.txt` is mirrored verbatim from
+Everything except `.env`, `GATEWAY.txt` and `platform-root.pem` is mirrored verbatim from
 [`forge/gateway-platform/appliance/`](../forge/gateway-platform/appliance/).
+
+**`platform-root.pem` is what `bootstrap` trusts for its first call.** That call is HTTPS to the
+platform's public URL from inside the container, which trusts the roots bundled with Node and not
+the host's store, so a certificate from an internal CA fails there even on a host that trusts it.
+The compose file points `NODE_EXTRA_CA_CERTS` at this file, which the function fills from the same
+root the install command pins (`ABER_CA_PEM`). An empty file adds nothing and logs nothing.
 
 `.env` carries exactly six values, all read by `bootstrap.mjs`:
 

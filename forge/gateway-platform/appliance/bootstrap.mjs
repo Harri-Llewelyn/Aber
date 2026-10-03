@@ -214,18 +214,22 @@ async function enrol() {
       payload = await response.json().catch(() => ({}));
     } catch (err) {
       // The platform is unreachable. NOT a spent token, so retrying is correct -- an appliance is
-      // routinely powered on before the network it is meant to reach.
+      // routinely powered on before the network it is meant to reach. fetch() says only "fetch
+      // failed"; the cause's code is what tells an untrusted certificate from a dead route.
+      const why = err.cause?.code ? `${err.message}: ${err.cause.code}` : err.message;
       if (attempt < MAX_ATTEMPTS) {
         const wait = BACKOFF_MS[attempt - 1] ?? 30000;
-        log(`cannot reach ${SUPABASE_URL} (${err.message}); retrying in ${wait / 1000}s ` +
+        log(`cannot reach ${SUPABASE_URL} (${why}); retrying in ${wait / 1000}s ` +
             `(attempt ${attempt}/${MAX_ATTEMPTS})`);
         await sleep(wait);
         continue;
       }
       die(
-        `the platform at ${SUPABASE_URL} is unreachable after ${MAX_ATTEMPTS} attempts.`,
-        'Check this appliance\'s network route to the platform. The enrolment token has NOT been\n'
-        + 'consumed -- once connectivity is restored, `docker compose up` again with this bundle.'
+        `the platform at ${SUPABASE_URL} is unreachable after ${MAX_ATTEMPTS} attempts (${why}).`,
+        'Check this appliance\'s network route to the platform. A certificate code above (such as\n'
+        + 'UNABLE_TO_VERIFY_LEAF_SIGNATURE) means platform-root.pem beside docker-compose.yml does not\n'
+        + 'hold the root that issued the platform\'s certificate. The enrolment token has NOT been\n'
+        + 'consumed -- once that is fixed, `docker compose up` again with this bundle.'
       );
     }
 

@@ -52,6 +52,9 @@ const APPLIANCE_FILES = [
   "README.md",
 ];
 
+/** Beside the compose project, where the bootstrap service's NODE_EXTRA_CA_CERTS names it. */
+const PLATFORM_ROOT_FILE = "platform-root.pem";
+
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
     status,
@@ -203,7 +206,8 @@ async function readiness(authHeader: string): Promise<Response> {
  * The pasted command. Stage 0 only when there is a root to pin, which is every deployment the
  * installer is served over TLS on. The token appears twice, in the header that authorises the
  * fetch and in the environment the script reads it from; the command travelled over the
- * authenticated browser session and is pasted, never stored.
+ * authenticated browser session and is pasted, never stored. The installer reads the root back from
+ * the path stage 0 installs it at (HOST_ROOT in install.sh), so the two must agree.
  */
 export function installCommand(input: {
   publicUrl: string;
@@ -424,6 +428,12 @@ export default async function handler(req: Request): Promise<Response> {
       credentialSecret: newCredentialSecret(),
       via: "bundle",
     }));
+
+    // The root that signs this platform's API certificate, which bootstrap's first call trusts
+    // through NODE_EXTRA_CA_CERTS. Empty where none is mounted (a publicly trusted certificate):
+    // Node reads an empty file as no extra roots, where a missing one logs a warning.
+    const root = platformRootPem();
+    files[`${folder}/${PLATFORM_ROOT_FILE}`] = strToU8(root ? `${root}\n` : "");
 
     // A per-gateway note at the top of the folder, so an unpacked bundle is self-identifying. The
     // bundle for the wrong gateway is otherwise indistinguishable from the right one until booted.

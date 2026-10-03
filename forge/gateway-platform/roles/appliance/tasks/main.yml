@@ -28,6 +28,16 @@
     - README.md
   register: appliance_files
 
+# What bootstrap's NODE_EXTRA_CA_CERTS names. The installer, or a person copying a bundle, writes
+# the platform's root there; this only creates it empty when absent, so a converge never replaces it
+# and Node finds a file rather than logging a warning about a missing one.
+- name: The platform's root for enrolment, empty unless the installer wrote it
+  ansible.builtin.copy:
+    dest: "{{ aber_compose_dir }}/platform-root.pem"
+    content: ""
+    mode: "0644"
+    force: false
+
 # The bind mount. Compose merges top-level `volumes` from an override file, so the template's
 # named volume stays as it is and the data lands where the host's converge script can read the
 # deploy key, the host key and the repository checkout bootstrap.mjs writes under /data/gitops.
@@ -55,7 +65,7 @@
   ansible.builtin.debug:
     msg: >-
       {{ aber_compose_dir }}/.env is absent, so the compose project is not started. The installer
-      writes it; by hand, copy the bundle's .env there and run this again.
+      writes it; by hand, copy the bundle's .env and platform-root.pem there and run this again.
   when: not appliance_env.stat.exists
 
 # Built and started only when something changed or nothing is running: `up -d --build` on an
