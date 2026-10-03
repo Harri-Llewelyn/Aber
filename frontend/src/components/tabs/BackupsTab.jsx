@@ -13,7 +13,7 @@ import { TakeBackupModal } from '../modals/TakeBackupModal'
 import { BackupDestinationModal } from '../modals/BackupDestinationModal'
 import { CardHeading } from '../common/CardHeading'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
-import { IconAlertTriangle, IconDatabase, IconHardDrive, IconShieldAlert, IconX } from '../common/Icons'
+import { IconAlertTriangle, IconChevronRight, IconDatabase, IconHardDrive, IconShieldAlert, IconX } from '../common/Icons'
 import { formatBytes, formatDateTime, formatRelative, NO_VALUE } from '../../utils/format'
 import { readFlag, readSetting } from '../../config'
 
@@ -524,6 +524,7 @@ function HistorianRow({ historian: h, selected, onSelect }) {
       </span>
       {h.repo_bytes != null && <span className="cell-meta">{formatBytes(h.repo_bytes)} in the repository</span>}
       {request && <Badge tone={request.tone} size="sm" title={request.title}>{request.label}</Badge>}
+      <span className="backup-historian-chevron" aria-hidden="true"><IconChevronRight size={14} /></span>
     </button>
   )
 }

@@ -1463,6 +1463,8 @@ tbody tr:hover { background: var(--bg-glass); }
   font-weight: 600;
 }
 .backup-historian-state { min-width: 0; }
+/* The chevron sits at the line's right end, where a table row's does. */
+.backup-historian-chevron { margin-left: auto; }
 
 /* The note under a form field: muted, small, and a fixed 4px below the control. */
 .form-hint {
@@ -2416,15 +2418,22 @@ td.row-actions, th.row-actions {
 
 .site-lane-counts { flex-shrink: 0; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: -0.2px; }
 
-/* A lane and an area card open the panel, so each ends in the row chevron's glyph and colours. */
+/* Everything that opens the panel and is not a table row ends in the row chevron's glyph and
+   colours: a lane, an area card, the Backups page's Historian line and an Audit Trail change
+   listed in the drawer. */
 .site-lane-chevron,
-.area-card-chevron { display: inline-flex; flex-shrink: 0; color: var(--text-dim); }
+.area-card-chevron,
+.backup-historian-chevron,
+.trail-causation-chevron { display: inline-flex; flex-shrink: 0; color: var(--text-dim); }
 
 .site-lane:hover .site-lane-chevron,
-.area-card:hover .area-card-chevron { color: var(--text-primary); }
+.area-card:hover .area-card-chevron,
+.backup-historian:hover .backup-historian-chevron,
+.trail-causation-item:hover .trail-causation-chevron { color: var(--text-primary); }
 
 .site-lane.is-open .site-lane-chevron,
-.area-card.is-selected .area-card-chevron { color: var(--accent); }
+.area-card.is-selected .area-card-chevron,
+.backup-historian-selected .backup-historian-chevron { color: var(--accent); }
 
 .site-lane-site {
   border-color: var(--accent);
@@ -4506,6 +4515,9 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   letter-spacing: 0.6px;
   color: var(--text-muted);
 }
+
+/* The item aligns its text on the baseline; the chevron is a glyph, so it centres instead. */
+.trail-causation-chevron { align-self: center; }
 
 /* ===== Audit Trail: the diff inspector inside the drawer ===== */
 .trail-diff { margin-top: 14px; }

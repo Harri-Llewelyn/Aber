@@ -403,7 +403,10 @@ in "building management system".
 - **Empty states** tell "none yet" from "none match".
 - **Permission hints** name the roles that hold the permission ("Requires Administrator or Shopfloor
   Manager"), from one helper, never "Admin".
-- **Clickable cues.** A chevron at a row's right means it opens a side panel. The copy chip copies.
+- **Clickable cues.** A chevron at the right end means it opens a side panel, and anything that
+  opens one shows it: a table row through `row-selectable`, and a lane, card or line that is not a
+  row through a trailing `IconChevronRight` in the shared chevron colours (`.area-card-chevron` and
+  its siblings in `App.css`). The copy chip copies.
   Accent colour is a real link. A button acts. Monospace text takes the text colour. Nothing else
   looks clickable ([What looks clickable](#what-looks-clickable)).
 - **Side panels.** The title carries the entity's icon, and there is exactly one primary action,
@@ -629,7 +632,7 @@ has already been told.
 
 ## Testing
 
-Vitest with globals enabled and a jsdom environment. **3,674 tests across 152 files** at the last count (2026-10-03).
+Vitest with globals enabled and a jsdom environment. **3,676 tests across 152 files** at the last count (2026-10-03).
 
 The suite treats an unhandled promise rejection as a defect, not noise — Vitest reports them
 separately and they can mask real failures.

@@ -268,6 +268,9 @@ describe('the Same transaction control', () => {
     expect(control()).toBeNull()
     expect(within(group()).getByText('Robot_03')).toBeInTheDocument()
     expect(group().querySelectorAll('.trail-causation-item')).toHaveLength(2)
+    // Each item opens its change in the drawer, so each ends in a chevron, hidden from readers.
+    expect([...group().querySelectorAll('.trail-causation-item')]
+      .every(i => i.lastElementChild.matches('.trail-causation-chevron[aria-hidden="true"]'))).toBe(true)
     expect(chip()).toHaveTextContent('2')
   })
 

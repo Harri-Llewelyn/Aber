@@ -710,6 +710,9 @@ describe('the historian row', () => {
     expect(strip).toHaveTextContent(/Next .*(differential|full)/)
     expect(strip).toHaveTextContent('3.0 GiB in the repository')
     expect(line()).toBeNull()
+    // The line opens the panel, so it ends in a chevron, hidden from readers.
+    expect(strip.lastElementChild).toHaveClass('backup-historian-chevron')
+    expect(strip.querySelector('.backup-historian-chevron[aria-hidden="true"] svg')).not.toBeNull()
   })
 
   it('says a historian never backed up has no backup yet, and stays quiet while that is recent', async () => {
