@@ -2111,9 +2111,9 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
     On Sparkplug B node-level messages (NBIRTH / NDATA / NDEATH): update the matching `gateways`
     row's status and last_heartbeat.
 
-    NBIRTH/NDATA mark the edge node ONLINE; NDEATH marks it OFFLINE. A `Gateway_Status` metric
-    overrides the derived status, subject to accept_reported_status(). Gateways are never
-    auto-created.
+    NBIRTH/NDATA mark the edge node ONLINE; NDEATH marks it and every device behind it OFFLINE. A
+    `Gateway_Status` metric overrides the gateway's derived status, subject to
+    accept_reported_status(). Gateways are never auto-created.
     """
     # An NBIRTH resets the edge node's whole alias table -- including its devices' -- because it
     # invalidates every binding the node previously declared. Registered before the client check
@@ -2225,6 +2225,41 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
             )
     except Exception as e:
         logger.error("Error updating gateway heartbeat for '%s': %s", edge_node_id, e, exc_info=True)
+
+    # Whatever status the payload reported: a node's death is its devices' death.
+    if msg_type == "NDEATH":
+        mark_node_devices_offline(gateway, group_id, edge_node_id)
+
+def mark_node_devices_offline(gateway, group_id, edge_node_id):
+    """
+    NDEATH: set every device of the node's gateway OFFLINE, as a DDEATH would, in one write with one
+    audit row per device it moves. Returns the ids it moved.
+
+    Those devices, and any this process heard through the node, then wait for a birth: the DBIRTHs
+    that follow the node's next NBIRTH set them ONLINE. After a failed write they stay tracked, so
+    the watchdog marks them OFFLINE once they are quiet.
+    """
+    try:
+        res = supabase_client.rpc("ingest_mark_gateway_devices_offline", {
+            "p_gateway_id": gateway["id"],
+        }).execute()
+    except Exception as e:
+        logger.error("Could not mark the devices of edge node '%s' OFFLINE after its NDEATH: %s",
+                     edge_node_id, e, exc_info=True)
+        return []
+
+    moved = list(getattr(res, "data", None) or [])
+    node = alias_key(group_id, edge_node_id)
+    with _device_seen_lock:
+        heard = [device_id for device_id, entry in _device_seen.items() if entry.get("node") == node]
+    for device_id in set(moved) | set(heard):
+        forget_device_seen(device_id)
+
+    if moved:
+        count("device_state_writes", len(moved))
+    logger.info("NDEATH: edge node '%s' (%s) -> %d device(s) marked OFFLINE",
+                gateway.get("name"), edge_node_id, len(moved))
+    return moved
 
 # -----------------------------------------------------------------------------
 # Payload conformance -- what the device sent against what its schema allows
