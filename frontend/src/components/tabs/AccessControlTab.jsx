@@ -379,7 +379,7 @@ export function AccessControlTab({ showToast, initialSection = '', onClearSectio
                 <thead>
                   <tr>
                     <th>Gateway</th>
-                    <th title="The kind of gateway: Remote (an appliance on the plant network), Host (inside this stack), Simulated (readings generated), Shadow (republishes recorded captures)">Type</th>
+                    <th title="The kind of gateway: Remote (an appliance on the plant network), Host (inside this stack), Simulated (readings generated), Playback (republishes recorded captures)">Type</th>
                     <th>MQTT username</th>
                     <th title="What the platform issued and recorded, from the database">Credential</th>
                     <th title="What the broker holds right now, read live from its Dynamic Security plugin">Broker</th>
@@ -398,7 +398,7 @@ export function AccessControlTab({ showToast, initialSection = '', onClearSectio
                         </td>
                         <td>
                           {/* The same four words as the Gateways and Capture pages, from the same
-                              helper: a simulator and a shadow gateway hold a credential for
+                              helper: a simulator and a playback gateway hold a credential for
                               different reasons. */}
                           <Badge
                             size="sm"
@@ -800,12 +800,17 @@ export function AccessControlTab({ showToast, initialSection = '', onClearSectio
                   const writes = live ? allowed.some(a => a.acltype === 'publishClientSend') : entry.writes
                   // A count in the table and the rules in the drawer: the ingestion role alone is
                   // nine lines, and the table is for comparing roles. Only a role the broker
-                  // reported opens, since there is nothing else to show.
+                  // reported opens, since there is nothing else to show. Enter or Space on the row
+                  // itself toggles it as a click does; keys on a control inside are ignored.
                   const toggle = () => setOpenRole(r => (r === entry.rolename ? null : entry.rolename))
                   const opens = live ? {
                     className: `row-selectable${openRole === entry.rolename ? ' row-selected' : ''}`,
                     onClick: rowSelectHandler(toggle),
-                    onKeyDown: e => { if (e.key === 'Enter' && e.target === e.currentTarget) toggle() },
+                    onKeyDown: e => {
+                      if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+                      e.preventDefault()
+                      toggle()
+                    },
                     tabIndex: 0,
                     title: `Open the rules the broker holds for ${entry.rolename}`,
                   } : {}

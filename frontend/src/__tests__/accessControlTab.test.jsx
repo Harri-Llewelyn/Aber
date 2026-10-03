@@ -732,7 +732,7 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(rolePanel().getAttribute('aria-hidden')).toBe('true'))
   })
 
-  it('opens a role from the keyboard: the row is in the Tab order and Enter opens it', async () => {
+  it('opens a role from the keyboard: the row is in the Tab order and Enter or Space toggles it', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listBrokerInventory.mockResolvedValue(LIVE_ROLES)
     await renderTab('Broker roles')
@@ -742,9 +742,16 @@ describe('AccessControlTab', () => {
     expect(document.activeElement).toBe(roleRow('ingestion'))
     fireEvent.keyDown(roleRow('ingestion'), { key: 'Enter' })
     expect(await screen.findByRole('complementary', { name: 'ingestion role' })).toBeTruthy()
+    // Enter again closes it, as a second click does.
+    fireEvent.keyDown(roleRow('ingestion'), { key: 'Enter' })
+    await waitFor(() => expect(rolePanel().getAttribute('aria-hidden')).toBe('true'))
+    // Space opens too, without scrolling the page: fireEvent returns false when the default is
+    // prevented.
+    expect(fireEvent.keyDown(roleRow('monitor'), { key: ' ' })).toBe(false)
+    expect(await screen.findByRole('complementary', { name: 'monitor role' })).toBeTruthy()
     // Another key does nothing.
-    fireEvent.keyDown(roleRow('monitor'), { key: 'a' })
-    expect(screen.queryByRole('complementary', { name: 'monitor role' })).toBeNull()
+    fireEvent.keyDown(roleRow('ingestion'), { key: 'a' })
+    expect(screen.queryByRole('complementary', { name: 'ingestion role' })).toBeNull()
   })
 
   it('closes the role drawer when Broker roles is left', async () => {
