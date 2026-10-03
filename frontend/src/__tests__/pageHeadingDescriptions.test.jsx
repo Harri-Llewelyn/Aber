@@ -16,8 +16,7 @@ const PAGES = [
   ['ColdStorageTab', '../components/tabs/ColdStorageTab.jsx'],
   ['DevicesTab', '../components/tabs/DevicesTab.jsx'],
   ['DirectoryTab', '../components/tabs/DirectoryTab.jsx'],
-  ['MetricsTab', '../components/tabs/MetricsTab.jsx'],
-  ['SettingsTab', '../components/tabs/SettingsTab.jsx']
+  ['MetricsTab', '../components/tabs/MetricsTab.jsx']
 ]
 
 /** The literal text between `>` of the heading's opening tag and `</PageHeading>` or the subtitle. */

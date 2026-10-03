@@ -4440,7 +4440,7 @@ components:
             The environment variable or code constant this overrides, named so the fallback is
             greppable from either end. An absent row means the fallback applies, which is what
             keeps local boot zero-configuration.
-          example: the 60_000 ms interval in AuditTrailTab.jsx
+          example: DEFAULT_POLL_SECONDS (60) in AuditTrailTab.jsx
         updated_at: { type: string, format: date-time }
         updated_by:
           type: string

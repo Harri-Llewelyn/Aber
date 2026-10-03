@@ -4,12 +4,13 @@ Platform settings an administrator owns: retention windows, thresholds, and the 
 
 ## What the controls do
 
-- **The category tabs** switch between groups of settings, one group on screen at a time, each with its count. The card beneath is headed with the category's name.
-- **Save** and **Discard** appear only once a value has changed. A save is refused by the database if the value is outside its bounds or your role may not change it, and the message says which.
+- **The category tabs** switch between groups of settings, one group on screen at a time. The list scrolls inside the card. A setting found from the search box (Ctrl+K) opens on its tab, scrolled into view and highlighted.
+- **Save** and **Discard** appear beside the field only once its value has changed. A save is refused by the database if the value is outside its bounds or your role may not change it, and the message says which.
 - **Each setting carries its own bounds.** A retention window has a floor and a ceiling, and the field refuses a value outside them -- because the settings most worth changing are the ones where a typo is a silent outage weeks later, not an error today.
 - **Enabled / Disabled** switches turn scheduled behaviour on and off. They take effect on the next run of whatever they gate, not retroactively.
-- **The `?` beside each field** explains what the setting actually controls. It is worth reading before the value is changed, because several of them read like each other and act very differently. The line beneath a field names what applies if the setting has never been changed.
-- **A read-only setting** shows **set by** and the place it is set instead of a control: the Sparkplug group and the archive site key are fixed when the stack is installed and cannot be changed here. Changing the group would re-address every gateway.
+- **The `?` beside each field** explains what the setting actually controls. It is worth reading before the value is changed, because several of them read like each other and act very differently.
+- **The line beneath a label** shows the setting's key, which copies when clicked, and what applies if the setting has never been changed (**falls back to**). Where that fallback is a `values.yaml` path or a single identifier, it copies too.
+- **A read-only setting** shows **set by** and the place it is set, in a greyed field: the Sparkplug group and the archive site key are fixed when the stack is installed and cannot be changed here. Changing the group would re-address every gateway.
 
 ## What the states mean
 

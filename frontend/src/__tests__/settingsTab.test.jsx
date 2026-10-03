@@ -7,7 +7,7 @@
 import React from 'react'
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { SettingsTab, coerceValue, displayValue, groupByCategory } from '../components/tabs/SettingsTab'
+import { SettingsTab, coerceValue, displayValue, fallbackCopy, groupByCategory } from '../components/tabs/SettingsTab'
 import { api } from '../api'
 
 vi.mock('../api', async () => {
@@ -20,7 +20,7 @@ const SETTINGS = [
     id: '2', key: 'ui.audit_trail_poll_seconds', value: 60, value_type: 'number',
     category: 'Audit Trail', label: 'Refresh interval (seconds)',
     description: 'How often the Audit Trail re-reads the audit log.',
-    fallback_source: 'the 60_000 ms interval in AuditTrailTab.jsx',
+    fallback_source: 'DEFAULT_POLL_SECONDS (60) in AuditTrailTab.jsx',
     updated_at: '2026-08-22T10:00:00Z', updated_by: null
   },
   {
@@ -137,7 +137,15 @@ describe('the page', () => {
     /* An absent row is not an absent value: the fallback is the first thing to check when a setting
        appears to do nothing, so the page names it. */
     await show()
-    expect(screen.getByText('the 60_000 ms interval in AuditTrailTab.jsx')).toBeInTheDocument()
+    expect(screen.getByText('DEFAULT_POLL_SECONDS (60) in AuditTrailTab.jsx')).toBeInTheDocument()
+  })
+
+  it('copies the key, and leaves a fallback that is prose as plain text', async () => {
+    await show()
+    expect(screen.getByRole('button', { name: 'Copy setting key ui.audit_trail_poll_seconds' })).toBeInTheDocument()
+    const fallback = screen.getByText('DEFAULT_POLL_SECONDS (60) in AuditTrailTab.jsx')
+    expect(fallback.closest('button')).toBeNull()
+    expect(fallback).not.toHaveClass('mono')
   })
 
   it('offers no way to add or delete a setting', async () => {
@@ -150,13 +158,17 @@ describe('the page', () => {
     // A permanently enabled Save invites the click that does nothing and then reports success.
     await show()
     expect(screen.queryByRole('button', { name: /^Save$/ })).toBeNull()
+    // Nothing is reserved for the buttons while there is nothing to save.
+    expect(document.querySelector('.setting-actions')).toBeNull()
 
     fireEvent.change(screen.getByLabelText('Refresh interval (seconds)'), { target: { value: '45' } })
 
     /* Awaited, like every other post-fireEvent assertion in the file: nothing in the page's
        contract promises the button appears in the same tick, and the guarantee (Save must appear)
        is unchanged. */
-    expect(await screen.findByRole('button', { name: /^Save$/ })).toBeInTheDocument()
+    const save = await screen.findByRole('button', { name: /^Save$/ })
+    // Beside the field, in the same control row, rather than on a line of its own beneath the row.
+    expect(save.closest('.setting-control')).toContainElement(screen.getByLabelText('Refresh interval (seconds)'))
   })
 
   it('sends the coerced value, not the string from the input', async () => {
@@ -235,11 +247,31 @@ describe('the page', () => {
     expect(screen.queryByLabelText('Refresh interval (seconds)')).toBeNull()
   })
 
-  it('says plainly that nothing secret belongs here', async () => {
-    /* Every authenticated user can read this table, so the rule against storing secrets here is
-       only useful if someone meets it before pasting an S3 key. */
+  it('leaves the rule about secrets to the help page rather than a permanent callout', async () => {
+    // help/settings.md says it in full; a warning on every visit stops being read.
     await show()
-    expect(screen.getByText(/Nothing secret is stored here/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Nothing secret is stored here/i)).toBeNull()
+    expect(document.querySelector('.callout-warning')).toBeNull()
+  })
+
+  it('opens a setting found from the search on its tab, scrolled into view and highlighted', async () => {
+    const scrollIntoView = vi.fn()
+    const original = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = scrollIntoView
+    try {
+      const onClear = vi.fn()
+      await act(async () => {
+        render(<SettingsTab showToast={vi.fn()} initialSetting="alerts.retention_days" onClearSetting={onClear} />)
+      })
+      expect(screen.getByRole('tab', { name: /^Retention/ })).toHaveAttribute('aria-selected', 'true')
+      const row = document.querySelector('[data-setting="alerts.retention_days"]')
+      expect(row).toHaveClass('setting-row-found')
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' })
+      expect(scrollIntoView.mock.contexts[0]).toBe(row)
+      expect(onClear).toHaveBeenCalled()
+    } finally {
+      Element.prototype.scrollIntoView = original
+    }
   })
 
   it('explains an empty list rather than rendering a blank page', async () => {
@@ -301,6 +333,22 @@ describe('a setting that is fixed at install', () => {
     expect(screen.getByText(/set by/i)).toBeInTheDocument()
     expect(screen.queryByText(/falls back to/i)).not.toBeInTheDocument()
   })
+
+  it('copies the values.yaml path it is set by, not the words around it', async () => {
+    await show()
+    expect(screen.getByRole('button', { name: 'Copy values.yaml path ingestion.sparkplugGroup' })).toBeInTheDocument()
+  })
+})
+
+describe('which fallbacks copy', () => {
+  it('copies a values.yaml path or one identifier, and nothing that is prose', () => {
+    expect(fallbackCopy('values.yaml coldArchive.s3.siteKey')).toMatchObject({ lead: 'values.yaml ', value: 'coldArchive.s3.siteKey' })
+    expect(fallbackCopy('prune_platform_alerts()')).toMatchObject({ lead: '', value: 'prune_platform_alerts()' })
+    expect(fallbackCopy('the p_retain default in prune_platform_alerts()')).toBeNull()
+    expect(fallbackCopy('timescaledb.retention.retainFor (14 days)')).toBeNull()
+    expect(fallbackCopy('none: the placement is refused')).toBeNull()
+    expect(fallbackCopy(null)).toBeNull()
+  })
 })
 
 describe('the page frame', () => {
@@ -309,27 +357,34 @@ describe('the page frame', () => {
     api.get.mockResolvedValue(SETTINGS)
   })
 
-  it('is headed Settings, above the category tabs', async () => {
+  it('is one card headed Settings, with the category tabs inside it under the heading', async () => {
     await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
     const heading = screen.getByRole('heading', { name: 'Settings' })
     const tabs = screen.getByRole('tablist', { name: 'Settings category' })
+    const card = heading.closest('.card')
+    expect(heading.closest('.card-heading')).toBeTruthy()
+    expect(tabs.parentElement).toBe(card)
     expect(heading.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(screen.queryByText('Runtime configuration')).toBeNull()
+    // The card scrolls, not the page.
+    expect(document.querySelector('.page-layout.page-fill')).not.toBeNull()
+    expect(card).toHaveClass('card-fill')
+    expect(card.querySelector(':scope > .card-fill-scroll')).toContainElement(screen.getByLabelText('Refresh interval (seconds)'))
+    expect(document.querySelectorAll('.card')).toHaveLength(1)
   })
 
-  it('gives the card a header naming the category, with a tip and a count', async () => {
+  it('puts the tab\'s tip in the toolbar row under the tabs, and counts nothing', async () => {
     await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
-    const card = document.querySelector('.settings-group')
-    const title = card.querySelector('.card-header .section-title')
-    expect(title.textContent).toMatch(/^Audit Trail/)
-    expect(title.querySelector('.help-tip')).toBeTruthy()
-    expect(title.querySelector('.section-count').textContent).toBe('1')
+    const bar = document.querySelector('.card > .tab-strip + .filter-bar')
+    expect(bar.querySelector('.help-tip')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'About Audit Trail settings' })).toBeInTheDocument()
+    expect(document.querySelector('.section-count')).toBeNull()
+    for (const tab of screen.getAllByRole('tab')) expect(tab).not.toHaveAttribute('title')
 
     fireEvent.click(screen.getByRole('tab', { name: /^Retention/ }))
-    expect(document.querySelector('.settings-group .section-title').textContent).toMatch(/^Retention/)
+    expect(screen.getByRole('button', { name: 'About Retention settings' })).toBeInTheDocument()
   })
 
-  it('shows a load error as a danger callout, not a card', async () => {
+  it('shows a load error as a danger callout inside the card', async () => {
     api.get.mockRejectedValue(new Error('permission denied for table system_settings'))
     await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
     const callout = screen.getByText(/permission denied/).closest('.callout')

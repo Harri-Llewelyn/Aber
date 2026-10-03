@@ -4587,16 +4587,17 @@ tr.row-selectable.row-selected > td:last-child::after { background-color: var(--
 
 /* ===== Settings ============================================================================= */
 
-.settings-group { padding: 0; margin-bottom: var(--stack); }
+/* The card's scroller: the selected category's rows. */
+.settings-group { padding: 0; }
 
-/* Label and control side by side, wrapping to stacked on a narrow viewport rather than
-   squeezing the input to unusability. */
+/* A fixed label column with the control straight after it. Below the two bases together (about
+   616px) the control wraps under the label rather than squeezing the input. */
 .setting-row {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--inset);
+  gap: 8px var(--inset);
   align-items: flex-start;
-  padding: var(--inset);
+  padding: 12px var(--inset);
   border-bottom: 1px solid var(--border);
 }
 .setting-row:last-child { border-bottom: none; }
@@ -4608,7 +4609,7 @@ tr.row-selectable.row-selected > td:last-child::after { background-color: var(--
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
-.setting-meta { flex: 1 1 320px; min-width: 0; }
+.setting-meta { flex: 0 0 420px; max-width: 100%; min-width: 0; }
 
 /* The label and its "?" on one line. The tip is outside the <label> so the label names the
    input alone; a button nested in a label is labelled by it too. */
@@ -4629,47 +4630,50 @@ tr.row-selectable.row-selected > td:last-child::after { background-color: var(--
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  font-size: 11px;
-  color: var(--text-dim);
+  gap: 6px 10px;
+  font-size: 12px;
 }
 
-.setting-key { color: var(--text-dim); }
+/* What applies when the setting has never been changed: plain, readable text, since it answers
+   "this setting appears to do nothing". Only a values.yaml path or a bare identifier is a chip. */
+.setting-fallback { color: var(--text-muted); line-height: 1.45; }
 
-/* What applies when the setting has never been changed. Dim, because it is context rather than
-   state -- but present, because "this setting appears to do nothing" is answered by it. */
-.setting-fallback { color: var(--text-dim); }
-
+/* The field, the range, then Save and Discard on one line; the field keeps its width. */
 .setting-control {
-  flex: 0 1 280px;
+  flex: 1 1 180px;
+  min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
 }
 
-.setting-json {
+.setting-control > .form-control { flex: 0 1 280px; min-width: 0; }
+.setting-control > .setting-input-short { flex-basis: 160px; }
+
+.setting-control > .setting-json {
+  flex: 1 1 100%;
+  max-width: 560px;
   font-family: var(--font-mono);
   font-size: 11px;
   resize: vertical;
 }
 
-/* Reserves its own height so a row does not jump when Save and Discard appear. The buttons are
-   shown only while there is an unsaved change -- a permanently enabled Save invites the click
-   that does nothing and then reports success. */
+/* Rendered only while there is an unsaved change, so the row reserves nothing for it. */
 .setting-actions {
   display: flex;
   gap: 6px;
-  min-height: 28px;
 }
 
-/* The permitted range, stated rather than left to a spinner's limits. Dim: it is a constraint on
-   the field above, not a value in its own right. */
+/* The permitted range, stated rather than left to a spinner's limits. */
 .setting-bounds {
   font-size: 11px;
   color: var(--text-dim);
+  white-space: nowrap;
 }
 
 .setting-error {
+  flex-basis: 100%;
   font-size: 11px;
   color: var(--danger-text);
   line-height: 1.45;

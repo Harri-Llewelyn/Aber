@@ -7645,7 +7645,7 @@ SELECT public.seed_setting(
     'Refresh interval (seconds)',
     'How often the Audit Trail re-reads the audit log. The page is a record to read rather than '
     'a live feed, so this is deliberately not a live-tail interval.',
-    'the 60_000 ms interval in AuditTrailTab.jsx'
+    'DEFAULT_POLL_SECONDS (60) in AuditTrailTab.jsx'
 );
 
 SELECT public.seed_setting(
