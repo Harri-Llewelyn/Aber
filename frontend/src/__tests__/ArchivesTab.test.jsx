@@ -523,7 +523,7 @@ describe('ArchivesTab lists archived areas', () => {
 describe('ArchivesTab exports a device before it goes', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
-  it('offers Export Bundle on a device, and posts the device id to the bundle route', async () => {
+  it('offers Export Bundle on a device through the export dialog, and posts the device id to the bundle route', async () => {
     api.post.mockResolvedValue({
       blob: new Blob(['zip']), filename: 'CNC_01-bundle.aasx', format: 'bundle',
       stats: { bundle: { stored: true, raw_rows: 10, hourly_rows: 2, trail_rows: 3, cold_objects: 1 } }
@@ -531,6 +531,7 @@ describe('ArchivesTab exports a device before it goes', () => {
     const { showToast } = await showLifecycle({ archives: [ARCHIVED_DEVICE] })
 
     fireEvent.click(screen.getByRole('button', { name: /Export Bundle/i }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: /^Export$/ }))
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/devices/asset-export', { device_id: 'dev-1' }))
     await waitFor(() => expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), 'CNC_01-bundle.aasx'))
@@ -547,6 +548,7 @@ describe('ArchivesTab exports a device before it goes', () => {
     const { showToast } = await showLifecycle({ archives: [ARCHIVED_DEVICE] })
 
     fireEvent.click(screen.getByRole('button', { name: /Export Bundle/i }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: /^Export$/ }))
 
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/NOT stored.*bucket missing/), 'warning'))
     expect(downloadBlob).toHaveBeenCalled()

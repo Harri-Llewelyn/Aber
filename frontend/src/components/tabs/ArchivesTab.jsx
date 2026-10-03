@@ -6,8 +6,8 @@ import CopyableId from '../common/CopyableId'
 // Restore and delete run from inside a ConfirmModal, which owns its own pending state; the export
 // is the one action that runs from the row.
 import { ConfirmModal } from '../modals/ConfirmModal'
+import { DeviceExportModal } from '../modals/DeviceExportModal'
 import { gatewayRepositoryUrl } from '../common/GatewayRepositoryPanel'
-import { downloadBlob } from '../../utils/downloadBlob'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { IconArchive, IconRefreshCw, IconTrash, IconDownload, IconHistory, IconExternalLink, IconAlertTriangle } from '../common/Icons'
@@ -43,8 +43,8 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
   const [stage, setStage]       = useState('archived')
   const [confirmPurge, setConfirmPurge] = useState(null)
   const [confirmRestore, setConfirmRestore] = useState(null)
-  // The device whose bundle is being taken, so its own button reports progress.
-  const [exporting, setExporting] = useState(null)
+  // The archived device whose export dialog is open, or null.
+  const [exportFor, setExportFor] = useState(null)
 
   const load = useCallback(() => {
     Promise.all([
@@ -85,32 +85,6 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
     } catch (e) { showToast(e.message, 'error') }
   }
 
-  /**
-   * Take the device away: the AASX with its trail, its live telemetry and the manifest, downloaded
-   * now and stored beside the cold tier so the tombstone can offer it after the row is gone.
-   */
-  const exportBundle = async (item) => {
-    setExporting(item.entity_id)
-    try {
-      const result = await api.post('/api/v1/devices/asset-export', { device_id: item.entity_id })
-      downloadBlob(result.blob, result.filename || `${item.name}-bundle.aasx`)
-      const b = result.stats?.bundle || {}
-      const summary = `${b.raw_rows ?? 0} raw and ${b.hourly_rows ?? 0} hourly readings, ${b.trail_rows ?? 0} audit trail rows, ${b.cold_objects ?? 0} cold object${b.cold_objects === 1 ? '' : 's'} named`
-      if (b.stored === false) {
-        showToast(`Bundle downloaded for '${item.name}' (${summary}) — it was NOT stored on the platform: ${b.reason || 'unknown reason'}. Keep the file.`, 'warning')
-      } else if (b.truncated) {
-        showToast(`Bundle exported for '${item.name}' (${summary}) — a cap was reached; the manifest says what is not included`, 'warning')
-      } else {
-        showToast(`Bundle exported for '${item.name}' (${summary})`, 'success')
-      }
-      load()
-    } catch (e) {
-      showToast(e.message, 'error')
-    } finally {
-      setExporting(null)
-    }
-  }
-
   const downloadExport = async (row) => {
     try {
       const url = await api.assetExportDownloadUrl(row)
@@ -120,6 +94,8 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
 
   const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
   const deniedTitle = requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE)
+  // aas-export refuses the bundle to a reader without audit_trail:read, since it carries the trail.
+  const canReadTrail = hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ)
   const latestExportOf = (entityId) => exports.find(x => x.entity_id === entityId) || null
 
   /** What survives a retired entity, as links; derived from the tombstone's row and its exports. */
@@ -238,11 +214,11 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
                        {a.entity_type === 'device' && (
                          <button
                            className={`btn btn-sm btn-ghost ${!canArchive ? 'btn-disabled' : ''}`}
-                           disabled={!canArchive || exporting === a.entity_id}
-                           onClick={() => canArchive && exportBundle(a)}
+                           disabled={!canArchive}
+                           onClick={() => canArchive && setExportFor(a)}
                            title={!canArchive ? deniedTitle : 'Download an AASX bundle of this device — its shell, audit trail, live telemetry and a manifest naming the cold objects — and keep a copy beside the cold tier'}
                          >
-                           <IconDownload size={12} /> {exporting === a.entity_id ? 'Exporting…' : 'Export Bundle'}
+                           <IconDownload size={12} /> Export Bundle…
                          </button>
                        )}
                        <button
@@ -335,6 +311,15 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
         />
       )}
 
+      {exportFor && (
+        <DeviceExportModal
+          device={{ id: exportFor.entity_id, name: exportFor.name }}
+          initialFormat="bundle"
+          bundleDisabledReason={canReadTrail ? null : `The bundle carries the Audit Trail. ${requiresRolesTitle(PERMISSION_UUIDS.AUDIT_TRAIL_READ)}.`}
+          onClose={() => { setExportFor(null); load() }}
+          showToast={showToast}
+        />
+      )}
       {confirmPurge && (
         <ConfirmModal
           title={`Permanently delete ${confirmPurge.entity_type}`}
