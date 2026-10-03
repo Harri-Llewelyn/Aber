@@ -232,8 +232,10 @@ long do we keep alerts" is on a page rather than in a migration — and `0033` a
 `relocate_devices()`, which applies a whole shopfloor rearrangement in **one transaction** so the
 six machines an operator files in one gesture carry one `causation_id` instead of six, and so a
 batch that fails partway leaves nothing behind — and `0034` seeds the **read-only principal the MCP
-client authenticates as**, holding `Operator` so it reads the i3X address space, writes nothing and
-cannot see the audit trail (`scripts/mint-mcp-token.mjs` signs its long-lived token) — and `0035`
+client authenticates as**, which reads the i3X address space, writes nothing and cannot see the
+audit trail; it now holds no role, only a `telemetry:read` grant of its own, and
+`0032_machine_principals_hold_no_role.sql` corrects the `user_roles` comment that said otherwise
+(`scripts/mint-mcp-token.mjs` signs its long-lived token) — and `0035`
 gives `gateways` the columns an appliance **reports about itself** on the heartbeat it already
 publishes, chiefly `cert_expires_at`: the internal CA is hand-distributed into every appliance's
 trust store, so re-minting it takes the whole fleet offline at once with no other signal — and

@@ -1956,6 +1956,10 @@ through those grants. Two things about it are worth knowing before writing a pol
   Use `has_authority()` where a policy would otherwise name a role machine principals happen to
   share — which, since `0080`, means `Operator` and nothing else.
 
+The `user_roles` table comment kept saying all three held `Operator` after the baseline fold.
+`0032` (`supabase/migrations/0032_machine_principals_hold_no_role.sql`) restates it; `0001` keeps
+the old text until the next squash, and `0032`'s comment wins on every boot.
+
 **The change was provably inert when it shipped, which is why it shipped before it was needed.**
 `Operator` is named in exactly three places in `0001` and none of them is an RLS policy, so the role
 granted these three nothing: every read they depend on is `FOR SELECT TO authenticated USING (true)`.
@@ -3738,8 +3742,7 @@ because each one produces a stack that looks fine and is not when it is forgotte
 share a process and nothing else: no filters, no routes, no credentials. The API listener admits
 machine principals holding an `apikey`; this one admits a person holding a browser session, and the
 separation is the design rather than an implementation detail — a cookie-session filter on the API
-path would redirect every daemon in the stack to a login screen it cannot complete, for the same
-reason `0048` keeps machine identities out of the `aal2` predicates.
+path would redirect every daemon in the stack to a login screen it cannot complete.
 
 Studio has no authentication of its own and connects as the database owner. Three filters supply
 what it lacks:
