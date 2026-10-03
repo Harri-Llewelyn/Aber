@@ -5219,20 +5219,31 @@ pre.gateway-code-wrap { white-space: pre-wrap; }
 /* The schema detail dialog's five footer buttons do not fit one row at its width. */
 .modal-lg .modal-actions { flex-wrap: wrap; }
 
-/* VOCABULARY. A section header reuses `.table-group-button` and `.table-group-label`; the strip
-   behind it is the header colour, and pins to the top of its scroller for as long as its own
-   section is in view. */
+/* VOCABULARY. `.vocab-sections` is the card's scroller (`.card-fill-scroll`). A section header reuses
+   `.table-group-button` and `.table-group-label`; the strip behind it is the header colour, and pins
+   to the top of the scroller for as long as its own section is in view. The button takes only its
+   label's width, so the section's "?" and its "in use" sit beside the title; the strip around them
+   toggles on a click as well. */
 .vocab-sections { padding: 0 0 4px; }
 
 .vocab-section-head {
   position: sticky;
   top: 0;
   z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
   background: var(--bg-base);
   box-shadow: inset 0 1px 0 var(--border), inset 0 -1px 0 var(--border);
 }
 
 .vocab-section-head:hover { background: color-mix(in srgb, var(--text-primary) 5%, var(--bg-base)); }
+
+.vocab-section-head > .table-group-button {
+  width: auto;
+  padding-right: 0;
+}
 
 .vocab-in-use {
   font-size: 11px;
@@ -5240,12 +5251,6 @@ pre.gateway-code-wrap { white-space: pre-wrap; }
 }
 
 .vocab-section-body { padding: 12px 16px; }
-
-.vocab-section-hint {
-  margin: 0 0 8px;
-  font-size: 11px;
-  color: var(--text-muted);
-}
 
 .vocab-chips {
   display: flex;
@@ -5272,7 +5277,15 @@ pre.gateway-code-wrap { white-space: pre-wrap; }
 }
 
 .vocab-chip-action { cursor: pointer; }
+.vocab-chip-action:hover { border-color: var(--text-muted); }
+.vocab-chip-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .vocab-chip-meta { opacity: 0.65; }
+
+/* The "+" of a chip that starts a metric: hidden at rest, its space kept so the chip does not grow
+   under the pointer and re-wrap the row. */
+.vocab-chip-plus { flex-shrink: 0; visibility: hidden; }
+.vocab-chip-action:hover .vocab-chip-plus,
+.vocab-chip-action:focus-visible .vocab-chip-plus { visibility: visible; }
 
 .vocab-note {
   display: block;
