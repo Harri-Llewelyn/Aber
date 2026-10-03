@@ -267,23 +267,24 @@ describe('filters still narrow the table', () => {
     expect(header).toHaveTextContent('New Cell')
   })
 
-  it('says there are none yet on an empty stack, and shows a count of 0', async () => {
+  it('says there are none yet on an empty stack, with no count on the heading', async () => {
     renderCells({}, { cells: [] })
     await waitFor(() => expect(document.querySelector('.empty-state')).toBeTruthy())
     expect(document.querySelector('.empty-state')).toHaveTextContent('No cells yet. Add one, then file it in an area.')
-    expect(document.querySelector('.card-header .section-count')).toHaveTextContent('0')
+    expect(document.querySelector('.card-header .section-count')).toBeNull()
   })
 
-  it('opens on Active, counts the rows, and reads shown / total under a search', async () => {
+  it('opens on Active, with the counts in the lifecycle options rather than on the heading', async () => {
     renderCells({}, {
       cells: [CELL, { ...CELL, cell_id: 'cell-2', cell_name: 'Paint Shop', gateways: [] }, { ...CELL, cell_id: 'cell-3', cell_name: 'Old Bay', is_archived: true }]
     })
     await ready()
     expect(screen.getByLabelText('Lifecycle')).toHaveValue('active')
     expect(within(table()).queryByText('Old Bay')).toBeNull()
-    expect(document.querySelector('.card-header .section-count')).toHaveTextContent('2')
+    expect(within(screen.getByLabelText('Lifecycle')).getByRole('option', { name: 'Active (2)' })).toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText(/Search by Cell UUID or name/), { target: { value: 'paint' } })
-    expect(document.querySelector('.card-header .section-count')).toHaveTextContent('1 / 2')
+    expect(within(table()).getByText('Paint Shop')).toBeInTheDocument()
+    expect(document.querySelector('.card-header .section-count')).toBeNull()
   })
 
   it('scrolls inside its card', async () => {

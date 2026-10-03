@@ -5,6 +5,7 @@ import { REALTIME_ENABLED, STALENESS_TICK_MS, refreshInterval } from '../../cons
 import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
+import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { gatewayLiveStatus, formatHeartbeat } from '../../utils/gatewayStatus'
 import { gatewayFleetCounts } from '../../utils/fleetCounts'
 import { useSetting } from '../../hooks/useSettings'
@@ -20,7 +21,7 @@ import {
   SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, WIDE_SCOPES, SOURCE_UNASSIGNED, SOURCE_AREA_WIDE,
   SOURCE_SITE_WIDE, SOURCE_SIMULATED, groupDevicesByCell
 } from '../../utils/cellResolution'
-import { isPlaced, formatPlace } from '../../utils/areaPlans'
+import { isPlaced } from '../../utils/areaPlans'
 import { cellIconComponent } from '../../utils/cellIcon'
 import { areaIconComponent } from '../../utils/areaIcon'
 import {
@@ -57,9 +58,10 @@ const PIN_ICON = { 1: 20, 2: 16, 3: 12 }
 
 /**
  * The Site Map, one card: the ISA-95 ladder and the legend, the three lanes that belong to no
- * area, then every area as its own plan with every one of its cells pinned on it. Read only:
- * assets are filed on their own pages, and cells are placed on the plan from the Cells page. One
- * context panel serves the lanes, the areas and the pins: whichever was clicked last.
+ * area, then every live area as its own plan with every one of its cells pinned on it; archived
+ * areas are drawn only on request. Read only: assets are filed on their own pages, and cells are
+ * placed on the plan from the Cells page. One context panel serves the lanes, the areas and the
+ * pins: whichever was clicked last. `?area=<id>` opens on that area.
  */
 export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSelectArea, showToast, onNavigateTab, activeAlerts = [] }) {
   const [cells, setCells]     = useState([])
@@ -96,6 +98,12 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   const siteName = useSetting('site.name', '')
   const sparkplugGroup = useSetting('sparkplug.group_id', '')
 
+  // Archived areas, and the cells filed in them, are left off the map until asked for.
+  const [showArchived, setShowArchived] = useState(false)
+  const archivedAreas = areas.filter(a => a.is_archived)
+  const visibleAreas = showArchived ? areas : areas.filter(a => !a.is_archived)
+  const hiddenAreaIds = new Set(showArchived ? [] : archivedAreas.map(a => a.area_id))
+
   /**
    * What the panel shows: a lane by key, an area by id, or a cell by id. Ids rather than objects
    * because this page polls, and an object would go stale. Choosing one clears the others: there
@@ -104,8 +112,9 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   const [openLane, setOpenLane] = useState(null)
   const [selectedCellId, setSelectedCellId] = useState(null)
   const [selectedAreaId, setSelectedAreaId] = useState(null)
-  const selectedCell = cells.find(c => c.cell_id === selectedCellId) || null
-  const selectedArea = areas.find(a => a.area_id === selectedAreaId) || null
+  // Resolved against what is drawn, so hiding an area closes its panel or its cell's.
+  const selectedCell = cells.find(c => c.cell_id === selectedCellId && !hiddenAreaIds.has(c.area_id)) || null
+  const selectedArea = visibleAreas.find(a => a.area_id === selectedAreaId) || null
   useEffect(() => {
     if (selectedCellId && !selectedCell) setSelectedCellId(null)
   }, [selectedCellId, selectedCell])
@@ -125,6 +134,21 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     setOpenLane(open => open === key ? null : key)
   }
   const closePanel = () => { setOpenLane(null); setSelectedCellId(null); setSelectedAreaId(null) }
+
+  // Arriving from a plan on the Areas or Cells page names one area: open its panel, draw it even
+  // when archived, and bring its card into view once it is drawn.
+  const [arrivalAreaId] = useState(() => new URLSearchParams(window.location.search).get('area') || '')
+  const [scrollToAreaId, setScrollToAreaId] = useState(null)
+  useArrivalSelection(arrivalAreaId, areas, (a, id) => a.area_id === id, (a) => {
+    if (a.is_archived) setShowArchived(true)
+    setOpenLane(null); setSelectedCellId(null); setSelectedAreaId(a.area_id)
+    setScrollToAreaId(a.area_id)
+  })
+  useEffect(() => {
+    if (!scrollToAreaId) return
+    document.querySelector(`.area-card[data-area="${scrollToAreaId}"]`)?.scrollIntoView?.({ block: 'nearest' })
+    setScrollToAreaId(null)
+  }, [scrollToAreaId])
 
   // Cell membership, resolved from the device list this page already holds.
   const devicesByCell = useMemo(() => groupDevicesByCell(assets), [assets])
@@ -228,8 +252,8 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     )
   }
 
-  /** A cell as a chip that selects it, for the cells with no place on the plan. */
-  const cellChip = (c, note) => {
+  /** A cell as a chip that opens its panel: in the unfiled tray, and in its area's panel. */
+  const cellChip = (c, note, unplaced = false) => {
     const state = stateOf(cellDevicesOf(c))
     const Icon = cellIconComponent(c.icon)
     return (
@@ -243,9 +267,40 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         <span className="badge-dot" style={{ background: state.pin === 'alert' ? 'var(--danger)' : state.status === 'normal' ? 'var(--success)' : state.status === 'attention' ? 'var(--warning)' : 'var(--text-dim)' }} />
         <Icon size={11} />
         <span className="chip-name">{c.cell_name}</span>
+        {unplaced && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>NOT PLACED</span>}
       </button>
     )
   }
+
+  /** A gateway in the cell and area panels: a chip that opens it on the Gateways page. */
+  const panelGatewayChip = (g, areaWide = false) => (
+    <button key={g.gateway_id} className="chip chip-link chip-gw" onClick={() => onSelectGateway?.(g.gateway_id)} title={`Open ${g.gateway_name} on the Gateways page${areaWide ? ' — it serves the whole area' : ''}`}>
+      <IconRadio size={11} /><span className="chip-name">{g.gateway_name}</span>
+      {areaWide && <span className="chip-flag" style={{ color: 'var(--text-muted)' }}>AREA-WIDE</span>}
+    </button>
+  )
+
+  /** A device in the cell and area panels: its state's dot, and a flag while an alert fires on it. */
+  const panelDeviceChip = (d, areaWide = false) => {
+    const status = deviceLifecycleStatus(d)
+    const alert = alertForDevice(alerts, d)
+    return (
+      <button key={d.asset_id} className="chip chip-link" onClick={() => onSelectDevice?.(d.asset_id)} title={`Open ${d.asset_name} on the Devices page — ${alert ? `ALERT: ${alert.alert_name}` : deviceStatusTitle(status)}${areaWide ? ' — it serves the whole area' : ''}`}>
+        <span className="badge-dot" style={{ background: deviceDotColor(d, alert) }} />
+        <IconCpu size={11} />
+        <span className="chip-name">{d.asset_name}</span>
+        {!d.is_archived && alert && (
+          <span className="chip-flag" style={{ color: 'var(--danger-text)' }}>{alert.severity === 'critical' ? 'ALARM' : 'WARNING'}</span>
+        )}
+        {areaWide && <span className="chip-flag" style={{ color: 'var(--text-muted)' }}>AREA-WIDE</span>}
+      </button>
+    )
+  }
+
+  /** The label over a panel's device chips, saying how many of them are online. */
+  const devicesLabel = (devices) => devices.length
+    ? `Devices (${devices.filter(a => a.status !== 'OFFLINE' && !a.is_archived).length}/${devices.length} online)`
+    : 'Devices'
 
   // Site-Wide first as stable context, Simulated as what not to trust, Unassigned last as the
   // thing to act on. A gateway's lane is read from its own columns: gateways have no inheritance.
@@ -298,7 +353,12 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     || [...new Set(gwList.filter(g => !g.is_shadow && g.sparkplug_group).map(g => g.sparkplug_group))].join(' / ')
 
   const unfiledCells = cells.filter(c => !c.area_id && !c.is_archived)
-  const columns = COLUMNS_FOR(areas.length)
+  const columns = COLUMNS_FOR(visibleAreas.length)
+  // What the archived toggle's tooltip says is hidden with the archived areas.
+  const hiddenWithArchived = archivedAreas.reduce((n, ar) => ({
+    cells: n.cells + cellsOf(ar).length,
+    devices: n.devices + cellsOf(ar).flatMap(cellDevicesOf).length + areaWideOf(ar).devices.length
+  }), { cells: 0, devices: 0 })
 
   /** A cell as a pin, or nothing when it has no place. */
   const cellPin = (c) => {
@@ -338,7 +398,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     const state = stateOf(devices)
     const AreaGlyph = areaIconComponent(ar.icon)
     const wideCount = wide.gateways.length + wide.devices.length
-    // Archived: drawn muted with its plan and its pins kept, as an archived cell's pin is.
+    // Archived, and drawn because the archived areas were asked for: muted, with its plan and pins.
     const archived = !!ar.is_archived
     return (
       <div
@@ -384,6 +444,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
             {plural(areaCells.length, 'Cell')} · {plural(gateways.length, 'Gateway')} · {plural(devices.length, 'Device')}
             {wideCount > 0 && <> · <span className="area-card-wide">{wideCount} Area-Wide</span></>}
           </span>
+          <span className="area-card-chevron" aria-hidden="true"><IconChevronRight size={14} /></span>
         </div>
         <AreaPlan area={ar} title={`${ar.area_name}${ar.plan_path ? '' : ' — no plan uploaded'}`}>
           {areaCells.map(cellPin)}
@@ -419,9 +480,11 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   /** The panel's contents for the open lane: what it is, and its assets as chips. */
   const lanePanel = openLaneView ? (() => {
     const { lane, devices: laneAssets, gateways: laneGateways } = openLaneView
+    const LaneIcon = lane.icon
     return {
       type: 'LANE',
       title: lane.title,
+      icon: <LaneIcon size={16} />,
       subtitle: (
         <>
           {stateBadge(stateOf(laneAssets), laneAssets)}
@@ -444,59 +507,67 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           title: 'Click one to open it on the Devices page'
         }
       ].filter(Boolean),
-      // Each action is offered only while the lane holds something to act on.
+      // Each action is offered only while the lane holds something to act on. Both are marked
+      // primary; the panel draws the first one offered as the primary.
       actions: onNavigateTab ? [
-        laneAssets.length > 0 && { label: 'Open Devices page', icon: <IconCpu size={13} />, onClick: () => onNavigateTab('devices'), title: `File these ${laneAssets.length} device(s) on the Devices page` },
-        laneGateways.length > 0 && { label: 'Open Gateways page', icon: <IconRadio size={13} />, onClick: () => onNavigateTab('gateways'), title: `File these ${laneGateways.length} gateway(s) on the Gateways page` }
+        laneAssets.length > 0 && { label: 'Open Devices page', icon: <IconCpu size={13} />, primary: true, onClick: () => onNavigateTab('devices'), title: `File these ${laneAssets.length} device(s) on the Devices page` },
+        laneGateways.length > 0 && { label: 'Open Gateways page', icon: <IconRadio size={13} />, primary: true, onClick: () => onNavigateTab('gateways'), title: `File these ${laneGateways.length} gateway(s) on the Gateways page` }
       ].filter(Boolean) : []
     }
   })() : null
 
-  /** The panel's contents for the selected area: what it holds that the plan does not show. */
+  /** The panel's contents for the selected area: its cells, gateways and devices as chips. */
   const areaPanel = selectedArea ? (() => {
     const areaCells = cellsOf(selectedArea)
-    const unplaced = areaCells.filter(c => !isPlaced(c))
     const wide = areaWideOf(selectedArea)
     const devices = [...areaCells.flatMap(cellDevicesOf), ...wide.devices]
     const gateways = [...areaCells.flatMap(cellGatewaysOf), ...wide.gateways]
     const state = stateOf(devices)
+    const AreaGlyph = areaIconComponent(selectedArea.icon)
     return {
       type: 'AREA',
       title: selectedArea.area_name,
+      icon: <AreaGlyph size={16} />,
       subtitle: (
         <>
           {stateBadge(state, devices)}
           {/* The card's own tally, which a narrow card drops. */}
           <Badge size="sm">{plural(areaCells.length, 'Cell')} · {plural(gateways.length, 'Gateway')} · {plural(devices.length, 'Device')}</Badge>
+          {selectedArea.is_archived && <ArchivedBadge size="sm" />}
         </>
       ),
       fields: [
         { label: 'Description', value: selectedArea.description || null, full: true },
         {
-          label: 'Plan',
-          value: selectedArea.plan_path
-            ? 'An SVG plan is uploaded; cells with a place are pinned on it.'
-            : 'No plan uploaded — the Site Map draws the default outline. Upload one from this area on the Areas page.',
-          full: true
-        },
-        unplaced.length > 0 && {
-          label: `Not placed (${unplaced.length})`,
-          value: <div className="context-device-list">{unplaced.map(c => cellChip(c, 'no place on the plan yet; set one in Edit Details on the Cells page'))}</div>,
-          full: true,
-          title: 'Filed in this area, but with no place on its plan, so nothing pins them'
-        },
-        {
-          label: 'Area-Wide assets',
-          value: wide.gateways.length + wide.devices.length
-            ? <div className="context-device-list">{wide.gateways.map(gatewayChip)}{wide.devices.map(deviceChip)}</div>
+          label: 'Cells',
+          value: areaCells.length
+            ? <div className="context-device-list">{areaCells.map(c => isPlaced(c)
+              ? cellChip(c, 'click for its details')
+              : cellChip(c, 'no place on the plan yet; set one in Edit Details on the Cells page', true))}</div>
             : null,
           full: true,
-          title: 'Assets that serve this whole area rather than one cell in it, such as its building management system. They have no place on a plan.'
+          title: 'Click one for its details. NOT PLACED marks a cell filed here with no place on the plan, so nothing pins it.'
+        },
+        {
+          label: 'Gateways',
+          value: gateways.length
+            ? <div className="context-device-list">{gateways.map(g => panelGatewayChip(g, wide.gateways.includes(g)))}</div>
+            : null,
+          full: true,
+          title: 'The gateways of its cells, then any that serve the whole area (AREA-WIDE)'
+        },
+        {
+          label: devicesLabel(devices),
+          value: devices.length
+            ? <div className="context-device-list">{devices.map(d => panelDeviceChip(d, wide.devices.includes(d)))}</div>
+            : null,
+          full: true,
+          title: 'Devices that resolve to its cells, then any that serve the whole area (AREA-WIDE), such as its building management system'
         }
-      ].filter(Boolean),
+      ],
       actions: [
         {
-          label: 'Open on Areas page', icon: <IconLayoutDashboard size={13} />,
+          label: 'Open on Areas page', icon: <IconLayoutDashboard size={13} />, primary: true,
           onClick: () => onSelectArea ? onSelectArea(selectedArea.area_id) : onNavigateTab?.('areas'),
           title: 'Edit this area, or upload its plan, on the Areas page'
         }
@@ -505,9 +576,11 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   })() : null
 
   /** The panel's contents for the selected cell: where it is, and what resolves to it. */
+  const SelectedCellIcon = cellIconComponent(selectedCell?.icon)
   const cellPanel = {
     type: 'CELL',
     title: selectedCell?.cell_name || '',
+    icon: selectedCell && <SelectedCellIcon size={16} />,
     subtitle: selectedCell && (
       <>
         {stateBadge(selectedState, cellDevicesOf(selectedCell))}
@@ -521,11 +594,6 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         value: selectedCellArea ? selectedCellArea.area_name : 'Unfiled — in no area yet',
         full: true,
         title: 'The area this cell is filed in, as set on the Cells page'
-      },
-      selectedCell.area_id && {
-        label: 'Place on plan',
-        value: formatPlace(selectedCell) || 'Not placed — set a place in Edit Details on the Cells page',
-        full: true
       },
       { label: 'Description', value: selectedCell.description || null, full: true },
       selectedAlerts.length > 0 && {
@@ -545,42 +613,15 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
       {
         label: 'Gateways',
         value: cellGatewaysOf(selectedCell).length
-          ? (
-            <div className="context-device-list">
-              {cellGatewaysOf(selectedCell).map(g => (
-                <button key={g.gateway_id} className="chip chip-link chip-gw" onClick={() => onSelectGateway?.(g.gateway_id)} title={`Open ${g.gateway_name} on the Gateways page`}>
-                  <IconRadio size={11} /><span className="chip-name">{g.gateway_name}</span>
-                </button>
-              ))}
-            </div>
-          )
+          ? <div className="context-device-list">{cellGatewaysOf(selectedCell).map(g => panelGatewayChip(g))}</div>
           : null,
         full: true,
         title: 'Edge nodes serving this cell'
       },
       {
-        label: cellDevicesOf(selectedCell).length
-          ? `Devices (${cellDevicesOf(selectedCell).filter(a => a.status !== 'OFFLINE' && !a.is_archived).length}/${cellDevicesOf(selectedCell).length} online)`
-          : 'Devices',
+        label: devicesLabel(cellDevicesOf(selectedCell)),
         value: cellDevicesOf(selectedCell).length
-          ? (
-            <div className="context-device-list">
-              {cellDevicesOf(selectedCell).map(d => {
-                const status = deviceLifecycleStatus(d)
-                const alert = alertForDevice(alerts, d)
-                return (
-                  <button key={d.asset_id} className="chip chip-link" onClick={() => onSelectDevice?.(d.asset_id)} title={`Open ${d.asset_name} on the Devices page — ${alert ? `ALERT: ${alert.alert_name}` : deviceStatusTitle(status)}`}>
-                    <span className="badge-dot" style={{ background: deviceDotColor(d, alert) }} />
-                    <IconCpu size={11} />
-                    <span className="chip-name">{d.asset_name}</span>
-                    {!d.is_archived && alert && (
-                      <span className="chip-flag" style={{ color: 'var(--danger-text)' }}>{alert.severity === 'critical' ? 'ALARM' : 'WARNING'}</span>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
-          )
+          ? <div className="context-device-list">{cellDevicesOf(selectedCell).map(d => panelDeviceChip(d))}</div>
           : null,
         full: true,
         title: 'Devices that resolve to this cell: its gateways\' devices, plus any filed here explicitly'
@@ -593,7 +634,8 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         title: 'Open Cell Dashboard / Grafana UI'
       },
       {
-        label: 'Open on Cells page', icon: <IconLayoutDashboard size={13} />,
+        // The primary when the cell has no dashboard: the panel takes the first one marked.
+        label: 'Open on Cells page', icon: <IconLayoutDashboard size={13} />, primary: true,
         onClick: () => onSelectCell ? onSelectCell(selectedCell.cell_id) : onNavigateTab?.('cells'),
         title: 'Edit this cell, or place it on its area plan, on the Cells page'
       }
@@ -611,9 +653,21 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           <CardHeading
             icon={<IconMap size={15} />}
             title="Site Map"
-            description="Every area drawn as its plan, with its cells pinned and coloured by device state; the lanes hold whatever belongs to no area."
+            description="Every area in service drawn as its plan, with its cells pinned and coloured by device state; the lanes hold whatever belongs to no area."
             actions={(
-              <>
+              <div className="site-map-heading-actions">
+                {/* Offered only while an area is archived; the count is what it would draw. */}
+                {archivedAreas.length > 0 && (
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${showArchived ? 'btn-primary' : 'btn-ghost'}`}
+                    onClick={() => setShowArchived(v => !v)}
+                    aria-pressed={showArchived}
+                    title={`Archived areas are left off the map, and with them the ${plural(hiddenWithArchived.cells, 'cell')} and ${plural(hiddenWithArchived.devices, 'device')} filed in them.`}
+                  >
+                    <IconArchive size={13} /> Show archived areas ({archivedAreas.length})
+                  </button>
+                )}
                 {/* The legend decodes the pin colours below and the tile dots in the lanes. */}
                 <div className="shopfloor-legend">
                   <span title={STATUS_LABEL.normal}><span className="tile-dot tile-dot-normal" /> Online</span>
@@ -623,7 +677,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
                       for it while the dots roll up a whole tile. */}
                   <span title={STATUS_LABEL.alert}><span className="legend-chip legend-chip-danger" /> Alert firing</span>
                 </div>
-              </>
+              </div>
             )}
           />
 
@@ -675,26 +729,29 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
                         <span className="site-lane-counts mono" title={`${plural(laneGateways.length, 'gateway')}, ${plural(laneAssets.length, 'device')}`}>
                           {plural(laneGateways.length, 'Gateway')} · {plural(laneAssets.length, 'Device')}
                         </span>
+                        <span className="site-lane-chevron" aria-hidden="true"><IconChevronRight size={14} /></span>
                       </button>
                     )
                   })}
                 </div>
 
-                {areas.length === 0 ? (
+                {visibleAreas.length === 0 ? (
                   <EmptyState
                     icon={<IconMap size={36} />}
-                    message={cells.length > 0
-                      ? 'No areas yet. Add one on the Areas page and file the cells into it; each area is drawn as its own plan here.'
-                      : laneViews.some(v => v.gateways.length > 0 || v.devices.length > 0)
-                        ? 'No areas or cells configured — every asset resolves to one of the lanes above.'
-                        : gw.shadow > 0
-                          ? 'Nothing on the map yet. The only gateway on this stack is the playback gateway, which is not part of the fleet and is driven from the Capture page.'
-                          : 'No areas or cells configured. Add an area on the Areas page to start the map.'}
+                    message={areas.length > 0
+                      ? 'Every area is archived. Show archived areas to draw them.'
+                      : cells.length > 0
+                        ? 'No areas yet. Add one on the Areas page and file the cells into it; each area is drawn as its own plan here.'
+                        : laneViews.some(v => v.gateways.length > 0 || v.devices.length > 0)
+                          ? 'No areas or cells configured — every asset resolves to one of the lanes above.'
+                          : gw.shadow > 0
+                            ? 'Nothing on the map yet. The only gateway on this stack is the playback gateway, which is not part of the fleet and is driven from the Capture page.'
+                            : 'No areas or cells configured. Add an area on the Areas page to start the map.'}
                   />
                 ) : (
                   <>
                     <div className="shopfloor-grid" style={{ '--map-columns': columns, '--pin-size': `${PIN_SIZE[columns]}px` }}>
-                      {areas.map(areaCard)}
+                      {visibleAreas.map(areaCard)}
                     </div>
                     {unfiledCells.length > 0 && (
                       <div className="site-map-tray">

@@ -86,22 +86,33 @@ function DefaultOutline({ aspect, unavailable }) {
 /**
  * One cell on a plan: a coloured disc with the cell's icon, its name beneath. `status` is the
  * tile rollup (normal, attention, idle), `alert` when Grafana has raised one against a device
- * here, or `muted` for a pin that is context rather than the subject.
+ * here, or `muted` for a pin that is context rather than the subject. Without `onClick` the pin
+ * is a mark, not a control: a span, so a read-only plan puts no dead stops in the tab order.
  */
 export function AreaPlanPin({ x, y, status = 'idle', Icon, label, title, selected = false, onClick, small = false, iconSize = null }) {
+  const className = `area-plan-pin area-plan-pin-${status}${selected ? ' area-plan-pin-selected' : ''}${small ? ' area-plan-pin-small' : ''}`
+  const style = { left: `${Number(x) * 100}%`, top: `${Number(y) * 100}%` }
+  const content = (
+    <>
+      <span className="area-plan-pin-disc">{Icon && <Icon size={iconSize ?? (small ? 9 : 18)} />}</span>
+      <span className="area-plan-pin-label">{label}</span>
+    </>
+  )
+  if (!onClick) {
+    return <span className={className} style={style} title={title || label} data-status={status}>{content}</span>
+  }
   return (
     <button
       type="button"
-      className={`area-plan-pin area-plan-pin-${status}${selected ? ' area-plan-pin-selected' : ''}${small ? ' area-plan-pin-small' : ''}`}
-      style={{ left: `${Number(x) * 100}%`, top: `${Number(y) * 100}%` }}
-      onClick={onClick ? (e) => { e.stopPropagation(); onClick(e) } : undefined}
+      className={className}
+      style={style}
+      onClick={(e) => { e.stopPropagation(); onClick(e) }}
       title={title || label}
       aria-label={label}
-      aria-pressed={onClick ? selected : undefined}
+      aria-pressed={selected}
       data-status={status}
     >
-      <span className="area-plan-pin-disc">{Icon && <Icon size={iconSize ?? (small ? 9 : 18)} />}</span>
-      <span className="area-plan-pin-label">{label}</span>
+      {content}
     </button>
   )
 }

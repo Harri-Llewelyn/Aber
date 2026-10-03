@@ -411,6 +411,8 @@ function Dashboard({ session, onSignOut }) {
   const showGateway = (id) => { setSelectedGatewayFilter(id); setTab('gateways', { search: id }) }
   const showCell    = (id) => { setSelectedCellFilter(id);    setTab('cells',    { search: id }) }
   const showArea    = (id) => { setSelectedAreaFilter(id);    setTab('areas',    { search: id }) }
+  /** The Site Map on one area: a plan preview on the Areas or Cells page. The map reads `area`. */
+  const showOnSiteMap = (id) => setTab('site-map', { area: id })
   /** Open ONE schema's drawer on the Schemas page -- a device drawer's Schema chip. */
   const showSchema  = (uuid) => { setSelectedSchemaId(uuid);  setTab('schemas',  { search: uuid }) }
   /* A setting is reached by its key, not a UUID: the key is what the page, the code and every
@@ -616,8 +618,8 @@ function Dashboard({ session, onSignOut }) {
         <main className="content">
           <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
             {tab === 'site-map'       && <SiteMapTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} showToast={showToast} onNavigateTab={t => setTab(t)} />}
-            {tab === 'areas'          && <AreasTab showToast={showToast} onViewTrail={a => viewTrailFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} hasPermission={hasPermission} initialSearchFilter={selectedAreaFilter} onClearFilter={() => setSelectedAreaFilter('')} />}
-            {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewTrail={c => viewTrailFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
+            {tab === 'areas'          && <AreasTab showToast={showToast} onViewTrail={a => viewTrailFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} initialSearchFilter={selectedAreaFilter} onClearFilter={() => setSelectedAreaFilter('')} />}
+            {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewTrail={c => viewTrailFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
             {tab === 'gateways'       && <GatewaysTab userRole={userRole} activeAlerts={firingAlerts} showToast={showToast} onViewTrail={g => viewTrailFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
             {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewTrail={a => viewTrailFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} activeAlerts={firingAlerts} />}
             {/* Re-checked here: `tab` arrives from the URL as well as the nav, so hiding the item

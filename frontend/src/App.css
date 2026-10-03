@@ -2343,6 +2343,9 @@ td.row-actions, th.row-actions {
 
 .shopfloor-legend > span { display: flex; align-items: center; gap: 5px; }
 
+/* The Site Map header's right-hand side: the archived toggle, when there is one, then the legend. */
+.site-map-heading-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
+
 /* Areas and Cells tables: a badge that follows a name or another badge. */
 .badge-follow { margin-left: 8px; }
 
@@ -2418,6 +2421,16 @@ td.row-actions, th.row-actions {
 .site-lane-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .site-lane-counts { flex-shrink: 0; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: -0.2px; }
+
+/* A lane and an area card open the panel, so each ends in the row chevron's glyph and colours. */
+.site-lane-chevron,
+.area-card-chevron { display: inline-flex; flex-shrink: 0; color: var(--text-dim); }
+
+.site-lane:hover .site-lane-chevron,
+.area-card:hover .area-card-chevron { color: var(--text-primary); }
+
+.site-lane.is-open .site-lane-chevron,
+.area-card.is-selected .area-card-chevron { color: var(--accent); }
 
 .site-lane-site {
   border-color: var(--accent);
@@ -2597,7 +2610,8 @@ td.row-actions, th.row-actions {
 .shopfloor-grid[style*="--map-columns: 2"] .area-card { --plan-max-height: 340px; }
 .shopfloor-grid[style*="--map-columns: 1"] .area-card { --plan-max-height: 440px; }
 
-.area-card .area-plan {
+.area-card .area-plan,
+.area-plan-preview .area-plan {
   width: min(100%, calc(var(--plan-max-height) * var(--plan-aspect, 1.3333)));
   margin: 0 auto;
 }
@@ -2613,6 +2627,13 @@ td.row-actions, th.row-actions {
 }
 
 .area-plan-interactive { cursor: crosshair; }
+
+/* A read-only plan in the Areas and Cells panels, capped as a Site Map card's plan is. As a link it
+   opens the Site Map on its area. */
+.area-plan-preview { --plan-max-height: 260px; border-radius: var(--radius-sm); }
+.area-plan-preview[role='link'] { cursor: pointer; }
+.area-plan-preview[role='link']:hover .area-plan { border-color: var(--border-hover); }
+.area-plan-preview:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .area-plan-image,
 .area-plan-outline {
@@ -2664,6 +2685,9 @@ td.row-actions, th.row-actions {
   z-index: 2;
   font: inherit;
 }
+
+/* A pin with no click of its own is a mark: it takes the cursor of the plan under it. */
+span.area-plan-pin { cursor: inherit; }
 
 .area-plan-pin-normal    { --pin-colour: var(--success); }
 .area-plan-pin-attention { --pin-colour: var(--warning); }
@@ -2782,7 +2806,7 @@ td.row-actions, th.row-actions {
   flex-wrap: wrap;
 }
 
-/* The plan control in the area panel: the one attached plan, or the zone that takes one. */
+/* The plan control in the area panel: the plan's preview, or the zone that takes one. */
 .area-plan-panel { display: flex; flex-direction: column; gap: 8px; }
 
 .area-plan-panel-header {
@@ -2793,8 +2817,7 @@ td.row-actions, th.row-actions {
   flex-wrap: wrap;
 }
 
-/* Wraps: in a narrow drawer the two buttons take a line of their own rather than squeezing the
-   state beside them down to one word a line. */
+/* The drop zone's box. */
 .area-plan-panel-row {
   display: flex;
   flex-wrap: wrap;
@@ -2806,10 +2829,6 @@ td.row-actions, th.row-actions {
   background: var(--bg-glass);
   font-size: 12px;
 }
-
-.area-plan-panel-glyph { flex-shrink: 0; color: var(--text-muted); }
-
-.area-plan-panel-state { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 
 .area-plan-panel-meta { font-size: 11px; color: var(--text-muted); }
 
