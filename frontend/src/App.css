@@ -1446,6 +1446,31 @@ tbody tr:hover { background: var(--bg-glass); }
   font-weight: 600;
 }
 
+/* A Backups run row stays one line high. The outcome under its status and the Holds list cut to
+   one line (the run's panel has all of each), and the short columns do not wrap. */
+.backup-run-outcome { max-width: 38ch; }
+.backup-run-failed { color: var(--danger-text); }
+.backup-run-holds { max-width: 28ch; }
+.backup-run-short { white-space: nowrap; }
+tr.backup-run:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* The files a backup holds, in its run's panel: each file's name, then its size. */
+.backup-files {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.backup-files li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.backup-files .mono { min-width: 0; overflow-wrap: anywhere; }
+
 /* The note under a form field: muted, small, and a fixed 4px below the control. */
 .form-hint {
   font-size: 11px;

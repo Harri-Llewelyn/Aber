@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { api } from '../../api'
 import { usePolling } from '../../hooks/usePolling'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
@@ -9,11 +9,10 @@ import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { ListFoot } from '../common/ListFoot'
 import { LoadingState } from '../common/LoadingState'
-import { SectionCount } from '../common/SectionCount'
 import { TakeBackupModal } from '../modals/TakeBackupModal'
 import { BackupDestinationModal } from '../modals/BackupDestinationModal'
-import CopyableId from '../common/CopyableId'
 import { CardHeading } from '../common/CardHeading'
+import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { IconAlertTriangle, IconHardDrive, IconShieldAlert, IconX } from '../common/Icons'
 import { formatBytes, formatDateTime, NO_VALUE } from '../../utils/format'
 import { readSetting } from '../../config'
@@ -68,6 +67,7 @@ export function BackupsTab({ showToast }) {
   const [floorIds, setFloorIds] = useState(() => new Set())
   const [offsite, setOffsite] = useState(null)
   const [editingDestination, setEditingDestination] = useState(false)
+  const [selectedId, setSelectedId] = useState(null)
   const lastCall = useRef(0)
 
   const [cancelPending, runCancel] = usePendingAction()
@@ -81,7 +81,7 @@ export function BackupsTab({ showToast }) {
       api.backupRunSummary(),
       // Soft: without it the Retention cells cannot say a backup is kept as one of the newest.
       api.newestBackupIds(BACKUP_RETENTION_FLOOR).catch(() => []),
-      // Soft too: the list is worth showing without it, and the callout above it then says nothing.
+      // Soft too: the list is worth showing without it, and the destination button is then left out.
       api.backupOffsiteDestination().catch(() => null)
     ])
     // A response for an earlier filter or page size that lands after a later one is dropped.
@@ -165,6 +165,8 @@ export function BackupsTab({ showToast }) {
   // No job row at all is a stack that has never run the backup service: the empty state, no warning.
   const neverRun = !summary?.firstRecordedAt
   const retentionDays = configuredRetentionDays()
+  const selected = runs.find(r => r.id === selectedId) || null
+  const toggleRun = (id) => setSelectedId(current => current === id ? null : id)
 
   return (
     <div className="page-layout page-fill">
@@ -174,19 +176,21 @@ export function BackupsTab({ showToast }) {
             icon={<IconHardDrive size={15} />}
             title="Backups"
             description="Every backup run, newest first, and why any failed. Scheduled backups follow the retention window; requested ones are kept until released."
-            count={<SectionCount total={total} shown={runs.length} />}
             actions={(
-              /* The primary action in the header, where every card keeps its. Disabled rather
-                 than hidden while one is in flight: the gate refuses a second anyway, and the
-                 callout below says why. */
-              <button
-                className="btn btn-primary btn-sm"
-                disabled={!!activeJob}
-                onClick={() => setAsking(true)}
-                title={activeJob ? 'One backup runs at a time' : 'Queue a backup of the whole stack now'}
-              >
-                <IconHardDrive size={14} /> Take a backup
-              </button>
+              <div className="btn-group">
+                <DestinationButton destination={offsite} onEdit={() => setEditingDestination(true)} />
+                {/* The primary action in the header, where every card keeps its. Disabled rather
+                    than hidden while one is in flight: the gate refuses a second anyway, and the
+                    callout below says why. */}
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={!!activeJob}
+                  onClick={() => setAsking(true)}
+                  title={activeJob ? 'One backup runs at a time' : 'Queue a backup of the whole stack now'}
+                >
+                  <IconHardDrive size={14} /> Take a backup
+                </button>
+              </div>
             )}
           />
 
@@ -200,7 +204,6 @@ export function BackupsTab({ showToast }) {
 
             <RunningCard job={activeJob} onCancel={onCancel} cancelPending={cancelPending} />
             <CurrentState summary={summary} />
-            <OffsiteLine destination={offsite} onEdit={() => setEditingDestination(true)} showToast={showToast} />
 
             {!loading && !neverRun && (
               <div className="filter-bar">
@@ -235,12 +238,12 @@ export function BackupsTab({ showToast }) {
               <table>
                 <thead>
                   <tr>
-                    <th title="When the backup was taken, or when a run without one ended. Hover a row for the queued, started and finished times.">When</th>
+                    <th title="When the backup was taken, or when a run without one ended. Open a run for its queued, started and finished times.">When</th>
                     <th title="How the run ended, with the reason when it failed or was withdrawn">Status</th>
                     <th title="Whether a person asked for the run or the schedule started it">Origin</th>
                     <th title="The note kept with the backup, saying why it was taken">Note</th>
                     <th title="The size of every file in the backup together">Size</th>
-                    <th title="The components the backup holds. Hover a row for each file and its size.">Holds</th>
+                    <th title="The components the backup holds. Open a run for each file and its size.">Holds</th>
                     <th title="Why the backup is still kept, or that the retention window applies">Retention</th>
                     <th title="Whether the encrypted copy has reached the off-site bucket">Off site</th>
                     <th className="row-actions" aria-label="Actions" />
@@ -256,6 +259,8 @@ export function BackupsTab({ showToast }) {
                       retentionDays={retentionDays}
                       releasing={pendingKey === run.backup?.id}
                       onRelease={setReleaseFor}
+                      selected={run.id === selectedId}
+                      onSelect={() => toggleRun(run.id)}
                     />
                   ))}
                 </tbody>
@@ -269,11 +274,23 @@ export function BackupsTab({ showToast }) {
               total={total}
               step={PAGE_SIZE}
               pending={paging}
+              counted
               onMore={() => { setPaging(true); setLimit(l => l + PAGE_SIZE) }}
             />
           )}
         </div>
       </div>
+
+      <RunPanel
+        run={selected}
+        offsiteBase={offsiteBase(offsite)}
+        retentionDays={retentionDays}
+        inFloor={!!selected?.backup && floorIds.has(selected.backup.id)}
+        releasing={pendingKey === selected?.backup?.id}
+        onRelease={setReleaseFor}
+        onClose={() => setSelectedId(null)}
+        showToast={showToast}
+      />
 
       {editingDestination && (
         <BackupDestinationModal
@@ -397,60 +414,64 @@ const STATUS_BADGES = {
   CANCELLED: { tone: 'neutral', label: 'Cancelled' }
 }
 
-/** Shown on the row; the whole error is in the cell's tooltip. The service caps it at 2000. */
-const ERROR_SHOWN = 200
+/** Taken for a backup (its data is as of the start); ended for a run that produced none. */
+function runWhen(run) {
+  return run.status === 'COMPLETED' ? (run.backup?.taken_at || run.started_at) : run.finished_at
+}
+
+/** What a run with no backup came to, in words: why it failed, was pruned or was withdrawn. */
+function runOutcome(run) {
+  if (run.backup) return null
+  if (run.status === 'COMPLETED') return 'Pruned by the retention window'
+  if (run.status === 'FAILED') return run.error || 'The service recorded no reason.'
+  return 'Withdrawn before the service claimed it'
+}
 
 /**
- * One finished run. A completed run shows its backup while the files exist; once the retention
- * window has pruned them the run stays, saying so. A run with no backup shows its outcome under the
- * status badge and a dash in the columns that describe the files.
+ * One finished run, one line high: its outcome under the status badge is cut to a line, and the
+ * whole of it, the times and the files are in the run's panel. A run with no backup shows a dash in
+ * the columns that describe the files. The row opens the panel on a click anywhere and on Enter.
  */
-function RunRow({ run, inFloor, offsiteBase: base, retentionDays, releasing, onRelease }) {
+function RunRow({ run, inFloor, offsiteBase: base, retentionDays, releasing, onRelease, selected, onSelect }) {
   const b = run.backup
   const badge = STATUS_BADGES[run.status] || { tone: 'neutral', label: run.status }
-  // Taken for a backup (its data is as of the start); ended for a run that produced none.
-  const when = run.status === 'COMPLETED' ? (b?.taken_at || run.started_at) : run.finished_at
-
-  let outcome = null
-  if (!b) {
-    if (run.status === 'COMPLETED') {
-      outcome = (
-        <span title="The service removed its files once they were older than the retention window. The run stays here as history.">
-          Pruned by the retention window
-        </span>
-      )
-    } else if (run.status === 'FAILED') {
-      const reason = run.error || 'The service recorded no reason.'
-      outcome = (
-        <span style={{ color: 'var(--danger-text)' }} title={reason}>
-          {reason.length > ERROR_SHOWN ? `${reason.slice(0, ERROR_SHOWN)}…` : reason}
-        </span>
-      )
-    } else {
-      outcome = <span>Withdrawn before the service claimed it</span>
-    }
-  }
+  const outcome = runOutcome(run)
 
   const none = <td className="cell-meta">{NO_VALUE}</td>
 
   return (
-    <tr data-testid={`run-${run.id}`}>
-      <td title={b ? b.location : runTimes(run)}>
-        {formatDateTime(when)}
+    <tr
+      data-testid={`run-${run.id}`}
+      className={`row-selectable backup-run${selected ? ' row-selected' : ''}`}
+      tabIndex={0}
+      onClick={rowSelectHandler(onSelect)}
+      // Enter on the row itself only: Enter on the Release button inside it is that button's.
+      onKeyDown={e => { if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); onSelect() } }}
+      title="Open this run's details: its times, its files and the whole of any failure"
+    >
+      <td>
+        {formatDateTime(runWhen(run))}
         {b && <div className="mono cell-meta">{b.stamp}</div>}
       </td>
       <td>
         <Badge tone={badge.tone} size="sm">{badge.label}</Badge>
-        {outcome && <div className="cell-meta" style={{ maxWidth: '38ch' }}>{outcome}</div>}
+        {outcome && (
+          <div
+            className={`cell-meta truncate backup-run-outcome${run.status === 'FAILED' ? ' backup-run-failed' : ''}`}
+            title={outcome}
+          >
+            {outcome}
+          </div>
+        )}
       </td>
-      <td>{run.origin === 'requested' ? 'On request' : 'Scheduled'}</td>
+      <td className="backup-run-short">{run.origin === 'requested' ? 'On request' : 'Scheduled'}</td>
       <td className={run.note ? undefined : 'cell-meta'}>{run.note || NO_VALUE}</td>
       {b ? (
         <>
-          <td>{formatBytes(b.size_bytes)}</td>
-          <td title={componentDetail(b.components)}>{componentSummary(b.components)}</td>
-          <td><RetentionCell backup={b} kept={keptBecause(b, { inFloor, retentionDays })} retentionDays={retentionDays} /></td>
-          <td><OffsiteCell backup={b} base={base} /></td>
+          <td className="backup-run-short">{formatBytes(b.size_bytes)}</td>
+          <td><div className="truncate backup-run-holds" title={componentSummary(b.components)}>{componentSummary(b.components)}</div></td>
+          <td className="backup-run-short"><RetentionCell backup={b} kept={keptBecause(b, { inFloor, retentionDays })} retentionDays={retentionDays} /></td>
+          <td className="backup-run-short"><OffsiteCell backup={b} base={base} /></td>
         </>
       ) : (
         <>{none}{none}{none}{none}</>
@@ -470,6 +491,96 @@ function RunRow({ run, inFloor, offsiteBase: base, retentionDays, releasing, onR
       </td>
     </tr>
   )
+}
+
+/** The run's retention, in the words the Retention column uses. */
+function retentionText(backup, kept, retentionDays) {
+  if (backup.pinned) return 'Pinned: the retention window does not apply until it is released'
+  if (kept === 'floor') return `Kept: one of the newest ${floorWord}, though older than the ${retentionDays}-day window`
+  if (kept === 'off') return 'Kept: pruning is off'
+  if (backup.released_at) return `Released ${formatDateTime(backup.released_at)}`
+  return 'Retention window'
+}
+
+/**
+ * One run's details: the whole of a failure, the queued, started and finished times, and the files
+ * a backup holds. Release is its one action, on a pinned backup.
+ */
+function RunPanel({ run, offsiteBase: base, retentionDays, inFloor, releasing, onRelease, onClose, showToast }) {
+  const b = run?.backup
+  const badge = run ? (STATUS_BADGES[run.status] || { tone: 'neutral', label: run.status }) : null
+  const outcome = run ? runOutcome(run) : null
+
+  const fields = run ? [
+    ...(outcome ? [{ label: run.status === 'FAILED' ? 'Reason' : 'Outcome', value: outcome, full: true }] : []),
+    { label: 'Origin', value: run.origin === 'requested' ? 'On request' : 'Scheduled' },
+    { label: 'Note', value: run.note },
+    { label: 'Queued', value: formatDateTime(run.created_at) },
+    { label: 'Started', value: run.started_at ? formatDateTime(run.started_at) : 'Never' },
+    { label: 'Finished', value: formatDateTime(run.finished_at) },
+    ...(b ? [
+      { label: 'Stamp', value: b.stamp, mono: true },
+      { label: 'Size', value: formatBytes(b.size_bytes) },
+      { label: 'Location', value: b.location, copyable: true, full: true, title: 'Where the files are inside the backup service\'s container' },
+      { label: 'Retention', value: retentionText(b, keptBecause(b, { inFloor, retentionDays }), retentionDays), full: true },
+      ...offsiteFields(b, base)
+    ] : [])
+  ] : []
+
+  const actions = b?.pinned ? [{
+    label: 'Release',
+    primary: true,
+    pending: releasing,
+    pendingLabel: 'Releasing…',
+    onClick: () => onRelease(b),
+    title: 'Let the retention window apply to this backup'
+  }] : []
+
+  return (
+    <ContextPanel
+      open={!!run}
+      type="Backup run"
+      title={run ? formatDateTime(runWhen(run)) : ''}
+      icon={<IconHardDrive size={16} />}
+      subtitle={badge && <Badge tone={badge.tone} size="sm">{badge.label}</Badge>}
+      fields={fields}
+      actions={actions}
+      onCopy={showToast}
+      onClose={onClose}
+      beforeActions={b && Array.isArray(b.components) && b.components.length > 0 && (
+        <>
+          <div className="context-panel-section-label">Files</div>
+          <ul className="backup-files">
+            {b.components.map(c => (
+              <li key={c.file} title={COMPONENT_LABELS[c.name] || c.name}>
+                <span className="mono">{c.file}</span>
+                <span className="cell-meta">{formatBytes(c.size_bytes)}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    />
+  )
+}
+
+/** The off-site copy of one backup, as panel fields. */
+function offsiteFields(backup, base) {
+  if (backup.offsite_state === 'COPIED' && (!base || backup.offsite_location?.startsWith(base))) {
+    return [
+      { label: 'Off site', value: `Copied ${formatDateTime(backup.offsite_copied_at)}` },
+      { label: 'Off-site copy', value: backup.offsite_location, copyable: true, full: true }
+    ]
+  }
+  if (!base) return [{ label: 'Off site', value: 'No destination is set' }]
+  if (backup.offsite_state === 'FAILED') {
+    return [{
+      label: 'Off site',
+      value: `Failed, retrying (tried ${backup.offsite_attempts} time(s), last ${formatDateTime(backup.offsite_attempted_at)}): ${backup.offsite_error || 'the service recorded no reason.'}`,
+      full: true
+    }]
+  }
+  return [{ label: 'Off site', value: 'Waiting for the service to copy it' }]
 }
 
 /** backup.retentionDays as the chart hands it to the page, or null when it was not supplied. */
@@ -532,40 +643,34 @@ function offsiteBase(destination) {
 }
 
 /**
- * The destination, or its absence, above the list. Unset is a warning rather than an error: the
- * backups are good, and they share a disk with the data they protect.
+ * The off-site destination as a header button, left of Take a backup. Unset or incomplete is a
+ * warning rather than an error: the backups are good, and they share a disk with the data they
+ * protect. The warning is the button's description as well as its tooltip, so a screen reader
+ * hears it. Set, it is a neutral button whose tooltip names where copies go.
  */
-function OffsiteLine({ destination, onEdit, showToast }) {
+function DestinationButton({ destination, onEdit }) {
+  const descriptionId = useId()
   if (!destination) return null
   const base = offsiteBase(destination)
+  if (base) {
+    return (
+      <button className="btn btn-ghost btn-sm" onClick={onEdit} title={`Every backup is copied, encrypted, to ${base}`}>
+        Change destination
+      </button>
+    )
+  }
   const missing = offsiteMissing(destination)
   const untouched = missing.length === OFFSITE_REQUIRED.length + 1
+  const message = untouched
+    ? 'No off-site copy. Every backup is on the same disk as the data it protects, so a lost disk or node takes both.'
+    : `The off-site copy cannot run. Still to set: ${missing.join(', ')}.`
   return (
-    <div className={base ? 'callout' : 'callout callout-warning'} data-testid="offsite-line">
-      {base
-        ? <IconHardDrive size={14} className="callout-icon" />
-        : <IconAlertTriangle size={14} className="callout-icon" />}
-      <div style={{ flex: 1, display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-        {base ? (
-          <>
-            <span>Every backup is copied, encrypted, to</span>
-            <CopyableId value={base} label="off-site destination" onNotify={showToast} />
-          </>
-        ) : untouched ? (
-          <span>
-            <strong>No off-site copy.</strong> Every backup is on the same disk as the data it
-            protects, so a lost disk or node takes both.
-          </span>
-        ) : (
-          <span>
-            <strong>The off-site copy cannot run.</strong> Still to set: {missing.join(', ')}.
-          </span>
-        )}
-      </div>
-      <button className="btn btn-ghost btn-sm" onClick={onEdit} title="Where every backup is copied, and the key it is encrypted to">
-        {base ? 'Change' : 'Set a destination'}
+    <>
+      <button className="btn btn-warning btn-sm" onClick={onEdit} title={message} aria-describedby={descriptionId}>
+        <IconAlertTriangle size={14} /> Set a destination
       </button>
-    </div>
+      <span id={descriptionId} className="sr-only">{message}</span>
+    </>
   )
 }
 
@@ -592,14 +697,6 @@ function OffsiteCell({ backup, base }) {
   return <span className="cell-meta" title="The service copies it on a coming poll, newest first">Waiting</span>
 }
 
-function runTimes(run) {
-  return [
-    `Queued ${formatDateTime(run.created_at)}`,
-    run.started_at && `Started ${formatDateTime(run.started_at)}`,
-    `Finished ${formatDateTime(run.finished_at)}`
-  ].filter(Boolean).join('\n')
-}
-
 const COMPONENT_LABELS = {
   'supabase-db': 'platform database',
   'timescaledb': 'historian',
@@ -619,9 +716,4 @@ function componentSentence() {
 function componentSummary(components) {
   if (!Array.isArray(components) || components.length === 0) return NO_VALUE
   return components.map(c => COMPONENT_LABELS[c.name] || c.name).join(', ')
-}
-
-function componentDetail(components) {
-  if (!Array.isArray(components)) return ''
-  return components.map(c => `${c.file}: ${formatBytes(c.size_bytes)}`).join('\n')
 }
