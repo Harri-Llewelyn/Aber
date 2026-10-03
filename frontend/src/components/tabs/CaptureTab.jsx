@@ -433,16 +433,17 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               { id: 'gateway', label: 'Gateways', title: 'Record everything one gateway publishes, every device beneath it included' },
               { id: 'device', label: 'Devices', title: "Record one device, plus its gateway's birth certificate" },
             ]}
+            help={(
+              <HelpTip
+                label={subjectKind === 'gateway' ? 'About capturing gateways' : 'About capturing devices'}
+                text={`${subjectKind === 'gateway'
+                  ? 'Record everything one gateway publishes, every device beneath it included.'
+                  : "Record one device, plus its gateway's birth certificate."} One capture per subject; recording again replaces it. Select a row to inspect, upload or play back.`}
+              />
+            )}
           />
 
           <div className="filter-bar">
-            <HelpTip
-              label={subjectKind === 'gateway' ? 'About capturing gateways' : 'About capturing devices'}
-              text={`${subjectKind === 'gateway'
-                ? 'Record everything one gateway publishes, every device beneath it included.'
-                : "Record one device, plus its gateway's birth certificate."} One capture per subject; recording again replaces it. Select a row to inspect, upload or play back.`}
-            />
-
             <select
               className="form-control control-md"
               value={storedFilter}

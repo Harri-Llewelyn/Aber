@@ -1204,12 +1204,18 @@ describe('the filter bar', () => {
     const card = document.querySelector('.card.card-fill')
     expect(card.querySelector(':scope > .card-heading')).toHaveTextContent('Capture')
     expect(card.querySelector(':scope > .card-heading + .tab-strip')).not.toBeNull()
+    // The tab's "?" is in the bar after the tab names, and it is about the tab on show.
+    const help = card.querySelector(':scope > .tab-strip > .tab-strip-help')
+    expect(help.firstElementChild).toHaveClass('help-tip')
+    expect(help.firstElementChild).toHaveAttribute('aria-label', 'About capturing gateways')
+    // Both tabs have filters, so each keeps its toolbar row, which starts with them.
     const bar = card.querySelector(':scope > .tab-strip + .filter-bar')
-    // The tab's "?" first, and it is about the tab on show.
-    expect(bar.firstElementChild).toHaveClass('help-tip')
-    expect(bar.firstElementChild).toHaveAttribute('aria-label', 'About capturing gateways')
+    expect(bar.querySelector('.help-tip')).toBeNull()
+    expect(bar.firstElementChild).toBe(screen.getByLabelText('Stored capture filter'))
     fireEvent.click(screen.getByRole('tab', { name: 'Devices' }))
-    expect(bar.firstElementChild).toHaveAttribute('aria-label', 'About capturing devices')
+    expect(help.firstElementChild).toHaveAttribute('aria-label', 'About capturing devices')
+    expect(card.querySelector(':scope > .tab-strip + .filter-bar')).toBe(bar)
+    expect(bar).toContainElement(screen.getByLabelText('Gateway filter'))
     expect(card.querySelector(':scope > .table-wrap')).not.toBeNull()
   })
 
