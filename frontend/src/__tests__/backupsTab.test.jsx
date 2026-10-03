@@ -250,7 +250,7 @@ describe('a run\'s panel', () => {
     expect(panel()).toBeNull()
   })
 
-  it('opens on Enter from the row, and not from the row\'s own Release button', async () => {
+  it('opens on Enter or Space from the row, and not from the row\'s own Release button', async () => {
     renderTab()
     const row = await screen.findByTestId('run-j-1')
     expect(row).toHaveAttribute('tabindex', '0')
@@ -265,6 +265,11 @@ describe('a run\'s panel', () => {
     fireEvent.keyDown(row, { key: 'Enter' })
     expect(panel()).not.toBeNull()
     expect(panel()).toHaveTextContent('before the areas migration')
+
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(panel()).toBeNull()
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(panel()).not.toBeNull()
   })
 
   it('makes Release the one primary action on a pinned backup, and offers none on a failed run', async () => {

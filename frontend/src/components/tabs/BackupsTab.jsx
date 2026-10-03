@@ -446,7 +446,7 @@ function RunRow({ run, inFloor, offsiteBase: base, retentionDays, releasing, onR
       tabIndex={0}
       onClick={rowSelectHandler(onSelect)}
       // Enter on the row itself only: Enter on the Release button inside it is that button's.
-      onKeyDown={e => { if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); onSelect() } }}
+      onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); onSelect() } }}
       title="Open this run's details: its times, its files and the whole of any failure"
     >
       <td>
