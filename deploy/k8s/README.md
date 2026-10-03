@@ -1206,7 +1206,7 @@ dumps. Retention (`backup.retentionDays`) applies to scheduled backups; a reques
 pinned until released on the page. Each `include*` flag mounts a ReadWriteOnce PVC, so each pins
 the pod to that pod's node — on a cluster where those pods sit on different nodes, enable the
 ones that share one. The mechanism, the tables and the restore runbook are in
-[`../../supabase/README.md`](../../supabase/README.md#backups-from-the-dashboard-0101).
+[`../../supabase/README.md`](../../supabase/README.md#backups-from-the-dashboard-archived-migration-0101).
 
 **A copy off site, from the same service.** On `local-path` the backup PVC sits on the node, and
 usually the disk, that holds both databases, so it survives a dropped table and not a lost disk,

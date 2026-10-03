@@ -210,7 +210,7 @@ generated vocabulary and SQL statements that must survive verbatim, so the floor
 only thing a squash removes at scale is the migration headers, and in this repository those are the
 reasoning for every schema guard.
 
-### The chain has an end, and now it says so (`0072`)
+### The chain has an end, and now it says so (archived migration 0072)
 
 There is no applied-migrations ledger, so **nothing in the database could distinguish "the chain is
 part-way through" from "the chain has finished"** — and on Kubernetes something needed to.
@@ -539,7 +539,7 @@ from one group to a request from another — precisely the collision this closes
 > **Adding a column to `gateways` requires `ensure_gateway_status_view()`.** `0008` calls it, and
 > `0001` no longer carries a second, explicit-column copy of the view — see below.
 
-### The group belongs to the site, and is fixed at install (`0131`)
+### The group belongs to the site, and is fixed at install (archived migration 0131)
 
 `gateways.sparkplug_group` defaulted to the literal `ACS-Cymru` — the platform vendor's name — so
 every site published its own machine data under it. The group is the first segment of the namespace
@@ -588,7 +588,7 @@ than an edit. In order:
 written before the change stay addressed by the old pair. That is the cost the fixed-at-install rule
 exists to make visible before it is paid.
 
-### The Directory reports liveness it observed (`0054`)
+### The Directory reports liveness it observed (archived migration 0054)
 
 `directory_services.status` and `.last_heartbeat` were **never written by anything**. The only
 writes were `0002`'s seed INSERTs, which contain the literal `'ACTIVE'` — so every stack reported
@@ -652,7 +652,7 @@ The component list is written twice, as the `served_by` rows in `0007` and the h
 `check-docs-drift.mjs` holds the two equal and checks that each component is one the chart
 renders. Adding a row the chart deploys means adding it to both.
 
-### Migrations that must run once, and the ledger that decides (`0040`, `0053`)
+### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
 **deleting** rows, and a second run would delete whatever an operator provisioned afterwards.
@@ -676,7 +676,7 @@ This is the same narrowing `0026` applied to `audit_trail`, on the argument that
 is not what an audit trail rests on"*. The table guarding a destructive replay had been left out of
 it.
 
-### Capture and playback orchestration (`0055`, `0056`, `0057`, `0058`, `0060`)
+### Capture and playback orchestration (archived migrations 0055, 0056, 0057, 0058 and 0060)
 
 The schema behind the **Capture** page. What the workers do with it is in
 [`ingestion/README.md`](../ingestion/README.md#recording-from-the-dashboard); what is here is the
@@ -872,7 +872,7 @@ by name choose neither — which is what [#236](https://github.com/Harri-Llewely
 recorded for `playback_finish`. `start_playback_job()` keeps its signature, so its grants survive
 and no sweep is needed.
 
-### What is stale, and what is merely quiet (`0029`, `0061`)
+### What is stale, and what is merely quiet (archived migrations 0029 and 0061)
 
 `platform_health` is the view most of Grafana's platform rules read (the others read
 `gateway_health`, `backup_health` and `audit_trail_partition_health`), and its `gateway_stale`
@@ -987,7 +987,7 @@ Every table has `ENABLE ROW LEVEL SECURITY`. The pattern is uniform and fail-clo
 | `machine_principals` | `Administrator`, `Auditor` | none — `create_machine_principal()` writes it with the identity (`0125`); `describe_machine_principal()` (`0126`) is the only path after |
 | `webhook_endpoints` | `Administrator` | **no write policy** |
 
-### The two privileged roles, and what separates them (`0069`)
+### The two privileged roles, and what separates them (archived migration 0069)
 
 **`Administrator` operates the platform; `Shopfloor_Manager` operates the shopfloor.** Until `0069`
 that sentence was not true of anything: `0002` granted both roles **the same thirteen permissions**,
@@ -1042,7 +1042,7 @@ deploys flows. The repair is to make that person an `Administrator`. Multi-facto
 `authz:manage`, and the security lane would otherwise have been hidden from a role that could grant
 itself the ability to see it. The second of those shipped as `0070`.
 
-### `0069` narrowed the policies and the RPCs went around them (`0087`)
+### Archived migration 0069 narrowed the policies and the RPCs went around them (archived migration 0087)
 
 **`0069` narrowed policies. `fork_schema()` and `publish_schema_version()` are `SECURITY DEFINER`,
 so they never consulted a policy in the first place** — they run as the owner — and both went on
@@ -1238,7 +1238,7 @@ Written by `log_audit_trail_event()`, an `AFTER INSERT OR UPDATE OR DELETE` trig
 `metric_catalog` (`0010`); by `log_role_assignment()` on `user_roles`;
 and by eight RPCs that record acts which are not row mutations at all.
 
-### Two lanes, and one of them an engineer cannot read (`0070`)
+### Two lanes, and one of them an engineer cannot read (archived migration 0070)
 
 Every row carries an **`audit_domain`** — `asset` or `security` — and a policy per domain replaces
 the single policy that used to cover the table.
@@ -1363,7 +1363,7 @@ longer claim `migration` either. Nothing in the stack sent that value: the daemo
 `service`, and checks that the daemon's identity and the owner's tokenless session are still
 believed.
 
-### Reading past the first page (`0077`)
+### Reading past the first page (archived migration 0077)
 
 **The page had a cap and no way to say so.** `audit_trail_page()` has returned `truncated`
 alongside every response since `0039`, and the Audit Trail tab has stored it in state since then
@@ -1399,7 +1399,7 @@ already loaded rather than replacing it — append-only means held rows cannot c
 only belong at the top — and starts again only when the two ranges no longer overlap, which is the
 one case where prepending would splice a hole into the middle of the list.
 
-### Saying how much of the trail this is (`0115`)
+### Saying how much of the trail this is (archived migration 0115)
 
 **A page that can be paged still has to say what fraction of the whole it is.** `0077` gave the tab
 a way to ask for more; it did not give it anything to say. The legend read "200 events" above a
@@ -1472,7 +1472,7 @@ purgeable. Rows naming a table that no longer exists — `area_floors`, which `0
 still drawn, still unfilterable, and still cannot be hidden. "The table is gone" is a different
 question from "the row is gone", and it is being decided with the rest of the archival lifecycle.
 
-### What can be shown to be deleted (`0117`)
+### What can be shown to be deleted (archived migration 0117)
 
 **The page had two disagreeing answers to "is this entity gone".** The timeline flags a lane
 *deleted* when a lookup covering its kind has landed and does not hold the id — schemas included,
@@ -1514,7 +1514,7 @@ but an empty list and a refused request are the same value and opposite facts. R
 the first would call every live schema deleted and then hide it, so one `403` would silently empty a
 lane. The tab admits a kind to `DELETABLE_KINDS` only once that kind's own lookup has landed.
 
-### Naming the last two lanes (`0118`)
+### Naming the last two lanes (archived migration 0118)
 
 **Two kinds of lane could not name themselves at all**, and each needed a different answer. On the
 development stack they were 25 of the lanes drawn: 24 backup jobs and one service principal, every
@@ -1560,7 +1560,7 @@ does not join them, because a search across one lane's names is not worth a rede
 function that pages every lane. A service principal is findable by its id, which an operator
 reaches through Access Control anyway.
 
-### A device is offline until it says otherwise (`0119`)
+### A device is offline until it says otherwise (archived migration 0119)
 
 **Two devices registered through the dashboard showed as Online having never sent a byte.** The
 device insert in `api.js` wrote `status: body.status || 'ONLINE'`, so creating a row asserted that
@@ -1589,7 +1589,7 @@ excludes the never-seen — a filter for things that have *died* should not list
 never alive.
 
 
-### Three ids, one of them spendable (`0121`)
+### Three ids, one of them spendable (archived migration 0121)
 
 **The event drawer hands a reader three copyable ids and only one of them went anywhere.** Entity ID
 had a single consumer in the platform — the global search's `resolveId`, which probes five tables
@@ -1687,7 +1687,7 @@ said it refuses a schema-lane proposal whose target is "not a draft", a check ar
 `audit_trail_page()` counting them as two.
 
 
-### The lane a Manager was offered and denied (`0120`)
+### The lane a Manager was offered and denied (archived migration 0120)
 
 **`audit_domain_for()` classifies every audit row into `asset` or `security`**, and
 `audit_trail_select_security` admits Administrator and Auditor alone. `schemas` had never been
@@ -1773,7 +1773,7 @@ and does not call a catalog row deleted (the catalog has no DELETE policy).
 `test_audit_trail_guard.py`, `test_audit_domain.py` and `test_role_permission_split.py` cover it.
 
 
-### The trail draws every lane (`0128`)
+### The trail draws every lane (archived migration 0128)
 
 **The Audit Trail no longer caps its lanes, so the setting that sized the cap has no reader.**
 `ui.digital_thread_lane_limit` folded every lane past the thirtieth behind a "Show all lanes"
@@ -1793,7 +1793,7 @@ interval, the trail's remaining setting, is still present: properties, not a cou
 The deletion is audited like any other write to `system_settings` — the trail records its own
 control being retired, under the `migration` actor.
 
-### A lane nothing wrote (`0122`)
+### A lane nothing wrote (archived migration 0122)
 
 **`device_nameplate` was an Audit Trail filter that could only ever answer empty.**
 `audit_domain_for()` classified it, `AUDIT_TRAIL_ENTITY_TYPES` listed it, `api.js` unions its
@@ -1832,7 +1832,7 @@ that column everywhere.
 **The entity id recorded is the device's.** A nameplate is an assertion about a device, so its
 edits belong in that device's history — which is what every reader already expected.
 
-### An area can be proposed (`0123`)
+### An area can be proposed (archived migration 0123)
 
 **Areas gained a page in `0097` and a proposal lane only now.** An Operator holds `proposal:create`
 and could ask for a change to a device, a nameplate, a cell or a gateway — and on the one rung
@@ -1870,11 +1870,11 @@ aborts the approval with the database's own sentence, and the proposal stays ope
 recording an approval of something that did not happen.
 
 Nothing here touches `audit_domain_for()`: `0097` put `areas` in the asset lane and
-[`0120`](#the-lane-a-manager-was-offered-and-denied-0120) left it there, so a Shopfloor_Manager can
+[`0120`](#the-lane-a-manager-was-offered-and-denied-archived-migration-0120) left it there, so a Shopfloor_Manager can
 read the history of what they approved. Nothing touches the `change_proposals` policies either,
 which name no lane at all.
 
-### A shape that can be pruned (`0079`)
+### A shape that can be pruned (archived migration 0079)
 
 **The table could only grow, and suppression was never going to fix that.** `0005` already removes
 both classes of machine non-event — an UPDATE that changes nothing, and one that moves only
@@ -1931,7 +1931,7 @@ The three database identities are `auth.users` rows with **no email, no password
 provider**, so none can sign in. That is also `0042`'s predicate for listing them, and `0048`'s for
 keeping their writes out of the audit trail's `'user'` bucket.
 
-### They hold permissions, not a person's role (`0080`)
+### They hold permissions, not a person's role (archived migration 0080)
 
 **All three used to hold `Operator`**, and the column above used to say so. It was a good choice when
 it was made and `0034` records it as one: `Operator` was picked **over `Auditor`** precisely so a
@@ -2048,7 +2048,7 @@ has no name; the page keeps the uuid's first eight characters for that case and 
 proposer as a machine. `test_machine_principal_naming.py` checks a Shopfloor_Manager gets the name
 and an Operator, an Auditor and the machine itself get nothing.
 
-### A person has a name the dashboard can read (`0116`)
+### A person has a name the dashboard can read (archived migration 0116)
 
 **The audit trail could not say who.** `log_role_assignment()` keys a role-assignment row by
 `user_roles.user_id`, so a lane on the Audit Trail is one *person's* history — and nothing
@@ -2140,7 +2140,7 @@ The daemon presents the **publishable key as the gateway `apikey` and its own to
 is not redundancy: the gateway's filter admits exactly two literal keys, so the ingestion token is
 refused at the edge if sent as the apikey.
 
-### Two recorders, because a host script cannot satisfy `has_role()` (`0041`, `0062`)
+### Two recorders, because a host script cannot satisfy `has_role()` (archived migrations 0041 and 0062)
 
 `record_gateway_credential_issued()` (`0041`) is the **operator** path: it gates on `has_role()`,
 which resolves through `auth.uid()`, and it writes the caller's own id into `changed_by`. That is
@@ -2171,7 +2171,7 @@ an auditor reads to check that did not happen, exactly the thing it was written 
 none: it is bounded by revocation (`0038`), not by a countdown. Inventing an `expires_at` would put a
 reassuring date against a credential that has no such date.
 
-### Three kinds of gateway, and two lanes for what is not real (`0052`, `0059`)
+### Three kinds of gateway, and two lanes for what is not real (archived migrations 0052 and 0059)
 
 **`is_simulated` (`0052`) records provenance and each consumer decides what to do with it.** It sits
 on the gateway and devices inherit it through `gateway_id` rather than carrying a copy: a stored
@@ -2205,7 +2205,7 @@ because that is the behaviour under test. Shorter retention for simulated data w
 feature that needs synthetic data to behave normally, and could not be built cheaply anyway —
 retention is one policy on one hypertable dropping whole chunks rather than rows.
 
-### The plant gains areas, and a third scope (`0097`)
+### The plant gains areas, and a third scope (archived migration 0097)
 
 ISA-95's hierarchy is enterprise, site, area, work center, work unit. The stack had the two lowest
 as `cells` and `devices` and the enterprise as `gateways.sparkplug_group`; `0097` adds the two
@@ -2241,7 +2241,7 @@ buildings are one ISA-95 site, so such a BMS is already Site-Wide; a join table 
 the view one row per pair, published each reading once per site, and let a per-site ACL leak a
 shared device.
 
-### A cell has a place on its area's plan (`0098`, `0113`)
+### A cell has a place on its area's plan (archived migrations 0098 and 0113)
 
 An area carries one SVG plan and a cell takes a place on it as two fractions of the plan's viewBox
 (`plan_x` across, `plan_y` down). **A floor is not modelled.** `0098` first made one a row of its
@@ -2290,7 +2290,7 @@ Unplaced is a state, not an error: a cell filed in an area with no place is list
 in the area's own panel on the Site Map. Filing a cell into an area is what puts its devices under
 the right Unified Namespace topic, and that must never wait on somebody opening a drawing.
 
-### The playback gateway is visible and almost inert (`0067`)
+### The playback gateway is visible and almost inert (archived migration 0067)
 
 It stays on the Gateways and Access Control pages deliberately: it holds a broker credential an
 operator has to mint — `0060`'s own `NOTICE` says so, with the `sparkplug_id` filled in — and its
@@ -2319,7 +2319,7 @@ its shadow devices exist to receive a replay rather than to report a machine, so
 out of the Capture page's subject tables. Starting a playback is unaffected — that query selects on
 `is_shadow` because that is exactly the lane a playback publishes into.
 
-### Cold telemetry archival (`0068`)
+### Cold telemetry archival (archived migration 0068)
 
 Raw telemetry leaves the historian one of two ways: the raw window (`timescaledb.retention.retainFor`)
 **drops** chunks past it, or cold archival **moves** them. The window never drops a chunk archiving
@@ -2367,7 +2367,7 @@ since through `set_archive_credential()` from the Cold Storage page, and `cold_a
 back through `cold_archive_destination()`. #353 is where the rule that admits that writer is being
 settled. `archive.bucket` was a setting and is retired with the local bucket it named (`0132`).
 
-#### The destination is somewhere else, and only somewhere else (`0132`)
+#### The destination is somewhere else, and only somewhere else (archived migration 0132)
 
 An archived object is **not a backup**: the raw chunk was dropped *because* this object was
 verified, so it is the only remaining copy of that span of history. Until `0132` it landed in the
@@ -2380,7 +2380,7 @@ code can check, and an optional remote destination is one nobody tests: it gets 
 by whoever wants fewest questions, and its worthlessness is discovered on the day it matters. One
 destination type means one code path, exercised at every site.
 
-#### Configuring it, which is a page and not a values file (`0134`)
+#### Configuring it, which is a page and not a values file (archived migration 0134)
 
 **Cold Storage → Set up cold storage**, as an Administrator: one dialog holds the S3 endpoint,
 region, bucket, access key ID and path style, the **secret access key**, and the `archive.enabled`
@@ -2724,14 +2724,14 @@ between verification and the drop: data in **both** places, `verified_at` still 
 special case, it is the safest state in the flow, so `--drop` will remove the chunk again with no
 further work. The round trip closes rather than being one-way.
 
-### `deployment`, and the word it replaced (`0064`)
+### `deployment`, and the word it replaced (archived migration 0064)
 
 `is_virtual` carries three incompatible definitions — *"no physical edge appliance behind this
 row"* (`0025`, provisioning), *"this connector runs on the app host"* (`GatewaysTab.jsx`), and
 *"(Cloud / Server-Simulated)"* (the checkbox, which contradicts the second) — while **every**
 behaviour branching on it is about a fourth thing: whether there is a machine out on the plant
 network. That was a roadmap item, retired into
-[`deployment`, and the word it replaced](#deployment-and-the-word-it-replaced-0064) below;
+[`deployment`, and the word it replaced](#deployment-and-the-word-it-replaced-archived-migration-0064) below;
 the bill arrived separately, as
 `gateway_holds_a_credential()` being the wrong predicate three times in `0056`, `0062` and `0063`.
 
@@ -2768,7 +2768,7 @@ Two things keep the old word: migration filenames (the chain is immutable) and e
 renaming it is its own change. [`0130`](migrations/archive/0130_the_gateway_types_keep_their_names.sql) is
 that change.
 
-### The credential gate is named after the type it accepts (`0130`)
+### The credential gate is named after the type it accepts (archived migration 0130)
 
 `authorize_host_gateway_credential(uuid)`, because a gateway is **Host**, **Remote** or
 **Simulated** — `deployment` plus `is_simulated`, rendered as one control by
@@ -2815,7 +2815,7 @@ a default: a row naming only `deployment` arrived with both set, and the one the
 Recorded because the reasoning outlives the trigger — the same shape recurs whenever two columns
 are kept in step through a rename.
 
-### Revocation reads that record, which is why it never worked (`0063`)
+### Revocation reads that record, which is why it never worked (archived migration 0063)
 
 `0038` revokes a decommissioned gateway's broker credential (since `0102`, by disabling the account
 at the broker, which drops its live session; before that, by rotating it to a password nobody
@@ -2880,7 +2880,7 @@ over-trust, and this inventory is the compensating control
 ### Expiry, and where revocation does not reach
 
 Revocation exists since `0074` (see
-[Tokens became revocable in `0074`](#tokens-became-revocable-in-0074-and-the-mint-followed-in-0075))
+[Tokens became revocable in `0074`](#tokens-became-revocable-in-archived-migration-0074-and-the-mint-followed-in-archived-migration-0075))
 and reaches PostgREST only: Storage, Realtime, the edge runtime and Studio verify the signature for
 themselves. Expiry therefore still bounds every token, and the line falls between **keys that name a
 principal** and **keys that name nobody**:
@@ -2961,7 +2961,7 @@ says why once, rather than drawing an empty column that reads as no accounts.
 adds a live credential rather than replacing one — reporting the newer of two would state half the
 exposure on the one page whose job is to state all of it.
 
-#### Tokens became revocable in `0074`, and the mint followed in `0075`
+#### Tokens became revocable in archived migration 0074, and the mint followed in archived migration 0075
 
 This section used to open *"Since nothing can be revoked, knowing how many unexpired tokens exist
 and when the first lapses **is** the safety story."* That was the honest position for as long as it
@@ -3003,7 +3003,7 @@ keys from the environment, so a token minted for either is valid and unread —
 `isMintableFromPage()` is the rule, and those two keep `npm run keys:rotate`, which is what actually
 changes what those processes present.
 
-#### `0076` revokes the identity, which reaches further than revoking its tokens
+#### Archived migration 0076 revokes the identity, which reaches further than revoking its tokens
 
 `revoke_service_principal()` flags a principal and `auth_pre_request()` then refuses every token
 naming it — **including ones this stack has no `TOKEN_MINTED` row for, and any issued afterwards**.
@@ -3132,7 +3132,7 @@ this is the only thing standing in front of the table.
 **Alerts with no `sparkplug_id` label are counted and skipped.** A `DatasourceError` notification
 carries no device label; inventing one would attribute a broken query to a machine.
 
-### Alert retention (0030)
+### Alert retention (archived migration 0030)
 
 **Alert occurrences are kept for 7 days and then deleted.** Not archived — nothing reads a historical
 alert. The dashboard reads `platform_alerts_active`, which is `DISTINCT ON (fingerprint)` filtered to
@@ -3307,7 +3307,7 @@ It is now one `SECURITY DEFINER` RPC — atomic, granted to `service_role` only,
 authenticated `p_actor_id` explicitly and **re-checking that actor's role against
 `public.user_roles`** so authorisation does not rest solely on the caller's check.
 
-### The approvals queue, and the first write an `Operator` has ever had (`0086`)
+### The approvals queue, and the first write an `Operator` has ever had (archived migration 0086)
 
 One queue for a change a person proposes but may not apply. An `Operator` inserts into
 `change_proposals`; an `Administrator` or `Shopfloor_Manager` calls `approve_proposal()`, and **the
@@ -3369,7 +3369,7 @@ the retention answer every other durable store here has.
 Both would otherwise take the fail-closed `security` branch, which would hide a
 `Shopfloor_Manager`'s own act from that manager.
 
-### A proposal says who asked, in something a person can read (`0089`)
+### A proposal says who asked, in something a person can read (archived migration 0089)
 
 `change_proposals.proposed_by` is a uuid and is the right thing to key on — it is what the policy
 compares, what the per-person cap counts, and what `audit_trail.changed_by` carries. **It is also
@@ -3400,9 +3400,9 @@ asked at the time. It joined the columns `0086`'s transition guard forbids a pro
 cannot be rewritten under an approver who is already reading it, and `approve_proposal()` carries it
 into the audit row beside the uuid.
 
-### The schema lane, and the second approval gate (`0088`, withdrawn by `0090`)
+### The schema lane, and the second approval gate (archived migration 0088, withdrawn by archived migration 0090)
 
-> **This lane no longer exists.** [`0090`](#the-queue-moves-to-the-assets-an-operator-can-see-0090)
+> **This lane no longer exists.** [`0090`](#the-queue-moves-to-the-assets-an-operator-can-see-archived-migration-0090)
 > withdrew it. The section is kept because the reasoning below — one function naming who decides
 > each lane, rejection gated identically to approval, an act-shaped patch — is what the lanes that
 > replaced it are built on. What `0088` could not supply was a reason for an `Operator` to be in
@@ -3414,7 +3414,7 @@ and an `Administrator` approved — at which point the approval called `publish_
 
 **One inbox, two approval gates, and the asymmetry is the substance.** A `Shopfloor_Manager` may
 approve a nameplate edit and may **not** approve a schema publication, because `0069` withdrew
-`schema:manage` from that role and [`0087`](#0069-narrowed-the-policies-and-the-rpcs-went-around-them-0087)
+`schema:manage` from that role and [`0087`](#archived-migration-0069-narrowed-the-policies-and-the-rpcs-went-around-them-archived-migration-0087)
 made the RPC enforce it. `may_decide_proposal()` is the one function naming who decides each lane,
 read by both `approve_proposal()` and `reject_proposal()` so the two cannot drift apart — which is
 the failure `0087` had just finished repairing between an RPC and the policies it was written to
@@ -3442,13 +3442,13 @@ right. `test_change_proposals.py` asserts that a draft published underneath an o
 its approval.
 
 **The audit row landed in the `security` domain**, because `audit_domain_for('schemas')` said so and
-`0070`'s rule is who may perform the act. [`0120`](#the-lane-a-manager-was-offered-and-denied-0120)
+`0070`'s rule is who may perform the act. [`0120`](#the-lane-a-manager-was-offered-and-denied-archived-migration-0120)
 moves `schemas` to the asset lane, which does not change the conclusion here: `audit_trail_select_asset`
 admits Administrator, Shopfloor_Manager and Auditor, so the proposing `Operator` still cannot read
 it. What they can read is their own proposal row, carrying `status`, `decided_by` and
 `applied_trail_id`. The queue is the proposer's record; the trail is the platform's.
 
-### The queue moves to the assets an Operator can see (`0090`)
+### The queue moves to the assets an Operator can see (archived migration 0090)
 
 `0090` does three things: it **withdraws the schema lane**, adds **five lanes** in its place, and
 refuses to approve a proposal that **has already come true**.
@@ -3459,7 +3459,7 @@ written. What it lacked was a reason for an `Operator` to be there: `fork_schema
 `0087` — so the only person who could create a draft was the only person who could publish it. An
 `Operator` "proposing" a publication was endorsing somebody else's work rather than asking for a
 change they could not make. That is a different feature, and this queue is for the second thing.
-[`0087`](#0069-narrowed-the-policies-and-the-rpcs-went-around-them-0087) is **not** reverted: it
+[`0087`](#archived-migration-0069-narrowed-the-policies-and-the-rpcs-went-around-them-archived-migration-0087) is **not** reverted: it
 closed a live hole and stands on its own.
 
 **The history is not retracted with the lane.** The `CHECK` constraint still admits the string, so
@@ -3522,7 +3522,7 @@ modal; `links.link_tag` carries no `CHECK` and never did, so nothing in the data
 about the value — retro-fitting one to a table with rows in it is a different migration with a
 different risk.
 
-### A draft can be discarded (`0091`)
+### A draft can be discarded (archived migration 0091)
 
 The Schemas page had been telling operators for some time that a draft can be *"published or
 discarded"* — it is the tooltip on the disabled Fork control — and there was no way to discard one.
@@ -3549,11 +3549,11 @@ Those rows are what the cascade removes, and the count is surfaced so the toast 
 **The parent is untouched**, which is the whole point: discarding v2 leaves v1 active, attached and
 unarchived, and the lineage returns to the state it was in before the fork. The `DELETE` writes its
 own `audit_trail` row, because `schemas` has been in the audit trigger since `0070`. The gate is
-`schema:manage`, matching what [`0087`](#0069-narrowed-the-policies-and-the-rpcs-went-around-them-0087)
+`schema:manage`, matching what [`0087`](#archived-migration-0069-narrowed-the-policies-and-the-rpcs-went-around-them-archived-migration-0087)
 put on `fork_schema()` and `publish_schema_version()` — a `SECURITY DEFINER` function bypasses RLS
 entirely, so its own check is the only one there is.
 
-### An archived schema stops taking new devices (`0093`)
+### An archived schema stops taking new devices (archived migration 0093)
 
 [Issue #167](https://github.com/Harri-Llewelyn/Aber/issues/167). Publishing v2 archives v1 and
 repoints every attached device in one transaction, so no machine is judged against a contract the
@@ -3592,7 +3592,7 @@ a public write surface, and the approvals queue applies a patch on somebody else
 cannot see another table and an RLS policy is bypassed by every `SECURITY DEFINER` path, which is why
 this is a trigger and why the test suite runs it as the **owner** — this guard exempts nobody.
 
-### A device behind a gateway that never arrived is not late (`0092`)
+### A device behind a gateway that never arrived is not late (archived migration 0092)
 
 "Ingestion Consuming Nothing" is gated on `expected_publishers > 0`, because *"no traffic"* and *"no
 traffic from a fleet that should be publishing"* are different conditions and only the second is a
@@ -3734,7 +3734,7 @@ because each one produces a stack that looks fine and is not when it is forgotte
 - **Clusters are `STRICT_DNS`.** Envoy re-resolves on its refresh interval, and a recreated
   container changes address.
 
-### The second listener, which is Studio's login (`0081`)
+### The second listener, which is Studio's login (archived migration 0081)
 
 **The gateway carries a second listener on `8001`, and everything above describes the first.** They
 share a process and nothing else: no filters, no routes, no credentials. The API listener admits
@@ -3779,7 +3779,7 @@ way past the door.
 `upgrade_configs` is declared anyway. It costs nothing, and a Studio version that grows a socket
 would otherwise fail with a `426` naming neither the line nor its absence.
 
-#### The read-only branch, which was broken rather than wide (`0082`)
+#### The read-only branch, which was broken rather than wide (archived migration 0082)
 
 Studio picks its database user per request — `readOnly ? POSTGRES_USER_READ_ONLY :
 POSTGRES_USER_READ_WRITE`, with one `POSTGRES_PASSWORD` substituted into both. This stack set only
@@ -3833,7 +3833,7 @@ nobody can open, which is the same posture as the loopback binding it replaces.
 
 ---
 
-### The forge's door, and the room behind it (`0094`)
+### The forge's door, and the room behind it (archived migration 0094)
 
 Gitea's web login is the gateway's `forge` listener in [`envoy.yaml`](envoy.yaml), on `8002`
 (`git.<domain>`). It is the Studio listener with the
@@ -3880,7 +3880,7 @@ otherwise sign each other out; and `/assets/ssh_host_key.pub` and `/api/` pass t
 session, in all three filters, because the host key is public and the API authenticates itself.
 `test_forge_membership.py` drives the whole flow for all three personas.
 
-### What a gateway's repository comes with, and how the forge reports back (`0095`)
+### What a gateway's repository comes with, and how the forge reports back (archived migration 0095)
 
 Enrolment furnishes the repository as well as creating it
 ([`_shared/forge.ts`](functions/_shared/forge.ts)). Its **wiki** starts with a Home page naming the
@@ -3956,7 +3956,7 @@ An empty secret leaves the sweep inert, and `0002` says so at boot. `test_forge_
 role changed behind the door, a deleted hook and a hand-made repository. One pass runs at a time
 ([One pass at a time](#one-pass-at-a-time-0025)).
 
-### The appliance reports on a branch of its own (`0104`)
+### The appliance reports on a branch of its own (archived migration 0104)
 
 `main` is what was approved; **`appliance` is what is running**, a second branch in the gateway's
 repository written only by the appliance and read by people in the forge. After every pass
@@ -4008,7 +4008,7 @@ this and closes `main` again if a rule was found admitting pushes. `test_forge_e
 the appliance push; `test_forge_sweep.py` covers the rules, a key downgraded by hand, an archived
 gateway's key, and the archive mark below.
 
-### Archiving a gateway reaches the forge (`0114`)
+### Archiving a gateway reaches the forge (archived migration 0114)
 
 **Archiving a gateway archives its repository, which is the fourth thing it loses**
 ([#197](https://github.com/Harri-Llewelyn/Aber/issues/197)). The key stops the appliance
@@ -4108,7 +4108,7 @@ takeover, the release and the follow-up on the throwaway database.
 right branch filter, so a repository that already has two, or gets two from an enrolment racing a
 pass, ends with one.
 
-### Archiving is a lifecycle rather than a flag (`0124`)
+### Archiving is a lifecycle rather than a flag (archived migration 0124)
 
 **Archiving was one flag, a timestamp and a timer, and an area could not be archived at all.** A
 cell's archive set the flag and nothing else; a device's stopped its readings and set the flag;
@@ -4190,7 +4190,7 @@ as the cold catalogue already was, so RLS decides its rows and the part no longe
 service key; `loadTrail()` also filters on `audit_domain = 'asset'`, so a bundle taken by an
 Administrator or an Auditor, who may read the security lane, never carries a row from it.
 
-### A machine has a name an operator gave it (`0125`)
+### A machine has a name an operator gave it (archived migration 0125)
 
 **`create_machine_principal()` made an identity nobody could name.** The `auth.users` row holds
 an id and nothing else, which is what keeps it unable to sign in; the permissions and a note went
@@ -4237,9 +4237,9 @@ unchanged: it requires a registry entry for every id a migration pins, and a pri
 runtime has no id to write down ahead of time, which is what the table is for. The Audit Trail
 reads the same table to label the *Machine identities* category, so a principal created from the page
 is named there too; the search still cannot reach that name, for the reason stated under
-[Naming the last two lanes](#naming-the-last-two-lanes-0118).
+[Naming the last two lanes](#naming-the-last-two-lanes-archived-migration-0118).
 
-### A principal can be described again (`0126`)
+### A principal can be described again (archived migration 0126)
 
 **`0125` closed the table and left out the ordinary case.** A purpose that was right when it was
 typed is not right once the report is renamed or the client moves lines, and a table with no
@@ -4394,7 +4394,7 @@ carries no status under the new one until its next push. `test_forge_events.py` 
 answers and that a proposal moves no column; `test_forge_sweep.py` covers the reconcile and the
 rename.
 
-### A gateway that needs code of its own (`0106`)
+### A gateway that needs code of its own (archived migration 0106)
 
 Some machinery — serial, Modbus, OPC-DA — no Node-RED node reaches, and the adapter that does is
 worth nothing to anybody else. It is admissible on one condition: **a container built from a
@@ -4446,7 +4446,7 @@ publishing everything else and reads ONLINE. `custom.yml` in the example therefo
 service is actually running after `up -d`, because compose reports success for a container that
 started and exited.
 
-### The one-liner (`0105`)
+### The one-liner (archived migration 0105)
 
 Commissioning as a pasted command
 ([`docs/remote-gateways.md`](../docs/remote-gateways.md#on-the-appliance-the-command)).
@@ -4492,7 +4492,7 @@ re-mints and asks first, because both spend the one token. `test_gateway_install
 mint by role, the three fetches, the identical refusals, and the token surviving every fetch to
 be redeemed by enrolment.
 
-## A replay lane is minted, not assigned (`0083`)
+## A replay lane is minted, not assigned (archived migration 0083)
 
 The Playback gateway's devices are **replay lanes**. Each stands in for one real machine, records
 which one in `shadow_of`, and is created by `ensure_shadow_devices()` when a capture is played — one
@@ -4534,7 +4534,7 @@ and the trigger is the one that holds for the fourth.
 
 ---
 
-## The Directory says what can reach a service (`0084`)
+## The Directory says what can reach a service (archived migration 0084)
 
 `directory_services` held an address and no statement of who could use it, so the page rendering
 those rows had to guess. `isBrowsableEndpoint` guesses well, and the guess is the right one for the
@@ -4585,7 +4585,7 @@ marked `HOST` offers a copy button and a tunnel hint instead of a link that was 
 
 ---
 
-## The Directory reads the address the browser uses (`0085`)
+## The Directory reads the address the browser uses (archived migration 0085)
 
 `endpoint_url` was a hardcoded string. `0002` seeded `http://localhost:1880`, `http://localhost:3002`
 and `http://127.0.0.1:54323`, and nothing ever moved them — while the deployment stated its own
@@ -4620,7 +4620,7 @@ This is what surfaces the chart's port-free hostnames on the page.
 
 ---
 
-## The Directory names the gateway that runs (`0096`)
+## The Directory names the gateway that runs (archived migration 0096)
 
 The stack runs Envoy, and the seeded directory row still read *Supabase API Gateway (Kong)*.
 The name is display text and also the key `directory_liveness_job_map()` joins the `envoy` scrape
@@ -4649,7 +4649,7 @@ retired and the secret holds the publishable key. `0002` rewrites that secret fr
 variable on every boot, so the rename is the old name joining the list it deletes first; there
 is no stored value to carry across and no migration.
 
-## The Directory observes both databases (`0127`)
+## The Directory observes both databases (archived migration 0127)
 
 Both databases read `UNKNOWN` on the Directory page, and the map was right to say so: nothing
 scraped either of them. `UNKNOWN` is the honest value — it means *nothing observes this service*,
@@ -4878,7 +4878,7 @@ on disk and are not the same kind of thing, which is why those two are in tier 1
 log store, because it captures the machine, but that is a side effect rather than a promise and no
 retention story should be built on it.
 
-### Backups from the dashboard (0101)
+### Backups from the dashboard (archived migration 0101)
 
 The tier 1 backup above needed a shell. `0101` gives it a caller: the **Backups** page (Administrator
 only) queues a `backup_jobs` row through `request_backup()`, and the **backup service**

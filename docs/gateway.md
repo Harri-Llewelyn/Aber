@@ -5,8 +5,8 @@ Envoy is the API gateway on the cluster. Its template is
 `scripts/sync-helm-chart-files.mjs` and rendered by the initContainer in
 [`templates/supabase/envoy.yaml`](../deploy/helm/aber/templates/supabase/envoy.yaml). Three
 listeners: the API on 8000, Studio's login on 8001 and the forge's login on 8002 (the last two are
-documented with [Studio's door](../supabase/README.md#the-second-listener-which-is-studios-login-0081)
-and [the forge's door](../supabase/README.md#the-forges-door-and-the-room-behind-it-0094)).
+documented with [Studio's door](../supabase/README.md#the-second-listener-which-is-studios-login-archived-migration-0081)
+and [the forge's door](../supabase/README.md#the-forges-door-and-the-room-behind-it-archived-migration-0094)).
 
 The Deployment, its pod labels and its Service are all `supabase-envoy`, and every in-cluster
 consumer reaches the gateway as `http://supabase-envoy:8000`.
