@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0020_the_thread_files_a_machine_as_a_service.sql
+-- Migration: 0152_the_thread_files_a_machine_as_a_service.sql (applied as 0020 until the 1.0 squash)
 -- A caller's X-Aber-Actor header is believed only when it describes that caller (#534)
 -- =============================================================================================
 --

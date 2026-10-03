@@ -26,8 +26,7 @@ const pass = (m) => console.log(`  ok    ${m}`);
 /**
  * Everything `0001`'s `DROP SERVER ... CASCADE` removes, with the live migration that must put it
  * back. `created_by` is a label, never read as a filename: the lowest missing one is printed as
- * where the chain stopped, so "telemetry_raw_window is missing" becomes "the chain did not finish
- * 0005". Since the fold, `0001` recreates all but that one.
+ * where the chain stopped. Since the squash before 1.0, `0001` recreates all of them.
  */
 const SURFACE = [
   { relation: 'public.telemetry',            created_by: '0001' },
@@ -41,7 +40,7 @@ const SURFACE = [
   { relation: 'public.telemetry_horizons',   created_by: '0001' },
   { relation: 'timescale.storage_footprint', created_by: '0001' },
   { relation: 'public.storage_footprint',    created_by: '0001' },
-  { relation: 'timescale.telemetry_raw_window', created_by: '0005' },
+  { relation: 'timescale.telemetry_raw_window', created_by: '0001' },
 ];
 
 /** psql inside the database pod, as the owner, over the socket: no password and no port-forward. */

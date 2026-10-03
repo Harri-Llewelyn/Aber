@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0021_an_approval_shares_a_causation_id_with_the_change_it_made.sql
+-- Migration: 0153_an_approval_shares_a_causation_id_with_the_change_it_made.sql (applied as 0021 until the 1.0 squash)
 -- A proposal's trail row carries the transaction that applied or expired it (#536)
 -- =============================================================================================
 --

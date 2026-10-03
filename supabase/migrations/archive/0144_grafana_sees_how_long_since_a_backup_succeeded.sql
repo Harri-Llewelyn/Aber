@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0011_grafana_sees_how_long_since_a_backup_succeeded.sql
+-- Migration: 0144_grafana_sees_how_long_since_a_backup_succeeded.sql (applied as 0011 until the 1.0 squash)
 -- How long since the platform backup last succeeded, for the Backup Stale alert rule (#474)
 -- =============================================================================================
 --

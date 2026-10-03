@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0031_the_seeded_quarantine_webhook_is_retired.sql
+-- Migration: 0161_the_seeded_quarantine_webhook_is_retired.sql (applied as 0031 until the 1.0 squash)
 -- The seeded quarantine webhook, which nothing served, is removed with its vault secret
 -- =============================================================================================
 --

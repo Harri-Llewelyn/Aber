@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0008_the_223p_metrics_file_under_bms.sql
+-- Migration: 0141_the_223p_metrics_file_under_bms.sql (applied as 0008 until the 1.0 squash)
 -- ASHRAE 223P has one metric group, BMS
 -- =============================================================================================
 --

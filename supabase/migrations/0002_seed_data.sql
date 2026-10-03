@@ -1,6 +1,6 @@
 -- =============================================================================================
 -- Migration: 0002_seed_data.sql
--- Aber -- consolidated baseline data (public beta)
+-- Aber -- the baseline data of release 1.0
 -- =============================================================================================
 --
 -- Every row the platform needs to come up usable: pure DML, the counterpart of
@@ -72,7 +72,7 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.permissions VALUES ('c234e567-8901-4c1d-8706-933e08544e41', 'gitops:manage', 'Deploy flows and manage GitOps edge configurations')
 ON CONFLICT (id) DO NOTHING;
 -- `audit_trail:read`, renamed with the page before 1.0. THE ID DOES NOT MOVE, as with `link:manage`
--- above; `0000` renames an existing row, which ON CONFLICT (id) DO NOTHING cannot correct.
+-- above.
 INSERT INTO public.permissions VALUES ('d345e678-9012-4c1d-8706-933e08544e42', 'audit_trail:read', 'View the audit trail')
 ON CONFLICT (id) DO NOTHING;
 
@@ -2353,9 +2353,9 @@ COMMENT ON TABLE public.opcua_vocabulary IS 'OPC UA companion specification data
 -- before the first probe says "not yet known" rather than asserting health nobody checked.
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000001', 'Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
--- ON CONFLICT (id), not (service_name): a database seeded earlier holds this id under an OLD name,
--- and a name-targeted clause does not catch a primary-key collision -- the insert would raise on
--- every boot instead of being skipped. 0024 then does the rename.
+-- ON CONFLICT (id), not (service_name): a row renamed since it was seeded keeps this id, and a
+-- name-targeted clause does not catch a primary-key collision -- the insert would raise on every
+-- boot instead of being skipped.
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000003', 'Node-RED (Host-Run Gateways)', 'EDGE_NODE', 'http://localhost:1880', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000004', 'Mosquitto MQTT Broker', 'MQTT_BROKER', 'mqtt://localhost:1883', 'UNKNOWN', NULL, NULL)
@@ -2364,8 +2364,7 @@ INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000
 ON CONFLICT (service_name) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000006', 'Grafana Dashboards', 'MONITORING', 'http://localhost:3002', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
--- ON CONFLICT (id) for this row too: a database from before archived migration 0096 holds the id
--- under the old name 'Supabase API Gateway (Kong)'. 0000 then does the rename.
+-- ON CONFLICT (id) for this row too, for the same reason.
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000007', 'Supabase API Gateway (Envoy)', 'API_GATEWAY', 'http://127.0.0.1:54321', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000008', 'Supabase Auth (GoTrue)', 'AUTHENTICATION', 'http://127.0.0.1:54321/auth/v1', 'UNKNOWN', NULL, NULL)
@@ -2589,6 +2588,19 @@ SELECT set_config('aber.dir_nodered_redirect',   '', false);
 SELECT set_config('aber.dir_gitea_public_url',   '', false);
 SELECT set_config('aber.dir_docs_public_url',     '', false);
 SELECT set_config('aber.dir_supabase_public_url', '', false);
+
+-- ---------------------------------------------------------------------------------------------
+-- The image each row's workload runs
+-- ---------------------------------------------------------------------------------------------
+-- db-init passes the chart's component -> image map as `directory_images` on every run, so the
+-- Version column follows each install and upgrade. psql does not substitute variables inside
+-- dollar quotes, so the map is read here. A runner that passes no map (test:db, the
+-- schema-equivalence check) records nothing and clears nothing.
+\if :{?directory_images} \else \set directory_images '' \endif
+
+SELECT public.record_directory_images(m.images) AS directory_images_changed
+  FROM (SELECT NULLIF(:'directory_images', '')::jsonb AS images) m
+ WHERE m.images IS NOT NULL;
 
 -- ---------------------------------------------------------------------------------------------
 -- Sequence reconciliation
@@ -2894,7 +2906,7 @@ SELECT set_config('aber.gitea_oauth_client_secret', '', false);
 -- ---------------------------------------------------------------------------------------------
 -- One group, not one per concept: `enforce_metric_group_spelling()` makes the first spelling
 -- permanent, and the standard is not yet published. A BMS point is named `BMS/<concept>`, the
--- group the standards seed files its 223P metrics under (0008 retires the earlier `Building`).
+-- group the standards seed files its 223P metrics under.
 
 INSERT INTO public.metric_groups (id, name, description, standard)
 VALUES ('5868dc1c-b33f-41e1-92a7-bddd7e57a3ac', 'BMS',
@@ -7560,8 +7572,6 @@ ON CONFLICT (name) DO NOTHING;
 -- on every replay while leaving the value alone, so an operator's change survives a restart.
 --
 -- Every one has a reader; a setting nothing reads is a control that does nothing.
--- `ui.digital_thread_lane_limit` was declared here until the Audit Trail stopped capping its
--- lanes, and `0000` removes the row from a stack that still holds it.
 --
 -- THREE OF THESE ARE NOT CONSTANTS. `sparkplug.group_id`, `archive.site_key` and the five S3
 -- fields are named by the deployment and arrive as psql variables, so their blocks read a GUC
@@ -7726,11 +7736,8 @@ BEGIN
 
     -- THE DISAGREEMENT IS LOUD. A chart value that no longer matches the database means either the
     -- values file lost the key or somebody meant to re-address the site; both need a person, and
-    -- neither is served by db-init carrying on. One pair is not a disagreement: a stack installed
-    -- before 1.0 holds 'ACS-Cymru', the platform's former name, and 0003 moves it to 'Aber' later
-    -- in this same boot.
-    IF v_stored IS DISTINCT FROM v_group
-       AND NOT (v_stored = 'ACS-Cymru' AND v_group = 'Aber') THEN
+    -- neither is served by db-init carrying on.
+    IF v_stored IS DISTINCT FROM v_group THEN
         RAISE EXCEPTION
             '0002: the database was installed with sparkplug group %, and the chart now says %. '
             'The group is fixed at install because it addresses every gateway, every appliance '
@@ -7843,11 +7850,7 @@ BEGIN
 END;
 $$;
 
--- THE DESTINATION, seeded from the chart on the boot that first supplies it. `archive.bucket` had
--- an earlier, unrelated meaning -- a Supabase Storage bucket, retired with the bucket itself --
--- and `0000` removes that row from a database that still holds it before this declares the key
--- again. The guard there is the absence of `system_settings.sensitive`, which is exactly "the new
--- meaning has not arrived yet".
+-- THE DESTINATION, seeded from the chart on the boot that first supplies it.
 DO $$
 DECLARE
     v_seeded int := 0;
@@ -7931,6 +7934,62 @@ SELECT set_config('aber.archive_region',        '', false);
 SELECT set_config('aber.archive_bucket',        '', false);
 SELECT set_config('aber.archive_access_key_id', '', false);
 SELECT set_config('aber.archive_path_style',    '', false);
+
+-- -------------------------------------------------------------------------------------------
+-- Off-site backup destination  (7 rows)
+-- -------------------------------------------------------------------------------------------
+-- Empty until an Administrator sets them on the Backups page; the backup service copies nothing
+-- while the endpoint is empty. Administrator-only, like the archive destination above.
+DO $$
+DECLARE
+    spec record;
+BEGIN
+    FOR spec IN
+        SELECT * FROM (VALUES
+            ('backup_offsite.endpoint', 'string', 'S3 endpoint',
+             'The full URL every backup is copied to, scheme included: '
+             'https://s3.<region>.amazonaws.com on AWS, or wherever a MinIO answers. Empty: no '
+             'off-site copy, and every backup shares a disk with the databases.'),
+            ('backup_offsite.region', 'string', 'S3 region',
+             'The region the bucket is in. The request is signed with it.'),
+            ('backup_offsite.bucket', 'string', 'S3 bucket',
+             'The bucket the copies are written into. It must already exist.'),
+            ('backup_offsite.prefix', 'string', 'Key prefix',
+             'Each backup is written under <prefix>/<stamp>/. One prefix per site, and the one a '
+             'bucket policy scopes this credential to.'),
+            ('backup_offsite.access_key_id', 'string', 'S3 access key ID',
+             'The identity the service writes as. The secret half is in the vault and is never '
+             'shown.'),
+            ('backup_offsite.recipient', 'string', 'Encryption recipient',
+             'The age public key (age1...) every file is encrypted to before it leaves the pod; '
+             'several, separated by spaces, each decrypt. Keep the matching identity outside this '
+             'stack: a restore after losing the site starts without it.')
+        ) AS t(key, value_type, label, description)
+    LOOP
+        PERFORM public.seed_setting(spec.key, to_jsonb(''::text), spec.value_type, 'Backups',
+                                    spec.label, spec.description, NULL);
+    END LOOP;
+
+    PERFORM public.seed_setting(
+        'backup_offsite.path_style', 'false'::jsonb, 'boolean', 'Backups',
+        'Address the bucket by path',
+        'On for MinIO and most self-hosted gateways; off for AWS, R2 and B2, which take the '
+        'virtual-host form.',
+        NULL
+    );
+
+    UPDATE public.system_settings
+       SET sensitive = true
+     WHERE starts_with(key, 'backup_offsite.')
+       AND NOT sensitive;
+END;
+$$;
+
+-- -------------------------------------------------------------------------------------------
+-- The forge-sweep lease  (1 row)
+-- -------------------------------------------------------------------------------------------
+-- The one row claim_forge_sweep(), renew_forge_sweep() and release_forge_sweep() move.
+INSERT INTO public.forge_sweep_lease (id) VALUES (true) ON CONFLICT (id) DO NOTHING;
 
 -- -------------------------------------------------------------------------------------------
 -- Value domains, and the bounds on the two settings that have them
@@ -8067,8 +8126,7 @@ ON CONFLICT (id) DO NOTHING;
 -- at all.
 --
 -- ON `principal_permissions`, NOT `user_roles`, and that is the whole point of the table --
--- refuse_role_for_machine_principal() refuses a role for an account that cannot sign in. A
--- database seeded before the split still holds the roles, and `0000` takes them away.
+-- refuse_role_for_machine_principal() refuses a role for an account that cannot sign in.
 INSERT INTO public.principal_permissions (principal_id, permission_id)
 SELECT u.id, p.id
   FROM (VALUES
@@ -8369,9 +8427,7 @@ SELECT set_config('aber.sweep_key',   :'forge_sweep_secret', false);
 --   gateway_revoke_secret         what actually authorises the revocation, checked by the function
 --   forge_sweep_secret            what authorises the forge sweep (0099), checked by forge-sweep
 --
--- All four are rewritten from db-init's variables on every boot, so the publishable key's secret
--- was renamed from `supabase_anon_key` by deleting the old name here: there is no stored value to
--- carry across.
+-- All four are rewritten from db-init's variables on every boot.
 DO $vault$
 DECLARE
   v_url    text := btrim(coalesce(current_setting('aber.fn_url', true), ''));
@@ -8392,11 +8448,10 @@ BEGIN
   END IF;
 
   -- REPLACED, NOT MERGED. A rotated value must overwrite the stored one and vault.create_secret
-  -- refuses a duplicate name, so the old row goes first. Same shape 0006 uses. The retired name
-  -- `supabase_anon_key` goes with them and is not written again.
+  -- refuses a duplicate name, so the old row goes first. Same shape archived migration 0006 uses.
   FOR v_id IN SELECT id FROM vault.secrets
                WHERE name IN ('supabase_functions_url', 'supabase_publishable_key', 'gateway_revoke_secret',
-                              'forge_sweep_secret', 'supabase_anon_key')
+                              'forge_sweep_secret')
   LOOP
     DELETE FROM vault.secrets WHERE id = v_id;
   END LOOP;

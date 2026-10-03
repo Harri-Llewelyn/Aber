@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0018_every_backup_has_an_encrypted_copy_off_site.sql
+-- Migration: 0151_every_backup_has_an_encrypted_copy_off_site.sql (applied as 0018 until the 1.0 squash)
 -- The backup service copies every backup, encrypted, to an S3 endpoint set on the Backups page
 -- =============================================================================================
 --

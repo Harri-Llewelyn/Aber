@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0004_the_namespace_answers_to_aber.sql
+-- Migration: 0137_the_namespace_answers_to_aber.sql (applied as 0004 until the 1.0 squash)
 -- Locally-minted semantic ids move from acs-cymru.local to aber.local (#335, tier 3)
 -- =============================================================================================
 --

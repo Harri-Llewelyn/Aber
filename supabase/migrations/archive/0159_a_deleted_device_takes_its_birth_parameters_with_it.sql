@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0029_a_deleted_device_takes_its_birth_parameters_with_it.sql
+-- Migration: 0159_a_deleted_device_takes_its_birth_parameters_with_it.sql (applied as 0029 until the 1.0 squash)
 -- A deleted device's asset_config rows are removed with it
 -- =============================================================================================
 --

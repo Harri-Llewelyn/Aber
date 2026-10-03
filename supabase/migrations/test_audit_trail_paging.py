@@ -879,7 +879,7 @@ class TheOtherTwoIdsTheDrawerShows(unittest.TestCase):
 
 class HowManyRowsATransactionWrote(unittest.TestCase):
     """
-    0006. Each event carries `transaction_rows`: how many rows share its causation_id, counted over
+    0139. Each event carries `transaction_rows`: how many rows share its causation_id, counted over
     the whole table rather than the page. The drawer's "Same transaction" section is drawn from the
     loaded, filtered set, so without this a single-row act and a group whose other rows the filters
     hide were indistinguishable, and it hedged and offered "Show whole transaction" to both.
@@ -921,12 +921,12 @@ class HowManyRowsATransactionWrote(unittest.TestCase):
         # because user_roles has no readable table to be absent from). Plus a single-row act, and
         # a row from before causation existed.
         self.group = [
-            self._insert("devices", {"name": "Txn Member 0 0006"}, self.CAUSATION),
-            self._insert("devices", {"name": "Txn Member 1 0006"}, self.CAUSATION),
+            self._insert("devices", {"name": "Txn Member 0 0139"}, self.CAUSATION),
+            self._insert("devices", {"name": "Txn Member 1 0139"}, self.CAUSATION),
             self._insert("user_roles", {"role": "Ghost_Role_0006"}, self.CAUSATION),
         ]
-        self.lone = self._insert("devices", {"name": "Lone Act 0006"}, self.CAUSATION + 1)
-        self.legacy = self._insert("devices", {"name": "Legacy Row 0006"}, None)
+        self.lone = self._insert("devices", {"name": "Lone Act 0139"}, self.CAUSATION + 1)
+        self.legacy = self._insert("devices", {"name": "Legacy Row 0139"}, None)
 
     def tearDown(self):
         self.conn.rollback()

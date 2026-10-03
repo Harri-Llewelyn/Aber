@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0017_retention_keeps_the_newest_three_backups.sql
+-- Migration: 0150_retention_keeps_the_newest_three_backups.sql (applied as 0017 until the 1.0 squash)
 -- The retention prune never removes any of the newest three backups
 -- =============================================================================================
 --

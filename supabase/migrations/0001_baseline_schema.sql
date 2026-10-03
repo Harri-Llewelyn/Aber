@@ -1,11 +1,11 @@
 -- =============================================================================================
 -- Migration: 0001_baseline_schema.sql
--- Aber -- consolidated schema baseline (public beta)
+-- Aber -- the schema baseline of release 1.0
 -- =============================================================================================
 --
--- The squashed structural baseline: pure DDL, generated from a pg_dump of a database the
--- pre-beta chain built (the chain is preserved under `supabase/migrations/archive/`). Baseline
--- data lives in `0002_seed_data.sql`.
+-- The squashed structural baseline: pure DDL, generated from a pg_dump of a database the whole
+-- chain before 1.0 built (the chain is kept under `supabase/migrations/archive/`). Baseline data
+-- lives in `0002_seed_data.sql`.
 --
 -- IDEMPOTENT, AND THAT IS NOT OPTIONAL. `supabase-db-init` replays every `/migrations/*.sql` on
 -- every boot with no ledger, so every statement survives re-execution: `CREATE TABLE IF NOT
@@ -225,7 +225,7 @@ $roles$;
 -- the narrative between objects lives in the archived migrations.
 --
 -- `audit_trail`'s monthly partitions are NOT here. They are created at run time by the
--- function 0079 installs, so the months present on the day of the dump are not schema; the
+-- function archived migration 0079 installs, so the months present on the day of the dump are not schema; the
 -- partitioned parent and the DEFAULT partition are, and both are below.
 
 -- public :: SCHEMA
@@ -417,7 +417,8 @@ BEGIN
                country_of_origin                = v_plate_new.country_of_origin,
                uri_of_the_product               = v_plate_new.uri_of_the_product,
                updated_at                       = now(),
-               -- The proposer; see 0086.
+               -- The proposer: a nameplate is an assertion about the asset, and who made it is
+               -- part of the record.
                updated_by                       = v_proposal.proposed_by
          WHERE device_id = v_proposal.entity_id;
 
@@ -432,9 +433,8 @@ BEGIN
         SELECT * INTO v_area_new FROM jsonb_populate_record(v_area, v_proposal.patch);
 
         -- `areas_name_topic_safe`, `areas_name_key` and `areas_icon_valid` run on this UPDATE, so a
-        -- patch naming an area another area is already called, a name carrying a topic separator,
-        -- or an icon nobody drew aborts the approval rather than being stored. The refusal is the
-        -- database's own sentence and the proposal stays open.
+        -- taken name, a topic separator or an unknown icon aborts the approval with the database's
+        -- own sentence and the proposal stays open.
         UPDATE public.areas
            SET name        = v_area_new.name,
                description = v_area_new.description,
@@ -452,8 +452,8 @@ BEGIN
         SELECT * INTO v_cell_new FROM jsonb_populate_record(v_cell, v_proposal.patch);
 
         -- The table's CHECKs, the area foreign key and place_cell_in_its_area() run on this
-        -- UPDATE, so a patch naming an icon nobody drew, a deleted area or a place too close to a
-        -- neighbour aborts the approval rather than being stored.
+        -- UPDATE, so an unknown icon, a deleted area or a place too close to a neighbour aborts
+        -- the approval rather than being stored.
         UPDATE public.cells
            SET name        = v_cell_new.name,
                grafana_url = v_cell_new.grafana_url,
@@ -486,13 +486,15 @@ BEGIN
          WHERE id = v_gateway.id;
 
     END IF;
-    -- No `schemas` branch: 0090 withdrew the lane and may_decide_proposal() refuses it above. No
-    -- link branch either: 0108 withdrew those three the same way, and a link has only ever been
-    -- attached by the direct edit that `link:manage` gates.
+    -- No `schemas` or link branch: those lanes are withdrawn and may_decide_proposal() refuses
+    -- them above.
 
     -- The row that names both parties; the target's own audit trigger records only the approver.
+    -- causation_id is this transaction, which the trigger also stamped on the target's row, so
+    -- the two group as one act.
     INSERT INTO public.audit_trail
-        (entity_type, entity_id, action, old_data, new_data, changed_by, actor_source, audit_domain)
+        (entity_type, entity_id, action, old_data, new_data, changed_by, actor_source,
+         causation_id, audit_domain)
     VALUES (
         v_proposal.entity_type,
         v_proposal.entity_id,
@@ -508,6 +510,7 @@ BEGIN
         ),
         v_actor,
         'user',
+        txid_current(),
         public.audit_domain_for(v_proposal.entity_type, 'PROPOSAL_APPLIED')
     )
     RETURNING id INTO v_trail;
@@ -531,7 +534,7 @@ ALTER FUNCTION public.approve_proposal(p_proposal_id uuid) OWNER TO postgres;
 --
 
 -- FUNCTION approve_proposal(p_proposal_id uuid) :: COMMENT
-COMMENT ON FUNCTION public.approve_proposal(p_proposal_id uuid) IS 'Approving IS applying: the lane''s own gate is re-checked server-side, the patch re-validated against proposable_columns(), and the change written in this transaction so every CHECK and foreign key on the target runs now -- an invalid change aborts the approval instead of becoming an audit record of something that did not happen. A proposal whose values are already in place is refused for the same reason. The three *_links lanes INSERT a row rather than updating one.';
+COMMENT ON FUNCTION public.approve_proposal(p_proposal_id uuid) IS 'Approving IS applying: the lane''s own gate is re-checked server-side, the patch re-validated against proposable_columns(), and the change written in this transaction so every CHECK and foreign key on the target runs now -- an invalid change aborts the approval instead of becoming an audit record of something that did not happen. A proposal whose values are already in place is refused for the same reason. The PROPOSAL_APPLIED row names both parties and carries this transaction as its causation_id, as the target''s own audit row does, so the two group as one act.';
 
 --
 
@@ -769,11 +772,12 @@ CREATE OR REPLACE FUNCTION public.audit_domain_for(p_entity_type text, p_action 
       THEN 'security'
 
     -- The asset trail: the shopfloor's own history. CREDENTIAL_ISSUED lands here on `gateways`
-    -- deliberately: a Manager may mint a host-run gateway's broker credential. `schemas` joined in
-    -- 0120 -- see the header for why an Administrator-only write is still an asset-lane record.
+    -- deliberately: a Manager may mint a host-run gateway's broker credential. `schemas` and
+    -- `metric_catalog` are Administrator-only writes to tables every authenticated user reads.
     WHEN p_entity_type IN ('areas', 'cells', 'devices', 'gateways', 'links',
                            'schemas', 'device_nameplate', 'change_proposals',
-                           'cell_links', 'gateway_links', 'device_links')
+                           'cell_links', 'gateway_links', 'device_links',
+                           'metric_catalog')
       THEN 'asset'
 
     -- Fail-closed: a new entity_type nobody classified is restricted rather than exposed.
@@ -787,7 +791,7 @@ ALTER FUNCTION public.audit_domain_for(p_entity_type text, p_action text) OWNER 
 --
 
 -- FUNCTION audit_domain_for(p_entity_type text, p_action text) :: COMMENT
-COMMENT ON FUNCTION public.audit_domain_for(p_entity_type text, p_action text) IS 'Which lane an audit_trail row belongs in. The rule is WHO MAY PERFORM the act, not what the act is about -- see 0070 -- with `schemas` the one exception 0120 makes, because its own table is readable by every authenticated user. Unrecognised input is ''security'': the safe failure is a row a Shopfloor_Manager cannot see, not a privileged act they can.';
+COMMENT ON FUNCTION public.audit_domain_for(p_entity_type text, p_action text) IS 'Which lane an audit_trail row belongs in. The rule is WHO MAY PERFORM the act, not what the act is about -- see 0070 -- with `schemas` (0120) and `metric_catalog` (0143) the exceptions, because their own tables are readable by every authenticated user. Unrecognised input is ''security'': the safe failure is a row a Shopfloor_Manager cannot see, not a privileged act they can.';
 
 --
 
@@ -814,6 +818,198 @@ ALTER FUNCTION public.audit_telemetry_columns() OWNER TO postgres;
 
 -- FUNCTION audit_telemetry_columns() :: COMMENT
 COMMENT ON FUNCTION public.audit_telemetry_columns() IS 'The gateways columns a heartbeat rewrites: liveness and the health readings (0035), and flow_hash, whose change ingest_record_gateway_health() records as its own FLOW_DEPLOYED row. log_audit_trail_event() subtracts these before deciding whether an UPDATE is an event.';
+
+--
+
+-- audit_trail_backup_job_ids_matching(text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.audit_trail_backup_job_ids_matching(p_pattern text) RETURNS uuid[]
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+  SELECT coalesce(array_agg(j.id), '{}'::uuid[])
+    FROM public.backup_jobs j
+    LEFT JOIN public.backups b ON b.id = j.backup_id
+   WHERE p_pattern IS NOT NULL
+     AND public.has_role(ARRAY['Administrator', 'Auditor'])
+     AND (j.note ILIKE p_pattern OR b.stamp ILIKE p_pattern)
+$$;
+
+
+ALTER FUNCTION public.audit_trail_backup_job_ids_matching(p_pattern text) OWNER TO postgres;
+
+--
+
+-- FUNCTION audit_trail_backup_job_ids_matching(p_pattern text) :: COMMENT
+COMMENT ON FUNCTION public.audit_trail_backup_job_ids_matching(p_pattern text) IS 'The ids of backup jobs whose note, or the stamp of the backup they produced, matches a LIKE pattern -- the two things the Backups page identifies a job by and neither of which is in its audit payload. For audit_trail_page()''s search. Administrator and Auditor only, matching the roles audit_trail_select_security admits, and an empty array rather than an error for anybody else because this is part of a query rather than a request of its own.';
+
+--
+
+-- audit_trail_page(integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone, timestamp with time zone, bigint, text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.audit_trail_page(p_limit integer DEFAULT 200, p_include_purged boolean DEFAULT false, p_entity_type text DEFAULT NULL::text, p_action text DEFAULT NULL::text, p_entity_ids uuid[] DEFAULT NULL::uuid[], p_since timestamp with time zone DEFAULT NULL::timestamp with time zone, p_until timestamp with time zone DEFAULT NULL::timestamp with time zone, p_before_recorded_at timestamp with time zone DEFAULT NULL::timestamp with time zone, p_before_id bigint DEFAULT NULL::bigint, p_search text DEFAULT NULL::text) RETURNS jsonb
+    LANGUAGE sql STABLE
+    SET search_path TO 'public'
+    AS $_$
+WITH term AS (
+    SELECT CASE WHEN p_search IS NULL OR btrim(p_search) = '' THEN NULL ELSE btrim(p_search) END AS raw
+),
+pattern AS (
+    -- The search as a LIKE pattern, built once. THE METACHARACTERS ARE ESCAPED: the box promises
+    -- a substring of a name or an id, and an unescaped '%' would silently return the whole trail
+    -- to somebody who typed a percentage into it. Backslash is the default LIKE escape, so the
+    -- backslashes have to be doubled first or an escape would be introduced by the escaping.
+    SELECT CASE
+             WHEN t.raw IS NULL THEN NULL
+             ELSE '%' || replace(replace(replace(t.raw, '\', '\\'), '%', '\%'), '_', '\_') || '%'
+           END AS pattern,
+           -- THE SAME TERM AS A ROW ID, when it is nothing but digits. 18 at most: bigint tops out
+           -- at 19, and a cast that overflows raises rather than missing.
+           CASE
+             WHEN t.raw ~ '^[0-9]{1,18}$' THEN t.raw::bigint
+             ELSE NULL
+           END AS id_term
+      FROM term t
+),
+-- MATERIALIZED, AND MEASURED. Without it Postgres inlines this CTE and the helper lands in the
+-- per-row Filter of every partition scan -- a STABLE function is allowed to be called once and is
+-- not promised to be. On 4,065 rows that took a search from 53ms to 583ms, which is the shape of
+-- cost that looks like "the trail got big" rather than like a query doing the wrong thing.
+q AS MATERIALIZED (
+    SELECT p.pattern,
+           p.id_term,
+           public.audit_trail_user_ids_matching(p.pattern)        AS user_ids,
+           public.audit_trail_backup_job_ids_matching(p.pattern)  AS job_ids
+      FROM pattern p
+),
+matching AS (
+    SELECT t.*,
+           -- SIX TYPES, FIVE PROBES, and the mismatch is `device_nameplate`: it is keyed by its
+           -- device's id, so `devices` answers for it. A type is listed here only if one of the
+           -- probes below can be asked about its rows -- `user_roles` and `service_principals`
+           -- are auth.users rows with no public table to read, and would otherwise answer "absent
+           -- from all five" about a person who is perfectly present. An entity type whose table
+           -- has been RETIRED is a third case this still does not answer: "the table is gone" is
+           -- not "the row is gone", so `area_floors` remains drawn and cannot be hidden.
+           t.entity_type IN ('areas', 'cells', 'gateways', 'devices', 'schemas', 'device_nameplate')
+       AND NOT EXISTS (SELECT 1 FROM public.areas    a WHERE a.id = t.entity_id)
+       AND NOT EXISTS (SELECT 1 FROM public.cells    c WHERE c.id = t.entity_id)
+       AND NOT EXISTS (SELECT 1 FROM public.gateways g WHERE g.id = t.entity_id)
+       AND NOT EXISTS (SELECT 1 FROM public.devices  d WHERE d.id = t.entity_id)
+       AND NOT EXISTS (SELECT 1 FROM public.schemas  s WHERE s.id = t.entity_id)
+               AS is_purged
+      FROM public.audit_trail t
+     CROSS JOIN q
+     WHERE (p_entity_type IS NULL OR t.entity_type = p_entity_type)
+       AND (p_action      IS NULL OR t.action      = p_action)
+       AND (p_entity_ids  IS NULL OR t.entity_id   = ANY (p_entity_ids))
+       AND (p_since       IS NULL OR t.recorded_at >= p_since)
+       AND (p_until       IS NULL OR t.recorded_at <= p_until)
+       -- THE ID AND THE NAME THE TIMELINE DRAWS. Both snapshots are read because an INSERT has
+       -- only `new_data` and a DELETE only `old_data`, and an UPDATE that renames something is
+       -- findable under either name, which is what somebody searching for the old one wants.
+       AND (q.pattern IS NULL
+            OR t.entity_id::text ILIKE q.pattern
+            -- THE OTHER TWO IDS THE DRAWER SHOWS: this audit row, and the transaction that wrote
+            -- it. Only when the term is nothing but digits, so this adds rows to a numeric search
+            -- and changes no other one.
+            OR (q.id_term IS NOT NULL
+                AND (t.id = q.id_term OR t.causation_id = q.id_term))
+            -- The person a role assignment is about, who is not in the payload. Empty for a caller
+            -- who may not ask, which matches no row.
+            OR t.entity_id = ANY (q.user_ids)
+            -- The note and the produced backup's stamp, which are on two tables and in no payload.
+            -- Empty on the same terms, and for the same reason.
+            OR t.entity_id = ANY (q.job_ids)
+            OR EXISTS (
+                 SELECT 1
+                   FROM unnest(ARRAY['name', 'sparkplug_id', 'schema_name',
+                                     'label', 'key', 'role', 'stamp', 'origin']) AS f(field)
+                  WHERE (t.new_data ->> f.field) ILIKE q.pattern
+                     OR (t.old_data ->> f.field) ILIKE q.pattern
+               ))
+),
+visible AS (
+    SELECT * FROM matching
+     WHERE (p_include_purged OR NOT is_purged)
+       -- The cursor is applied here and not in `matching`: `purged_assets` and `total_matching` are
+       -- counted over `matching` and are facts about everything the filters select, not about what
+       -- is left after paging.
+       AND (p_before_id IS NULL
+            OR p_before_recorded_at IS NULL
+            OR (recorded_at, id) < (p_before_recorded_at, p_before_id))
+     ORDER BY recorded_at DESC, id DESC
+     LIMIT greatest(1, least(coalesce(p_limit, 200), 1000))
+)
+SELECT jsonb_build_object(
+    'events', coalesce(
+        (SELECT jsonb_agg(
+                  (to_jsonb(v) - 'is_purged')
+                  -- HOW MANY ROWS THE TRANSACTION WROTE (0139), over the whole table and not the
+                  -- page, so the drawer can tell a single-row act from a group whose other rows
+                  -- the filters hide or a later page holds. One probe of
+                  -- idx_audit_trail_causation per row on the page. Under the caller's own
+                  -- policies, like the rows themselves: it is the number a reader could load.
+                  -- Null where there is no causation: NULL is not a group, and counting it would
+                  -- make every legacy row one act.
+                  || jsonb_build_object('transaction_rows',
+                       CASE WHEN v.causation_id IS NULL THEN NULL
+                            ELSE (SELECT count(*) FROM public.audit_trail d
+                                   WHERE d.causation_id = v.causation_id)
+                       END)
+                  ORDER BY v.recorded_at DESC, v.id DESC)
+           FROM visible v),
+        '[]'::jsonb),
+    'purged_assets', (SELECT count(DISTINCT entity_id) FROM matching WHERE is_purged),
+    -- HOW LONG THE TRAIL IS UNDER THESE FILTERS, so a reader holding one page knows what fraction
+    -- of it that is. Counted under the SAME predicate `visible` opens with, minus the cursor and
+    -- the limit -- so it does not move as the reader pages, and a page can never report more rows
+    -- than the total it is a fraction of.
+    'total_matching', (SELECT count(*) FROM matching WHERE p_include_purged OR NOT is_purged),
+    -- KEPT, AND IT MEANS "THERE IS A NEXT PAGE". It used to mean "your view is cut off", which was
+    -- the same thing when there was no way to ask for more. Callers that only ever showed a banner
+    -- keep working unchanged.
+    'truncated', (SELECT count(*) FROM visible) >= greatest(1, least(coalesce(p_limit, 200), 1000)),
+    -- WHERE THE READER GOT TO, or null at the end of the trail. Null is the ONLY end-of-data
+    -- signal a caller should trust: an empty `events` array with a non-null cursor cannot happen,
+    -- but a full page that happens to be the last one is ordinary, so "fewer rows than I asked
+    -- for" is not a reliable test and callers must not invent one.
+    'next_cursor', CASE
+        WHEN (SELECT count(*) FROM visible) >= greatest(1, least(coalesce(p_limit, 200), 1000))
+        THEN (SELECT jsonb_build_object('recorded_at', v.recorded_at, 'id', v.id)
+                FROM visible v ORDER BY v.recorded_at ASC, v.id ASC LIMIT 1)
+        ELSE NULL
+    END
+);
+$_$;
+
+
+ALTER FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) OWNER TO postgres;
+
+--
+
+-- FUNCTION audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) :: COMMENT
+COMMENT ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) IS 'One page of the Audit Trail, with deleted entities filtered server-side and counted over the whole match rather than the page. `total_matching` is how many rows the filters select in total, under the same purged rule as the page, so a reader knows what fraction of the trail they hold. Keyset paged on (recorded_at DESC, id DESC): pass the previous response''s `next_cursor` back as p_before_recorded_at/p_before_id. A null next_cursor is the only end-of-data signal. `p_search` matches the entity id and the audit-snapshot fields the timeline labels a lane from, so an entity is findable by the name the page shows for it; LIKE metacharacters in it are literal. A term of 1 to 18 digits ALSO matches the audit row''s own id and its causation_id (0121), which is how the other two ids the event drawer shows are searchable; it is an additional disjunct, so a numeric name still matches by name. `transaction_rows` on each event is how many rows share its causation_id, counted over the whole table under the caller''s own policies rather than over the page, and null where there is no causation (0139). Two labels are not in any payload and are matched through a SECURITY DEFINER helper each: the person a role assignment is about (0115), and a backup job''s note and the stamp of the backup it produced (0118). `is_purged` applies to areas, cells, gateways, devices, schemas and device nameplates -- every entity type this function can probe a table for. A type with no readable table behind it (user_roles and service_principals, which are auth.users rows; area_floors, whose table was retired) is never called deleted. `purged_assets` keeps its wire name and counts all of them.';
+
+--
+
+-- audit_trail_user_ids_matching(text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.audit_trail_user_ids_matching(p_pattern text) RETURNS uuid[]
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+  SELECT coalesce(array_agg(u.id), '{}'::uuid[])
+    FROM auth.users u
+   WHERE p_pattern IS NOT NULL
+     AND public.has_role(ARRAY['Administrator', 'Auditor'])
+     AND u.email ILIKE p_pattern
+$$;
+
+
+ALTER FUNCTION public.audit_trail_user_ids_matching(p_pattern text) OWNER TO postgres;
+
+--
+
+-- FUNCTION audit_trail_user_ids_matching(p_pattern text) :: COMMENT
+COMMENT ON FUNCTION public.audit_trail_user_ids_matching(p_pattern text) IS 'The ids of people whose email matches a LIKE pattern, for the one disjunct of audit_trail_page()''s search that cannot read its answer out of an audit payload: a role-assignment row names the role, and the dashboard labels that lane with the person (0116). Administrator and Auditor only, and an empty array rather than an error for anybody else, because this is part of a query rather than a request of its own.';
 
 --
 
@@ -1145,6 +1341,255 @@ COMMENT ON FUNCTION public.backup_forget(p_backup_id uuid, p_reason text) IS 'De
 
 --
 
+-- backup_offsite_base() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.backup_offsite_base() RETURNS text
+    LANGUAGE plpgsql STABLE
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+DECLARE
+    v jsonb := (SELECT jsonb_object_agg(key, value) FROM public.system_settings
+                 WHERE starts_with(key, 'backup_offsite.'));
+BEGIN
+    IF coalesce(v ->> 'backup_offsite.endpoint', '') = ''
+       OR coalesce(v ->> 'backup_offsite.region', '') = ''
+       OR coalesce(v ->> 'backup_offsite.bucket', '') = ''
+       OR coalesce(v ->> 'backup_offsite.prefix', '') = ''
+       OR coalesce(v ->> 'backup_offsite.access_key_id', '') = ''
+       OR coalesce(v ->> 'backup_offsite.recipient', '') = ''
+       OR NOT EXISTS (SELECT 1 FROM vault.secrets WHERE name = 'backup_offsite_secret_access_key') THEN
+        RETURN NULL;
+    END IF;
+    RETURN rtrim(v ->> 'backup_offsite.endpoint', '/') || '/' || (v ->> 'backup_offsite.bucket') || '/'
+        || (v ->> 'backup_offsite.prefix') || '/';
+END;
+$$;
+
+
+ALTER FUNCTION public.backup_offsite_base() OWNER TO postgres;
+
+--
+
+-- FUNCTION backup_offsite_base() :: COMMENT
+COMMENT ON FUNCTION public.backup_offsite_base() IS 'Where off-site copies go, <endpoint>/<bucket>/<prefix>/, or NULL while any of the six settings or the secret key is missing. Not callable through PostgREST.';
+
+--
+
+-- backup_offsite_credential_is_set() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.backup_offsite_credential_is_set() RETURNS boolean
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+BEGIN
+    RETURN public.has_role(ARRAY['Administrator'])
+       AND EXISTS (SELECT 1 FROM vault.secrets WHERE name = 'backup_offsite_secret_access_key');
+END;
+$$;
+
+
+ALTER FUNCTION public.backup_offsite_credential_is_set() OWNER TO postgres;
+
+--
+
+-- FUNCTION backup_offsite_credential_is_set() :: COMMENT
+COMMENT ON FUNCTION public.backup_offsite_credential_is_set() IS 'True when the off-site backup credential is in the vault and the caller is an Administrator; false for everyone else.';
+
+--
+
+-- backup_offsite_destination() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.backup_offsite_destination() RETURNS jsonb
+    LANGUAGE plpgsql STABLE
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+DECLARE
+    v_base text;
+    v      jsonb;
+BEGIN
+    PERFORM public.require_backup_service_caller('backup_offsite_destination');
+    v_base := public.backup_offsite_base();
+    IF v_base IS NULL THEN
+        RETURN NULL;
+    END IF;
+    v := (SELECT jsonb_object_agg(key, value) FROM public.system_settings WHERE starts_with(key, 'backup_offsite.'));
+    RETURN jsonb_build_object(
+        'base',          v_base,
+        'endpoint',      rtrim(v ->> 'backup_offsite.endpoint', '/'),
+        'region',        v ->> 'backup_offsite.region',
+        'bucket',        v ->> 'backup_offsite.bucket',
+        'prefix',        v ->> 'backup_offsite.prefix',
+        'access_key_id', v ->> 'backup_offsite.access_key_id',
+        'secret_key',    (SELECT decrypted_secret FROM vault.decrypted_secrets
+                           WHERE name = 'backup_offsite_secret_access_key'),
+        'recipients',    to_jsonb(regexp_split_to_array(btrim(v ->> 'backup_offsite.recipient'), '[\s,]+')),
+        'path_style',    coalesce((v ->> 'backup_offsite.path_style')::boolean, false)
+    );
+END;
+$$;
+
+
+ALTER FUNCTION public.backup_offsite_destination() OWNER TO postgres;
+
+--
+
+-- FUNCTION backup_offsite_destination() :: COMMENT
+COMMENT ON FUNCTION public.backup_offsite_destination() IS 'The off-site destination with its secret key, for the backup service alone, or NULL while it is incomplete.';
+
+--
+
+-- backup_offsite_health_rows() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.backup_offsite_health_rows() RETURNS TABLE(newest_stamp text, offsite_state text, age_seconds numeric)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+DECLARE
+    v_base    text := public.backup_offsite_base();
+    v_changed timestamptz;
+BEGIN
+    IF v_base IS NULL THEN
+        RETURN;
+    END IF;
+    SELECT max(s.updated_at) INTO v_changed FROM public.system_settings s WHERE starts_with(s.key, 'backup_offsite.');
+    RETURN QUERY
+        SELECT b.stamp, b.offsite_state,
+               CASE WHEN b.offsite_state = 'COPIED' AND starts_with(coalesce(b.offsite_location, ''), v_base)
+                    THEN 0::numeric
+                    ELSE EXTRACT(EPOCH FROM (now() - greatest(b.taken_at, v_changed)))::numeric
+               END
+          FROM public.backups b
+         ORDER BY b.taken_at DESC, b.stamp DESC
+         LIMIT 1;
+END;
+$$;
+
+
+ALTER FUNCTION public.backup_offsite_health_rows() OWNER TO postgres;
+
+--
+
+-- FUNCTION backup_offsite_health_rows() :: COMMENT
+COMMENT ON FUNCTION public.backup_offsite_health_rows() IS 'The row backup_offsite_health shows. SECURITY DEFINER so grafana_reader needs no privilege on backups, system_settings or the vault.';
+
+--
+
+-- backup_offsite_next() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.backup_offsite_next() RETURNS jsonb
+    LANGUAGE plpgsql STABLE
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+DECLARE
+    v_base text;
+BEGIN
+    PERFORM public.require_backup_service_caller('backup_offsite_next');
+    v_base := public.backup_offsite_base();
+    IF v_base IS NULL THEN
+        RETURN NULL;
+    END IF;
+    RETURN (
+        SELECT jsonb_build_object('id', b.id, 'stamp', b.stamp, 'location', b.location)
+          FROM public.backups b
+         WHERE NOT (b.offsite_state = 'COPIED' AND starts_with(coalesce(b.offsite_location, ''), v_base))
+           AND (b.offsite_state <> 'FAILED'
+                OR b.offsite_attempted_at IS NULL
+                OR b.offsite_attempted_at <= now()
+                   - least(interval '1 minute' * power(2, least(greatest(b.offsite_attempts - 1, 0), 4)),
+                           interval '15 minutes'))
+         ORDER BY b.taken_at DESC, b.stamp DESC
+         LIMIT 1
+    );
+END;
+$$;
+
+
+ALTER FUNCTION public.backup_offsite_next() OWNER TO postgres;
+
+--
+
+-- FUNCTION backup_offsite_next() :: COMMENT
+COMMENT ON FUNCTION public.backup_offsite_next() IS 'The newest backup with no copy at the current off-site destination and no failure in its backoff, or NULL. The backup service''s poll, when it has no job to take.';
+
+--
+
+-- backup_offsite_record(uuid, text, jsonb, text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.backup_offsite_record(p_backup_id uuid, p_location text, p_objects jsonb, p_error text) RETURNS void
+    LANGUAGE plpgsql
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+BEGIN
+    PERFORM public.require_backup_service_caller('backup_offsite_record');
+    IF p_error IS NULL THEN
+        UPDATE public.backups
+           SET offsite_state = 'COPIED', offsite_location = p_location,
+               offsite_objects = coalesce(p_objects, '[]'::jsonb),
+               offsite_copied_at = now(), offsite_attempted_at = now(),
+               offsite_attempts = 0, offsite_error = NULL
+         WHERE id = p_backup_id;
+    ELSE
+        UPDATE public.backups
+           SET offsite_state = 'FAILED', offsite_attempted_at = now(),
+               offsite_attempts = offsite_attempts + 1,
+               offsite_error = left(coalesce(nullif(btrim(p_error), ''), 'unspecified failure'), 2000)
+         WHERE id = p_backup_id;
+    END IF;
+END;
+$$;
+
+
+ALTER FUNCTION public.backup_offsite_record(p_backup_id uuid, p_location text, p_objects jsonb, p_error text) OWNER TO postgres;
+
+--
+
+-- FUNCTION backup_offsite_record(p_backup_id uuid, p_location text, p_objects jsonb, p_error text) :: COMMENT
+COMMENT ON FUNCTION public.backup_offsite_record(p_backup_id uuid, p_location text, p_objects jsonb, p_error text) IS 'Record an off-site copy: COPIED with where and what, or FAILED with why. The backup service''s gate.';
+
+--
+
+-- backup_offsite_setting_guard() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.backup_offsite_setting_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public', 'pg_catalog'
+    AS $_$
+DECLARE
+    v_value text := CASE WHEN jsonb_typeof(NEW.value) = 'string' THEN NEW.value #>> '{}' END;
+    v_rule  text;
+BEGIN
+    IF NOT starts_with(NEW.key, 'backup_offsite.') OR NEW.value IS NOT DISTINCT FROM OLD.value
+       OR coalesce(v_value, '') = '' THEN
+        RETURN NEW;
+    END IF;
+
+    v_rule := CASE NEW.key
+        WHEN 'backup_offsite.endpoint' THEN
+            CASE WHEN v_value !~ '^https?://[^\s/?#]+(/[^\s?#]*)?$'
+                 THEN 'must be a URL with its scheme, such as https://s3.eu-west-2.amazonaws.com' END
+        WHEN 'backup_offsite.region' THEN
+            CASE WHEN v_value !~ '^[A-Za-z0-9_-]{1,64}$'
+                 THEN 'must be a region name, such as eu-west-2' END
+        WHEN 'backup_offsite.bucket' THEN
+            CASE WHEN v_value !~ '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+                 THEN 'must be an S3 bucket name: 3 to 63 lower-case letters, digits, dots and hyphens' END
+        WHEN 'backup_offsite.prefix' THEN
+            CASE WHEN length(v_value) > 200
+                   OR v_value !~ '^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$'
+                 THEN 'must be segments of letters, digits, dots, hyphens and underscores separated by /, with no leading or trailing /' END
+        WHEN 'backup_offsite.access_key_id' THEN
+            CASE WHEN v_value !~ '^[A-Za-z0-9+/=._-]{1,128}$'
+                 THEN 'must be an access key ID, with no spaces' END
+        WHEN 'backup_offsite.recipient' THEN
+            CASE WHEN btrim(v_value) !~ '^age1[ac-hj-np-z02-9]{58}([\s,]+age1[ac-hj-np-z02-9]{58})*$'
+                 THEN 'must be one or more age public keys (age1 followed by 58 characters), separated by spaces' END
+    END;
+
+    IF v_rule IS NOT NULL THEN
+        RAISE EXCEPTION '% %', NEW.key, v_rule USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$_$;
+
+
+ALTER FUNCTION public.backup_offsite_setting_guard() OWNER TO postgres;
+
+--
+
 -- backup_prunable(integer) :: FUNCTION
 CREATE OR REPLACE FUNCTION public.backup_prunable(p_retention_days integer) RETURNS jsonb
     LANGUAGE plpgsql STABLE
@@ -1158,11 +1603,19 @@ BEGIN
         RETURN '[]'::jsonb;
     END IF;
 
+    -- The floor: the newest three rows are never returned. Every row is a successful backup, so
+    -- while backups are failing these are the last three good ones. The Backups page holds the
+    -- same number (BACKUP_RETENTION_FLOOR), and check-docs-drift.mjs couples the two. The service
+    -- deletes each returned row's off-site copy with its files, so the copies follow the floor too.
     RETURN coalesce((
-        SELECT jsonb_agg(jsonb_build_object('id', b.id, 'stamp', b.stamp, 'location', b.location) ORDER BY b.taken_at)
+        SELECT jsonb_agg(jsonb_build_object('id', b.id, 'stamp', b.stamp, 'location', b.location,
+                                            'offsite_location', b.offsite_location) ORDER BY b.taken_at)
           FROM public.backups b
          WHERE NOT b.pinned
            AND b.taken_at < now() - make_interval(days => p_retention_days)
+           AND b.id NOT IN (
+               SELECT n.id FROM public.backups n ORDER BY n.taken_at DESC, n.stamp DESC LIMIT 3
+           )
     ), '[]'::jsonb);
 END;
 $$;
@@ -1173,7 +1626,7 @@ ALTER FUNCTION public.backup_prunable(p_retention_days integer) OWNER TO postgre
 --
 
 -- FUNCTION backup_prunable(p_retention_days integer) :: COMMENT
-COMMENT ON FUNCTION public.backup_prunable(p_retention_days integer) IS 'The backups the retention window has expired and nobody has pinned, oldest first. The service deletes each one''s files and then calls backup_forget().';
+COMMENT ON FUNCTION public.backup_prunable(p_retention_days integer) IS 'The backups the retention window has expired and nobody has pinned, oldest first, never any of the newest three, each with where its off-site copy is. The service deletes each one''s files and copy, then calls backup_forget().';
 
 --
 
@@ -1349,6 +1802,71 @@ $$;
 
 
 ALTER FUNCTION public.capped_capture_manifest(p_manifest jsonb) OWNER TO postgres;
+
+--
+
+-- claim_forge_sweep(integer) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.claim_forge_sweep(p_seconds integer) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_holder uuid;
+BEGIN
+    IF p_seconds IS NULL OR p_seconds NOT BETWEEN 1 AND 3600 THEN
+        RAISE EXCEPTION 'claim_forge_sweep: a lease lasts 1 to 3600 seconds, not %', p_seconds
+            USING ERRCODE = '22023';
+    END IF;
+
+    -- Two claims at once serialise on the row lock, and the second re-reads held_until after the
+    -- first commits, so exactly one wins. A new pass sees every change made before it, so it
+    -- clears `requested`.
+    UPDATE public.forge_sweep_lease
+       SET holder = gen_random_uuid(),
+           held_until = clock_timestamp() + make_interval(secs => p_seconds),
+           requested = false
+     WHERE id AND held_until <= clock_timestamp()
+    RETURNING holder INTO v_holder;
+
+    IF v_holder IS NULL THEN
+        UPDATE public.forge_sweep_lease SET requested = true WHERE id;
+    END IF;
+    RETURN v_holder;
+END;
+$$;
+
+
+ALTER FUNCTION public.claim_forge_sweep(p_seconds integer) OWNER TO postgres;
+
+--
+
+-- FUNCTION claim_forge_sweep(p_seconds integer) :: COMMENT
+COMMENT ON FUNCTION public.claim_forge_sweep(p_seconds integer) IS 'Claim the forge-sweep lease for p_seconds (1 to 3600). Returns the holder id, or null when another pass holds it, in which case `requested` is set so that pass''s release queues one more. A lease past its held_until is taken over.';
+
+--
+
+-- clear_backup_offsite_destination() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.clear_backup_offsite_destination() RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+BEGIN
+    IF NOT public.has_role(ARRAY['Administrator']) THEN
+        RAISE EXCEPTION 'only an Administrator may remove the off-site backup destination'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    PERFORM public.set_backup_offsite_destination('', '', '', '', '', '', false);
+    DELETE FROM vault.secrets WHERE name = 'backup_offsite_secret_access_key';
+END;
+$$;
+
+
+ALTER FUNCTION public.clear_backup_offsite_destination() OWNER TO postgres;
+
+--
+
+-- FUNCTION clear_backup_offsite_destination() :: COMMENT
+COMMENT ON FUNCTION public.clear_backup_offsite_destination() IS 'Empty the off-site destination and delete its secret key from the vault. Administrator only. Copies already made are left in the bucket.';
 
 --
 
@@ -1577,15 +2095,15 @@ CREATE OR REPLACE FUNCTION public.create_machine_principal(p_name text, p_permis
     SET search_path TO 'public'
     AS $$
 DECLARE
-    -- Read-only permissions only, as an allow-list so a permission added later is refused until
-    -- somebody decides otherwise: a machine identity holding a write permission becomes an
-    -- unrevocable write credential the moment a token is signed for it. check-docs-drift.mjs
-    -- asserts the Access Control page offers exactly this list.
-    c_allowed CONSTANT text[] := ARRAY['telemetry:read', 'quarantine:view', 'audit_trail:read'];
+    -- Machines propose, people decide. An allow-list, so a permission added later is refused
+    -- until somebody decides a machine may hold it. check-docs-drift.mjs asserts the Access
+    -- Control page offers exactly this list (11e) and that each entry reaches a machine (11f).
+    c_allowed CONSTANT text[] := ARRAY['telemetry:read', 'quarantine:view', 'audit_trail:read',
+                                       'archive:manage', 'proposal:create', 'schema:manage'];
     v_id      uuid;
     v_name    text := btrim(p_name);
     v_purpose text := nullif(btrim(coalesce(p_purpose, '')), '');
-    v_bad     text[];
+    v_refused text;
     v_ids     uuid[];
 BEGIN
     -- ADMINISTRATOR ONLY. Creating an identity that can reach the stack is an access-control act,
@@ -1628,16 +2146,33 @@ BEGIN
             USING ERRCODE = 'invalid_parameter_value';
     END IF;
 
-    SELECT array_agg(x) INTO v_bad
-      FROM unnest(p_permissions) AS x
-     WHERE x <> ALL (c_allowed);
+    -- Each refused permission once, in the order asked, with the rule that refuses it.
+    SELECT string_agg(format('%s (%s)', r.perm, CASE
+               WHEN NOT EXISTS (SELECT 1 FROM public.permissions p WHERE p.name = r.perm)
+                 THEN 'no such permission'
+               WHEN r.perm = 'device:manage'
+                 THEN 'device writes are made by people'
+               WHEN r.perm IN ('quarantine:approve', 'quarantine:reject')
+                 THEN 'quarantine decisions are made by people'
+               WHEN r.perm IN ('cell:manage', 'gateway:manage')
+                 THEN 'for a machine it would only decide change proposals, and deciding is a '
+                      'person''s act: machines propose, people decide'
+               WHEN r.perm = 'authz:manage'
+                 THEN 'access control stays with people'
+               WHEN r.perm IN ('link:manage', 'gitops:manage')
+                 THEN 'no check a machine passes consults it, so the grant would do nothing'
+               ELSE 'nobody has decided that a machine may hold it'
+             END), '; ' ORDER BY r.first_at)
+      INTO v_refused
+      FROM (SELECT u.x AS perm, min(u.o) AS first_at
+              FROM unnest(p_permissions) WITH ORDINALITY AS u(x, o)
+             WHERE u.x <> ALL (c_allowed)
+             GROUP BY u.x) AS r;
 
-    IF v_bad IS NOT NULL THEN
+    IF v_refused IS NOT NULL THEN
         RAISE EXCEPTION
-            'create_machine_principal: % is not grantable to a machine identity. Allowed: %. Once a '
-            'token is signed for a principal it cannot be revoked, so a write permission here would '
-            'be an unrevocable write credential.',
-            array_to_string(v_bad, ', '), array_to_string(c_allowed, ', ')
+            'create_machine_principal: not grantable to a machine identity: %. Allowed: %.',
+            v_refused, array_to_string(c_allowed, ', ')
             USING ERRCODE = 'invalid_parameter_value';
     END IF;
 
@@ -1660,8 +2195,7 @@ BEGIN
     INSERT INTO auth.users (id) VALUES (v_id);
 
     -- BY CONSTRAINT NAME, not by column list: `principal_id` is also this function's first output
-    -- column, and PL/pgSQL refuses the column list as ambiguous. 0080 spelled it the other way and
-    -- nothing found out, because no page called the function until this file.
+    -- column, and PL/pgSQL refuses the column list as ambiguous.
     INSERT INTO public.principal_permissions (principal_id, permission_id)
     SELECT v_id, unnest(v_ids)
     ON CONFLICT ON CONSTRAINT principal_permissions_pkey DO NOTHING;
@@ -1703,7 +2237,7 @@ ALTER FUNCTION public.create_machine_principal(p_name text, p_permissions text[]
 --
 
 -- FUNCTION create_machine_principal(p_name text, p_permissions text[], p_purpose text) :: COMMENT
-COMMENT ON FUNCTION public.create_machine_principal(p_name text, p_permissions text[], p_purpose text) IS 'Create a machine identity that cannot sign in, holding its own read-only permissions and a name the Access Control page lists it by. Administrator only. Refuses anything but telemetry:read, quarantine:view and audit_trail:read: once a token is signed for a principal it cannot be revoked. The name is unique ignoring case. Replaces the two-argument form of 0080, dropped because an overload whose extra arguments default makes every RPC call ambiguous.';
+COMMENT ON FUNCTION public.create_machine_principal(p_name text, p_permissions text[], p_purpose text) IS 'Create a machine identity that cannot sign in, holding permissions of its own and a name the Access Control page lists it by. Administrator only. Machines propose, people decide: allows telemetry:read, quarantine:view, audit_trail:read, archive:manage, proposal:create and schema:manage, and refuses every other permission with its reason -- device writes, quarantine decisions, deciding proposals and access control are made by people, and no check a machine passes consults link:manage or gitops:manage. revoke_service_token() and revoke_service_principal() withdraw what it creates at PostgREST, where every check those grants open is reached. The name is unique ignoring case. One form only: an overload whose extra arguments default makes every RPC call ambiguous.';
 
 --
 
@@ -1739,6 +2273,28 @@ $$;
 
 
 ALTER FUNCTION public.custom_access_token_hook(event jsonb) OWNER TO postgres;
+
+--
+
+-- delete_device_asset_config() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.delete_device_asset_config() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+BEGIN
+  -- SECURITY DEFINER, so the rows go whoever deletes the device: asset_config has a DELETE policy
+  -- of its own, and a DELETE the policy filters leaves the rows behind without an error.
+  DELETE FROM public.asset_config WHERE asset_id = OLD.sparkplug_id;
+  RETURN OLD;
+END $$;
+
+
+ALTER FUNCTION public.delete_device_asset_config() OWNER TO postgres;
+
+--
+
+-- FUNCTION delete_device_asset_config() :: COMMENT
+COMMENT ON FUNCTION public.delete_device_asset_config() IS 'Trigger function: removes a deleted device''s birth parameters from asset_config, whose asset_id is the device''s sparkplug_id with no foreign key to cascade through.';
 
 --
 
@@ -1857,184 +2413,6 @@ ALTER FUNCTION public.describe_machine_principal(p_principal_id uuid, p_name tex
 
 -- FUNCTION describe_machine_principal(p_principal_id uuid, p_name text, p_purpose text) :: COMMENT
 COMMENT ON FUNCTION public.describe_machine_principal(p_principal_id uuid, p_name text, p_purpose text) IS 'Rename a machine principal created from the Access Control page, or change its purpose. Administrator only; the only write path to machine_principals after creation. Refuses an identity with no name row (the pinned ones, named by the dashboard''s registry) and a name another row holds. Records PRINCIPAL_DESCRIBED with the old and new values, and returns that row''s id, or NULL when nothing changed. Permissions are not editable: a wider grant is a new principal.';
-
---
-
--- audit_trail_backup_job_ids_matching(text) :: FUNCTION
-CREATE OR REPLACE FUNCTION public.audit_trail_backup_job_ids_matching(p_pattern text) RETURNS uuid[]
-    LANGUAGE sql STABLE SECURITY DEFINER
-    SET search_path TO 'public'
-    AS $$
-  SELECT coalesce(array_agg(j.id), '{}'::uuid[])
-    FROM public.backup_jobs j
-    LEFT JOIN public.backups b ON b.id = j.backup_id
-   WHERE p_pattern IS NOT NULL
-     AND public.has_role(ARRAY['Administrator', 'Auditor'])
-     AND (j.note ILIKE p_pattern OR b.stamp ILIKE p_pattern)
-$$;
-
-
-ALTER FUNCTION public.audit_trail_backup_job_ids_matching(p_pattern text) OWNER TO postgres;
-
---
-
--- FUNCTION audit_trail_backup_job_ids_matching(p_pattern text) :: COMMENT
-COMMENT ON FUNCTION public.audit_trail_backup_job_ids_matching(p_pattern text) IS 'The ids of backup jobs whose note, or the stamp of the backup they produced, matches a LIKE pattern -- the two things the Backups page identifies a job by and neither of which is in its audit payload. For audit_trail_page()''s search. Administrator and Auditor only, matching the roles audit_trail_select_security admits, and an empty array rather than an error for anybody else because this is part of a query rather than a request of its own.';
-
---
-
--- audit_trail_page(integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone, timestamp with time zone, bigint, text) :: FUNCTION
-CREATE OR REPLACE FUNCTION public.audit_trail_page(p_limit integer DEFAULT 200, p_include_purged boolean DEFAULT false, p_entity_type text DEFAULT NULL::text, p_action text DEFAULT NULL::text, p_entity_ids uuid[] DEFAULT NULL::uuid[], p_since timestamp with time zone DEFAULT NULL::timestamp with time zone, p_until timestamp with time zone DEFAULT NULL::timestamp with time zone, p_before_recorded_at timestamp with time zone DEFAULT NULL::timestamp with time zone, p_before_id bigint DEFAULT NULL::bigint, p_search text DEFAULT NULL::text) RETURNS jsonb
-    LANGUAGE sql STABLE
-    SET search_path TO 'public'
-    AS $_$
-WITH term AS (
-    SELECT CASE WHEN p_search IS NULL OR btrim(p_search) = '' THEN NULL ELSE btrim(p_search) END AS raw
-),
-pattern AS (
-    -- The search as a LIKE pattern, built once. THE METACHARACTERS ARE ESCAPED: the box promises
-    -- a substring of a name or an id, and an unescaped '%' would silently return the whole trail
-    -- to somebody who typed a percentage into it. Backslash is the default LIKE escape, so the
-    -- backslashes have to be doubled first or an escape would be introduced by the escaping.
-    SELECT CASE
-             WHEN t.raw IS NULL THEN NULL
-             ELSE '%' || replace(replace(replace(t.raw, '\', '\\'), '%', '\%'), '_', '\_') || '%'
-           END AS pattern,
-           -- THE SAME TERM AS A ROW ID, when it is nothing but digits. 18 at most: bigint tops out
-           -- at 19, and a cast that overflows raises rather than missing.
-           CASE
-             WHEN t.raw ~ '^[0-9]{1,18}$' THEN t.raw::bigint
-             ELSE NULL
-           END AS id_term
-      FROM term t
-),
--- MATERIALIZED, AND MEASURED. Without it Postgres inlines this CTE and the helper lands in the
--- per-row Filter of every partition scan -- a STABLE function is allowed to be called once and is
--- not promised to be. On 4,065 rows that took a search from 53ms to 583ms, which is the shape of
--- cost that looks like "the trail got big" rather than like a query doing the wrong thing.
-q AS MATERIALIZED (
-    SELECT p.pattern,
-           p.id_term,
-           public.audit_trail_user_ids_matching(p.pattern)        AS user_ids,
-           public.audit_trail_backup_job_ids_matching(p.pattern)  AS job_ids
-      FROM pattern p
-),
-matching AS (
-    SELECT t.*,
-           -- SIX TYPES, FIVE PROBES, and the mismatch is `device_nameplate`: it is keyed by its
-           -- device's id, so `devices` answers for it. A type is listed here only if one of the
-           -- probes below can be asked about its rows -- `user_roles` and `service_principals`
-           -- are auth.users rows with no public table to read, and would otherwise answer "absent
-           -- from all five" about a person who is perfectly present. An entity type whose table
-           -- has been RETIRED is a third case this still does not answer: "the table is gone" is
-           -- not "the row is gone", so `area_floors` remains drawn and cannot be hidden.
-           t.entity_type IN ('areas', 'cells', 'gateways', 'devices', 'schemas', 'device_nameplate')
-       AND NOT EXISTS (SELECT 1 FROM public.areas    a WHERE a.id = t.entity_id)
-       AND NOT EXISTS (SELECT 1 FROM public.cells    c WHERE c.id = t.entity_id)
-       AND NOT EXISTS (SELECT 1 FROM public.gateways g WHERE g.id = t.entity_id)
-       AND NOT EXISTS (SELECT 1 FROM public.devices  d WHERE d.id = t.entity_id)
-       AND NOT EXISTS (SELECT 1 FROM public.schemas  s WHERE s.id = t.entity_id)
-               AS is_purged
-      FROM public.audit_trail t
-     CROSS JOIN q
-     WHERE (p_entity_type IS NULL OR t.entity_type = p_entity_type)
-       AND (p_action      IS NULL OR t.action      = p_action)
-       AND (p_entity_ids  IS NULL OR t.entity_id   = ANY (p_entity_ids))
-       AND (p_since       IS NULL OR t.recorded_at >= p_since)
-       AND (p_until       IS NULL OR t.recorded_at <= p_until)
-       -- THE ID AND THE NAME THE TIMELINE DRAWS. Both snapshots are read because an INSERT has
-       -- only `new_data` and a DELETE only `old_data`, and an UPDATE that renames something is
-       -- findable under either name, which is what somebody searching for the old one wants.
-       AND (q.pattern IS NULL
-            OR t.entity_id::text ILIKE q.pattern
-            -- THE OTHER TWO IDS THE DRAWER SHOWS: this audit row, and the transaction that wrote
-            -- it. Only when the term is nothing but digits, so this adds rows to a numeric search
-            -- and changes no other one.
-            OR (q.id_term IS NOT NULL
-                AND (t.id = q.id_term OR t.causation_id = q.id_term))
-            -- The person a role assignment is about, who is not in the payload. Empty for a caller
-            -- who may not ask, which matches no row.
-            OR t.entity_id = ANY (q.user_ids)
-            -- The note and the produced backup's stamp, which are on two tables and in no payload.
-            -- Empty on the same terms, and for the same reason.
-            OR t.entity_id = ANY (q.job_ids)
-            OR EXISTS (
-                 SELECT 1
-                   FROM unnest(ARRAY['name', 'sparkplug_id', 'schema_name',
-                                     'label', 'key', 'role', 'stamp', 'origin']) AS f(field)
-                  WHERE (t.new_data ->> f.field) ILIKE q.pattern
-                     OR (t.old_data ->> f.field) ILIKE q.pattern
-               ))
-),
-visible AS (
-    SELECT * FROM matching
-     WHERE (p_include_purged OR NOT is_purged)
-       -- The cursor is applied here and not in `matching`: `purged_assets` and `total_matching` are
-       -- counted over `matching` and are facts about everything the filters select, not about what
-       -- is left after paging.
-       AND (p_before_id IS NULL
-            OR p_before_recorded_at IS NULL
-            OR (recorded_at, id) < (p_before_recorded_at, p_before_id))
-     ORDER BY recorded_at DESC, id DESC
-     LIMIT greatest(1, least(coalesce(p_limit, 200), 1000))
-)
-SELECT jsonb_build_object(
-    'events', coalesce(
-        (SELECT jsonb_agg(to_jsonb(v) - 'is_purged' ORDER BY v.recorded_at DESC, v.id DESC)
-           FROM visible v),
-        '[]'::jsonb),
-    'purged_assets', (SELECT count(DISTINCT entity_id) FROM matching WHERE is_purged),
-    -- HOW LONG THE TRAIL IS UNDER THESE FILTERS, so a reader holding one page knows what fraction
-    -- of it that is. Counted under the SAME predicate `visible` opens with, minus the cursor and
-    -- the limit -- so it does not move as the reader pages, and a page can never report more rows
-    -- than the total it is a fraction of.
-    'total_matching', (SELECT count(*) FROM matching WHERE p_include_purged OR NOT is_purged),
-    -- KEPT, AND IT MEANS "THERE IS A NEXT PAGE". It used to mean "your view is cut off", which was
-    -- the same thing when there was no way to ask for more. Callers that only ever showed a banner
-    -- keep working unchanged.
-    'truncated', (SELECT count(*) FROM visible) >= greatest(1, least(coalesce(p_limit, 200), 1000)),
-    -- WHERE THE READER GOT TO, or null at the end of the trail. Null is the ONLY end-of-data
-    -- signal a caller should trust: an empty `events` array with a non-null cursor cannot happen,
-    -- but a full page that happens to be the last one is ordinary, so "fewer rows than I asked
-    -- for" is not a reliable test and callers must not invent one.
-    'next_cursor', CASE
-        WHEN (SELECT count(*) FROM visible) >= greatest(1, least(coalesce(p_limit, 200), 1000))
-        THEN (SELECT jsonb_build_object('recorded_at', v.recorded_at, 'id', v.id)
-                FROM visible v ORDER BY v.recorded_at ASC, v.id ASC LIMIT 1)
-        ELSE NULL
-    END
-);
-$_$;
-
-
-ALTER FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) OWNER TO postgres;
-
---
-
--- FUNCTION audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) :: COMMENT
-COMMENT ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) IS 'One page of the Audit Trail, with deleted entities filtered server-side and counted over the whole match rather than the page. `total_matching` is how many rows the filters select in total, under the same purged rule as the page, so a reader knows what fraction of the trail they hold. Keyset paged on (recorded_at DESC, id DESC): pass the previous response''s `next_cursor` back as p_before_recorded_at/p_before_id. A null next_cursor is the only end-of-data signal. `p_search` matches the entity id and the audit-snapshot fields the timeline labels a lane from, so an entity is findable by the name the page shows for it; LIKE metacharacters in it are literal. A term of 1 to 18 digits ALSO matches the audit row''s own id and its causation_id (0121), which is how the other two ids the event drawer shows are searchable; it is an additional disjunct, so a numeric name still matches by name. Two labels are not in any payload and are matched through a SECURITY DEFINER helper each: the person a role assignment is about (0115), and a backup job''s note and the stamp of the backup it produced (0118). `is_purged` applies to areas, cells, gateways, devices, schemas and device nameplates -- every entity type this function can probe a table for. A type with no readable table behind it (user_roles and service_principals, which are auth.users rows; area_floors, whose table was retired) is never called deleted. `purged_assets` keeps its wire name and counts all of them.';
-
---
-
--- audit_trail_user_ids_matching(text) :: FUNCTION
-CREATE OR REPLACE FUNCTION public.audit_trail_user_ids_matching(p_pattern text) RETURNS uuid[]
-    LANGUAGE sql STABLE SECURITY DEFINER
-    SET search_path TO 'public'
-    AS $$
-  SELECT coalesce(array_agg(u.id), '{}'::uuid[])
-    FROM auth.users u
-   WHERE p_pattern IS NOT NULL
-     AND public.has_role(ARRAY['Administrator', 'Auditor'])
-     AND u.email ILIKE p_pattern
-$$;
-
-
-ALTER FUNCTION public.audit_trail_user_ids_matching(p_pattern text) OWNER TO postgres;
-
---
-
--- FUNCTION audit_trail_user_ids_matching(p_pattern text) :: COMMENT
-COMMENT ON FUNCTION public.audit_trail_user_ids_matching(p_pattern text) IS 'The ids of people whose email matches a LIKE pattern, for the one disjunct of audit_trail_page()''s search that cannot read its answer out of an audit payload: a role-assignment row names the role, and the dashboard labels that lane with the person (0116). Administrator and Auditor only, and an empty array rather than an error for anybody else, because this is part of a query rather than a request of its own.';
 
 --
 
@@ -2402,28 +2780,6 @@ COMMENT ON FUNCTION public.enqueue_scheduled_backup() IS 'Queue a scheduled back
 
 --
 
--- ensure_cron_job(text, text, text) :: FUNCTION
-CREATE OR REPLACE FUNCTION public.ensure_cron_job(p_name text, p_schedule text, p_command text) RETURNS void
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'public', 'cron'
-    AS $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = p_name) THEN
-    PERFORM cron.unschedule(p_name);
-  END IF;
-  PERFORM cron.schedule(p_name, p_schedule, p_command);
-END $$;
-
-
-ALTER FUNCTION public.ensure_cron_job(p_name text, p_schedule text, p_command text) OWNER TO postgres;
-
---
-
--- FUNCTION ensure_cron_job(p_name text, p_schedule text, p_command text) :: COMMENT
-COMMENT ON FUNCTION public.ensure_cron_job(p_name text, p_schedule text, p_command text) IS 'Unschedule-then-schedule, so replaying this migration does not accumulate duplicate jobs.';
-
---
-
 -- ensure_audit_trail_partition(timestamp with time zone) :: FUNCTION
 CREATE OR REPLACE FUNCTION public.ensure_audit_trail_partition(p_month timestamp with time zone) RETURNS boolean
     LANGUAGE plpgsql SECURITY DEFINER
@@ -2498,6 +2854,28 @@ ALTER FUNCTION public.ensure_audit_trail_partitions(p_months_ahead integer) OWNE
 
 -- FUNCTION ensure_audit_trail_partitions(p_months_ahead integer) :: COMMENT
 COMMENT ON FUNCTION public.ensure_audit_trail_partitions(p_months_ahead integer) IS 'Create this month''s audit_trail partition and the next p_months_ahead of them. Idempotent; returns how many were actually created. Called by the audit_trail_partitions cron job and by 0079 itself.';
+
+--
+
+-- ensure_cron_job(text, text, text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.ensure_cron_job(p_name text, p_schedule text, p_command text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'cron'
+    AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = p_name) THEN
+    PERFORM cron.unschedule(p_name);
+  END IF;
+  PERFORM cron.schedule(p_name, p_schedule, p_command);
+END $$;
+
+
+ALTER FUNCTION public.ensure_cron_job(p_name text, p_schedule text, p_command text) OWNER TO postgres;
+
+--
+
+-- FUNCTION ensure_cron_job(p_name text, p_schedule text, p_command text) :: COMMENT
+COMMENT ON FUNCTION public.ensure_cron_job(p_name text, p_schedule text, p_command text) IS 'Unschedule-then-schedule, so replaying this migration does not accumulate duplicate jobs.';
 
 --
 
@@ -2692,9 +3070,8 @@ BEGIN
       FROM public.system_settings
      WHERE key = 'proposals.open_expiry_days';
 
-    -- Seven days, matching the seeded default. The setting is bounded at 1 so it cannot be zero,
-    -- but a deleted row would otherwise make this interval NULL and the comparison never true --
-    -- expiry would stop silently, which is the failure mode the floor exists to prevent.
+    -- Seven days, the seeded default. A deleted setting would make the interval NULL and stop
+    -- expiry silently, which is what the setting's floor exists to prevent.
     v_days := COALESCE(v_days, 7);
 
     PERFORM set_config('aber.proposal_transition', 'on', true);
@@ -2707,7 +3084,8 @@ BEGIN
         RETURNING id, entity_type, entity_id, proposed_by
     LOOP
         INSERT INTO public.audit_trail
-            (entity_type, entity_id, action, new_data, changed_by, actor_source, audit_domain)
+            (entity_type, entity_id, action, new_data, changed_by, actor_source, causation_id,
+             audit_domain)
         VALUES (
             'change_proposals',
             v_row.id,
@@ -2718,9 +3096,11 @@ BEGIN
                 'target_id',   v_row.entity_id,
                 'after_days',  v_days
             ),
-            -- NULL, and deliberately. `changed_by` names WHICH user, and no user did this.
+            -- NULL: `changed_by` names which user, and no user did this.
             NULL,
             'service',
+            -- One run is one act: every proposal it closes shares this transaction.
+            txid_current(),
             public.audit_domain_for('change_proposals', 'PROPOSAL_EXPIRED')
         );
         v_expired := v_expired + 1;
@@ -2736,7 +3116,7 @@ ALTER FUNCTION public.expire_open_proposals() OWNER TO postgres;
 --
 
 -- FUNCTION expire_open_proposals() :: COMMENT
-COMMENT ON FUNCTION public.expire_open_proposals() IS 'Closes open proposals older than proposals.open_expiry_days, freeing the slots they hold under both caps. Records actor_source ''service'' with changed_by NULL: the timer has no session and is not a person, and an expiry is not a rejection.';
+COMMENT ON FUNCTION public.expire_open_proposals() IS 'Closes open proposals older than proposals.open_expiry_days, freeing the slots they hold under both caps. Records actor_source ''service'' with changed_by NULL: the timer has no session and is not a person, and an expiry is not a rejection. Every PROPOSAL_EXPIRED row one run writes carries that run''s transaction as its causation_id.';
 
 --
 
@@ -2915,6 +3295,7 @@ CREATE TABLE IF NOT EXISTS public.gateways (
     CONSTRAINT gateways_simulated_is_host CHECK (((NOT is_simulated) OR (deployment = 'host'::text))),
     CONSTRAINT gateways_site_wide_has_no_cell CHECK (((location_scope <> 'site_wide'::text) OR (cell_id IS NULL))),
     CONSTRAINT gateways_sparkplug_group_format CHECK (((sparkplug_group <> ''::text) AND (sparkplug_group !~ '[/+#]'::text))),
+    CONSTRAINT gateways_status_valid CHECK (((btrim(status) <> ''::text) AND (length(status) <= 32) AND ((upper(status) <> ALL (ARRAY['PENDING_ENROLLMENT'::text, 'AWAITING_BIRTH'::text, 'STALE'::text])) OR (status = ANY (ARRAY['PENDING_ENROLLMENT'::text, 'AWAITING_BIRTH'::text]))))),
     CONSTRAINT gateways_synthetic_has_no_cell CHECK ((((NOT is_simulated) AND (NOT is_shadow)) OR (cell_id IS NULL)))
 );
 
@@ -3143,6 +3524,22 @@ END $c$;
 DO $c$ BEGIN
 
   IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'gateways_status_valid'
+                AND conrelid = 'public.gateways'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((btrim(status) <> ''''::text) AND (length(status) <= 32) AND ((upper(status) <> ALL (ARRAY[''PENDING_ENROLLMENT''::text, ''AWAITING_BIRTH''::text, ''STALE''::text])) OR (status = ANY (ARRAY[''PENDING_ENROLLMENT''::text, ''AWAITING_BIRTH''::text])))))') THEN
+    ALTER TABLE public.gateways DROP CONSTRAINT gateways_status_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'gateways_status_valid'
+                    AND conrelid = 'public.gateways'::regclass) THEN
+    ALTER TABLE public.gateways
+        ADD CONSTRAINT gateways_status_valid CHECK (((btrim(status) <> ''::text) AND (length(status) <= 32) AND ((upper(status) <> ALL (ARRAY['PENDING_ENROLLMENT'::text, 'AWAITING_BIRTH'::text, 'STALE'::text])) OR (status = ANY (ARRAY['PENDING_ENROLLMENT'::text, 'AWAITING_BIRTH'::text])))));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateways_synthetic_has_no_cell'
                 AND conrelid = 'public.gateways'::regclass
                 AND pg_get_constraintdef(oid) <> 'CHECK ((((NOT is_simulated) AND (NOT is_shadow)) OR (cell_id IS NULL)))') THEN
@@ -3164,7 +3561,7 @@ COMMENT ON COLUMN public.gateways.cell_id IS 'The cell this gateway is filed int
 --
 
 -- COLUMN gateways.status :: COMMENT
-COMMENT ON COLUMN public.gateways.status IS 'Free text, deliberately unconstrained -- a Gateway_Status metric in an NBIRTH payload overrides whatever the message type implies, so the domain is not closed. The values this platform writes are: PENDING_ENROLLMENT (a Remote gateway awaiting its bundle redemption), AWAITING_BIRTH (enrolled, holds a credential, has not yet published), ONLINE and OFFLINE (written by the ingestion daemon from node-level Sparkplug messages). STALE is DERIVED at read time by public.gateway_status and is never stored.';
+COMMENT ON COLUMN public.gateways.status IS 'Free text in the fleet''s own words: a Gateway_Status metric in a node-level payload overrides whatever the message type implies, so the domain is not closed. The values this platform writes are: PENDING_ENROLLMENT (a Remote gateway awaiting its bundle redemption), AWAITING_BIRTH (enrolled, holds a credential, has not yet published), ONLINE and OFFLINE (written by the ingestion daemon from node-level Sparkplug messages). STALE is DERIVED at read time by public.gateway_status and is never stored. gateways_status_valid (0147) refuses a blank status, one over 32 characters, STALE in any case, and the two lifecycle states spelt any way but the platform''s.';
 
 --
 
@@ -3615,6 +4012,97 @@ ALTER FUNCTION public.has_role(allowed_roles text[]) OWNER TO postgres;
 
 --
 
+-- historian_backup_state() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.historian_backup_state() RETURNS TABLE(hour_utc integer, full_on integer, first_recorded_at timestamp with time zone, last_attempt_at timestamp with time zone, last_success_at timestamp with time zone, last_success_kind text, last_success_label text, last_full_at timestamp with time zone, repo_bytes bigint, last_failure_at timestamp with time zone, last_failure_kind text, last_failure_detail text, request_at timestamp with time zone, request_claimed_at timestamp with time zone, request_finished_at timestamp with time zone, request_succeeded boolean)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+#variable_conflict use_column
+BEGIN
+    -- Checked here: a hidden page is not a gate, and this runs as its owner.
+    IF NOT public.has_role(ARRAY['Administrator']) THEN
+        RETURN;
+    END IF;
+
+    RETURN QUERY
+    WITH runs AS (
+        SELECT r.kind, r.started_at, r.finished_at, r.succeeded, r.detail, r.label, r.repo_bytes
+          FROM timescale.physical_backup_runs r
+    ), ok AS (
+        SELECT b.* FROM runs b WHERE b.succeeded AND b.kind <> 'check'
+         ORDER BY b.finished_at DESC LIMIT 1
+    ), failed AS (
+        SELECT b.* FROM runs b WHERE NOT b.succeeded AND b.kind <> 'check'
+         ORDER BY b.finished_at DESC LIMIT 1
+    ), request AS (
+        SELECT q.requested_at, q.claimed_at FROM timescale.physical_backup_requests q
+         ORDER BY q.id DESC LIMIT 1
+    ), answer AS (
+        SELECT b.finished_at, b.succeeded FROM runs b, request q
+         WHERE b.kind <> 'check' AND b.finished_at >= q.claimed_at
+         ORDER BY b.finished_at LIMIT 1
+    )
+    SELECT s.hour_utc,
+           s.full_on,
+           (SELECT min(b.started_at) FROM runs b),
+           (SELECT max(b.started_at) FROM runs b WHERE b.kind <> 'check'),
+           ok.finished_at,
+           ok.kind,
+           ok.label,
+           (SELECT max(b.finished_at) FROM runs b WHERE b.succeeded AND b.kind = 'full'),
+           (SELECT b.repo_bytes FROM runs b WHERE b.repo_bytes IS NOT NULL
+             ORDER BY b.finished_at DESC LIMIT 1),
+           failed.finished_at,
+           failed.kind,
+           failed.detail,
+           request.requested_at,
+           request.claimed_at,
+           answer.finished_at,
+           answer.succeeded
+      FROM (SELECT 1) one
+      LEFT JOIN timescale.physical_backup_schedule s ON true
+      LEFT JOIN ok ON true
+      LEFT JOIN failed ON ok.finished_at IS NULL OR failed.finished_at > ok.finished_at
+      LEFT JOIN request ON true
+      LEFT JOIN answer ON true;
+EXCEPTION
+    -- postgres_fdw raises on connect: an unreachable historian, or one whose tables are not made
+    -- yet. That is "cannot be read", which the page must not show as nothing to report.
+    WHEN OTHERS THEN
+        RETURN;
+END;
+$$;
+
+
+ALTER FUNCTION public.historian_backup_state() OWNER TO postgres;
+
+--
+
+-- FUNCTION historian_backup_state() :: COMMENT
+COMMENT ON FUNCTION public.historian_backup_state() IS 'The historian''s physical backup for the Backups page: schedule, last success, repository size, a failure newer than the last success, and the latest request with its answer. Administrator only. No row while the historian cannot be read, which the page reports as unreachable.';
+
+--
+
+-- i3x_auth_probe() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.i3x_auth_probe() RETURNS boolean
+    LANGUAGE plpgsql STABLE
+    SET search_path TO ''
+    AS $$
+BEGIN
+  RETURN true;
+END;
+$$;
+
+
+ALTER FUNCTION public.i3x_auth_probe() OWNER TO postgres;
+
+--
+
+-- FUNCTION i3x_auth_probe() :: COMMENT
+COMMENT ON FUNCTION public.i3x_auth_probe() IS 'i3X calls this as the caller to authenticate a request: it succeeds only when PostgREST accepts the token and auth_pre_request() finds neither its jti nor its sub revoked. plpgsql and STABLE so no plan folds the call away: its EXECUTE check, which refuses anon, runs on every call.';
+
+--
+
 -- ingest_capture_progress(uuid, bigint, bigint, integer, boolean) :: FUNCTION
 CREATE OR REPLACE FUNCTION public.ingest_capture_progress(p_job_id uuid, p_messages bigint, p_bytes bigint, p_elapsed_seconds integer, p_birth_captured boolean DEFAULT false) RETURNS boolean
     LANGUAGE plpgsql SECURITY DEFINER
@@ -3828,6 +4316,45 @@ $$;
 
 
 ALTER FUNCTION public.ingest_mark_device_offline(p_device_id uuid) OWNER TO postgres;
+
+--
+
+-- ingest_mark_gateway_devices_offline(uuid) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.ingest_mark_gateway_devices_offline(p_gateway_id uuid) RETURNS uuid[]
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_moved uuid[];
+BEGIN
+    PERFORM public.require_ingestion_caller('ingest_mark_gateway_devices_offline');
+
+    IF p_gateway_id IS NULL THEN
+        RAISE EXCEPTION 'ingest_mark_gateway_devices_offline: p_gateway_id is required'
+            USING ERRCODE = 'null_value_not_allowed';
+    END IF;
+
+    WITH moved AS (
+        UPDATE public.devices d
+           SET status = 'OFFLINE'
+         WHERE d.gateway_id = p_gateway_id
+           AND d.is_archived IS NOT TRUE
+           AND d.status IS DISTINCT FROM 'OFFLINE'
+        RETURNING d.id
+    )
+    SELECT coalesce(array_agg(id), '{}') INTO v_moved FROM moved;
+
+    RETURN v_moved;
+END;
+$$;
+
+
+ALTER FUNCTION public.ingest_mark_gateway_devices_offline(p_gateway_id uuid) OWNER TO postgres;
+
+--
+
+-- FUNCTION ingest_mark_gateway_devices_offline(p_gateway_id uuid) :: COMMENT
+COMMENT ON FUNCTION public.ingest_mark_gateway_devices_offline(p_gateway_id uuid) IS 'NDEATH: set every non-archived device of this gateway OFFLINE in one UPDATE and return the ids it moved. The filter skips a device already OFFLINE, so each device moved gets one Audit Trail row and no other gets any. Ingestion principal only.';
 
 --
 
@@ -4563,6 +5090,33 @@ COMMENT ON FUNCTION public.list_machine_principals() IS 'Machine identities that
 
 --
 
+-- list_proposer_names() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.list_proposer_names() RETURNS TABLE(principal_id uuid, name text)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+BEGIN
+    -- may_decide_proposal() is the lane gate approve_proposal() decides by, and the one statement
+    -- of which permission decides a lane. Every status, not only open: the Decided list names the
+    -- proposer too. A person, and a pinned identity with no name, have no machine_principals row.
+    RETURN QUERY
+    SELECT DISTINCT mp.principal_id, mp.name
+      FROM public.change_proposals cp
+      JOIN public.machine_principals mp ON mp.principal_id = cp.proposed_by
+     WHERE public.may_decide_proposal(cp.entity_type);
+END;
+$$;
+
+
+ALTER FUNCTION public.list_proposer_names() OWNER TO postgres;
+
+--
+
+-- FUNCTION list_proposer_names() :: COMMENT
+COMMENT ON FUNCTION public.list_proposer_names() IS 'The name of each machine identity that filed a change proposal the caller may decide, for the Approvals page: a machine has no email for the proposal to carry. Gated by may_decide_proposal() on each proposal''s lane, the gate approve_proposal() decides by, so a caller who decides nothing gets no rows, and machine_principals stays readable by Administrator and Auditor alone. A person, and a pinned identity with no name, return no row.';
+
+--
+
 -- list_user_accounts() :: FUNCTION
 CREATE OR REPLACE FUNCTION public.list_user_accounts() RETURNS TABLE(user_id uuid, email text)
     LANGUAGE plpgsql SECURITY DEFINER
@@ -4641,10 +5195,9 @@ BEGIN
     -- -----------------------------------------------------------------------------------------
     -- Suppression. UPDATE only: an INSERT or DELETE is always an event.
     -- -----------------------------------------------------------------------------------------
-    -- One comparison covers every case, because subtracting an absent key is a no-op: identical
-    -- rows are a no-op write, and rows differing only in the columns audit_telemetry_columns()
-    -- names are a heartbeat's readings, which arrive every thirty seconds and are not events.
-    -- `IS NOT DISTINCT FROM` so a NULL on either side compares as equal.
+    -- Identical rows are a no-op write, and rows differing only in the columns
+    -- audit_telemetry_columns() names are a heartbeat's readings, not events. Subtracting an
+    -- absent key is a no-op, so one comparison covers both; NULLs compare as equal.
     IF TG_OP = 'UPDATE'
        AND (to_jsonb(NEW) - public.audit_telemetry_columns())
            IS NOT DISTINCT FROM (to_jsonb(OLD) - public.audit_telemetry_columns())
@@ -4655,12 +5208,8 @@ BEGIN
     -- -----------------------------------------------------------------------------------------
     -- Which column names the entity
     -- -----------------------------------------------------------------------------------------
-    -- `id` unless the trigger says otherwise. `device_nameplate` is keyed by `device_id` and has
-    -- no `id` column at all, so the `NEW.id` this read before could never have been attached to
-    -- it. Taking the name as a trigger argument keeps ONE attribution ladder for every table that
-    -- has one: the alternative is a THIRD copy of everything below, after log_role_assignment(),
-    -- which carries a deliberately reduced ladder and has to be kept in step with this one by
-    -- hand.
+    -- `id` unless the trigger argument names another: `device_nameplate` is keyed by `device_id`.
+    -- One attribution ladder for every table; log_role_assignment() carries a reduced copy.
     v_key := COALESCE(TG_ARGV[0], 'id');
 
     IF (TG_OP = 'DELETE') THEN
@@ -4675,10 +5224,8 @@ BEGIN
         v_entity_id := (v_new_data ->> v_key)::UUID;
     END IF;
 
-    -- A column that is not there reads as NULL through `->>`, so a mistyped trigger argument
-    -- would otherwise file every row under no entity. entity_id is NOT NULL, so this would be
-    -- caught either way -- but by a constraint that names audit_trail rather than the trigger
-    -- that is wrong.
+    -- A mistyped trigger argument reads as NULL through `->>`; refused here so the error names
+    -- the trigger rather than audit_trail's NOT NULL.
     IF v_entity_id IS NULL THEN
         RAISE EXCEPTION
             'log_audit_trail_event: % has no % to name the entity by -- check the column named '
@@ -4692,9 +5239,8 @@ BEGIN
     v_actor := auth.uid();
 
     IF v_actor IS NULL THEN
-        -- Set with SET LOCAL by a SECURITY DEFINER RPC acting on a user's behalf -- the
-        -- approve-quarantine path, where the request arrives on the service-role key but a
-        -- specific operator authorised it. See 0003.
+        -- Set with SET LOCAL by a SECURITY DEFINER RPC acting on a person's behalf, such as
+        -- approve_quarantined_device() and approve_proposal().
         BEGIN
             v_actor := NULLIF(current_setting('aber.actor_id', true), '')::UUID;
         EXCEPTION WHEN others THEN
@@ -4705,15 +5251,14 @@ BEGIN
     -- -----------------------------------------------------------------------------------------
     -- What kind of actor
     -- -----------------------------------------------------------------------------------------
-    -- A person, not merely a `sub`: machine principals carry one too. A machine falls through to
-    -- the declared-header path below and is recorded as what it is, while `changed_by` still
-    -- receives v_actor so the row names it.
+    -- A person, not merely a `sub`: machine principals carry one too. changed_by receives
+    -- v_actor either way, so a machine's row still names it.
     IF v_actor IS NOT NULL AND NOT public.is_machine_principal(v_actor) THEN
         v_source := 'user';
     ELSE
-        -- A caller may declare itself with an `X-Aber-Actor` request header, which PostgREST
-        -- exposes as request.headers. That is how the ingestion daemon is told apart from an edge
-        -- function; the branch above declines to read a machine's `sub` as evidence of a person.
+        -- The `X-Aber-Actor` request header, which PostgREST exposes as request.headers. Each value
+        -- is believed only from the caller it describes. 'user' never is: claiming a human author
+        -- is exactly the assertion a client must not be able to make about itself.
         BEGIN
             v_declared := NULLIF(
                 current_setting('request.headers', true)::json ->> 'x-aber-actor', ''
@@ -4722,15 +5267,21 @@ BEGIN
             v_declared := NULL;
         END;
 
-        IF v_declared IN ('ingestion', 'service', 'migration') THEN
-            -- 'user' is deliberately NOT accepted from a header: claiming a human author is
-            -- exactly the assertion a client must not be able to make about itself.
-            v_source := v_declared;
+        IF v_declared = 'ingestion' AND public.is_ingestion_caller() THEN
+            v_source := 'ingestion';
+        ELSIF v_declared = 'migration'
+              AND NULLIF(current_setting('request.jwt.claims', true), '') IS NULL
+              AND session_user IN ('postgres', 'supabase_admin') THEN
+            -- The owner's own session with no token, which PostgREST never is.
+            v_source := 'migration';
+        ELSIF v_declared = 'service' OR v_actor IS NOT NULL THEN
+            -- Any other caller that is not a person may call itself a service. A machine identity
+            -- is one whatever it declares.
+            v_source := 'service';
         ELSE
-            -- Which role is calling, and not `current_user`: this function is SECURITY DEFINER, so
-            -- `current_user` is the owner (`postgres`). PostgREST connects as `authenticator` and SET ROLEs,
-            -- so `role` holds the effective role; a direct psql session reports 'none', where
-            -- `session_user` is the honest answer.
+            -- The effective role, not `current_user`, which is this SECURITY DEFINER function's
+            -- owner. PostgREST SET ROLEs, so `role` holds it; a direct psql session reports
+            -- 'none', where `session_user` is the honest answer.
             v_role := NULLIF(current_setting('role', true), 'none');
             IF v_role IS NULL OR v_role = '' THEN
                 v_role := session_user;
@@ -4739,7 +5290,8 @@ BEGIN
             IF v_role IN ('postgres', 'supabase_admin') THEN
                 v_source := 'migration';
             ELSE
-                -- service_role with nothing declared: automation we cannot name more precisely.
+                -- service_role with nothing believable declared: automation we cannot name more
+                -- precisely.
                 v_source := 'service';
             END IF;
         END IF;
@@ -4763,7 +5315,7 @@ ALTER FUNCTION public.log_audit_trail_event() OWNER TO postgres;
 --
 
 -- FUNCTION log_audit_trail_event() :: COMMENT
-COMMENT ON FUNCTION public.log_audit_trail_event() IS 'AFTER trigger that appends to audit_trail. Suppresses an UPDATE that changed nothing and one that moved only the columns audit_telemetry_columns() names (0100). The entity id is read from the column named in the trigger argument, defaulting to `id` -- 0122, for device_nameplate, which is keyed by device_id. Attribution is auth.uid(), then aber.actor_id, then the X-Aber-Actor header, then the effective role.';
+COMMENT ON FUNCTION public.log_audit_trail_event() IS 'AFTER trigger that appends to audit_trail. Suppresses an UPDATE that changed nothing and one that moved only the columns audit_telemetry_columns() names. The entity id is read from the column named in the trigger argument, defaulting to `id`. Attribution is auth.uid(), then aber.actor_id; a person is ''user''. Otherwise the X-Aber-Actor header is believed only from the caller it describes -- ''ingestion'' when is_ingestion_caller(), ''migration'' from the owner''s session with no JWT, ''service'' from any other non-person -- a machine identity is ''service'' whatever it declares, and anything else falls to the effective role.';
 
 --
 
@@ -4846,26 +5398,20 @@ CREATE OR REPLACE FUNCTION public.may_decide_proposal(p_entity_type text) RETURN
     LANGUAGE sql STABLE
     AS $$
   SELECT CASE p_entity_type
-    -- The two original lanes, unchanged. `device:manage` is held by exactly the two roles named
-    -- here, so rewriting them as has_authority() would be a no-op with a migration's blast radius.
+    -- The role pair the devices, device_nameplate and areas write policies name.
     WHEN 'devices'          THEN public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
     WHEN 'device_nameplate' THEN public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
-
-    -- 0123. A ROLE PAIR, NOT A PERMISSION, WHICH IS THE RULE AND NOT AN EXCEPTION TO IT. The rule
-    -- every lane follows is: resolve whatever the target table's own policy resolves, so the lane
-    -- closes when that closes. `areas_update_privileged` resolves this role pair -- there is no
-    -- `area:manage` grant anywhere in the schema -- so mirroring it means has_role() here. A lane
-    -- gated on a permission the table does not consult would be a second, disagreeing answer.
     WHEN 'areas'            THEN public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
 
-    -- 0090. THE PERMISSION THE TABLE'S OWN POLICY RESOLVES, so the lane closes when the grant is
-    -- withdrawn rather than outliving it.
+    -- THE PERMISSION, where the cells and gateways write policies name the role pair. For a
+    -- person the two agree: the pair are the only roles holding cell:manage and gateway:manage.
+    -- No machine reaches these arms, because create_machine_principal() refuses both grants:
+    -- machines propose, people decide. check-docs-drift.mjs (11f) holds all three facts.
     WHEN 'cells'            THEN public.has_authority(ARRAY['cell:manage'])
     WHEN 'gateways'         THEN public.has_authority(ARRAY['gateway:manage'])
 
-    -- 'schemas' FALLS THROUGH TO false, which is 0090 withdrawing the lane rather than an omission,
-    -- and so do the three link lanes 0108 withdrew. Nothing can be filed in either (proposable_columns
-    -- is empty) and nothing left in them can be decided.
+    -- Withdrawn lanes decide nothing: schemas, and the three link lanes. proposable_columns() is
+    -- empty for each, so nothing new can be filed in them either.
     ELSE false
   END
 $$;
@@ -4876,7 +5422,7 @@ ALTER FUNCTION public.may_decide_proposal(p_entity_type text) OWNER TO postgres;
 --
 
 -- FUNCTION may_decide_proposal(p_entity_type text) :: COMMENT
-COMMENT ON FUNCTION public.may_decide_proposal(p_entity_type text) IS 'Who may approve or reject a proposal in this lane. Each lane resolves whatever its target table''s own policy resolves, so the lane closes when that closes: the two device lanes and areas (0123) resolve a role pair, cells and gateways the permission their policy names. An unknown or withdrawn lane -- schemas since 0090, the three link lanes since 0108 -- is decidable by nobody.';
+COMMENT ON FUNCTION public.may_decide_proposal(p_entity_type text) IS 'Who may approve or reject a proposal in this lane. The device lanes and areas resolve the role pair (Administrator, Shopfloor_Manager) their tables'' write policies name. Cells and gateways resolve cell:manage and gateway:manage, where their tables'' policies name the same pair: the two agree for a person, because the pair are the only roles holding those grants, and no machine can hold either, because create_machine_principal() refuses them. An unknown or withdrawn lane -- schemas, and the three link lanes -- is decidable by nobody.';
 
 --
 
@@ -5745,6 +6291,80 @@ ALTER FUNCTION public.publish_schema_version(draft_schema_id uuid) OWNER TO post
 
 -- FUNCTION publish_schema_version(draft_schema_id uuid) :: COMMENT
 COMMENT ON FUNCTION public.publish_schema_version(draft_schema_id uuid) IS 'Activates a draft version, archives its parent, and atomically repoints every device_submodels row and legacy devices.schema_id from the parent to it.';
+
+--
+
+-- raw_telemetry_window() :: FUNCTION
+CREATE OR REPLACE FUNCTION public.raw_telemetry_window() RETURNS TABLE(raw_window_seconds numeric, archive_armed boolean, archive_reported_at timestamp with time zone)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+BEGIN
+    IF NOT public.has_role(ARRAY['Administrator', 'Shopfloor_Manager', 'Auditor']) THEN
+        RETURN;
+    END IF;
+    RETURN QUERY
+    SELECT EXTRACT(EPOCH FROM w.raw_window)::numeric, w.archive_armed, w.archive_reported_at
+      FROM timescale.telemetry_raw_window w;
+EXCEPTION
+    -- postgres_fdw raises on CONNECT, so an unreachable historian arrives here.
+    WHEN OTHERS THEN
+        RETURN;
+END;
+$$;
+
+
+ALTER FUNCTION public.raw_telemetry_window() OWNER TO postgres;
+
+--
+
+-- FUNCTION raw_telemetry_window() :: COMMENT
+COMMENT ON FUNCTION public.raw_telemetry_window() IS 'How long raw telemetry is kept (NULL seconds = indefinitely) and whether the cold archiver last reported archiving on. No row when the historian cannot be read.';
+
+--
+
+-- record_directory_images(jsonb) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.record_directory_images(p_images jsonb) RETURNS integer
+    LANGUAGE sql
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+    WITH served_by(id, component) AS (VALUES
+        ('f1111111-0000-0000-0000-000000000001'::uuid, 'supabase-studio'),
+        ('f1111111-0000-0000-0000-000000000003'::uuid, 'node-red'),
+        ('f1111111-0000-0000-0000-000000000004'::uuid, 'mosquitto'),
+        ('f1111111-0000-0000-0000-000000000005'::uuid, 'timescaledb'),
+        ('f1111111-0000-0000-0000-000000000006'::uuid, 'grafana'),
+        ('f1111111-0000-0000-0000-000000000007'::uuid, 'supabase-envoy'),
+        ('f1111111-0000-0000-0000-000000000008'::uuid, 'supabase-auth'),
+        ('f1111111-0000-0000-0000-000000000009'::uuid, 'supabase-rest'),
+        ('f1111111-0000-0000-0000-00000000000a'::uuid, 'supabase-functions'),
+        ('f1111111-0000-0000-0000-00000000000b'::uuid, 'supabase-db'),
+        ('f1111111-0000-0000-0000-00000000000c'::uuid, 'ingestion'),
+        ('f1111111-0000-0000-0000-00000000000d'::uuid, 'swagger-ui'),
+        ('f1111111-0000-0000-0000-00000000000e'::uuid, 'prometheus'),
+        ('f1111111-0000-0000-0000-00000000000f'::uuid, 'alloy'),
+        ('f1111111-0000-0000-0000-000000000010'::uuid, 'ingestion'),
+        ('f1111111-0000-0000-0000-000000000011'::uuid, 'gitea')
+    ), changed AS (
+        -- A component missing from the map clears its row: the chart no longer deploys it, and
+        -- the previous release's version would otherwise stay on the page.
+        UPDATE public.directory_services d
+           SET image = NULLIF(p_images ->> s.component, '')
+          FROM served_by s
+         WHERE d.id = s.id
+           AND d.image IS DISTINCT FROM NULLIF(p_images ->> s.component, '')
+        RETURNING 1
+    )
+    SELECT count(*)::integer FROM changed;
+$$;
+
+
+ALTER FUNCTION public.record_directory_images(p_images jsonb) OWNER TO postgres;
+
+--
+
+-- FUNCTION record_directory_images(p_images jsonb) :: COMMENT
+COMMENT ON FUNCTION public.record_directory_images(p_images jsonb) IS 'Writes directory_services.image for the chart-managed rows from a component -> image map, clearing rows whose component is absent. Leaves every other row alone. Returns how many rows changed. Called by this migration with the chart''s map; db-init runs it as postgres.';
 
 --
 
@@ -6761,6 +7381,45 @@ COMMENT ON FUNCTION public.release_backup(p_backup_id uuid) IS 'Let the retentio
 
 --
 
+-- release_forge_sweep(uuid) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.release_forge_sweep(p_holder uuid) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_requested boolean;
+BEGIN
+    SELECT requested INTO v_requested
+      FROM public.forge_sweep_lease
+     WHERE id AND holder = p_holder
+       FOR UPDATE;
+    IF NOT FOUND THEN
+        RETURN false;
+    END IF;
+
+    UPDATE public.forge_sweep_lease
+       SET holder = NULL, held_until = '-infinity', requested = false
+     WHERE id;
+
+    -- A call refused during the pass may have come after the pass read what it asked about.
+    -- Queued on commit; any number of refusals come to this one pass.
+    IF v_requested THEN
+        PERFORM public.sweep_forge();
+    END IF;
+    RETURN true;
+END;
+$$;
+
+
+ALTER FUNCTION public.release_forge_sweep(p_holder uuid) OWNER TO postgres;
+
+--
+
+-- FUNCTION release_forge_sweep(p_holder uuid) :: COMMENT
+COMMENT ON FUNCTION public.release_forge_sweep(p_holder uuid) IS 'Release the forge-sweep lease if p_holder holds it, and queue one more pass through sweep_forge() when a claim was refused while it was held. False, and nothing released, for any other id.';
+
+--
+
 -- release_gateway_enrollment_token(text) :: FUNCTION
 CREATE OR REPLACE FUNCTION public.release_gateway_enrollment_token(p_token text) RETURNS boolean
     LANGUAGE plpgsql SECURITY DEFINER
@@ -6998,6 +7657,37 @@ ALTER FUNCTION public.relocate_devices(p_moves jsonb) OWNER TO postgres;
 
 -- FUNCTION relocate_devices(p_moves jsonb) :: COMMENT
 COMMENT ON FUNCTION public.relocate_devices(p_moves jsonb) IS 'Apply a batch of device relocations in ONE transaction, so the whole rearrangement shares a single audit_trail causation_id. A move states location_scope (cell, area_wide or site_wide) and, for area_wide, area_id. Refuses the batch outright on an unknown device, cell or area, a duplicate device, a missing location_scope or an area_wide move with no area -- a half-applied batch is the failure mode this exists to remove. Authority: Administrator or Shopfloor_Manager.';
+
+--
+
+-- renew_forge_sweep(uuid, integer) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.renew_forge_sweep(p_holder uuid, p_seconds integer) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+BEGIN
+    IF p_seconds IS NULL OR p_seconds NOT BETWEEN 1 AND 3600 THEN
+        RAISE EXCEPTION 'renew_forge_sweep: a lease lasts 1 to 3600 seconds, not %', p_seconds
+            USING ERRCODE = '22023';
+    END IF;
+
+    -- By holder alone: a lapsed lease nobody took over is still this holder's. Called as a pass
+    -- starts under a lease its caller holds, so it clears `requested` as a claim does.
+    UPDATE public.forge_sweep_lease
+       SET held_until = clock_timestamp() + make_interval(secs => p_seconds),
+           requested = false
+     WHERE id AND holder = p_holder;
+    RETURN FOUND;
+END;
+$$;
+
+
+ALTER FUNCTION public.renew_forge_sweep(p_holder uuid, p_seconds integer) OWNER TO postgres;
+
+--
+
+-- FUNCTION renew_forge_sweep(p_holder uuid, p_seconds integer) :: COMMENT
+COMMENT ON FUNCTION public.renew_forge_sweep(p_holder uuid, p_seconds integer) IS 'Extend the forge-sweep lease p_holder holds by p_seconds from now, as a pass starts under it. False when p_holder is not the holder: never claimed, released, or taken over after it lapsed.';
 
 --
 
@@ -7386,9 +8076,10 @@ CREATE OR REPLACE FUNCTION public.revoke_gateway_credential(p_sparkplug_id text)
     SET search_path TO 'public'
     AS $_$
 DECLARE
-  v_url    text;
-  v_key    text;
-  v_secret text;
+  v_url     text;
+  v_key     text;
+  v_secret  text;
+  v_request bigint;
 BEGIN
   IF p_sparkplug_id IS NULL OR p_sparkplug_id !~ '^gwy[0-9a-f]{21}$' THEN
     RETURN false;
@@ -7400,7 +8091,7 @@ BEGIN
 
   -- A STACK WITH NOTHING CONFIGURED DOES NOTHING rather than sending a bare "Bearer ". The call
   -- would answer 401 or 503 either way; not making it keeps the failure legible as "not
-  -- configured" rather than as "rejected". Same reasoning as 0006's webhook signer.
+  -- configured" rather than as "rejected".
   IF coalesce(v_url,'') = '' OR coalesce(v_key,'') = '' OR coalesce(v_secret,'') = '' THEN
     RETURN false;
   END IF;
@@ -7408,7 +8099,7 @@ BEGIN
   -- Through the gateway to the edge function, not straight at the credential service: the chart
   -- admits only `supabase-functions` to that service. `apikey` gets past the gateway;
   -- `x-revoke-secret` is what authorises the act.
-  PERFORM net.http_post(
+  v_request := net.http_post(
     url     := rtrim(v_url, '/') || '/revoke-gateway-credential',
     headers := jsonb_build_object(
                  'Content-Type',    'application/json',
@@ -7417,6 +8108,14 @@ BEGIN
                  'x-revoke-secret', v_secret),
     body    := jsonb_build_object('sparkplug_id', p_sparkplug_id)
   );
+
+  -- The sweep judges the caller's stamp by this request's reply. An INSERT, never an UPDATE of
+  -- gateways: the BEFORE DELETE trigger calls this, and updating the row being deleted aborts the
+  -- DELETE. A deleted gateway's row goes with it by ON DELETE CASCADE; no gateway row, no record.
+  INSERT INTO public.gateway_revocation_requests (gateway_id, request_id, requested_at)
+  SELECT g.id, v_request, now() FROM public.gateways g WHERE g.sparkplug_id = p_sparkplug_id
+  ON CONFLICT (gateway_id) DO UPDATE
+     SET request_id = EXCLUDED.request_id, requested_at = EXCLUDED.requested_at;
 
   RETURN true;
 END $_$;
@@ -7427,7 +8126,7 @@ ALTER FUNCTION public.revoke_gateway_credential(p_sparkplug_id text) OWNER TO po
 --
 
 -- FUNCTION revoke_gateway_credential(p_sparkplug_id text) :: COMMENT
-COMMENT ON FUNCTION public.revoke_gateway_credential(p_sparkplug_id text) IS 'Ask the credential service to disable this gateway''s broker account, which is how this platform revokes: the broker drops any live session at once and refuses the next CONNECT. The account is not deleted; a later issue re-enables it. Returns false when the service is not configured. ASYNCHRONOUS: net.http_post queues the request, so a true return means "asked", not "revoked". The sweep is what makes archive eventually correct.';
+COMMENT ON FUNCTION public.revoke_gateway_credential(p_sparkplug_id text) IS 'Ask the credential service to disable this gateway''s broker account, which is how this platform revokes: the broker drops any live session at once and refuses the next CONNECT. The account is not deleted; a later issue re-enables it. Returns false when the service is not configured. ASYNCHRONOUS: true means "asked", not "revoked". Records the pg_net request id in gateway_revocation_requests, against the gateway row if there is one, for the sweep to judge.';
 
 --
 
@@ -7765,7 +8464,7 @@ ALTER FUNCTION public.service_token_max_days() OWNER TO postgres;
 --
 
 -- FUNCTION service_token_max_days() :: COMMENT
-COMMENT ON FUNCTION public.service_token_max_days() IS 'The longest life a service-principal token may be recorded with (90 days). Mirrored by the --days ceiling in scripts/mint-mcp-token.mjs; these tokens cannot be revoked, so the expiry is the only bound that exists.';
+COMMENT ON FUNCTION public.service_token_max_days() IS 'The longest life a service-principal token may be recorded with (90 days). Mirrored by the --days ceiling in scripts/mint-mcp-token.mjs. revoke_service_token() and revoke_service_principal() withdraw a token at PostgREST; storage, realtime, the edge runtime and Studio verify the signature alone, so the expiry is the only bound that reaches every service.';
 
 --
 
@@ -7806,6 +8505,80 @@ ALTER FUNCTION public.set_archive_credential(p_secret text) OWNER TO postgres;
 
 -- FUNCTION set_archive_credential(p_secret text) :: COMMENT
 COMMENT ON FUNCTION public.set_archive_credential(p_secret text) IS 'Write the cold archive''s S3 secret key into the vault. Administrator only. WRITE-ONLY BY CONSTRUCTION: nothing reads it back to a browser, so the page can report that a credential is set and never what it is.';
+
+--
+
+-- set_backup_offsite_credential(text) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.set_backup_offsite_credential(p_secret text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+DECLARE
+    v_id uuid;
+BEGIN
+    IF NOT public.has_role(ARRAY['Administrator']) THEN
+        RAISE EXCEPTION 'only an Administrator may set the off-site backup credential'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    IF p_secret IS NULL OR length(btrim(p_secret)) = 0 THEN
+        RAISE EXCEPTION 'the off-site backup credential cannot be empty; remove the destination instead'
+            USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+
+    SELECT id INTO v_id FROM vault.secrets WHERE name = 'backup_offsite_secret_access_key';
+    IF v_id IS NULL THEN
+        PERFORM vault.create_secret(btrim(p_secret), 'backup_offsite_secret_access_key',
+                                    'The secret half of the off-site backup copy''s S3 credential.');
+    ELSE
+        PERFORM vault.update_secret(v_id, btrim(p_secret));
+    END IF;
+END;
+$$;
+
+
+ALTER FUNCTION public.set_backup_offsite_credential(p_secret text) OWNER TO postgres;
+
+--
+
+-- FUNCTION set_backup_offsite_credential(p_secret text) :: COMMENT
+COMMENT ON FUNCTION public.set_backup_offsite_credential(p_secret text) IS 'Write the off-site backup copy''s S3 secret key into the vault. Administrator only, and write-only: nothing reads it back to a browser.';
+
+--
+
+-- set_backup_offsite_destination(text, text, text, text, text, text, boolean) :: FUNCTION
+CREATE OR REPLACE FUNCTION public.set_backup_offsite_destination(p_endpoint text, p_region text, p_bucket text, p_prefix text, p_access_key_id text, p_recipient text, p_path_style boolean) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_catalog'
+    AS $$
+BEGIN
+    IF NOT public.has_role(ARRAY['Administrator']) THEN
+        RAISE EXCEPTION 'only an Administrator may set the off-site backup destination'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    UPDATE public.system_settings s
+       SET value = v.value
+      FROM (VALUES
+          ('backup_offsite.endpoint',      to_jsonb(btrim(coalesce(p_endpoint, '')))),
+          ('backup_offsite.region',        to_jsonb(btrim(coalesce(p_region, '')))),
+          ('backup_offsite.bucket',        to_jsonb(btrim(coalesce(p_bucket, '')))),
+          ('backup_offsite.prefix',        to_jsonb(btrim(coalesce(p_prefix, '')))),
+          ('backup_offsite.access_key_id', to_jsonb(btrim(coalesce(p_access_key_id, '')))),
+          ('backup_offsite.recipient',     to_jsonb(btrim(coalesce(p_recipient, '')))),
+          ('backup_offsite.path_style',    to_jsonb(coalesce(p_path_style, false)))
+      ) AS v(key, value)
+     WHERE s.key = v.key
+       AND s.value IS DISTINCT FROM v.value;
+END;
+$$;
+
+
+ALTER FUNCTION public.set_backup_offsite_destination(p_endpoint text, p_region text, p_bucket text, p_prefix text, p_access_key_id text, p_recipient text, p_path_style boolean) OWNER TO postgres;
+
+--
+
+-- FUNCTION set_backup_offsite_destination(p_endpoint text, p_region text, p_bucket text, p_prefix text, p_access_key_id text, p_recipient text, p_path_style boolean) :: COMMENT
+COMMENT ON FUNCTION public.set_backup_offsite_destination(p_endpoint text, p_region text, p_bucket text, p_prefix text, p_access_key_id text, p_recipient text, p_path_style boolean) IS 'Set the six off-site destination settings and the path-style switch in one statement, each checked by backup_offsite_setting_guard(). Administrator only. The secret key is set_backup_offsite_credential()''s.';
 
 --
 
@@ -8275,20 +9048,30 @@ DECLARE
   v_row     record;
   v_asked   int := 0;
 BEGIN
-  -- FIRST, UNDO OPTIMISM THAT TURNED OUT TO BE WRONG. A stamp written by the trigger means the
-  -- request was QUEUED. If pg_net recorded a non-2xx answer, or recorded nothing at all within
-  -- five minutes, the revocation did not happen and the stamp is a lie -- clearing it puts the
-  -- gateway back into the retry set below.
+  -- A 2xx to its own request confirms a stamp, and dropping the row makes that final: pg_net
+  -- prunes replies after six hours. Rows whose gateway was restored or lost its stamp go too.
+  DELETE FROM public.gateway_revocation_requests q
+   USING public.gateways g
+   WHERE g.id = q.gateway_id
+     AND (NOT g.is_archived
+          OR g.credential_revoked_at IS NULL
+          OR EXISTS (SELECT 1 FROM net._http_response r
+                      WHERE r.id = q.request_id AND r.status_code BETWEEN 200 AND 299));
+
+  -- Any other reply, or none five minutes on, means the revocation did not happen. Clearing the
+  -- stamp puts the gateway back into the retry set below.
+  WITH failed AS (
+    DELETE FROM public.gateway_revocation_requests q
+     WHERE NOT EXISTS (SELECT 1 FROM net._http_response r
+                        WHERE r.id = q.request_id AND r.status_code BETWEEN 200 AND 299)
+       AND (q.requested_at < now() - interval '5 minutes'
+            OR EXISTS (SELECT 1 FROM net._http_response r WHERE r.id = q.request_id))
+    RETURNING q.gateway_id
+  )
   UPDATE public.gateways g
      SET credential_revoked_at = NULL
-   WHERE g.is_archived
-     AND g.credential_revoked_at IS NOT NULL
-     AND g.credential_revoked_at < now() - interval '5 minutes'
-     AND NOT EXISTS (
-       SELECT 1 FROM net._http_response r
-        WHERE r.created >= g.credential_revoked_at - interval '1 minute'
-          AND r.status_code BETWEEN 200 AND 299
-     );
+    FROM failed
+   WHERE g.id = failed.gateway_id;
 
   FOR v_row IN
     SELECT sparkplug_id FROM public.gateways g
@@ -8313,7 +9096,7 @@ ALTER FUNCTION public.sweep_gateway_credential_revocations() OWNER TO postgres;
 --
 
 -- FUNCTION sweep_gateway_credential_revocations() :: COMMENT
-COMMENT ON FUNCTION public.sweep_gateway_credential_revocations() IS 'Retries broker-credential revocation for archived gateways whose trigger call did not land, and clears stamps that pg_net shows were never answered. Run by pg_cron every 15 minutes. Gated on gateway_has_broker_credential() since 0063. Does nothing for DELETED gateways -- their row is gone; scripts/revoke-orphaned-broker-accounts.mjs is the sweep for those.';
+COMMENT ON FUNCTION public.sweep_gateway_credential_revocations() IS 'Judges each revocation stamp by the reply to its own pg_net request (gateway_revocation_requests): a 2xx confirms it, any other reply or none after five minutes clears it. Then asks again for every archived gateway that holds a broker credential and has no stamp, 200 per run. Run by pg_cron every 15 minutes. Does nothing for DELETED gateways -- their row is gone; scripts/revoke-orphaned-broker-accounts.mjs is the sweep for those.';
 
 --
 
@@ -8446,7 +9229,7 @@ ALTER FUNCTION public.validate_change_proposal() OWNER TO postgres;
 --
 
 -- FUNCTION validate_change_proposal() :: COMMENT
-COMMENT ON FUNCTION public.validate_change_proposal() IS 'Refuses a patch naming a key proposable_columns() does not admit, and a proposal aimed at a target that is absent, archived or -- for the schema lane -- not a draft. Runs on INSERT and on any UPDATE that touches the patch, because editing an open proposal is a path INSERT-only validation would miss.';
+COMMENT ON FUNCTION public.validate_change_proposal() IS 'Refuses a proposal in a lane proposable_columns() has no allowlist for (the withdrawn schemas lane among them), a patch naming a key the lane does not admit, and a proposal aimed at a target that is absent or archived. Runs on INSERT and on any UPDATE that touches the patch, because editing an open proposal is a path INSERT-only validation would miss.';
 
 --
 
@@ -8884,6 +9667,153 @@ COMMENT ON TABLE public.asset_exports IS 'Each per-asset bundle aas-export store
 
 --
 
+-- audit_trail :: TABLE
+CREATE TABLE IF NOT EXISTS public.audit_trail (
+    id bigint NOT NULL,
+    entity_type text NOT NULL,
+    entity_id uuid NOT NULL,
+    action text NOT NULL,
+    old_data jsonb,
+    new_data jsonb,
+    changed_by uuid,
+    recorded_at timestamp with time zone DEFAULT now() NOT NULL,
+    actor_source text,
+    causation_id bigint,
+    audit_domain text NOT NULL,
+    CONSTRAINT audit_trail_actor_source_check CHECK (((actor_source IS NULL) OR (actor_source = ANY (ARRAY['user'::text, 'ingestion'::text, 'migration'::text, 'service'::text])))),
+    CONSTRAINT audit_trail_audit_domain_check CHECK ((audit_domain = ANY (ARRAY['asset'::text, 'security'::text])))
+)
+PARTITION BY RANGE (recorded_at);
+
+
+ALTER TABLE public.audit_trail OWNER TO postgres;
+
+ALTER TABLE public.audit_trail
+    ADD COLUMN IF NOT EXISTS id bigint NOT NULL,
+    ADD COLUMN IF NOT EXISTS entity_type text NOT NULL,
+    ADD COLUMN IF NOT EXISTS entity_id uuid NOT NULL,
+    ADD COLUMN IF NOT EXISTS action text NOT NULL,
+    ADD COLUMN IF NOT EXISTS old_data jsonb,
+    ADD COLUMN IF NOT EXISTS new_data jsonb,
+    ADD COLUMN IF NOT EXISTS changed_by uuid,
+    ADD COLUMN IF NOT EXISTS recorded_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS actor_source text,
+    ADD COLUMN IF NOT EXISTS causation_id bigint,
+    ADD COLUMN IF NOT EXISTS audit_domain text NOT NULL;
+
+ALTER TABLE public.audit_trail
+    ALTER COLUMN id DROP DEFAULT,
+    ALTER COLUMN entity_type DROP DEFAULT,
+    ALTER COLUMN entity_id DROP DEFAULT,
+    ALTER COLUMN action DROP DEFAULT,
+    ALTER COLUMN old_data DROP DEFAULT,
+    ALTER COLUMN new_data DROP DEFAULT,
+    ALTER COLUMN changed_by DROP DEFAULT,
+    ALTER COLUMN recorded_at SET DEFAULT now(),
+    ALTER COLUMN actor_source DROP DEFAULT,
+    ALTER COLUMN causation_id DROP DEFAULT,
+    ALTER COLUMN audit_domain DROP DEFAULT;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'audit_trail_actor_source_check'
+                AND conrelid = 'public.audit_trail'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (((actor_source IS NULL) OR (actor_source = ANY (ARRAY[''user''::text, ''ingestion''::text, ''migration''::text, ''service''::text]))))') THEN
+    ALTER TABLE public.audit_trail DROP CONSTRAINT audit_trail_actor_source_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'audit_trail_actor_source_check'
+                    AND conrelid = 'public.audit_trail'::regclass) THEN
+    ALTER TABLE public.audit_trail
+        ADD CONSTRAINT audit_trail_actor_source_check CHECK (((actor_source IS NULL) OR (actor_source = ANY (ARRAY['user'::text, 'ingestion'::text, 'migration'::text, 'service'::text]))));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'audit_trail_audit_domain_check'
+                AND conrelid = 'public.audit_trail'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((audit_domain = ANY (ARRAY[''asset''::text, ''security''::text])))') THEN
+    ALTER TABLE public.audit_trail DROP CONSTRAINT audit_trail_audit_domain_check;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'audit_trail_audit_domain_check'
+                    AND conrelid = 'public.audit_trail'::regclass) THEN
+    ALTER TABLE public.audit_trail
+        ADD CONSTRAINT audit_trail_audit_domain_check CHECK ((audit_domain = ANY (ARRAY['asset'::text, 'security'::text])));
+  END IF;
+END $c$;
+
+--
+
+-- TABLE audit_trail :: COMMENT
+COMMENT ON TABLE public.audit_trail IS 'Append-only audit of every attributed change to cells, gateways and devices, plus the security lane 0070 added. Range-partitioned by month on recorded_at (0079) so retention is DETACH rather than DELETE. Rows are written only by log_audit_trail_event() and its named siblings; UPDATE and DELETE are refused for every role that is not an owner.';
+
+--
+
+-- COLUMN audit_trail.actor_source :: COMMENT
+COMMENT ON COLUMN public.audit_trail.actor_source IS 'What kind of actor made the change: user | ingestion | migration | service. Complements changed_by, which names WHICH user and is NULL for every machine-originated write.';
+
+--
+
+-- COLUMN audit_trail.causation_id :: COMMENT
+COMMENT ON COLUMN public.audit_trail.causation_id IS 'The transaction that wrote this row (txid_current()). Rows sharing it were written by ONE act -- an approval and the change it applied, a batch relocation, a delete that cascaded. NOT a global identifier: it is unique only within this database, and only until the epoch counter is reset by a restore from a dump. Group by it; never store it as a foreign reference.';
+
+--
+
+-- COLUMN audit_trail.audit_domain :: COMMENT
+COMMENT ON COLUMN public.audit_trail.audit_domain IS 'asset | security. Stamped by trg_audit_trail_stamp_domain from audit_domain_for(); callers do not supply it and cannot override it. Decides which SELECT policy admits the row.';
+
+--
+
+-- audit_trail_id_seq :: SEQUENCE
+CREATE SEQUENCE IF NOT EXISTS public.audit_trail_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.audit_trail_id_seq OWNER TO postgres;
+
+--
+
+-- audit_trail_id_seq :: SEQUENCE OWNED BY
+ALTER SEQUENCE public.audit_trail_id_seq OWNED BY public.audit_trail.id;
+
+--
+
+-- audit_trail_default :: TABLE
+CREATE TABLE IF NOT EXISTS public.audit_trail_default PARTITION OF public.audit_trail DEFAULT;
+
+--
+
+-- audit_trail_partition_health :: VIEW
+CREATE OR REPLACE VIEW public.audit_trail_partition_health AS
+ SELECT ( SELECT count(*) AS count
+           FROM (pg_class c
+             JOIN pg_inherits i ON ((i.inhrelid = c.oid)))
+          WHERE (i.inhparent = ('public.audit_trail'::regclass)::oid)) AS partition_count,
+    ( SELECT count(*) AS count
+           FROM public.audit_trail_default) AS default_rows,
+    ( SELECT max((regexp_replace(pg_get_expr(c.relpartbound, c.oid), '^FOR VALUES FROM \(''([^'']+)''\) TO \(''([^'']+)''\).*$'::text, '\2'::text))::timestamp with time zone) AS max
+           FROM (pg_class c
+             JOIN pg_inherits i ON ((i.inhrelid = c.oid)))
+          WHERE ((i.inhparent = ('public.audit_trail'::regclass)::oid) AND (pg_get_expr(c.relpartbound, c.oid) !~~ 'DEFAULT%'::text))) AS covered_until;
+
+
+ALTER VIEW public.audit_trail_partition_health OWNER TO postgres;
+
+--
+
+-- VIEW audit_trail_partition_health :: COMMENT
+COMMENT ON VIEW public.audit_trail_partition_health IS 'Whether audit_trail partitioning is keeping up. default_rows > 0 means the maintenance job has stopped and retention by DETACH is no longer complete; covered_until is the instant beyond which new rows fall to the default partition. Read by the Grafana rule "Audit Trail Partitions Falling Behind".';
+
+--
+
 -- backup_jobs :: TABLE
 CREATE TABLE IF NOT EXISTS public.backup_jobs (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -8981,6 +9911,44 @@ COMMENT ON COLUMN public.backup_jobs.error IS 'What the service said when it fai
 
 --
 
+-- backup_health :: VIEW
+CREATE OR REPLACE VIEW public.backup_health AS
+ SELECT now() AS collected_at,
+    last_success_at,
+    EXTRACT(epoch FROM (now() - COALESCE(last_success_at, first_recorded_at))) AS age_seconds
+   FROM ( SELECT max(j.started_at) FILTER (WHERE (j.status = 'COMPLETED'::text)) AS last_success_at,
+            min(j.created_at) AS first_recorded_at
+           FROM public.backup_jobs j) s
+  WHERE (first_recorded_at IS NOT NULL);
+
+
+ALTER VIEW public.backup_health OWNER TO postgres;
+
+--
+
+-- VIEW backup_health :: COMMENT
+COMMENT ON VIEW public.backup_health IS 'How long since the platform backup last succeeded. last_success_at is when the newest COMPLETED backup_jobs row started (NULL before the first); age_seconds counts from it, or from the first job recorded while none has succeeded. No row while no job exists. Read by the Grafana rule "Backup Stale" as grafana_reader.';
+
+--
+
+-- backup_offsite_health :: VIEW
+CREATE OR REPLACE VIEW public.backup_offsite_health AS
+ SELECT now() AS collected_at,
+    newest_stamp,
+    offsite_state,
+    age_seconds
+   FROM public.backup_offsite_health_rows() r(newest_stamp, offsite_state, age_seconds);
+
+
+ALTER VIEW public.backup_offsite_health OWNER TO postgres;
+
+--
+
+-- VIEW backup_offsite_health :: COMMENT
+COMMENT ON VIEW public.backup_offsite_health IS 'How long the newest backup has gone without an off-site copy at the current destination: age_seconds from when it was taken or the destination last changed, zero once copied. No row while the destination is incomplete or no backup exists. Read by the Grafana rule "Off-site Backup Stale" as grafana_reader.';
+
+--
+
 -- backups :: TABLE
 CREATE TABLE IF NOT EXISTS public.backups (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -8996,7 +9964,15 @@ CREATE TABLE IF NOT EXISTS public.backups (
     released_at timestamp with time zone,
     released_by uuid,
     taken_at timestamp with time zone DEFAULT now() NOT NULL,
+    offsite_state text DEFAULT 'PENDING'::text NOT NULL,
+    offsite_location text,
+    offsite_objects jsonb,
+    offsite_copied_at timestamp with time zone,
+    offsite_attempted_at timestamp with time zone,
+    offsite_attempts integer DEFAULT 0 NOT NULL,
+    offsite_error text,
     CONSTRAINT backups_components_is_an_array CHECK ((jsonb_typeof(components) = 'array'::text)),
+    CONSTRAINT backups_offsite_state_valid CHECK ((offsite_state = ANY (ARRAY['PENDING'::text, 'COPIED'::text, 'FAILED'::text]))),
     CONSTRAINT backups_origin_valid CHECK ((origin = ANY (ARRAY['requested'::text, 'scheduled'::text]))),
     CONSTRAINT backups_size_is_not_negative CHECK ((size_bytes >= 0)),
     CONSTRAINT backups_stamp_is_a_directory_name CHECK ((stamp ~ '^[0-9]{8}T[0-9]{6}Z$'::text))
@@ -9018,7 +9994,14 @@ ALTER TABLE public.backups
     ADD COLUMN IF NOT EXISTS pinned boolean DEFAULT false NOT NULL,
     ADD COLUMN IF NOT EXISTS released_at timestamp with time zone,
     ADD COLUMN IF NOT EXISTS released_by uuid,
-    ADD COLUMN IF NOT EXISTS taken_at timestamp with time zone DEFAULT now() NOT NULL;
+    ADD COLUMN IF NOT EXISTS taken_at timestamp with time zone DEFAULT now() NOT NULL,
+    ADD COLUMN IF NOT EXISTS offsite_state text DEFAULT 'PENDING'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS offsite_location text,
+    ADD COLUMN IF NOT EXISTS offsite_objects jsonb,
+    ADD COLUMN IF NOT EXISTS offsite_copied_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS offsite_attempted_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS offsite_attempts integer DEFAULT 0 NOT NULL,
+    ADD COLUMN IF NOT EXISTS offsite_error text;
 
 ALTER TABLE public.backups
     ALTER COLUMN id SET DEFAULT gen_random_uuid(),
@@ -9033,7 +10016,14 @@ ALTER TABLE public.backups
     ALTER COLUMN pinned SET DEFAULT false,
     ALTER COLUMN released_at DROP DEFAULT,
     ALTER COLUMN released_by DROP DEFAULT,
-    ALTER COLUMN taken_at SET DEFAULT now();
+    ALTER COLUMN taken_at SET DEFAULT now(),
+    ALTER COLUMN offsite_state SET DEFAULT 'PENDING'::text,
+    ALTER COLUMN offsite_location DROP DEFAULT,
+    ALTER COLUMN offsite_objects DROP DEFAULT,
+    ALTER COLUMN offsite_copied_at DROP DEFAULT,
+    ALTER COLUMN offsite_attempted_at DROP DEFAULT,
+    ALTER COLUMN offsite_attempts SET DEFAULT 0,
+    ALTER COLUMN offsite_error DROP DEFAULT;
 
 DO $c$ BEGIN
 
@@ -9048,6 +10038,22 @@ DO $c$ BEGIN
                     AND conrelid = 'public.backups'::regclass) THEN
     ALTER TABLE public.backups
         ADD CONSTRAINT backups_components_is_an_array CHECK ((jsonb_typeof(components) = 'array'::text));
+  END IF;
+END $c$;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'backups_offsite_state_valid'
+                AND conrelid = 'public.backups'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK ((offsite_state = ANY (ARRAY[''PENDING''::text, ''COPIED''::text, ''FAILED''::text])))') THEN
+    ALTER TABLE public.backups DROP CONSTRAINT backups_offsite_state_valid;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'backups_offsite_state_valid'
+                    AND conrelid = 'public.backups'::regclass) THEN
+    ALTER TABLE public.backups
+        ADD CONSTRAINT backups_offsite_state_valid CHECK ((offsite_state = ANY (ARRAY['PENDING'::text, 'COPIED'::text, 'FAILED'::text])));
   END IF;
 END $c$;
 
@@ -9102,7 +10108,7 @@ END $c$;
 --
 
 -- TABLE backups :: COMMENT
-COMMENT ON TABLE public.backups IS 'One row per backup that EXISTS on the backup volume; the row is deleted when the service prunes the files, and BACKUP_PRUNED in audit_trail is the record that it did. Written only by backup_finalise() and released only by release_backup(). Readable by Administrator only. The bytes never leave the volume: nothing serves them to a browser.';
+COMMENT ON TABLE public.backups IS 'One row per backup that EXISTS on the backup volume; the row is deleted when the service prunes the files, and BACKUP_PRUNED in audit_trail is the record that it did. Written only by backup_finalise() and backup_offsite_record(), and released only by release_backup(). Readable by Administrator only. No byte reaches a browser; the off-site copy is encrypted before it leaves the service.';
 
 --
 
@@ -9123,6 +10129,26 @@ COMMENT ON COLUMN public.backups.components IS 'What the backup holds: an array 
 
 -- COLUMN backups.pinned :: COMMENT
 COMMENT ON COLUMN public.backups.pinned IS 'True keeps the backup out of the retention prune. Set at creation for a requested backup, cleared by release_backup(). A scheduled backup is never pinned.';
+
+--
+
+-- COLUMN backups.offsite_state :: COMMENT
+COMMENT ON COLUMN public.backups.offsite_state IS 'The off-site copy. PENDING: none yet. COPIED: every file uploaded, encrypted, and checked by a HEAD against its SHA-256. FAILED: the last attempt failed, offsite_error says why, and the service tries again after a backoff. Written only by backup_offsite_record().';
+
+--
+
+-- COLUMN backups.offsite_location :: COMMENT
+COMMENT ON COLUMN public.backups.offsite_location IS 'Where the copy is: <endpoint>/<bucket>/<prefix>/<stamp>/, one <file>.age object per file.';
+
+--
+
+-- COLUMN backups.offsite_objects :: COMMENT
+COMMENT ON COLUMN public.backups.offsite_objects IS 'The uploaded objects: an array of {file, key, size_bytes, sha256}, the digest of the ciphertext.';
+
+--
+
+-- COLUMN backups.offsite_attempts :: COMMENT
+COMMENT ON COLUMN public.backups.offsite_attempts IS 'Failed attempts since the last success; the backoff before the next one grows with it.';
 
 --
 
@@ -10011,7 +11037,7 @@ END $c$;
 --
 
 -- COLUMN devices.status :: COMMENT
-COMMENT ON COLUMN public.devices.status IS 'What the platform has OBSERVED of this device, never what an operator intends: ONLINE or OFFLINE. Written only by ingestion -- DBIRTH sets ONLINE, DDEATH and the liveness watchdog set OFFLINE -- and left at its OFFLINE default for a device registered but not yet connected. devices_online_implies_born refuses ONLINE without a first_dbirth_at. A device provisioned and never heard from is OFFLINE with a null first_dbirth_at, which the dashboard draws as awaiting its first birth rather than as a machine that went away.';
+COMMENT ON COLUMN public.devices.status IS 'What the platform has OBSERVED of this device, never what an operator intends: ONLINE or OFFLINE. Written only by ingestion -- DBIRTH sets ONLINE, as does DDATA from a device the liveness watchdog timed out; DDEATH, its node''s NDEATH and the watchdog set OFFLINE -- and left at its OFFLINE default for a device registered but not yet connected. devices_online_implies_born refuses ONLINE without a first_dbirth_at. A device provisioned and never heard from is OFFLINE with a null first_dbirth_at, which the dashboard draws as awaiting its first birth rather than as a machine that went away.';
 
 --
 
@@ -10297,153 +11323,6 @@ COMMENT ON VIEW public.device_schemas IS 'Every schema attached to a device: dev
 
 --
 
--- audit_trail :: TABLE
-CREATE TABLE IF NOT EXISTS public.audit_trail (
-    id bigint NOT NULL,
-    entity_type text NOT NULL,
-    entity_id uuid NOT NULL,
-    action text NOT NULL,
-    old_data jsonb,
-    new_data jsonb,
-    changed_by uuid,
-    recorded_at timestamp with time zone DEFAULT now() NOT NULL,
-    actor_source text,
-    causation_id bigint,
-    audit_domain text NOT NULL,
-    CONSTRAINT audit_trail_actor_source_check CHECK (((actor_source IS NULL) OR (actor_source = ANY (ARRAY['user'::text, 'ingestion'::text, 'migration'::text, 'service'::text])))),
-    CONSTRAINT audit_trail_audit_domain_check CHECK ((audit_domain = ANY (ARRAY['asset'::text, 'security'::text])))
-)
-PARTITION BY RANGE (recorded_at);
-
-
-ALTER TABLE public.audit_trail OWNER TO postgres;
-
-ALTER TABLE public.audit_trail
-    ADD COLUMN IF NOT EXISTS id bigint NOT NULL,
-    ADD COLUMN IF NOT EXISTS entity_type text NOT NULL,
-    ADD COLUMN IF NOT EXISTS entity_id uuid NOT NULL,
-    ADD COLUMN IF NOT EXISTS action text NOT NULL,
-    ADD COLUMN IF NOT EXISTS old_data jsonb,
-    ADD COLUMN IF NOT EXISTS new_data jsonb,
-    ADD COLUMN IF NOT EXISTS changed_by uuid,
-    ADD COLUMN IF NOT EXISTS recorded_at timestamp with time zone DEFAULT now() NOT NULL,
-    ADD COLUMN IF NOT EXISTS actor_source text,
-    ADD COLUMN IF NOT EXISTS causation_id bigint,
-    ADD COLUMN IF NOT EXISTS audit_domain text NOT NULL;
-
-ALTER TABLE public.audit_trail
-    ALTER COLUMN id DROP DEFAULT,
-    ALTER COLUMN entity_type DROP DEFAULT,
-    ALTER COLUMN entity_id DROP DEFAULT,
-    ALTER COLUMN action DROP DEFAULT,
-    ALTER COLUMN old_data DROP DEFAULT,
-    ALTER COLUMN new_data DROP DEFAULT,
-    ALTER COLUMN changed_by DROP DEFAULT,
-    ALTER COLUMN recorded_at SET DEFAULT now(),
-    ALTER COLUMN actor_source DROP DEFAULT,
-    ALTER COLUMN causation_id DROP DEFAULT,
-    ALTER COLUMN audit_domain DROP DEFAULT;
-
-DO $c$ BEGIN
-
-  IF EXISTS (SELECT 1 FROM pg_constraint
-              WHERE conname = 'audit_trail_actor_source_check'
-                AND conrelid = 'public.audit_trail'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((actor_source IS NULL) OR (actor_source = ANY (ARRAY[''user''::text, ''ingestion''::text, ''migration''::text, ''service''::text]))))') THEN
-    ALTER TABLE public.audit_trail DROP CONSTRAINT audit_trail_actor_source_check;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint
-                  WHERE conname = 'audit_trail_actor_source_check'
-                    AND conrelid = 'public.audit_trail'::regclass) THEN
-    ALTER TABLE public.audit_trail
-        ADD CONSTRAINT audit_trail_actor_source_check CHECK (((actor_source IS NULL) OR (actor_source = ANY (ARRAY['user'::text, 'ingestion'::text, 'migration'::text, 'service'::text]))));
-  END IF;
-END $c$;
-
-DO $c$ BEGIN
-
-  IF EXISTS (SELECT 1 FROM pg_constraint
-              WHERE conname = 'audit_trail_audit_domain_check'
-                AND conrelid = 'public.audit_trail'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((audit_domain = ANY (ARRAY[''asset''::text, ''security''::text])))') THEN
-    ALTER TABLE public.audit_trail DROP CONSTRAINT audit_trail_audit_domain_check;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint
-                  WHERE conname = 'audit_trail_audit_domain_check'
-                    AND conrelid = 'public.audit_trail'::regclass) THEN
-    ALTER TABLE public.audit_trail
-        ADD CONSTRAINT audit_trail_audit_domain_check CHECK ((audit_domain = ANY (ARRAY['asset'::text, 'security'::text])));
-  END IF;
-END $c$;
-
---
-
--- TABLE audit_trail :: COMMENT
-COMMENT ON TABLE public.audit_trail IS 'Append-only audit of every attributed change to cells, gateways and devices, plus the security lane 0070 added. Range-partitioned by month on recorded_at (0079) so retention is DETACH rather than DELETE. Rows are written only by log_audit_trail_event() and its named siblings; UPDATE and DELETE are refused for every role that is not an owner.';
-
---
-
--- COLUMN audit_trail.actor_source :: COMMENT
-COMMENT ON COLUMN public.audit_trail.actor_source IS 'What kind of actor made the change: user | ingestion | migration | service. Complements changed_by, which names WHICH user and is NULL for every machine-originated write.';
-
---
-
--- COLUMN audit_trail.causation_id :: COMMENT
-COMMENT ON COLUMN public.audit_trail.causation_id IS 'The transaction that wrote this row (txid_current()). Rows sharing it were written by ONE act -- an approval and the change it applied, a batch relocation, a delete that cascaded. NOT a global identifier: it is unique only within this database, and only until the epoch counter is reset by a restore from a dump. Group by it; never store it as a foreign reference.';
-
---
-
--- COLUMN audit_trail.audit_domain :: COMMENT
-COMMENT ON COLUMN public.audit_trail.audit_domain IS 'asset | security. Stamped by trg_audit_trail_stamp_domain from audit_domain_for(); callers do not supply it and cannot override it. Decides which SELECT policy admits the row.';
-
---
-
--- audit_trail_id_seq :: SEQUENCE
-CREATE SEQUENCE IF NOT EXISTS public.audit_trail_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public.audit_trail_id_seq OWNER TO postgres;
-
---
-
--- audit_trail_id_seq :: SEQUENCE OWNED BY
-ALTER SEQUENCE public.audit_trail_id_seq OWNED BY public.audit_trail.id;
-
---
-
--- audit_trail_default :: TABLE
-CREATE TABLE IF NOT EXISTS public.audit_trail_default PARTITION OF public.audit_trail DEFAULT;
-
---
-
--- audit_trail_partition_health :: VIEW
-CREATE OR REPLACE VIEW public.audit_trail_partition_health AS
- SELECT ( SELECT count(*) AS count
-           FROM (pg_class c
-             JOIN pg_inherits i ON ((i.inhrelid = c.oid)))
-          WHERE (i.inhparent = ('public.audit_trail'::regclass)::oid)) AS partition_count,
-    ( SELECT count(*) AS count
-           FROM public.audit_trail_default) AS default_rows,
-    ( SELECT max((regexp_replace(pg_get_expr(c.relpartbound, c.oid), '^FOR VALUES FROM \(''([^'']+)''\) TO \(''([^'']+)''\).*$'::text, '\2'::text))::timestamp with time zone) AS max
-           FROM (pg_class c
-             JOIN pg_inherits i ON ((i.inhrelid = c.oid)))
-          WHERE ((i.inhparent = ('public.audit_trail'::regclass)::oid) AND (pg_get_expr(c.relpartbound, c.oid) !~~ 'DEFAULT%'::text))) AS covered_until;
-
-
-ALTER VIEW public.audit_trail_partition_health OWNER TO postgres;
-
---
-
--- VIEW audit_trail_partition_health :: COMMENT
-COMMENT ON VIEW public.audit_trail_partition_health IS 'Whether audit_trail partitioning is keeping up. default_rows > 0 means the maintenance job has stopped and retention by DETACH is no longer complete; covered_until is the instant beyond which new rows fall to the default partition. Read by the Grafana rule "Audit Trail Partitions Falling Behind".';
-
---
-
 -- directory_liveness_probe :: TABLE
 CREATE TABLE IF NOT EXISTS public.directory_liveness_probe (
     id boolean DEFAULT true NOT NULL,
@@ -10498,6 +11377,7 @@ CREATE TABLE IF NOT EXISTS public.directory_services (
     last_heartbeat timestamp with time zone DEFAULT now(),
     registered_schema_id uuid,
     exposure text DEFAULT 'UNKNOWN'::text NOT NULL,
+    image text,
     CONSTRAINT directory_services_exposure_valid CHECK ((exposure = ANY (ARRAY['NETWORK'::text, 'HOST'::text, 'INTERNAL'::text, 'UNKNOWN'::text]))),
     CONSTRAINT directory_services_status_valid CHECK ((status = ANY (ARRAY['ACTIVE'::text, 'DOWN'::text, 'UNKNOWN'::text])))
 );
@@ -10513,7 +11393,8 @@ ALTER TABLE public.directory_services
     ADD COLUMN IF NOT EXISTS status text DEFAULT 'UNKNOWN'::text NOT NULL,
     ADD COLUMN IF NOT EXISTS last_heartbeat timestamp with time zone DEFAULT now(),
     ADD COLUMN IF NOT EXISTS registered_schema_id uuid,
-    ADD COLUMN IF NOT EXISTS exposure text DEFAULT 'UNKNOWN'::text NOT NULL;
+    ADD COLUMN IF NOT EXISTS exposure text DEFAULT 'UNKNOWN'::text NOT NULL,
+    ADD COLUMN IF NOT EXISTS image text;
 
 ALTER TABLE public.directory_services
     ALTER COLUMN id SET DEFAULT gen_random_uuid(),
@@ -10523,7 +11404,8 @@ ALTER TABLE public.directory_services
     ALTER COLUMN status SET DEFAULT 'UNKNOWN'::text,
     ALTER COLUMN last_heartbeat SET DEFAULT now(),
     ALTER COLUMN registered_schema_id DROP DEFAULT,
-    ALTER COLUMN exposure SET DEFAULT 'UNKNOWN'::text;
+    ALTER COLUMN exposure SET DEFAULT 'UNKNOWN'::text,
+    ALTER COLUMN image DROP DEFAULT;
 
 DO $c$ BEGIN
 
@@ -10571,6 +11453,73 @@ COMMENT ON COLUMN public.directory_services.last_heartbeat IS 'When this service
 
 -- COLUMN directory_services.exposure :: COMMENT
 COMMENT ON COLUMN public.directory_services.exposure IS 'Where this service can be reached FROM, as a property of its port binding rather than of its URL: NETWORK (published on every interface), HOST (bound to 127.0.0.1 -- the deployment host or an SSH tunnel), INTERNAL (no host port; container network only), UNKNOWN (not recorded). Describes the Compose deployment the seed describes; a deployment that publishes differently updates it. Consumed by the Directory page, which combines it with the URL''s own host -- a loopback ADDRESS cannot work from a remote browser however broadly the PORT is published.';
+
+--
+
+-- COLUMN directory_services.image :: COMMENT
+COMMENT ON COLUMN public.directory_services.image IS 'The image reference (repository:tag) this release deploys for the service, as the chart renders it. Written by record_directory_images() on every db-init run; NULL when the chart does not deploy the service or nothing has recorded it.';
+
+--
+
+-- forge_sweep_lease :: TABLE
+CREATE TABLE IF NOT EXISTS public.forge_sweep_lease (
+    id boolean DEFAULT true NOT NULL,
+    holder uuid,
+    held_until timestamp with time zone DEFAULT '-infinity'::timestamp with time zone NOT NULL,
+    requested boolean DEFAULT false NOT NULL,
+    CONSTRAINT forge_sweep_lease_one_row CHECK (id)
+);
+
+
+ALTER TABLE public.forge_sweep_lease OWNER TO postgres;
+
+ALTER TABLE public.forge_sweep_lease
+    ADD COLUMN IF NOT EXISTS id boolean DEFAULT true NOT NULL,
+    ADD COLUMN IF NOT EXISTS holder uuid,
+    ADD COLUMN IF NOT EXISTS held_until timestamp with time zone DEFAULT '-infinity'::timestamp with time zone NOT NULL,
+    ADD COLUMN IF NOT EXISTS requested boolean DEFAULT false NOT NULL;
+
+ALTER TABLE public.forge_sweep_lease
+    ALTER COLUMN id SET DEFAULT true,
+    ALTER COLUMN holder DROP DEFAULT,
+    ALTER COLUMN held_until SET DEFAULT '-infinity'::timestamp with time zone,
+    ALTER COLUMN requested SET DEFAULT false;
+
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'forge_sweep_lease_one_row'
+                AND conrelid = 'public.forge_sweep_lease'::regclass
+                AND pg_get_constraintdef(oid) <> 'CHECK (id)') THEN
+    ALTER TABLE public.forge_sweep_lease DROP CONSTRAINT forge_sweep_lease_one_row;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'forge_sweep_lease_one_row'
+                    AND conrelid = 'public.forge_sweep_lease'::regclass) THEN
+    ALTER TABLE public.forge_sweep_lease
+        ADD CONSTRAINT forge_sweep_lease_one_row CHECK (id);
+  END IF;
+END $c$;
+
+--
+
+-- TABLE forge_sweep_lease :: COMMENT
+COMMENT ON TABLE public.forge_sweep_lease IS 'The one forge-sweep pass allowed to run. One row by CHECK (id). Moved only by claim_forge_sweep(), renew_forge_sweep() and release_forge_sweep(); readable by service_role.';
+
+--
+
+-- COLUMN forge_sweep_lease.holder :: COMMENT
+COMMENT ON COLUMN public.forge_sweep_lease.holder IS 'The id the current claim returned, or null when free. Only this id renews or releases.';
+
+--
+
+-- COLUMN forge_sweep_lease.held_until :: COMMENT
+COMMENT ON COLUMN public.forge_sweep_lease.held_until IS 'When the lease lapses and the next claim takes it over. -infinity when free.';
+
+--
+
+-- COLUMN forge_sweep_lease.requested :: COMMENT
+COMMENT ON COLUMN public.forge_sweep_lease.requested IS 'A claim was refused since the current pass started. The release then queues one more pass.';
 
 --
 
@@ -10677,64 +11626,45 @@ COMMENT ON VIEW public.gateway_health IS 'The fleet''s current condition, one ro
 
 --
 
+-- gateway_revocation_requests :: TABLE
+CREATE TABLE IF NOT EXISTS public.gateway_revocation_requests (
+    gateway_id uuid NOT NULL,
+    request_id bigint NOT NULL,
+    requested_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+ALTER TABLE public.gateway_revocation_requests OWNER TO postgres;
+
+ALTER TABLE public.gateway_revocation_requests
+    ADD COLUMN IF NOT EXISTS gateway_id uuid NOT NULL,
+    ADD COLUMN IF NOT EXISTS request_id bigint NOT NULL,
+    ADD COLUMN IF NOT EXISTS requested_at timestamp with time zone DEFAULT now() NOT NULL;
+
+ALTER TABLE public.gateway_revocation_requests
+    ALTER COLUMN gateway_id DROP DEFAULT,
+    ALTER COLUMN request_id DROP DEFAULT,
+    ALTER COLUMN requested_at SET DEFAULT now();
+
+--
+
+-- TABLE gateway_revocation_requests :: COMMENT
+COMMENT ON TABLE public.gateway_revocation_requests IS 'The pg_net request behind each archived gateway''s credential_revoked_at stamp, until the revocation sweep has judged its reply. Written by revoke_gateway_credential(), removed by the sweep; readable by service_role.';
+
+--
+
+-- COLUMN gateway_revocation_requests.request_id :: COMMENT
+COMMENT ON COLUMN public.gateway_revocation_requests.request_id IS 'The id net.http_post returned; its reply lands in net._http_response under the same id.';
+
+--
+
+-- COLUMN gateway_revocation_requests.requested_at :: COMMENT
+COMMENT ON COLUMN public.gateway_revocation_requests.requested_at IS 'When the request was queued. No reply five minutes on counts as a failed revocation.';
+
+--
+
 -- gateway_status :: VIEW
-CREATE OR REPLACE VIEW public.gateway_status WITH (security_invoker='true') AS
- SELECT id,
-    name,
-    cell_id,
-    access_url,
-    status,
-    created_at,
-    is_archived,
-    archived_at,
-    auto_delete_at,
-    last_heartbeat,
-    sparkplug_id,
-    location_scope,
-    sparkplug_group,
-    description,
-    enrolled_at,
-    agent_version,
-    health_reported_at,
-    uptime_seconds,
-    load_1m,
-    mem_available_bytes,
-    disk_free_bytes,
-    cert_expires_at,
-    flow_hash,
-    credential_revoked_at,
-    is_simulated,
-    is_shadow,
-    deployment,
-    forge_head_sha,
-    forge_head_message,
-    forge_head_by,
-    forge_head_at,
-    forge_head_flow_sha256,
-    area_id,
-    forge_appliance_sha,
-    forge_appliance_at,
-    forge_appliance_flow_sha256,
-    forge_appliance_platform_tag,
-    forge_appliance_platform_outcome,
-    forge_appliance_converged_at,
-    forge_appliance_custom_outcome,
-    forge_appliance_custom_revision,
-    forge_repository_at,
-    forge_archived_at,
-        CASE
-            WHEN (status = ANY (ARRAY['PENDING_ENROLLMENT'::text, 'AWAITING_BIRTH'::text])) THEN status
-            WHEN (status = 'OFFLINE'::text) THEN 'OFFLINE'::text
-            WHEN (last_heartbeat IS NULL) THEN status
-            WHEN ((now() - last_heartbeat) > '00:01:30'::interval) THEN 'STALE'::text
-            ELSE status
-        END AS live_status,
-    ((last_heartbeat IS NOT NULL) AND ((now() - last_heartbeat) > '00:01:30'::interval)) AS is_stale,
-    (EXTRACT(epoch FROM (now() - last_heartbeat)))::bigint AS heartbeat_age_seconds
-   FROM public.gateways g;
-
-
-ALTER VIEW public.gateway_status OWNER TO postgres;
+SELECT public.ensure_gateway_status_view();
 
 --
 
@@ -11014,7 +11944,7 @@ END) STORED,
     CONSTRAINT metric_catalog_category_valid CHECK (((category IS NULL) OR (category = ANY (ARRAY['SAMPLE'::text, 'EVENT'::text, 'CONDITION'::text])))),
     CONSTRAINT metric_catalog_name_format CHECK ((name ~ '^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*$'::text)),
     CONSTRAINT metric_catalog_permitted_values_shape CHECK (((permitted_values IS NULL) OR ((cardinality(permitted_values) > 0) AND (array_position(permitted_values, NULL::text) IS NULL) AND (''::text <> ALL (permitted_values))))),
-    CONSTRAINT metric_catalog_semantic_id_type_valid CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text, 'ModelReference'::text]))))
+    CONSTRAINT metric_catalog_semantic_id_type_valid CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text]))))
 );
 
 
@@ -11110,14 +12040,14 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'metric_catalog_semantic_id_type_valid'
                 AND conrelid = 'public.metric_catalog'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY[''IRI''::text, ''IRDI''::text, ''ModelReference''::text]))))') THEN
+                AND pg_get_constraintdef(oid) <> 'CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY[''IRI''::text, ''IRDI''::text]))))') THEN
     ALTER TABLE public.metric_catalog DROP CONSTRAINT metric_catalog_semantic_id_type_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'metric_catalog_semantic_id_type_valid'
                     AND conrelid = 'public.metric_catalog'::regclass) THEN
     ALTER TABLE public.metric_catalog
-        ADD CONSTRAINT metric_catalog_semantic_id_type_valid CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text, 'ModelReference'::text]))));
+        ADD CONSTRAINT metric_catalog_semantic_id_type_valid CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text]))));
   END IF;
 END $c$;
 
@@ -11129,7 +12059,7 @@ COMMENT ON COLUMN public.metric_catalog.semantic_id IS 'AAS (IEC 63278) semantic
 --
 
 -- COLUMN metric_catalog.semantic_id_type :: COMMENT
-COMMENT ON COLUMN public.metric_catalog.semantic_id_type IS 'Which kind of AAS Reference semantic_id is: IRI, IRDI, or ModelReference.';
+COMMENT ON COLUMN public.metric_catalog.semantic_id_type IS 'Which kind of AAS Reference semantic_id is: IRI or IRDI. Both export as an ExternalReference.';
 
 --
 
@@ -11280,6 +12210,8 @@ ALTER TABLE public.opcua_vocabulary
 --
 
 -- TABLE opcua_vocabulary :: COMMENT
+COMMENT ON TABLE public.opcua_vocabulary IS 'OPC UA companion specification data points: OPC 30050 PackML, OPC 40001 Machinery, OPC 40001-4 Machinery Energy, OPC 40010 Robotics, OPC 40501 Machine Tools, OPC 40540 Additive Manufacturing. Reference data, not deployment state. The OPC 30050 PackML, OPC 40001-4 Machinery Energy, OPC 40501 Machine Tools, OPC 40540 Additive Manufacturing rows are verified against the OPC Foundation NodeSet2 XML by scripts/generate-opcua-vocabulary.mjs; the OPC 40001 Machinery, OPC 40010 Robotics rows are hand-written. node_id holds a browse path, not a resolvable numeric NodeId. semantic_id is derived from the published namespace URI plus the browse name, not issued by the OPC Foundation; MTConnect ids are minted under aber.local instead.';
+
 --
 
 -- permissions :: TABLE
@@ -12082,7 +13014,7 @@ CREATE TABLE IF NOT EXISTS public.schemas (
     status character varying(20) DEFAULT 'active'::character varying NOT NULL,
     change_description text,
     CONSTRAINT schemas_parent_not_self CHECK (((parent_schema_id IS NULL) OR (parent_schema_id <> id))),
-    CONSTRAINT schemas_semantic_id_type_valid CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text, 'ModelReference'::text])))),
+    CONSTRAINT schemas_semantic_id_type_valid CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text])))),
     CONSTRAINT schemas_status_valid CHECK (((status)::text = ANY (ARRAY[('draft'::character varying)::text, ('active'::character varying)::text, ('archived'::character varying)::text]))),
     CONSTRAINT schemas_version_lineage_coherent CHECK ((((version = 1) AND (parent_schema_id IS NULL)) OR ((version > 1) AND (parent_schema_id IS NOT NULL)))),
     CONSTRAINT schemas_version_positive CHECK ((version >= 1))
@@ -12138,14 +13070,14 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'schemas_semantic_id_type_valid'
                 AND conrelid = 'public.schemas'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY[''IRI''::text, ''IRDI''::text, ''ModelReference''::text]))))') THEN
+                AND pg_get_constraintdef(oid) <> 'CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY[''IRI''::text, ''IRDI''::text]))))') THEN
     ALTER TABLE public.schemas DROP CONSTRAINT schemas_semantic_id_type_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'schemas_semantic_id_type_valid'
                     AND conrelid = 'public.schemas'::regclass) THEN
     ALTER TABLE public.schemas
-        ADD CONSTRAINT schemas_semantic_id_type_valid CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text, 'ModelReference'::text]))));
+        ADD CONSTRAINT schemas_semantic_id_type_valid CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text]))));
   END IF;
 END $c$;
 
@@ -12201,6 +13133,11 @@ END $c$;
 
 -- COLUMN schemas.semantic_id :: COMMENT
 COMMENT ON COLUMN public.schemas.semantic_id IS 'AAS semanticId for the Submodel this schema corresponds to, e.g. an IDTA submodel template id.';
+
+--
+
+-- COLUMN schemas.semantic_id_type :: COMMENT
+COMMENT ON COLUMN public.schemas.semantic_id_type IS 'Which kind of AAS Reference semantic_id is: IRI or IRDI. Both export as an ExternalReference.';
 
 --
 
@@ -12885,7 +13822,7 @@ ALTER TABLE public.user_roles
 --
 
 -- TABLE user_roles :: COMMENT
-COMMENT ON TABLE public.user_roles IS 'Role assignment per auth user. Includes three seeded machine principals that cannot sign in: b0000000-0000-4000-8000-000000000001, the read-only principal the MCP client authenticates as (0034); b0000000-0000-4000-8000-000000000002, Service_Ingestor, the identity the ingestion daemon authenticates as (0046); and b0000000-0000-4000-8000-000000000003, Service_Playback, the identity the playback worker authenticates as (0056). All three hold Operator and write nothing directly -- every write goes through a SECURITY DEFINER gate that checks which of them is calling.';
+COMMENT ON TABLE public.user_roles IS 'Role assignment per person. A machine principal, an auth.users row that cannot sign in, holds no role: refuse_role_for_machine_principal() refuses one, and has_authority() resolves its grants through principal_permissions. Three are seeded, each granted telemetry:read: b0000000-0000-4000-8000-000000000001, the read-only principal the MCP client authenticates as; b0000000-0000-4000-8000-000000000002, Service_Ingestor, the identity the ingestion daemon authenticates as; and b0000000-0000-4000-8000-000000000003, Service_Playback, the identity the playback worker authenticates as. The two services write through SECURITY DEFINER gates that check which of them is calling.';
 
 --
 
@@ -12922,6 +13859,111 @@ ALTER TABLE public.webhook_endpoints
 
 -- TABLE webhook_endpoints :: COMMENT
 COMMENT ON TABLE public.webhook_endpoints IS 'Outbound webhook targets. Managed by migration only -- there is deliberately no INSERT/UPDATE/DELETE RLS policy, so no API caller can point the database at a host of their choosing.';
+
+--
+
+-- physical_backup_requests :: FOREIGN TABLE
+CREATE FOREIGN TABLE IF NOT EXISTS timescale.physical_backup_requests (
+    id bigint,
+    requested_at timestamp with time zone,
+    job_id text,
+    claimed_at timestamp with time zone
+)
+SERVER timescaledb_server
+OPTIONS (
+    schema_name 'public',
+    table_name 'physical_backup_requests'
+);
+
+
+ALTER FOREIGN TABLE timescale.physical_backup_requests OWNER TO postgres;
+
+ALTER TABLE timescale.physical_backup_requests
+    ADD COLUMN IF NOT EXISTS id bigint,
+    ADD COLUMN IF NOT EXISTS requested_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS job_id text,
+    ADD COLUMN IF NOT EXISTS claimed_at timestamp with time zone;
+
+ALTER TABLE timescale.physical_backup_requests
+    ALTER COLUMN id DROP DEFAULT,
+    ALTER COLUMN requested_at DROP DEFAULT,
+    ALTER COLUMN job_id DROP DEFAULT,
+    ALTER COLUMN claimed_at DROP DEFAULT;
+
+--
+
+-- physical_backup_runs :: FOREIGN TABLE
+CREATE FOREIGN TABLE IF NOT EXISTS timescale.physical_backup_runs (
+    id bigint,
+    kind text,
+    started_at timestamp with time zone,
+    finished_at timestamp with time zone,
+    succeeded boolean,
+    detail text,
+    label text,
+    database_bytes bigint,
+    backup_bytes bigint,
+    repo_bytes bigint
+)
+SERVER timescaledb_server
+OPTIONS (
+    schema_name 'public',
+    table_name 'physical_backup_runs'
+);
+
+
+ALTER FOREIGN TABLE timescale.physical_backup_runs OWNER TO postgres;
+
+ALTER TABLE timescale.physical_backup_runs
+    ADD COLUMN IF NOT EXISTS id bigint,
+    ADD COLUMN IF NOT EXISTS kind text,
+    ADD COLUMN IF NOT EXISTS started_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS finished_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS succeeded boolean,
+    ADD COLUMN IF NOT EXISTS detail text,
+    ADD COLUMN IF NOT EXISTS label text,
+    ADD COLUMN IF NOT EXISTS database_bytes bigint,
+    ADD COLUMN IF NOT EXISTS backup_bytes bigint,
+    ADD COLUMN IF NOT EXISTS repo_bytes bigint;
+
+ALTER TABLE timescale.physical_backup_runs
+    ALTER COLUMN id DROP DEFAULT,
+    ALTER COLUMN kind DROP DEFAULT,
+    ALTER COLUMN started_at DROP DEFAULT,
+    ALTER COLUMN finished_at DROP DEFAULT,
+    ALTER COLUMN succeeded DROP DEFAULT,
+    ALTER COLUMN detail DROP DEFAULT,
+    ALTER COLUMN label DROP DEFAULT,
+    ALTER COLUMN database_bytes DROP DEFAULT,
+    ALTER COLUMN backup_bytes DROP DEFAULT,
+    ALTER COLUMN repo_bytes DROP DEFAULT;
+
+--
+
+-- physical_backup_schedule :: FOREIGN TABLE
+CREATE FOREIGN TABLE IF NOT EXISTS timescale.physical_backup_schedule (
+    hour_utc integer,
+    full_on integer,
+    recorded_at timestamp with time zone
+)
+SERVER timescaledb_server
+OPTIONS (
+    schema_name 'public',
+    table_name 'physical_backup_schedule'
+);
+
+
+ALTER FOREIGN TABLE timescale.physical_backup_schedule OWNER TO postgres;
+
+ALTER TABLE timescale.physical_backup_schedule
+    ADD COLUMN IF NOT EXISTS hour_utc integer,
+    ADD COLUMN IF NOT EXISTS full_on integer,
+    ADD COLUMN IF NOT EXISTS recorded_at timestamp with time zone;
+
+ALTER TABLE timescale.physical_backup_schedule
+    ALTER COLUMN hour_utc DROP DEFAULT,
+    ALTER COLUMN full_on DROP DEFAULT,
+    ALTER COLUMN recorded_at DROP DEFAULT;
 
 --
 
@@ -12982,6 +14024,33 @@ ALTER TABLE timescale.telemetry_archive_manifest
     ALTER COLUMN verified_at DROP DEFAULT,
     ALTER COLUMN dropped_at DROP DEFAULT,
     ALTER COLUMN last_error DROP DEFAULT;
+
+--
+
+-- telemetry_raw_window :: FOREIGN TABLE
+CREATE FOREIGN TABLE IF NOT EXISTS timescale.telemetry_raw_window (
+    raw_window interval,
+    archive_armed boolean,
+    archive_reported_at timestamp with time zone
+)
+SERVER timescaledb_server
+OPTIONS (
+    schema_name 'public',
+    table_name 'telemetry_raw_window'
+);
+
+
+ALTER FOREIGN TABLE timescale.telemetry_raw_window OWNER TO postgres;
+
+ALTER TABLE timescale.telemetry_raw_window
+    ADD COLUMN IF NOT EXISTS raw_window interval,
+    ADD COLUMN IF NOT EXISTS archive_armed boolean,
+    ADD COLUMN IF NOT EXISTS archive_reported_at timestamp with time zone;
+
+ALTER TABLE timescale.telemetry_raw_window
+    ALTER COLUMN raw_window DROP DEFAULT,
+    ALTER COLUMN archive_armed DROP DEFAULT,
+    ALTER COLUMN archive_reported_at DROP DEFAULT;
 
 --
 
@@ -13104,6 +14173,25 @@ DO $c$ BEGIN
                     AND conrelid = 'public.asset_exports'::regclass) THEN
     ALTER TABLE ONLY public.asset_exports
         ADD CONSTRAINT asset_exports_pkey PRIMARY KEY (id);
+  END IF;
+END $c$;
+
+--
+
+-- audit_trail audit_trail_pkey :: CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'audit_trail_pkey'
+                AND conrelid = 'public.audit_trail'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id, recorded_at)') THEN
+    ALTER TABLE public.audit_trail DROP CONSTRAINT audit_trail_pkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'audit_trail_pkey'
+                    AND conrelid = 'public.audit_trail'::regclass) THEN
+    ALTER TABLE public.audit_trail
+        ADD CONSTRAINT audit_trail_pkey PRIMARY KEY (id, recorded_at);
   END IF;
 END $c$;
 
@@ -13356,25 +14444,6 @@ END $c$;
 
 --
 
--- audit_trail audit_trail_pkey :: CONSTRAINT
-DO $c$ BEGIN
-
-  IF EXISTS (SELECT 1 FROM pg_constraint
-              WHERE conname = 'audit_trail_pkey'
-                AND conrelid = 'public.audit_trail'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id, recorded_at)') THEN
-    ALTER TABLE public.audit_trail DROP CONSTRAINT audit_trail_pkey;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint
-                  WHERE conname = 'audit_trail_pkey'
-                    AND conrelid = 'public.audit_trail'::regclass) THEN
-    ALTER TABLE public.audit_trail
-        ADD CONSTRAINT audit_trail_pkey PRIMARY KEY (id, recorded_at);
-  END IF;
-END $c$;
-
---
-
 -- directory_liveness_probe directory_liveness_probe_pkey :: CONSTRAINT
 DO $c$ BEGIN
 
@@ -13432,6 +14501,25 @@ END $c$;
 
 --
 
+-- forge_sweep_lease forge_sweep_lease_pkey :: CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'forge_sweep_lease_pkey'
+                AND conrelid = 'public.forge_sweep_lease'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+    ALTER TABLE public.forge_sweep_lease DROP CONSTRAINT forge_sweep_lease_pkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'forge_sweep_lease_pkey'
+                    AND conrelid = 'public.forge_sweep_lease'::regclass) THEN
+    ALTER TABLE ONLY public.forge_sweep_lease
+        ADD CONSTRAINT forge_sweep_lease_pkey PRIMARY KEY (id);
+  END IF;
+END $c$;
+
+--
+
 -- gateway_enrollment_tokens gateway_enrollment_tokens_pkey :: CONSTRAINT
 DO $c$ BEGIN
 
@@ -13446,6 +14534,25 @@ DO $c$ BEGIN
                     AND conrelid = 'public.gateway_enrollment_tokens'::regclass) THEN
     ALTER TABLE ONLY public.gateway_enrollment_tokens
         ADD CONSTRAINT gateway_enrollment_tokens_pkey PRIMARY KEY (id);
+  END IF;
+END $c$;
+
+--
+
+-- gateway_revocation_requests gateway_revocation_requests_pkey :: CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'gateway_revocation_requests_pkey'
+                AND conrelid = 'public.gateway_revocation_requests'::regclass
+                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (gateway_id)') THEN
+    ALTER TABLE public.gateway_revocation_requests DROP CONSTRAINT gateway_revocation_requests_pkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'gateway_revocation_requests_pkey'
+                    AND conrelid = 'public.gateway_revocation_requests'::regclass) THEN
+    ALTER TABLE ONLY public.gateway_revocation_requests
+        ADD CONSTRAINT gateway_revocation_requests_pkey PRIMARY KEY (gateway_id);
   END IF;
 END $c$;
 
@@ -14121,6 +15228,26 @@ CREATE INDEX IF NOT EXISTS asset_exports_entity_idx ON public.asset_exports USIN
 
 --
 
+-- idx_audit_trail_domain :: INDEX
+CREATE INDEX IF NOT EXISTS idx_audit_trail_domain ON public.audit_trail USING btree (audit_domain, recorded_at DESC);
+
+--
+
+-- idx_audit_trail_causation :: INDEX
+CREATE INDEX IF NOT EXISTS idx_audit_trail_causation ON public.audit_trail USING btree (causation_id) WHERE (causation_id IS NOT NULL);
+
+--
+
+-- idx_audit_trail_recorded_id :: INDEX
+CREATE INDEX IF NOT EXISTS idx_audit_trail_recorded_id ON public.audit_trail USING btree (recorded_at DESC, id DESC);
+
+--
+
+-- INDEX idx_audit_trail_recorded_id :: COMMENT
+COMMENT ON INDEX public.idx_audit_trail_recorded_id IS 'Serves audit_trail_page()''s keyset order. MUST match its ORDER BY (recorded_at DESC, id DESC) exactly -- a cursor walking one order against an index in another degrades to a full sort per page, which is invisible until the table is large.';
+
+--
+
 -- backup_jobs_finished_at_idx :: INDEX
 CREATE INDEX IF NOT EXISTS backup_jobs_finished_at_idx ON public.backup_jobs USING btree (finished_at DESC);
 
@@ -14168,26 +15295,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS change_proposals_one_open_per_asset_per_person
 
 -- change_proposals_open_by_age :: INDEX
 CREATE INDEX IF NOT EXISTS change_proposals_open_by_age ON public.change_proposals USING btree (proposed_at) WHERE (status = 'open'::text);
-
---
-
--- idx_audit_trail_domain :: INDEX
-CREATE INDEX IF NOT EXISTS idx_audit_trail_domain ON public.audit_trail USING btree (audit_domain, recorded_at DESC);
-
---
-
--- idx_audit_trail_causation :: INDEX
-CREATE INDEX IF NOT EXISTS idx_audit_trail_causation ON public.audit_trail USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
---
-
--- idx_audit_trail_recorded_id :: INDEX
-CREATE INDEX IF NOT EXISTS idx_audit_trail_recorded_id ON public.audit_trail USING btree (recorded_at DESC, id DESC);
-
---
-
--- INDEX idx_audit_trail_recorded_id :: COMMENT
-COMMENT ON INDEX public.idx_audit_trail_recorded_id IS 'Serves audit_trail_page()''s keyset order. MUST match its ORDER BY (recorded_at DESC, id DESC) exactly -- a cursor walking one order against an index in another degrades to a full sort per page, which is invisible until the table is large.';
 
 --
 
@@ -14337,6 +15444,12 @@ CREATE TRIGGER archive_destination_guard_trg BEFORE UPDATE ON public.system_sett
 
 --
 
+-- system_settings backup_offsite_setting_guard_trg :: TRIGGER
+DROP TRIGGER IF EXISTS backup_offsite_setting_guard_trg ON public.system_settings;
+CREATE TRIGGER backup_offsite_setting_guard_trg BEFORE UPDATE ON public.system_settings FOR EACH ROW EXECUTE FUNCTION public.backup_offsite_setting_guard();
+
+--
+
 -- system_settings system_settings_read_only_trg :: TRIGGER
 DROP TRIGGER IF EXISTS system_settings_read_only_trg ON public.system_settings;
 CREATE TRIGGER system_settings_read_only_trg BEFORE UPDATE ON public.system_settings FOR EACH ROW EXECUTE FUNCTION public.system_settings_read_only_guard();
@@ -14364,6 +15477,18 @@ CREATE TRIGGER trg_areas_retired AFTER DELETE ON public.areas FOR EACH ROW EXECU
 -- asset_exports trg_asset_exports_audit_trail :: TRIGGER
 DROP TRIGGER IF EXISTS trg_asset_exports_audit_trail ON public.asset_exports;
 CREATE TRIGGER trg_asset_exports_audit_trail AFTER INSERT ON public.asset_exports FOR EACH ROW EXECUTE FUNCTION public.log_asset_export();
+
+--
+
+-- audit_trail trg_audit_trail_append_only :: TRIGGER
+DROP TRIGGER IF EXISTS trg_audit_trail_append_only ON public.audit_trail;
+CREATE TRIGGER trg_audit_trail_append_only BEFORE DELETE OR UPDATE ON public.audit_trail FOR EACH ROW EXECUTE FUNCTION public.enforce_audit_trail_append_only();
+
+--
+
+-- audit_trail trg_audit_trail_stamp_domain :: TRIGGER
+DROP TRIGGER IF EXISTS trg_audit_trail_stamp_domain ON public.audit_trail;
+CREATE TRIGGER trg_audit_trail_stamp_domain BEFORE INSERT ON public.audit_trail FOR EACH ROW EXECUTE FUNCTION public.stamp_audit_domain();
 
 --
 
@@ -14445,6 +15570,12 @@ CREATE TRIGGER trg_devices_audit_trail AFTER INSERT OR DELETE OR UPDATE ON publi
 
 --
 
+-- devices trg_devices_delete_asset_config :: TRIGGER
+DROP TRIGGER IF EXISTS trg_devices_delete_asset_config ON public.devices;
+CREATE TRIGGER trg_devices_delete_asset_config AFTER DELETE ON public.devices FOR EACH ROW EXECUTE FUNCTION public.delete_device_asset_config();
+
+--
+
 -- devices trg_devices_reject_archived_schema :: TRIGGER
 DROP TRIGGER IF EXISTS trg_devices_reject_archived_schema ON public.devices;
 CREATE TRIGGER trg_devices_reject_archived_schema BEFORE INSERT OR UPDATE OF schema_id ON public.devices FOR EACH ROW EXECUTE FUNCTION public.reject_archived_schema_assignment();
@@ -14475,33 +15606,21 @@ CREATE TRIGGER trg_devices_shadow_follows_delete BEFORE DELETE ON public.devices
 
 --
 
--- audit_trail trg_audit_trail_append_only :: TRIGGER
-DROP TRIGGER IF EXISTS trg_audit_trail_append_only ON public.audit_trail;
-CREATE TRIGGER trg_audit_trail_append_only BEFORE DELETE OR UPDATE ON public.audit_trail FOR EACH ROW EXECUTE FUNCTION public.enforce_audit_trail_append_only();
-
---
-
--- audit_trail trg_audit_trail_stamp_domain :: TRIGGER
-DROP TRIGGER IF EXISTS trg_audit_trail_stamp_domain ON public.audit_trail;
-CREATE TRIGGER trg_audit_trail_stamp_domain BEFORE INSERT ON public.audit_trail FOR EACH ROW EXECUTE FUNCTION public.stamp_audit_domain();
-
---
-
 -- schemas trg_enforce_schema_version_provenance :: TRIGGER
 DROP TRIGGER IF EXISTS trg_enforce_schema_version_provenance ON public.schemas;
 CREATE TRIGGER trg_enforce_schema_version_provenance BEFORE INSERT ON public.schemas FOR EACH ROW EXECUTE FUNCTION public.enforce_schema_version_provenance();
 
 --
 
--- gateways trg_gateways_clear_credential_revoked :: TRIGGER
-DROP TRIGGER IF EXISTS trg_gateways_clear_credential_revoked ON public.gateways;
-CREATE TRIGGER trg_gateways_clear_credential_revoked BEFORE UPDATE OF is_archived ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.clear_credential_revoked_on_enrolment();
-
---
-
 -- gateways trg_gateways_audit_trail :: TRIGGER
 DROP TRIGGER IF EXISTS trg_gateways_audit_trail ON public.gateways;
 CREATE TRIGGER trg_gateways_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
+
+--
+
+-- gateways trg_gateways_clear_credential_revoked :: TRIGGER
+DROP TRIGGER IF EXISTS trg_gateways_clear_credential_revoked ON public.gateways;
+CREATE TRIGGER trg_gateways_clear_credential_revoked BEFORE UPDATE OF is_archived ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.clear_credential_revoked_on_enrolment();
 
 --
 
@@ -14538,6 +15657,12 @@ CREATE TRIGGER trg_gateways_revoke_credential_update AFTER UPDATE OF is_archived
 -- gateways trg_gateways_withdraw_enrolment :: TRIGGER
 DROP TRIGGER IF EXISTS trg_gateways_withdraw_enrolment ON public.gateways;
 CREATE TRIGGER trg_gateways_withdraw_enrolment AFTER UPDATE OF is_archived ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.withdraw_gateway_enrollment_tokens();
+
+--
+
+-- metric_catalog trg_metric_catalog_audit_trail :: TRIGGER
+DROP TRIGGER IF EXISTS trg_metric_catalog_audit_trail ON public.metric_catalog;
+CREATE TRIGGER trg_metric_catalog_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.metric_catalog FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
 
 --
 
@@ -14592,6 +15717,25 @@ CREATE TRIGGER trg_user_roles_audit_trail AFTER INSERT OR DELETE OR UPDATE ON pu
 -- user_roles trg_user_roles_refuse_machine_principal :: TRIGGER
 DROP TRIGGER IF EXISTS trg_user_roles_refuse_machine_principal ON public.user_roles;
 CREATE TRIGGER trg_user_roles_refuse_machine_principal BEFORE INSERT OR UPDATE ON public.user_roles FOR EACH ROW EXECUTE FUNCTION public.refuse_role_for_machine_principal();
+
+--
+
+-- audit_trail audit_trail_changed_by_fkey :: FK CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'audit_trail_changed_by_fkey'
+                AND conrelid = 'public.audit_trail'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (changed_by) REFERENCES auth.users(id)') THEN
+    ALTER TABLE public.audit_trail DROP CONSTRAINT audit_trail_changed_by_fkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'audit_trail_changed_by_fkey'
+                    AND conrelid = 'public.audit_trail'::regclass) THEN
+    ALTER TABLE public.audit_trail
+        ADD CONSTRAINT audit_trail_changed_by_fkey FOREIGN KEY (changed_by) REFERENCES auth.users(id);
+  END IF;
+END $c$;
 
 --
 
@@ -14937,25 +16081,6 @@ END $c$;
 
 --
 
--- audit_trail audit_trail_changed_by_fkey :: FK CONSTRAINT
-DO $c$ BEGIN
-
-  IF EXISTS (SELECT 1 FROM pg_constraint
-              WHERE conname = 'audit_trail_changed_by_fkey'
-                AND conrelid = 'public.audit_trail'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (changed_by) REFERENCES auth.users(id)') THEN
-    ALTER TABLE public.audit_trail DROP CONSTRAINT audit_trail_changed_by_fkey;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint
-                  WHERE conname = 'audit_trail_changed_by_fkey'
-                    AND conrelid = 'public.audit_trail'::regclass) THEN
-    ALTER TABLE public.audit_trail
-        ADD CONSTRAINT audit_trail_changed_by_fkey FOREIGN KEY (changed_by) REFERENCES auth.users(id);
-  END IF;
-END $c$;
-
---
-
 -- directory_services directory_services_registered_schema_id_fkey :: FK CONSTRAINT
 DO $c$ BEGIN
 
@@ -14989,6 +16114,25 @@ DO $c$ BEGIN
                     AND conrelid = 'public.gateway_enrollment_tokens'::regclass) THEN
     ALTER TABLE ONLY public.gateway_enrollment_tokens
         ADD CONSTRAINT gateway_enrollment_tokens_gateway_fk FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE;
+  END IF;
+END $c$;
+
+--
+
+-- gateway_revocation_requests gateway_revocation_requests_gateway_id_fkey :: FK CONSTRAINT
+DO $c$ BEGIN
+
+  IF EXISTS (SELECT 1 FROM pg_constraint
+              WHERE conname = 'gateway_revocation_requests_gateway_id_fkey'
+                AND conrelid = 'public.gateway_revocation_requests'::regclass
+                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE') THEN
+    ALTER TABLE public.gateway_revocation_requests DROP CONSTRAINT gateway_revocation_requests_gateway_id_fkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'gateway_revocation_requests_gateway_id_fkey'
+                    AND conrelid = 'public.gateway_revocation_requests'::regclass) THEN
+    ALTER TABLE ONLY public.gateway_revocation_requests
+        ADD CONSTRAINT gateway_revocation_requests_gateway_id_fkey FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE;
   END IF;
 END $c$;
 
@@ -15340,6 +16484,23 @@ CREATE POLICY asset_exports_select_privileged ON public.asset_exports FOR SELECT
 
 --
 
+-- audit_trail :: ROW SECURITY
+ALTER TABLE public.audit_trail ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- audit_trail audit_trail_select_asset :: POLICY
+DROP POLICY IF EXISTS audit_trail_select_asset ON public.audit_trail;
+CREATE POLICY audit_trail_select_asset ON public.audit_trail FOR SELECT TO authenticated USING (((audit_domain = 'asset'::text) AND (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]) OR public.has_authority(ARRAY['audit_trail:read'::text]))));
+
+--
+
+-- audit_trail audit_trail_select_security :: POLICY
+DROP POLICY IF EXISTS audit_trail_select_security ON public.audit_trail;
+CREATE POLICY audit_trail_select_security ON public.audit_trail FOR SELECT TO authenticated USING (((audit_domain = 'security'::text) AND public.has_role(ARRAY['Administrator'::text, 'Auditor'::text])));
+
+--
+
 -- backup_jobs :: ROW SECURITY
 ALTER TABLE public.backup_jobs ENABLE ROW LEVEL SECURITY;
 
@@ -15529,23 +16690,6 @@ CREATE POLICY devices_update_privileged ON public.devices FOR UPDATE TO authenti
 
 --
 
--- audit_trail :: ROW SECURITY
-ALTER TABLE public.audit_trail ENABLE ROW LEVEL SECURITY;
-
---
-
--- audit_trail audit_trail_select_asset :: POLICY
-DROP POLICY IF EXISTS audit_trail_select_asset ON public.audit_trail;
-CREATE POLICY audit_trail_select_asset ON public.audit_trail FOR SELECT TO authenticated USING (((audit_domain = 'asset'::text) AND public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text])));
-
---
-
--- audit_trail audit_trail_select_security :: POLICY
-DROP POLICY IF EXISTS audit_trail_select_security ON public.audit_trail;
-CREATE POLICY audit_trail_select_security ON public.audit_trail FOR SELECT TO authenticated USING (((audit_domain = 'security'::text) AND public.has_role(ARRAY['Administrator'::text, 'Auditor'::text])));
-
---
-
 -- directory_liveness_probe :: ROW SECURITY
 ALTER TABLE public.directory_liveness_probe ENABLE ROW LEVEL SECURITY;
 
@@ -15580,8 +16724,18 @@ CREATE POLICY directory_services_update_privileged ON public.directory_services 
 
 --
 
+-- forge_sweep_lease :: ROW SECURITY
+ALTER TABLE public.forge_sweep_lease ENABLE ROW LEVEL SECURITY;
+
+--
+
 -- gateway_enrollment_tokens :: ROW SECURITY
 ALTER TABLE public.gateway_enrollment_tokens ENABLE ROW LEVEL SECURITY;
+
+--
+
+-- gateway_revocation_requests :: ROW SECURITY
+ALTER TABLE public.gateway_revocation_requests ENABLE ROW LEVEL SECURITY;
 
 --
 
@@ -16027,6 +17181,27 @@ GRANT ALL ON FUNCTION public.audit_telemetry_columns() TO authenticated;
 
 --
 
+-- FUNCTION audit_trail_backup_job_ids_matching(p_pattern text) :: ACL
+REVOKE ALL ON FUNCTION public.audit_trail_backup_job_ids_matching(p_pattern text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.audit_trail_backup_job_ids_matching(p_pattern text) TO service_role;
+GRANT ALL ON FUNCTION public.audit_trail_backup_job_ids_matching(p_pattern text) TO authenticated;
+
+--
+
+-- FUNCTION audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) :: ACL
+REVOKE ALL ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) TO service_role;
+GRANT ALL ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) TO authenticated;
+
+--
+
+-- FUNCTION audit_trail_user_ids_matching(p_pattern text) :: ACL
+REVOKE ALL ON FUNCTION public.audit_trail_user_ids_matching(p_pattern text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.audit_trail_user_ids_matching(p_pattern text) TO service_role;
+GRANT ALL ON FUNCTION public.audit_trail_user_ids_matching(p_pattern text) TO authenticated;
+
+--
+
 -- FUNCTION auth_pre_request() :: ACL
 REVOKE ALL ON FUNCTION public.auth_pre_request() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.auth_pre_request() TO anon;
@@ -16062,6 +17237,49 @@ REVOKE ALL ON FUNCTION public.backup_forget(p_backup_id uuid, p_reason text) FRO
 
 --
 
+-- FUNCTION backup_offsite_base() :: ACL
+REVOKE ALL ON FUNCTION public.backup_offsite_base() FROM PUBLIC;
+
+--
+
+-- FUNCTION backup_offsite_credential_is_set() :: ACL
+REVOKE ALL ON FUNCTION public.backup_offsite_credential_is_set() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.backup_offsite_credential_is_set() TO service_role;
+GRANT ALL ON FUNCTION public.backup_offsite_credential_is_set() TO authenticated;
+
+--
+
+-- FUNCTION backup_offsite_destination() :: ACL
+REVOKE ALL ON FUNCTION public.backup_offsite_destination() FROM PUBLIC;
+
+--
+
+-- FUNCTION backup_offsite_health_rows() :: ACL
+REVOKE ALL ON FUNCTION public.backup_offsite_health_rows() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.backup_offsite_health_rows() TO service_role;
+DO $g$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
+    EXECUTE 'GRANT ALL ON FUNCTION public.backup_offsite_health_rows() TO grafana_reader';
+  END IF;
+END $g$;
+
+--
+
+-- FUNCTION backup_offsite_next() :: ACL
+REVOKE ALL ON FUNCTION public.backup_offsite_next() FROM PUBLIC;
+
+--
+
+-- FUNCTION backup_offsite_record(p_backup_id uuid, p_location text, p_objects jsonb, p_error text) :: ACL
+REVOKE ALL ON FUNCTION public.backup_offsite_record(p_backup_id uuid, p_location text, p_objects jsonb, p_error text) FROM PUBLIC;
+
+--
+
+-- FUNCTION backup_offsite_setting_guard() :: ACL
+REVOKE ALL ON FUNCTION public.backup_offsite_setting_guard() FROM PUBLIC;
+
+--
+
 -- FUNCTION backup_prunable(p_retention_days integer) :: ACL
 REVOKE ALL ON FUNCTION public.backup_prunable(p_retention_days integer) FROM PUBLIC;
 
@@ -16088,6 +17306,19 @@ GRANT ALL ON FUNCTION public.cancel_backup_job(p_job_id uuid) TO authenticated;
 REVOKE ALL ON FUNCTION public.capped_capture_manifest(p_manifest jsonb) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.capped_capture_manifest(p_manifest jsonb) TO service_role;
 GRANT ALL ON FUNCTION public.capped_capture_manifest(p_manifest jsonb) TO authenticated;
+
+--
+
+-- FUNCTION claim_forge_sweep(p_seconds integer) :: ACL
+REVOKE ALL ON FUNCTION public.claim_forge_sweep(p_seconds integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.claim_forge_sweep(p_seconds integer) TO service_role;
+
+--
+
+-- FUNCTION clear_backup_offsite_destination() :: ACL
+REVOKE ALL ON FUNCTION public.clear_backup_offsite_destination() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.clear_backup_offsite_destination() TO service_role;
+GRANT ALL ON FUNCTION public.clear_backup_offsite_destination() TO authenticated;
 
 --
 
@@ -16144,31 +17375,16 @@ GRANT ALL ON FUNCTION public.custom_access_token_hook(event jsonb) TO supabase_a
 
 --
 
+-- FUNCTION delete_device_asset_config() :: ACL
+REVOKE ALL ON FUNCTION public.delete_device_asset_config() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.delete_device_asset_config() TO service_role;
+
+--
+
 -- FUNCTION describe_machine_principal(p_principal_id uuid, p_name text, p_purpose text) :: ACL
 REVOKE ALL ON FUNCTION public.describe_machine_principal(p_principal_id uuid, p_name text, p_purpose text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.describe_machine_principal(p_principal_id uuid, p_name text, p_purpose text) TO service_role;
 GRANT ALL ON FUNCTION public.describe_machine_principal(p_principal_id uuid, p_name text, p_purpose text) TO authenticated;
-
---
-
--- FUNCTION audit_trail_backup_job_ids_matching(p_pattern text) :: ACL
-REVOKE ALL ON FUNCTION public.audit_trail_backup_job_ids_matching(p_pattern text) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.audit_trail_backup_job_ids_matching(p_pattern text) TO service_role;
-GRANT ALL ON FUNCTION public.audit_trail_backup_job_ids_matching(p_pattern text) TO authenticated;
-
---
-
--- FUNCTION audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) :: ACL
-REVOKE ALL ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) TO service_role;
-GRANT ALL ON FUNCTION public.audit_trail_page(p_limit integer, p_include_purged boolean, p_entity_type text, p_action text, p_entity_ids uuid[], p_since timestamp with time zone, p_until timestamp with time zone, p_before_recorded_at timestamp with time zone, p_before_id bigint, p_search text) TO authenticated;
-
---
-
--- FUNCTION audit_trail_user_ids_matching(p_pattern text) :: ACL
-REVOKE ALL ON FUNCTION public.audit_trail_user_ids_matching(p_pattern text) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.audit_trail_user_ids_matching(p_pattern text) TO service_role;
-GRANT ALL ON FUNCTION public.audit_trail_user_ids_matching(p_pattern text) TO authenticated;
 
 --
 
@@ -16231,11 +17447,6 @@ GRANT ALL ON FUNCTION public.enqueue_scheduled_backup() TO service_role;
 
 --
 
--- FUNCTION ensure_cron_job(p_name text, p_schedule text, p_command text) :: ACL
-REVOKE ALL ON FUNCTION public.ensure_cron_job(p_name text, p_schedule text, p_command text) FROM PUBLIC;
-
---
-
 -- FUNCTION ensure_audit_trail_partition(p_month timestamp with time zone) :: ACL
 REVOKE ALL ON FUNCTION public.ensure_audit_trail_partition(p_month timestamp with time zone) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ensure_audit_trail_partition(p_month timestamp with time zone) TO service_role;
@@ -16245,6 +17456,11 @@ GRANT ALL ON FUNCTION public.ensure_audit_trail_partition(p_month timestamp with
 -- FUNCTION ensure_audit_trail_partitions(p_months_ahead integer) :: ACL
 REVOKE ALL ON FUNCTION public.ensure_audit_trail_partitions(p_months_ahead integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ensure_audit_trail_partitions(p_months_ahead integer) TO service_role;
+
+--
+
+-- FUNCTION ensure_cron_job(p_name text, p_schedule text, p_command text) :: ACL
+REVOKE ALL ON FUNCTION public.ensure_cron_job(p_name text, p_schedule text, p_command text) FROM PUBLIC;
 
 --
 
@@ -16344,6 +17560,20 @@ GRANT ALL ON FUNCTION public.has_role(allowed_roles text[]) TO authenticated;
 
 --
 
+-- FUNCTION historian_backup_state() :: ACL
+REVOKE ALL ON FUNCTION public.historian_backup_state() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.historian_backup_state() TO service_role;
+GRANT ALL ON FUNCTION public.historian_backup_state() TO authenticated;
+
+--
+
+-- FUNCTION i3x_auth_probe() :: ACL
+REVOKE ALL ON FUNCTION public.i3x_auth_probe() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.i3x_auth_probe() TO service_role;
+GRANT ALL ON FUNCTION public.i3x_auth_probe() TO authenticated;
+
+--
+
 -- FUNCTION ingest_capture_progress(p_job_id uuid, p_messages bigint, p_bytes bigint, p_elapsed_seconds integer, p_birth_captured boolean) :: ACL
 REVOKE ALL ON FUNCTION public.ingest_capture_progress(p_job_id uuid, p_messages bigint, p_bytes bigint, p_elapsed_seconds integer, p_birth_captured boolean) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_capture_progress(p_job_id uuid, p_messages bigint, p_bytes bigint, p_elapsed_seconds integer, p_birth_captured boolean) TO service_role;
@@ -16383,6 +17613,13 @@ GRANT ALL ON FUNCTION public.ingest_finalise_capture(p_job_id uuid, p_size_bytes
 REVOKE ALL ON FUNCTION public.ingest_mark_device_offline(p_device_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.ingest_mark_device_offline(p_device_id uuid) TO service_role;
 GRANT ALL ON FUNCTION public.ingest_mark_device_offline(p_device_id uuid) TO authenticated;
+
+--
+
+-- FUNCTION ingest_mark_gateway_devices_offline(p_gateway_id uuid) :: ACL
+REVOKE ALL ON FUNCTION public.ingest_mark_gateway_devices_offline(p_gateway_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.ingest_mark_gateway_devices_offline(p_gateway_id uuid) TO service_role;
+GRANT ALL ON FUNCTION public.ingest_mark_gateway_devices_offline(p_gateway_id uuid) TO authenticated;
 
 --
 
@@ -16509,6 +17746,13 @@ GRANT ALL ON FUNCTION public.issue_gateway_enrollment_token(p_gateway_id uuid, p
 REVOKE ALL ON FUNCTION public.list_machine_principals() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.list_machine_principals() TO service_role;
 GRANT ALL ON FUNCTION public.list_machine_principals() TO authenticated;
+
+--
+
+-- FUNCTION list_proposer_names() :: ACL
+REVOKE ALL ON FUNCTION public.list_proposer_names() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.list_proposer_names() TO service_role;
+GRANT ALL ON FUNCTION public.list_proposer_names() TO authenticated;
 
 --
 
@@ -16679,6 +17923,18 @@ GRANT ALL ON FUNCTION public.publish_schema_version(draft_schema_id uuid) TO aut
 
 --
 
+-- FUNCTION raw_telemetry_window() :: ACL
+REVOKE ALL ON FUNCTION public.raw_telemetry_window() FROM PUBLIC;
+GRANT ALL ON FUNCTION public.raw_telemetry_window() TO service_role;
+GRANT ALL ON FUNCTION public.raw_telemetry_window() TO authenticated;
+
+--
+
+-- FUNCTION record_directory_images(p_images jsonb) :: ACL
+REVOKE ALL ON FUNCTION public.record_directory_images(p_images jsonb) FROM PUBLIC;
+
+--
+
 -- FUNCTION record_gateway_credential_issued(p_gateway_id uuid) :: ACL
 REVOKE ALL ON FUNCTION public.record_gateway_credential_issued(p_gateway_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.record_gateway_credential_issued(p_gateway_id uuid) TO service_role;
@@ -16770,6 +18026,12 @@ GRANT ALL ON FUNCTION public.release_backup(p_backup_id uuid) TO authenticated;
 
 --
 
+-- FUNCTION release_forge_sweep(p_holder uuid) :: ACL
+REVOKE ALL ON FUNCTION public.release_forge_sweep(p_holder uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.release_forge_sweep(p_holder uuid) TO service_role;
+
+--
+
 -- FUNCTION release_gateway_enrollment_token(p_token text) :: ACL
 REVOKE ALL ON FUNCTION public.release_gateway_enrollment_token(p_token text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.release_gateway_enrollment_token(p_token text) TO service_role;
@@ -16780,6 +18042,12 @@ GRANT ALL ON FUNCTION public.release_gateway_enrollment_token(p_token text) TO s
 REVOKE ALL ON FUNCTION public.relocate_devices(p_moves jsonb) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.relocate_devices(p_moves jsonb) TO service_role;
 GRANT ALL ON FUNCTION public.relocate_devices(p_moves jsonb) TO authenticated;
+
+--
+
+-- FUNCTION renew_forge_sweep(p_holder uuid, p_seconds integer) :: ACL
+REVOKE ALL ON FUNCTION public.renew_forge_sweep(p_holder uuid, p_seconds integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.renew_forge_sweep(p_holder uuid, p_seconds integer) TO service_role;
 
 --
 
@@ -16894,6 +18162,20 @@ GRANT ALL ON FUNCTION public.set_archive_credential(p_secret text) TO authentica
 
 --
 
+-- FUNCTION set_backup_offsite_credential(p_secret text) :: ACL
+REVOKE ALL ON FUNCTION public.set_backup_offsite_credential(p_secret text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.set_backup_offsite_credential(p_secret text) TO service_role;
+GRANT ALL ON FUNCTION public.set_backup_offsite_credential(p_secret text) TO authenticated;
+
+--
+
+-- FUNCTION set_backup_offsite_destination(p_endpoint text, p_region text, p_bucket text, p_prefix text, p_access_key_id text, p_recipient text, p_path_style boolean) :: ACL
+REVOKE ALL ON FUNCTION public.set_backup_offsite_destination(p_endpoint text, p_region text, p_bucket text, p_prefix text, p_access_key_id text, p_recipient text, p_path_style boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.set_backup_offsite_destination(p_endpoint text, p_region text, p_bucket text, p_prefix text, p_access_key_id text, p_recipient text, p_path_style boolean) TO service_role;
+GRANT ALL ON FUNCTION public.set_backup_offsite_destination(p_endpoint text, p_region text, p_bucket text, p_prefix text, p_access_key_id text, p_recipient text, p_path_style boolean) TO authenticated;
+
+--
+
 -- FUNCTION shadow_follows_its_original() :: ACL
 REVOKE ALL ON FUNCTION public.shadow_follows_its_original() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.shadow_follows_its_original() TO service_role;
@@ -16999,9 +18281,45 @@ GRANT SELECT ON TABLE public.asset_exports TO authenticated;
 
 --
 
+-- TABLE audit_trail :: ACL
+GRANT SELECT,REFERENCES,TRIGGER,MAINTAIN ON TABLE public.audit_trail TO service_role;
+GRANT SELECT ON TABLE public.audit_trail TO authenticated;
+
+--
+
+-- TABLE audit_trail_partition_health :: ACL
+GRANT ALL ON TABLE public.audit_trail_partition_health TO service_role;
+DO $g$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
+    EXECUTE 'GRANT SELECT ON TABLE public.audit_trail_partition_health TO grafana_reader';
+  END IF;
+END $g$;
+
+--
+
 -- TABLE backup_jobs :: ACL
 GRANT ALL ON TABLE public.backup_jobs TO service_role;
 GRANT SELECT ON TABLE public.backup_jobs TO authenticated;
+
+--
+
+-- TABLE backup_health :: ACL
+GRANT ALL ON TABLE public.backup_health TO service_role;
+DO $g$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
+    EXECUTE 'GRANT SELECT ON TABLE public.backup_health TO grafana_reader';
+  END IF;
+END $g$;
+
+--
+
+-- TABLE backup_offsite_health :: ACL
+GRANT ALL ON TABLE public.backup_offsite_health TO service_role;
+DO $g$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
+    EXECUTE 'GRANT SELECT ON TABLE public.backup_offsite_health TO grafana_reader';
+  END IF;
+END $g$;
 
 --
 
@@ -17065,22 +18383,6 @@ GRANT ALL ON TABLE public.device_schemas TO authenticated;
 
 --
 
--- TABLE audit_trail :: ACL
-GRANT SELECT,REFERENCES,TRIGGER,MAINTAIN ON TABLE public.audit_trail TO service_role;
-GRANT SELECT ON TABLE public.audit_trail TO authenticated;
-
---
-
--- TABLE audit_trail_partition_health :: ACL
-GRANT ALL ON TABLE public.audit_trail_partition_health TO service_role;
-DO $g$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
-    EXECUTE 'GRANT SELECT ON TABLE public.audit_trail_partition_health TO grafana_reader';
-  END IF;
-END $g$;
-
---
-
 -- TABLE directory_liveness_probe :: ACL
 GRANT ALL ON TABLE public.directory_liveness_probe TO service_role;
 
@@ -17089,6 +18391,11 @@ GRANT ALL ON TABLE public.directory_liveness_probe TO service_role;
 -- TABLE directory_services :: ACL
 GRANT ALL ON TABLE public.directory_services TO service_role;
 GRANT ALL ON TABLE public.directory_services TO authenticated;
+
+--
+
+-- TABLE forge_sweep_lease :: ACL
+GRANT SELECT ON TABLE public.forge_sweep_lease TO service_role;
 
 --
 
@@ -17104,6 +18411,11 @@ DO $g$ BEGIN
     EXECUTE 'GRANT SELECT ON TABLE public.gateway_health TO grafana_reader';
   END IF;
 END $g$;
+
+--
+
+-- TABLE gateway_revocation_requests :: ACL
+GRANT SELECT ON TABLE public.gateway_revocation_requests TO service_role;
 
 --
 
@@ -17399,17 +18711,29 @@ BEGIN
                'assert_principal_not_revoked',
                'audit_domain_for',
                'audit_telemetry_columns',
+               'audit_trail_backup_job_ids_matching',
+               'audit_trail_page',
+               'audit_trail_user_ids_matching',
                'auth_pre_request',
                'authorize_host_gateway_credential',
                'backup_claim_job',
                'backup_fail',
                'backup_finalise',
                'backup_forget',
+               'backup_offsite_base',
+               'backup_offsite_credential_is_set',
+               'backup_offsite_destination',
+               'backup_offsite_health_rows',
+               'backup_offsite_next',
+               'backup_offsite_record',
+               'backup_offsite_setting_guard',
                'backup_prunable',
                'backup_reconcile_jobs',
                'backup_schedule',
                'cancel_backup_job',
                'capped_capture_manifest',
+               'claim_forge_sweep',
+               'clear_backup_offsite_destination',
                'clear_credential_revoked_on_enrolment',
                'cold_archive_backlog',
                'cold_archive_backlog_state',
@@ -17418,10 +18742,8 @@ BEGIN
                'consume_gateway_enrollment_token',
                'create_machine_principal',
                'custom_access_token_hook',
+               'delete_device_asset_config',
                'describe_machine_principal',
-               'audit_trail_backup_job_ids_matching',
-               'audit_trail_page',
-               'audit_trail_user_ids_matching',
                'directory_liveness_job_map',
                'discard_schema_draft',
                'dispatch_device_quarantine_webhook',
@@ -17431,9 +18753,9 @@ BEGIN
                'enforce_open_proposal_cap',
                'enforce_schema_version_provenance',
                'enqueue_scheduled_backup',
-               'ensure_cron_job',
                'ensure_audit_trail_partition',
                'ensure_audit_trail_partitions',
+               'ensure_cron_job',
                'ensure_gateway_status_view',
                'ensure_shadow_devices',
                'expire_open_proposals',
@@ -17446,12 +18768,15 @@ BEGIN
                'handle_new_user',
                'has_authority',
                'has_role',
+               'historian_backup_state',
+               'i3x_auth_probe',
                'ingest_capture_progress',
                'ingest_claim_capture_job',
                'ingest_claim_rebirth_requests',
                'ingest_fail_capture',
                'ingest_finalise_capture',
                'ingest_mark_device_offline',
+               'ingest_mark_gateway_devices_offline',
                'ingest_reconcile_capture_jobs',
                'ingest_record_declared_metrics',
                'ingest_record_gateway_health',
@@ -17470,6 +18795,7 @@ BEGIN
                'is_valid_quarantine_reason',
                'issue_gateway_enrollment_token',
                'list_machine_principals',
+               'list_proposer_names',
                'list_user_accounts',
                'log_asset_export',
                'log_audit_trail_event',
@@ -17494,6 +18820,8 @@ BEGIN
                'prune_closed_proposals',
                'prune_platform_alerts',
                'publish_schema_version',
+               'raw_telemetry_window',
+               'record_directory_images',
                'record_gateway_credential_issued',
                'record_gateway_credential_issued_by_service',
                'record_ingestion_rejection',
@@ -17508,8 +18836,10 @@ BEGIN
                'reject_archived_schema_assignment',
                'reject_proposal',
                'release_backup',
+               'release_forge_sweep',
                'release_gateway_enrollment_token',
                'relocate_devices',
+               'renew_forge_sweep',
                'request_backup',
                'request_capture_stop',
                'request_gateway_rebirth',
@@ -17527,6 +18857,8 @@ BEGIN
                'seed_setting',
                'service_token_max_days',
                'set_archive_credential',
+               'set_backup_offsite_credential',
+               'set_backup_offsite_destination',
                'shadow_follows_its_original',
                'sparkplug_group_default',
                'stamp_audit_domain',
@@ -17552,17 +18884,29 @@ BEGIN
             'assert_principal_not_revoked(uuid)',
             'audit_domain_for(text, text)',
             'audit_telemetry_columns()',
+            'audit_trail_backup_job_ids_matching(text)',
+            'audit_trail_page(integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone, timestamp with time zone, bigint, text)',
+            'audit_trail_user_ids_matching(text)',
             'auth_pre_request()',
             'authorize_host_gateway_credential(uuid)',
             'backup_claim_job()',
             'backup_fail(uuid, text)',
             'backup_finalise(uuid, text, text, jsonb, bigint)',
             'backup_forget(uuid, text)',
+            'backup_offsite_base()',
+            'backup_offsite_credential_is_set()',
+            'backup_offsite_destination()',
+            'backup_offsite_health_rows()',
+            'backup_offsite_next()',
+            'backup_offsite_record(uuid, text, jsonb, text)',
+            'backup_offsite_setting_guard()',
             'backup_prunable(integer)',
             'backup_reconcile_jobs(text)',
             'backup_schedule(text)',
             'cancel_backup_job(uuid)',
             'capped_capture_manifest(jsonb)',
+            'claim_forge_sweep(integer)',
+            'clear_backup_offsite_destination()',
             'clear_credential_revoked_on_enrolment()',
             'cold_archive_backlog()',
             'cold_archive_backlog_state()',
@@ -17571,10 +18915,8 @@ BEGIN
             'consume_gateway_enrollment_token(text)',
             'create_machine_principal(text, text[], text)',
             'custom_access_token_hook(jsonb)',
+            'delete_device_asset_config()',
             'describe_machine_principal(uuid, text, text)',
-            'audit_trail_backup_job_ids_matching(text)',
-            'audit_trail_page(integer, boolean, text, text, uuid[], timestamp with time zone, timestamp with time zone, timestamp with time zone, bigint, text)',
-            'audit_trail_user_ids_matching(text)',
             'directory_liveness_job_map()',
             'discard_schema_draft(uuid)',
             'dispatch_device_quarantine_webhook()',
@@ -17584,9 +18926,9 @@ BEGIN
             'enforce_open_proposal_cap()',
             'enforce_schema_version_provenance()',
             'enqueue_scheduled_backup()',
-            'ensure_cron_job(text, text, text)',
             'ensure_audit_trail_partition(timestamp with time zone)',
             'ensure_audit_trail_partitions(integer)',
+            'ensure_cron_job(text, text, text)',
             'ensure_gateway_status_view()',
             'ensure_shadow_devices(uuid)',
             'expire_open_proposals()',
@@ -17599,12 +18941,15 @@ BEGIN
             'handle_new_user()',
             'has_authority(text[])',
             'has_role(text[])',
+            'historian_backup_state()',
+            'i3x_auth_probe()',
             'ingest_capture_progress(uuid, bigint, bigint, integer, boolean)',
             'ingest_claim_capture_job()',
             'ingest_claim_rebirth_requests()',
             'ingest_fail_capture(uuid, text)',
             'ingest_finalise_capture(uuid, bigint, integer, jsonb)',
             'ingest_mark_device_offline(uuid)',
+            'ingest_mark_gateway_devices_offline(uuid)',
             'ingest_reconcile_capture_jobs()',
             'ingest_record_declared_metrics(uuid, text[], timestamp with time zone)',
             'ingest_record_gateway_health(uuid, text, timestamp with time zone, jsonb)',
@@ -17623,6 +18968,7 @@ BEGIN
             'is_valid_quarantine_reason(text)',
             'issue_gateway_enrollment_token(uuid, integer)',
             'list_machine_principals()',
+            'list_proposer_names()',
             'list_user_accounts()',
             'log_asset_export()',
             'log_audit_trail_event()',
@@ -17647,6 +18993,8 @@ BEGIN
             'prune_closed_proposals()',
             'prune_platform_alerts(interval)',
             'publish_schema_version(uuid)',
+            'raw_telemetry_window()',
+            'record_directory_images(jsonb)',
             'record_gateway_credential_issued(uuid)',
             'record_gateway_credential_issued_by_service(uuid, jsonb)',
             'record_ingestion_rejection(uuid, jsonb, timestamp with time zone)',
@@ -17661,8 +19009,10 @@ BEGIN
             'reject_archived_schema_assignment()',
             'reject_proposal(uuid, text)',
             'release_backup(uuid)',
+            'release_forge_sweep(uuid)',
             'release_gateway_enrollment_token(text)',
             'relocate_devices(jsonb)',
+            'renew_forge_sweep(uuid, integer)',
             'request_backup(text)',
             'request_capture_stop(uuid)',
             'request_gateway_rebirth(uuid)',
@@ -17680,6 +19030,8 @@ BEGIN
             'seed_setting(text, jsonb, text, text, text, text, text)',
             'service_token_max_days()',
             'set_archive_credential(text)',
+            'set_backup_offsite_credential(text)',
+            'set_backup_offsite_destination(text, text, text, text, text, text, boolean)',
             'shadow_follows_its_original()',
             'sparkplug_group_default()',
             'stamp_audit_domain()',
@@ -17725,17 +19077,6 @@ SELECT public.secure_audit_trail_partition('public.audit_trail_default'::regclas
 SELECT public.ensure_audit_trail_partitions(3);
 
 -- ---------------------------------------------------------------------------------------------
--- 4c. gateway_status is rebuilt from the column set this database actually has
--- ---------------------------------------------------------------------------------------------
--- Section 4 declares the view with an explicit column list, because that is how a dump records
--- `SELECT g.*`. That list is right for a fresh install and wrong for an UPGRADE: the widening
--- above appends a missing column to the END of `gateways`, while the list puts it in declaration
--- order, and `CREATE OR REPLACE VIEW` refuses a list whose existing columns have moved. Rebuilding
--- from `g.*` takes whatever column set the table ended up with, and re-applies the grants that
--- DROP VIEW discards. check-docs-drift.mjs requires this of any migration that adds a gateways
--- column, which -- since the widening -- this file does.
-SELECT public.ensure_gateway_status_view();
-
 -- 5. Realtime publication
 -- ---------------------------------------------------------------------------------------------
 -- `telemetry` is absent: it is a postgres_fdw foreign table whose rows enter TimescaleDB's WAL,
@@ -17812,14 +19153,24 @@ REVOKE ALL ON SEQUENCE public.audit_trail_id_seq FROM service_role;
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.audit_trail FROM service_role;
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.one_shot_migrations FROM service_role;
 
--- Three functions nothing outside a migration may call: two maintenance routines that pg_cron
--- invokes as the superuser it runs under, and the sweep above. Revoked from service_role as well,
--- because holding the service key is not a reason to be able to rewrite the cron schedule.
+-- Two tables only their own SECURITY DEFINER functions write: the forge-sweep lease and the
+-- pg_net request behind each revocation stamp. `service_role` reads them and nothing more.
+REVOKE ALL ON TABLE public.forge_sweep_lease FROM service_role;
+GRANT SELECT ON TABLE public.forge_sweep_lease TO service_role;
+REVOKE ALL ON TABLE public.gateway_revocation_requests FROM service_role;
+GRANT SELECT ON TABLE public.gateway_revocation_requests TO service_role;
+
+-- Four functions nothing outside a migration may call: two maintenance routines that pg_cron
+-- invokes as the superuser it runs under, the sweep above, and the Directory's image writer that
+-- db-init calls with the chart's map. Revoked from service_role as well, because holding the
+-- service key is not a reason to be able to rewrite the cron schedule.
 REVOKE ALL ON FUNCTION public.ensure_cron_job(p_name text, p_schedule text, p_command text)
   FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.prune_platform_alerts(interval)
   FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.revoke_anon_function_privileges()
+  FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.record_directory_images(jsonb)
   FROM PUBLIC, anon, authenticated, service_role;
 
 -- The anon sweep, which has to run last: PostgreSQL grants EXECUTE to PUBLIC on every function
@@ -17838,7 +19189,7 @@ END
 $sweep$;
 
 -- ---------------------------------------------------------------------------------------------
--- THE BACKUP LANE IS CLOSED TO EVERY PostgREST ROLE, and section 4 cannot say so. These eight
+-- THE BACKUP LANE IS CLOSED TO EVERY PostgREST ROLE, and section 4 cannot say so. These twelve
 -- are SECURITY DEFINER gates the backup service reaches over its own connection; the only thing
 -- standing between `service_role` and them is the absence of a grant, and the image's default
 -- privileges hand `service_role` EXECUTE on every function created after them. 0101 withdrew it
@@ -17851,6 +19202,13 @@ REVOKE ALL ON FUNCTION public.backup_finalise(uuid, text, text, jsonb, bigint)  
 REVOKE ALL ON FUNCTION public.backup_fail(uuid, text)                           FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.backup_prunable(integer)                          FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION public.backup_forget(uuid, text)                         FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.backup_offsite_base()                             FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.backup_offsite_destination()                      FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.backup_offsite_next()                             FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.backup_offsite_record(uuid, text, jsonb, text)    FROM PUBLIC, anon, authenticated, service_role;
+
+-- The off-site settings' trigger function, which fires whatever the writer holds. Nobody calls it.
+REVOKE ALL ON FUNCTION public.backup_offsite_setting_guard() FROM PUBLIC, anon, authenticated, service_role;
 
 -- ONE GRANT THE SWEEP ABOVE MUST NOT TAKE, and it has to be re-stated after it rather than with
 -- the object. `auth_pre_request()` is PostgREST's db-pre-request hook: it runs for EVERY request

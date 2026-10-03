@@ -8,7 +8,7 @@
  *
  *   TABLE        CREATE TABLE IF NOT EXISTS
  *   FUNCTION     CREATE OR REPLACE FUNCTION
- *   VIEW         CREATE OR REPLACE VIEW
+ *   VIEW         CREATE OR REPLACE VIEW, or a call to the function that builds it (REBUILT_BY)
  *   INDEX        CREATE [UNIQUE] INDEX IF NOT EXISTS
  *   TRIGGER      DROP TRIGGER IF EXISTS ... ON ...; CREATE TRIGGER ...
  *   POLICY       DROP POLICY IF EXISTS ... ON ...; CREATE POLICY ...
@@ -64,6 +64,14 @@ function blocks(sql) {
   }
   return out;
 }
+
+/**
+ * Views a function builds from `SELECT t.*`, emitted as a call to that function instead of as
+ * themselves. Postgres freezes the star into a column list at creation, so a stated
+ * `CREATE OR REPLACE VIEW` would, on the replay after a later migration widened the table and
+ * rebuilt the view, try to drop that column and abort the boot ("cannot drop columns from view").
+ */
+const REBUILT_BY = { gateway_status: 'public.ensure_gateway_status_view()' };
 
 const esc = (s) => s.replace(/'/g, "''");
 const bare = (s) => (s || '').replace(/^public\./, '').replace(/"/g, '');
@@ -247,6 +255,7 @@ function rewrite(b) {
     return s.replace(/^CREATE FUNCTION /m, 'CREATE OR REPLACE FUNCTION ')
             .replace(/^CREATE PROCEDURE /m, 'CREATE OR REPLACE PROCEDURE ');
   }
+  if (t === 'VIEW' && REBUILT_BY[b.name] && b.schema === 'public') return `SELECT ${REBUILT_BY[b.name]};`;
   if (t === 'VIEW') return s.replace(/^CREATE VIEW /m, 'CREATE OR REPLACE VIEW ');
   if (t === 'MATERIALIZED VIEW') return s.replace(/^CREATE MATERIALIZED VIEW /m, 'CREATE MATERIALIZED VIEW IF NOT EXISTS ');
   if (t === 'SEQUENCE') return s.replace(/^CREATE SEQUENCE /m, 'CREATE SEQUENCE IF NOT EXISTS ');

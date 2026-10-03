@@ -227,7 +227,7 @@ class TestTheSweepAgrees(RevocationBase):
 
 class TestTheSweepJudgesItsOwnReply(RevocationBase):
     """
-    A stamp is judged by the reply to its own request, never by another call's (0028).
+    A stamp is judged by the reply to its own request, never by another call's (0158).
 
     The forge sweep and the liveness probe answer 200 every few minutes, so a sweep that accepted
     any 2xx left a failed revocation stamped and the broker account working. Replies are written

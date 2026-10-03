@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0005_raw_telemetry_has_a_stated_window.sql
+-- Migration: 0138_raw_telemetry_has_a_stated_window.sql (applied as 0005 until the 1.0 squash)
 -- The Cold Storage page reads how long raw telemetry is kept (#401)
 -- =============================================================================================
 --

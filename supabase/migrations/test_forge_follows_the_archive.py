@@ -1,10 +1,10 @@
 """
 Archiving a gateway asks the forge to follow (0114), and asking is gated where it should be; and
-one forge sweep runs at a time (0025).
+one forge sweep runs at a time (0156).
 
     python supabase/migrations/test_forge_follows_the_archive.py
 
-Requires the Supabase database (54322 by default) and 0114 applied; the lease tests need 0025.
+Requires the Supabase database (54322 by default) and 0114 applied; the lease tests need 0156.
 
 ---------------------------------------------------------------------------------------------
 WHAT IS UNDER TEST, AND WHAT IS NOT. forge-sweep is what archives the repository; this is the
@@ -172,7 +172,7 @@ class ForgeFollowsTheArchive(unittest.TestCase):
 
 class OnePassAtATime(unittest.TestCase):
     """
-    The forge-sweep lease (0025): what a claim, a renewal and a release do to it. What the function
+    The forge-sweep lease (0156): what a claim, a renewal and a release do to it. What the function
     answers while another pass holds it needs the stack, and is test_forge_sweep.py's.
 
     Each test frees the lease inside its own transaction and rolls back, which also un-queues the
@@ -186,7 +186,7 @@ class OnePassAtATime(unittest.TestCase):
         try:
             cur.execute("SELECT to_regprocedure('public.claim_forge_sweep(integer)');")
             if not cur.fetchone()[0]:
-                raise unittest.SkipTest("0025 has not been applied")
+                raise unittest.SkipTest("0156 has not been applied")
         finally:
             conn.rollback()
             conn.close()

@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0016_a_local_extension_carries_no_minted_id.sql
+-- Migration: 0149_a_local_extension_carries_no_minted_id.sql (applied as 0016 until the 1.0 squash)
 -- The two local extensions lose the semantic ids the seed minted for them (#547)
 -- =============================================================================================
 --

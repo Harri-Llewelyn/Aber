@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0003_the_group_answers_to_aber.sql
+-- Migration: 0136_the_group_answers_to_aber.sql (applied as 0003 until the 1.0 squash)
 -- The default Sparkplug group moves from ACS-Cymru to Aber (#335, tier 3)
 -- =============================================================================================
 --

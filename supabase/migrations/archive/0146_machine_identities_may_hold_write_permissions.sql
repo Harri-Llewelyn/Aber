@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0013_machine_identities_may_hold_write_permissions.sql
+-- Migration: 0146_machine_identities_may_hold_write_permissions.sql (applied as 0013 until the 1.0 squash)
 -- Machines propose, people decide: what a machine identity may hold (#526, #517)
 -- =============================================================================================
 --

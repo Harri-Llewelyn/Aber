@@ -3219,24 +3219,27 @@ class TestLivenessMirrorsTheDirectory(unittest.TestCase):
     """
 
     def _view(self) -> str:
-        """The last definition of public.gateway_status the migrations make, pg_dump's form."""
+        """
+        The view as the last `ensure_gateway_status_view()` in the migrations builds it, whitespace
+        collapsed. No migration states the view itself: the function is its one definition.
+        """
         text = ""
         for path in sorted(MIGRATIONS_DIR.glob("[0-9]*.sql")):
             sql = path.read_text(encoding="utf-8")
-            for m in re.finditer(r"^CREATE OR REPLACE VIEW public\.gateway_status\b.*?;$", sql,
-                                 re.M | re.S):
-                text = m.group(0)
-        self.assertTrue(text, "no gateway_status view in the migrations")
+            for m in re.finditer(r"^CREATE OR REPLACE FUNCTION public\.ensure_gateway_status_view\(\).*?\$\$;",
+                                 sql, re.M | re.S):
+                text = " ".join(m.group(0).split())
+        self.assertTrue(text, "no ensure_gateway_status_view() in the migrations")
         return text
 
     def test_gateway_live_status_is_the_views_rule(self):
         view = self._view()
         steps = [
-            "WHEN (status = ANY (ARRAY['PENDING_ENROLLMENT'::text, 'AWAITING_BIRTH'::text])) THEN status",
-            "WHEN (status = 'OFFLINE'::text) THEN 'OFFLINE'::text",
-            "WHEN (last_heartbeat IS NULL) THEN status",
-            "WHEN ((now() - last_heartbeat) > '00:01:30'::interval) THEN 'STALE'::text",
-            "ELSE status",
+            "WHEN g.status IN ('PENDING_ENROLLMENT', 'AWAITING_BIRTH') THEN g.status",
+            "WHEN g.status = 'OFFLINE' THEN 'OFFLINE'",
+            "WHEN g.last_heartbeat IS NULL THEN g.status",
+            "WHEN NOW() - g.last_heartbeat > INTERVAL '90 seconds' THEN 'STALE'",
+            "ELSE g.status",
         ]
         at = [view.find(step) for step in steps]
         self.assertNotIn(-1, at, "the view's CASE changed; update gateway_live_status to match")
