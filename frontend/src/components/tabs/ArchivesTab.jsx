@@ -8,11 +8,11 @@ import CopyableId from '../common/CopyableId'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { gatewayRepositoryUrl } from '../common/GatewayRepositoryPanel'
 import { downloadBlob } from '../../utils/downloadBlob'
-import { PageHeading } from '../common/PageHeading'
-import { IconArchive, IconRefreshCw, IconTrash, IconDownload, IconHistory, IconExternalLink } from '../common/Icons'
+import { CardHeading } from '../common/CardHeading'
+import { TabStrip } from '../common/TabStrip'
+import { IconArchive, IconRefreshCw, IconTrash, IconDownload, IconHistory, IconExternalLink, IconAlertTriangle } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 import { Badge } from '../common/Badge'
-import { SectionCount } from '../common/SectionCount'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { formatDate, formatDateTime } from '../../utils/format'
@@ -20,19 +20,27 @@ import { formatDate, formatDateTime } from '../../utils/format'
 /** The page's singular row type -> the Audit Trail page's handover type. */
 const TRAIL_TYPE = { area: 'AREA', cell: 'CELL', gateway: 'GATEWAY', device: 'DEVICE' }
 
+/** How close the auto-purge may come before its date turns the danger colour. */
+const PURGE_SOON_DAYS = 7
+
+/** True when the purge is due within PURGE_SOON_DAYS, or already overdue. */
+export function purgeIsSoon(at, now = Date.now()) {
+  return new Date(at).getTime() - now <= PURGE_SOON_DAYS * 24 * 60 * 60 * 1000
+}
+
 /**
- * Two cards, two stages of one lifecycle. The first is what archiving leaves: the row still in its
- * table, restorable, its retention timer running. It takes the page's spare height and scrolls.
- * The second is what deleting leaves: the row gone, a tombstone written by the database on the
- * DELETE, with links to what survives it -- the audit trail, a gateway's repository in the forge,
- * any bundle exported while it was alive, and the historian id its readings are still keyed by. It
- * keeps its natural height.
+ * One card, two tabs, two stages of one lifecycle. Archived is what archiving leaves: the row still
+ * in its table, restorable, its retention timer running. Retired is what deleting leaves: the row
+ * gone, a tombstone written by the database on the DELETE, with links to what survives it -- the
+ * audit trail, a gateway's repository in the forge, any bundle exported while it was alive, and the
+ * historian id its readings are still keyed by. The two tables share their first three columns.
  */
 export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
   const [archives, setArchives] = useState([])
   const [retired, setRetired]   = useState([])
   const [exports, setExports]   = useState([])
   const [loading, setLoading]   = useState(true)
+  const [stage, setStage]       = useState('archived')
   const [confirmPurge, setConfirmPurge] = useState(null)
   const [confirmRestore, setConfirmRestore] = useState(null)
   // The device whose bundle is being taken, so its own button reports progress.
@@ -162,21 +170,28 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
   return (
     <div className="page-layout page-fill">
       <div className="page-main">
-      <PageHeading icon={<IconArchive size={15} />} title="Archived Entities">
-        Areas, cells, gateways and devices taken out of commission without being deleted; Restore
-        returns one to service intact.
-      </PageHeading>
-
       <div className="card card-fill">
-        <div className="card-header">
-          <h3 className="section-title">
-            Archived Entities
-            <HelpTip
-              label="About archived entities"
-              text="Out of commission but not gone: identity and history kept, hidden from the asset pages, a timer running to auto-purge. Restore returns it intact. Export a device as a bundle before it is purged."
-            />
-            <SectionCount total={archives.length} />
-          </h3>
+        <CardHeading
+          icon={<IconArchive size={15} />}
+          title="Archived Entities"
+          description="Areas, cells, gateways and devices out of commission. An archived one restores intact; a retired one was deleted, and links to what survives it."
+        />
+        <TabStrip
+          ariaLabel="Lifecycle stage"
+          value={stage}
+          onChange={setStage}
+          tabs={[
+            { id: 'archived', label: 'Archived', title: 'Out of commission, restorable, a timer running to auto-purge' },
+            { id: 'retired', label: 'Retired', title: 'Archived and then deleted: the tombstone and what survives it' },
+          ]}
+        />
+
+        {stage === 'archived' && (<>
+        <div className="filter-bar">
+          <HelpTip
+            label="About archived entities"
+            text="Out of commission but not gone: identity and history kept, hidden from the asset pages, a timer running to auto-purge. Restore returns it intact. Export a device as a bundle before it is purged."
+          />
         </div>
         {loading ? <LoadingState label="archived entities" /> :
          archives.length === 0 ? (
@@ -184,7 +199,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
          ) : (
            <div className="table-wrap">
              <table>
-               <thead><tr><th title="Entity Name">Name</th><th title="Entity ID">Entity ID</th><th title="Entity classification">Type</th><th title="When it was archived">Archived At</th><th title="When the auto-purge timer deletes the archived record for good">Auto-Purge</th><th className="row-actions">Actions</th></tr></thead>
+               <thead><tr><th title="Entity Name">Name</th><th title="Entity classification">Type</th><th title="Entity ID">Entity ID</th><th title="When it was archived">Archived At</th><th title="When the auto-purge timer deletes the archived record for good">Auto-Purge</th><th className="row-actions">Actions</th></tr></thead>
                <tbody>
                  {archives.map(a => {
                    const latestExport = a.entity_type === 'device' ? latestExportOf(a.entity_id) : null
@@ -198,12 +213,12 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
                          </div>
                        )}
                      </td>
+                     <td><Badge size="sm">{a.entity_type.toUpperCase()}</Badge></td>
                      <td><CopyableId value={a.entity_id} label="entity id" onNotify={showToast} /></td>
-                     <td><Badge tone="warning" size="sm">{a.entity_type.toUpperCase()}</Badge></td>
                      <td className="cell-meta">{formatDateTime(a.archived_at)}</td>
                      <td>
                        {a.auto_delete_at ? (
-                         <span className="mono cell-purge-date">Purges: {formatDate(a.auto_delete_at)}</span>
+                         <PurgeDate at={a.auto_delete_at} />
                        ) : (
                          <Badge size="sm" title="No auto-purge timer is running; it stays archived until someone deletes it">Never auto-purged</Badge>
                        )}
@@ -246,20 +261,15 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
              </table>
            </div>
          )}
-      </div>
+        </>)}
 
-      {/* The second stage: the row is gone and this is what is left of it. It keeps its natural
-          height while the card above gives way. */}
-      <div className="card">
-        <div className="card-header">
-          <h3 className="section-title">
-            Retired Entities
-            <HelpTip
-              label="About retired entities"
-              text="Archived and then deleted, by timer or by hand. Only this tombstone remains, linking to what survives: the audit trail, a forge repository, any exported bundle. Readings stay in the historian under its id."
-            />
-            <SectionCount total={retired.length} />
-          </h3>
+        {/* The second stage: the row is gone and this is what is left of it. */}
+        {stage === 'retired' && (<>
+        <div className="filter-bar">
+          <HelpTip
+            label="About retired entities"
+            text="Archived and then deleted, by timer or by hand. Only this tombstone remains, linking to what survives: the audit trail, a forge repository, any exported bundle. Readings stay in the historian under its id."
+          />
         </div>
         {loading ? <LoadingState label="retired entities" /> :
          retired.length === 0 ? (
@@ -286,6 +296,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
              </table>
            </div>
          )}
+        </>)}
       </div>
       </div>
 
@@ -356,5 +367,23 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
         />
       )}
     </div>
+  )
+}
+
+/**
+ * An archived row's auto-purge date, as a plain date. Within a week of the purge it takes the
+ * danger colour and a warning icon, so colour is not the only signal, and says so to a reader.
+ */
+function PurgeDate({ at }) {
+  const soon = purgeIsSoon(at)
+  return (
+    <span
+      className={soon ? 'cell-purge-date cell-purge-date-soon' : 'cell-purge-date'}
+      title={`Deleted for good ${formatDateTime(at)}, unless restored first`}
+    >
+      {soon && <IconAlertTriangle size={12} />}
+      {soon && <span className="sr-only">Within a week: </span>}
+      {formatDate(at)}
+    </span>
   )
 }

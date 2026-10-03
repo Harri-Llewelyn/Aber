@@ -1434,12 +1434,16 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--text-muted);
 }
 
-/* The retention deadline on an archived row. Danger-coloured because it is a date on which data
-   disappears. Compounded with .mono, which sets its own colour and size, so this does not depend on
-   source order. */
-.mono.cell-purge-date {
-  font-size: 11px;
-  color: var(--danger);
+/* The auto-purge date on an archived row: a plain date. Within a week of the purge it takes the
+   danger colour and a warning icon beside it, so colour is not the only signal. */
+.cell-purge-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.cell-purge-date-soon {
+  color: var(--danger-text);
+  font-weight: 600;
 }
 
 /* The note under a form field: muted, small, and a fixed 4px below the control. */
