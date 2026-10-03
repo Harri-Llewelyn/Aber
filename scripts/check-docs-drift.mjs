@@ -1870,7 +1870,8 @@ function edgeFunctionNames() {
 
   // Set by something other than the Deployment's env list, each with what sets it.
   const elsewhere = {
-    ABER_CA_PEM: 'the image entrypoint reads it from the mounted platform root',
+    ABER_CA_PEM: 'main/index.ts reads it from the mounted platform root at spawn, the entrypoint at start',
+    ABER_CA_STATE: 'main/index.ts derives it from what the mounted platform root holds',
     ASSET_EXPORT_MAX_TELEMETRY_ROWS: 'defaulted inside aas-export, deliberately not plumbed',
     ASSET_EXPORT_MAX_TRAIL_ROWS: 'defaulted inside aas-export, deliberately not plumbed',
   };

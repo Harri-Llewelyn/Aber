@@ -171,7 +171,13 @@ Everything except `.env`, `GATEWAY.txt` and `platform-root.pem` is mirrored verb
 platform's public URL from inside the container, which trusts the roots bundled with Node and not
 the host's store, so a certificate from an internal CA fails there even on a host that trusts it.
 The compose file points `NODE_EXTRA_CA_CERTS` at this file, which the function fills from the same
-root the install command pins (`ABER_CA_PEM`). An empty file adds nothing and logs nothing.
+root the install command pins (`ABER_CA_PEM`). An empty file adds nothing and logs nothing, which is
+right for an issuer that publishes no root, such as ACME: Node's bundled roots verify the platform.
+
+**Nothing is minted before the platform's certificate exists.** On an HTTPS platform whose ingress
+certificate cert-manager has not issued yet, `gateway-bundle` answers `503` for the bundle and the
+command alike and mints no token, since an appliance could not verify the platform. Once it is
+issued, the functions read the root from their mount on the next request, with no restart.
 
 `.env` carries exactly six values, all read by `bootstrap.mjs`:
 

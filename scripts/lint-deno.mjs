@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * deno lint and deno check over the edge functions, each in a pinned container. Any finding fails;
- * both run, so one report shows every finding.
+ * deno lint, deno check and deno test over the edge functions, each in a pinned container. Any
+ * finding or failure fails; all three run, so one report shows every finding.
  *
  * lint applies Deno's recommended rules. no-import-prefix is among them: a dependency is declared
  * in supabase/functions/deno.json, not in an import specifier, so deno.lock covers it.
@@ -9,6 +9,9 @@
  * check type-checks every function's entrypoint and the _shared modules they import, with the Deno
  * the functions image builds with (the `modules` stage of supabase/functions/Dockerfile), so the
  * types are the edge runtime's. --frozen fails on a lock that does not cover the module graph.
+ *
+ * test runs every *_test.ts with the same Deno. A test imports nothing outside the functions' own
+ * graph, so it needs no entry in deno.lock.
  *
  *   node scripts/lint-deno.mjs
  *
@@ -39,4 +42,5 @@ function deno(image, command) {
 
 const lint = deno(LINT_IMAGE, 'deno lint')
 const check = deno(CHECK_IMAGE, 'deno check --frozen */index.ts')
-process.exit(lint || check)
+const test = deno(CHECK_IMAGE, 'deno test --frozen --allow-read --allow-write --allow-env')
+process.exit(lint || check || test)

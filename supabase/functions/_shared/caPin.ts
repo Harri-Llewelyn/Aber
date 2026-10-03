@@ -7,11 +7,105 @@
  * with `rotationPolicy: Never`, so the key outlives the certificate and a pin on the key does not
  * break at the re-issue.
  *
- * The root arrives as ABER_CA_PEM, read at start by the image's entrypoint from the ingress TLS
- * Secret's ca.crt (functions.yaml mounts it), which is the root that signs the API's own
- * certificate: the appliance trusts the API through this pin, so it must be that root and not the
- * broker's, which is allowed to differ.
+ * The root is the ingress TLS Secret's ca.crt, which functions.yaml mounts at PLATFORM_ROOT_DIR:
+ * the root that signs the API's own certificate. The appliance trusts the API through this pin, so
+ * it must be that root and not the broker's, which is allowed to differ. A user worker cannot read
+ * the mount, so main/index.ts reads it with platformRootReader() at each spawn until it holds a
+ * root, and hands the worker ABER_CA_PEM and ABER_CA_STATE; the image's entrypoint reads ca.crt
+ * once at start, and that value stands when main cannot read the mount.
  */
+
+/**
+ * Where functions.yaml mounts the ingress TLS Secret's ca.crt and tls.crt, when ingress TLS is on.
+ * The volume is optional, so it is empty until cert-manager issues the Secret, and kubelet fills it
+ * afterwards without a restart.
+ */
+export const PLATFORM_ROOT_DIR = "/home/deno/ca";
+
+/**
+ * What the mount holds. `root`: ca.crt is a certificate, so there is a pin. `no-root`: the
+ * certificate is issued and its issuer publishes no root (an ACME issuer), so no pin, which is
+ * correct. `unissued`: the mount is there and empty, so cert-manager has not issued the ingress
+ * certificate and no appliance could verify the platform yet. `unmounted`: ingress TLS is off.
+ */
+export type PlatformRootState = "root" | "no-root" | "unissued" | "unmounted";
+
+const STATES: PlatformRootState[] = ["root", "no-root", "unissued", "unmounted"];
+
+/** Read the mount once. Throws on anything but a missing file, such as a denied read. */
+export function readPlatformRoot(dir: string = PLATFORM_ROOT_DIR): { state: PlatformRootState; pem: string | null } {
+  const missing = (err: unknown) => err instanceof Deno.errors.NotFound;
+  try {
+    if (!Deno.statSync(dir).isDirectory) return { state: "unmounted", pem: null };
+  } catch (err) {
+    if (missing(err)) return { state: "unmounted", pem: null };
+    throw err;
+  }
+  const read = (name: string): string => {
+    try {
+      return Deno.readTextFileSync(`${dir}/${name}`).trim();
+    } catch (err) {
+      if (missing(err)) return "";
+      throw err;
+    }
+  };
+  const ca = read("ca.crt");
+  if (ca.includes("BEGIN CERTIFICATE")) return { state: "root", pem: ca };
+  return { state: read("tls.crt") ? "no-root" : "unissued", pem: null };
+}
+
+/**
+ * A reader that reads the mount on every call until it holds a root, and then keeps that root: it
+ * changes under a running pod only when the CA is re-issued, which keeps its key and so the pin.
+ */
+export function platformRootReader(dir: string = PLATFORM_ROOT_DIR): () => { state: PlatformRootState; pem: string | null } {
+  let kept: { state: PlatformRootState; pem: string | null } | null = null;
+  return () => {
+    if (kept) return kept;
+    const found = readPlatformRoot(dir);
+    if (found.state === "root") kept = found;
+    return found;
+  };
+}
+
+/** What main/index.ts found in the mount, or null when it could not read it. */
+export function platformRootState(): PlatformRootState | null {
+  const state = Deno.env.get("ABER_CA_STATE") ?? "";
+  return (STATES as string[]).includes(state) ? state as PlatformRootState : null;
+}
+
+/**
+ * Why neither the bundle nor the install command is minted while the ingress certificate is
+ * unissued: the bundle would carry no root, and the appliance's first call would fail.
+ */
+export const CERTIFICATE_UNISSUED =
+  "cert-manager has not issued the platform's ingress TLS certificate yet, so an appliance could " +
+  "not verify the platform (its first call would fail with UNABLE_TO_VERIFY_LEAF_SIGNATURE). Wait " +
+  "until the certificate is Ready and ask again; supabase-functions reads the root when it " +
+  "appears, with no restart";
+
+/** Whether to refuse both forms: an appliance must verify an HTTPS platform, and cannot yet. */
+export function certificateUnissued(publicUrl: string, state: PlatformRootState | null): boolean {
+  return publicUrl.startsWith("https://") && state === "unissued";
+}
+
+/** Why there is no root to pin, by what main/index.ts found in the mount. */
+export function noRootReason(state: PlatformRootState | null): string {
+  switch (state) {
+    case "unissued":
+      return CERTIFICATE_UNISSUED;
+    case "no-root":
+      return "the ingress certificate's issuer publishes no root (its Secret has no ca.crt, as with an " +
+        "ACME issuer), so there is nothing for the command to pin";
+    case "root":
+      return "the ingress TLS Secret's ca.crt does not parse as a certificate";
+    case "unmounted":
+      return "no platform root is mounted into the functions, because ingress.tls is off in the chart's values";
+    default:
+      return "supabase-functions could not read the platform root's mount and has none from its start " +
+        "(restart supabase-functions)";
+  }
+}
 
 /** The DER bytes of the first certificate in a PEM, or null when there is none. */
 export function pemToDer(pem: string): Uint8Array | null {
