@@ -54,6 +54,7 @@ import { ToastStack } from './components/common/Toast'
 import { AlertPill } from './components/common/AlertPill'
 import { NotificationHistory } from './components/common/NotificationHistory'
 import { HelpPanel } from './components/common/HelpPanel'
+import { HelpDrawerContext } from './components/common/ContextPanel'
 import { usePlatformAlerts } from './hooks/usePlatformAlerts'
 import { useNavSignals } from './hooks/useNavSignals'
 import { BugReportModal } from './components/modals/BugReportModal'
@@ -386,6 +387,7 @@ function Dashboard({ session, onSignOut }) {
   const [showBugReport, setShowBugReport] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
+  const closeHelp = useCallback(() => setShowHelp(false), [])
 
   const { tab, setTab, handleNavClick } = useAppRouting(
     setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter, setSelectedCellFilter,
@@ -616,6 +618,9 @@ function Dashboard({ session, onSignOut }) {
         {/* Devices' signal is the quarantine queue, so while it shows, the item opens that tab. */}
         <Sidebar tabs={navTabs} currentTab={tab} onNavigate={id => (id === 'devices' && navSignals.devices ? showSection('devices', 'quarantine') : handleNavClick(id))} mode={sidebarMode} onChangeMode={setSidebarMode} signals={navSignals} />
 
+        {/* A page's drawer closes help through this on a narrow screen (ContextPanel.jsx). The help
+            drawer itself sits outside it. */}
+        <HelpDrawerContext.Provider value={closeHelp}>
         <main className="content">
           <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
             {tab === 'site-map'       && <SiteMapTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} showToast={showToast} onNavigateTab={t => setTab(t)} />}
@@ -665,10 +670,11 @@ function Dashboard({ session, onSignOut }) {
             {tab === 'settings' && userRole === 'Administrator' && <SettingsTab showToast={showToast} initialSetting={selectedSettingKey} onClearSetting={() => setSelectedSettingKey('')} />}
           </Suspense>
         </main>
+        </HelpDrawerContext.Provider>
 
         {/* Rendered beside the page so it survives tab switches (`tabId` follows `tab`) and is
             available on pages with no drawer of their own. See HelpPanel.jsx. */}
-        <HelpPanel open={showHelp} tabId={tab} onClose={() => setShowHelp(false)} />
+        <HelpPanel open={showHelp} tabId={tab} onClose={closeHelp} />
       </div>
 
       <ToastStack toasts={toasts} onDismiss={dismissToast} onExpire={expireToast} />

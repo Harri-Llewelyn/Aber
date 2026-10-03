@@ -7,7 +7,9 @@ import { TABS } from '../../navigation'
 /**
  * Contextual help for the current page, in the same ContextPanel drawer the pages use. It sits in
  * `.app-body` as a sibling of `.content`, not inside the page, so a tab switch cannot unmount it
- * and it works on pages with no drawer of their own; both drawers can be open at once.
+ * and it works on pages with no drawer of their own. From 1440px wide it opens beside a page's
+ * drawer. Narrower, it replaces it: the page's drawer is hidden, not closed, until help closes, and
+ * a page's drawer that opens or changes subject closes help (`ONE_DRAWER_QUERY` in ContextPanel.jsx).
  */
 export function HelpPanel({ open, tabId, onClose }) {
   const tab = TABS.find((t) => t.id === tabId)

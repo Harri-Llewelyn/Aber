@@ -403,9 +403,34 @@ sees and the author never does, so the drift check rejects it at build time inst
 The same component the entity pages use, with `subject="help"` for its region label and close
 control. It is a sibling of `.content` rather than of a page's list, so it survives a tab switch,
 works on pages that have no drawer of their own, and cannot be unmounted by the page it describes —
-`tabId` follows the active tab, so it re-reads as you navigate. Both drawers can be open at once on
-Devices; the flex row narrows the table rather than stacking them, and below 800px it takes the
-same dismissible overlay treatment every other drawer takes.
+`tabId` follows the active tab, so it re-reads as you navigate. Every drawer, this one included,
+stays docked beside the page down to 800px wide; narrower, it slides over the page as a
+dismissible overlay.
+
+**One drawer at a time below 1440px.** From 1440px wide, help opens beside a page's drawer and the
+flex row narrows the page between them. Narrower, help replaces the page's drawer:
+
+- **Opening help hides the page's drawer without closing it.** The page keeps its selection, and
+  closing help (its X, Escape, or the top bar's ?) shows the same details again. Escape closes the
+  most recently opened drawer first, so with help opened second it closes help. The hiding is CSS,
+  `@media (max-width: 1439px)` in `App.css`, and `display: none` also takes the hidden drawer out of
+  the tab order and the accessibility tree.
+- **Selecting a row, a pin or a lane while help is open closes help** and shows the details, rather
+  than changing a panel nobody can see. A page's `ContextPanel` that opens or turns to another
+  entity calls the App's `HelpDrawerContext` when `ONE_DRAWER_QUERY` matches. The help drawer sits
+  outside that provider. The query and the media query must agree; `contextPanel.test.jsx` checks
+  that they do.
+
+**Where 1440px comes from.** A drawer is `--context-panel-width`, `clamp(320px, 28vw, 560px)`. With
+the rail collapsed (52px), the page's column is the window less the rail, the 12px gutter either
+side of the page, the page's drawer with its 16px gap, and the help drawer with its 12px right
+margin: `W − 104 − 2 × clamp(320, 0.28W, 560)`. Between 1143px and 2000px that is `0.44W − 104`,
+which reaches 500px at 1373px. A card in the column loses another 48px to its border and padding
+(the Site Map card body measured 552, 411, 168 and 108px at 1600, 1280, 960 and 900px wide with
+both drawers open), so its body is about 480px at 1440px, the first common window width past
+1373px. A laptop at 1366px gets one drawer: two would leave its column 497px and a card's body
+about 450px. The expanded rail (240px) takes 188px more at every width; the threshold does not
+move with it.
 
 **Its contents are mounted only while it is open**, which the per-page drawers do not need to do.
 The panel stays in the DOM so its width can transition, but a page of prose whose first line is the

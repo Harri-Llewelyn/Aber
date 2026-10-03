@@ -3,7 +3,8 @@ import { render, screen, within, waitFor, fireEvent, act } from '@testing-librar
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { ContextPanel, rowSelectHandler } from '../components/common/ContextPanel'
+import { ContextPanel, rowSelectHandler, HelpDrawerContext, ONE_DRAWER_QUERY } from '../components/common/ContextPanel'
+import { HelpPanel } from '../components/common/HelpPanel'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { CellsTab } from '../components/tabs/CellsTab'
@@ -282,6 +283,106 @@ describe('Panel layout pushes rather than covers', () => {
     expect(overlay).toMatch(/\.context-panel-open \{[^}]*position:\s*fixed/)
     // The inner shell fills the overlay; the desktop width left an empty strip on the right.
     expect(overlay).toMatch(/\.context-panel-inner \{[^}]*width:\s*100%/)
+  })
+})
+
+describe('On a narrow screen help replaces the details panel', () => {
+  const oneDrawer = APP_CSS.match(/@media (\([^)]*\)) \{\s*(\.app-body:has[^{]*?) \{ display: none; \}\s*\}/)
+  const [, query, hiddenSelector] = oneDrawer || []
+  const cells = [cell, { cell_id: 'cell-2', cell_name: 'Paint Shop', is_archived: false, gateways: [], gateway_count: 0 }]
+
+  /** The App's drawer wiring: the page in `.content` under the provider, help beside it, the ? above. */
+  function Shell({ children }) {
+    const [help, setHelp] = React.useState(false)
+    const closeHelp = React.useCallback(() => setHelp(false), [])
+    return (
+      <>
+        <button type="button" onClick={() => setHelp(v => !v)}>Help for this page</button>
+        <div className="app-body">
+          <HelpDrawerContext.Provider value={closeHelp}>
+            <main className="content">{children}</main>
+          </HelpDrawerContext.Provider>
+          <HelpPanel open={help} tabId="cells" onClose={closeHelp} />
+        </div>
+      </>
+    )
+  }
+
+  const screenIs = (narrow) => {
+    window.matchMedia = vi.fn(q => ({ matches: narrow && q === ONE_DRAWER_QUERY, media: q, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
+  }
+  afterEach(() => { delete window.matchMedia })
+
+  const details = () => document.querySelector('.content .context-panel')
+  const help = () => document.querySelector('.context-panel-app')
+  const toggleHelp = () => fireEvent.click(screen.getByRole('button', { name: 'Help for this page' }))
+  const hidden = () => details().matches(hiddenSelector)
+  const renderShell = async () => {
+    api.get.mockImplementation(routeGet({ cells }))
+    render(<Shell><CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} /></Shell>)
+    await waitFor(() => expect(list().getByText('Assembly Line 1')).toBeInTheDocument())
+  }
+
+  it('hides the page drawer below 1440px while help is open, with a query the code shares', () => {
+    expect(query).toBe(ONE_DRAWER_QUERY)
+    expect(query).toBe('(max-width: 1439px)')
+    expect(hiddenSelector).toBe('.app-body:has(> .context-panel-app.context-panel-open) > .content .context-panel-open')
+  })
+
+  it('hides the details without closing them, and shows the same details when help closes', async () => {
+    screenIs(true)
+    await renderShell()
+    fireEvent.click(list().getByText('Assembly Line 1'))
+    await waitFor(() => expect(details()).toHaveClass('context-panel-open'))
+    expect(hidden()).toBe(false)
+
+    // The X.
+    toggleHelp()
+    expect(help()).toHaveClass('context-panel-open')
+    expect(details()).toHaveClass('context-panel-open')
+    expect(hidden()).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Close help' }))
+    expect(hidden()).toBe(false)
+    expect(within(details()).getByText('cell-1')).toBeInTheDocument()
+
+    // Escape: help was opened second, so it closes first.
+    toggleHelp()
+    expect(hidden()).toBe(true)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(help()).not.toHaveClass('context-panel-open')
+    expect(details()).toHaveClass('context-panel-open')
+    expect(hidden()).toBe(false)
+
+    // The top bar's ?.
+    toggleHelp()
+    toggleHelp()
+    expect(hidden()).toBe(false)
+    expect(document.querySelector('.row-selected')).toHaveTextContent('Assembly Line 1')
+  })
+
+  it('closes help when a row is selected, the first time and on the next row', async () => {
+    screenIs(true)
+    await renderShell()
+    toggleHelp()
+    fireEvent.click(list().getByText('Assembly Line 1'))
+    await waitFor(() => expect(help()).not.toHaveClass('context-panel-open'))
+    expect(details()).toHaveClass('context-panel-open')
+    expect(hidden()).toBe(false)
+
+    toggleHelp()
+    expect(hidden()).toBe(true)
+    fireEvent.click(list().getByText('Paint Shop'))
+    await waitFor(() => expect(help()).not.toHaveClass('context-panel-open'))
+    expect(within(details()).getByText('cell-2')).toBeInTheDocument()
+  })
+
+  it('leaves help open beside the details from 1440px wide', async () => {
+    screenIs(false)
+    await renderShell()
+    toggleHelp()
+    fireEvent.click(list().getByText('Assembly Line 1'))
+    await waitFor(() => expect(details()).toHaveClass('context-panel-open'))
+    expect(help()).toHaveClass('context-panel-open')
   })
 })
 

@@ -1,9 +1,18 @@
-import React, { useRef } from 'react'
+import React, { createContext, useContext, useEffect, useRef } from 'react'
 import { IconX, IconAlertTriangle, IconAlertCircle, IconExternalLink } from './Icons'
 import CopyableId from './CopyableId'
 import { HelpTip } from './HelpTip'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { grafanaAlertUrl } from '../../constants'
+
+/**
+ * Below this width only one drawer shows: an open help drawer hides a page's (the media query in
+ * App.css, which must match), and a page's drawer that opens or changes subject closes help.
+ */
+export const ONE_DRAWER_QUERY = '(max-width: 1439px)'
+
+/** Provided by the App around the page, not around the help drawer: closes the help drawer. */
+export const HelpDrawerContext = createContext(null)
 
 /**
  * The right-hand context drawer: one entity at a time, beside the list it came from. Not an
@@ -55,6 +64,13 @@ export function ContextPanel({ open, type, title, icon, subtitle, fields = [], a
   // stack, so Escape out of a modal opened from this panel closes the modal and not the panel
   // behind it; `open` keeps a closed panel off the stack.
   useEscapeKey(onClose, open)
+
+  // A page's drawer opening, or turning to another entity, is what the person asked to see, so on a
+  // narrow screen it closes the help drawer that would otherwise hide it.
+  const closeHelp = useContext(HelpDrawerContext)
+  useEffect(() => {
+    if (open && closeHelp && window.matchMedia?.(ONE_DRAWER_QUERY)?.matches) closeHelp()
+  }, [open, type, title, closeHelp])
 
   const firstPrimary = actions.findIndex(a => a.primary)
   const orderedActions = actions.map((a, i) => ({ ...a, primary: i === firstPrimary }))

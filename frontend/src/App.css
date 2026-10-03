@@ -3901,6 +3901,14 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   }
 }
 
+/* One drawer at a time below 1440px, where two would leave the page under about 500px (the
+   derivation is in frontend/README.md). Open help hides a page's open drawer without closing it, so
+   closing help shows the same details again; `display: none` also takes it out of the tab order and
+   the accessibility tree. ONE_DRAWER_QUERY in ContextPanel.jsx must match this query. */
+@media (max-width: 1439px) {
+  .app-body:has(> .context-panel-app.context-panel-open) > .content .context-panel-open { display: none; }
+}
+
 /* A table inside a modal. Auto layout gives the one variable-length column the leftovers and
    overflows sideways; fixed layout plus a `<colgroup>` declares the proportions and fits the
    container. */
