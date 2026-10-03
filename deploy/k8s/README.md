@@ -318,6 +318,13 @@ it needs. Either write a `my-values.yaml` from
 the package**, so `helm pull --untar` gives you a copy — or, for a throwaway cluster, pull the
 demo credentials out of `.env.example`.
 
+**Set the AAS base IRI before the first export: it is permanent from then on.** Every
+`globalAssetId` and submodel id an exported Asset Administration Shell carries is
+`supabaseFunctions.aas.baseIri` plus the asset's `sparkplug_id`. Once a shell has left the site,
+whoever imported it holds those identifiers, and changing the IRI gives every asset a new identity.
+Put it under a domain your organisation controls, as `values-prod.yaml.example` shows; the
+default, `https://aber.local/ids/asset/`, belongs to nobody.
+
 The ten built images resolve automatically to the chart's `appVersion`, which the release stamps
 equal to the chart version. Chart 0.1.0 can only pull images 0.1.0; there is nothing to line up by
 hand and no `latest` tag to drift onto.

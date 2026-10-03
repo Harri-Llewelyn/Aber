@@ -620,7 +620,8 @@ supabaseFunctions:
   # main/index.ts forwards. Outbound references must name addresses the recipient of a shell
   # can reach.
   aas:
-    # Namespaces every globalAssetId and submodel id the shell carries.
+    # Namespaces every globalAssetId and submodel id the shell carries. Permanent once a shell has
+    # left the site: set it before the first export, under a domain the organisation controls.
     baseIri: https://aber.local/ids/asset/
     # Where a consumer fetches the samples a Time Series LinkedSegment points at. Derived from
     # publicUrls.supabase when empty.
