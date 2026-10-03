@@ -116,7 +116,7 @@ describe('GatewayCredentialModal', () => {
     expect(written[0]).toContain(`MQTT_GW_<NAME>_USER=${CREDENTIAL.mqtt_username}`)
     expect(written[0]).toContain(`MQTT_GW_<NAME>_PASSWORD=${CREDENTIAL.password}`)
     // The hint under the block says where to find the name and what reads the pair.
-    expect(screen.getAllByText(/acsCredentialsEnv/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/aberCredentialsEnv/).length).toBeGreaterThan(0)
     expect(screen.getByText(/node-red-init/)).toBeInTheDocument()
     expect(screen.queryByText(/\.env/)).toBeNull()
   })
@@ -138,7 +138,7 @@ describe('GatewayCredentialModal', () => {
     expect(written[0]).toBe(`{"${CREDENTIAL.mqtt_username}":"${CREDENTIAL.password}"}`)
     // No placeholder to substitute, and no mention of a flow it does not appear in.
     expect(written[0]).not.toContain('<NAME>')
-    expect(screen.queryAllByText(/acsCredentialsEnv/)).toHaveLength(0)
+    expect(screen.queryAllByText(/aberCredentialsEnv/)).toHaveLength(0)
     expect(screen.queryAllByText(/Node-RED/)).toHaveLength(0)
     expect(screen.getByText(/rollout restart deploy\/playback/)).toBeInTheDocument()
   })

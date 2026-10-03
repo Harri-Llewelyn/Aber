@@ -176,10 +176,12 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(single.style.getPropertyValue('--pin-size')).toBe('44px')
   })
 
-  it('keeps the three campus lanes side by side in the Site Map card, each in its own hue, with no area selector', async () => {
+  it('keeps the three site lanes side by side in the Site Map card, each in its own hue, with no area selector', async () => {
     // Site-Wide, Simulated and Unassigned belong to no area. Area-Wide is not among them: it
     // belongs to an area and is counted on that area's card.
     await renderSiteMap()
+    // Named for the ISA-95 level they sit under; "campus" only glosses it.
+    expect(screen.getByRole('group', { name: 'Site lanes' })).toBe(document.querySelector('.site-lanes'))
     expect(lanes().map(l => l.textContent.replace(/\d+ Gateways?.*$/, '').trim())).toEqual(['Site-Wide', 'Simulated', 'Unassigned'])
     expect(lanes().map(l => l.className)).toEqual([
       expect.stringContaining('site-lane-site'),

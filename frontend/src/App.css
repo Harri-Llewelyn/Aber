@@ -1432,6 +1432,40 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 .backup-files .mono { min-width: 0; overflow-wrap: anywhere; }
 
+/* The historian's own backup on the Backups page: one line of facts that opens its panel and wraps
+   on a narrow screen. A button, so it is reached and opened from the keyboard. */
+.backup-historian {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.backup-historian:hover { border-color: var(--border-hover); }
+.backup-historian:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.backup-historian-selected {
+  background: var(--accent-dim);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.backup-historian-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.backup-historian-state { min-width: 0; }
+/* The chevron sits at the line's right end, where a table row's does. */
+.backup-historian-chevron { margin-left: auto; }
+
 /* The note under a form field: muted, small, and a fixed 4px below the control. */
 .form-hint {
   font-size: 11px;
@@ -2384,15 +2418,22 @@ td.row-actions, th.row-actions {
 
 .site-lane-counts { flex-shrink: 0; font-size: 11px; font-weight: 500; color: var(--text-muted); letter-spacing: -0.2px; }
 
-/* A lane and an area card open the panel, so each ends in the row chevron's glyph and colours. */
+/* Everything that opens the panel and is not a table row ends in the row chevron's glyph and
+   colours: a lane, an area card, the Backups page's Historian line and an Audit Trail change
+   listed in the drawer. */
 .site-lane-chevron,
-.area-card-chevron { display: inline-flex; flex-shrink: 0; color: var(--text-dim); }
+.area-card-chevron,
+.backup-historian-chevron,
+.trail-causation-chevron { display: inline-flex; flex-shrink: 0; color: var(--text-dim); }
 
 .site-lane:hover .site-lane-chevron,
-.area-card:hover .area-card-chevron { color: var(--text-primary); }
+.area-card:hover .area-card-chevron,
+.backup-historian:hover .backup-historian-chevron,
+.trail-causation-item:hover .trail-causation-chevron { color: var(--text-primary); }
 
 .site-lane.is-open .site-lane-chevron,
-.area-card.is-selected .area-card-chevron { color: var(--accent); }
+.area-card.is-selected .area-card-chevron,
+.backup-historian-selected .backup-historian-chevron { color: var(--accent); }
 
 .site-lane-site {
   border-color: var(--accent);
@@ -2575,18 +2616,29 @@ td.row-actions, th.row-actions {
 
 .area-card .area-plan,
 .area-plan-preview .area-plan {
-  width: min(100%, calc(var(--plan-max-height) * var(--plan-aspect, 1.3333)));
+  width: min(100%, calc(var(--plan-max-height) * var(--plan-aspect, 1.3333) + 2 * var(--plan-inset-x)));
   margin: 0 auto;
 }
 
+/* The frame keeps a margin of half a pin round the drawing, so a pin centred on the plan's edge is
+   drawn whole: across, half the disc and its selection ring; down, half the disc, gap and label
+   (`.area-plan-pin`) and the ring. Resize these with the pin. */
 .area-plan {
-  position: relative;
+  --plan-inset-x: 24px;
+  --plan-inset-y: 34px;
   width: 100%;
+  padding: var(--plan-inset-y) var(--plan-inset-x);
   background: var(--bg-glass);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   overflow: hidden;
   user-select: none;
+}
+
+/* What a place is a fraction of. A container, so a pin's label can measure the plan's width. */
+.area-plan-drawing {
+  position: relative;
+  container-type: inline-size;
 }
 
 .area-plan-interactive { cursor: crosshair; }
@@ -2697,6 +2749,13 @@ span.area-plan-pin { cursor: inherit; }
   max-width: 150px;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* Slides sideways just far enough to end inside the frame, the disc staying on its place:
+     --pin-x is the place's fraction across, 100cqw the drawing's width, 50% half the label's. */
+  translate: clamp(
+    calc(50% - var(--pin-x, 0.5) * 100cqw - var(--plan-inset-x, 0px) + 4px),
+    0px,
+    calc((1 - var(--pin-x, 0.5)) * 100cqw + var(--plan-inset-x, 0px) - 4px - 50%)
+  );
 }
 
 .area-plan-pin-small .area-plan-pin-label { font-size: 11px; padding: 0 4px; max-width: 90px; }
@@ -2963,8 +3022,8 @@ span.area-plan-pin { cursor: inherit; }
   align-items: center;
   gap: 5px;
   padding: 0 6px;
-  /* 28px, the same as the shortcuts button and the account avatar. The three controls on the right
-     are now one row of one size rather than a 78px pill flanked by two circles. */
+  /* 28px, the same as the other four controls on the right (the bell, the shortcuts and help keys,
+     and the account avatar), so the five are one row of one size. */
   height: 28px;
   border-radius: 999px;
   font-size: 12px;
@@ -3883,6 +3942,14 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   }
 }
 
+/* One drawer at a time below 1440px, where two would leave the page under about 500px (the
+   derivation is in frontend/README.md). Open help hides a page's open drawer without closing it, so
+   closing help shows the same details again; `display: none` also takes it out of the tab order and
+   the accessibility tree. ONE_DRAWER_QUERY in ContextPanel.jsx must match this query. */
+@media (max-width: 1439px) {
+  .app-body:has(> .context-panel-app.context-panel-open) > .content .context-panel-open { display: none; }
+}
+
 /* A table inside a modal. Auto layout gives the one variable-length column the leftovers and
    overflows sideways; fixed layout plus a `<colgroup>` declares the proportions and fits the
    container. */
@@ -4448,6 +4515,9 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   letter-spacing: 0.6px;
   color: var(--text-muted);
 }
+
+/* The item aligns its text on the baseline; the chevron is a glyph, so it centres instead. */
+.trail-causation-chevron { align-self: center; }
 
 /* ===== Audit Trail: the diff inspector inside the drawer ===== */
 .trail-diff { margin-top: 14px; }

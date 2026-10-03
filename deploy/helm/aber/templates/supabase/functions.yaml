@@ -68,9 +68,9 @@ spec:
             {{- include "aber.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
             {{- include "aber.secretEnv" (dict "name" "SUPABASE_SERVICE_ROLE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
             {{- include "aber.secretEnv" (dict "name" "JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
-            # false because EACH FUNCTION CHECKS ITS OWN ROLE CLAIM. approve-quarantine and
-            # deploy-nodered allow-list Administrator/Shopfloor_Manager; aas-export additionally
-            # allows the read-scoped roles. Verifying here would be a second, coarser gate that
+            # false because EACH FUNCTION CHECKS ITS OWN ROLE CLAIM. approve-quarantine
+            # allow-lists Administrator/Shopfloor_Manager; aas-export also allows the read-scoped
+            # roles. Verifying here would be a second, coarser gate that
             # could only ever be wrong about one of them.
             - name: VERIFY_JWT
               value: {{ .Values.supabaseFunctions.verifyJwt | quote }}
@@ -96,7 +96,7 @@ spec:
               value: {{ .Values.supabaseFunctions.aas.modelPublicBase | default (printf "%s/storage/v1/object/public/%s" $supabasePublic .Values.supabaseStorage.bucket) | quote }}
             - name: STORAGE_MODEL_BUCKET
               value: {{ .Values.supabaseStorage.bucket | quote }}
-            {{- /* int64 first -- see supabase/storage.yaml. Rendered as "3.3554432e+07" this
+            {{- /* int64 first -- see deploy/helm/aber/templates/supabase/storage.yaml. Rendered as "3.3554432e+07" this
                    parses as 3, so every 3D model exceeded the bundling cap and the exporter fell
                    back to a URL reference. The .aasx still validated, which is why nothing failed. */}}
             - name: AAS_MAX_BUNDLED_MODEL_BYTES

@@ -13,9 +13,9 @@ import { TakeBackupModal } from '../modals/TakeBackupModal'
 import { BackupDestinationModal } from '../modals/BackupDestinationModal'
 import { CardHeading } from '../common/CardHeading'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
-import { IconAlertTriangle, IconHardDrive, IconShieldAlert, IconX } from '../common/Icons'
-import { formatBytes, formatDateTime, NO_VALUE } from '../../utils/format'
-import { readSetting } from '../../config'
+import { IconAlertTriangle, IconChevronRight, IconDatabase, IconHardDrive, IconShieldAlert, IconX } from '../common/Icons'
+import { formatBytes, formatDateTime, formatRelative, NO_VALUE } from '../../utils/format'
+import { readFlag, readSetting } from '../../config'
 
 /**
  * How old the last successful backup may be before the page says backups have stopped: the nightly
@@ -29,6 +29,9 @@ export const BACKUP_STALE_HOURS = 36
  * check-docs-drift.mjs holds it equal to the floor in backup_prunable().
  */
 const BACKUP_RETENTION_FLOOR = 3
+
+/** The selection that opens the historian's panel rather than a run's. */
+const HISTORIAN = 'historian'
 
 /** Runs per page of the list; the list foot adds another page. */
 const PAGE_SIZE = 30
@@ -68,6 +71,10 @@ export function BackupsTab({ showToast }) {
   const [offsite, setOffsite] = useState(null)
   const [editingDestination, setEditingDestination] = useState(false)
   const [selectedId, setSelectedId] = useState(null)
+  // The historian's own backup: undefined while physical backup is off or not yet read, null when
+  // the historian cannot be read.
+  const [historian, setHistorian] = useState(undefined)
+  const historianOn = readFlag('VITE_HISTORIAN_PHYSICAL_BACKUP')
   const lastCall = useRef(0)
 
   const [cancelPending, runCancel] = usePendingAction()
@@ -75,14 +82,16 @@ export function BackupsTab({ showToast }) {
 
   const refresh = useCallback(async () => {
     const call = ++lastCall.current
-    const [page, active, sum, floor, destination] = await Promise.all([
+    const [page, active, sum, floor, destination, historianRow] = await Promise.all([
       api.listBackupRuns({ statuses: FILTERS[filter].statuses, limit }),
       api.activeBackupJob(),
       api.backupRunSummary(),
       // Soft: without it the Retention cells cannot say a backup is kept as one of the newest.
       api.newestBackupIds(BACKUP_RETENTION_FLOOR).catch(() => []),
       // Soft too: the list is worth showing without it, and the destination button is then left out.
-      api.backupOffsiteDestination().catch(() => null)
+      api.backupOffsiteDestination().catch(() => null),
+      // A read that fails is reported the way an unreachable historian is: it cannot be read.
+      historianOn ? api.historianBackupState().catch(() => null) : undefined
     ])
     // A response for an earlier filter or page size that lands after a later one is dropped.
     if (call !== lastCall.current) return
@@ -92,8 +101,9 @@ export function BackupsTab({ showToast }) {
     setSummary(sum)
     setFloorIds(new Set(floor))
     setOffsite(destination)
+    setHistorian(historianRow)
     setError(null)
-  }, [filter, limit])
+  }, [filter, limit, historianOn])
 
   useEffect(() => {
     let cancelled = false
@@ -105,7 +115,7 @@ export function BackupsTab({ showToast }) {
 
   // A poll, not Realtime: a backup takes minutes and its row changes twice. Faster while one is
   // in flight so the card settles when the service finishes.
-  usePolling(refresh, activeJob ? 5000 : 30000, !loading)
+  usePolling(refresh, activeJob || historianRequest(historian)?.inFlight ? 5000 : 30000, !loading)
 
   // The dialog shows a refusal itself, so a throw here stays in it: the gate names the backup in
   // the way, and a toast would vanish before the sentence was read.
@@ -202,8 +212,16 @@ export function BackupsTab({ showToast }) {
               </div>
             )}
 
-            <RunningCard job={activeJob} onCancel={onCancel} cancelPending={cancelPending} />
+            <RunningCard job={activeJob} onCancel={onCancel} cancelPending={cancelPending} historianOn={historianOn} />
             <CurrentState summary={summary} />
+            {historianOn && historian !== undefined && (
+              <>
+                <HistorianState historian={historian} />
+                {historian && (
+                  <HistorianRow historian={historian} selected={selectedId === HISTORIAN} onSelect={() => toggleRun(HISTORIAN)} />
+                )}
+              </>
+            )}
 
             {!loading && !neverRun && (
               <div className="filter-bar">
@@ -292,6 +310,14 @@ export function BackupsTab({ showToast }) {
         showToast={showToast}
       />
 
+      {historianOn && (
+        <HistorianPanel
+          historian={selectedId === HISTORIAN ? historian : null}
+          onClose={() => setSelectedId(null)}
+          showToast={showToast}
+        />
+      )}
+
       {editingDestination && (
         <BackupDestinationModal
           destination={offsite}
@@ -303,7 +329,7 @@ export function BackupsTab({ showToast }) {
       )}
 
       {asking && (
-        <TakeBackupModal holds={componentSentence()} onConfirm={onRequest} onCancel={() => setAsking(false)} />
+        <TakeBackupModal holds={takeBackupHolds(historianOn)} onConfirm={onRequest} onCancel={() => setAsking(false)} />
       )}
 
       {releaseFor && (
@@ -368,8 +394,187 @@ function CurrentState({ summary }) {
   )
 }
 
+const HOUR_MS = 60 * 60 * 1000
+const DAY_MS = 24 * HOUR_MS
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const KIND_WORDS = { full: 'full', diff: 'differential', incr: 'incremental' }
+const kindWord = (kind) => KIND_WORDS[kind] || kind
+
+/**
+ * The historian's one statement about now, or null: the platform line's rule on the clock
+ * Historian Backup Stale reads. A failure (the read returns one only while it is newer than the
+ * last success) stands until a backup succeeds; otherwise stale when the last success, or before
+ * the first the first recorded run, is older than BACKUP_STALE_HOURS. Null in is unreachable.
+ */
+export function historianState(historian, now = Date.now()) {
+  if (historian === null) return { kind: 'unreachable' }
+  if (!historian) return null
+  if (historian.last_failure_at) return { kind: 'failed' }
+  const clock = historian.last_success_at || historian.first_recorded_at
+  if (clock && now - new Date(clock).getTime() > BACKUP_STALE_HOURS * HOUR_MS) return { kind: 'stale' }
+  return null
+}
+
+/**
+ * When the sidecar takes its next backup, and which type, by its own rules
+ * (physical_backup_missed_slot() and physical_backup_type() in timescaledb/physical_backup.sql):
+ * the latest slot at hour_utc while nothing has been attempted since it (due now), else the next;
+ * full on full_on's weekday or when the newest full is over seven days old by then. Null without
+ * a schedule, which the sidecar records when it starts.
+ */
+export function nextHistorianBackup(historian, now = Date.now()) {
+  if (!historian || historian.hour_utc == null) return null
+  const d = new Date(now)
+  const today = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), historian.hour_utc)
+  const latest = today <= now ? today : today - DAY_MS
+  const attempted = !!historian.last_attempt_at && new Date(historian.last_attempt_at).getTime() >= latest
+  const at = attempted ? latest + DAY_MS : latest
+  const lastFull = historian.last_full_at ? new Date(historian.last_full_at).getTime() : null
+  const full = new Date(at).getUTCDay() === historian.full_on || lastFull === null ||
+    lastFull < Math.max(at, now) - 7 * DAY_MS
+  return { at, due: !attempted, kind: full ? 'full' : 'diff' }
+}
+
+/**
+ * The latest backup asked for from this page, while it is worth saying: waiting for the sidecar,
+ * being taken, or how it ended within the last day. The sidecar looks once a minute, so one waiting
+ * for minutes means its container is not running.
+ */
+export function historianRequest(historian, now = Date.now()) {
+  if (!historian?.request_at) return null
+  if (!historian.request_claimed_at) {
+    return now - new Date(historian.request_at).getTime() > 3 * 60 * 1000
+      ? { inFlight: true, tone: 'warning', label: 'Requested: not picked up', title: 'The backup sidecar looks for a request once a minute, so one waiting longer means its container is not running.' }
+      : { inFlight: true, tone: 'info', label: 'Requested: queued', title: `Asked for ${formatDateTime(historian.request_at)}. The backup sidecar takes it within a minute.` }
+  }
+  if (!historian.request_finished_at) {
+    return { inFlight: true, tone: 'info', label: 'Requested: being taken', title: `The backup sidecar started it ${formatDateTime(historian.request_claimed_at)}.` }
+  }
+  if (now - new Date(historian.request_finished_at).getTime() > DAY_MS) return null
+  return historian.request_succeeded
+    ? { inFlight: false, tone: 'success', label: 'Requested: taken', title: `Finished ${formatDateTime(historian.request_finished_at)}.` }
+    : { inFlight: false, tone: 'danger', label: 'Requested: failed', title: `Failed ${formatDateTime(historian.request_finished_at)}. The historian's panel gives pgBackRest's reason.` }
+}
+
+/** The historian's line above the list: only when its backup is not working, or cannot be read. */
+function HistorianState({ historian }) {
+  const state = historianState(historian)
+  if (!state) return null
+  if (state.kind === 'unreachable') {
+    return (
+      <div className="callout callout-warning" role="status" data-testid="historian-state">
+        <IconAlertTriangle size={14} className="callout-icon" />
+        <div>
+          <strong>The historian cannot be read</strong>, so this page cannot say whether its own backup is
+          working. Its database did not answer: the timescaledb pod is probably down or restarting.
+        </div>
+      </div>
+    )
+  }
+  const failed = state.kind === 'failed'
+  const lastGood = historian.last_success_at
+    ? `The last good one finished ${formatDateTime(historian.last_success_at)}.`
+    : failed
+      ? 'None has succeeded yet.'
+      : `None has succeeded since backup was switched on ${formatDateTime(historian.first_recorded_at)}.`
+  const reason = historian.last_failure_detail || 'pgBackRest recorded no reason.'
+  return (
+    <div className={failed ? 'callout callout-danger' : 'callout callout-warning'} role="status" data-testid="historian-state">
+      {failed
+        ? <IconShieldAlert size={14} className="callout-icon" />
+        : <IconAlertTriangle size={14} className="callout-icon" />}
+      <div className="backup-historian-state">
+        <strong>{failed ? "The historian's last backup failed" : `No historian backup has succeeded in ${BACKUP_STALE_HOURS} hours`}</strong>
+        {failed ? ` ${formatRelative(historian.last_failure_at)}, and none has succeeded since. ` : '. '}
+        {lastGood}
+        {failed
+          ? <div className="truncate" title={reason}>{reason}</div>
+          : ' Take a backup asks for one; if its request is not picked up, the backup sidecar is not running.'}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The historian's own backup as one line: the last success with its type and label, when the next
+ * is due, the repository's size and a request from this page. Opens the historian's panel, which
+ * has the whole of any failure.
+ */
+function HistorianRow({ historian: h, selected, onSelect }) {
+  const next = nextHistorianBackup(h)
+  const request = historianRequest(h)
+  return (
+    <button
+      type="button"
+      className={`backup-historian${selected ? ' backup-historian-selected' : ''}`}
+      data-testid="historian-row"
+      aria-pressed={selected}
+      onClick={onSelect}
+      title="Open the historian's own backup: its last run, its schedule and the whole of any failure"
+    >
+      <span className="backup-historian-name"><IconDatabase size={14} /> Historian</span>
+      <span>
+        {h.last_success_at
+          ? <>Last backup {formatRelative(h.last_success_at)}, {kindWord(h.last_success_kind)}</>
+          : 'No backup yet'}
+        {h.last_success_label && <span className="mono cell-meta"> {h.last_success_label}</span>}
+      </span>
+      <span className="cell-meta">
+        {!next ? 'Next: not known yet' : next.due ? 'Next: due now' : `Next ${formatDateTime(next.at)}, ${kindWord(next.kind)}`}
+      </span>
+      {h.repo_bytes != null && <span className="cell-meta">{formatBytes(h.repo_bytes)} in the repository</span>}
+      {request && <Badge tone={request.tone} size="sm" title={request.title}>{request.label}</Badge>}
+      <span className="backup-historian-chevron" aria-hidden="true"><IconChevronRight size={14} /></span>
+    </button>
+  )
+}
+
+const pad2 = (n) => String(n).padStart(2, '0')
+
+/** The historian's panel: its last success and any newer failure in full, the schedule, the repository. */
+function HistorianPanel({ historian: h, onClose, showToast }) {
+  const state = h ? historianState(h) : null
+  const next = h ? nextHistorianBackup(h) : null
+  const request = h ? historianRequest(h) : null
+  const badge = !h ? null
+    : state?.kind === 'failed' ? <Badge tone="danger" size="sm">Failed</Badge>
+      : state?.kind === 'stale' ? <Badge tone="warning" size="sm">Stale</Badge>
+        : h.last_success_at ? <Badge tone="success" size="sm">Current</Badge>
+          : <Badge tone="neutral" size="sm">No backup yet</Badge>
+
+  const fields = h ? [
+    ...(h.last_failure_at ? [
+      { label: 'Reason', value: h.last_failure_detail || 'pgBackRest recorded no reason.', full: true },
+      { label: 'Failed', value: `${formatDateTime(h.last_failure_at)}, ${kindWord(h.last_failure_kind)}` }
+    ] : []),
+    { label: 'Last backup', value: h.last_success_at ? `${formatDateTime(h.last_success_at)}, ${kindWord(h.last_success_kind)}` : 'None yet' },
+    ...(h.last_success_label ? [{ label: 'Label', value: h.last_success_label, mono: true, copyable: true }] : []),
+    { label: 'Next backup', value: !next ? 'Not known until the backup sidecar starts' : next.due ? 'Due now' : `${formatDateTime(next.at)}, ${kindWord(next.kind)}` },
+    ...(h.hour_utc != null ? [{
+      label: 'Schedule',
+      value: `Daily at ${pad2(h.hour_utc)}:00 UTC: a full backup on ${WEEKDAYS[h.full_on]}s, or whenever the newest full is over a week old, and a differential otherwise.`,
+      full: true
+    }] : []),
+    { label: 'Repository', value: h.repo_bytes != null ? `${formatBytes(h.repo_bytes)}, every backup it holds, WAL excluded` : NO_VALUE, full: true },
+    ...(request ? [{ label: 'Requested', value: `${formatDateTime(h.request_at)}: ${request.label.replace('Requested: ', '')}` }] : [])
+  ] : []
+
+  return (
+    <ContextPanel
+      open={!!h}
+      type="Historian backup"
+      title="Historian"
+      icon={<IconDatabase size={16} />}
+      subtitle={badge}
+      fields={fields}
+      onCopy={showToast}
+      onClose={onClose}
+    />
+  )
+}
+
 /** The backup in flight. A queued one that stays queued is the sign no service is running. */
-function RunningCard({ job, onCancel, cancelPending }) {
+function RunningCard({ job, onCancel, cancelPending, historianOn }) {
   if (!job) return null
   const pending = job.status === 'PENDING'
   const waitedMs = Date.now() - new Date(job.created_at).getTime()
@@ -389,7 +594,7 @@ function RunningCard({ job, onCancel, cancelPending }) {
             ? 'No backup service has claimed this. Nothing will take it until the service is running; cancel it or start the service.'
             : pending
               ? 'Waiting for the backup service to claim it.'
-              : `Started ${formatDateTime(job.started_at)}. Being written: ${componentSentence()}.`}
+              : `Started ${formatDateTime(job.started_at)}. Being written: ${componentSentence(historianOn)}.`}
         </div>
       </div>
       {pending && (
@@ -707,10 +912,21 @@ const COMPONENT_LABELS = {
   'ca': 'internal CA'
 }
 
-/** Every component a run writes, as a sentence fragment: "the platform database, ... and the internal CA". */
-function componentSentence() {
-  const names = Object.values(COMPONENT_LABELS).map(label => `the ${label}`)
+/**
+ * Every component a run writes, as a sentence fragment: "the platform database, ... and the internal
+ * CA". Without the historian while pgBackRest backs it up.
+ */
+function componentSentence(historianOn = false) {
+  const names = Object.entries(COMPONENT_LABELS)
+    .filter(([name]) => !(historianOn && name === 'timescaledb'))
+    .map(([, label]) => `the ${label}`)
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+}
+
+/** What Take a backup's dialog says it writes, and that it asks the historian for its own backup. */
+function takeBackupHolds(historianOn) {
+  if (!historianOn) return componentSentence()
+  return `${componentSentence(true)}. The historian's own backup takes a differential at the same time, which this backup does not wait for`
 }
 
 function componentSummary(components) {

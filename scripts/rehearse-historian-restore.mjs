@@ -133,10 +133,11 @@ result.database = sql('SELECT pg_size_pretty(pg_database_size(current_database()
 const before = sql(FINGERPRINT);
 console.log(`  historian is ${result.database}\n  ${before.split('\n').join('\n  ')}`);
 
+// Through the sidecar's own script, so the run is recorded in physical_backup_runs like any other.
 function fullBackup () {
   step('full backup');
   const t = Date.now();
-  pgbackrest('--type=full', 'backup');
+  kubectl(['exec', POD, '-c', 'pgbackrest', '--', '/bin/sh', '/opt/aber/historian-backup.sh', 'full']);
   result.backup_seconds = seconds(t);
   const info = JSON.parse(pgbackrest('--output=json', 'info').stdout)[0];
   const last = info.backup.at(-1);

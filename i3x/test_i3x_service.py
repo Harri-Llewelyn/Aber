@@ -12,7 +12,7 @@ controlled queue:
     acknowledgement if the server happens to produce updates while it is watching, and a demo device
     publishing every five seconds does not reliably do that inside the window. So the MUSTs that
     protect against losing a client's unprocessed updates are covered here, or nowhere.
-  * Queue overflow needs 10,000 batches to fall off the end. Nothing generates that against a live
+  * Queue overflow needs I3X_SUBSCRIPTION_QUEUE_LIMIT (500) batches to fall off the end. Nothing generates that against a live
     broker in test time.
   * TTL expiry needs minutes of wall clock, which is why the registry takes an injectable clock.
 
@@ -3306,6 +3306,28 @@ class TestLivenessMirrorsTheDirectory(unittest.TestCase):
         self.assertEqual(i3x_service._vqt(None, "2026-09-28T10:00:00+00:00")["quality"], "GoodNoData")
         self.assertEqual(A.stored_sample_quality(True),
                          A.value_quality(A.STORED_SAMPLE_SOURCE, None, True))
+
+
+class TestNoServiceKeyAtStartup(unittest.TestCase):
+    """The service refuses to start holding the service-role key, under either of its names."""
+
+    def test_each_name_is_found(self):
+        for name in ("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY"):
+            self.assertEqual(i3x_service.service_keys_in_environment({name: "x"}), [name])
+
+    def test_an_empty_value_is_not_a_key(self):
+        self.assertEqual(i3x_service.service_keys_in_environment(
+            {"SUPABASE_SERVICE_ROLE_KEY": "", "SUPABASE_SECRET_KEY": ""}), [])
+
+    def test_main_refuses_before_it_connects_anything(self):
+        for name in ("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY"):
+            with self.subTest(name=name), \
+                    mock.patch.dict(os.environ, {name: "sb_secret_example"}), \
+                    mock.patch.object(i3x_service, "start_mqtt") as mqtt:
+                with self.assertRaises(SystemExit) as raised:
+                    i3x_service.main()
+                self.assertIn(name, str(raised.exception))
+                mqtt.assert_not_called()
 
 
 class TestRequestValidation(unittest.TestCase):

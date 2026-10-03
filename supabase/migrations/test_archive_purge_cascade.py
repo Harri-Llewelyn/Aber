@@ -167,5 +167,100 @@ class PurgeCascadeTests(unittest.TestCase):
                          "purge_expired_archives no longer deletes devices, then gateways, then cells")
 
 
+class DeletedDeviceBirthParameterTests(unittest.TestCase):
+    """
+    A deleted device's birth parameters go with it (0029). `asset_config.asset_id` is the device's
+    sparkplug_id as text, so no foreign key cascades; a trigger on devices DELETE does. Everything
+    here is one transaction, rolled back.
+    """
+
+    MERGE_GATEWAY = "7a300000-0000-4000-8000-000000000002"
+    SURVIVOR = "7d400000-0000-4000-8000-000000000002"
+    DUPLICATE = "7d500000-0000-4000-8000-000000000002"
+    ACTOR = "7e600000-0000-4000-8000-000000000002"
+
+    def setUp(self):
+        self.conn = connect()
+        self.cur = self.conn.cursor()
+        self.cur.execute(
+            "INSERT INTO public.gateways (id, name, deployment) VALUES (%s, 'Birth Param Gateway', 'remote');",
+            (self.MERGE_GATEWAY,),
+        )
+        self.cur.execute(
+            "INSERT INTO public.devices (id, name, gateway_id) VALUES (%s, 'Birth Param Survivor', %s);",
+            (self.SURVIVOR, self.MERGE_GATEWAY),
+        )
+        self.cur.execute(
+            "INSERT INTO public.devices (id, name, gateway_id, is_quarantined, quarantine_reason) "
+            "VALUES (%s, 'Birth Param Duplicate', %s, true, 'test');",
+            (self.DUPLICATE, self.MERGE_GATEWAY),
+        )
+        self.survivor_id = self.sparkplug_id(self.SURVIVOR)
+        self.duplicate_id = self.sparkplug_id(self.DUPLICATE)
+        self.declare(self.survivor_id, "Properties/Model")
+        self.declare(self.duplicate_id, "Properties/Serial")
+
+    def tearDown(self):
+        self.conn.rollback()
+        self.conn.close()
+
+    def sparkplug_id(self, device_id):
+        self.cur.execute("SELECT sparkplug_id FROM public.devices WHERE id = %s;", (device_id,))
+        return self.cur.fetchone()[0]
+
+    def declare(self, asset_id, metric):
+        self.cur.execute(
+            "INSERT INTO public.asset_config (asset_id, metric_name, val_string) VALUES (%s, %s, 'x');",
+            (asset_id, metric),
+        )
+
+    def metrics_of(self, asset_id):
+        self.cur.execute(
+            "SELECT metric_name FROM public.asset_config WHERE asset_id = %s ORDER BY metric_name;",
+            (asset_id,),
+        )
+        return [r[0] for r in self.cur.fetchall()]
+
+    def test_deleting_a_device_removes_its_birth_parameters_and_no_one_elses(self):
+        self.cur.execute("DELETE FROM public.devices WHERE id = %s;", (self.DUPLICATE,))
+        self.assertEqual(self.metrics_of(self.duplicate_id), [],
+                         "a deleted device left its birth parameters in asset_config")
+        self.assertEqual(self.metrics_of(self.survivor_id), ["Properties/Model"])
+
+    def test_a_quarantine_merge_keeps_the_re_keyed_parameters(self):
+        """The merge re-keys the duplicate's rows onto the survivor, then deletes the duplicate."""
+        # A person, not a machine: is_machine_principal() calls an account with no email, no
+        # password and no identity a machine, and a machine may not hold a role.
+        self.cur.execute("SAVEPOINT person;")
+        try:
+            self.cur.execute(
+                "INSERT INTO auth.users (id, email, encrypted_password) VALUES (%s, %s, %s);",
+                (self.ACTOR, f"{self.ACTOR}@purge.test", "not-a-real-hash"),
+            )
+            self.cur.execute("RELEASE SAVEPOINT person;")
+        except psycopg2.Error:
+            self.cur.execute("ROLLBACK TO SAVEPOINT person;")
+            self.cur.execute("INSERT INTO auth.users (id) VALUES (%s);", (self.ACTOR,))
+        self.cur.execute(
+            "INSERT INTO auth.identities (user_id, provider, provider_id, identity_data)"
+            " VALUES (%s, 'email', %s, %s::jsonb);",
+            (self.ACTOR, self.ACTOR, '{"sub": "%s"}' % self.ACTOR),
+        )
+        self.cur.execute(
+            "INSERT INTO public.user_roles (user_id, role_id)"
+            " SELECT %s, id FROM public.roles WHERE name = 'Administrator';",
+            (self.ACTOR,),
+        )
+
+        self.cur.execute(
+            "SELECT public.approve_quarantined_device(%s, %s, p_merge_into_device_id => %s);",
+            (self.DUPLICATE, self.ACTOR, self.SURVIVOR),
+        )
+
+        self.assertEqual(self.metrics_of(self.survivor_id), ["Properties/Model", "Properties/Serial"],
+                         "the merge lost the duplicate's birth parameters")
+        self.assertEqual(self.metrics_of(self.duplicate_id), [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

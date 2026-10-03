@@ -319,9 +319,29 @@ class TestArchiveIntegrity(BundleBase):
         folder = names[0].split("/")[0]
         self.assertTrue(folder.startswith("aber-gateway-"))
 
-        for required in (".env", "docker-compose.yml", "Dockerfile",
-                         "bootstrap.mjs", "flows.template.json", "README.md"):
+        for required in (".env", "docker-compose.yml", "Dockerfile", "bootstrap.mjs",
+                         "flows.template.json", "README.md", "platform-root.pem"):
             self.assertIn(f"{folder}/{required}", names, f"{required} is missing from the bundle")
+
+    def test_bootstrap_trusts_the_platform_root_beside_it(self):
+        """
+        Enrolment's first call is HTTPS from inside the bootstrap container, which trusts Node's
+        bundled roots and not the host's store. The compose file points NODE_EXTRA_CA_CERTS at
+        platform-root.pem through the /bundle mount, and the archive carries that file: the root
+        that signs the API's certificate, or an empty file where none is mounted, which Node reads
+        as no extra roots. A missing file would only make Node log a warning, so it is always there.
+        """
+        archive = zipfile.ZipFile(io.BytesIO(self.body))
+        folder = archive.namelist()[0].split("/")[0]
+        root = archive.read(f"{folder}/platform-root.pem").decode()
+        if root:
+            self.assertTrue(root.startswith("-----BEGIN CERTIFICATE-----"), root[:80])
+            self.assertTrue(root.endswith("-----END CERTIFICATE-----\n"), root[-80:])
+        self.assertNotIn("PRIVATE KEY", root)
+
+        compose = archive.read(f"{folder}/docker-compose.yml").decode()
+        self.assertIn("NODE_EXTRA_CA_CERTS: /bundle/platform-root.pem", compose)
+        self.assertIn("- ./:/bundle:ro", compose, "the file reaches the container through this mount")
 
     def test_expands_into_one_named_folder(self):
         """Four appliances provisioned in a morning means four downloads that must be tellable apart."""

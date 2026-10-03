@@ -42,6 +42,9 @@ export const RUNTIME_SETTING_NAMES = [
   // backup.retentionDays, the window the backup service prunes by; the Backups page says why a
   // backup past it is still kept.
   'VITE_BACKUP_RETENTION_DAYS',
+  // 'true' while timescaledb.physicalBackup is on: the Backups page shows the historian's own
+  // backup, and says it is unreachable when it cannot be read.
+  'VITE_HISTORIAN_PHYSICAL_BACKUP',
 ];
 
 /**
@@ -61,6 +64,7 @@ const BUILD_TIME_SETTINGS = {
   VITE_CAPTURE_BUCKET: import.meta.env.VITE_CAPTURE_BUCKET,
   VITE_RELEASE_VERSION: import.meta.env.VITE_RELEASE_VERSION,
   VITE_BACKUP_RETENTION_DAYS: import.meta.env.VITE_BACKUP_RETENTION_DAYS,
+  VITE_HISTORIAN_PHYSICAL_BACKUP: import.meta.env.VITE_HISTORIAN_PHYSICAL_BACKUP,
 };
 
 /**

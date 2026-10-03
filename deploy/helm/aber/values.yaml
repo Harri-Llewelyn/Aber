@@ -305,12 +305,14 @@ timescaledb:
   # historian holds now, rollups included. See deploy/k8s/README.md, "Backing up the historian".
   #
   # Turning it on restarts the historian (archive_mode is read at start) and takes a full backup
-  # as soon as the server is up. While it is on, the nightly logical dump skips the historian.
+  # as soon as the server is up. While it is on, the nightly logical dump skips the historian, and
+  # the Backups page shows this backup and asks for a differential with each Take a backup.
   physicalBackup:
     enabled: false
     # The hour (UTC, 0-23) the daily backup starts, and the day of the week (0 = Sunday) it is a
-    # full backup; a differential on the other six. Not a cron string: the sidecar that runs it
-    # has no cron daemon.
+    # full backup; a differential on the other six, or a full whenever the newest is over seven
+    # days old. Not a cron string: the sidecar checks the clock once a minute, so an hour missed
+    # while the historian was down is taken late, once, when it is back.
     hourUtc: 1
     fullOn: 0
     # Full backups kept. Each full carries the differentials and the WAL taken after it, so 2 keeps
@@ -620,7 +622,8 @@ supabaseFunctions:
   # main/index.ts forwards. Outbound references must name addresses the recipient of a shell
   # can reach.
   aas:
-    # Namespaces every globalAssetId and submodel id the shell carries.
+    # Namespaces every globalAssetId and submodel id the shell carries. Permanent once a shell has
+    # left the site: set it before the first export, under a domain the organisation controls.
     baseIri: https://aber.local/ids/asset/
     # Where a consumer fetches the samples a Time Series LinkedSegment points at. Derived from
     # publicUrls.supabase when empty.
@@ -1006,7 +1009,9 @@ i3xService:
   subscriptionTtlSeconds: 300
   # How many update batches one subscription may queue before the oldest are dropped. Dropping
   # is reported: the next /sync answers 206 and the client backfills from /objects/history.
-  subscriptionQueueLimit: 10000
+  # A count, not bytes: raising it or maxSubscriptions is a memory decision (i3x/README.md ->
+  # What causes a restart).
+  subscriptionQueueLimit: 500
   # Past these, creating a subscription or opening a stream answers 429 naming the limit. A
   # principal is the token's `sub`, so every token minted for one service principal shares its
   # allowance. Each open stream holds a server thread.
@@ -1023,7 +1028,8 @@ i3xService:
   maxComponents: 10000
   resources:
     requests: { cpu: 100m, memory: 128Mi }
-    # Sized for connection handling; the value cache and queues are bounded.
+    # The subscription queues are bounded by count, not by memory; the defaults above keep them
+    # well inside this. Past it the pod is OOM-killed and every client loses its subscriptions.
     limits: { memory: 512Mi }
 
 # ---------------------------------------------------------------------------------------------
@@ -1507,7 +1513,10 @@ autoscaling:
 # no replication and neither database is replicated.
 backup:
   enabled: false
-  # 02:30 daily; not "@daily" (midnight), the same minute as every other default job.
+  # 02:30 daily; not "@daily" (midnight), the same minute as every other default job. A run missed
+  # while the stack was down is taken late, once: the CronJob up to a day after it, the backup
+  # service when no scheduled backup was queued in the last 25 hours (a schedule that runs every
+  # day only; any other is not caught up).
   schedule: "30 2 * * *"
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

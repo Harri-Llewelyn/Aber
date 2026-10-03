@@ -146,6 +146,22 @@ class TestWhatIsServed(InstallerBase):
         self.assertIn(PUBLISHABLE_KEY, script)
         self.assertNotIn(self.minted["token"], script, "the token rides in the environment, never in the script's text")
 
+    def test_the_installer_hands_bootstrap_the_root_stage_0_installed(self):
+        """
+        bootstrap's container trusts Node's bundled roots, not the host's store where stage 0
+        installed the pinned root, so the installer copies that root beside the compose project,
+        where NODE_EXTRA_CA_CERTS names it. It reads it from the path stage 0 wrote.
+        """
+        status, body, _ = fetch(self.minted["token"])
+        self.assertEqual(status, 200, body)
+        script = body.decode()
+        self.assertIn('"$COMPOSE_DIR/platform-root.pem"', script)
+        host_root = re.search(r'local HOST_ROOT="([^"]+)"', script)
+        self.assertIsNotNone(host_root, "the installer names no HOST_ROOT")
+        if self.minted["ca_pin"]:
+            self.assertIn(f"/tmp/aber-ca.pem {host_root.group(1)}", self.minted["command"],
+                          "stage 0 installs the root somewhere other than where the installer reads it")
+
     def test_the_env_carries_the_token_and_a_fresh_secret_each_time(self):
         status, first, headers = fetch(self.minted["token"], "?file=env")
         self.assertEqual(status, 200, first)
@@ -167,8 +183,11 @@ class TestWhatIsServed(InstallerBase):
         self.assertEqual(headers.get("content-type"), "application/zip")
         with zipfile.ZipFile(io.BytesIO(body)) as archive:
             names = set(archive.namelist())
+            compose = archive.read("appliance/docker-compose.yml").decode()
         for expected in ("site.yml", "install.sh", "roles/converge/files/aber-gateway-converge", "appliance/bootstrap.mjs", "appliance/docker-compose.yml"):
             self.assertIn(expected, names)
+        # The installer writes this file; the compose project it lays down has to name it.
+        self.assertIn("NODE_EXTRA_CA_CERTS: /bundle/platform-root.pem", compose)
 
     def test_an_unknown_file_is_a_404(self):
         status, body, _ = fetch(self.minted["token"], "?file=flows_cred.json")

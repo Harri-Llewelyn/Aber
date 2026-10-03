@@ -5,7 +5,7 @@ import { KNOWN_PRINCIPALS } from '../../utils/serviceIdentities'
 import { ContextPanel } from '../common/ContextPanel'
 import {
   IconHistory, IconDownload, IconLayoutDashboard, IconFactory, IconRadio, IconCpu, IconTrash,
-  IconShieldCheck, IconLock, IconClipboardList, IconSettings, IconTag
+  IconShieldCheck, IconLock, IconClipboardList, IconSettings, IconTag, IconChevronRight
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { SearchInput } from '../common/SearchInput'
@@ -714,6 +714,7 @@ function CausationGroup({ event, siblings, entityNames, onSelect, onShowTransact
                   {name || <span className="mono">{shortId(s.entity_id)}</span>}
                 </span>
                 <span className="trail-causation-action">{s.event_type}</span>
+                <span className="trail-causation-chevron" aria-hidden="true"><IconChevronRight size={14} /></span>
               </button>
             </li>
           )

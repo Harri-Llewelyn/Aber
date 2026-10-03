@@ -560,7 +560,7 @@ obvious.
 | `server_info` | `GET /info` — including `update.current: false` |
 | `list_root_objects`, `get_object`, `search_objects`, `refresh_catalog` | `GET /objects`, `POST /objects/list` |
 | `read_current_value` | `POST /objects/value` — values, `quality`, timestamp |
-| `get_history` | `POST /objects/history` — raw or aggregated, out of TimescaleDB |
+| `get_history` | `POST /objects/history` — raw samples out of TimescaleDB; the server serves no rollups |
 | `find_related` | `POST /objects/related` — `HasParent` / `HasChildren` / `HasComponent` |
 | `describe_type` | `GET /objecttypes` |
 | `watch_values` | the subscription set, capped by `I3X_WATCH_MAX_SEC` (default 300s) |
@@ -715,7 +715,7 @@ But it **skipped SUB-07 and SUB-13** on the live run ("no updates were observed 
 it can only test sync acknowledgement if an update arrives between its register and its sync, and
 the only way it provokes one is `PUT /objects/value`, which this server refuses. So they skip
 whenever nothing publishes in that window, and the MUSTs that protect a client's unprocessed updates
-are covered by our unit tests, or nowhere. Queue overflow (10,000 batches) and TTL expiry are the
+are covered by our unit tests, or nowhere. Queue overflow (500 batches by default) and TTL expiry are the
 same story — they need a controlled queue and an injectable clock — and so is which subscriptions a
 change reaches, since the suite registers only at the default `maxDepth`.
 
@@ -798,7 +798,7 @@ cleanup deletes by those keys. Expected values come from the Directory or from w
 | `MQTT_HOST` / `MQTT_PORT` | `mosquitto` / `1883` | |
 | `MQTT_TLS_ENABLED` / `MQTT_TLS_CA_FILE` | off | Fails closed: a missing CA stops startup |
 | `I3X_SUBSCRIPTION_TTL_SECONDS` | `300` | Spec MUST — abandoned subscriptions are deleted |
-| `I3X_SUBSCRIPTION_QUEUE_LIMIT` | `10000` | Batches per subscription before 206 |
+| `I3X_SUBSCRIPTION_QUEUE_LIMIT` | `500` | Batches per subscription before 206. A count, not bytes: see [What causes a restart](#what-causes-a-restart-and-how-often-to-expect-one) |
 | `I3X_MAX_SUBSCRIPTIONS_PER_PRINCIPAL` | `20` | Per token `sub`; past it, create answers 429 |
 | `I3X_MAX_SUBSCRIPTIONS` | `500` | On the server; past it, create answers 429 |
 | `I3X_MAX_STREAMS` | `50` | Open SSE streams; past it, stream answers 429 |
@@ -806,7 +806,7 @@ cleanup deletes by those keys. Expected values come from the Directory or from w
 | `I3X_MAX_COMPONENTS` | `10000` | Components one value or history request returns, summed over its elementIds; past it, 206 |
 | `I3X_ADDRESS_SPACE_TTL_SECONDS` | `2` | Address-space cache lifetime. `0` disables it |
 | `I3X_ADDRESS_SPACE_CACHE_MAX` | `64` | Cached address spaces retained, evicted LRU |
-| `SUPABASE_SERVICE_ROLE_KEY` | **must be absent** | Its presence is a startup refusal |
+| `SUPABASE_SECRET_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | **must be absent** | Either one is a startup refusal |
 
 ## Availability
 
@@ -825,7 +825,7 @@ and discover it during their own integration.
 | Current values immediately after a restart | **Filled on the first read.** The MQTT cache refills from `spBv1.0/#` as devices publish, and the first `/objects/value` naming a device fills what it lacks from `telemetry_latest`, with each sample's stored time ([Address space](#address-space)). Only a metric the historian does not hold within raw retention is `GoodNoData` until it next changes. A subscription registration fills the devices it names the same way, so the first map staged for one is complete |
 | Metadata and history across a restart | **Unaffected.** Neither is held here — metadata is PostgREST's and history is TimescaleDB's, so a restart cannot lose either |
 | Client contract | `/subscriptions/sync` and `/subscriptions/stream` answer **404** for a subscriptionId this process has never seen. Create a new subscription |
-| Subscription limits | **20 per principal, 500 in total, 50 open streams**, each set in the chart. Past one, `POST /subscriptions` or `/subscriptions/stream` answers **429** naming the limit. A principal is the token's `sub`, so every token minted for one service principal shares its 20 |
+| Subscription limits | **20 per principal, 500 in total, 50 open streams**, each set in the chart. Past one, `POST /subscriptions` or `/subscriptions/stream` answers **429** naming the limit. Each subscription queues **500 batches**; past that the oldest drop and `/sync` answers **206**. A principal is the token's `sub`, so every token minted for one service principal shares its 20 |
 
 ### Why 404-then-recreate is the contract and not a workaround
 
@@ -845,6 +845,19 @@ because a subscription that lies about its continuity is worse than one that adm
 | Chart upgrade that changes the pod spec | Every release that moves `appVersion` — the image tag is the chart's own, so in practice **once per release** | Immediate; bounded by image pull and the 10s readiness period |
 | Liveness probe failure on `/v1/info` | Unplanned, and rare enough that one is worth investigating | Up to **3 minutes** to detect — `periodSeconds: 30` × `failureThreshold: 6`, set deliberately high because a restart costs every open stream |
 | Node drain, eviction or loss | Cluster-operational, not application-driven | Reschedule time, which is the cluster's property rather than this service's |
+| OOM kill at `resources.limits.memory` (512Mi) | Not expected at the shipped defaults; possible once `maxSubscriptions` or `subscriptionQueueLimit` is raised without the limit | Immediate restart by the kubelet. Every client loses its subscriptions and streams, not only the one whose queue filled |
+
+**The queues are bounded by count, not by memory.** A subscription holds up to
+`subscriptionQueueLimit` batches, dropping the oldest past it, whatever they weigh. At about 0.5 KB
+a batch the shipped defaults allow 500 subscriptions × 500 batches × 0.5 KB ≈ 125 MB, a quarter of
+the limit, leaving the rest for the value cache, the address-space cache and connections; one
+principal at its 20 subscriptions holds about 5 MB. The estimate is unmeasured and may be low: a
+batch for a device carries a map of every metric the device holds. The default was 10,000 batches
+until 1.0, which allowed about 2.5 GB. A queue fills only when its client does not acknowledge:
+`/sync` without `lastSequenceNumber` keeps a subscription alive and its queue full, and a client that
+stops syncing is reaped after `subscriptionTtlSeconds`. Raise `subscriptionQueueLimit` or
+`maxSubscriptions` only with `resources.limits.memory`, keeping their product times the batch size
+well inside it.
 
 A `helm upgrade` that does not touch the i3X pod template does not restart it. The controlling number
 is therefore the release cadence, and **an operator who needs a quiet window should treat an i3X

@@ -7,7 +7,7 @@ read from; this directory is where what they read is written and reviewed.
 | Directory | Published as | By |
 | :--- | :--- | :--- |
 | [`gateway-platform/`](gateway-platform) | `platform/gateway-platform`, tagged `v<version>` | `forge-sweep`, on every pass ([how](../supabase/README.md#the-platform-playbook-is-published-by-the-sweep)) |
-| [`gateway-custom-example/`](gateway-custom-example) | `platform/gateway-custom-example`, a template repository, untagged | `forge-sweep`, on every pass ([how](../supabase/README.md#a-gateway-that-needs-code-of-its-own-0106)) |
+| [`gateway-custom-example/`](gateway-custom-example) | `platform/gateway-custom-example`, a template repository, untagged | `forge-sweep`, on every pass ([how](../supabase/README.md#a-gateway-that-needs-code-of-its-own-archived-migration-0106)) |
 
 **Tagged or not** is what the repository is *for*. The playbook is converged to, so an appliance
 pins a released version of it and a tag must never move. The example is **copied**, once, by a

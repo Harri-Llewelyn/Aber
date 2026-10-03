@@ -893,7 +893,7 @@ paths:
         3. `-1` clears everything.
 
         **Overflow is reported, not hidden.** Past `I3X_SUBSCRIPTION_QUEUE_LIMIT` (default
-        10,000) the oldest batches drop and the next sync answers **206**. Compute the gap
+        500) the oldest batches drop and the next sync answers **206**. Compute the gap
         from `lastSequenceNumber + 1` to `result[0].sequenceNumber - 1`.
 
         **What it delivers is checked against your view first.** Each call reads your address

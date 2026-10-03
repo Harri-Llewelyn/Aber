@@ -66,7 +66,7 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
   }, [showToast])
 
   // Two destinations. A host-run gateway's pair goes in the release Secret under the names its
-  // broker node declares in `acsCredentialsEnv`, and node-red-init writes it onto that node. The
+  // broker node declares in `aberCredentialsEnv`, and node-red-init writes it onto that node. The
   // playback gateway's goes in `secrets.mqttPlaybackCredentials`, one JSON object keyed by
   // sparkplug_id.
   const isPlayback = !!gateway.is_shadow
@@ -80,7 +80,7 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
     : isPlayback
       ? `{"${credential.mqtt_username}":"${credential.password}"}`
       : [
-        '# names from the broker node\'s acsCredentialsEnv',
+        '# names from the broker node\'s aberCredentialsEnv',
         `MQTT_GW_<NAME>_USER=${credential.mqtt_username}`,
         `MQTT_GW_<NAME>_PASSWORD=${credential.password}`,
       ].join('\n')
@@ -249,7 +249,7 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
                   ) : (
                     <>
                       Add both values to the release Secret, replacing <span className="mono">&lt;NAME&gt;</span>{' '}
-                      with the <span className="mono">acsCredentialsEnv</span> value declared on the
+                      with the <span className="mono">aberCredentialsEnv</span> value declared on the
                       broker node in the Node-RED flow (it is not the gateway’s name). Then restart
                       Node-RED: its init step, <span className="mono">node-red-init</span>, writes the
                       pair onto that broker node as the pod starts.

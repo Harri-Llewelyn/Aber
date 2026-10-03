@@ -29,6 +29,11 @@ services:
     # ---------------------------------------------------------------------------------------------
     user: "0"
     env_file: .env
+    environment:
+      # The root that signs the platform's API certificate, for enrolment's first call: Node trusts
+      # its bundled roots, not the host's store. Empty when that certificate is publicly trusted,
+      # which Node reads as no extra roots; a missing file logs a warning and is otherwise the same.
+      NODE_EXTRA_CA_CERTS: /bundle/platform-root.pem
     volumes:
       - nodered_data:/data
       # The bundle itself, read-only. bootstrap.mjs and flows.template.json are inputs; nothing

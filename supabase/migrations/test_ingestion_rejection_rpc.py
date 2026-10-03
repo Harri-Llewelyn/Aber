@@ -279,7 +279,7 @@ class ServiceRoleCannotForgeAuditRowsTestCase(unittest.TestCase):
             """)
 
     def test_service_role_still_cannot_update_or_delete(self):
-        """0003's append-only trigger, re-asserted because 0026 rewrites the grants around it."""
+        """0003's append-only trigger, re-asserted because archived migration 0026 rewrites the grants around it."""
         for statement in (
             "UPDATE public.audit_trail SET action = 'TAMPERED' WHERE id = "
             "(SELECT id FROM public.audit_trail ORDER BY id DESC LIMIT 1)",
@@ -401,6 +401,90 @@ class IngestionPrincipalGateTestCase(unittest.TestCase):
                 "SELECT public.record_ingestion_rejection(%s::uuid, %s::jsonb)",
                 (self.device_id, json.dumps([{"metric": "Anon", "code": "unmodelled_metric"}])),
             )
+
+
+class NodeDeathTakesItsDevicesOfflineTestCase(unittest.TestCase):
+    """
+    `ingest_mark_gateway_devices_offline()` (0030): an NDEATH sets every non-archived device of the
+    gateway OFFLINE in one UPDATE, one audit row per device it moves. Rolled back.
+    """
+
+    GATEWAY = "0a300000-0000-4000-8000-000000000003"
+    OTHER_GATEWAY = "0a400000-0000-4000-8000-000000000003"
+    LIVE = "0d500000-0000-4000-8000-000000000003"
+    ARCHIVED = "0d600000-0000-4000-8000-000000000003"
+    ALREADY_OFFLINE = "0d700000-0000-4000-8000-000000000003"
+    ELSEWHERE = "0d800000-0000-4000-8000-000000000003"
+
+    def setUp(self):
+        self.conn = get_connection()
+        self.cur = self.conn.cursor()
+        self.cur.execute(
+            "INSERT INTO public.gateways (id, name, deployment) VALUES "
+            "(%s, 'NDEATH Gateway', 'remote'), (%s, 'NDEATH Other Gateway', 'remote');",
+            (self.GATEWAY, self.OTHER_GATEWAY),
+        )
+        self.cur.execute(
+            "INSERT INTO public.devices (id, name, gateway_id, status, is_archived, first_dbirth_at) VALUES "
+            "(%s, 'NDEATH Live', %s, 'ONLINE', false, now()), "
+            "(%s, 'NDEATH Archived', %s, 'ONLINE', true, now()), "
+            "(%s, 'NDEATH Already Offline', %s, 'OFFLINE', false, now()), "
+            "(%s, 'NDEATH Elsewhere', %s, 'ONLINE', false, now());",
+            (self.LIVE, self.GATEWAY, self.ARCHIVED, self.GATEWAY,
+             self.ALREADY_OFFLINE, self.GATEWAY, self.ELSEWHERE, self.OTHER_GATEWAY),
+        )
+
+    def tearDown(self):
+        self.conn.rollback()
+        self.cur.close()
+        self.conn.close()
+
+    def claim(self, sub):
+        self.cur.execute(
+            "SELECT set_config('request.jwt.claims', %s, true)",
+            (json.dumps({"sub": sub, "role": "authenticated"}),),
+        )
+
+    def mark(self):
+        self.cur.execute(
+            "SELECT moved::text FROM unnest(public.ingest_mark_gateway_devices_offline(%s::uuid)) moved",
+            (self.GATEWAY,),
+        )
+        return [r[0] for r in self.cur.fetchall()]
+
+    def status(self, device_id):
+        self.cur.execute("SELECT status FROM public.devices WHERE id = %s", (device_id,))
+        return self.cur.fetchone()[0]
+
+    def offline_rows(self):
+        """This transaction's audit rows that set one of the fixture's devices OFFLINE."""
+        self.cur.execute(
+            "SELECT entity_id::text FROM public.audit_trail "
+            " WHERE causation_id = txid_current() AND entity_type = 'devices' AND action = 'UPDATE'"
+            "   AND new_data ->> 'status' = 'OFFLINE'"
+            "   AND entity_id IN (%s, %s, %s, %s)",
+            (self.LIVE, self.ARCHIVED, self.ALREADY_OFFLINE, self.ELSEWHERE),
+        )
+        return self.cur.fetchall()
+
+    def test_the_gateways_live_devices_go_offline_with_one_audit_row_each(self):
+        self.claim(INGESTION_PRINCIPAL)
+        self.assertEqual(self.mark(), [self.LIVE])
+        self.assertEqual(self.status(self.LIVE), "OFFLINE")
+        self.assertEqual(self.status(self.ARCHIVED), "ONLINE", "an archived device's status is not maintained")
+        self.assertEqual(self.status(self.ELSEWHERE), "ONLINE", "another gateway's device was taken offline")
+        self.assertEqual(self.offline_rows(), [(self.LIVE,)])
+
+    def test_a_second_death_writes_nothing(self):
+        self.claim(INGESTION_PRINCIPAL)
+        self.mark()
+        self.assertEqual(self.mark(), [])
+        self.assertEqual(len(self.offline_rows()), 1)
+
+    def test_another_authenticated_identity_cannot(self):
+        self.claim(OTHER_PRINCIPAL)
+        with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
+            self.mark()
 
 
 if __name__ == "__main__":

@@ -335,6 +335,12 @@ BEGIN
     EXECUTE format('GRANT SELECT ON public.storage_footprint TO %I', v_role);
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.storage_footprint_rows() TO %I', v_role);
   END IF;
+  -- The Backups page's historian row. Here rather than in physical_backup.sql, which runs before
+  -- this file creates the role on a fresh volume.
+  IF to_regclass('public.physical_backup_requests') IS NOT NULL THEN
+    EXECUTE format('GRANT SELECT ON public.physical_backup_runs, public.physical_backup_schedule, '
+                   'public.physical_backup_requests TO %I', v_role);
+  END IF;
 
   EXECUTE format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.telemetry FROM %I', v_role);
   EXECUTE format('REVOKE ALL ON public.assets FROM %I', v_role);
@@ -342,7 +348,7 @@ BEGIN
   EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM %I', v_role);
 
   RAISE NOTICE
-    'roles: % may SELECT the seven objects Supabase projects and cannot write any of them.', v_role;
+    'roles: % may SELECT the objects Supabase projects and cannot write any of them.', v_role;
 END $$;
 
 DO $$
@@ -402,6 +408,15 @@ BEGIN
         'roles self-check: fdw_reader cannot read telemetry_horizons, so the telemetry export '
         'dialog cannot tell which resolutions still cover a range -- and it fails quietly, '
         'reporting every resolution as "reach unknown".';
+    END IF;
+
+    IF to_regclass('public.physical_backup_requests') IS NOT NULL
+       AND NOT (has_table_privilege('fdw_reader', 'public.physical_backup_runs', 'SELECT')
+            AND has_table_privilege('fdw_reader', 'public.physical_backup_schedule', 'SELECT')
+            AND has_table_privilege('fdw_reader', 'public.physical_backup_requests', 'SELECT')) THEN
+      RAISE EXCEPTION
+        'roles self-check: fdw_reader cannot read the physical backup tables the platform '
+        'projects as timescale.physical_backup_*, so a read through its mapping is refused.';
     END IF;
 
     RAISE NOTICE 'roles self-check passed: fdw_reader reads the projection and writes nothing.';

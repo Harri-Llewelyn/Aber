@@ -10,6 +10,9 @@ Node-RED in Docker, enrols itself on first boot, and publishes Sparkplug B over 
 - **The enrolment token in `.env` expires 30 minutes after the bundle was generated, and is
   single-use.** If it lapses, generate a new bundle from the gateway's page in the dashboard —
   nothing here needs deleting first.
+- `platform-root.pem` is the root that issued the platform's certificate, which `bootstrap` trusts
+  for its call to the platform. It is empty when that certificate is publicly trusted. Keep it in
+  this folder.
 
 ## Run it
 
@@ -178,7 +181,10 @@ used. Tokens are single-use: if you have run this bundle before, even unsuccessf
 step, it is spent. Generate a new bundle.
 
 **`bootstrap` retries and then gives up** — the appliance cannot reach the platform. The token was
-*not* consumed; fix the route and `docker compose up` again with this same bundle.
+*not* consumed; fix the route and `docker compose up` again with this same bundle. A certificate code
+in the message, such as `UNABLE_TO_VERIFY_LEAF_SIGNATURE`, means the route works and the platform's
+certificate is not trusted: `platform-root.pem` must hold the root that issued it
+(`/.well-known/aber/ca.pem` on the dashboard's host).
 
 **Node-RED starts but the broker node stays disconnected** — almost always one of three things:
 

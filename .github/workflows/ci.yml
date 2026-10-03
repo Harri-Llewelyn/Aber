@@ -709,9 +709,9 @@ jobs:
 
           # The flows whose absence is silent and expensive.
           REQUIRED = [
-              # pg_net posts directly to Node-RED (webhook_endpoints seeds http://node-red:1880/hooks/quarantine)
-              # with no retries and no DLQ. Block it and every quarantine notification is dropped silently.
-              ('supabase-db', 'node-red', 1880, 'pg_net quarantine webhook (no retries/DLQ)'),
+              # pg_net posts a webhook_endpoints row directly to Node-RED, where a site's flow serves it,
+              # with no retries and no DLQ. Block it and every notification is dropped silently.
+              ('supabase-db', 'node-red', 1880, 'pg_net webhooks to Node-RED (no retries/DLQ)'),
               ('supabase-db', 'supabase-envoy', 8000, 'pg_net to edge functions'),
               # M2/M6: public.telemetry is a postgres_fdw projection.
               ('supabase-db', 'timescaledb', 5432, 'postgres_fdw'),

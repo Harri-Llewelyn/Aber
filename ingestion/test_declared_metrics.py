@@ -693,10 +693,28 @@ class TestADeviceThatPublishesAgain(unittest.TestCase):
         call = MagicMock()
         if name in self.failing:
             call.execute.side_effect = RuntimeError("supabase down")
+        elif name == "ingest_mark_gateway_devices_offline":
+            call.execute.return_value = types.SimpleNamespace(data=self.node_moved)
         else:
             moved = self.gate_moved if name == "ingest_mark_device_offline" else True
             call.execute.return_value = types.SimpleNamespace(data=moved)
         return call
+
+    # The node's gateway, and the ids ingest_mark_gateway_devices_offline() answers it moved.
+    GATEWAY = {"id": "gw-uuid-a", "name": "Gateway_A", "status": "ONLINE", "is_archived": False}
+    node_moved = ["dev-uuid-1"]
+
+    def ndeath(self, node=NODE_A):
+        real = ingestion.resolve_gateway
+        ingestion.resolve_gateway = lambda wire_id, group_id=None, include_archived=False: dict(self.GATEWAY)
+        try:
+            ingestion.process_node_message(node, "NDEATH", AliasPayload(), group_id=GROUP)
+        finally:
+            ingestion.resolve_gateway = real
+
+    def node_offline_calls(self):
+        return [c.args[1] for c in self.client.rpc.call_args_list
+                if c.args[0] == "ingest_mark_gateway_devices_offline"]
 
     def birth(self, node=NODE_A):
         """What process_dbirth() leaves behind once its write has set the row ONLINE."""
@@ -874,6 +892,63 @@ class TestADeviceThatPublishesAgain(unittest.TestCase):
         self.assertTrue(self.tracked())
         self.assertEqual(self.online_writes(), [])
         self.assertEqual(self.rebirths(), [])
+
+    def test_a_node_death_marks_its_gateways_devices_offline_in_one_call(self):
+        self.birth()
+        self.ndeath()
+        self.assertEqual(self.node_offline_calls(), [{"p_gateway_id": self.GATEWAY["id"]}])
+        offline = [c for c in self.client.rpc.call_args_list
+                   if c.args[0] == "ingest_mark_device_offline"]
+        self.assertEqual(offline, [], "one set-based write, not a round trip per device")
+
+    def test_a_device_the_node_death_took_offline_waits_for_its_birth(self):
+        self.birth()
+        self.ndeath()
+        self.device["status"] = "OFFLINE"
+        self.assertFalse(self.tracked(), "the watchdog would mark it OFFLINE a second time")
+
+        self.ddata()
+        self.assertEqual(self.online_writes(), [])
+        self.assertEqual(len(self.rebirths()), 1)
+
+        self.birth()
+        self.ddata()
+        self.assertTrue(self.tracked())
+
+    def test_a_stale_online_row_does_not_end_the_wait_after_a_node_death(self):
+        """A row cached before the NDEATH wrote, of a device this process never heard."""
+        self.ndeath()
+        self.ddata()
+        self.assertFalse(self.tracked())
+        self.assertEqual(len(self.rebirths()), 1)
+
+    def test_a_device_heard_through_the_node_waits_even_if_the_gate_moved_nothing(self):
+        self.node_moved = []
+        self.birth()
+        self.ndeath()
+        self.assertFalse(self.tracked())
+
+    def test_another_nodes_death_leaves_the_device_tracked(self):
+        self.node_moved = []
+        self.birth()
+        self.ndeath(node=NODE_B)
+        self.assertTrue(self.tracked())
+
+    def test_a_failed_write_leaves_the_device_to_the_watchdog(self):
+        self.failing.add("ingest_mark_gateway_devices_offline")
+        self.birth()
+        self.ndeath()
+        self.assertTrue(self.tracked())
+
+    def test_node_births_and_data_mark_no_devices_offline(self):
+        real = ingestion.resolve_gateway
+        ingestion.resolve_gateway = lambda wire_id, group_id=None, include_archived=False: dict(self.GATEWAY)
+        try:
+            for msg_type in ("NBIRTH", "NDATA"):
+                ingestion.process_node_message(NODE_A, msg_type, AliasPayload(), group_id=GROUP)
+        finally:
+            ingestion.resolve_gateway = real
+        self.assertEqual(self.node_offline_calls(), [])
 
 
 if __name__ == "__main__":

@@ -31,8 +31,8 @@ const MISSING = ['bash', 'jq', 'python3', 'git'].filter(
 );
 // `openssl version`, not `--version`: OpenSSL 3 refuses the long form.
 if (spawnSync('openssl', ['version'], { stdio: 'ignore' }).status !== 0) MISSING.push('openssl');
-// The script reads platform.yml with python3's yaml module and, without it, falls back to the
-// enrolment tag without a word, so a host lacking it would fail the tag cases for no real reason.
+// The script reads platform.yml with python3's yaml module and, without it, refuses every pointer,
+// so a host lacking it would fail the tag cases for no real reason.
 if (!MISSING.includes('python3') &&
     spawnSync('python3', ['-c', 'import yaml'], { stdio: 'ignore' }).status !== 0) {
   MISSING.push('python3-yaml');
@@ -43,6 +43,8 @@ const SKIP = MISSING.length
 
 /** Where the shim below hands anything but `s_client` on to. */
 const OPENSSL = SKIP ? null : spawnSync('bash', ['-c', 'command -v openssl'], { encoding: 'utf8' }).stdout.trim();
+/** The real python3, which the no-yaml shim runs with `-S` so no site-packages are on its path. */
+const PYTHON3 = SKIP ? null : spawnSync('bash', ['-c', 'command -v python3'], { encoding: 'utf8' }).stdout.trim();
 
 /** Forward slashes throughout: these become environment variables a shell reads. */
 const posix = (p) => p.replace(/\\/g, '/');
@@ -146,9 +148,15 @@ function appliance({
  * argument per line, so an argument carrying a space is still one line's worth of value, and exits
  * with `exit`.
  */
-function converge({ state, gitops }, { exit = 0, customExit = 0, connects = true } = {}) {
+function converge({ state, gitops }, { exit = 0, customExit = 0, connects = true, yaml = true } = {}) {
   const bin = `${state}/bin`;
   mkdirSync(bin, { recursive: true });
+
+  // A host without python3-yaml: `-S` leaves out every site-packages directory, so the import fails
+  // the way it would there, and nothing else about the interpreter changes.
+  if (!yaml) {
+    writeFileSync(`${bin}/python3`, `#!/bin/sh\nexec '${PYTHON3}' -S "$@"\n`, { mode: 0o755 });
+  }
 
   /**
    * `openssl` as the script finds it, except that `s_client` never leaves the box: the guard it
@@ -295,14 +303,38 @@ test("records a failure with ansible-pull's exit code, and exits with it", { ski
   assert.match(result.record.detail, /exited 4/);
 });
 
-test('a malformed platform.yml falls back rather than aborting', { skip: SKIP }, () => {
-  // The pointer is changed by pull request, so it can arrive unparseable. An appliance that
-  // stopped converging over a typo in one gateway's file would need a visit to fix it.
+test('refuses and records a platform.yml that does not parse', { skip: SKIP }, () => {
+  // The pointer is changed by pull request, so it can arrive unparseable. Falling back would move
+  // the appliance to its enrolment tag without its vars and record a normal run; refusing leaves it
+  // where it last converged, and says why in the forge. The next pass after a fix converges.
   const result = converge(appliance({ pointer: 'platform: [this is not a mapping\n' }));
-  assert.equal(result.status, 0);
-  assert.equal(flag(result.argv, '--checkout'), 'v0.0.9');
-  // The declared default, not the empty string a failed read leaves behind.
-  assert.deepEqual(JSON.parse(flag(result.argv, '--extra-vars')), {});
+  assert.equal(result.status, 1);
+  assert.equal(result.argv, null, 'nothing should have been pulled');
+  assert.equal(result.record.outcome, 'refused');
+  assert.equal(result.record.tag, '');
+  // Python's own reason, on one line, so the record names the fault rather than only its file.
+  assert.match(result.record.detail, /^platform\.yml could not be read: \w*Error: .*line 2/);
+  assert.doesNotMatch(result.record.detail, /\n/);
+  assert.match(result.output, /REFUSING: platform\.yml could not be read/);
+});
+
+test('refuses a platform.yml whose platform key is not a mapping', { skip: SKIP }, () => {
+  // Parses, but names nothing this script can read: a tag written where the mapping belongs.
+  const result = converge(appliance({ pointer: 'platform: v1.2.3\n' }));
+  assert.equal(result.status, 1);
+  assert.equal(result.argv, null);
+  assert.equal(result.record.outcome, 'refused');
+  assert.match(result.record.detail, /platform is not a mapping/);
+});
+
+test('refuses and records when python3 has no yaml module', { skip: SKIP }, () => {
+  // The base role installs python3-yaml, so this is a damaged host rather than a normal one. It
+  // used to read as "the pointer names no tag" and converge to the enrolment tag.
+  const result = converge(appliance({ pointer: 'platform:\n  tag: v1.2.3\n' }), { yaml: false });
+  assert.equal(result.status, 1);
+  assert.equal(result.argv, null, 'nothing should have been pulled');
+  assert.equal(result.record.outcome, 'refused');
+  assert.match(result.record.detail, /^platform\.yml could not be read: ModuleNotFoundError: No module named 'yaml'$/);
 });
 
 // This gateway's own playbook, beside its flow on main

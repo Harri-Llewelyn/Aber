@@ -103,7 +103,7 @@ series), and **F**, 1,000 devices × 10 metrics at 1 Hz (864 M rows a day, 10,00
 | `audit_trail` (platform database) | none: append-only, never pruned | grows with configuration changes, not telemetry | |
 | Prometheus | 30 days or 8 GB, on a 10 Gi volume | ≤ 8 GB | ≤ 8 GB |
 | Loki | 30 days (`retention_period: 720h`), on a 10 Gi volume | ≤ 10 Gi | ≤ 10 Gi |
-| Broker persistence | retained and queued messages, on a 1 Gi volume | small | small |
+| Broker persistence | the Dynamic Security accounts, on a 1 Gi volume (Mosquitto's own message persistence is off) | small | small |
 | Storage (models, captures, area plans, exports) | a 10 Gi volume; a capture is at most 100 MiB | by use | by use |
 | Logical backups | `backup.retentionDays` (14), on a 20 Gi volume | the platform database, and the historian unless physical backup is on | the platform database; the historian is physical at this size |
 | Historian physical backup repository | `physicalBackup.retainFull` (2) full backups, the differentials after the older one, and the WAL since it | ~16 GB | ~2 TB, most of it WAL |
@@ -317,6 +317,13 @@ it needs. Either write a `my-values.yaml` from
 [`values-prod.yaml.example`](../helm/aber/values-prod.yaml.example) — which travels **inside
 the package**, so `helm pull --untar` gives you a copy — or, for a throwaway cluster, pull the
 demo credentials out of `.env.example`.
+
+**Set the AAS base IRI before the first export: it is permanent from then on.** Every
+`globalAssetId` and submodel id an exported Asset Administration Shell carries is
+`supabaseFunctions.aas.baseIri` plus the asset's `sparkplug_id`. Once a shell has left the site,
+whoever imported it holds those identifiers, and changing the IRI gives every asset a new identity.
+Put it under a domain your organisation controls, as `values-prod.yaml.example` shows; the
+default, `https://aber.local/ids/asset/`, belongs to nobody.
 
 The ten built images resolve automatically to the chart's `appVersion`, which the release stamps
 equal to the chart version. Chart 0.1.0 can only pull images 0.1.0; there is nothing to line up by
@@ -1061,7 +1068,7 @@ from the node CIDR via `networkPolicy.extraEgress`.
 
 **Two rules are load-bearing and easy to miss:** DNS egress on **both** UDP and TCP 53 (a response
 over 512 bytes falls back to TCP, so a UDP-only rule fails *intermittently*), and
-`supabase-db → node-red:1880` — the quarantine webhook goes there **directly**, not through the
+`supabase-db → node-red:1880` — a webhook to Node-RED goes there **directly**, not through the
 gateway, and
 pg_net has no retries or DLQ, so blocking it drops every notification silently.
 
@@ -1144,6 +1151,10 @@ The edge functions load their dependencies from the image. The image build resol
 a lock file and boots every function with no network, so a function that would fetch fails the
 build instead (`supabase/README.md`, *Edge function dependencies*).
 
+The dashboard's 3D viewer decodes a Draco- or KTX2-compressed model with decoders the dashboard
+serves itself, under `/decoders/`. `@google/model-viewer`'s default fetches them from
+www.gstatic.com; `Model3DViewer.jsx` points it at the dashboard's copies.
+
 An administrator can opt Node-RED into update notifications from its User Settings. The runtime
 keeps that choice over `settings.js`.
 
@@ -1195,7 +1206,7 @@ dumps. Retention (`backup.retentionDays`) applies to scheduled backups; a reques
 pinned until released on the page. Each `include*` flag mounts a ReadWriteOnce PVC, so each pins
 the pod to that pod's node — on a cluster where those pods sit on different nodes, enable the
 ones that share one. The mechanism, the tables and the restore runbook are in
-[`../../supabase/README.md`](../../supabase/README.md#backups-from-the-dashboard-0101).
+[`../../supabase/README.md`](../../supabase/README.md#backups-from-the-dashboard-archived-migration-0101).
 
 **A copy off site, from the same service.** On `local-path` the backup PVC sits on the node, and
 usually the disk, that holds both databases, so it survives a dropped table and not a lost disk,
@@ -1327,11 +1338,27 @@ timescaledb:
 spooling on its own data volume; a segment is pushed when it fills or after
 `archiveTimeoutSeconds` (60), which bounds how much a restore can lose on a quiet historian. The
 `pgbackrest` sidecar in the pod takes the daily backup at `hourUtc` (full on `fullOn`) and records
-each run in `public.physical_backup_runs`. Two alerts watch it: **Historian Backup Stale** (no
+each run in `public.physical_backup_runs`.
+
+- **A missed hour is taken late, once.** The sidecar checks the clock every minute rather than
+  sleeping until the hour. When the latest `hourUtc` has passed and no backup has been attempted
+  since, it takes one and logs `missed the <date> 01:00 UTC backup; taking it now`. A pod that was
+  down, a suspended host and a restart across the hour all meet that rule.
+- **A failed run counts as the attempt.** It is not retried until the next day's hour; Historian
+  Backup Stale reports it.
+- **A full whenever the newest is over seven days old**, whatever the day, so `retainFull` keeps
+  expiring when a `fullOn` day is missed.
+
+Two alerts watch it: **Historian Backup Stale** (no
 successful backup for 36 hours) and **Historian WAL Archiving Failing** (the last attempt failed and
 nothing has been archived for 10 minutes). While archiving fails, unarchived WAL collects on the
 data volume up to `archiveQueueMax`, after which pgBackRest drops it and a restore cannot cross the
 gap; that is what the second alert is there to prevent.
+
+**The Backups page shows it**, on a Historian line above the list: the last backup with its type
+and label, when the next is due, the repository's size, and the last failure with pgBackRest's
+reason. **Take a backup** there also asks the sidecar for a differential, which it takes within a
+minute without the platform backup waiting for it. From a shell:
 
 ```bash
 kubectl -n aber exec timescaledb-0 -c pgbackrest -- pgbackrest --stanza=historian info

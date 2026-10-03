@@ -73,7 +73,7 @@ spec:
             - name: STORAGE_MODEL_FILE_SIZE_LIMIT
               {{- /* int64 first: `quote` alone renders this float as "5.24288e+07", which
                      storage-init's parseInt reads as 5 -- creating the bucket with a five-byte
-                     limit. See the note in supabase/storage.yaml. */}}
+                     limit. See the note in deploy/helm/aber/templates/supabase/storage.yaml. */}}
               value: {{ .Values.supabaseStorage.modelFileSizeLimit | int64 | quote }}
             - name: CAPTURE_BUCKET
               value: {{ .Values.supabaseStorage.captureBucket | quote }}

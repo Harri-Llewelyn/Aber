@@ -710,7 +710,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
                 </div>
 
                 {/* The lanes, three across, sharing the width; each opens into the panel. */}
-                <div className="site-lanes" role="group" aria-label="Campus lanes">
+                <div className="site-lanes" role="group" aria-label="Site lanes">
                   {laneViews.map(({ lane, devices: laneAssets, gateways: laneGateways }) => {
                     const open = openLane === lane.key
                     const status = stateOf(laneAssets).status

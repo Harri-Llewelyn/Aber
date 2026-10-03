@@ -797,7 +797,7 @@ Compose port layout 1:1:
 
 Path-based routing on a single host is possible but fragile here: Grafana needs
 `serve_from_sub_path` plus a matching `root_url`, Node-RED needs `httpAdminRoot` *and*
-`httpNodeRoot` moved (which changes the quarantine webhook's path, which is registered in
+`httpNodeRoot` moved (which changes the path of any webhook a site registers in
 `webhook_endpoints` in the database), and Studio is a Next.js app with its own basePath assumptions.
 Subdomains avoid all three. Document single-host as unsupported rather than half-supporting it.
 
@@ -1161,11 +1161,11 @@ Two rules matter more than the rest:
   spends so much effort preventing. Both protocols because a response over 512 bytes falls back to
   TCP, so a UDP-only rule works until a query gets large enough and then fails *intermittently*.
 - **`supabase-db → node-red:1880`.** The obvious `pg_net` allow-list is the gateway and the edge runtime,
-  and **the quarantine webhook goes through neither**:
-  `webhook_endpoints` seeds `http://node-red:1880/hooks/quarantine` directly. pg_net
-  has no retries, no ordering and no DLQ, so blocking it drops every quarantine notification with no
-  error, no queue and no log — the first sign is an operator noticing alerts stopped weeks earlier.
-  CI asserts this flow specifically.
+  and **a webhook to Node-RED goes through neither**: pg_net posts a `webhook_endpoints` row's URL
+  directly, and Node-RED is where a site serves one with a flow of its own. None is seeded since
+  `0031` removed the quarantine hook nothing served. pg_net has no retries, no ordering and no DLQ, so
+  blocking it drops every notification with no error, no queue and no log — the first sign is an
+  operator noticing alerts stopped weeks earlier. CI asserts this flow specifically.
 
 **Two knobs cannot be inferred and are the reason this is opt-in:** which namespace CoreDNS is in,
 and which namespace the ingress controller is in. A wrong value on the second means every route 502s
@@ -1204,8 +1204,12 @@ scales nothing.
 ### 10.3 Backups
 
 **The only recovery path this stack has.** `local-path` is node-local with no replication or
-snapshots, and neither database is replicated. `pg_dump -Fc` for both, nightly, to a PVC that
-survives `helm uninstall` — deleting the release is precisely when the backups are most wanted.
+snapshots, and neither database is replicated. `pg_dump -Fc` nightly, to a PVC that survives
+`helm uninstall` — deleting the release is precisely when the backups are most wanted. The dump
+covers the platform database always, and the historian unless `timescaledb.physicalBackup` is on.
+With it on, the historian has pgBackRest full and differential backups and continuous WAL
+archiving instead, and the nightly dump skips it (`deploy/k8s/README.md`, *Backing up the
+historian*).
 
 - **`--no-owner --no-privileges` are deliberately absent.** The role scaffolding is exactly what a
   restore needs: `supabase_auth_admin`, `authenticator` and `supabase_storage_admin` own objects, and
@@ -1219,9 +1223,10 @@ survives `helm uninstall` — deleting the release is precisely when the backups
   could never run (its image has no `aws` CLI) and is retired; a values file that still sets it
   fails the render. The backup service copies every backup, age-encrypted, to an S3 destination set
   on the Backups page (`supabase/README.md`, "An encrypted copy off site").
-- **This is a logical dump, not PITR.** It recovers to the last nightly run and no finer. A real RPO
-  wants pgBackRest or WAL archiving; this is the floor, said plainly so nobody mistakes it for the
-  ceiling. **Test a restore** — an untested backup is a belief, not a capability.
+- **The dump is logical, not PITR.** It recovers to the last nightly run and no finer; this is the
+  floor, said plainly so nobody mistakes it for the ceiling. The historian's physical backup, when
+  on, restores to any moment inside the retained backups; the platform database has no such path.
+  **Test a restore** — an untested backup is a belief, not a capability.
 
 ### 10.4 Secret management
 
@@ -1297,7 +1302,8 @@ oversights.
   (`deploy/k8s/traefik-config.yaml`; `docs/gateway.md`, *The client's address*). The gateway limits
   nothing: no overall request ceiling and no per-route limit (#442). §7.1 covers the longer-term
   Gateway API question.
-- **Backups are logical dumps, not PITR** (§10.3). The recovery floor is the last nightly run.
+- **The platform database's backup is a logical dump, not PITR** (§10.3). Its recovery floor is the
+  last nightly run; only the historian has a physical backup, and only when it is switched on.
 
 ## 12. What the shared helpers decide
 

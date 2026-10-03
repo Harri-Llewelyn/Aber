@@ -528,5 +528,132 @@ class TestOffsiteHealth(OffsiteFixture):
         self.assertEqual(self.cur.fetchone(), (True, True, False))
 
 
+# -------------------------------------------------------------------------------------------------
+# The historian on the Backups page (0026)
+# -------------------------------------------------------------------------------------------------
+# Local tables of the same names stand in for the three foreign ones, inside the test's rolled-back
+# transaction, so the read's arithmetic is checked without a historian.
+STAND_INS = """
+DROP FOREIGN TABLE timescale.physical_backup_runs, timescale.physical_backup_schedule,
+                   timescale.physical_backup_requests;
+CREATE TABLE timescale.physical_backup_runs (
+    id bigint GENERATED ALWAYS AS IDENTITY, kind text, started_at timestamptz, finished_at timestamptz,
+    succeeded boolean, detail text, label text, database_bytes bigint, backup_bytes bigint, repo_bytes bigint);
+CREATE TABLE timescale.physical_backup_schedule (hour_utc integer, full_on integer, recorded_at timestamptz);
+CREATE TABLE timescale.physical_backup_requests (
+    id bigint GENERATED ALWAYS AS IDENTITY, requested_at timestamptz, job_id text, claimed_at timestamptz);
+"""
+STATE_COLUMNS = (
+    "hour_utc", "full_on", "first_recorded_at", "last_attempt_at", "last_success_at", "last_success_kind",
+    "last_success_label", "last_full_at", "repo_bytes", "last_failure_at", "last_failure_kind",
+    "last_failure_detail", "request_at", "request_claimed_at", "request_finished_at", "request_succeeded",
+)
+
+
+class TestHistorianBackupState(OffsiteFixture):
+    """What the Backups page's historian row reads: one row for an Administrator, none unreachable."""
+
+    def state(self, user_id=OFFSITE_ADMIN_ID):
+        as_user(self.cur, user_id)
+        self.cur.execute("SELECT * FROM public.historian_backup_state()")
+        rows = [dict(zip(STATE_COLUMNS, row)) for row in self.cur.fetchall()]
+        as_service(self.cur)
+        return rows
+
+    def stand_in(self):
+        self.cur.execute(STAND_INS)
+
+    def ran(self, kind, hours_ago, succeeded=True, **columns):
+        self.cur.execute(
+            "INSERT INTO timescale.physical_backup_runs (kind, started_at, finished_at, succeeded, detail, label, repo_bytes) "
+            "VALUES (%s, now() - make_interval(hours => %s), now() - make_interval(hours => %s) + interval '1 minute', "
+            "%s, %s, %s, %s)",
+            (kind, hours_ago, hours_ago, succeeded, columns.get("detail"), columns.get("label"), columns.get("repo_bytes")))
+
+    def ago(self, hours, plus_minutes=0):
+        self.cur.execute("SELECT now() - make_interval(hours => %s) + make_interval(mins => %s)", (hours, plus_minutes))
+        return self.cur.fetchone()[0]
+
+    def test_no_row_while_the_historian_is_unreachable(self):
+        # The db lane has no historian, so the foreign tables raise on connect and the read catches it.
+        self.cur.execute("SAVEPOINT probe")
+        try:
+            self.cur.execute("SELECT 1 FROM timescale.physical_backup_runs LIMIT 1")
+            self.skipTest("the historian is reachable from this database")
+        except psycopg2.Error:
+            self.cur.execute("ROLLBACK TO SAVEPOINT probe")
+        self.assertEqual(self.state(), [])
+
+    def test_no_row_for_anybody_but_an_administrator(self):
+        self.stand_in()
+        self.ran("diff", 2, label="20261003-010002F_20261003-010002D")
+        self.assertEqual(len(self.state()), 1)
+        self.assertEqual(self.state(OFFSITE_OPERATOR_ID), [])
+
+    def test_never_backed_up(self):
+        self.stand_in()
+        self.ran("check", 3)
+        [row] = self.state()
+        self.assertIsNone(row["last_success_at"])
+        self.assertIsNone(row["last_failure_at"])
+        self.assertIsNone(row["last_attempt_at"])
+        self.assertEqual(row["first_recorded_at"], self.ago(3))
+
+    def test_current_with_its_schedule_and_the_repository(self):
+        self.stand_in()
+        self.cur.execute("INSERT INTO timescale.physical_backup_schedule VALUES (1, 0, now())")
+        self.ran("full", 50, label="20261001-010002F", repo_bytes=100)
+        self.ran("diff", 26, succeeded=False, detail="ERROR: [082]: WAL segment was not archived")
+        self.ran("diff", 2, label="20261003-010002F_20261003-010002D", repo_bytes=150)
+        self.ran("check", 1, repo_bytes=160)
+        [row] = self.state()
+        self.assertEqual((row["hour_utc"], row["full_on"]), (1, 0))
+        self.assertEqual(row["last_success_at"], self.ago(2, 1))
+        self.assertEqual((row["last_success_kind"], row["last_success_label"]), ("diff", "20261003-010002F_20261003-010002D"))
+        self.assertEqual(row["last_full_at"], self.ago(50, 1))
+        self.assertEqual(row["last_attempt_at"], self.ago(2))
+        # The newest row's, which an archive check records too.
+        self.assertEqual(row["repo_bytes"], 160)
+        # The failure is history: a backup has succeeded since.
+        self.assertIsNone(row["last_failure_at"])
+
+    def test_a_failure_newer_than_the_last_success(self):
+        self.stand_in()
+        self.ran("diff", 30, label="20261002-010002F_20261002-010002D")
+        self.ran("diff", 4, succeeded=False, detail="ERROR: [056]: unable to find primary cluster")
+        [row] = self.state()
+        self.assertEqual(row["last_failure_at"], self.ago(4, 1))
+        self.assertEqual(row["last_failure_kind"], "diff")
+        self.assertIn("unable to find primary cluster", row["last_failure_detail"])
+        self.assertEqual(row["last_success_at"], self.ago(30, 1))
+
+    def test_a_request_queued_then_answered(self):
+        self.stand_in()
+        self.ran("diff", 30, label="20261002-010002F_20261002-010002D")
+        self.cur.execute("INSERT INTO timescale.physical_backup_requests (requested_at, job_id) "
+                         "VALUES (now() - interval '4 hours', 'job')")
+        [row] = self.state()
+        self.assertEqual(row["request_at"], self.ago(4))
+        self.assertIsNone(row["request_claimed_at"])
+        self.assertIsNone(row["request_finished_at"])
+
+        # Claimed, and the first run recorded after the claim is its answer.
+        self.cur.execute("UPDATE timescale.physical_backup_requests SET claimed_at = now() - interval '3 hours'")
+        self.ran("diff", 2, label="20261003-010002F_20261003-010003D")
+        self.ran("diff", 0, succeeded=False)
+        [row] = self.state()
+        self.assertEqual(row["request_finished_at"], self.ago(2, 1))
+        self.assertTrue(row["request_succeeded"])
+
+    def test_only_an_authenticated_caller_may_ask(self):
+        for role, may in (("anon", False), ("authenticated", True)):
+            self.cur.execute("SELECT has_function_privilege(%s, 'public.historian_backup_state()', 'EXECUTE')", (role,))
+            self.assertEqual(self.cur.fetchone()[0], may, role)
+        for table in ("physical_backup_runs", "physical_backup_schedule", "physical_backup_requests"):
+            for role in ("anon", "authenticated"):
+                self.cur.execute("SELECT has_table_privilege(%s, %s, 'SELECT')", (role, f"timescale.{table}"))
+                self.assertFalse(self.cur.fetchone()[0], f"{role} reads timescale.{table}")
+
+
 if __name__ == "__main__":
     unittest.main()

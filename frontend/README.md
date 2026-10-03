@@ -356,6 +356,83 @@ line keeps search, status and the key toggle and moves the rest into `common/Fil
 
 ---
 
+## Words and rules
+
+The words and rules every page follows, so a page is checked against one list rather than against
+the page beside it. They were settled by the frontend consistency audit
+([#579](https://github.com/Harri-Llewelyn/Aber/issues/579)) and amended by the 2026-10-01 review
+([#629](https://github.com/Harri-Llewelyn/Aber/issues/629)). Change them here, not page by page.
+Retired names are the other half of the record: check 19c of `scripts/check-docs-drift.mjs` refuses
+them. Nothing checks this list, because a word that is allowed cannot be policed by a pattern.
+
+| Thing | Use | Not |
+| :--- | :--- | :--- |
+| The Devices queue | Quarantine queue | Zero-Touch Onboarding Quarantine Queue, onboarding queue, the banner |
+| Approving a queued device | Approve & Onboard | Approve & Assign |
+| A device before its first birth | Awaiting first birth | Never sent a birth |
+| A non-human principal | machine identity | database/service principal, service identity |
+| A machine identity taken out of use | Withdraw / Reinstate, WITHDRAWN | Revoke(d) |
+| A token or broker credential taken back | Revoke, REVOKED | Withdraw |
+| Out of commission | Archived | Decommissioned, Out of Commission, Inaccessible |
+| Archived Entities' two tabs | Archived, Retired | |
+| The alert flag | WARNING | WARN |
+| The shadow target for playback | Playback gateway | simulated gateway, replay lane, Shadow, Shadow lane |
+| A shadow device | replay lane | SHADOW |
+| The ISA-95 site | site | campus, as a name |
+| A group of cells | area | building, floor |
+| A cell | cell | cell zone, zone, work center |
+| Any audited row | entity | asset, unless it is the shopfloor class |
+
+**Site and campus.** "Site" is the term: the page, the setting, the Site-Wide scope and the ISA-95
+level all say it. "Campus" may gloss it in running text and tooltips, as in "the site is this
+campus", but never names a control, a setting or an identifier. "Area" is used everywhere except
+in "building management system".
+
+- **Page identity.** A page has one card. Its icon, title and one-sentence description are the
+  card's `CardHeading`, stated once; there is no `PageHeading` above it. A tabbed page puts its tab
+  bar inside that card, and the tab's "?" and the toolbar row follow [Tabs](#tabs).
+- **Scroll.** Every page scrolls inside its card, Access Control, Directory and Approvals included.
+- **Counts.** None on card headings, section headings or tabs. A count stays where it states what is
+  loaded ("30 of 55" beside Show more), what a filter option or toggle holds ("Active (4)", "Show
+  deleted entities (3351)"), what an export will write, or how much work is waiting (a Quarantine
+  or Awaiting tab, the sidebar).
+- **Queues are tabs.** Devices' quarantine queue is its Quarantine tab, not a card above the roster;
+  a tab with work waiting takes `attention`.
+- **Clear filters (N).** N counts every control that is off its default, the lifecycle select
+  included. The button (`common/ClearFilters.jsx`) sits at the right end of the filter bar.
+- **Empty states** tell "none yet" from "none match".
+- **Permission hints** name the roles that hold the permission ("Requires Administrator or Shopfloor
+  Manager"), from one helper, never "Admin".
+- **Clickable cues.** A chevron at the right end means it opens a side panel, and anything that
+  opens one shows it: a table row through `row-selectable`, and a lane, card or line that is not a
+  row through a trailing `IconChevronRight` in the shared chevron colours (`.area-card-chevron` and
+  its siblings in `App.css`). The copy chip copies.
+  Accent colour is a real link. A button acts. Monospace text takes the text colour. Nothing else
+  looks clickable ([What looks clickable](#what-looks-clickable)).
+- **Side panels.** The title carries the entity's icon, and there is exactly one primary action,
+  listed first, picked in the order under [The drawer is `ContextPanel`](#the-drawer-is-contextpanel).
+- **Tables.** Every header row, group band and section band is one opaque colour, `--bg-base`
+  ([Table and Row Conventions](#table-and-row-conventions)).
+- **Colour is never the only signal.** Tabs, sidebar flags, warning buttons and the Audit Trail
+  markers each carry an icon, a shape or a number as well (WCAG 2.2 SC 1.4.1).
+- **The sidebar** colours an icon only when the viewer can act on what it flags, and shows how many.
+- **Archived things are hidden by default**, in every list and on the Site Map. A list opens on
+  Active, archived rows are one filter away, and Archived Entities lists them all.
+- **Sizes** use binary units labelled KiB and MiB. There is one relative-time style and one absolute
+  date-time format (`utils/format.js`).
+- **Help pages** state nothing wrong and name the page's main controls; they are not full manuals.
+  A `HelpTip` is about 35 words or fewer.
+- **Comments** state the current state only. An archived migration is cited as "archived migration
+  NNNN", never as a bare number, which a live migration will reach; where that is ambiguous (the
+  archive has two numbering schemes, and two files numbered 0074), cite the file name.
+
+**Earlier decisions the 2026-10-01 review reversed**, recorded so the next audit does not undo them:
+counts always showing, including on headings; Settings and Vocabulary keeping a `PageHeading`;
+Access Control, Directory and Approvals scrolling the page; the Devices queue as a card above the
+roster.
+
+---
+
 ## Contextual help
 
 A control in the top bar opens a drawer describing **the page you are on** — what it is for, what
@@ -367,6 +444,8 @@ somebody changing the stack — it argues why things are built as they are, at l
 needs the other half, in a few hundred words per page, and shipping the control before the corpus
 would have produced a help system whose honest content is a link to the README. That is what the
 request called too slow in the first place.
+
+A help page uses the words in [Words and rules](#words-and-rules), as the page it describes does.
 
 ### One file per page, resolved by filename
 
@@ -403,9 +482,34 @@ sees and the author never does, so the drift check rejects it at build time inst
 The same component the entity pages use, with `subject="help"` for its region label and close
 control. It is a sibling of `.content` rather than of a page's list, so it survives a tab switch,
 works on pages that have no drawer of their own, and cannot be unmounted by the page it describes —
-`tabId` follows the active tab, so it re-reads as you navigate. Both drawers can be open at once on
-Devices; the flex row narrows the table rather than stacking them, and below 800px it takes the
-same dismissible overlay treatment every other drawer takes.
+`tabId` follows the active tab, so it re-reads as you navigate. Every drawer, this one included,
+stays docked beside the page down to 800px wide; narrower, it slides over the page as a
+dismissible overlay.
+
+**One drawer at a time below 1440px.** From 1440px wide, help opens beside a page's drawer and the
+flex row narrows the page between them. Narrower, help replaces the page's drawer:
+
+- **Opening help hides the page's drawer without closing it.** The page keeps its selection, and
+  closing help (its X, Escape, or the top bar's ?) shows the same details again. Escape closes the
+  most recently opened drawer first, so with help opened second it closes help. The hiding is CSS,
+  `@media (max-width: 1439px)` in `App.css`, and `display: none` also takes the hidden drawer out of
+  the tab order and the accessibility tree.
+- **Selecting a row, a pin or a lane while help is open closes help** and shows the details, rather
+  than changing a panel nobody can see. A page's `ContextPanel` that opens or turns to another
+  entity calls the App's `HelpDrawerContext` when `ONE_DRAWER_QUERY` matches. The help drawer sits
+  outside that provider. The query and the media query must agree; `contextPanel.test.jsx` checks
+  that they do.
+
+**Where 1440px comes from.** A drawer is `--context-panel-width`, `clamp(320px, 28vw, 560px)`. With
+the rail collapsed (52px), the page's column is the window less the rail, the 12px gutter either
+side of the page, the page's drawer with its 16px gap, and the help drawer with its 12px right
+margin: `W − 104 − 2 × clamp(320, 0.28W, 560)`. Between 1143px and 2000px that is `0.44W − 104`,
+which reaches 500px at 1373px. A card in the column loses another 48px to its border and padding
+(the Site Map card body measured 552, 411, 168 and 108px at 1600, 1280, 960 and 900px wide with
+both drawers open), so its body is about 480px at 1440px, the first common window width past
+1373px. A laptop at 1366px gets one drawer: two would leave its column 497px and a card's body
+about 450px. The expanded rail (240px) takes 188px more at every width; the threshold does not
+move with it.
 
 **Its contents are mounted only while it is open**, which the per-page drawers do not need to do.
 The panel stays in the DOM so its width can transition, but a page of prose whose first line is the
@@ -528,7 +632,7 @@ has already been told.
 
 ## Testing
 
-Vitest with globals enabled and a jsdom environment. **607 tests across 39 files.**
+Vitest with globals enabled and a jsdom environment. **3,676 tests across 152 files** at the last count (2026-10-03).
 
 The suite treats an unhandled promise rejection as a defect, not noise — Vitest reports them
 separately and they can mask real failures.

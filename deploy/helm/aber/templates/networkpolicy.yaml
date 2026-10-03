@@ -14,8 +14,8 @@ WHY DEFAULT-DENY EGRESS AT ALL, given it is the risky half. `pg_net` fires outbo
 POSTGRES, and `webhook_endpoints` has no write RLS policy -- deliberately, because a writable
 endpoint table plus database egress is an SSRF primitive. This file is the other half of that.
 
-THE MOST DANGEROUS RULE HERE IS THE ONE EASIEST TO OMIT: `supabase-db -> node-red:1880`. The
-quarantine webhook goes DIRECTLY to Node-RED, not through a gateway route, and pg_net has no
+THE MOST DANGEROUS RULE HERE IS THE ONE EASIEST TO OMIT: `supabase-db -> node-red:1880`. A
+webhook to Node-RED goes DIRECTLY there, not through a gateway route, and pg_net has no
 retries, no ordering and no DLQ. Blocked, every notification is dropped with no error, no queue and
 no log, and the first sign is an operator noticing alerts stopped arriving weeks ago.
 
@@ -55,7 +55,7 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "grafana"            "to" "timescaledb"        "port" 5432 "why" "the historian datasource")
 
   (dict "from" "supabase-db"        "to" $gw      "port" 8000 "why" "pg_net: edge functions and REST called from SQL")
-  (dict "from" "supabase-db"        "to" "node-red"           "port" 1880 "why" "pg_net: THE QUARANTINE WEBHOOK, direct, no retries/DLQ")
+  (dict "from" "supabase-db"        "to" "node-red"           "port" 1880 "why" "pg_net: WEBHOOKS to a site's flows, direct, no retries/DLQ")
 
   (dict "from" $gw      "to" "supabase-auth"      "port" 9999 "why" "/auth/v1/")
   (dict "from" $gw      "to" "supabase-rest"      "port" 3000 "why" "/rest/v1/")
@@ -101,7 +101,7 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "backup"             "to" "supabase-db"        "port" 5432 "why" "pg_dump")
   (dict "from" "backup"             "to" "timescaledb"        "port" 5432 "why" "pg_dump")
   (dict "from" "backup-service"     "to" "supabase-db"        "port" 5432 "why" "pg_dump, and the job queue it claims from")
-  (dict "from" "backup-service"     "to" "timescaledb"        "port" 5432 "why" "pg_dump")
+  (dict "from" "backup-service"     "to" "timescaledb"        "port" 5432 "why" "pg_dump, or asking the pgBackRest sidecar for a backup")
 
   (dict "from" "alloy"              "to" "prometheus"         "port" 9090 "why" "remote-write of every scraped series")
   (dict "from" "alloy"              "to" "loki"               "port" 3100 "why" "the log push")

@@ -118,7 +118,7 @@ B lifecycle to be recognised:
    moves every broker node to 8883 with the CA on the next start, so leave the port as the chart
    sets it.
 2. Give it the username and password from step 4. Set them as an env pair on the Node-RED pod and
-   name that pair in the broker node's `acsCredentialsEnv` property — `node-red-init` reconciles env
+   name that pair in the broker node's `aberCredentialsEnv` property — `node-red-init` reconciles env
    pairs onto broker nodes at init, which is what keeps the secret out of the flow file and out of
    git.
 3. Publish an **NBIRTH** on `spBv1.0/<group>/NBIRTH/<gateway sparkplug_id>`.
@@ -204,9 +204,9 @@ HS256 because pgjwt implements only the HS family. The consequence — Node-RED 
 would itself accept — is bounded by that same scope, and is the trade for not adding an asymmetric
 signing dependency to a fire-and-forget notification path.
 
-`nodered_admin_token` survives as **break-glass only**: `settings.js` accepts it on the admin API
-when set, for when Supabase Auth is down and the flows still have to be reachable. It is empty by
-default.
+`NODERED_ADMIN_TOKEN` survives as **break-glass only**: `settings.js` reads it from Node-RED's
+environment and accepts it on the admin API when set, for when Supabase Auth is down and the flows
+still have to be reachable. It is empty by default, and the database keeps no copy of it (`0031`).
 
 ### Other things that fail in a way that does not look like their cause
 

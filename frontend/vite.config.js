@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { execFileSync } from 'node:child_process'
+import { modelViewerDecoders } from './modelViewerDecoders.js'
 
 /**
  * The version this bundle reports in the account menu (issue #57).
@@ -64,7 +65,7 @@ export default defineConfig(({ mode, command }) => {
   }
 
   return {
-    plugins: [react()],
+    plugins: [react(), modelViewerDecoders()],
     build: {
       // @google/model-viewer is a 1 MB chunk, loaded only when a device with a model is opened.
       chunkSizeWarningLimit: 1100,

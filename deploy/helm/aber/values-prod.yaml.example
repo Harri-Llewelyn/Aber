@@ -180,8 +180,8 @@ secrets:
 
   noderedCredentialSecret: ""
   noderedOAuthClientSecret: ""
-  # openssl rand -hex 32. A SIGNING key, not a bearer credential -- /hooks/quarantine is an
-  # `http in` node, so any flow author can read msg.req.headers.
+  # openssl rand -hex 32. A SIGNING key, not a bearer credential -- Node-RED's `http in` nodes
+  # verify against it, and any flow author can read msg.req.headers.
   noderedWebhookJwtSecret: ""
   # LEAVE EMPTY. Break-glass static token that bypasses Supabase Auth entirely.
   noderedAdminToken: ""
@@ -444,7 +444,14 @@ backup:
 # place; that is why the gateway's metrics switch is here rather than beside the telemetry block it
 # serves.
 supabaseRest:      { replicas: 2 }
-supabaseFunctions: { replicas: 2 }
+supabaseFunctions:
+  replicas: 2
+  aas:
+    # PERMANENT ONCE A SHELL LEAVES THE SITE. Every globalAssetId and submodel id an AAS export
+    # carries is this plus the asset's sparkplug_id, so changing it later gives every asset a new
+    # identity to whoever imported the old one. Set it before the first export, under a domain
+    # your organisation controls; the default, aber.local, belongs to nobody.
+    baseIri: https://aber.example.com/ids/asset/
 frontend:          { replicas: 3 }
 
 supabaseEnvoy:

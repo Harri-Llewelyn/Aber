@@ -33,7 +33,7 @@ const credentialSecret = process.env.NODERED_CREDENTIAL_SECRET;
 // A gateway credential, not a shared platform account: the broker's roles confine each client to
 // `spBv1.0/+/+/<sparkplug_id>/#`, so the username must be the gateway's `sparkplug_id`. This pair is the
 // legacy fallback for a `mqtt-broker-config` node (see brokerCredentialFor()); current flows
-// name their own pair per broker node through `acsCredentialsEnv`.
+// name their own pair per broker node through `aberCredentialsEnv`.
 const mqttUser = process.env.MQTT_USER || 'gwy100000000000400080000';
 const mqttPassword = process.env.MQTT_PASSWORD;
 const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
@@ -178,6 +178,32 @@ if (fs.existsSync(flowsPath)) {
       `[node-red-init] moved tls-config node '${LEGACY_TLS_NODE.id}' to '${TLS_NODE_ID}' ` +
         `(${occurrences - 1} reference(s) with it)`
     );
+  }
+}
+
+// The broker node property naming its credential pair was named for ACS before the rename to
+// Aber. Moved in the file's text like the tls-config node: a key is the quoted name after `{` or
+// `,` and before `:`, so a string that mentions it (its quotes escaped) is left as it is. Not when
+// a node carries both names, which would leave it two keys of one name.
+const CREDENTIALS_ENV_KEY = 'aberCredentialsEnv';
+const LEGACY_CREDENTIALS_ENV_KEY = 'acsCredentialsEnv';
+const holds = (key) => (n) => n !== null && typeof n === 'object' && Object.hasOwn(n, key);
+if (fs.existsSync(flowsPath)) {
+  const text = fs.readFileSync(flowsPath, 'utf8');
+  let nodes = [];
+  try { nodes = JSON.parse(text); } catch { /* read again below, where an unreadable flow stops the boot */ }
+  const count = (list, key) => (Array.isArray(list) ? list.filter(holds(key)).length : 0);
+  const legacy = count(nodes, LEGACY_CREDENTIALS_ENV_KEY);
+  const both = (n) => holds(LEGACY_CREDENTIALS_ENV_KEY)(n) && holds(CREDENTIALS_ENV_KEY)(n);
+  if (legacy && !nodes.some(both)) {
+    const key = new RegExp(`([{,]\\s*)"${LEGACY_CREDENTIALS_ENV_KEY}"(\\s*:)`, 'g');
+    const moved = text.replace(key, (_, before, after) => `${before}"${CREDENTIALS_ENV_KEY}"${after}`);
+    const movedNodes = JSON.parse(moved);
+    if (count(movedNodes, LEGACY_CREDENTIALS_ENV_KEY) === 0
+        && count(movedNodes, CREDENTIALS_ENV_KEY) === count(nodes, CREDENTIALS_ENV_KEY) + legacy) {
+      fs.writeFileSync(flowsPath, moved);
+      console.log(`[node-red-init] moved '${LEGACY_CREDENTIALS_ENV_KEY}' to '${CREDENTIALS_ENV_KEY}' on ${legacy} node(s)`);
+    }
   }
 }
 
@@ -366,12 +392,12 @@ const SETTINGS_JS = `/**
  *
  *   adminAuth.strategy  -- humans, in a browser. OAuth2 + PKCE against GoTrue, identity and
  *                          role from the nodered-userinfo edge function.
- *   adminAuth.tokens    -- services calling the admin API. Verifies the Supabase access token
- *                          that deploy-nodered forwards from the operator who triggered it.
- *   httpNodeAuth        -- the http-in nodes (POST /hooks/quarantine). adminAuth does NOT
+ *   adminAuth.tokens    -- services calling the admin API. Verifies a Supabase access token
+ *                          a service forwards for the operator it acts for.
+ *   httpNodeAuth        -- every http-in node a flow adds. adminAuth does NOT
  *                          cover these: they mount under httpNodeRoot, a separate Express
- *                          mount (Node-RED's red.js:426), which is why the webhook stayed open
- *                          in every design that only set adminAuth.
+ *                          mount (Node-RED's red.js:426), so a design that sets only adminAuth
+ *                          leaves every http-in node open.
  */
 const OAuth2Strategy = require(${JSON.stringify(`${RUNTIME_DIR}/passport-oauth2`)});
 const jwt = require(${JSON.stringify(`${RUNTIME_DIR}/jsonwebtoken`)});
@@ -613,9 +639,9 @@ module.exports = {
     },
 
     /**
-     * Machine-to-machine access to the admin API, read from Authorization: Bearer. deploy-nodered
-     * forwards the operator's access token; the role is re-derived from public.user_roles rather
-     * than trusted, so a revocation takes effect on both sides at once.
+     * Machine-to-machine access to the admin API, read from Authorization: Bearer: a Supabase
+     * access token, whose role is re-derived from public.user_roles rather than trusted, so a
+     * revocation takes effect on both sides at once.
      */
     tokenHeader: 'authorization',
     tokens: async function (token) {
@@ -654,12 +680,13 @@ module.exports = {
   },
 
   /**
-   * Authentication for the http-in nodes (POST /hooks/quarantine). A function, because Node-RED
-   * accepts Express middleware here, which allows a bearer check instead of HTTP Basic.
+   * Authentication for every http-in node, before routing, so a path no node serves answers 401
+   * too. A function, because Node-RED accepts Express middleware here, which allows a bearer
+   * check instead of HTTP Basic.
    *
    * The token is not the admin credential and must never be: a flow author can read
-   * msg.req.headers, so anything sent here is readable by every flow. The database mints a fresh
-   * 60-second JWT per event, scoped aud=node-red-hooks.
+   * msg.req.headers, so anything sent here is readable by every flow. The database's webhook
+   * dispatcher mints a fresh 60-second JWT per event, scoped aud=node-red-hooks.
    */
   httpNodeAuth: function (req, res, next) {
     const header = req.headers.authorization || '';
@@ -736,13 +763,13 @@ function storedBrokerCredential(nodeId = BROKER_NODE_ID) {
  * Which credential each broker node in the flow should carry.
  *
  * One connection per gateway, because the broker's roles pin the edge-node segment to the username.
- * The env prefix is declared on the node in `acsCredentialsEnv`, not derived from its id: a
+ * The env prefix is declared on the node in `aberCredentialsEnv`, not derived from its id: a
  * convention is invisible when it breaks, and the only symptom is "Connection failed to broker".
  * The credential tooling emits exactly these variable names. The legacy node keeps reading
  * MQTT_USER / MQTT_PASSWORD with no declaration.
  */
 function brokerCredentialFor(node) {
-  const prefix = node.acsCredentialsEnv;
+  const prefix = node[CREDENTIALS_ENV_KEY];
 
   if (!prefix) {
     if (node.id === BROKER_NODE_ID) {
@@ -756,16 +783,19 @@ function brokerCredentialFor(node) {
   which are empty by default because the account they
   name was retired by archived migration 0020.
 
-  Either set MQTT_SIMULATOR_PASSWORD and re-provision that account, or reseed the flow
+  Either set MQTT_PASSWORD and re-provision that account, or reseed the flow
   with NODE_RED_FORCE_SEED=true to drop the legacy node entirely.`
         );
       }
       return { user: mqttUser, password: mqttPassword };
     }
     fail(
-      `broker node '${node.id}' (${node.name || 'unnamed'}) declares no 'acsCredentialsEnv' and is ` +
+      `broker node '${node.id}' (${node.name || 'unnamed'}) declares no '${CREDENTIALS_ENV_KEY}' and is ` +
         `not the legacy '${BROKER_NODE_ID}'. It would connect with no username, and Mosquitto ` +
-        'refuses that with CONNACK 5 while Node-RED reports only "Connection failed to broker".'
+        'refuses that with CONNACK 5 while Node-RED reports only "Connection failed to broker".' +
+        (holds(LEGACY_CREDENTIALS_ENV_KEY)(node)
+          ? `\n  It carries the retired '${LEGACY_CREDENTIALS_ENV_KEY}', which was not moved; rename it.`
+          : '')
     );
   }
 
@@ -777,7 +807,7 @@ function brokerCredentialFor(node) {
   // this script exists to remove. Naming both the node and the variable makes it one fix.
   if (!user || !password) {
     fail(
-      `broker node '${node.id}' declares acsCredentialsEnv='${prefix}', but ` +
+      `broker node '${node.id}' declares ${CREDENTIALS_ENV_KEY}='${prefix}', but ` +
         `${prefix}_USER and/or ${prefix}_PASSWORD are not set.\n` +
         '  Mint the credential from the dashboard: Gateways tab, Generate broker credential.\n' +
         '  Add them to the release Secret and restart node-red-init.'

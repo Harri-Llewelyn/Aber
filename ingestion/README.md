@@ -11,7 +11,7 @@ allowed to be heard at all.
 | [`ingestion.py`](ingestion.py) | The daemon. Identity resolution, quarantine gating, telemetry mapping, the historian writer |
 | [`conformance.py`](conformance.py) | The constraint engine: what a device sent, judged against its bound schemas. Pure logic; the daemon decides the policy |
 | [`registry.py`](registry.py) | The Prometheus metric objects, built from the declarations in `metrics.py` |
-| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 77 outcomes |
+| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 80 outcomes |
 | [`logging_config.py`](logging_config.py) | The logger used by both — human-readable lines, or one JSON object per line under `LOG_FORMAT=json` |
 | [`test_gateway_binding.py`](test_gateway_binding.py) | Gateway↔device binding, telemetry sanity window, append-only historian |
 | [`test_declared_metrics.py`](test_declared_metrics.py) | Birth-metric observation, change-only writes, alias resolution, rebirth rate limit, device watchdog, a device that publishes again |
@@ -1255,6 +1255,14 @@ Three properties keep it from becoming an audit-row generator or a false-alarm g
 DDEATH removes the device from tracking outright — an explicit death certificate is the
 authoritative answer and needs no second opinion.
 
+**A node's NDEATH is the death of every device behind it**, as Sparkplug B says, so it does not wait
+for the watchdog. `ingest_mark_gateway_devices_offline()` (`0030`) sets every non-archived device of
+the node's gateway OFFLINE in one UPDATE, behind the same `IS DISTINCT FROM 'OFFLINE'` filter, so
+each device it moves gets one `audit_trail` row and an already-OFFLINE one gets none. Those devices,
+and any this process heard through the node, leave tracking as after a DDEATH; the DBIRTHs that
+follow the node's next NBIRTH set them ONLINE. If the write fails they stay tracked, and the
+watchdog marks them OFFLINE once they are quiet.
+
 > **Tuning.** Too *low* a value reports a healthy machine offline, which is the more misleading of
 > the two failures. Raise the window for event-driven devices that legitimately stay quiet, or set
 > `0` to disable.
@@ -1284,7 +1292,9 @@ rebirth request per node.
 
 `test_declared_metrics.py` (`TestADeviceThatPublishesAgain`) covers both cases. `validate.py`
 check 10b publishes DDATA from the device check 10 timed out and expects it ONLINE; like check 10,
-it runs only when `DEVICE_OFFLINE_TIMEOUT_SECONDS` is 90 or less.
+it runs only when `DEVICE_OFFLINE_TIMEOUT_SECONDS` is 90 or less. Check 18 publishes the seeded
+gateway's NDEATH, expects its registered device OFFLINE with one audit row, and expects it ONLINE
+after an NBIRTH and its DBIRTH.
 
 ---
 
@@ -1547,7 +1557,7 @@ all of them; only the first two are recoverable on their own.
 | `directory_unavailable` | A DDATA message | One sample. The stream resumes by itself. |
 | `ddeath_directory_unavailable` | A death certificate | A delayed status. The watchdog marks the device OFFLINE after `DEVICE_OFFLINE_TIMEOUT_SECONDS`. |
 | `dbirth_directory_unavailable` | **A birth certificate** | **The alias table for that device.** Every later alias-only DDATA from its edge node is undecodable until the next rebirth. |
-| `node_message_directory_unavailable` | An NBIRTH or NDEATH | The edge node's heartbeat. An NBIRTH also resets the whole node's alias table, so losing one has the reach of a DBIRTH drop across every device behind it. |
+| `node_message_directory_unavailable` | An NBIRTH or NDEATH | The edge node's heartbeat. An NBIRTH also resets the whole node's alias table, so losing one has the reach of a DBIRTH drop across every device behind it. A lost NDEATH leaves the node's devices ONLINE until the watchdog times them out. |
 
 The last two are worth waking someone for and the first two are not, which is the whole reason
 they are separable — see the `Ingestion Dropping Birth Certificates` alert. Note that the node
@@ -1699,9 +1709,10 @@ does and fights dynamic enrolment, since gateways arrive with single-use tokens 
 partition cannot know them.
 
 **One prerequisite that turned out not to exist**, recorded because it is the part everyone expects
-to be hard: the daemon speaks MQTT 3.1.1 (`mqtt.Client()` with paho 1.6.1's v1 callbacks) and
-`$share` is an MQTT 5 feature — but Mosquitto 2.0.22 honours shared subscriptions for 3.1.1 clients
-regardless, verified above. **No protocol upgrade and no callback migration would be needed.**
+to be hard: `$share` is an MQTT 5 feature, and the daemon already connects as MQTT 5
+(`mqtt.Client(protocol=mqtt.MQTTv5)` with paho 1.6.1's v1 callbacks). Mosquitto 2.0.22 honours
+shared subscriptions for 3.1.1 clients as well, verified above. **No protocol upgrade and no
+callback migration would be needed.**
 
 ## Testing
 

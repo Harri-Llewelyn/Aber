@@ -70,7 +70,8 @@ spec:
               value: {{ include "aber.supabase.internalUrl" . | quote }}
             # THE PUBLISHABLE KEY ONLY. This service authenticates the caller and queries PostgREST
             # as that caller, so RLS -- not this code -- decides what the address space contains.
-            # The process REFUSES TO START if SUPABASE_SERVICE_ROLE_KEY is set, which turns a
+            # The process REFUSES TO START if SUPABASE_SECRET_KEY or the legacy
+            # SUPABASE_SERVICE_ROLE_KEY is set, which turns a
             # copy-pasted env block into a CrashLoopBackOff with a legible message rather than a
             # silent, total RLS bypass across every asset on the site. Do not add the service-role
             # key here "for convenience".

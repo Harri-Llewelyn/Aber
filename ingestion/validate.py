@@ -2474,6 +2474,84 @@ def verify_i3x_live(token):
         publisher.disconnect()
 
 
+def verify_node_death_takes_its_devices_offline():
+    """
+    Check 18: the seeded gateway's NDEATH sets its registered device OFFLINE with one audit row, and
+    the DBIRTH after its NBIRTH sets it ONLINE. After check 17, so nothing later reads the plant.
+    Returns True when it passed or was skipped.
+    """
+    known = SEEDED.get("known_uuid")
+    if not supabase_client or not known:
+        print("⚠️  18. NODE DEATH: skipped, no Supabase client or fixture device.")
+        return True
+
+    def status_until(wanted, timeout=15):
+        status, deadline = None, time.time() + timeout
+        while time.time() < deadline:
+            res = supabase_client.table("devices").select("status").eq("id", known).execute()
+            status = res.data[0]["status"] if res.data else None
+            if status == wanted:
+                break
+            time.sleep(1)
+        return status
+
+    freshen_the_plant()
+    if status_until("ONLINE") != "ONLINE":
+        print(f"❌ 18. NODE DEATH FAIL: {SEEDED.get('known_id')} is not ONLINE after its DBIRTH, so "
+              "its NDEATH would prove nothing.")
+        return False
+    publisher = connect_publisher(capture=False)
+    if publisher is None:
+        print("❌ 18. NODE DEATH FAIL: could not connect to the broker as the seeded gateway.")
+        return False
+
+    gw = SEEDED.get("gateway_id") or VAL_GW_NAME
+    passed = True
+    try:
+        # By row id, not time: the database's clock is not this shell's.
+        latest = supabase_client.table("audit_trail").select("id").eq("entity_id", known).order(
+            "id", desc=True).limit(1).execute()
+        before = latest.data[0]["id"] if latest.data else 0
+        publisher.publish(f"spBv1.0/{VAL_GROUP}/NDEATH/{gw}",
+                          make_node_birth_payload({}, int(time.time() * 1000)))
+        status = status_until("OFFLINE")
+        if status == "OFFLINE":
+            print("✅ 18. NODE DEATH: the gateway's NDEATH set its device OFFLINE at once, without "
+                  "waiting for the watchdog.")
+        else:
+            print(f"❌ 18. NODE DEATH FAIL: {SEEDED.get('known_id')} reads '{status}' after its "
+                  "gateway's NDEATH; expected OFFLINE. The daemon logs 'NDEATH: edge node' with "
+                  "the count it marked.")
+            passed = False
+
+        audit = supabase_client.table("audit_trail").select("new_data").eq(
+            "entity_id", known).eq("action", "UPDATE").gt("id", before).execute()
+        offline_rows = [r for r in (audit.data or [])
+                        if (r.get("new_data") or {}).get("status") == "OFFLINE"]
+        if len(offline_rows) == 1:
+            print("✅ 18a. NODE DEATH AUDIT: one OFFLINE row in the Audit Trail for the device.")
+        else:
+            print(f"❌ 18a. NODE DEATH AUDIT FAIL: {len(offline_rows)} OFFLINE rows for the device "
+                  "since the NDEATH; expected exactly one.")
+            passed = False
+
+        at_ms = int(time.time() * 1000)
+        publisher.publish(f"spBv1.0/{VAL_GROUP}/NBIRTH/{gw}", make_node_birth_payload({}, at_ms))
+        publisher.publish(f"spBv1.0/{VAL_GROUP}/DBIRTH/{gw}/{SEEDED['known_id']}",
+                          make_sparkplug_payload(SEEDED["known_id"], VAL_KNOWN_BIRTH, at_ms))
+        status = status_until("ONLINE")
+        if status == "ONLINE":
+            print("✅ 18b. NODE BIRTH: the DBIRTH after the gateway's NBIRTH set the device ONLINE.")
+        else:
+            print(f"❌ 18b. NODE BIRTH FAIL: {SEEDED.get('known_id')} reads '{status}' after NBIRTH "
+                  "and DBIRTH; expected ONLINE.")
+            passed = False
+    finally:
+        publisher.loop_stop()
+        publisher.disconnect()
+    return passed
+
+
 def verify_results():
     print("\n==========================================")
     print("    END-TO-END VALIDATION REPORT")
@@ -2800,12 +2878,13 @@ def verify_results():
     # spread across a generated settings.js, an image carrying the modules it requires, and an init
     # script that reconciles the file onto an existing volume. The three probes are not redundant:
     # adminAuth covers httpAdminRoot and httpNodeAuth covers httpNodeRoot, separate Express mounts,
-    # so a settings.js declaring only the first leaves the webhook receiver open.
+    # so a settings.js declaring only the first leaves every http-in node open. The third path has no
+    # node: httpNodeAuth runs before routing, so 401 rather than 404 is what proves it is declared.
     try:
         probes = [
             ("GET", "/flows", None, "admin API read"),
             ("POST", "/flows", b"[]", "admin API write"),
-            ("POST", "/hooks/quarantine", b"{}", "quarantine webhook receiver"),
+            ("POST", "/hooks/validate-probe", b"{}", "http-in nodes (httpNodeAuth)"),
         ]
         unauthenticated = []
         for method, path, body, label in probes:
@@ -2824,7 +2903,7 @@ def verify_results():
                 unauthenticated.append(f"{method} {path} -> {status} ({label})")
 
         if not unauthenticated:
-            print("✅ 7. NODE-RED AUTHENTICATION: admin API and webhook receiver both answer 401 "
+            print("✅ 7. NODE-RED AUTHENTICATION: admin API and http-in nodes both answer 401 "
                   "to unauthenticated callers.")
             # 7b. And that a real sign-in still works. Node-RED's editor resolves the user twice,
             # adminAuth.authenticate at login and adminAuth.users on every request after it, and a
@@ -3336,6 +3415,14 @@ def verify_results():
             passed = False
     except Exception as e:
         print(f"❌ 17.  i3X LIVE ERROR: {type(e).__name__}: {e}")
+        passed = False
+
+    # 18. A node's NDEATH takes its devices OFFLINE. Last: it kills the seeded gateway.
+    try:
+        if not verify_node_death_takes_its_devices_offline():
+            passed = False
+    except Exception as e:
+        print(f"❌ 18. NODE DEATH ERROR: {type(e).__name__}: {e}")
         passed = False
 
     return passed

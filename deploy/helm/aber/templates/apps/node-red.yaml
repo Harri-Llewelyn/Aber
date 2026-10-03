@@ -26,9 +26,9 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  # THE NAME IS `node-red`: webhook_endpoints seeds http://node-red:1880/hooks/quarantine as the
-  # pg_net target. (The deploy-nodered function reached the same Service at /flows until it was
-  # retired with the demonstrator.)
+  # THE NAME IS `node-red`: a webhook_endpoints row a site adds reaches its flow as
+  # http://node-red:1880/<path>. (The deploy-nodered function reached the same Service at /flows
+  # until it was retired with the demonstrator.)
   name: node-red
   labels:
     {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
@@ -118,7 +118,7 @@ spec:
               no credential to exist for a gateway nobody has created.
 
               A USER BUILDING A FLOW mints its credential from the dashboard and adds the pair to
-              the chart Secret under the names their broker node's `acsCredentialsEnv` declares.
+              the chart Secret under the names their broker node's `aberCredentialsEnv` declares.
               node-red-init reconciles env pairs onto broker nodes at init and FAILS CLOSED when a
               declared pair is absent -- deliberately, because the alternative is seeding an empty
               username, which the broker refuses with CONNACK 5 while Node-RED reports only

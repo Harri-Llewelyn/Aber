@@ -105,7 +105,6 @@ const PSQL_VARS = {
   ts_host: 'timescaledb', ts_port: '5432', ts_dbname: 'historian',
   ts_user: 'probe', ts_password: 'probe',
   ts_fdw_user: 'probe', ts_fdw_password: 'probe',
-  nodered_admin_token: 'probe-nodered-admin-token',
   grafana_oauth_client_secret: 'probe-grafana-secret',
   grafana_public_url: 'http://localhost:3000',
   studio_oauth_client_secret: 'probe-studio-secret',

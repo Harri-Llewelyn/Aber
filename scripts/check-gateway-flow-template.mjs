@@ -4,8 +4,8 @@
  * JavaScript inside JSON inside a template, shipped to hardware nobody here can log into;
  * `bootstrap.mjs` parses it on the appliance after the token is spent, and Node-RED evaluates a
  * function node's body at the first tick. Checks: 1. every function node's body compiles, in the
- * wrapper Node-RED puts around it; 2. no metric uses the `{ type, value }` encoding the daemon
- * discards; 3. every placeholder is one `bootstrap.mjs` substitutes; 4. every wire resolves, the
+ * wrapper Node-RED puts around it; 2. no metric is typed by `{ type, value }`, which reaches the
+ * platform untyped, and no byte count travels in the 32-bit `int_value`; 3. every placeholder is one `bootstrap.mjs` substitutes; 4. every wire resolves, the
  * heartbeat is driven only by its injects, and all three collector branches terminate in the cache;
  * 5. every `env.get()` the flow reads is a variable `bootstrap.mjs` writes into /data/gateway.env;
  * 6. the deployed-flow branch reads the file `bootstrap.mjs` and `flow-sync.mjs` agree on, and the
@@ -74,32 +74,33 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
   if (!broken) pass(`all ${functions.length} function nodes compile`);
 }
 
-// 2. No metric uses the encoding the daemon cannot read.
+// 2. Every metric is typed the way the platform reads a type.
 {
+  // json_metric_value() takes the type only from `datatype`: it reads a bare `value` by what the
+  // JSON holds and ignores `type`. The playback recorder does not read a bare `value` at all.
   const legacy = [...raw.matchAll(/\{\s*name:\s*'([^']+)',\s*type:\s*'(String|Int64|Int32|Float|Double|Boolean)'/g)];
   if (legacy.length) {
     fail(
       `${legacy.length} metric(s) use the \`{ name, type, value }\` encoding: `
       + `${legacy.map((m) => m[1]).join(', ')}.\n`
-      + '         parse_sparkplug_payload()\'s JSON branch reads `string_value`, `double_value`,\n'
-      + '         `boolean_value` or `int_value`. A metric carrying none of them arrives with a\n'
-      + '         name and NO VALUE, and is discarded without an error at either end.'
+      + '         The daemon ignores `type`, so the metric arrives with no datatype, and the\n'
+      + '         playback recorder does not read a bare `value`, so a recording replays it empty.\n'
+      + '         Send `datatype` and the typed field, as the rest of the flow does.'
     );
   } else {
-    pass('no metric uses the { name, type, value } encoding the daemon discards');
+    pass('every metric declares `datatype` rather than the { name, type, value } encoding');
   }
 
-  // `int_value` is a uint32 in Sparkplug and the daemon's JSON branch does not read `long_value`,
-  // so any byte count has to travel as a double.
-  const ints = [...raw.matchAll(/name:\s*'([A-Za-z_]*(?:Bytes|_s))',[^}]*int_value/g)];
+  // `int_value` is a 32-bit field, and the daemon drops a metric whose value does not fit it.
+  const ints = [...raw.matchAll(/name:\s*'([A-Za-z_]*Bytes)',[^}]*int_value/g)];
   if (ints.length) {
     fail(
-      `${ints.map((m) => m[1]).join(', ')} sent as \`int_value\`, which is a uint32 (max 4.29 GB)\n`
-      + '         and cannot hold a memory or disk figure. `long_value` is not read by the JSON\n'
-      + '         branch at all; use `double_value`, exact for integers to 2^53.'
+      `${ints.map((m) => m[1]).join(', ')} sent as \`int_value\`, a 32-bit field (max 4.29 GB) that\n`
+      + '         cannot hold a memory or disk figure; the daemon drops the metric once it\n'
+      + '         overflows. Use `double_value`, exact for integers to 2^53, or `long_value`.'
     );
   } else {
-    pass('byte counts avoid int_value, which is a uint32 and too small for them');
+    pass('byte counts avoid int_value, a 32-bit field too small for them');
   }
 }
 
@@ -415,6 +416,6 @@ if (problems.length) {
   process.exit(1);
 }
 console.log(
-  `\n${TEMPLATE} compiles, uses an encoding the daemon reads, and is wired so the collector `
+  `\n${TEMPLATE} compiles, types its metrics the way the daemon reads them, and is wired so the collector `
   + 'cannot take the heartbeat with it.'
 );

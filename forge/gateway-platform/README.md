@@ -51,7 +51,8 @@ over plain HTTP, checks its public key against the pin minted beside the token, 
 then fetches `install.sh` from the platform over TLS with the token in a header. The installer
 puts the packages the playbook needs in place, fetches this playbook (as a zip, from the platform:
 the forge refuses anonymous reads and the appliance has no key yet), runs it, writes the
-appliance's `.env`, and enrols by starting the compose project. Install first, enrol last: every
+appliance's `.env` and, beside it, the pinned root as `platform-root.pem` (the enrolment container
+trusts that file, not the host's store), and enrols by starting the compose project. Install first, enrol last: every
 step before enrolment can be re-run with the same command, and the token is spent only by the
 enrolment. The runbook is in `docs/remote-gateways.md`.
 
@@ -60,7 +61,10 @@ enrolment. The runbook is in `docs/remote-gateways.md`.
 `aber-gateway-converge` (installed by the `converge` role, run by its timer hourly and at boot):
 
 1. reads `platform.yml` from the appliance's checkout of its own repository's `main`
-   (`/var/lib/aber-gateway/data/gitops/repo/platform.yml`), which `flow-sync` keeps current;
+   (`/var/lib/aber-gateway/data/gitops/repo/platform.yml`), which `flow-sync` keeps current.
+   Until the first pull there is none, and the tag enrolment recorded is used. A `platform.yml`
+   that cannot be read (a bad merge, or no `python3-yaml`) is refused and recorded with Python's
+   error, and the appliance stays on the tag it last converged to;
 2. runs `ansible-pull` against this repository at that tag, over SSH with the appliance's own
    deploy key and the forge's pinned host key, the same identity and the same verification the
    puller uses; the key is read-only here and read-write on the gateway's own repository;

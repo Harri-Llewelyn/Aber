@@ -40,9 +40,9 @@ ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
 -- whose key differs produces rows that are present, well-formed, and undecryptable -- and nothing
 -- about the restore reports it. Commit 4ee344e exists because that was found late once already.
 --
--- Its own secret rather than `nodered_admin_token`: that one is only created when the token is
--- supplied, so on a stack installed without Node-RED there would be nothing to decrypt and the
--- assertion would pass by being vacuous.
+-- Its own secret, so the assertion does not rest on which of the platform's secrets this stack
+-- was given: one never supplied leaves nothing to decrypt, and the check would pass by being
+-- vacuous.
 DO $$
 DECLARE
   v_id uuid;
