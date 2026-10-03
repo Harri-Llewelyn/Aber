@@ -1403,8 +1403,8 @@ tbody tr:hover { background: var(--bg-glass); }
   font-weight: 600;
 }
 
-/* A Backups run row stays one line high. The outcome under its status and the Holds list cut to
-   one line (the run's panel has all of each), and the short columns do not wrap. */
+/* A Backups run row stays short. The outcome under its status and the Holds list cut to one line
+   (the run's panel has all of each), and the date and the short columns do not wrap. */
 .backup-run-outcome { max-width: 38ch; }
 .backup-run-failed { color: var(--danger-text); }
 .backup-run-holds { max-width: 28ch; }

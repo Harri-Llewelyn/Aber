@@ -162,8 +162,8 @@ describe('the list of runs', () => {
   it('keeps the short columns on one line', async () => {
     renderTab()
     const cells = within(await screen.findByTestId('run-j-1')).getAllByRole('cell')
-    // Origin, Size, Retention and Off site; Holds cuts to a line like the reason.
-    for (const i of [2, 4, 6, 7]) expect(cells[i]).toHaveClass('backup-run-short')
+    // When, Origin, Size, Retention and Off site; Holds cuts to a line like the reason.
+    for (const i of [0, 2, 4, 6, 7]) expect(cells[i]).toHaveClass('backup-run-short')
     expect(cells[5].firstElementChild).toHaveClass('truncate')
   })
 

@@ -449,7 +449,7 @@ function RunRow({ run, inFloor, offsiteBase: base, retentionDays, releasing, onR
       onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); onSelect() } }}
       title="Open this run's details: its times, its files and the whole of any failure"
     >
-      <td>
+      <td className="backup-run-short">
         {formatDateTime(runWhen(run))}
         {b && <div className="mono cell-meta">{b.stamp}</div>}
       </td>
