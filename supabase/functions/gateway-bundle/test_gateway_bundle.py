@@ -319,8 +319,10 @@ class TestArchiveIntegrity(BundleBase):
         folder = names[0].split("/")[0]
         self.assertTrue(folder.startswith("aber-gateway-"))
 
-        for required in (".env", "docker-compose.yml", "Dockerfile", "bootstrap.mjs",
-                         "flows.template.json", "README.md", "platform-root.pem"):
+        # docs/remote-gateways.md, "What is in the bundle", lists the same files.
+        for required in (".env", "GATEWAY.txt", "platform-root.pem", "docker-compose.yml",
+                         "Dockerfile", "bootstrap.mjs", "flow-sync.mjs", "flows.template.json",
+                         "README.md"):
             self.assertIn(f"{folder}/{required}", names, f"{required} is missing from the bundle")
 
     def test_bootstrap_trusts_the_platform_root_beside_it(self):
