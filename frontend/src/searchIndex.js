@@ -60,6 +60,7 @@ export const CARDS = [
   { id: 'shopfloor-cells',      label: 'Cells',                tab: 'cells',          keywords: ['cell list', 'zones'] },
   { id: 'edge-gateways',        label: 'Gateways',             tab: 'gateways',       keywords: ['gateway list', 'nodes'] },
   { id: 'device-list',          label: 'Devices',              tab: 'devices',        keywords: ['device list', 'assets'] },
+  { id: 'quarantine-queue',     label: 'Quarantine',           tab: 'devices',        view: 'quarantine', keywords: ['quarantine queue', 'onboarding', 'approve device', 'unknown device'] },
   /* No 'Archived Entities' card: it would add no keyword the page entry does not have. */
 
   { id: 'registered-schemas',   label: 'Registered Schemas',   tab: 'schemas',        keywords: ['schema registry', 'versions', 'drafts', 'create version', 'fork'] },
@@ -118,6 +119,8 @@ export function buildTargets(visibleTabs, settings = []) {
       // What the row says under the label. A card's page is the ONLY thing a reader needs to be
       // told, and it is the thing they came to the search not knowing.
       page: visibleTabs.find(t => t.id === c.tab)?.label || c.tab,
+      // The tab of its page a card opens on, where the card is one; the page's default otherwise.
+      view: c.view,
       keywords: c.keywords || []
     }))
 

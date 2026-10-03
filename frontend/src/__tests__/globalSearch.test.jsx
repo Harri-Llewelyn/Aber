@@ -261,6 +261,15 @@ describe('the palette', () => {
     expect(p.onNavigate).not.toHaveBeenCalled()
   })
 
+  it('opens the Quarantine card on the Devices page\'s Quarantine tab', async () => {
+    const p = props()
+    render(<GlobalSearch {...p} />)
+    type('quarantine')
+
+    fireEvent.click(await screen.findByText('Quarantine'))
+    expect(p.onNavigate).toHaveBeenCalledWith('devices', 'quarantine')
+  })
+
   it('opens the highlighted row on Enter', async () => {
     const p = props()
     render(<GlobalSearch {...p} />)

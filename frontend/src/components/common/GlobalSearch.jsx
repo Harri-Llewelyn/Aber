@@ -200,6 +200,9 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
     } else if (result.kind === 'card' && result.target.section && onSelectSection) {
       // A card that is one tab of its page opens the page on that tab.
       onSelectSection(result.target.tabId, result.target.section)
+    } else if (result.target.view) {
+      // A card that is one tab of its page opens on that tab.
+      onNavigate?.(result.target.tabId, result.target.view)
     } else {
       // Any other card navigates to its page and no further: there are no anchors on cards, and
       // claiming to jump to a heading would be worse than landing at the top.
