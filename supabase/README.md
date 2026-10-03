@@ -3332,6 +3332,19 @@ It is now one `SECURITY DEFINER` RPC — atomic, granted to `service_role` only,
 authenticated `p_actor_id` explicitly and **re-checking that actor's role against
 `public.user_roles`** so authorisation does not rest solely on the caller's check.
 
+### A deleted device takes its birth parameters with it (`0029`)
+
+`asset_config` holds the parameters each device declared at birth, keyed by `asset_id`, which is the
+device's `sparkplug_id` as text. With no foreign key to cascade through, every deleted device left
+its rows behind: a Permanent Delete, `purge_expired_archives`, and `scripts/load-test.mjs down`. On
+the dev cluster on 2026-09-28 the table held 25,659 rows for 3,250 `sparkplug_id`s no device carried.
+
+`0029` adds `trg_devices_delete_asset_config`, an `AFTER DELETE` trigger on `devices` that removes
+the device's rows, and deletes the orphans already there. The trigger is `SECURITY DEFINER` so the
+rows go whoever deletes the device: `asset_config` has a DELETE policy of its own, and a DELETE the
+policy filters removes nothing without an error. The quarantine merge re-keys the duplicate's rows onto the
+surviving device before it deletes the duplicate, so the trigger finds none of them.
+
 ### The approvals queue, and the first write an `Operator` has ever had (archived migration 0086)
 
 One queue for a change a person proposes but may not apply. An `Operator` inserts into
