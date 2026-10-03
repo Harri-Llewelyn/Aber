@@ -435,7 +435,7 @@ the same reason: `/docker-entrypoint-initdb.d` runs only on an empty data direct
 | Role | May | Used by |
 | :--- | :--- | :--- |
 | `ingest_writer` | INSERT + SELECT on `telemetry`; upsert `assets` | the ingestion daemon |
-| `fdw_reader` | SELECT the six objects Supabase projects | Supabase's `postgres_fdw` PUBLIC mapping |
+| `fdw_reader` | SELECT only, on each object Supabase projects as a foreign table | Supabase's `postgres_fdw` PUBLIC mapping |
 | `grafana_reader` | SELECT everything the dashboards query | Grafana |
 | `powerbi_reader` | SELECT the three rollups only | external BI |
 

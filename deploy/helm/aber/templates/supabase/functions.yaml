@@ -74,9 +74,6 @@ spec:
             # could only ever be wrong about one of them.
             - name: VERIFY_JWT
               value: {{ .Values.supabaseFunctions.verifyJwt | quote }}
-            - name: NODERED_URL
-              value: http://node-red:1880/flows
-            {{- include "aber.secretEnv" (dict "name" "NODERED_ADMIN_TOKEN" "secretName" $secretName "key" "NODERED_ADMIN_TOKEN") | nindent 12 }}
             # --- AAS export ---------------------------------------------------------------
             # Namespaces every globalAssetId and submodel id the shell carries, so it must name
             # the organisation publishing the document. The default is only correct for a local

@@ -617,7 +617,7 @@ intercepted. This is not cosmetic.
 
 Server-side, the root reaches the broker's clients and the database clients (both below) and
 nothing else: every HTTP hop between services stays on plaintext over in-cluster Service names
-(`token_url`, `api_url`, `NODERED_URL`, and the pg_net webhook all do), so Grafana, Node-RED and
+(`token_url`, `api_url`, and pg_net's calls from the database all do), so Grafana, Node-RED and
 the edge runtime carry no CA bundle for HTTP. That hop is a service mesh's to close, and the
 roadmap records it as answered rather than built.
 

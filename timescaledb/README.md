@@ -401,9 +401,10 @@ tables do not become readable either. `test_bi_reader_grants.py` asserts both ha
 A second role rather than a wider `powerbi_reader`: Power BI is an external business tool that
 should see aggregated buckets only, and Grafana is an internal console whose job is the raw
 signal. Still read-only. It reads the rollups, raw telemetry, `telemetry_latest`, `assets`, the
-archive manifest (every FDW session from the platform opens as this role, so without it
-`cold_storage_rows()` fails inside a panel), `telemetry_gapfill()` (how a report-by-exception
-series must be read), the storage footprint and its function, and `pg_monitor` for the I/O panels.
+archive manifest (for a panel on the historian datasource; no FDW session opens as this role, since
+Supabase maps PUBLIC to `fdw_reader` and `postgres` to the historian's superuser, the mapping the
+SECURITY DEFINER `cold_storage_rows()` reads through), `telemetry_gapfill()` (how a
+report-by-exception series must be read), the storage footprint and its function, and `pg_monitor` for the I/O panels.
 The footprint is not granted to `powerbi_reader`, because the size of the telemetry is an
 operations question.
 

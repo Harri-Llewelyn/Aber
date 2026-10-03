@@ -28,9 +28,6 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // Writes to `devices` outside the caller's RLS context after checking the caller's role.
   "approve-quarantine": ["SUPABASE_SERVICE_ROLE_KEY"],
 
-  // Reads the committed flow from the environment and pushes it to Node-RED's admin API.
-  // No service-role key: it makes no privileged database write.
-
   // Mints a host-run gateway's broker credential and reveals it once, authorised by role through a
   // SECURITY DEFINER RPC that checks has_role() itself. No service-role key: it holds the
   // credential service's bearer token, whose authority is one confined account at the broker.

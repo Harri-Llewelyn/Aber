@@ -1084,17 +1084,20 @@ The resulting behaviour, confirmed against a running `supabase-db`:
 
 ### M4 — `pg_net` egress NetworkPolicy (§10.1)
 
-**Failure:** a default-deny egress policy is the right posture, and it silently kills the
-quarantine webhook. `dispatch_device_quarantine_webhook()` fires outbound HTTP **from inside
-Postgres** via `pg_net`, which is not a shape a service-tier policy anticipates — databases are
-normally egress leaves. pg_net has no retries, ordering or DLQ, so a blocked request is simply
-lost, and nothing surfaces it.
+**Failure:** a default-deny egress policy is the right posture, and it silently drops whatever
+Postgres sends **from inside the database** via `pg_net`, which is not a shape a service-tier
+policy anticipates — databases are normally egress leaves. Two kinds of call leave `supabase-db`:
+`revoke_gateway_credential()` and `sweep_forge()` call edge functions through the gateway, and
+`dispatch_device_quarantine_webhook()` posts to each enabled `device.quarantined` row of
+`webhook_endpoints`. pg_net has no retries, ordering or DLQ, so a blocked request is lost, and the
+only record is a row in `net._http_response`.
 
-**Mitigation:** the policy must explicitly allow egress from `supabase-db` to `supabase-envoy:8000`
-and to the edge runtime, and to Node-RED's webhook receiver. Write these allows **in the same
-change** as the default-deny, never as a follow-up — and add a validation check that fires a
-quarantine event and asserts the webhook arrived, or the gap is invisible until an operator notices
-alerts stopped.
+**Mitigation:** the policy must explicitly allow egress from `supabase-db` to `supabase-envoy:8000`,
+and to `node-red:1880`, where a site serves a webhook with a flow of its own. Write these allows
+**in the same change** as the default-deny, never as a follow-up. No webhook row is seeded, so on a
+fresh install nothing in the database calls Node-RED until a site adds one; a site that does should
+check that its flow receives a quarantine event. A blocked revocation is retried rather than lost:
+the revocation sweep judges each request by its own reply and asks again.
 
 This is also why `webhook_endpoints` has no write RLS policy: a writable endpoint table plus
 database egress is an SSRF primitive. The NetworkPolicy is the second half of that mitigation.
