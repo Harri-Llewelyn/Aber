@@ -14,9 +14,10 @@ import { canDecide } from '../utils/proposalAuthority'
 import { api } from '../api'
 import { ENTITY_KIND_BY_TABLE, ENTITY_TABLE_BY_KIND } from '../constants'
 import { formatDateTime } from '../utils/format'
+import { expectCardHeading } from '../test/cardHeading'
 
 vi.mock('../api', () => ({
-  api: { get: vi.fn(), post: vi.fn(), put: vi.fn() }
+  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), getAuditTrailRow: vi.fn() }
 }))
 
 /**
@@ -86,6 +87,10 @@ async function selectRow(index = 0) {
   return rows[index]
 }
 
+/** The decided proposals are the second tab; Awaiting a decision is the default. */
+const showDecided = () => fireEvent.click(screen.getByRole('tab', { name: 'Decided' }))
+const showAwaiting = () => fireEvent.click(screen.getByRole('tab', { name: /^Awaiting a decision/ }))
+
 const renderTab = (props = {}) => render(
   <ApprovalsTab
     showToast={vi.fn()}
@@ -100,6 +105,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   api.post.mockResolvedValue({})
   api.put.mockResolvedValue({})
+  api.getAuditTrailRow.mockResolvedValue(null)
 })
 
 describe('who may decide which lane', () => {
@@ -178,6 +184,7 @@ describe('the page draws the gate it was given', () => {
       status: 'applied', decided_by: MANAGER_ID, decided_at: new Date().toISOString()
     })])
     renderTab()
+    showDecided()
     await selectRow()
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Withdraw' })).toBeNull()
@@ -266,22 +273,24 @@ describe('the queue is worked from the front', () => {
     expect(within(cards[0]).getByText('Older')).toBeInTheDocument()
   })
 
-  it('gives every selectable row the pointer cursor, and a rejected proposal a readable badge', async () => {
+  it('marks the rows on both tabs as opening the drawer, and a rejected proposal a readable badge', async () => {
     mockLoad([
       deviceProposal({ id: 'open-1', target_label: 'Open one' }),
       deviceProposal({ id: 'rej-1', target_label: 'Rejected one', status: 'rejected', decided_by: MANAGER_ID, decided_at: '2026-09-05T00:00:00Z' })
     ])
     renderTab()
 
-    await screen.findAllByTestId('proposal-row')
-    for (const row of screen.getAllByTestId('proposal-row')) {
-      expect(row.className).toContain('row-selectable')
-    }
+    const [open] = await screen.findAllByTestId('proposal-row')
+    expect(open.tagName).toBe('TR')
+    expect(open).toHaveClass('row-selectable')
+    showDecided()
+    const [rejected] = await screen.findAllByTestId('proposal-row')
+    expect(rejected).toHaveClass('row-selectable')
     expect(document.querySelector('.badge-danger')).not.toBeNull()
     expect(document.querySelector('.badge-offline')).toBeNull()
   })
 
-  it('separates what is waiting from what was decided', async () => {
+  it('separates what is waiting from what was decided, one tab each', async () => {
     mockLoad([
       deviceProposal({ id: 'open-one', target_label: 'Waiting' }),
       deviceProposal({
@@ -291,16 +300,30 @@ describe('the queue is worked from the front', () => {
       })
     ])
     renderTab()
-    const rows = await screen.findAllByTestId('proposal-row')
-    // One row in each table, under its own card.
-    expect(rows).toHaveLength(2)
-    expect(screen.getByText('Awaiting a decision')).toBeInTheDocument()
-    expect(screen.getByText('Decided')).toBeInTheDocument()
+    // Awaiting a decision is the tab the page opens on.
+    expect(screen.getByRole('tab', { name: /^Awaiting a decision/ })).toHaveAttribute('aria-selected', 'true')
+    let rows = await screen.findAllByTestId('proposal-row')
+    expect(rows).toHaveLength(1)
+    expect(within(rows[0]).getByText('Waiting')).toBeInTheDocument()
+
+    showDecided()
+    rows = screen.getAllByTestId('proposal-row')
+    expect(rows).toHaveLength(1)
+    expect(within(rows[0]).getByText('Done')).toBeInTheDocument()
 
     // The reason lives in the drawer now, not on the row -- which is what lets a long list of
     // decisions stay scannable.
-    fireEvent.click(rows[1])
+    fireEvent.click(rows[0])
     expect(screen.getByText(/not this quarter/)).toBeInTheDocument()
+  })
+
+  it('closes the drawer when the tab changes, since its row is no longer on screen', async () => {
+    mockLoad([deviceProposal()])
+    renderTab()
+    await selectRow()
+    expect(document.querySelector('.context-panel-open')).toBeTruthy()
+    showDecided()
+    expect(document.querySelector('.context-panel-open')).toBeNull()
   })
 })
 
@@ -311,6 +334,7 @@ describe('an expired proposal names nobody', () => {
       status: 'expired', decided_by: null, decided_at: '2026-09-05T00:00:00Z'
     })])
     renderTab()
+    showDecided()
     await selectRow()
     expect(screen.getByText(/the expiry timer, which is not a person/)).toBeInTheDocument()
   })
@@ -338,6 +362,7 @@ describe('finding a decision again', () => {
   it('filters by the kind of change', async () => {
     mockLoad(decidedSet())
     renderTab()
+    showDecided()
     await screen.findAllByTestId('proposal-row')
 
     fireEvent.change(screen.getByLabelText('Filter decided proposals by kind'), {
@@ -352,6 +377,7 @@ describe('finding a decision again', () => {
     // The three things somebody remembers about a decision they are trying to find again.
     mockLoad(decidedSet())
     renderTab()
+    showDecided()
     await screen.findAllByTestId('proposal-row')
 
     const box = screen.getByLabelText(/filter decided proposals by what/i)
@@ -369,6 +395,7 @@ describe('finding a decision again', () => {
   it('says when a filter is what emptied the list, not the absence of decisions', async () => {
     mockLoad(decidedSet())
     renderTab()
+    showDecided()
     await screen.findAllByTestId('proposal-row')
 
     fireEvent.change(screen.getByLabelText(/filter decided proposals by what/i), {
@@ -388,12 +415,15 @@ describe('finding a decision again', () => {
       })
     ])
     renderTab()
+    showDecided()
     await screen.findAllByTestId('proposal-row')
 
     fireEvent.change(screen.getByLabelText('Filter decided proposals by kind'), { target: { value: 'schemas' } })
+    showAwaiting()
     const rows = screen.getAllByTestId('proposal-row')
     // The open device proposal survives; only the decided table narrowed.
     expect(rows.some(r => within(r).queryByText('Waiting_Device'))).toBe(true)
+    expect(screen.getByLabelText('Filter open proposals by kind')).toHaveValue('all')
   })
 })
 
@@ -405,6 +435,7 @@ describe('following an approval into the Audit Trail', () => {
       applied_trail_id: 4321
     })])
     renderTab({ onViewTrail })
+    showDecided()
     await selectRow()
 
     fireEvent.click(screen.getByRole('button', { name: /view in audit trail/i }))
@@ -427,6 +458,7 @@ describe('following an approval into the Audit Trail', () => {
       decided_at: '2026-09-06T00:00:00Z', applied_trail_id: 4321
     })])
     renderTab({ onViewTrail })
+    showDecided()
     await selectRow()
 
     fireEvent.click(screen.getByRole('button', { name: /view in audit trail/i }))
@@ -448,6 +480,7 @@ describe('following an approval into the Audit Trail', () => {
       decided_at: '2026-09-06T00:00:00Z', applied_trail_id: 4321
     })])
     renderTab({ onViewTrail })
+    showDecided()
     await selectRow()
 
     fireEvent.click(screen.getByRole('button', { name: /view in audit trail/i }))
@@ -463,6 +496,7 @@ describe('following an approval into the Audit Trail', () => {
       decision_reason: 'no', applied_trail_id: null
     })])
     renderTab({ onViewTrail })
+    showDecided()
     await selectRow()
     expect(screen.queryByRole('button', { name: /view in audit trail/i })).toBeNull()
   })
@@ -543,6 +577,7 @@ describe('the columns say one thing each', () => {
       status: 'applied', decided_by: MANAGER_ID, decided_at: '2026-09-06T10:00:00Z'
     })])
     renderTab()
+    showDecided()
     await selectRow()
     expect(screen.getByText('Decided at')).toBeInTheDocument()
   })
@@ -552,6 +587,7 @@ describe('the columns say one thing each', () => {
       status: 'applied', decided_by: MANAGER_ID, decided_at: '2026-09-06T10:00:00Z'
     })])
     renderTab()
+    showDecided()
     await screen.findAllByTestId('proposal-row')
     fireEvent.change(screen.getByLabelText(/filter decided proposals by what/i), {
       target: { value: 'ops.person' }
@@ -948,43 +984,68 @@ describe('a cell, a gateway or an area proposal names its subject', () => {
   })
 })
 
-describe('the cards count, load in place and light up only when work waits', () => {
+describe('one card, two tabs, no counts, and attention only on work this viewer can do', () => {
   const decidedOne = (id, at) => deviceProposal({
     id, target_label: id, status: 'applied', decided_by: MANAGER_ID, decided_at: at
   })
 
-  it('shows a count on both cards, 0 included, and no attention tint while nothing waits', async () => {
+  it('is one card: the heading, the tab bar inside it, then the toolbar row', async () => {
+    mockLoad([])
+    const { container } = renderTab()
+    await screen.findByText('Nothing is waiting. A proposal appears here when somebody asks for a change they cannot make themselves.')
+    expectCardHeading('Approvals', /proposed but may not make themselves/)
+    expect(document.querySelectorAll('.card')).toHaveLength(1)
+    expect(container.querySelector('.page-layout')).toHaveClass('page-fill')
+    const card = document.querySelector('.card')
+    expect(card).toHaveClass('card-fill')
+    const strip = card.querySelector(':scope > .tab-strip')
+    expect(strip).toBeTruthy()
+    expect(strip.previousElementSibling).toHaveClass('card-heading')
+    const bar = strip.nextElementSibling
+    expect(bar).toHaveClass('filter-bar')
+    // The tab's HelpTip first.
+    const help = within(bar).getByRole('button', { name: 'About the open queue' })
+    expect(bar.firstElementChild.contains(help)).toBe(true)
+  })
+
+  it('counts nothing on the heading or the tabs, and flags nothing while nothing waits', async () => {
     mockLoad([])
     renderTab()
     await screen.findByText('Nothing is waiting. A proposal appears here when somebody asks for a change they cannot make themselves.')
-    const cards = document.querySelectorAll('.approvals-card')
-    expect(cards).toHaveLength(2)
-    for (const card of cards) {
-      expect(card.querySelector('.section-count')).toHaveTextContent('0')
-    }
-    expect(cards[0].className).not.toContain('card-attention')
+    expect(document.querySelector('.card-heading .section-count')).toBeNull()
+    expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['Awaiting a decision', 'Decided'])
+    expect(document.querySelector('.tab-strip-attention')).toBeNull()
   })
 
-  it('tints the awaiting card while it holds something, and counts the narrowed rows', async () => {
+  it('flags Awaiting with how many this viewer may decide, leaving out their own and the schema lane', async () => {
     mockLoad([
       deviceProposal({ id: 'o1', target_label: 'Lathe_01' }),
-      deviceProposal({ id: 'o2', target_label: 'Press_02', entity_type: 'cells' })
+      deviceProposal({ id: 'o2', target_label: 'Press_02', entity_type: 'cells' }),
+      deviceProposal({ id: 'mine', target_label: 'Mine', proposed_by: MANAGER_ID }),
+      schemaProposal()
     ])
     renderTab()
     await screen.findAllByTestId('proposal-row')
-    const [awaiting] = document.querySelectorAll('.approvals-card')
-    expect(awaiting.className).toContain('card-attention')
-    expect(awaiting.querySelector('.section-count')).toHaveTextContent('2')
-
+    const awaiting = screen.getByRole('tab', { name: 'Awaiting a decision, 2 waiting' })
+    expect(awaiting.querySelector('.tab-strip-attention')).toHaveTextContent('2')
+    // A filter narrows the list, not the work waiting.
     fireEvent.change(screen.getByLabelText('Filter open proposals by kind'), { target: { value: 'cells' } })
-    expect(awaiting.querySelector('.section-count')).toHaveTextContent('1 / 2')
+    expect(screen.getByRole('tab', { name: 'Awaiting a decision, 2 waiting' })).toBeInTheDocument()
   })
 
-  it('keeps the heading and both cards on screen while the first load runs', () => {
+  it('flags nothing for a viewer who may decide none of it', async () => {
+    mockLoad([deviceProposal({ id: 'o1', proposed_by: 'somebody-else' })])
+    renderTab({ userRole: 'Operator', currentUserId: OPERATOR_ID })
+    await screen.findAllByTestId('proposal-row')
+    expect(screen.getByRole('tab', { name: 'Awaiting a decision' })).toBeInTheDocument()
+    expect(document.querySelector('.tab-strip-attention')).toBeNull()
+  })
+
+  it('keeps the heading and the card on screen while the first load runs', () => {
     api.get.mockImplementation(() => new Promise(() => {}))
     renderTab()
     expect(screen.getByRole('heading', { name: 'Approvals' })).toBeInTheDocument()
-    expect(screen.getAllByText('Loading proposals…')).toHaveLength(2)
+    expect(screen.getAllByText('Loading proposals…')).toHaveLength(1)
   })
 
   it('lists the decided proposals by decision time, newest first', async () => {
@@ -993,6 +1054,7 @@ describe('the cards count, load in place and light up only when work waits', () 
       decidedOne('Decided-late', '2026-09-09T00:00:00Z')
     ])
     renderTab()
+    showDecided()
     const rows = await screen.findAllByTestId('proposal-row')
     expect(within(rows[0]).getByText('Decided-late')).toBeInTheDocument()
   })
@@ -1002,5 +1064,141 @@ describe('the cards count, load in place and light up only when work waits', () 
     renderTab()
     const [row] = await screen.findAllByTestId('proposal-row')
     expect(row.querySelector('.badge-pending .badge-dot')).not.toBeNull()
+  })
+})
+
+describe('the diff says what happened, by status', () => {
+  const heading = () => document.querySelector('.context-panel-facts .context-panel-section-label').textContent
+  const columns = () => [...document.querySelectorAll('.modal-table thead th')].map(th => th.textContent)
+  const cells = () => [...document.querySelectorAll('.modal-table tbody tr')]
+    .map(tr => [...tr.cells].map(td => td.textContent))
+  const applied = (over = {}) => deviceProposal({
+    status: 'applied', decided_by: MANAGER_ID, decided_at: '2026-09-06T10:00:00Z',
+    applied_trail_id: 4321,
+    // The live row already holds the applied value, which is why it cannot be Before.
+    current: { name: 'Cell 4 Lathe' }, ...over
+  })
+
+  it('says what an open proposal would change, Now against Proposed, flagging a no-op part', async () => {
+    mockLoad([deviceProposal({ patch: { name: 'Cell 4 Lathe', description: 'same' }, current: { name: 'Lathe_01', description: 'same' } })])
+    renderTab()
+    await selectRow()
+    expect(heading()).toBe('What would change')
+    expect(columns()).toEqual(['Field', 'Now', 'Proposed'])
+    expect(cells()).toEqual([['Name', 'Lathe_01', 'Cell 4 Lathe'], ['Description', 'same', 'sameunchanged']])
+  })
+
+  it('says what an applied proposal changed, Before from its audit record against After', async () => {
+    api.getAuditTrailRow.mockResolvedValue({ id: 4321, action: 'PROPOSAL_APPLIED', replaced: { name: 'Lathe_01' } })
+    mockLoad([applied()])
+    renderTab()
+    showDecided()
+    await selectRow()
+    expect(heading()).toBe('What changed')
+    await waitFor(() => expect(columns()).toEqual(['Field', 'Before', 'After']))
+    expect(cells()).toEqual([['Name', 'Lathe_01', 'Cell 4 Lathe']])
+    expect(api.getAuditTrailRow).toHaveBeenCalledWith(4321)
+    // Applied means it changed: the live row matching the patch is not a no-op.
+    expect(screen.queryByText('unchanged')).toBeNull()
+  })
+
+  it('shows After alone, and says why, when the viewer cannot read the audit record', async () => {
+    api.getAuditTrailRow.mockResolvedValue(null)
+    mockLoad([applied()])
+    renderTab()
+    showDecided()
+    await selectRow()
+    expect(await screen.findByText(/You cannot read the audit record this change wrote/)).toBeInTheDocument()
+    expect(columns()).toEqual(['Field', 'After'])
+    expect(cells()).toEqual([['Name', 'Cell 4 Lathe']])
+    expect(screen.queryByText('unchanged')).toBeNull()
+  })
+
+  it('treats a refused read as an unreadable record', async () => {
+    api.getAuditTrailRow.mockRejectedValue(new Error('permission denied'))
+    mockLoad([applied()])
+    renderTab()
+    showDecided()
+    await selectRow()
+    expect(await screen.findByText(/You cannot read the audit record this change wrote/)).toBeInTheDocument()
+    expect(columns()).toEqual(['Field', 'After'])
+  })
+
+  it.each(['rejected', 'withdrawn', 'expired'])('says what a %s proposal asked for, Proposed alone', async (status) => {
+    mockLoad([deviceProposal({ status, decided_at: '2026-09-06T10:00:00Z', decided_by: MANAGER_ID })])
+    renderTab()
+    showDecided()
+    await selectRow()
+    expect(heading()).toBe('What was proposed')
+    expect(columns()).toEqual(['Field', 'Proposed'])
+    expect(cells()).toEqual([['Name', 'Cell 4 Lathe']])
+    // Nothing was changed, so no audit record is read.
+    expect(api.getAuditTrailRow).not.toHaveBeenCalled()
+  })
+})
+
+describe('a row opens its proposal from the keyboard too', () => {
+  it('is in the Tab order, and Enter on it toggles the drawer', async () => {
+    mockLoad([deviceProposal()])
+    renderTab()
+    const [row] = await screen.findAllByTestId('proposal-row')
+    expect(row).toHaveAttribute('tabindex', '0')
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(document.querySelector('.context-panel-open')).toBeTruthy()
+    expect(row).toHaveClass('row-selected')
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(document.querySelector('.context-panel-open')).toBeNull()
+  })
+
+  it('opens on Space as well, and the click toggles it the same way', async () => {
+    mockLoad([deviceProposal()])
+    renderTab()
+    const [row] = await screen.findAllByTestId('proposal-row')
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(document.querySelector('.context-panel-open')).toBeTruthy()
+    fireEvent.click(row)
+    expect(document.querySelector('.context-panel-open')).toBeNull()
+  })
+
+  it('ignores a key pressed inside the row rather than on it', async () => {
+    mockLoad([deviceProposal()])
+    renderTab()
+    const [row] = await screen.findAllByTestId('proposal-row')
+    fireEvent.keyDown(row.querySelector('td strong'), { key: 'Enter' })
+    expect(document.querySelector('.context-panel-open')).toBeNull()
+  })
+})
+
+describe('the drawer carries the proposal icon and one primary action, listed first', () => {
+  const primaries = () => [...document.querySelectorAll('.context-panel-actions .btn-primary')]
+  const firstAction = () => document.querySelector('.context-panel-actions .context-action')
+
+  it('makes Approve the primary for somebody who may decide', async () => {
+    mockLoad([deviceProposal()])
+    renderTab()
+    await selectRow()
+    expect(document.querySelector('.context-panel-open .context-panel-icon svg')).toBeTruthy()
+    expect(primaries()).toHaveLength(1)
+    expect(firstAction()).toHaveTextContent('Approve')
+    expect(firstAction()).toHaveClass('btn-primary')
+  })
+
+  it('makes the hand-over the primary on your own open proposal', async () => {
+    mockLoad([deviceProposal()])
+    renderTab({ userRole: 'Operator', currentUserId: OPERATOR_ID, onOpenSubject: vi.fn() })
+    await selectRow()
+    expect(primaries()).toHaveLength(1)
+    expect(firstAction()).toHaveTextContent('Add to this proposal')
+  })
+
+  it('makes View in Audit Trail the primary on an applied proposal', async () => {
+    mockLoad([deviceProposal({
+      status: 'applied', decided_by: MANAGER_ID, decided_at: '2026-09-06T00:00:00Z', applied_trail_id: 4321
+    })])
+    renderTab({ onViewTrail: vi.fn() })
+    showDecided()
+    await selectRow()
+    expect(primaries()).toHaveLength(1)
+    expect(firstAction()).toHaveTextContent('View in Audit Trail')
   })
 })

@@ -7,10 +7,15 @@ A machine identity can propose too, if an Administrator gave it that permission.
 ## What the controls do
 
 - There is no form on this page. A change is asked for on the entity's own page: open the device, area, cell or gateway and use **Propose a Change**, which opens the same dialog that edits it. A nameplate change starts from the device's **Digital Nameplate…**. Change only what you want changed, and say why. A field you leave alone is not part of the proposal.
-- Selecting a proposal opens it beside the queue, with **What would change**: each field, its value now and the value proposed. A field already at the proposed value is marked **unchanged**. A subject that no longer exists is marked **MISSING**, and approving it fails rather than recreating anything.
+- The page has two tabs: **Awaiting a decision**, where it opens, and **Decided**. While proposals you may decide are waiting, the Awaiting tab carries a warning mark and how many; your own proposals and kinds you may not decide are not counted.
+- Selecting a row, by clicking it or with Enter, opens the proposal beside the list; selecting it again closes it. What it shows depends on the status:
+  - **What would change**, while it is open: each field, its value **Now** and the value **Proposed**. A field already at the proposed value is marked **unchanged**.
+  - **What changed**, once applied: each field **Before** and **After**. Before comes from the Audit Trail row the approval wrote, because the entity now holds After. If you may not read that row, only After is shown, with a note saying so.
+  - **What was proposed**, once rejected, withdrawn or expired: the **Proposed** values alone. Nothing was changed, and today's value may have moved since.
+- A subject that no longer exists is marked **MISSING**, and approving it fails rather than recreating anything.
 - **Approve** applies the change there and then, in one transaction, as you. **Reject** refuses it and requires a reason. **Withdraw** is your own proposal's exit, and only the person who filed it can use it.
 - **Add to this proposal** takes you to the entity's page with your open proposal loaded into its dialog, so you can add to it rather than filing a second one.
-- Each card has a **kind** filter, a search box (the subject, the proposer, the reason or rationale, or an id) and **Clear filters**. The count beside each title is the number of rows in the card, and reads "shown / total" while a filter narrows it. **Awaiting a decision** is tinted while it holds something.
+- Each tab has its own **kind** filter, whose options say how many proposals each kind holds, a search box (the subject, the proposer, the reason or rationale, or an id) and **Clear filters**.
 - The columns are **Subject**, **Change** (the kind of change), **Field(s) changed**, **Status** and **When**. Hover a time for the full date. The drawer adds who proposed it, when it was proposed and decided, the reason, the rationale, the proposal's UUID and the Audit Trail row.
 - The database decides which fields a proposal may name, and checks again at approval. The dialog disables a field no proposal may name, and says why.
 

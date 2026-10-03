@@ -821,6 +821,38 @@ const apiMethods = {
   },
 
   /**
+   * One audit row by id, read from `audit_trail` as the reads beside it are, so its policies
+   * decide; null when the row is absent or hidden from the caller.
+   *
+   * An approval's row (PROPOSAL_APPLIED, `change_proposals.applied_trail_id`) carries no
+   * `old_data`: the values it replaced are on the UPDATE the target's own trigger wrote in the
+   * same transaction. For that row `replaced` is that UPDATE's `old_data`, or null where it
+   * cannot be read.
+   */
+  getAuditTrailRow: async (id) => {
+    const { data, error } = await supabase
+      .from('audit_trail')
+      .select('id,entity_type,entity_id,action,old_data,new_data,recorded_at,causation_id')
+      .eq('id', id)
+      .limit(1);
+    const row = !error && data?.[0];
+    if (!row) return null;
+    if (row.action !== 'PROPOSAL_APPLIED' || row.causation_id == null) return row;
+
+    const { data: change, error: changeError } = await supabase
+      .from('audit_trail')
+      .select('old_data')
+      .eq('causation_id', row.causation_id)
+      .eq('entity_type', row.entity_type)
+      .eq('entity_id', row.entity_id)
+      .eq('action', 'UPDATE')
+      // A nameplate approval can INSERT the row before it UPDATEs it; the UPDATE is the later one.
+      .order('id', { ascending: false })
+      .limit(1);
+    return { ...row, replaced: (!changeError && change?.[0]?.old_data) || null };
+  },
+
+  /**
    * The jtis `auth_pre_request()` is currently refusing, as a Set.
    *
    * Separate from listServiceTokens(): that is the permanent history, this reads

@@ -1,13 +1,13 @@
-import React, { useState, useCallback, useMemo } from 'react'
+import React, { useState, useCallback, useMemo, useRef } from 'react'
 import { api } from '../../api'
 import { POLL_INTERVAL_MS, ENTITY_KIND_BY_TABLE } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { IconPencil, IconCheck, IconX, IconArchive, IconHistory, IconInbox } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
-import { PageHeading } from '../common/PageHeading'
+import { CardHeading } from '../common/CardHeading'
+import { TabStrip } from '../common/TabStrip'
 import { Badge } from '../common/Badge'
-import { SectionCount } from '../common/SectionCount'
 import { SearchInput } from '../common/SearchInput'
 import { ClearFilters } from '../common/ClearFilters'
 import { LoadingState } from '../common/LoadingState'
@@ -168,8 +168,24 @@ export function ActorLabel({ id, email, machineName, currentUserId }) {
   return <span className="mono" title={id}>{String(id).slice(0, 8)}</span>
 }
 
-/** The before/after table, drawn in the drawer. */
-function DiffTable({ proposal, names }) {
+/**
+ * The drawer's diff heading, by status: what an open proposal would change, what an applied one
+ * changed, and, for one that changed nothing, what was asked for.
+ */
+function diffHeading(status) {
+  if (status === 'open') return 'What would change'
+  if (status === 'applied') return 'What changed'
+  return 'What was proposed'
+}
+
+/**
+ * The diff, drawn in the drawer. Open: Now against Proposed, flagging a part that is already true.
+ * Applied: Before against After, where Before is `replaced`, the values the approval's audit record
+ * says it replaced, since the live row now holds After; `undefined` while that is read, null when
+ * the viewer cannot read it. Otherwise: Proposed alone, because nothing was changed and Now may
+ * have moved since.
+ */
+function DiffTable({ proposal, names, replaced }) {
   const rows = diffRows(proposal)
   if (proposal.entity_type === 'schemas') {
     return (
@@ -180,24 +196,39 @@ function DiffTable({ proposal, names }) {
     )
   }
   if (rows.length === 0) return <p className="form-hint">This proposal changes nothing.</p>
+
+  const open = proposal.status === 'open'
+  const applied = proposal.status === 'applied'
+  if (applied && replaced === undefined) return <p className="form-hint">Reading the audit record…</p>
+  const before = open ? 'Now' : applied && replaced ? 'Before' : null
+  const after = applied ? 'After' : 'Proposed'
   return (
-    <table className="modal-table">
-      <thead>
-        <tr><th>Field</th><th>Now</th><th>Proposed</th></tr>
-      </thead>
-      <tbody>
-        {rows.map(r => (
-          <tr key={r.key}>
-            <td>{keyLabel(r.key)}</td>
-            <td className="cell-meta"><ValueCell value={r.from} names={names} /></td>
-            <td>
-              <strong><ValueCell value={r.to} names={names} /></strong>
-              {r.unchanged && <Badge size="sm" className="badge-follow">unchanged</Badge>}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <>
+      {applied && !replaced && (
+        <p className="form-hint">You cannot read the audit record this change wrote, so its old values are not shown.</p>
+      )}
+      <table className="modal-table">
+        <thead>
+          <tr><th>Field</th>{before && <th>{before}</th>}<th>{after}</th></tr>
+        </thead>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.key}>
+              <td>{keyLabel(r.key)}</td>
+              {before && (
+                <td className="cell-meta">
+                  <ValueCell value={open ? r.from : replaced[r.key]} names={names} />
+                </td>
+              )}
+              <td>
+                <strong><ValueCell value={r.to} names={names} /></strong>
+                {open && r.unchanged && <Badge size="sm" className="badge-follow">unchanged</Badge>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
   )
 }
 
@@ -291,6 +322,13 @@ function ProposalTable({ rows, selectedId, onSelect, loading, filtered, emptyMes
                 data-testid="proposal-row"
                 className={`row-selectable${selectedId === p.id ? ' row-selected' : ''}`}
                 onClick={rowSelectHandler(() => onSelect(p.id))}
+                /* In the Tab order: Enter or Space on the row toggles the drawer, as a click does. */
+                tabIndex={0}
+                onKeyDown={e => {
+                  if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+                  e.preventDefault()
+                  onSelect(p.id)
+                }}
                 title="Click to inspect this proposal in the details panel"
               >
                 <td>
@@ -334,11 +372,15 @@ export function filterProposals(rows, kind, query) {
   })
 }
 
-/** The kind-and-text filter bar, identical over both queues because the queues are one shape. */
-function ProposalFilters({ rows, kind, onKind, query, onQuery, placeholder, label }) {
+/**
+ * The kind-and-text filter bar, identical over both queues because the queues are one shape. `help`
+ * is the tab's HelpTip, drawn first.
+ */
+function ProposalFilters({ rows, kind, onKind, query, onQuery, placeholder, label, help }) {
   const activeFilterCount = (kind !== 'all' ? 1 : 0) + (query ? 1 : 0)
   return (
     <div className="filter-bar">
+      {help}
       <select
         className="form-control control-md"
         value={kind}
@@ -383,6 +425,8 @@ export function ApprovalsTab({
   const [rejecting, setRejecting] = useState(null)
   const [busyId, setBusyId]       = useState(null)
   const [selectedId, setSelectedId] = useState(null)
+  // The tab: 'open' (Awaiting a decision) or 'decided'.
+  const [queue, setQueue] = useState('open')
   const [decidedKind, setDecidedKind] = useState('all')
   const [decidedQuery, setDecidedQuery] = useState('')
   const [openKind, setOpenKind] = useState('all')
@@ -416,6 +460,7 @@ export function ApprovalsTab({
      `useState(initialSubject)` would run once and ignore every later hand-over. */
   React.useEffect(() => {
     if (!initialSubject) return
+    setQueue('open')
     setOpenQuery(initialSubject)
     // Both queues are narrowed, so a decided proposal about the same device does not sit unfiltered
     // below.
@@ -449,9 +494,37 @@ export function ApprovalsTab({
   const openFiltered = useMemo(
     () => filterProposals(open, openKind, openQuery), [open, openKind, openQuery])
 
+  /* What waits on this viewer, by the rule the sidebar's count uses: lanes they may decide, and not
+     their own requests. */
+  const waiting = useMemo(
+    () => open.filter(p => p.proposed_by !== currentUserId && canDecide(p.entity_type, userRole)).length,
+    [open, currentUserId, userRole]
+  )
+
+  // A row on the other tab is not on screen, so changing tab closes the drawer.
+  const chooseQueue = (id) => { setQueue(id); setSelectedId(null) }
+  // A row opens its proposal in the drawer, and the open row closes it.
+  const toggleSelected = (id) => setSelectedId(cur => (cur === id ? null : id))
+
   // Resolved fresh every render, so a proposal that is decided out from under the drawer -- by the
   // poller, or by somebody else -- closes it rather than leaving a stale row on screen.
   const selected = proposals.find(p => p.id === selectedId) || null
+
+  /* The values an applied proposal replaced, by audit row id: absent while being read, null where
+     the viewer cannot read the row. Read once per row, because the trail is append-only. */
+  const [replacedByTrail, setReplacedByTrail] = useState(() => new Map())
+  const requestedTrails = useRef(new Set())
+  const trailId = selected?.status === 'applied' && selected.entity_type !== 'schemas'
+    ? selected.applied_trail_id ?? null
+    : null
+  React.useEffect(() => {
+    if (trailId === null || requestedTrails.current.has(trailId)) return
+    requestedTrails.current.add(trailId)
+    api.getAuditTrailRow(trailId)
+      .then(row => row?.replaced ?? null, () => null)
+      .then(replaced => setReplacedByTrail(m => new Map(m).set(trailId, replaced)))
+  }, [trailId])
+  const replaced = trailId === null ? null : replacedByTrail.get(trailId)
 
   const decide = async (proposal, action, reason) => {
     setBusyId(proposal.id)
@@ -503,7 +576,7 @@ export function ApprovalsTab({
     // Only when there is a row to open: `applied_trail_id` is set by an approval and by nothing
     // else.
     ...(selected.applied_trail_id && onViewTrail ? [{
-      label: 'View in Audit Trail', icon: <IconHistory size={13} />,
+      label: 'View in Audit Trail', primary: true, icon: <IconHistory size={13} />,
       title: 'The audit row this approval wrote, naming both the proposer and the approver',
       // Filtered to the subject's own kind: `audit_trail_page()` compares `entity_type` exactly,
       // and the approval row is filed under that kind's table. A deleted subject's rows are hidden
@@ -519,7 +592,7 @@ export function ApprovalsTab({
          from this proposal. One open proposal per entity per person, so a second field extends
          the request. */
       ...(onOpenSubject ? [{
-        label: 'Add to this proposal', icon: <IconPencil size={13} />,
+        label: 'Add to this proposal', primary: true, icon: <IconPencil size={13} />,
         title: 'Open this entity, where the same dialog that edits it will extend your request',
         onClick: () => onOpenSubject(selected)
       }] : []),
@@ -534,73 +607,75 @@ export function ApprovalsTab({
   ]
 
   return (
-    <div className="page-layout">
+    /* One card, the two queues as its tabs; the table scrolls inside it. */
+    <div className="page-layout page-fill">
       <div className="page-main">
-
-        {/* No Propose a Change card: the act starts on the entity's own page. */}
-        <PageHeading icon={<IconInbox size={15} />} title="Approvals">
-          Changes people have proposed but may not make themselves; nothing is written until someone
-          who may make the change approves it.
-        </PageHeading>
-
-        <div className={`card approvals-card${open.length > 0 ? ' card-attention' : ''}`}>
-          <div className="card-header">
-            <h3 className="section-title">
-              Awaiting a decision
-              <HelpTip
-                label="About the open queue"
-                text="The working queue, oldest first. Select a row to see exactly what would change. Approving applies it in one transaction, so a proposal that breaks a rule fails here rather than later."
-              />
-              <SectionCount total={open.length} shown={openFiltered.length} />
-            </h3>
-          </div>
-          <div className="card-body">
-            <ProposalFilters
-              rows={open} kind={openKind} onKind={setOpenKind}
-              query={openQuery} onQuery={setOpenQuery}
-              label="open proposals"
-              placeholder="Search subject, proposer or rationale…"
-            />
-          </div>
-          <ProposalTable
-            rows={openFiltered}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            loading={loading}
-            filtered={openKind !== 'all' || Boolean(openQuery)}
-            emptyMessage="Nothing is waiting. A proposal appears here when somebody asks for a change they cannot make themselves."
-            filteredMessage="Nothing open matches these filters."
+        {/* No Propose a Change control: the act starts on the entity's own page. */}
+        <div className="card card-fill">
+          <CardHeading
+            icon={<IconInbox size={15} />}
+            title="Approvals"
+            description="Changes people have proposed but may not make themselves; nothing is written until someone who may make the change approves it."
           />
-        </div>
-
-        <div className="card approvals-card">
-          <div className="card-header">
-            <h3 className="section-title">
-              Decided
-              <HelpTip
-                label="About decided proposals"
-                text="What was applied, rejected, withdrawn or left to expire, newest decision first, kept for the retention period an Administrator sets. What an approval changed lives in the Audit Trail."
-              />
-              <SectionCount total={decided.length} shown={decidedFiltered.length} />
-            </h3>
-          </div>
-          <div className="card-body">
-            <ProposalFilters
-              rows={decided} kind={decidedKind} onKind={setDecidedKind}
-              query={decidedQuery} onQuery={setDecidedQuery}
-              label="decided proposals"
-              placeholder="Search subject, proposer or reason…"
-            />
-          </div>
-          <ProposalTable
-            rows={decidedFiltered}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            loading={loading}
-            filtered={decidedKind !== 'all' || Boolean(decidedQuery)}
-            emptyMessage="Nothing has been decided yet."
-            filteredMessage="No decided proposal matches these filters."
+          <TabStrip
+            ariaLabel="Approvals queue"
+            value={queue}
+            onChange={chooseQueue}
+            tabs={[
+              { id: 'open', label: 'Awaiting a decision', attention: waiting },
+              { id: 'decided', label: 'Decided' },
+            ]}
           />
+
+          {queue === 'open' ? (
+            <>
+              <ProposalFilters
+                rows={open} kind={openKind} onKind={setOpenKind}
+                query={openQuery} onQuery={setOpenQuery}
+                label="open proposals"
+                placeholder="Search subject, proposer or rationale…"
+                help={(
+                  <HelpTip
+                    label="About the open queue"
+                    text="The working queue, oldest first. Select a row to see exactly what would change. Approving applies it in one transaction, so a proposal that breaks a rule fails here rather than later."
+                  />
+                )}
+              />
+              <ProposalTable
+                rows={openFiltered}
+                selectedId={selectedId}
+                onSelect={toggleSelected}
+                loading={loading}
+                filtered={openKind !== 'all' || Boolean(openQuery)}
+                emptyMessage="Nothing is waiting. A proposal appears here when somebody asks for a change they cannot make themselves."
+                filteredMessage="Nothing open matches these filters."
+              />
+            </>
+          ) : (
+            <>
+              <ProposalFilters
+                rows={decided} kind={decidedKind} onKind={setDecidedKind}
+                query={decidedQuery} onQuery={setDecidedQuery}
+                label="decided proposals"
+                placeholder="Search subject, proposer or reason…"
+                help={(
+                  <HelpTip
+                    label="About decided proposals"
+                    text="What was applied, rejected, withdrawn or left to expire, newest decision first, kept for the retention period an Administrator sets. Select a row to see what it changed or asked for."
+                  />
+                )}
+              />
+              <ProposalTable
+                rows={decidedFiltered}
+                selectedId={selectedId}
+                onSelect={toggleSelected}
+                loading={loading}
+                filtered={decidedKind !== 'all' || Boolean(decidedQuery)}
+                emptyMessage="Nothing has been decided yet."
+                filteredMessage="No decided proposal matches these filters."
+              />
+            </>
+          )}
         </div>
       </div>
 
@@ -609,6 +684,7 @@ export function ApprovalsTab({
         onClose={() => setSelectedId(null)}
         type="PROPOSAL"
         subject="proposal"
+        icon={<IconInbox size={15} />}
         onCopy={showToast}
         title={selected?.target_label || ''}
         subtitle={selected && (
@@ -663,8 +739,8 @@ export function ApprovalsTab({
         ] : []}
         beforeActions={selected && (
           <div>
-            <div className="context-panel-section-label">What would change</div>
-            <DiffTable proposal={selected} names={locationNames} />
+            <div className="context-panel-section-label">{diffHeading(selected.status)}</div>
+            <DiffTable proposal={selected} names={locationNames} replaced={replaced} />
           </div>
         )}
         actions={panelActions}

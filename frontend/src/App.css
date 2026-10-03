@@ -4811,10 +4811,6 @@ tr.row-selectable.row-selected > td:last-child::after { background-color: var(--
   line-height: 1.45;
 }
 
-/* Between the approvals cards. Deliberately not `.card + .card`, for the reason the directory
-   groups give: several pages stack cards that are meant to sit tight against each other. */
-.approvals-card + .approvals-card { margin-top: var(--stack); }
-
 /* The banner at the top of a dialog somebody may not save. Neutral, not a warning: nothing has gone
    wrong, so it takes the muted surface every other explanatory strip takes. The button is pushed to
    the far end by the span's own flex. */
