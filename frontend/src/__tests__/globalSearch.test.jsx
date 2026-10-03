@@ -267,7 +267,8 @@ describe('the palette', () => {
     type('quarantine')
 
     fireEvent.click(await screen.findByText('Quarantine'))
-    expect(p.onNavigate).toHaveBeenCalledWith('devices', 'quarantine')
+    expect(p.onSelectSection).toHaveBeenCalledWith('devices', 'quarantine')
+    expect(p.onNavigate).not.toHaveBeenCalled()
   })
 
   it('opens the highlighted row on Enter', async () => {

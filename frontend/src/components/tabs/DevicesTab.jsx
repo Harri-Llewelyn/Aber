@@ -84,7 +84,7 @@ import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 const CELL_FILTER_UNASSIGNED = '__unassigned__'
 const CELL_FILTER_SITE_WIDE = '__site_wide__'
 
-export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewTrail, onViewApprovals, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter, initialView, onClearView, activeAlerts = [] }) {
+export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewTrail, onViewApprovals, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter, initialSection, onClearSection, activeAlerts = [] }) {
   /**
    * Which devices have an alert firing on them, via utils/deviceAlerts.js so the Site Map, Cells and
    * Gateways resolve alerts the same way.
@@ -131,15 +131,17 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [areas, setAreas]       = useState([])
   const [form, setForm]         = useState(blank)
   const [filterMode, setFilterMode] = useState('active')
-  // The card's tab: 'registered' or 'quarantine'. `initialView` is a one-shot hand-over from App
+  // The card's tab: 'registered' or 'quarantine'. `initialSection` is a one-shot hand-over from App
   // (the rail's quarantine signal, the search), consumed and cleared so a second one still lands.
-  const [view, setView] = useState(initialView === 'quarantine' ? 'quarantine' : 'registered')
+  const [view, setView] = useState(initialSection === 'quarantine' ? 'quarantine' : 'registered')
   useEffect(() => {
-    if (initialView !== 'quarantine') return
-    setView('quarantine')
-    setSelectedId(null)
-    onClearView?.()
-  }, [initialView, onClearView])
+    if (!initialSection) return
+    if (initialSection === 'quarantine') {
+      setView('quarantine')
+      setSelectedId(null)
+    }
+    onClearSection?.()
+  }, [initialSection, onClearSection])
   // The device whose export dialog is open, or null.
   const [exportFor, setExportFor] = useState(null)
 

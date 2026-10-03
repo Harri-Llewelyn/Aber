@@ -177,11 +177,11 @@ describe('the Quarantine tab', () => {
   })
 
   it('opens on the Quarantine tab when App hands it over, and clears the hand-over', async () => {
-    const onClearView = vi.fn()
-    await show([device()], [queued], () => true, { initialView: 'quarantine', onClearView })
+    const onClearSection = vi.fn()
+    await show([device()], [queued], () => true, { initialSection: 'quarantine', onClearSection })
 
     expect(tab(/^Quarantine/)).toHaveAttribute('aria-selected', 'true')
-    expect(onClearView).toHaveBeenCalled()
+    expect(onClearSection).toHaveBeenCalled()
   })
 
   it('lands a quarantined device named by another page on the Quarantine tab, with no panel', async () => {
