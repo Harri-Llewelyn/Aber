@@ -220,8 +220,9 @@ MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credent
 # The broker-credential machinery whose failure is silent, in isolation and with no stack: the
 # boot reconcile that must never lose a client, the control-API protocol, and the filter deciding
 # which accounts the orphan sweep may disable — which is what keeps it from revoking
-# `aber_ingestion` and stopping the stack ingesting. Also node-red-init against a volume from
-# before the rename to Aber, which must keep its flow byte for byte apart from the moved node.
+# `aber_ingestion` and stopping the stack ingesting. Also node-red-init against a seeded volume:
+# one tls-config node shared by every broker, and a broker node with no credential pair stopping
+# the boot.
 npm run test:lib
 
 # THE MIGRATION MODEL'S CENTRAL INVARIANT — needs the stack up, and replays db-init a second

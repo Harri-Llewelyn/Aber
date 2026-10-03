@@ -5368,6 +5368,9 @@ current settings, a changed size limit takes effect on the next boot rather than
 dropped, and for the private buckets `public: false` is re-asserted. The buckets are created
 sequentially, not with `Promise.all`, so a failure part-way through names the bucket that failed.
 
+**Nothing removes a bucket.** This script only creates and reconciles, and `storage-policies.sql`
+only replaces what it names, so a bucket the platform stops declaring is deleted by hand.
+
 **The buckets are a list in code, not parameters.** They differ in the setting that matters most,
 whether they are public, and expressing that as an environment variable would leave "is this
 bucket public?" answerable only by reading a `.env` file. `asset-exports` and `area-plans` are fixed names rather

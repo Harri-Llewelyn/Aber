@@ -3203,38 +3203,17 @@ function edgeFunctionNames() {
     'the writer thread, threading.Thread and daemon_threads beside the audit trail and audit_trail',
   ];
 
-  const STORAGE_POLICIES = ['supabase/storage-policies.sql', 'deploy/helm/aber/files/storage-policies/storage-policies.sql'];
   /** [file or directory/, the phrase marking the paragraph kept (null: the whole file), why]. */
   const KEPT = [
     ['supabase/migrations/archive/', null, 'never executed: the record of what each archived migration did'],
     ['docs/incidents.md', null, 'names what each incident happened to'],
     ['.gitleaksignore', null, 'its fingerprints name historical paths and must match them exactly'],
-    [['scripts/storage-init.mjs', 'deploy/helm/aber/files/scripts/storage-init.mjs'], "{ from: 'floor-plans', to: 'area-plans' }", 'RENAMED_BUCKETS moves the old bucket'],
-    [STORAGE_POLICIES, ['under its old name, floor-plans', "policyname LIKE 'floor_plans_%'", 'floor-plans policies gone'],
-      "drops the old bucket's policies and path check, and asserts they are gone"],
-    [['scripts/lib/mosquitto-dynsec.mjs', 'deploy/helm/aber/files/gateway-credential-lib/mosquitto-dynsec.mjs'], 'RETIRED_PLATFORM_USERNAMES =',
-      'the boot reconcile removes the old broker accounts'],
-    ['scripts/lib/mosquitto-dynsec.test.mjs', /factoryplus_/, 'tests that removal'],
-    ['scripts/check-broker-config.mjs', /factoryplus_/, 'plants the old accounts and asserts the broker refuses them'],
-    ['supabase/functions/_shared/forge.ts', 'RETIRED_FLOW_SHAPE_CONTEXTS =', 'the sweep removes the old status context from branch rules'],
-    ['supabase/functions/forge-sweep/test_forge_sweep.py', 'RETIRED_FLOW_SHAPE_CONTEXT =', 'tests that removal'],
-    ['node-red/node-red-init.mjs', ["['.factoryplus-seeded'", 'LEGACY_TLS_NODE =', 'LEGACY_CREDENTIALS_ENV_KEY ='], 'moves the old names on the volume'],
-    ['node-red/node-red-init.test.mjs', /factoryplus-tls-config/, 'plants the old tls-config node and asserts it moves'],
-    ['node-red/node-red-init.test.mjs', /acsCredentialsEnv/, 'plants the old broker-node property and asserts it moves'],
-    ['frontend/src/searchIndex.js', /floor plan/, 'search keywords find a page by its old word'],
     ['ingestion/README.md', "ACS's `acs-edge`", 'names the upstream ACS component'],
     ['test-harness/load_generator.py', 'NOT the demonstration simulator', 'says what the load generator is not'],
     ['test-harness/README.md', 'Not the demonstration simulator', 'says what the load generator is not'],
     ['deploy/helm/aber/values.yaml', 'The demonstration simulator was removed', 'history, beside the value it explains'],
     ['docs/gateway.md', "Envoy kept the Kong Service's name", "the gateway's History"],
-    ['mosquitto/README.md', 'RETIRED_PLATFORM_USERNAMES', 'the removal of the old accounts'],
     ['README.md', 'It used to come up with a four-cell simulated shopfloor', 'what a fresh install used to hold'],
-    ['frontend/src/__tests__/auditTrailPurgedEntity.test.jsx', /ui\.digital_thread_lane_limit/, 'an old row on the trail names the retired setting'],
-    ['frontend/src/constants.js', 'export const RENAMED_TABS', 'the old route opens the Audit Trail'],
-    ['frontend/src/__tests__/appRouting.test.jsx', /\/digital-thread/, 'tests the old route'],
-    ['frontend/src/searchIndex.js', /digital thread/, 'search keywords find the Audit Trail by its old name'],
-    [['grafana/provisioning/alerting/alert-rules.yaml', 'deploy/helm/aber/files/grafana-alerting/alert-rules.yaml'],
-      'uid: aber-digital-thread-partitions', 'deleteRules drops the old rule from a Grafana that loaded it'],
   ];
 
   const THIS_FILE = 'scripts/check-docs-drift.mjs';
