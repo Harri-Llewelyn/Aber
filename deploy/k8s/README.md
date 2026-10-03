@@ -1068,7 +1068,7 @@ from the node CIDR via `networkPolicy.extraEgress`.
 
 **Two rules are load-bearing and easy to miss:** DNS egress on **both** UDP and TCP 53 (a response
 over 512 bytes falls back to TCP, so a UDP-only rule fails *intermittently*), and
-`supabase-db → node-red:1880` — the quarantine webhook goes there **directly**, not through the
+`supabase-db → node-red:1880` — a webhook to Node-RED goes there **directly**, not through the
 gateway, and
 pg_net has no retries or DLQ, so blocking it drops every notification silently.
 

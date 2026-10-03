@@ -3118,6 +3118,16 @@ Built by `0041`–`0044`, `0074`, `0075`, `supabase/functions/gateway-credential
 > *transition* trigger, not a hook on every write — ingestion stamps `last_heartbeat` constantly,
 > so a blanket hook would emit ~2 HTTP calls/min/gateway of noise.
 
+### The seeded quarantine webhook is retired (`0031`)
+
+The triggers post to each enabled `webhook_endpoints` row for `device.quarantined`, and none is
+seeded. `0002` used to seed one for `http://node-red:1880/hooks/quarantine`, a path the retired demo
+flow served; Node-RED's seeded flow is blank now, so every quarantine produced a 404 that pg_net
+recorded in `net._http_response` and nobody read. `0002` no longer seeds it, and `0031` deletes it,
+matched by its id **and** its original URL so a site that re-pointed it at a flow of its own keeps
+the row. Webhooks stay: a row a site adds whose `secret_name` is `nodered_webhook_jwt_secret` is
+signed with the key Node-RED's `httpNodeAuth` verifies every `http in` request against.
+
 ---
 
 ## Edge Functions

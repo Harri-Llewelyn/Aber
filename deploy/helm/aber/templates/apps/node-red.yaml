@@ -26,9 +26,9 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  # THE NAME IS `node-red`: webhook_endpoints seeds http://node-red:1880/hooks/quarantine as the
-  # pg_net target. (The deploy-nodered function reached the same Service at /flows until it was
-  # retired with the demonstrator.)
+  # THE NAME IS `node-red`: a webhook_endpoints row a site adds reaches its flow as
+  # http://node-red:1880/<path>. (The deploy-nodered function reached the same Service at /flows
+  # until it was retired with the demonstrator.)
   name: node-red
   labels:
     {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}

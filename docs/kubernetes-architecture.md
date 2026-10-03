@@ -797,7 +797,7 @@ Compose port layout 1:1:
 
 Path-based routing on a single host is possible but fragile here: Grafana needs
 `serve_from_sub_path` plus a matching `root_url`, Node-RED needs `httpAdminRoot` *and*
-`httpNodeRoot` moved (which changes the quarantine webhook's path, which is registered in
+`httpNodeRoot` moved (which changes the path of any webhook a site registers in
 `webhook_endpoints` in the database), and Studio is a Next.js app with its own basePath assumptions.
 Subdomains avoid all three. Document single-host as unsupported rather than half-supporting it.
 
@@ -1161,11 +1161,11 @@ Two rules matter more than the rest:
   spends so much effort preventing. Both protocols because a response over 512 bytes falls back to
   TCP, so a UDP-only rule works until a query gets large enough and then fails *intermittently*.
 - **`supabase-db → node-red:1880`.** The obvious `pg_net` allow-list is the gateway and the edge runtime,
-  and **the quarantine webhook goes through neither**:
-  `webhook_endpoints` seeds `http://node-red:1880/hooks/quarantine` directly. pg_net
-  has no retries, no ordering and no DLQ, so blocking it drops every quarantine notification with no
-  error, no queue and no log — the first sign is an operator noticing alerts stopped weeks earlier.
-  CI asserts this flow specifically.
+  and **a webhook to Node-RED goes through neither**: pg_net posts a `webhook_endpoints` row's URL
+  directly, and Node-RED is where a site serves one with a flow of its own. None is seeded since
+  `0031` removed the quarantine hook nothing served. pg_net has no retries, no ordering and no DLQ, so
+  blocking it drops every notification with no error, no queue and no log — the first sign is an
+  operator noticing alerts stopped weeks earlier. CI asserts this flow specifically.
 
 **Two knobs cannot be inferred and are the reason this is opt-in:** which namespace CoreDNS is in,
 and which namespace the ingress controller is in. A wrong value on the second means every route 502s

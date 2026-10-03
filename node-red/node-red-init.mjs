@@ -394,10 +394,10 @@ const SETTINGS_JS = `/**
  *                          role from the nodered-userinfo edge function.
  *   adminAuth.tokens    -- services calling the admin API. Verifies a Supabase access token
  *                          a service forwards for the operator it acts for.
- *   httpNodeAuth        -- the http-in nodes (POST /hooks/quarantine). adminAuth does NOT
+ *   httpNodeAuth        -- every http-in node a flow adds. adminAuth does NOT
  *                          cover these: they mount under httpNodeRoot, a separate Express
- *                          mount (Node-RED's red.js:426), which is why the webhook stayed open
- *                          in every design that only set adminAuth.
+ *                          mount (Node-RED's red.js:426), so a design that sets only adminAuth
+ *                          leaves every http-in node open.
  */
 const OAuth2Strategy = require(${JSON.stringify(`${RUNTIME_DIR}/passport-oauth2`)});
 const jwt = require(${JSON.stringify(`${RUNTIME_DIR}/jsonwebtoken`)});
@@ -680,12 +680,13 @@ module.exports = {
   },
 
   /**
-   * Authentication for the http-in nodes (POST /hooks/quarantine). A function, because Node-RED
-   * accepts Express middleware here, which allows a bearer check instead of HTTP Basic.
+   * Authentication for every http-in node, before routing, so a path no node serves answers 401
+   * too. A function, because Node-RED accepts Express middleware here, which allows a bearer
+   * check instead of HTTP Basic.
    *
    * The token is not the admin credential and must never be: a flow author can read
-   * msg.req.headers, so anything sent here is readable by every flow. The database mints a fresh
-   * 60-second JWT per event, scoped aud=node-red-hooks.
+   * msg.req.headers, so anything sent here is readable by every flow. The database's webhook
+   * dispatcher mints a fresh 60-second JWT per event, scoped aud=node-red-hooks.
    */
   httpNodeAuth: function (req, res, next) {
     const header = req.headers.authorization || '';

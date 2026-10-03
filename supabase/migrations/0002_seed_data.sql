@@ -2590,15 +2590,6 @@ SELECT set_config('aber.dir_gitea_public_url',   '', false);
 SELECT set_config('aber.dir_docs_public_url',     '', false);
 SELECT set_config('aber.dir_supabase_public_url', '', false);
 
--- -------------------------------------------------------------------------------------------
--- Outbound webhook targets  (1 row)
--- -------------------------------------------------------------------------------------------
--- Migration-managed and given no write RLS policy: a writable endpoint table is an SSRF
--- primitive. pg_net has no retries, ordering or dead-letter queue: advisory notifications only.
-
-INSERT INTO public.webhook_endpoints VALUES ('3484ec9d-e07f-49ee-8aa3-f95d40d38a54', 'device.quarantined', 'http://node-red:1880/hooks/quarantine', 'nodered_admin_token', true, '2026-08-02 05:44:42.806298+00')
-ON CONFLICT (event_key, url) DO NOTHING;
-
 -- ---------------------------------------------------------------------------------------------
 -- Sequence reconciliation
 -- ---------------------------------------------------------------------------------------------
@@ -2700,9 +2691,8 @@ DECLARE
   v_token TEXT := current_setting('aber.nodered_admin_token', true);
   v_id    UUID;
 BEGIN
-  -- An absent token is the default stack's normal state: Node-RED runs without adminAuth, so
-  -- there is nothing to authenticate with. Seeding an empty secret would be indistinguishable
-  -- from a real one at dispatch time, so record nothing and let the webhook go unauthenticated.
+  -- An absent token is the default: the break-glass static-token path is shut. An empty secret
+  -- would be indistinguishable from a real one to whatever reads it, so record nothing.
   IF v_token IS NULL OR v_token = '' THEN
     RAISE NOTICE 'vault: nodered_admin_token not supplied; leaving it unset';
     RETURN;
@@ -2714,8 +2704,7 @@ BEGIN
     PERFORM vault.create_secret(
       v_token,
       'nodered_admin_token',
-      'Bearer token for the Node-RED admin API. Read by '
-      'public.dispatch_device_quarantine_webhook() (archived migration 0027).'
+      'Bearer token for the Node-RED admin API: NODERED_ADMIN_TOKEN, the break-glass path.'
     );
   ELSE
     -- update_secret rather than create: supabase-db-init replays every migration on every
@@ -8249,11 +8238,11 @@ SELECT public.ensure_cron_job(
 -- =============================================================================================
 -- Node-RED authentication
 --
--- Closes the Node-RED admin API and webhook receiver on port 1880. The application half lives
+-- Closes the Node-RED admin API and its `http in` nodes on port 1880. The application half lives
 -- in node-red/Dockerfile, node-red/node-red-init.mjs and supabase/functions/nodered-userinfo.
 -- This provides the two things only the database can: the OAuth client Node-RED authenticates
--- humans with (auth.oauth_clients), and the signing key for the quarantine webhook's token in
--- Vault, plus a dispatch function that mints a short-lived token per event.
+-- humans with (auth.oauth_clients), and the key webhook tokens are signed with in Vault, which
+-- the webhook dispatcher uses to mint a short-lived token per event.
 --
 -- PSQL VARIABLES: `-v nodered_oauth_client_secret`, `-v nodered_webhook_jwt_secret`,
 -- `-v nodered_redirect_uri`. An absent secret leaves the corresponding path shut.
@@ -8333,11 +8322,12 @@ END $$;
 SELECT set_config('aber.nodered_oauth_client_secret', '', false);
 
 -- ---------------------------------------------------------------------------------------------
--- 2. Vault: the quarantine webhook SIGNING KEY
+-- 2. Vault: the webhook SIGNING KEY
 -- ---------------------------------------------------------------------------------------------
 -- A signing key, not a bearer credential: a flow author can read msg.req.headers, so sharing
--- the admin token with the webhook would hand every flow the admin API. HS256 because pgjwt
--- implements only the HS family. See tutorial/README.md -> "Node-RED authentication".
+-- the admin token with a webhook would hand every flow the admin API. Node-RED's httpNodeAuth
+-- verifies every `http in` request against the same key. HS256 because pgjwt implements only
+-- the HS family. See tutorial/README.md -> "Node-RED authentication".
 DO $$
 DECLARE
   v_secret TEXT := current_setting('aber.nodered_webhook_jwt_secret', true);
@@ -8346,9 +8336,9 @@ BEGIN
   IF v_secret IS NULL OR v_secret = '' THEN
     -- Unlike the pre-authentication default, an absent key here is NOT normal and does not fail
     -- open: dispatch below sends no Authorization header, and Node-RED's httpNodeAuth answers
-    -- 401. The webhook stops working, visibly, rather than the endpoint staying open.
-    RAISE WARNING 'vault: nodered_webhook_jwt_secret not supplied; the quarantine webhook will '
-                  'be rejected by Node-RED (401). Set NODERED_WEBHOOK_JWT_SECRET in .env.';
+    -- 401. A webhook stops working, visibly, rather than the endpoint staying open.
+    RAISE WARNING 'vault: nodered_webhook_jwt_secret not supplied; a webhook to Node-RED will '
+                  'be rejected (401). Set NODERED_WEBHOOK_JWT_SECRET in .env.';
     RETURN;
   END IF;
 
@@ -8358,7 +8348,7 @@ BEGIN
     PERFORM vault.create_secret(
       v_secret,
       'nodered_webhook_jwt_secret',
-      'HS256 signing key for the Node-RED quarantine webhook. Read by '
+      'HS256 signing key for webhooks to Node-RED, and what its httpNodeAuth verifies. Read by '
       'public.dispatch_device_quarantine_webhook(), which mints a fresh 60-second token per '
       'event. NOT a bearer credential and NOT the Node-RED admin token -- see archived migration 0006.'
     );
@@ -8378,7 +8368,7 @@ BEGIN
       PERFORM vault.create_secret(
         v_secret,
         'nodered_webhook_jwt_secret',
-        'HS256 signing key for the Node-RED quarantine webhook. Read by '
+        'HS256 signing key for webhooks to Node-RED, and what its httpNodeAuth verifies. Read by '
         'public.dispatch_device_quarantine_webhook(), which mints a fresh 60-second token per '
         'event. NOT a bearer credential and NOT the Node-RED admin token -- see archived migration 0006.'
       );
@@ -8387,17 +8377,6 @@ BEGIN
 END $$;
 
 SELECT set_config('aber.nodered_webhook_jwt_secret', '', false);
-
--- ---------------------------------------------------------------------------------------------
--- 3. Repoint the webhook endpoint at the new secret
--- ---------------------------------------------------------------------------------------------
--- An explicit UPDATE, because the seeded row is `ON CONFLICT DO NOTHING` and an edit there
--- would never reach an existing database. Guarded on the old value so an operator who has
--- deliberately repointed this row is not overwritten.
-UPDATE public.webhook_endpoints
-   SET secret_name = 'nodered_webhook_jwt_secret'
- WHERE event_key = 'device.quarantined'
-   AND secret_name = 'nodered_admin_token';
 
 \if :{?supabase_functions_url}
 \else

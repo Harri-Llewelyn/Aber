@@ -509,7 +509,7 @@ Two consequences worth stating on the front page; both are detailed in
 
 - **Node-RED is not an open port.** A `function` node runs arbitrary JavaScript in a container
   holding the MQTT credential, so anyone who could replace a flow had remote code execution on the
-  edge host. The editor and `/flows` use OAuth2 + PKCE; `POST /hooks/quarantine` takes a 60-second
+  edge host. The editor and `/flows` use OAuth2 + PKCE; an `http in` node accepts only a 60-second
   per-event signed token, deliberately not the admin credential, because any flow author can read it
   from `msg.req.headers`.
 - **The `asset-3d-models` bucket is public-read**, because an exported AAS `File` URL must resolve

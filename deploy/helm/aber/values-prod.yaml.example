@@ -180,8 +180,8 @@ secrets:
 
   noderedCredentialSecret: ""
   noderedOAuthClientSecret: ""
-  # openssl rand -hex 32. A SIGNING key, not a bearer credential -- /hooks/quarantine is an
-  # `http in` node, so any flow author can read msg.req.headers.
+  # openssl rand -hex 32. A SIGNING key, not a bearer credential -- Node-RED's `http in` nodes
+  # verify against it, and any flow author can read msg.req.headers.
   noderedWebhookJwtSecret: ""
   # LEAVE EMPTY. Break-glass static token that bypasses Supabase Auth entirely.
   noderedAdminToken: ""

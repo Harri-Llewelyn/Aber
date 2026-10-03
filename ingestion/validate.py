@@ -2878,12 +2878,13 @@ def verify_results():
     # spread across a generated settings.js, an image carrying the modules it requires, and an init
     # script that reconciles the file onto an existing volume. The three probes are not redundant:
     # adminAuth covers httpAdminRoot and httpNodeAuth covers httpNodeRoot, separate Express mounts,
-    # so a settings.js declaring only the first leaves the webhook receiver open.
+    # so a settings.js declaring only the first leaves every http-in node open. The third path has no
+    # node: httpNodeAuth runs before routing, so 401 rather than 404 is what proves it is declared.
     try:
         probes = [
             ("GET", "/flows", None, "admin API read"),
             ("POST", "/flows", b"[]", "admin API write"),
-            ("POST", "/hooks/quarantine", b"{}", "quarantine webhook receiver"),
+            ("POST", "/hooks/validate-probe", b"{}", "http-in nodes (httpNodeAuth)"),
         ]
         unauthenticated = []
         for method, path, body, label in probes:
@@ -2902,7 +2903,7 @@ def verify_results():
                 unauthenticated.append(f"{method} {path} -> {status} ({label})")
 
         if not unauthenticated:
-            print("✅ 7. NODE-RED AUTHENTICATION: admin API and webhook receiver both answer 401 "
+            print("✅ 7. NODE-RED AUTHENTICATION: admin API and http-in nodes both answer 401 "
                   "to unauthenticated callers.")
             # 7b. And that a real sign-in still works. Node-RED's editor resolves the user twice,
             # adminAuth.authenticate at login and adminAuth.users on every request after it, and a
