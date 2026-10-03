@@ -1254,8 +1254,9 @@ Four features that came after the first working chart, each with a design note w
 
 - **Internal CA** (`deploy/k8s/internal-ca.yaml`) — a self-signed root booting a `aber-ca`
   `ClusterIssuer`, deliberately outside Helm so `helm uninstall` cannot take the root private key.
-  The chart was already issuer-agnostic, so this needed no template change; ACME remains the option
-  for a genuinely public domain, and cannot work for an internal one.
+  The chart names the issuer rather than creating it, so this needed no template change. It is the
+  only supported issuer: Aber runs on the site's network, and a public one cannot validate a private
+  domain or supply the root Remote enrolment hands each appliance.
 - **MQTTS on 8883** — a conditionally-appended listener, cert-manager `Certificate` with IP SANs, the
   external Service port, `SIGHUP`-based certificate reload with no broker restart, and opt-in TLS for
   the two in-cluster clients with the CA projected `ca.crt`-only.
@@ -1483,7 +1484,7 @@ reads as a schema fault; `helm test` (M6) queries the foreign table to pin it.
 **Clients project `ca.crt` alone.** The broker's `mosquitto-tls` and each database's Secret are
 `kubernetes.io/tls`, so they hold the server's private key beside the CA; mounting the whole
 Secret into every client pod would hand each of them the key that lets anything impersonate the
-server, when verifying a certificate needs only the public CA. `items` restricts the projection at
+server, when verifying a certificate needs only the CA's certificate. `items` restricts the projection at
 the kubelet, so the key is never written into a client's filesystem. Both databases are issued by
 one issuer, so one CA verifies either, and the client-side helpers render nothing while TLS is off
 so a caller adds them unconditionally. libpq's own variables (`PGSSLMODE`, `PGSSLROOTCERT`) cover

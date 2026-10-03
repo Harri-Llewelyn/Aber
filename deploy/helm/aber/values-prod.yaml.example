@@ -323,8 +323,7 @@ ingress:
     enabled: true
     secretName: aber-tls
     certManager:
-      # `aber-ca` is the internal CA. Swap for an ACME issuer (letsencrypt-prod) ONLY if the
-      # domain is genuinely public -- ACME cannot validate an internal one at all.
+      # `aber-ca` is the internal CA (deploy/k8s/internal-ca.yaml), the supported issuer.
       clusterIssuer: aber-ca
 
 # TLS to both databases, from the same issuer. Every client verifies the server; each database

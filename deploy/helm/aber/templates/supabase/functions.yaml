@@ -217,7 +217,7 @@ spec:
             {{- /* The platform's root, for the one-liner's pin: the CA that signs the API's own
                    certificate, which is the one an appliance must trust to reach this function.
                    ca.crt and tls.crt, never the Secret whole (it also holds tls.key); tls.crt
-                   without ca.crt is an issuer that publishes no root, such as ACME. Optional so
+                   without ca.crt is not from the internal CA, and nothing is minted. Optional so
                    the pod starts before cert-manager has issued: kubelet fills the volume when the
                    Secret appears, and main/index.ts reads it at each spawn until it holds a root.
                    While it is empty, gateway-bundle mints neither a bundle nor a command. */}}

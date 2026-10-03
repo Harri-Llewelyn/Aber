@@ -4483,8 +4483,8 @@ HTTP by the frontend at `/.well-known/aber/ca.pem` (`nginx.conf`, `frontend.yaml
 where stage 0 fetches it; the chart hands the functions that address as `ABER_CA_URL`. The mount is
 optional so the pods start before cert-manager has issued, and `main/index.ts` reads it at each
 spawn until it holds a root, so a pod that started first needs no restart. While the mount is empty
-on an HTTPS platform, `gateway-bundle` refuses both the bundle and the command and mints no token;
-an issuer that publishes no root (ACME) leaves `ca.crt` out, and the bundle then carries none. The same
+on an HTTPS platform, `gateway-bundle` refuses both the bundle and the command and mints no token,
+as it does when the Secret carries no `ca.crt`: only the internal CA is supported. The same
 root reaches the appliance's `bootstrap` container as `platform-root.pem` beside the compose
 project, which its `NODE_EXTRA_CA_CERTS` names: the installer copies the root stage 0 verified,
 and the ZIP bundle carries `ABER_CA_PEM`, or an empty file when there is none.

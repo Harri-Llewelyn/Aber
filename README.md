@@ -410,6 +410,12 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 
 ## Security model
 
+**Aber runs on a site's own network.** It is built for the devices, gateways and people on one
+shopfloor network, with every service behind the deployment's internal CA
+([`deploy/k8s/internal-ca.yaml`](deploy/k8s/internal-ca.yaml)). Reaching it from outside that network
+is the operator's to arrange, over a VPN they manage. It is not built or supported as an
+internet-facing or cloud-hosted service, and public certificates are not a supported configuration.
+
 Fail-closed throughout: edge functions and RLS policies deny by default, and a missing or
 unrecognised role produces `403`.
 

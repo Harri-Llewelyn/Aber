@@ -8,7 +8,7 @@ import { brokerPublicHost, platformPublicUrl } from "../_shared/publicAddresses.
 import { BUNDLE_VERSION, newCredentialSecret, renderGatewayEnv } from "../_shared/gatewayEnv.ts";
 import {
   CERTIFICATE_UNISSUED,
-  certificateUnissued,
+  platformRootMissing,
   noRootReason,
   platformRootPem,
   platformRootState,
@@ -336,13 +336,16 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
-    // Neither form while the certificate an appliance must verify is unissued: the bundle would
-    // carry no root and the command no pin, so the first call would fail. Checked before minting.
-    if (certificateUnissued(publicUrl, platformRootState())) {
-      console.error("the ingress certificate is not issued yet; nothing minted");
+    // Neither form while there is no root an appliance could verify the platform with: the bundle
+    // would carry none and the command no pin, so the first call would fail. Checked before minting.
+    const rootState = platformRootState();
+    if (platformRootMissing(publicUrl, rootState)) {
+      console.error(`the platform has no root to hand an appliance (${rootState}); nothing minted`);
       return json(503, {
-        error: "The platform's certificate has not been issued yet",
-        details: `${CERTIFICATE_UNISSUED}. No enrolment token was minted.`,
+        error: rootState === "unissued"
+          ? "The platform's certificate has not been issued yet"
+          : "The platform's certificate carries no root an appliance can trust",
+        details: `${rootState === "unissued" ? CERTIFICATE_UNISSUED : noRootReason(rootState)}. No enrolment token was minted.`,
       });
     }
 
@@ -447,9 +450,8 @@ export default async function handler(req: Request): Promise<Response> {
     }));
 
     // The root that signs this platform's API certificate, which bootstrap's first call trusts
-    // through NODE_EXTRA_CA_CERTS. Empty where the issuer publishes none (a publicly trusted
-    // certificate) or ingress TLS is off: Node reads an empty file as no extra roots, where a
-    // missing one logs a warning.
+    // through NODE_EXTRA_CA_CERTS. Empty only where ingress TLS is off: Node reads an empty file as
+    // no extra roots, where a missing one logs a warning.
     const root = platformRootPem();
     files[`${folder}/${PLATFORM_ROOT_FILE}`] = strToU8(root ? `${root}\n` : "");
 

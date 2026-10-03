@@ -24,9 +24,9 @@ export const PLATFORM_ROOT_DIR = "/home/deno/ca";
 
 /**
  * What the mount holds. `root`: ca.crt is a certificate, so there is a pin. `no-root`: the
- * certificate is issued and its issuer publishes no root (an ACME issuer), so no pin, which is
- * correct. `unissued`: the mount is there and empty, so cert-manager has not issued the ingress
- * certificate and no appliance could verify the platform yet. `unmounted`: ingress TLS is off.
+ * certificate is issued but its Secret carries no ca.crt, so there is no root to give an appliance;
+ * only the internal CA is supported, and it always publishes one. `unissued`: the mount is there and
+ * empty, so cert-manager has not issued the ingress certificate yet. `unmounted`: ingress TLS is off.
  */
 export type PlatformRootState = "root" | "no-root" | "unissued" | "unmounted";
 
@@ -84,9 +84,9 @@ export const CERTIFICATE_UNISSUED =
   "until the certificate is Ready and ask again; supabase-functions reads the root when it " +
   "appears, with no restart";
 
-/** Whether to refuse both forms: an appliance must verify an HTTPS platform, and cannot yet. */
-export function certificateUnissued(publicUrl: string, state: PlatformRootState | null): boolean {
-  return publicUrl.startsWith("https://") && state === "unissued";
+/** Whether to refuse both forms: an appliance must verify an HTTPS platform, and could not. */
+export function platformRootMissing(publicUrl: string, state: PlatformRootState | null): boolean {
+  return publicUrl.startsWith("https://") && (state === "unissued" || state === "no-root");
 }
 
 /** Why there is no root to pin, by what main/index.ts found in the mount. */
@@ -95,8 +95,8 @@ export function noRootReason(state: PlatformRootState | null): string {
     case "unissued":
       return CERTIFICATE_UNISSUED;
     case "no-root":
-      return "the ingress certificate's issuer publishes no root (its Secret has no ca.crt, as with an " +
-        "ACME issuer), so there is nothing for the command to pin";
+      return "the ingress TLS Secret has no ca.crt, so there is no root to give an appliance. Issue the " +
+        "ingress certificate from the internal CA (deploy/k8s/internal-ca.yaml), which publishes its root there";
     case "root":
       return "the ingress TLS Secret's ca.crt does not parse as a certificate";
     case "unmounted":

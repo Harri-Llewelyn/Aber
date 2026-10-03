@@ -536,9 +536,9 @@ database owner.
 
 ### TLS
 
-The chart is **issuer-agnostic**: it names a cert-manager issuer and never assumes what kind it is.
-An internal CA is the default for an on-premises cluster; ACME is the alternative for a genuinely
-public domain.
+Every certificate comes from the **internal CA** created below, and it is the only supported
+issuer: Aber runs on the site's own network, on a private domain. The chart names that issuer
+rather than creating it, because the root's private key must outlive any release.
 
 #### 0. Install cert-manager — once per cluster
 
@@ -573,11 +573,10 @@ This deliberately lives **outside Helm**. It holds the deployment's root private
 unverifiable, and re-issuing means redistributing a new root to every machine that trusts this one.
 It is also cluster-scoped and shared, and a 10-year artefact against a chart upgraded monthly.
 
-> **Why not Let's Encrypt.** ACME cannot serve this target. HTTP-01 needs the cluster reachable from
-> the public internet, DNS-01 needs a public zone plus provider API credentials in a Secret, a
-> *wildcard* requires DNS-01 specifically, and an internal-only domain cannot be validated at all.
-> Nothing in the chart is ACME-specific, so swapping `clusterIssuer` for an ACME issuer is the whole
-> change if you do have a public domain.
+> **Public certificates are not supported.** ACME cannot validate a private domain, and Remote
+> enrolment hands each appliance the root from the broker's Secret (`ca.crt`), which a public issuer
+> does not put there: enrolment refuses without it. Reaching the site from outside its network is
+> the operator's to arrange, over a VPN they manage.
 
 #### 2. Turn on ingress TLS and broker TLS
 

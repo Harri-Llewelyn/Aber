@@ -1,6 +1,6 @@
 import {
   CERTIFICATE_UNISSUED,
-  certificateUnissued,
+  platformRootMissing,
   noRootReason,
   platformRootReader,
   platformRootState,
@@ -76,16 +76,18 @@ Deno.test("the state reaches the worker as ABER_CA_STATE, and anything else read
 });
 
 Deno.test("an unissued certificate is refused with its cause and remedy; each state says why", () => {
-  assert.equal(certificateUnissued("https://api.factory.example", "unissued"), true);
-  assert.equal(certificateUnissued("http://api.localhost", "unissued"), false, "plain HTTP verifies nothing");
-  for (const state of ["root", "no-root", "unmounted", null] as const) {
-    assert.equal(certificateUnissued("https://api.factory.example", state), false, String(state));
+  for (const state of ["unissued", "no-root"] as const) {
+    assert.equal(platformRootMissing("https://api.factory.example", state), true, state);
+  }
+  assert.equal(platformRootMissing("http://api.localhost", "unissued"), false, "plain HTTP verifies nothing");
+  for (const state of ["root", "unmounted", null] as const) {
+    assert.equal(platformRootMissing("https://api.factory.example", state), false, String(state));
   }
   assert.equal(noRootReason("unissued"), CERTIFICATE_UNISSUED);
   assert.match(CERTIFICATE_UNISSUED, /not issued/);
   assert.match(CERTIFICATE_UNISSUED, /UNABLE_TO_VERIFY_LEAF_SIGNATURE/);
   assert.match(CERTIFICATE_UNISSUED, /no restart/);
-  assert.match(noRootReason("no-root"), /ACME/);
+  assert.match(noRootReason("no-root"), /internal CA/);
   assert.match(noRootReason("unmounted"), /ingress\.tls is off/);
   assert.match(noRootReason(null), /restart supabase-functions/);
 });

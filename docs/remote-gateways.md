@@ -155,7 +155,7 @@ bundle-installed appliance until somebody runs the platform playbook on it once 
 aber-gateway-<name>-<sparkplug_id>/
 ├── .env                  generated per gateway — the only file that differs between bundles
 ├── GATEWAY.txt           which gateway this is, and the two commands. Self-identifying on a USB stick
-├── platform-root.pem     the root that issued the platform's certificate; empty when it is publicly trusted
+├── platform-root.pem     the root that issued the platform's certificate; empty only with ingress TLS off
 ├── docker-compose.yml     bootstrap (one-shot) + node-red + flow-sync + node-exporter
 ├── Dockerfile             thin layer on a pinned nodered/node-red
 ├── bootstrap.mjs          first-boot provisioning
@@ -171,13 +171,14 @@ Everything except `.env`, `GATEWAY.txt` and `platform-root.pem` is mirrored verb
 platform's public URL from inside the container, which trusts the roots bundled with Node and not
 the host's store, so a certificate from an internal CA fails there even on a host that trusts it.
 The compose file points `NODE_EXTRA_CA_CERTS` at this file, which the function fills from the same
-root the install command pins (`ABER_CA_PEM`). An empty file adds nothing and logs nothing, which is
-right for an issuer that publishes no root, such as ACME: Node's bundled roots verify the platform.
+root the install command pins (`ABER_CA_PEM`). It is empty only on a platform without ingress TLS,
+where an empty file adds nothing and logs nothing.
 
-**Nothing is minted before the platform's certificate exists.** On an HTTPS platform whose ingress
-certificate cert-manager has not issued yet, `gateway-bundle` answers `503` for the bundle and the
-command alike and mints no token, since an appliance could not verify the platform. Once it is
-issued, the functions read the root from their mount on the next request, with no restart.
+**Nothing is minted without a root to hand over.** On an HTTPS platform whose ingress certificate
+cert-manager has not issued yet, or whose Secret carries no `ca.crt` because it was not issued by
+the internal CA, `gateway-bundle` answers `503` for the bundle and the command alike and mints no
+token, since an appliance could not verify the platform. Once the internal CA has issued it, the
+functions read the root from their mount on the next request, with no restart.
 
 `.env` carries exactly six values, all read by `bootstrap.mjs`:
 
