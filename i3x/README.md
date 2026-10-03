@@ -560,7 +560,7 @@ obvious.
 | `server_info` | `GET /info` — including `update.current: false` |
 | `list_root_objects`, `get_object`, `search_objects`, `refresh_catalog` | `GET /objects`, `POST /objects/list` |
 | `read_current_value` | `POST /objects/value` — values, `quality`, timestamp |
-| `get_history` | `POST /objects/history` — raw or aggregated, out of TimescaleDB |
+| `get_history` | `POST /objects/history` — raw samples out of TimescaleDB; the server serves no rollups |
 | `find_related` | `POST /objects/related` — `HasParent` / `HasChildren` / `HasComponent` |
 | `describe_type` | `GET /objecttypes` |
 | `watch_values` | the subscription set, capped by `I3X_WATCH_MAX_SEC` (default 300s) |

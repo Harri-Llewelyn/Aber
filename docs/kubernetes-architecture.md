@@ -1204,8 +1204,12 @@ scales nothing.
 ### 10.3 Backups
 
 **The only recovery path this stack has.** `local-path` is node-local with no replication or
-snapshots, and neither database is replicated. `pg_dump -Fc` for both, nightly, to a PVC that
-survives `helm uninstall` — deleting the release is precisely when the backups are most wanted.
+snapshots, and neither database is replicated. `pg_dump -Fc` nightly, to a PVC that survives
+`helm uninstall` — deleting the release is precisely when the backups are most wanted. The dump
+covers the platform database always, and the historian unless `timescaledb.physicalBackup` is on.
+With it on, the historian has pgBackRest full and differential backups and continuous WAL
+archiving instead, and the nightly dump skips it (`deploy/k8s/README.md`, *Backing up the
+historian*).
 
 - **`--no-owner --no-privileges` are deliberately absent.** The role scaffolding is exactly what a
   restore needs: `supabase_auth_admin`, `authenticator` and `supabase_storage_admin` own objects, and
@@ -1219,9 +1223,10 @@ survives `helm uninstall` — deleting the release is precisely when the backups
   could never run (its image has no `aws` CLI) and is retired; a values file that still sets it
   fails the render. The backup service copies every backup, age-encrypted, to an S3 destination set
   on the Backups page (`supabase/README.md`, "An encrypted copy off site").
-- **This is a logical dump, not PITR.** It recovers to the last nightly run and no finer. A real RPO
-  wants pgBackRest or WAL archiving; this is the floor, said plainly so nobody mistakes it for the
-  ceiling. **Test a restore** — an untested backup is a belief, not a capability.
+- **The dump is logical, not PITR.** It recovers to the last nightly run and no finer; this is the
+  floor, said plainly so nobody mistakes it for the ceiling. The historian's physical backup, when
+  on, restores to any moment inside the retained backups; the platform database has no such path.
+  **Test a restore** — an untested backup is a belief, not a capability.
 
 ### 10.4 Secret management
 
@@ -1297,7 +1302,8 @@ oversights.
   (`deploy/k8s/traefik-config.yaml`; `docs/gateway.md`, *The client's address*). The gateway limits
   nothing: no overall request ceiling and no per-route limit (#442). §7.1 covers the longer-term
   Gateway API question.
-- **Backups are logical dumps, not PITR** (§10.3). The recovery floor is the last nightly run.
+- **The platform database's backup is a logical dump, not PITR** (§10.3). Its recovery floor is the
+  last nightly run; only the historian has a physical backup, and only when it is switched on.
 
 ## 12. What the shared helpers decide
 

@@ -238,8 +238,9 @@ not made here. A quarter of the CPU did not move it either: see *On the minimum 
 daemon's MQTT thread falls behind, Mosquitto sheds for that subscriber, and the message never
 reaches the daemon to be counted: every `aber_ingestion_messages_dropped_total` reason read **zero**
 through every run above, including the one that lost 56,871 messages in 75 s. The only record is
-the broker exporter's `broker_publish_messages_dropped`, which nothing in the stack alerts on.
-A growing queue is visible and recoverable; this is neither. It began at 1250 — 1.8 % of the
+the broker exporter's `broker_publish_messages_dropped`, which the *Broker Shedding Messages* alert
+reads (`grafana/provisioning/alerting/alert-rules.yaml`), warning on any discard in five minutes
+while the broker exporter is on. A growing queue is visible and recoverable; this is neither. It began at 1250 — 1.8 % of the
 soak's traffic — well before the daemon's queue was anywhere near its 10,000 cap.
 
 #### On the minimum profile

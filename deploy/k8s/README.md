@@ -103,7 +103,7 @@ series), and **F**, 1,000 devices × 10 metrics at 1 Hz (864 M rows a day, 10,00
 | `audit_trail` (platform database) | none: append-only, never pruned | grows with configuration changes, not telemetry | |
 | Prometheus | 30 days or 8 GB, on a 10 Gi volume | ≤ 8 GB | ≤ 8 GB |
 | Loki | 30 days (`retention_period: 720h`), on a 10 Gi volume | ≤ 10 Gi | ≤ 10 Gi |
-| Broker persistence | retained and queued messages, on a 1 Gi volume | small | small |
+| Broker persistence | the Dynamic Security accounts, on a 1 Gi volume (Mosquitto's own message persistence is off) | small | small |
 | Storage (models, captures, area plans, exports) | a 10 Gi volume; a capture is at most 100 MiB | by use | by use |
 | Logical backups | `backup.retentionDays` (14), on a 20 Gi volume | the platform database, and the historian unless physical backup is on | the platform database; the historian is physical at this size |
 | Historian physical backup repository | `physicalBackup.retainFull` (2) full backups, the differentials after the older one, and the WAL since it | ~16 GB | ~2 TB, most of it WAL |

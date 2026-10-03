@@ -1699,9 +1699,10 @@ does and fights dynamic enrolment, since gateways arrive with single-use tokens 
 partition cannot know them.
 
 **One prerequisite that turned out not to exist**, recorded because it is the part everyone expects
-to be hard: the daemon speaks MQTT 3.1.1 (`mqtt.Client()` with paho 1.6.1's v1 callbacks) and
-`$share` is an MQTT 5 feature — but Mosquitto 2.0.22 honours shared subscriptions for 3.1.1 clients
-regardless, verified above. **No protocol upgrade and no callback migration would be needed.**
+to be hard: `$share` is an MQTT 5 feature, and the daemon already connects as MQTT 5
+(`mqtt.Client(protocol=mqtt.MQTTv5)` with paho 1.6.1's v1 callbacks). Mosquitto 2.0.22 honours
+shared subscriptions for 3.1.1 clients as well, verified above. **No protocol upgrade and no
+callback migration would be needed.**
 
 ## Testing
 

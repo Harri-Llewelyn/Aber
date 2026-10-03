@@ -2630,23 +2630,23 @@ here.
 has nothing to say about reading what already was — refusing a traceability question because
 somebody turned future archiving off would be the setting reaching past what it means.
 
-With the file backend the objects sit behind storage-api, so each relevant object
-is fetched whole rather than range-scanned. Pointing storage at real S3 makes DuckDB read only the
-row groups a query touches, with no change to the SQL.
+Each relevant object is fetched whole from the archive's S3 destination and read from a temporary
+directory, rather than range-scanned where it lies. DuckDB's httpfs could read only the row groups
+a query touches, with no change to the SQL.
 
 ### What Grafana can and cannot see
 
 **Grafana cannot read the Parquet, and is not meant to.** It connects as `grafana_reader` over
-Postgres to `timescaledb:5432` and `supabase-db:5432`. The objects live behind storage-api's HTTP
-API in a bucket whose RLS admits three roles, none of which is a Postgres datasource. There is no
-path between them.
+Postgres to `timescaledb:5432` and `supabase-db:5432`. The objects live in the S3 bucket the Cold
+Storage page names, which the archiver reaches through boto3 with the archive's own credential, and
+no Postgres datasource can reach it. There is no path between them.
 
 **Archiving therefore removes raw rows from Grafana's reach — and that matters far less than it
 sounds, because the rollups were designed for it:**
 
 | relation | retained | Grafana |
 | :--- | :--- | :--- |
-| `telemetry` (raw) | 90 days, then archived | loses the archived span |
+| `telemetry` (raw) | `timescaledb.retention.retainFor` (14 days by default), then archived | loses the archived span |
 | `telemetry_1m` | 180 days | unaffected |
 | `telemetry_5m` | 1 year | unaffected |
 | `telemetry_1h` | **5 years** | unaffected |
@@ -2704,15 +2704,13 @@ many rows that is.
 **It checks the other direction too** — objects on storage that no manifest row references. Those are
 bytes nothing can reach through the catalogue and nothing can account for, left by a failed drop, an
 interrupted export, or a manifest restored from a backup older than the storage beside it. They are
-**reported and never deleted**: removing an object is the one irreversible act here, the process runs
-as Operator, and the bucket admits only an Administrator to `DELETE`.
+**reported and never deleted**: removing an object is the one irreversible act here.
 
-**The failure it exists for is a reconfiguration, not a bug.** `STORAGE_BACKEND` can be pointed from
-`file` at S3 — but switching it **migrates nothing**. The same keys are looked for in the new backend
-and 404 while the manifest still reads `archived` and the raw rows are already gone. Moving to cloud
-storage therefore means copying the objects across **preserving their keys exactly**, because
-`object_key` is what points at them. Note also that the backend is storage-api-wide: 3D models, flow
-backups and captures move with it.
+**The failure it exists for is a reconfiguration, not a bug.** The Cold Storage page can point the
+archive at another endpoint or bucket, but changing it **migrates nothing**. The same keys are
+looked for at the new destination and 404 while the manifest still reads `archived` and the raw
+rows are already gone. Moving the archive therefore means copying the objects across **preserving
+their keys exactly**, because `object_key` is what points at them.
 
 ### Restoring
 
