@@ -1001,11 +1001,16 @@ describe('one card, two tabs, no counts, and attention only on work this viewer 
     const strip = card.querySelector(':scope > .tab-strip')
     expect(strip).toBeTruthy()
     expect(strip.previousElementSibling).toHaveClass('card-heading')
+    // Both queues have filters, so both keep the row; the tab's HelpTip is in the bar, not the row.
     const bar = strip.nextElementSibling
     expect(bar).toHaveClass('filter-bar')
-    // The tab's HelpTip first.
-    const help = within(bar).getByRole('button', { name: 'About the open queue' })
-    expect(bar.firstElementChild.contains(help)).toBe(true)
+    expect(bar.querySelector('.help-tip')).toBeNull()
+    expect(within(strip).getByRole('button', { name: 'About the open queue' }).parentElement).toHaveClass('tab-strip-help')
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Decided' }))
+    expect(card.querySelector(':scope > .tab-strip + .filter-bar')).toBeTruthy()
+    expect(within(strip).queryByRole('button', { name: 'About the open queue' })).toBeNull()
+    expect(within(strip).getByRole('button', { name: 'About decided proposals' }).parentElement).toHaveClass('tab-strip-help')
   })
 
   it('counts nothing on the heading or the tabs, and flags nothing while nothing waits', async () => {

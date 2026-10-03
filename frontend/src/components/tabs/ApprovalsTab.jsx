@@ -372,15 +372,11 @@ export function filterProposals(rows, kind, query) {
   })
 }
 
-/**
- * The kind-and-text filter bar, identical over both queues because the queues are one shape. `help`
- * is the tab's HelpTip, drawn first.
- */
-function ProposalFilters({ rows, kind, onKind, query, onQuery, placeholder, label, help }) {
+/** The kind-and-text filter bar, identical over both queues because the queues are one shape. */
+function ProposalFilters({ rows, kind, onKind, query, onQuery, placeholder, label }) {
   const activeFilterCount = (kind !== 'all' ? 1 : 0) + (query ? 1 : 0)
   return (
     <div className="filter-bar">
-      {help}
       <select
         className="form-control control-md"
         value={kind}
@@ -405,6 +401,18 @@ function ProposalFilters({ rows, kind, onKind, query, onQuery, placeholder, labe
       <ClearFilters count={activeFilterCount} onClear={() => { onKind('all'); onQuery('') }} />
     </div>
   )
+}
+
+/** Each queue's "?", drawn in the tab bar for the selected queue. */
+const QUEUE_HELP = {
+  open: {
+    label: 'About the open queue',
+    text: 'The working queue, oldest first. Select a row to see exactly what would change. Approving applies it in one transaction, so a proposal that breaks a rule fails here rather than later.',
+  },
+  decided: {
+    label: 'About decided proposals',
+    text: 'What was applied, rejected, withdrawn or left to expire, newest decision first, kept for the retention period an Administrator sets. Select a row to see what it changed or asked for.',
+  },
 }
 
 export function ApprovalsTab({
@@ -625,6 +633,7 @@ export function ApprovalsTab({
               { id: 'open', label: 'Awaiting a decision', attention: waiting },
               { id: 'decided', label: 'Decided' },
             ]}
+            help={<HelpTip label={QUEUE_HELP[queue].label} text={QUEUE_HELP[queue].text} />}
           />
 
           {queue === 'open' ? (
@@ -634,12 +643,6 @@ export function ApprovalsTab({
                 query={openQuery} onQuery={setOpenQuery}
                 label="open proposals"
                 placeholder="Search subject, proposer or rationale…"
-                help={(
-                  <HelpTip
-                    label="About the open queue"
-                    text="The working queue, oldest first. Select a row to see exactly what would change. Approving applies it in one transaction, so a proposal that breaks a rule fails here rather than later."
-                  />
-                )}
               />
               <ProposalTable
                 rows={openFiltered}
@@ -658,12 +661,6 @@ export function ApprovalsTab({
                 query={decidedQuery} onQuery={setDecidedQuery}
                 label="decided proposals"
                 placeholder="Search subject, proposer or reason…"
-                help={(
-                  <HelpTip
-                    label="About decided proposals"
-                    text="What was applied, rejected, withdrawn or left to expire, newest decision first, kept for the retention period an Administrator sets. Select a row to see what it changed or asked for."
-                  />
-                )}
               />
               <ProposalTable
                 rows={decidedFiltered}
