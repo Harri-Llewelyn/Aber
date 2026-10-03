@@ -3964,8 +3964,7 @@ tr.row-selectable.row-selected > td:last-child::after { background-color: var(--
 
 .trail-timeline > .trail-scroll { min-height: 0; }
 
-/* The row above the timeline: the count at the left, the colour key at the right. Baseline-aligned,
-   because the two are set at different sizes. */
+/* The row above the timeline, holding the key. */
 .trail-header {
   display: flex;
   align-items: baseline;
@@ -3975,8 +3974,8 @@ tr.row-selectable.row-selected > td:last-child::after { background-color: var(--
   margin-bottom: 10px;
 }
 
-/* The colour key. `.trail-node-dot` shares the `.trail-node-<kind>` fills with the markers themselves,
-   so the legend cannot drift away from what it describes. */
+/* The key. Each entry draws the track's own marker (TrailMarker), so the legend cannot drift away
+   from what it describes. */
 .trail-legend {
   display: flex;
   align-items: center;
@@ -3990,24 +3989,6 @@ tr.row-selectable.row-selected > td:last-child::after { background-color: var(--
   display: inline-flex;
   align-items: center;
   gap: 6px;
-}
-
-.trail-node-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-/* How much of the trail is on screen. Shares one row with the legend: the count at the left, the
-   key at the right. A tier above the muted legend beside it, which is what stops it reading as part
-   of the key. Tabular figures so the numbers do not shuffle sideways as the poll and Load more
-   change them under a reader's eye. */
-.trail-count {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
 }
 
 /* Both scrolls live here rather than on the page: the drawer is a flex sibling of the list and takes
@@ -4135,13 +4116,6 @@ tr.row-selectable.row-selected > td:last-child::after { background-color: var(--
   letter-spacing: 0.7px;
 }
 
-/* The count, dim and monospaced beside the name; the label's own gap separates them. */
-.trail-section-count {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-dim);
-}
-
 /* Sticky, and opaque in the card's own colour: markers scroll UNDER the labels rather than over
    them, so the asset a lane belongs to stays readable at any scroll offset. A transparent label
    here would let a dozen dots slide through the text. */
@@ -4243,19 +4217,18 @@ tr.row-selectable.row-selected > td:last-child::after { background-color: var(--
 /* 14px of padding at each end of the track, so a marker at either extreme is drawn whole instead
    of being cut in half by the lane's edge. Positions are a calc against that padded width --
    see offsetFor(). */
+/* The button is the 13px box clustering measures; TrailMarker draws the shape inside it. */
 .trail-node {
   position: absolute;
   top: 50%;
   width: 13px;
   height: 13px;
   padding: 0;
-  border-radius: 50%;
-  /* The ring keeps two adjacent markers from reading as one blob. In the card's colour, which is
-     what the row is drawn on. */
-  border: 2px solid var(--bg-card);
+  border: none;
+  background: none;
   cursor: pointer;
   transform: translate(-50%, -50%);
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  transition: transform 0.12s ease;
 }
 
 /* Markers crowd where activity is dense. A pile is a badge now, but a near miss is still two dots
@@ -4267,19 +4240,46 @@ tr.row-selectable.row-selected > td:last-child::after { background-color: var(--
   z-index: 3;
 }
 
-/* The active marker has to survive being surrounded: a solid accent ring with a gap inside it in
-   the card colour, since `--accent-glow` alone almost disappears in a dense stretch. Shared with
-   `.trail-cluster`, not a `.trail-node` compound, so a badge can carry the ring while the drawer steps
-   through the events inside it; `box-shadow` follows the element's own border-radius. */
-.trail-node-selected {
-  box-shadow: 0 0 0 2px var(--bg-card), 0 0 0 4px var(--accent), 0 0 10px var(--accent-glow);
-  z-index: 4;
+/* The marker's SVG. Not clipped, so the selected ring can reach past the 13px box. */
+.trail-node-mark {
+  display: block;
+  flex-shrink: 0;
+  overflow: visible;
 }
 
-.trail-node-creation,    .trail-node-dot.trail-node-creation    { background: var(--success); }
-.trail-node-operational, .trail-node-dot.trail-node-operational { background: var(--accent); }
-.trail-node-governance,  .trail-node-dot.trail-node-governance  { background: var(--warning); }
-.trail-node-critical,    .trail-node-dot.trail-node-critical    { background: var(--danger); }
+/* The shape, over a 2px edge in the card's colour that keeps two adjacent markers from reading as
+   one blob. `paint-order` paints the stroke first, so only its outer half shows. */
+.trail-node-shape {
+  fill: currentColor;
+  stroke: var(--bg-card);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  paint-order: stroke;
+}
+
+/* The active marker has to survive being surrounded: a solid accent ring outside the card-coloured
+   edge, since `--accent-glow` alone almost disappears in a dense stretch. The same outline stroked
+   wider beneath the shape, so it follows a triangle as closely as a circle. */
+.trail-node-ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 8px;
+  stroke-linejoin: round;
+}
+.trail-node-selected .trail-node-mark { filter: drop-shadow(0 0 4px var(--accent-glow)); }
+
+/* Shared by the marker and the badge: lifts the selected one above its neighbours. A badge draws
+   its ring as a box-shadow, which follows the pill's radius; a marker draws its own, above. */
+.trail-node-selected { z-index: 4; }
+.trail-cluster.trail-node-selected {
+  box-shadow: 0 0 0 2px var(--bg-card), 0 0 0 4px var(--accent), 0 0 10px var(--accent-glow);
+}
+
+/* The class colours, carried by the marker's `color` into its fill. */
+.trail-node-creation    { color: var(--success); }
+.trail-node-operational { color: var(--accent); }
+.trail-node-governance  { color: var(--warning); }
+.trail-node-critical    { color: var(--danger); }
 
 /* The cluster badge: several events too close together to draw separately, replaced by their count.
    Violet, because a badge is not a kind of event; see --cluster. Positioning is separate from the
@@ -4325,7 +4325,7 @@ tr.row-selectable.row-selected > td:last-child::after { background-color: var(--
 }
 
 /* The legend's sample. Not clickable, and a notch smaller so it sits on the 11px key line beside
-   the four 9px dots rather than setting the row's height on its own. */
+   the four 13px markers rather than setting the row's height on its own. */
 .trail-legend-cluster {
   cursor: default;
   height: 16px;

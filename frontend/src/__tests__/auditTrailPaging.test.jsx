@@ -6,17 +6,11 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
-import fs from 'node:fs'
-import path from 'node:path'
 import {
   AuditTrailTab, mergeFirstPage, countRatio, isPartial,
 } from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
 import { AUDIT_TRAIL_ENTITY_TYPES } from '../constants'
-
-/* Newlines normalised on read, as auditTrailFilters.test.jsx does it: .gitattributes checks
-   this file out with the platform's native ending, and the rule matcher below spans lines. */
-const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8').replace(/\r\n/g, '\n')
 
 // Spread from the real module, not replaced: api.js exports constants the tab reads at import time,
 // and a bare stub drops them, which renders as an empty timeline.
@@ -178,8 +172,9 @@ describe('AuditTrailTab paging', () => {
     render(<AuditTrailTab />)
     fireEvent.click(await screen.findByRole('button', { name: /Show \d+ more/ }))
 
-    // Four events across two pages, and the count is the page's own claim about itself.
-    await waitFor(() => expect(screen.getByText(/4 entities · 4 events/)).toBeInTheDocument())
+    // Four events across two pages, and the foot is the page's own claim about itself.
+    expect(await screen.findByText('All 4 shown.')).toBeInTheDocument()
+    expect(document.querySelectorAll('.trail-node')).toHaveLength(4)
   })
 
   // The whole point of the change: a cut-off view must say so. This is what was missing.
@@ -217,22 +212,25 @@ describe('AuditTrailTab paging', () => {
   it('reads All N shown on a stack smaller than one page', async () => {
     respond(() => page([event(2), event(1)], { nextCursor: null, truncated: false }))
     render(<AuditTrailTab />)
-    await waitFor(() => expect(screen.getByText(/2 entities · 2 events/)).toBeInTheDocument())
-    expect(screen.getByText('All 2 shown.')).toBeInTheDocument()
+    expect(await screen.findByText('All 2 shown.')).toBeInTheDocument()
+    // Everything is loaded, so the foot states no count beside it.
+    expect(screen.queryByText(/\d+ of \d+/)).toBeNull()
     expect(document.querySelector('.trail-pagination')).toBeNull()
   })
 
-  it('draws the count row, reading zero, while loading and when nothing matches', async () => {
+  it('keeps the key row while loading and when nothing matches, and counts nothing', async () => {
     let release
     const pending = new Promise(resolve => { release = resolve })
     respond(() => pending)
     render(<AuditTrailTab />)
     expect(await screen.findByText('Loading the Audit Trail…')).toBeInTheDocument()
-    expect(document.querySelector('.trail-count')).toHaveTextContent('0 entities · 0 events')
+    expect(document.querySelector('.trail-header .trail-legend')).toBeTruthy()
+    expect(document.querySelector('.list-foot')).toBeNull()
     release(page([], { nextCursor: null, totalMatching: 0 }))
     await waitFor(() => expect(screen.queryByText('Loading the Audit Trail…')).toBeNull())
-    expect(document.querySelector('.trail-count')).toHaveTextContent('0 entities · 0 events')
-    expect(screen.queryByText(/All d+ shown/)).toBeNull()
+    expect(document.querySelector('.trail-header .trail-legend')).toBeTruthy()
+    expect(document.querySelector('.list-foot')).toBeNull()
+    expect(screen.queryByText(/All \d+ shown/)).toBeNull()
   })
 })
 
@@ -282,6 +280,8 @@ describe('AuditTrailTab section coverage', () => {
     render(<AuditTrailTab />)
     await screen.findByLabelText('Gateways lanes')
 
+    // The kind filter lives in the Filters popover.
+    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
     const select = screen.getByTitle('Show only events against one kind of entity')
     const options = [...select.querySelectorAll('option')]
 
@@ -295,10 +295,7 @@ describe('AuditTrailTab section coverage', () => {
     expect(options[0].value).toBe('')
   })
 
-  it('the entity count in the header equals the lanes actually drawn', async () => {
-    // The reconcilable-number property, stated directly: this is what a reader checks the page
-    // against, and it was wrong by 27 on the stack that found it.
-    //
+  it('draws a lane for every entity it holds, and the foot counts the events', async () => {
     // ENTITIES, not assets. Two of these three lanes are a role assignment and a schema, neither
     // of which is a thing on the shopfloor.
     respond(() => page([
@@ -309,9 +306,9 @@ describe('AuditTrailTab section coverage', () => {
 
     render(<AuditTrailTab />)
     await screen.findByLabelText('Gateways lanes')
-    const drawn = screen.getAllByRole('separator').length
-    expect(drawn).toBe(3)
-    expect(screen.getByText(/3 entities · 3 events/)).toBeInTheDocument()
+    expect(screen.getAllByRole('separator')).toHaveLength(3)
+    expect(document.querySelectorAll('.trail-lane:not(.trail-axis)')).toHaveLength(3)
+    expect(screen.getByText('All 3 shown.')).toBeInTheDocument()
   })
 })
 
@@ -404,75 +401,51 @@ describe('AuditTrailTab empty state', () => {
 describe('AuditTrailTab total', () => {
   const cursor = { recorded_at: '2026-01-01T00:00:00.000Z', id: 41 }
 
-  it('says what fraction of the match is on screen, once, on the header row', async () => {
+  it('says what fraction of the match is loaded, once, beside Show more', async () => {
     respond(() => page([event(42), event(41)], {
       nextCursor: cursor, truncated: true, totalMatching: 467,
     }))
     render(<AuditTrailTab />)
 
-    // Above the timeline, on the header row beside the key.
-    expect(await screen.findByText(/2 entities · 2\/467 events/)).toBeInTheDocument()
-    // And nowhere else: the foot used to say it again in words, under a button offering more.
-    expect(screen.queryByText(/2 of 467 events/)).not.toBeInTheDocument()
-    expect(document.querySelector('.trail-pagination-count')).toBeNull()
+    expect(await screen.findByText('2 of 467')).toBeInTheDocument()
+    // Once: not again above the timeline, where it used to sit beside the key.
+    expect(screen.getAllByText(/2 of 467/)).toHaveLength(1)
+    expect(document.querySelector('.trail-header').textContent).not.toMatch(/\d/)
     expect(screen.getByRole('button', { name: /Show \d+ more/ })).toBeInTheDocument()
   })
 
-  it('counts one event as one event', async () => {
-    respond(() => page([event(1)], { nextCursor: null, totalMatching: 1 }))
-    render(<AuditTrailTab />)
-    expect(await screen.findByText(/1 entity · 1 event$/)).toBeInTheDocument()
-  })
-
-  it('draws the count beside the key, above the timeline and not inside the swimlanes', async () => {
-    /* Asserted by POSITION and not only by text: the axis corner, a lane label hard against the
-       left edge beside the first tick, is where readers missed it, and the text would pass from
-       there too. */
+  it('draws the count in the foot beside Show more, with only the key above the timeline', async () => {
+    /* Asserted by POSITION and not only by text: the count states what is loaded, so it sits with
+       the control that loads more. */
     respond(() => page([event(42), event(41)], {
       nextCursor: cursor, truncated: true, totalMatching: 467,
     }))
     render(<AuditTrailTab />)
-    await screen.findByText(/2 entities · 2\/467 events/)
-
-    const count = document.querySelector('.trail-count')
-    expect(count).toBeTruthy()
-    expect(count.textContent).toMatch(/2 entities · 2\/467 events/)
-    // One row with the key: the count first, the key after it, and the scroller that holds the
-    // tracks directly under the row.
-    const header = count.parentElement
-    expect(header).toHaveClass('trail-header')
-    expect(count.nextElementSibling).toHaveClass('trail-legend')
+    const count = await screen.findByText('2 of 467')
+    expect(count.parentElement).toHaveClass('list-foot')
+    expect(count.nextElementSibling).toHaveTextContent(/Show \d+ more/)
+    // The row above the timeline holds the key alone, with the scroller directly under it.
+    const header = document.querySelector('.trail-header')
+    expect([...header.children].map(c => c.className)).toEqual(['trail-legend'])
     expect(header.nextElementSibling).toHaveClass('trail-scroll')
-    // And gone from the corner, which is now only the spacer that lines the ticks up.
+    // And not in the corner, which is only the spacer that lines the ticks up.
     expect(document.querySelector('.trail-axis-corner').textContent).toBe('')
   })
 
-  it('is larger than the key it shares a row with', async () => {
-    // jsdom lays nothing out, so the rule is read from the stylesheet. Without this the position
-    // is asserted as markup only, and the reason for it -- that the line was easy to miss -- is
-    // not. The size is what carries that: the row puts it beside a muted 11px key, and at the same
-    // size it would read as one more entry in the key.
-    const rule = APP_CSS.match(/\n\.trail-count \{([\s\S]*?)\n\}/)?.[1]
-    expect(rule, '.trail-count has no rule in App.css').toBeTruthy()
-
-    const size = (r) => Number(/font-size:\s*(\d+)px/.exec(r)?.[1])
-    const legend = APP_CSS.match(/\n\.trail-legend \{([\s\S]*?)\n\}/)?.[1]
-    expect(size(rule)).toBeGreaterThan(size(legend))
-  })
-
-  it('drops the fraction when the loaded page is the whole match', async () => {
+  it('drops the count when the loaded page is the whole match', async () => {
     respond(() => page([event(2), event(1)], { nextCursor: null, totalMatching: 2 }))
     render(<AuditTrailTab />)
-    await waitFor(() => expect(screen.getByText(/2 entities · 2 events/)).toBeInTheDocument())
+    expect(await screen.findByText('All 2 shown.')).toBeInTheDocument()
     expect(screen.queryByText(/2\/2|2 of 2/)).not.toBeInTheDocument()
   })
 
-  it('falls back to the loaded count against a server that returns no total', async () => {
+  it('states no count against a server that returns no total, whose total is only an estimate', async () => {
     // Every other fixture in this file leaves `totalMatching` null, so this is the state they all
     // assert against; stated once, explicitly, so the fallback is a decision rather than a default.
     respond(() => page([event(2), event(1)], { nextCursor: cursor, truncated: true }))
     render(<AuditTrailTab />)
-    await waitFor(() => expect(screen.getByText(/2 entities · 2 events/)).toBeInTheDocument())
+    expect(await screen.findByRole('button', { name: /Show \d+ more/ })).toBeInTheDocument()
+    expect(screen.queryByText(/\d+ of \d+/)).not.toBeInTheDocument()
     expect(screen.queryByText(/of null|of undefined|NaN|\/null|\/undefined/)).not.toBeInTheDocument()
   })
 
@@ -484,11 +457,11 @@ describe('AuditTrailTab total', () => {
       : page([event(42), event(41)], { nextCursor: cursor, truncated: true, totalMatching: 4 }))
 
     render(<AuditTrailTab />)
-    await screen.findByText(/2 entities · 2\/4 events/)
+    await screen.findByText('2 of 4')
     fireEvent.click(screen.getByRole('button', { name: /Show \d+ more/ }))
 
     // Four of four is the whole match, so the fraction goes.
-    await waitFor(() => expect(screen.getByText(/4 entities · 4 events/)).toBeInTheDocument())
+    expect(await screen.findByText('All 4 shown.')).toBeInTheDocument()
     expect(screen.queryByText(/4\/4/)).not.toBeInTheDocument()
   })
 

@@ -8,7 +8,9 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { AuditTrailTab, classifyEvent, diffFields, tickFormatter, shortId, timeWindow } from '../components/tabs/AuditTrailTab'
+import {
+  AuditTrailTab, classifyEvent, diffFields, tickFormatter, shortId, timeWindow, MARKERS, CLUSTER_GAP_PX
+} from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
 import { expectCardHeading } from '../test/cardHeading'
 
@@ -127,6 +129,15 @@ const selectEvent = async (pattern) => {
 
 const rangeSelect = () => screen.getByTitle('Limit the timeline to a time range')
 
+/** The kind and action filters live in the Filters popover, which is opened first. */
+const openFilters = () => {
+  if (!document.querySelector('.filters-popover')) {
+    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
+  }
+}
+const kindSelect = () => { openFilters(); return screen.getByTitle(/Show only events against one kind of entity/) }
+const actionSelect = () => { openFilters(); return screen.getByTitle(/Filter by the database action/) }
+
 describe('Audit Trail card header', () => {
   it('names the page with its icon, title and description, and Export on the right', async () => {
     await show()
@@ -136,30 +147,50 @@ describe('Audit Trail card header', () => {
 })
 
 describe('Audit Trail filter bar', () => {
-  it('offers entity type, entity name, event type and time range, in the shared filter bar', async () => {
+  it('keeps search and the time range in the bar, and the kind and action in the Filters popover', async () => {
     await show()
 
     // The same `.filter-bar` the Gateways and Devices pages use, not a row of controls wedged
     // into the section header.
-    expect(document.querySelector('.filter-bar')).toBeTruthy()
-    expect(screen.getByTitle(/Show only events against one kind of entity/)).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('Search a name or any ID…')).toBeInTheDocument()
-    // The wording is load-bearing: this control filters `audit_trail.action`, while the coloured
-    // markers show a derived classification. See auditTrailActionFilter.test.jsx.
-    expect(screen.getByTitle(/Filter by the database action/)).toBeInTheDocument()
-    expect(rangeSelect()).toBeInTheDocument()
+    const bar = document.querySelector('.filter-bar')
+    expect(bar).toBeTruthy()
+    expect(within(bar).getByPlaceholderText('Search a name or any ID…')).toBeInTheDocument()
+    expect(bar.contains(rangeSelect())).toBe(true)
+    expect(screen.queryByTitle(/Show only events against one kind of entity/)).toBeNull()
+
+    openFilters()
+    const popover = screen.getByRole('dialog', { name: 'Filters' })
+    expect(within(popover).getByTitle(/Show only events against one kind of entity/)).toBeInTheDocument()
+    // The wording is load-bearing: this control filters `audit_trail.action`, while the markers
+    // show a derived classification. See auditTrailActionFilter.test.jsx.
+    expect(within(popover).getByTitle(/Filter by the database action/)).toBeInTheDocument()
+  })
+
+  it('counts the popover\'s own filters on its button, and its Clear resets only those', async () => {
+    await show()
+    fireEvent.change(kindSelect(), { target: { value: 'GATEWAY' } })
+    fireEvent.change(actionSelect(), { target: { value: 'DELETE' } })
+    fireEvent.change(screen.getByPlaceholderText('Search a name or any ID…'), { target: { value: 'Press' } })
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Filters/ })).toHaveTextContent('Filters (2)'))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Filters' })).getByRole('button', { name: 'Clear' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Filters/ })).toHaveTextContent(/^Filters$/))
+    await waitFor(() => expect(lastTrailUrl()).not.toContain('entity_type='))
+    expect(lastTrailUrl()).not.toContain('action=')
+    expect(lastTrailUrl()).toContain('search=Press')
   })
 
   it('filters by entity type', async () => {
     await show()
-    fireEvent.change(screen.getByTitle(/Show only events against one kind of entity/), { target: { value: 'GATEWAY' } })
+    fireEvent.change(kindSelect(), { target: { value: 'GATEWAY' } })
 
     await waitFor(() => expect(lastTrailUrl()).toContain('entity_type=GATEWAY'))
   })
 
   it('filters by audit event type', async () => {
     await show()
-    fireEvent.change(screen.getByTitle(/Filter by the database action/), { target: { value: 'DELETE' } })
+    fireEvent.change(actionSelect(), { target: { value: 'DELETE' } })
 
     await waitFor(() => expect(lastTrailUrl()).toContain('action=DELETE'))
   })
@@ -200,7 +231,7 @@ describe('Audit Trail filter bar', () => {
 
   it('counts the active filters and clears them together, the time range included', async () => {
     await show()
-    fireEvent.change(screen.getByTitle(/Filter by the database action/), { target: { value: 'UPDATE' } })
+    fireEvent.change(actionSelect(), { target: { value: 'UPDATE' } })
     fireEvent.change(screen.getByPlaceholderText('Search a name or any ID…'), { target: { value: 'Press' } })
     fireEvent.change(rangeSelect(), { target: { value: '7d' } })
 
@@ -431,12 +462,10 @@ describe('Audit Trail swimlanes', () => {
     expect(headings).toEqual(['Cells', 'Gateways', 'Devices'])
   })
 
-  it('counts what it draws in each heading', async () => {
+  it('puts no count on a section heading', async () => {
     await showAll()
-    const counts = [...document.querySelectorAll('.trail-section')]
-      .map(s => s.textContent.replace(/[^0-9]/g, ''))
-    // One cell, one gateway, three devices (dev-1, dev-2, the unnamed one).
-    expect(counts).toEqual(['1', '1', '3'])
+    const headings = [...document.querySelectorAll('.trail-section')].map(s => s.textContent)
+    expect(headings).toEqual(['Cells', 'Gateways', 'Devices'])
   })
 
   it('omits a section with nothing in it rather than drawing an empty heading', async () => {
@@ -482,8 +511,7 @@ describe('Audit Trail swimlanes', () => {
     render(<AuditTrailTab />)
 
     await waitFor(() => expect(document.querySelectorAll('.trail-lane:not(.trail-axis)').length).toBe(40))
-    // The header names the whole set, as a plain count: nothing is held back to make a fraction.
-    expect(screen.getByText(/40 entities/)).toBeInTheDocument()
+    // Nothing is held back to make a fraction.
     expect(screen.queryByText(/\d+\/40/)).not.toBeInTheDocument()
     expect(screen.queryByText(/Show all lanes|Show fewer lanes/)).not.toBeInTheDocument()
   })
@@ -543,6 +571,73 @@ describe('Audit Trail time axis', () => {
     expect(shortId('99999999-8888-7777-6666-555555555555')).toBe('99999999…5555')
     // Already short enough to read whole.
     expect(shortId('dev-1')).toBe('dev-1')
+  })
+})
+
+/**
+ * Colour is never the only signal: each class has a shape as well, drawn by one component that
+ * the legend renders too.
+ */
+describe('Audit Trail marker shapes', () => {
+  const shapeOf = (el) => el.querySelector('.trail-node-mark')?.getAttribute('data-shape')
+  const pathOf = (el) => el.querySelector('.trail-node-shape')?.getAttribute('d')
+
+  it('gives each class its own shape', async () => {
+    await showAll()
+    const byKind = {}
+    for (const n of nodes()) {
+      const kind = Object.keys(MARKERS).find(k => n.classList.contains(`trail-node-${k}`))
+      byKind[kind] = { shape: shapeOf(n), path: pathOf(n) }
+    }
+    // The fixture holds all four classes.
+    expect(Object.keys(byKind).sort()).toEqual(Object.keys(MARKERS).sort())
+    expect(byKind).toMatchObject({
+      operational: { shape: 'circle' },
+      creation:    { shape: 'square' },
+      governance:  { shape: 'diamond' },
+      critical:    { shape: 'triangle' },
+    })
+    expect(new Set(Object.values(byKind).map(v => v.path)).size).toBe(4)
+  })
+
+  it('draws the legend with the same marker the track draws', async () => {
+    await showAll()
+    const items = [...document.querySelectorAll('.trail-legend .trail-legend-item')]
+      .filter(i => i.querySelector('.trail-node-mark'))
+    expect(items).toHaveLength(4)
+    for (const item of items) {
+      const kind = Object.keys(MARKERS).find(k => item.textContent === MARKERS[k].label)
+      const onTrack = nodes().find(n => n.classList.contains(`trail-node-${kind}`))
+      expect(item.querySelector('.trail-node-mark').getAttribute('class'))
+        .toBe(onTrack.querySelector('.trail-node-mark').getAttribute('class'))
+      expect(shapeOf(item)).toBe(shapeOf(onTrack))
+      expect(pathOf(item)).toBe(pathOf(onTrack))
+    }
+  })
+
+  it('keeps every shape inside the 13px box the clustering maths measures', async () => {
+    await show()
+    const mark = nodes()[0].querySelector('.trail-node-mark')
+    expect(mark.getAttribute('viewBox')).toBe('0 0 13 13')
+    expect(mark.getAttribute('width')).toBe('13')
+    expect(CLUSTER_GAP_PX).toBe(14)
+    // Every coordinate of every outline lies within the box.
+    for (const n of nodes()) {
+      const numbers = pathOf(n).match(/-?\d+(\.\d+)?/g).map(Number)
+      expect(Math.max(...numbers)).toBeLessThanOrEqual(13)
+    }
+  })
+
+  it('draws the ring only on the selected marker', async () => {
+    await show()
+    expect(document.querySelector('.trail-node-ring')).toBeNull()
+    fireEvent.click(nodes()[0])
+    await waitFor(() => expect(document.querySelectorAll('.trail-node-ring')).toHaveLength(1))
+    expect(document.querySelector('.trail-node-selected .trail-node-ring')).toBeTruthy()
+  })
+
+  it('keeps the violet Grouped badge a pill, not a shape', () => {
+    expect(APP_CSS).toMatch(/\n\.trail-cluster \{[^}]*border-radius: 9px/)
   })
 })
 
@@ -662,6 +757,12 @@ describe('Audit Trail event drawer', () => {
   it('stays shut until an event is clicked', async () => {
     await show()
     expect(document.querySelector('.context-panel-open')).toBeNull()
+  })
+
+  it('carries the icon of the entity kind in its title', async () => {
+    await show()
+    await selectEvent(/UPDATE on Simulated_CNC_01/)
+    expect(document.querySelector('.context-panel-open .context-panel-icon svg')).toBeTruthy()
   })
 
   it('opens on the clicked event and names the asset it touched', async () => {
@@ -937,17 +1038,20 @@ describe('Audit Trail — removed tag filter', () => {
     expect(screen.queryByTitle(/carry this tag/i)).not.toBeInTheDocument()
   })
 
-  it('leaves exactly four filter controls, six in the custom range mode', async () => {
+  it('leaves two controls in the bar, four in the custom range mode, and two in the popover', async () => {
     await show()
 
-    // The bar's own controls: three selects and the search box. Export sits in the card header.
+    // The bar's own controls: the search box and the range. Export sits in the card header.
     const controls = () => document.querySelectorAll('.filter-bar select, .filter-bar input')
-    expect(controls().length).toBe(4)
+    expect(controls().length).toBe(2)
 
     // The date pickers are not present until they mean something. Two controls sitting inert
     // beside the presets are two controls whose relationship to them has to be guessed at.
     fireEvent.change(rangeSelect(), { target: { value: 'custom' } })
-    await waitFor(() => expect(controls().length).toBe(6))
+    await waitFor(() => expect(controls().length).toBe(4))
+
+    openFilters()
+    expect(screen.getByRole('dialog', { name: 'Filters' }).querySelectorAll('select')).toHaveLength(2)
   })
 
   it('puts export in the card header, where a card keeps its actions', async () => {
@@ -1382,13 +1486,13 @@ describe('Audit Trail — removed tag filter', () => {
       await show()
       const heading = document.querySelector('.trail-section')
       expect(heading).toBeTruthy()
-      // The same two columns as a lane: a sticky label holding the name and its count, and an
-      // empty track, so the heading takes the row's rule and the row's rhythm, and the first lane
-      // under it has an edge above it.
+      // The same two columns as a lane: a sticky label holding the name, and an empty track, so
+      // the heading takes the row's rule and the row's rhythm, and the first lane under it has an
+      // edge above it.
       const label = heading.querySelector('.trail-lane-label')
       expect(label).toBeTruthy()
       expect(label.querySelector('.trail-section-name')).toBeTruthy()
-      expect(label.querySelector('.trail-section-count')).toBeTruthy()
+      expect(label.querySelector('.trail-section-count')).toBeNull()
       expect(heading.querySelector('.trail-track')).toBeTruthy()
       // Not a pill: nothing draws a badge any more.
       expect(ruleFor('.trail-section-badge')).toBeUndefined()
@@ -1414,19 +1518,23 @@ describe('Audit Trail — removed tag filter', () => {
   })
 
   describe('the selected marker is findable among the ones it is stacked with', () => {
-    it('rings the active node in a solid accent rather than a halo', async () => {
+    it('rings the active marker in a solid accent outside a gap in the card colour', async () => {
       /* `--accent-glow` alone is translucent and almost disappears in a dense stretch of track; the
-         inner gap in the card colour separates the selected mark. */
-      const rule = ruleFor('.trail-node-selected')
-      expect(rule).toMatch(/var\(--accent\)/)
-      expect(rule).toMatch(/var\(--bg-card\)/)
+         gap in the card colour separates the selected mark. Both are strokes of the marker's own
+         outline, so the ring follows a triangle as it does a circle. */
+      expect(ruleFor('.trail-node-ring')).toMatch(/stroke:\s*var\(--accent\)/)
+      expect(ruleFor('.trail-node-shape')).toMatch(/stroke:\s*var\(--bg-card\)/)
+      // Not clipped to the 13px box, or the ring would be cut where it passes outside it.
+      expect(ruleFor('.trail-node-mark')).toMatch(/overflow:\s*visible/)
     })
 
-    it('is shared with the cluster badge rather than being a .trail-node compound', async () => {
-      /* What lets a badge carry the ring while the drawer steps through the events inside it.
-         Written `.trail-node.trail-node-selected`, a selected group would show no highlight. */
+    it('draws a marker\'s ring in its SVG, and a badge\'s as a box-shadow on the pill', async () => {
+      /* `.trail-node-selected` stays the shared state class, so a badge still lights while the
+         drawer steps through the events inside it; only the badge's ring is a box-shadow, which
+         follows the pill's radius and would ring a triangle's box as a circle. */
       expect(APP_CSS).toContain('\n.trail-node-selected {')
-      expect(APP_CSS).not.toContain('.trail-node.trail-node-selected {')
+      expect(ruleFor('.trail-cluster.trail-node-selected')).toMatch(/var\(--accent\)/)
+      expect(ruleFor('.trail-node')).not.toMatch(/box-shadow|border-radius/)
     })
 
     it('paints the cluster badge outside the four-colour classification', async () => {

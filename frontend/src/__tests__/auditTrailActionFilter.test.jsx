@@ -42,7 +42,13 @@ const show = async () => {
   await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
 }
 
-const filter = () => screen.getByTitle(/Filter by the database action/)
+/** The kind and action filters live in the Filters popover, which is opened first. */
+const openFilters = () => {
+  if (!document.querySelector('.filters-popover')) {
+    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
+  }
+}
+const filter = () => { openFilters(); return screen.getByTitle(/Filter by the database action/) }
 const trailUrls = () => api.get.mock.calls.map(c => c[0]).filter(u => u.includes('/audit-trail'))
 
 

@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -68,6 +68,8 @@ describe('which entity types a role is offered', () => {
 describe('the filter bar on the page', () => {
   const optionsOffered = async (userRole) => {
     render(<AuditTrailTab userRole={userRole} />)
+    // The kind filter lives in the Filters popover.
+    fireEvent.click(await screen.findByRole('button', { name: /^Filters/ }))
     const select = await screen.findByTitle('Show only events against one kind of entity')
     await waitFor(() => expect(api.get).toHaveBeenCalled())
     return [...select.options].map(o => o.textContent)

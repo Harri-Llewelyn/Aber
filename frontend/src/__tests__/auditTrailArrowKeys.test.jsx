@@ -109,6 +109,7 @@ describe('the arrow keys step the drawer', () => {
     await show()
     await selectOldest()
 
+    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
     const kind = screen.getByTitle(/Show only events against one kind of entity/)
     kind.focus()
     press('ArrowRight', kind)
