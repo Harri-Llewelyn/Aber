@@ -652,12 +652,14 @@ export default async function handler(req: Request): Promise<Response> {
   // rather than repeated here for the same reason -- unlike an `errors` entry, which is raised in a
   // catch block that logs nothing of its own and would otherwise reach only the response body.
   const changed = summary.placed.length + summary.removed.length + summary.hooked.length + summary.protected.length +
-    summary.rekeyed.length + summary.revoked.length + summary.published.length + summary.recorded.length;
+    summary.rekeyed.length + summary.revoked.length + summary.archived.length + summary.restored.length +
+    summary.published.length + summary.recorded.length;
   if (changed || summary.errors.length) {
     console.log(
       `forge-sweep: placed ${summary.placed.length}, removed ${summary.removed.length}, ` +
         `hooked ${summary.hooked.length}, protected ${summary.protected.length}, ` +
         `rekeyed ${summary.rekeyed.length}, revoked ${summary.revoked.length}, ` +
+        `archived ${summary.archived.length}, restored ${summary.restored.length}, ` +
         `published ${summary.published.length}, recorded ${summary.recorded.length}, ` +
         `warnings ${summary.warnings.length}, errors ${summary.errors.length}` +
         (summary.errors.length ? `: ${summary.errors.join("; ")}` : ""),
