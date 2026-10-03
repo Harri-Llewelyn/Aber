@@ -1,46 +1,8 @@
 import React from 'react'
 import { describe, it, expect } from 'vitest'
 import { render } from '@testing-library/react'
-import { SectionCount, countLabel } from '../components/common/SectionCount'
 import { Badge, ArchivedBadge, TONE_CLASS } from '../components/common/Badge'
 import { StatusBadge } from '../components/common/StatusBadge'
-
-describe('countLabel', () => {
-  it('is a bare total when nothing is filtered', () => {
-    expect(countLabel(undefined, 12)).toBe('12')
-    expect(countLabel(null, 12)).toBe('12')
-    expect(countLabel(12, 12)).toBe('12')
-  })
-
-  it('is shown / total while only part of the rows are drawn', () => {
-    expect(countLabel(3, 12)).toBe('3 / 12')
-    expect(countLabel(0, 12)).toBe('0 / 12')
-  })
-
-  it('shows zero rather than nothing', () => {
-    expect(countLabel(undefined, 0)).toBe('0')
-    expect(countLabel(0, 0)).toBe('0')
-  })
-
-  it('draws what it has when the total is unknown', () => {
-    expect(countLabel(200, undefined)).toBe('200')
-    expect(countLabel(undefined, undefined)).toBe('0')
-  })
-})
-
-describe('SectionCount', () => {
-  it('renders the section-count pill, including for 0', () => {
-    const { container } = render(<SectionCount total={0} />)
-    const pill = container.querySelector('.section-count')
-    expect(pill).not.toBeNull()
-    expect(pill.textContent).toBe('0')
-  })
-
-  it('reads shown / total when filtered', () => {
-    const { container } = render(<SectionCount total={40} shown={7} />)
-    expect(container.querySelector('.section-count').textContent).toBe('7 / 40')
-  })
-})
 
 describe('Badge', () => {
   it.each(['success', 'info', 'warning', 'danger', 'neutral', 'pending', 'brand'])('tone %s draws its class', (tone) => {

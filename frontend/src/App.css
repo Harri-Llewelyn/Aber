@@ -896,35 +896,6 @@ html, body, #root {
   margin-left: 10px;
 }
 
-/* A page's own title and description, above its cards. Deliberately not a card: a page whose
-   subject is split across several lists needs one place to name the subject, and a frame around a
-   sentence reads as one more thing to act on. The title keeps `.section-title`'s page-level 20px --
-   the 15px override applies only inside `.card-header` -- so it outranks the card titles below it.
-
-   Not licence to restate the rail: a heading that only repeats the tab's name was removed from
-   the Site Map for saying nothing, and `navigationShell.test.jsx` still guards that. The
-   description is what earns the block. */
-.page-heading {
-  margin: 0 0 var(--stack);
-}
-
-.page-heading .section-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.page-heading p {
-  margin: 6px 0 0;
-  font-size: 12px;
-  line-height: 1.55;
-  color: var(--text-muted);
-}
-
-.page-heading .page-heading-note {
-  color: var(--text-primary);
-}
-
 /* ===== Cards & Containers ===== */
 .card {
   background: var(--bg-card);
@@ -933,20 +904,6 @@ html, body, #root {
   box-shadow: var(--shadow);
   overflow: hidden;
   transition: background-color 0.25s ease, border-color 0.25s ease;
-}
-
-/* A card holding work that is waiting rather than a record of what exists: the quarantine queue is
-   the only one so far. It takes the warning border the inline banners on Areas, Cells and Gateways
-   use, so a queue and a banner about a queue read as the same kind of thing; the tint is on the
-   header alone, because a full-height wash over a table makes every row look flagged. */
-.card-attention {
-  border-color: var(--warning);
-}
-
-.card-attention > .card-header {
-  background: rgba(255, 179, 0, 0.08);
-  border-bottom-color: var(--warning);
-  color: var(--warning-text);
 }
 
 /* A section header inside a card. `.card` carries no padding so tables can run edge to edge; this
