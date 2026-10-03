@@ -317,9 +317,11 @@ supplies no release version, is not evidence of drift.
 
 **A page has one card.** Its title and description are the card's `CardHeading`. The seamless tab bar
 (`common/TabStrip.jsx`, one underline style, no pills) sits under the heading and shows one tab's
-content at a time; the card scrolls, the page does not. Under the bar is a toolbar row, the existing
-`.filter-bar`: the tab's "?" `HelpTip` first, its filters next, its actions in `.filter-bar-actions`
-at the right. Tabs carry no counts. A tab with work waiting takes `attention={n}`: the label turns
+content at a time; the card scrolls, the page does not. The selected tab's "?" `HelpTip` sits in the
+bar straight after the last tab (`TabStrip`'s `help`), so a tab needs no row of its own to explain
+itself. Under the bar is a toolbar row, the existing `.filter-bar`, drawn only when the tab has
+filters or actions: its filters first, its actions in `.filter-bar-actions` at the right. Tabs carry
+no counts. A tab with work waiting takes `attention={n}`: the label turns
 the warning colour and gains an icon and the number, only while n is above 0. A row that outgrows one
 line keeps search, status and the key toggle and moves the rest into `common/FiltersPopover.jsx`.
 
@@ -327,9 +329,10 @@ line keeps search, status and the key toggle and moves the rest into `common/Fil
 <div className="card">
   <CardHeading title="Devices" description="…" />
   <TabStrip ariaLabel="Devices view" value={tab} onChange={setTab}
-    tabs={[{ id: 'roster', label: 'Roster' }, { id: 'quarantine', label: 'Quarantine', attention: waiting }]} />
+    tabs={[{ id: 'roster', label: 'Roster' }, { id: 'quarantine', label: 'Quarantine', attention: waiting }]}
+    help={<HelpTip label={`About ${selectedLabel}`} text={TAB_HELP[tab]} />} />
+  {/* Only a tab with filters or actions draws this row. */}
   <div className="filter-bar">
-    <HelpTip text="…" />
     <SearchInput … />
     <FiltersPopover activeCount={extraCount} onClear={clearExtras}>{/* the other controls */}</FiltersPopover>
     <div className="filter-bar-actions"><button className="btn btn-sm btn-primary">New …</button></div>

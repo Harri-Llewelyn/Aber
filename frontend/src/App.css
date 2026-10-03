@@ -996,8 +996,9 @@ html, body, #root {
   border-radius: var(--radius);
 }
 
-/* The toolbar row under a card's tab bar: flush, chromeless, ruled off from the content below. The
-   tab's "?" HelpTip comes first, its filters follow, and its actions go in .filter-bar-actions. */
+/* The toolbar row under a card's tab bar: flush, chromeless, ruled off from the content below. It
+   holds the tab's filters, then its actions in .filter-bar-actions, and is drawn only when the tab
+   has any. The selected tab's "?" sits in the bar after the last tab (TabStrip's `help`). */
 .card > .tab-strip + .filter-bar {
   margin-bottom: 0;
   padding: 10px var(--inset);
