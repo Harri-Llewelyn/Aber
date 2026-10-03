@@ -4475,14 +4475,16 @@ leaves the token live and refuses what redemption refuses.
 **The pin.** [`_shared/caPin.ts`](functions/_shared/caPin.ts) walks the root's DER to its
 SubjectPublicKeyInfo and hashes it, which is what `openssl x509 -pubkey | openssl pkey -outform
 DER | openssl dgst -sha256` prints on the appliance (measured equal on the dev cluster's root).
-The root reaches the functions as `ABER_CA_PEM`, read at start by the image's entrypoint from the
-ingress TLS Secret's `ca.crt`, which the chart mounts as one projected key when ingress TLS is on:
+The root reaches the functions as `ABER_CA_PEM`, from the ingress TLS Secret's `ca.crt`, which the
+chart mounts beside `tls.crt` (never the key) when ingress TLS is on:
 that is the root that signs the API's own certificate, the one an appliance must trust to reach
 the installer, and not the broker's, which is allowed to differ. The same key is served over plain
 HTTP by the frontend at `/.well-known/aber/ca.pem` (`nginx.conf`, `frontend.yaml`), which is
 where stage 0 fetches it; the chart hands the functions that address as `ABER_CA_URL`. The mount is
-optional so the pods start before cert-manager has issued; a functions pod that started before
-the issue offers no command until it is restarted, and the readiness answer says so. The same
+optional so the pods start before cert-manager has issued, and `main/index.ts` reads it at each
+spawn until it holds a root, so a pod that started first needs no restart. While the mount is empty
+on an HTTPS platform, `gateway-bundle` refuses both the bundle and the command and mints no token;
+an issuer that publishes no root (ACME) leaves `ca.crt` out, and the bundle then carries none. The same
 root reaches the appliance's `bootstrap` container as `platform-root.pem` beside the compose
 project, which its `NODE_EXTRA_CA_CERTS` names: the installer copies the root stage 0 verified,
 and the ZIP bundle carries `ABER_CA_PEM`, or an empty file when there is none.
