@@ -68,7 +68,13 @@ const routeGet = (rows, { quarantine = [], cells = CELLS, areas = [] } = {}) => 
 const show = async (rows, options = {}) => {
   api.get.mockImplementation(routeGet(rows, options))
   render(<DevicesTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
+  if (options.tab) fireEvent.click(screen.getByRole('tab', { name: options.tab }))
   await waitFor(() => expect(screen.getByText(options.expect || 'CNC_01')).toBeTruthy())
+}
+
+/** Open the Registered tab's Filters popover, where all but search, status and attention live. */
+const openFilters = () => {
+  if (!screen.queryByRole('dialog', { name: 'Filters' })) fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
 }
 
 /** Open the edit form for a device: select the row, then Edit from the drawer. */
@@ -80,8 +86,7 @@ const openEdit = (name = 'CNC_01') => {
 beforeEach(() => vi.clearAllMocks())
 
 describe('the cell column', () => {
-  // Scoped to the roster's Cell column. Cell names also appear in the filter dropdown. The only
-  // table is the roster while the Quarantine queue is empty.
+  // Scoped to the roster's Cell column. The only table is the roster while Registered is the tab.
   const cellColumn = () =>
     within(screen.getByRole('table')).getAllByRole('row')[1].querySelectorAll('td')[4]
 
@@ -133,14 +138,14 @@ describe('the cell column', () => {
     expect(within(cellColumn()).queryByText(/Unassigned/)).not.toBeInTheDocument()
   })
 
-  it('reports a shadow device as Shadow rather than folding it into Simulated', async () => {
+  it('reports a replay lane as Replay lane rather than folding it into Simulated', async () => {
     // The precedence the view keeps and this column has to keep with it: a replayed reading DID
     // happen, which is the opposite answer to a generated one.
     await show([device({
       active_gateway_id: 'gw-sim', effective_cell_id: null, gateway_cell_id: null,
       location_source: 'shadow'
     })])
-    expect(within(cellColumn()).getByText('Shadow')).toBeInTheDocument()
+    expect(within(cellColumn()).getByText('Replay lane')).toBeInTheDocument()
   })
 
   it('does not offer unassigned advice to a simulated device', async () => {
@@ -154,7 +159,7 @@ describe('the cell column', () => {
 })
 
 describe('the cell filter', () => {
-  const cellSelect = () => screen.getByTitle(/Filter by the cell a device resolves to/i)
+  const cellSelect = () => { openFilters(); return screen.getByTitle(/Filter by the cell a device resolves to/i) }
 
   it('matches an inherited device when filtering by its resolved cell', async () => {
     // The regression this guards: filtering on cell_id would match only explicitly filed
@@ -405,6 +410,53 @@ describe('the Sparkplug topic in the context panel', () => {
   })
 })
 
+describe('the Location row in the context panel', () => {
+  // One row in place of three. The cells are filed into areas here, so the area resolves.
+  const FILED = [
+    { cell_id: CELL_1, cell_name: 'Assembly', area_id: 'area-1', is_archived: false },
+    { cell_id: CELL_2, cell_name: 'Paint Shop', area_id: 'area-1', is_archived: false }
+  ]
+  const AREAS = [{ area_id: 'area-1', area_name: 'North Shop' }]
+
+  const location = async (overrides) => {
+    await show([device(overrides)], { cells: FILED, areas: AREAS })
+    fireEvent.click(within(document.querySelector('.page-main')).getByText('CNC_01'))
+    const field = [...document.querySelectorAll('.context-panel .context-field')]
+      .find(f => f.querySelector('.context-field-label').textContent === 'Location')
+    return field.querySelector('.context-field-value')
+  }
+
+  it('is one row: the area and the cell, marked as from the gateway when inherited', async () => {
+    const value = await location()
+    expect(value.textContent).toBe('North Shop›Assembly(from gateway)')
+    expect(within(value).getByRole('button', { name: /North Shop/ })).toHaveAttribute('title', 'Open this area on the Areas page')
+    expect(within(value).getByRole('button', { name: /Assembly/ })).toHaveAttribute('title', 'Open this cell on the Cells page')
+    const labels = [...document.querySelectorAll('.context-panel .context-field-label')].map(l => l.textContent)
+    expect(labels).not.toContain('Area (resolved)')
+    expect(labels).not.toContain('Location Source')
+  })
+
+  it('drops "(from gateway)" for a device filed on itself', async () => {
+    const value = await location({ cell_id: CELL_2, location_source: 'explicit' })
+    expect(value.textContent).toBe('North Shop›Paint Shop')
+    expect(value).toHaveAttribute('title', expect.stringMatching(/^Set on the device itself/))
+  })
+
+  it('says Unassigned, as a warning, when nothing supplies a cell', async () => {
+    const value = await location({ active_gateway_id: 'gw-host', effective_cell_id: null, gateway_cell_id: null, location_source: 'unassigned' })
+    expect(value.textContent).toBe('Unassigned')
+    expect(value.querySelector('.badge-warning svg')).toBeTruthy()
+  })
+
+  it('names the area of an Area-Wide device, and Site-Wide alone', async () => {
+    let value = await location({ location_scope: 'area_wide', area_id: 'area-1', effective_cell_id: null, location_source: 'area_wide' })
+    expect(value.textContent).toBe('North Shop›Area-Wide')
+    cleanup()
+    value = await location({ location_scope: 'site_wide', effective_cell_id: null, location_source: 'site_wide' })
+    expect(value.textContent).toBe('Site-Wide')
+  })
+})
+
 describe('needs attention', () => {
   const attentionButton = () => screen.getByRole('button', { name: /Needs attention/i })
 
@@ -451,7 +503,7 @@ describe('approving a quarantined device', () => {
     within(screen.getByRole('dialog')).getByRole('button', { name: /Approve & Onboard/i })
 
   const openApproval = async () => {
-    await show([], { quarantine: [quarantined], expect: 'Unknown_Robot' })
+    await show([], { quarantine: [quarantined], expect: 'Unknown_Robot', tab: /^Quarantine/ })
     fireEvent.click(screen.getAllByRole('button', { name: /Approve/i })[0])
     await waitFor(() => expect(screen.getByText(/Approve Discovered Device/i)).toBeTruthy())
   }
@@ -489,6 +541,7 @@ describe('approving a quarantined device', () => {
       ]
     }))
     render(<DevicesTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
+    fireEvent.click(screen.getByRole('tab', { name: /^Quarantine/ }))
     await waitFor(() => expect(screen.getByText('Unknown_Robot')).toBeTruthy())
     fireEvent.click(screen.getAllByRole('button', { name: /Approve/i })[0])
     await waitFor(() => expect(screen.getByText(/Approve Discovered Device/i)).toBeTruthy())
@@ -520,7 +573,7 @@ describe('approving a quarantined device', () => {
 
 
 /**
- * Shadow devices on the Devices page. `ensure_shadow_devices()` mints one per captured device when
+ * Replay lanes on the Devices page. `ensure_shadow_devices()` mints one per captured device when
  * a playback starts, so the first playback doubles the list; a replay lane's values did happen, on
  * the real device, on the day of the capture, which is worth a badge rather than a filter alone.
  */
@@ -545,30 +598,34 @@ describe('replay lanes', () => {
     // COUNTED ACROSS EVERY DEVICE, not the filtered list -- counting the rows on screen would
     // report zero exactly when the button is worth pressing.
     await show([device(), shadow()])
-    await waitFor(() => expect(screen.getByText(/Show shadow devices \(1\)/)).toBeInTheDocument())
+    openFilters()
+    await waitFor(() => expect(screen.getByText(/Show replay lanes \(1\)/)).toBeInTheDocument())
   })
 
   it('shows them when asked, marked as what they are', async () => {
     await show([device(), shadow()])
-    fireEvent.click(await screen.findByText(/Show shadow devices \(1\)/))
+    openFilters()
+    fireEvent.click(await screen.findByText(/Show replay lanes \(1\)/))
     await waitFor(() => expect(screen.getByText('CNC_01 (replay)')).toBeInTheDocument())
     // The badge is on the ROW, not only implied by the filter: filters are forgotten, and the row
     // may be read later from a link or a screenshot.
-    expect(screen.getByText('SHADOW')).toBeInTheDocument()
+    expect(within(screen.getByText('CNC_01 (replay)').closest('td')).getByText('Replay lane')).toBeInTheDocument()
   })
 
   it('does not offer the toggle on a stack that has never replayed', async () => {
-    // Most stacks. A permanent "Show shadow devices (0)" would take width from filters that do something.
+    // Most stacks. A permanent "Show replay lanes (0)" would be a control that does nothing.
     await show([device()])
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeInTheDocument())
-    expect(screen.queryByText(/Show shadow devices/)).toBeNull()
+    openFilters()
+    expect(screen.queryByText(/Show replay lanes/)).toBeNull()
   })
 
   it('is orthogonal to the archived filter, which is why it is not a filterMode', async () => {
     // A replay lane can be archived or not. Folding it into active/archived/all would make one of
     // those combinations unreachable.
     await show([device(), shadow({ is_archived: true })])
-    fireEvent.click(await screen.findByText(/Show shadow devices \(1\)/))
+    openFilters()
+    fireEvent.click(await screen.findByText(/Show replay lanes \(1\)/))
     fireEvent.change(screen.getByTitle('Filter by lifecycle state'), { target: { value: 'all' } })
     await waitFor(() => expect(screen.getByText('CNC_01 (replay)')).toBeInTheDocument())
     expect(screen.getAllByText('ARCHIVED').length).toBeGreaterThan(0)
@@ -593,7 +650,9 @@ describe('the actions a shadow device does not offer', () => {
 
   const openShadowPanel = async () => {
     await show([device(), shadowDevice()])
-    fireEvent.click(await screen.findByText(/Show shadow devices \(1\)/))
+    openFilters()
+    fireEvent.click(await screen.findByText(/Show replay lanes \(1\)/))
+    fireEvent.keyDown(document, { key: 'Escape' })
     fireEvent.click(await screen.findByText('CNC_01 (replay)'))
     return within(document.querySelector('.context-panel'))
   }
@@ -608,10 +667,11 @@ describe('the actions a shadow device does not offer', () => {
     expect(panel.queryByText('Attached Links')).toBeNull()
   })
 
-  it('still offers the AAS exports on a replay lane', async () => {
-    // A replay lane exports without a Nameplate submodel: a shell with no asset identity.
+  it('still offers the export on a replay lane', async () => {
+    // A replay lane exports without a Nameplate submodel: a shell with no asset identity. The
+    // dialog withholds only the bundle (aasExport.test.jsx).
     const panel = await openShadowPanel()
-    expect(panel.queryByText(/Export AAS JSON/)).not.toBeNull()
+    expect(panel.queryByText(/Export…/)).not.toBeNull()
   })
 
   it('leaves all three on an ordinary device', async () => {
@@ -621,6 +681,6 @@ describe('the actions a shadow device does not offer', () => {
     const panel = within(document.querySelector('.context-panel'))
     expect(panel.queryByText(/Digital Nameplate/)).not.toBeNull()
     expect(panel.queryByText('Attached Links')).not.toBeNull()
-    expect(panel.queryByText(/Export AAS JSON/)).not.toBeNull()
+    expect(panel.queryByText(/Export…/)).not.toBeNull()
   })
 })

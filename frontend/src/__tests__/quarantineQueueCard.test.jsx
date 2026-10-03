@@ -1,13 +1,14 @@
 import React from 'react'
-import { render, waitFor, fireEvent, within } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
 import { formatDateTime } from '../utils/format'
 
 /**
- * The Quarantine queue is always the Devices page's first card, and the roster under it opens on
- * Active, counts its rows and tells "none yet" from "none match".
+ * The Devices page is one card with two tabs: Registered, the roster, which opens on Active and
+ * keeps its secondary filters in a popover; and Quarantine, the queue, which carries the attention
+ * state while a birth waits.
  */
 
 vi.mock('../api', async () => {
@@ -64,60 +65,97 @@ const routeGet = (rows, quarantine) => (path) => {
   return Promise.resolve([])
 }
 
-const show = async (rows, quarantine = [], hasPermission = () => true) => {
+const show = async (rows, quarantine = [], hasPermission = () => true, props = {}) => {
   api.get.mockImplementation(routeGet(rows, quarantine))
-  render(<DevicesTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={hasPermission} />)
-  await waitFor(() => expect(document.querySelector('.queue-card')).toBeTruthy())
+  render(<DevicesTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={hasPermission} {...props} />)
+  await waitFor(() => expect(document.querySelector('.tab-strip')).toBeTruthy())
   await waitFor(() => expect(document.querySelector('.loading-wrap')).toBeNull())
 }
 
-const queueCard = () => document.querySelector('.queue-card')
-const rosterCard = () => document.querySelector('.page-main .card-fill')
-const titleCount = (card) => card.querySelector('.section-title .section-count').textContent
+const card = () => document.querySelector('.page-main > .card')
+const tab = (name) => screen.getByRole('tab', { name })
+const openFilters = () => {
+  fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
+  return within(screen.getByRole('dialog', { name: 'Filters' }))
+}
+const panelOpen = () => !!document.querySelector('.context-panel-open')
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+  window.history.replaceState({}, '', '/devices')
+})
 
-describe('the Devices page heading', () => {
-  it('opens the page with the rail icon, title and one sentence, above the queue', async () => {
+describe('the Devices card', () => {
+  it('is the page\'s one card, its heading carrying the rail icon, the title and one sentence', async () => {
     await show([device()])
 
-    const heading = document.querySelector('.page-heading')
-    expect(heading.querySelector('h2.section-title').textContent).toBe('Devices')
-    expect(heading.querySelector('h2 svg')).toBeTruthy()
-    expect(heading.querySelector('p').textContent.match(/[.!?]/g)).toHaveLength(1)
-    expect(heading.compareDocumentPosition(queueCard()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(document.querySelectorAll('.page-main > .card')).toHaveLength(1)
+    expect(document.querySelector('.page-heading')).toBeNull()
+    const heading = card().querySelector(':scope > .card-heading')
+    expect(heading.querySelector('h3.section-title').textContent).toBe('Devices')
+    expect(heading.querySelector('h3 svg')).toBeTruthy()
+    const sentence = heading.querySelector('.card-heading-description').textContent
+    expect(sentence.match(/[.!?](\s|$)/g)).toHaveLength(1)
+    expect(sentence.split(' ').length).toBeLessThanOrEqual(28)
   })
 
-  it('retitles the roster card Registered devices, keeping its tooltip', async () => {
+  it('puts the tab bar straight under the heading, Registered selected, with no counts', async () => {
+    await show([device()], [queued])
+
+    const strip = card().querySelector(':scope > .card-heading + .tab-strip')
+    expect(strip).toBeTruthy()
+    expect(within(strip).getAllByRole('tab').map(t => t.textContent.replace(/\d+$/, ''))).toEqual(['Registered', 'Quarantine'])
+    expect(tab('Registered')).toHaveAttribute('aria-selected', 'true')
+    expect(card().querySelector('.section-count')).toBeNull()
+  })
+
+  it('gives the scrolling to the card, its table the scroller', async () => {
     await show([device()])
 
-    const title = rosterCard().querySelector('h3.section-title')
-    expect(title.textContent).toMatch(/^Registered devices/)
-    expect(within(rosterCard()).getByRole('button', { name: 'About registered devices' })).toBeInTheDocument()
+    expect(document.querySelector('.page-layout')).toHaveClass('page-fill')
+    expect(card()).toHaveClass('card-fill')
+    expect(card().querySelector(':scope > .table-wrap')).toBeTruthy()
+  })
+
+  it('closes the panel when the tab changes, since it belongs to the list it came from', async () => {
+    await show([device()], [queued])
+    fireEvent.click(within(card()).getByText('CNC_01'))
+    expect(panelOpen()).toBe(true)
+
+    fireEvent.click(tab(/^Quarantine/))
+    expect(panelOpen()).toBe(false)
   })
 })
 
-describe('the Quarantine queue card', () => {
-  it('is the first card and says so with a zero and one line while nothing is waiting', async () => {
+describe('the Quarantine tab', () => {
+  it('is plain and says so with one line while nothing is waiting', async () => {
     await show([device()])
 
-    const card = queueCard()
-    expect(card.querySelector('h3.section-title').textContent).toMatch(/Quarantine queue/)
-    expect(titleCount(card)).toBe('0')
-    expect(within(card).getByText('Nothing is waiting to be let in.')).toBeInTheDocument()
-    expect(card.querySelector('table')).toBeNull()
-    expect(card).not.toHaveClass('card-attention')
-    expect(document.querySelector('.page-main .card')).toBe(card)
-    expect(card.compareDocumentPosition(rosterCard()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(tab('Quarantine')).not.toHaveClass('tab-strip-tab-attention')
+    fireEvent.click(tab('Quarantine'))
+    expect(within(card()).getByText('Nothing is waiting to be let in.')).toBeInTheDocument()
+    expect(card().querySelector('table')).toBeNull()
   })
 
-  it('wears the attention border and lists the device while it holds one', async () => {
+  it('carries the attention state while a device waits: colour, icon and number', async () => {
     await show([device()], [queued])
 
-    const card = queueCard()
-    expect(card).toHaveClass('card-attention')
-    expect(titleCount(card)).toBe('1')
-    const row = within(card).getByText('Unknown_Robot').closest('tr')
+    const waiting = tab('Quarantine, 1 waiting')
+    expect(waiting).toHaveClass('tab-strip-tab-attention')
+    expect(waiting.querySelector('.tab-strip-attention svg')).toBeTruthy()
+    expect(waiting.querySelector('.tab-strip-attention').textContent).toBe('1')
+    // No border on any card, and the roster stays where it was.
+    expect(document.querySelector('.card-attention')).toBeNull()
+    expect(tab('Registered')).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('lists the waiting device, with its HelpTip first in the toolbar', async () => {
+    await show([device()], [queued])
+    fireEvent.click(tab(/^Quarantine/))
+
+    const bar = card().querySelector(':scope > .tab-strip + .filter-bar')
+    expect(bar.firstElementChild).toHaveAccessibleName('About the Quarantine queue')
+    const row = within(card()).getByText('Unknown_Robot').closest('tr')
     // Relative time, with the exact time on hover; a plain dash for the missing gateway name.
     const when = within(row).getByText('3h ago')
     expect(when).toHaveAttribute('title', formatDateTime(DISCOVERED))
@@ -130,64 +168,126 @@ describe('the Quarantine queue card', () => {
 
   it('names the roles that can approve on a disabled button', async () => {
     await show([device()], [queued], () => false)
+    fireEvent.click(tab(/^Quarantine/))
 
-    const button = within(queueCard()).getByRole('button', { name: 'Approve & Onboard' })
+    const button = within(card()).getByRole('button', { name: 'Approve & Onboard' })
     expect(button).toBeDisabled()
     expect(button.title).toMatch(/^Requires /)
     expect(button.title).not.toMatch(/Admin permissions/)
   })
+
+  it('opens on the Quarantine tab when App hands it over, and clears the hand-over', async () => {
+    const onClearView = vi.fn()
+    await show([device()], [queued], () => true, { initialView: 'quarantine', onClearView })
+
+    expect(tab(/^Quarantine/)).toHaveAttribute('aria-selected', 'true')
+    expect(onClearView).toHaveBeenCalled()
+  })
+
+  it('lands a quarantined device named by another page on the Quarantine tab, with no panel', async () => {
+    const held = device({ asset_id: queued.asset_id, asset_name: 'Unknown_Robot', is_quarantined: true })
+    await show([device(), held], [queued], () => true, { initialSearchFilter: queued.asset_id })
+
+    await waitFor(() => expect(tab(/^Quarantine/)).toHaveAttribute('aria-selected', 'true'))
+    expect(panelOpen()).toBe(false)
+    expect(within(card()).getByText('Unknown_Robot')).toBeInTheDocument()
+  })
 })
 
-describe('the Devices roster', () => {
+describe('the Registered tab', () => {
   const archived = device({
     asset_id: 'aaaaaaaa-0000-4000-8000-000000000002', asset_name: 'Old_Lathe', is_archived: true
   })
 
-  it('opens on Active and counts what it lists', async () => {
-    await show([device(), archived])
+  it('keeps search, status and Needs attention in the toolbar, and New Device at its end', async () => {
+    await show([device()])
 
-    expect(within(rosterCard()).queryByText('Old_Lathe')).toBeNull()
-    expect(titleCount(rosterCard())).toBe('1')
-    expect(rosterCard().querySelector('select').value).toBe('active')
-    expect(within(rosterCard()).getByRole('option', { name: 'Archived (1)' })).toBeInTheDocument()
-    // Active is the default, so it is not a filter to clear.
-    expect(within(rosterCard()).queryByRole('button', { name: /Clear filters/ })).toBeNull()
+    const bar = within(card().querySelector(':scope > .tab-strip + .filter-bar'))
+    expect(card().querySelector('.filter-bar').firstElementChild).toHaveAccessibleName('About registered devices')
+    expect(bar.getByRole('searchbox', { name: 'Search devices' })).toBeInTheDocument()
+    expect(bar.getByTitle('Filter by operational state')).toBeInTheDocument()
+    expect(bar.getByRole('button', { name: /Needs attention/ })).toBeInTheDocument()
+    expect(within(card().querySelector('.filter-bar-actions')).getByRole('button', { name: /New Device/ })).toBeInTheDocument()
+    // The rest wait in the popover.
+    expect(screen.queryByTitle('Filter by serving gateway')).toBeNull()
   })
 
-  it('shows archived rows one filter away, tinted and badged', async () => {
-    await show([device(), archived])
-    fireEvent.change(rosterCard().querySelector('select'), { target: { value: 'archived' } })
+  it('holds lifecycle, type, schema, gateway and cell in the Filters popover', async () => {
+    await show([device()])
 
-    const row = within(rosterCard()).getByText('Old_Lathe').closest('tr')
+    const popover = openFilters()
+    for (const name of ['Lifecycle', 'Type', 'Schema', 'Gateway', 'Cell']) {
+      expect(popover.getByRole('combobox', { name })).toBeInTheDocument()
+    }
+  })
+
+  it('opens on Active and lists no archived row', async () => {
+    await show([device(), archived])
+
+    expect(within(card()).queryByText('Old_Lathe')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument()
+    const popover = openFilters()
+    expect(popover.getByRole('combobox', { name: 'Lifecycle' })).toHaveValue('active')
+    expect(popover.getByRole('option', { name: 'Archived (1)' })).toBeInTheDocument()
+    // Active is the default, so it is not a filter to clear.
+    expect(within(card()).queryByRole('button', { name: /Clear filters/ })).toBeNull()
+  })
+
+  it('shows archived rows one filter away, tinted and badged, and counts the filter', async () => {
+    await show([device(), archived])
+    fireEvent.change(openFilters().getByRole('combobox', { name: 'Lifecycle' }), { target: { value: 'archived' } })
+
+    const row = within(card()).getByText('Old_Lathe').closest('tr')
     expect(row).toHaveClass('row-archived')
     expect(within(row).getAllByText('ARCHIVED').length).toBeGreaterThan(0)
-    expect(titleCount(rosterCard())).toBe('1')
-    expect(within(rosterCard()).getByRole('button', { name: /Clear filters \(1\)/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Filters (1)' })).toBeInTheDocument()
+    expect(within(card()).getByRole('button', { name: /Clear filters \(1\)/ })).toBeInTheDocument()
   })
 
-  it('reads shown / total while a search narrows the list', async () => {
-    await show([device(), device({ asset_id: 'aaaaaaaa-0000-4000-8000-000000000009', asset_name: 'Press_02' })])
-    expect(titleCount(rosterCard())).toBe('2')
+  it('clears only its own filters from the popover, and everything from the toolbar', async () => {
+    await show([device(), archived])
+    fireEvent.change(within(card()).getByPlaceholderText(/Search name, UUID or Sparkplug ID/), { target: { value: 'CNC' } })
+    const popover = openFilters()
+    fireEvent.change(popover.getByRole('combobox', { name: 'Gateway' }), { target: { value: 'gw-1' } })
+    expect(screen.getByRole('button', { name: 'Filters (1)' })).toBeInTheDocument()
+    expect(within(card()).getByRole('button', { name: /Clear filters \(2\)/ })).toBeInTheDocument()
 
-    fireEvent.change(within(rosterCard()).getByPlaceholderText(/Search name, UUID or Sparkplug ID/), { target: { value: 'Press' } })
-    expect(titleCount(rosterCard())).toBe('1 / 2')
+    fireEvent.click(popover.getByRole('button', { name: 'Clear' }))
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument()
+    expect(within(card()).getByPlaceholderText(/Search name, UUID or Sparkplug ID/)).toHaveValue('CNC')
+
+    fireEvent.click(within(card()).getByRole('button', { name: /Clear filters \(1\)/ }))
+    expect(within(card()).getByPlaceholderText(/Search name, UUID or Sparkplug ID/)).toHaveValue('')
   })
 
   it('says "none yet" on an empty stack and "none match" once a filter is on', async () => {
     await show([])
-    expect(within(rosterCard()).getByText('No devices yet.')).toBeInTheDocument()
-    expect(titleCount(rosterCard())).toBe('0')
+    expect(within(card()).getByText('No devices yet.')).toBeInTheDocument()
 
-    fireEvent.change(within(rosterCard()).getByPlaceholderText(/Search name, UUID or Sparkplug ID/), { target: { value: 'zzz' } })
-    expect(within(rosterCard()).getByText('No devices match these filters.')).toBeInTheDocument()
+    fireEvent.change(within(card()).getByPlaceholderText(/Search name, UUID or Sparkplug ID/), { target: { value: 'zzz' } })
+    expect(within(card()).getByText('No devices match these filters.')).toBeInTheDocument()
   })
 
-  it('gives the scrolling to the roster card and keeps the queue card at its height', async () => {
+  it('opens a row from the keyboard, and leaves a key on a control inside it to that control', async () => {
     await show([device()])
+    const row = within(card()).getByText('CNC_01').closest('tr')
+    expect(row).toHaveClass('row-selectable')
+    expect(row).toHaveAttribute('tabindex', '0')
 
-    expect(document.querySelector('.page-layout')).toHaveClass('page-fill')
-    expect(rosterCard()).toBe(document.querySelectorAll('.page-main > .card')[1])
-    expect(queueCard()).not.toHaveClass('card-fill')
-    expect(rosterCard().querySelector(':scope > .table-wrap')).toBeTruthy()
+    const copy = within(row).getByRole('button', { name: /Device UUID/i })
+    fireEvent.keyDown(copy, { key: 'Enter' })
+    fireEvent.keyDown(copy, { key: ' ' })
+    expect(panelOpen()).toBe(false)
+
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(panelOpen()).toBe(true)
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(panelOpen()).toBe(false)
+
+    // Space as well, without scrolling the card.
+    const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
+    row.dispatchEvent(space)
+    await waitFor(() => expect(panelOpen()).toBe(true))
+    expect(space.defaultPrevented).toBe(true)
   })
 })

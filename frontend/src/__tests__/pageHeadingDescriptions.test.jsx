@@ -9,7 +9,6 @@ import { describe, it, expect } from 'vitest'
 const SOURCES = import.meta.glob('../components/tabs/*.jsx', { query: '?raw', import: 'default', eager: true })
 
 const PAGES = [
-  ['DevicesTab', '../components/tabs/DevicesTab.jsx']
 ]
 
 /** The literal text between `>` of the heading's opening tag and `</PageHeading>` or the subtitle. */

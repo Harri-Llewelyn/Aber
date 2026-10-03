@@ -5129,6 +5129,43 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   background: var(--bg-glass);
 }
 
+/* The panel's Location row: the area and cell chips on one line, "›" between them. */
+.device-location {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+/* The device export dialog's formats: a radio and its name, with the hint indented beneath. */
+.device-export-formats {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.device-export-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.device-export-choice input[type="radio"] {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.device-export-choice.is-disabled {
+  color: var(--text-dim);
+  cursor: not-allowed;
+}
+
+.device-export-hint { margin-left: 21px; }
+
 /* GATEWAYS: the setup and credential dialogs. */
 
 /* Exempts the typed-name label's uppercasing, so the operator is not told to type capitals that

@@ -67,8 +67,10 @@ const show = async (hasPermission, rows = [device()], proposals = []) => {
       onViewApprovals={onViewApprovals}
     />
   )
-  // The roster opens on Active, so a fixture holding an archived row asks for All first.
+  // The roster opens on Active, so a fixture holding an archived row asks for All first, from the
+  // Filters popover.
   if (rows.some(r => r.is_archived)) {
+    fireEvent.click(await screen.findByRole('button', { name: /^Filters/ }))
     fireEvent.change(await screen.findByTitle('Filter by lifecycle state'), { target: { value: 'all' } })
   }
   await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())

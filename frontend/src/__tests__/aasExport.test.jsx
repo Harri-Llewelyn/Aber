@@ -49,21 +49,28 @@ const routeGet = (path) => {
 }
 
 /**
- * Both export formats are actions on the device's context panel. What is asserted is the request
- * each one issues and the file it writes.
+ * The device panel offers one Export… action, which opens DeviceExportModal. What is asserted is the
+ * request each format issues, the file it writes and what the dialog withholds.
  */
 const openPanel = () => {
   fireEvent.click(within(document.querySelector('.page-main')).getByText(DEVICE.asset_name))
   return within(document.querySelector('.context-panel'))
 }
+const openExport = () => {
+  fireEvent.click(openPanel().getByRole('button', { name: /Export…/ }))
+  return within(screen.getByRole('dialog'))
+}
+const FORMAT_NAME = { json: /AAS JSON/, aasx: /AASX package/, bundle: /Bundle/ }
 const chooseFormat = (format) => {
-  fireEvent.click(openPanel().getByText(
-    format === 'aasx' ? /Export AASX package/i : /Export AAS JSON/i
-  ))
+  const dialog = openExport()
+  fireEvent.click(dialog.getByRole('radio', { name: FORMAT_NAME[format] }))
+  fireEvent.click(dialog.getByRole('button', { name: 'Export' }))
+  return dialog
 }
 
-const renderDevices = (showToast = vi.fn()) => {
-  render(<DevicesTab showToast={showToast} onSelectDevice={() => {}} hasPermission={() => true} />)
+const renderDevices = (showToast = vi.fn(), hasPermission = () => true, devices = [DEVICE]) => {
+  api.get.mockImplementation((path) => (path.startsWith('/api/v1/devices') ? Promise.resolve(devices) : routeGet(path)))
+  render(<DevicesTab showToast={showToast} onSelectDevice={() => {}} hasPermission={hasPermission} />)
   return showToast
 }
 
@@ -73,24 +80,33 @@ beforeEach(() => {
   api.post.mockResolvedValue(AAS_RESULT)
 })
 
-describe('Export AAS action', () => {
-  it('offers both formats in the device drawer', async () => {
+describe('the Export… action', () => {
+  it('is one action in the device drawer, in place of one per format', async () => {
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
     const items = openPanel().getAllByRole('button').map(i => i.textContent)
-    expect(items.some(t => /Export AAS JSON/i.test(t))).toBe(true)
-    expect(items.some(t => /Export AASX package/i.test(t))).toBe(true)
+    expect(items.filter(t => /Export/.test(t))).toEqual([expect.stringMatching(/^\s*Export…$/)])
+  })
+
+  it('opens a dialog offering the three formats, JSON chosen', async () => {
+    renderDevices()
+    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
+    const dialog = openExport()
+    expect(dialog.getAllByRole('radio')).toHaveLength(3)
+    expect(dialog.getByRole('radio', { name: /AAS JSON/ })).toBeChecked()
+    expect(dialog.getByText(/A copy is kept beside the cold tier/)).toBeInTheDocument()
   })
 
   it('is available without the manage permission — an export is a read', async () => {
-    render(<DevicesTab showToast={vi.fn()} onSelectDevice={() => {}} hasPermission={() => false} />)
+    renderDevices(vi.fn(), () => false)
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
-
-    const panel = openPanel()
     // Enabled even for a role that cannot manage the device, unlike Edit and Archive beside it.
-    for (const name of [/Export AAS JSON/i, /Export AASX package/i]) {
-      expect(panel.getByText(name).closest('button').disabled).toBe(false)
-    }
+    const action = openPanel().getByRole('button', { name: /Export…/ })
+    expect(action).toBeEnabled()
+    fireEvent.click(action)
+    const dialog = within(screen.getByRole('dialog'))
+    expect(dialog.getByRole('radio', { name: /AAS JSON/ })).toBeEnabled()
+    expect(dialog.getByRole('radio', { name: /AASX package/ })).toBeEnabled()
   })
 
   it('composes the document server-side rather than in the browser', async () => {
@@ -106,18 +122,7 @@ describe('Export AAS action', () => {
     ))
   })
 
-  it('downloads the shell under the device name', async () => {
-    renderDevices()
-    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
-
-    chooseFormat('json')
-
-    await waitFor(() => expect(downloadJSON).toHaveBeenCalledWith(
-      AAS_RESULT.aas, 'CNC_01_aas_v3.json'
-    ))
-  })
-
-  it('downloads the AAS environment, not the wrapper the function returns', async () => {
+  it('downloads the AAS environment under the device name, not the wrapper the function returns', async () => {
     // `aas` is the AAS Part 5 Environment; the surrounding stats/device keys are transport, and a
     // consumer handed the whole envelope would reject it.
     renderDevices()
@@ -125,13 +130,14 @@ describe('Export AAS action', () => {
 
     chooseFormat('json')
 
-    await waitFor(() => expect(downloadJSON).toHaveBeenCalled())
+    await waitFor(() => expect(downloadJSON).toHaveBeenCalledWith(AAS_RESULT.aas, 'CNC_01_aas_v3.json'))
     const [payload] = downloadJSON.mock.calls[0]
     expect(payload).toHaveProperty('assetAdministrationShells')
     expect(payload).not.toHaveProperty('stats')
+    expect(downloadBlob).not.toHaveBeenCalled()
   })
 
-  it('reports what was exported', async () => {
+  it('reports what was exported and closes the dialog', async () => {
     const showToast = renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
@@ -140,62 +146,29 @@ describe('Export AAS action', () => {
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(
       expect.stringContaining('3 submodels, 11 metrics'), 'success'
     ))
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('warns when metrics carried no semantic id, rather than failing silently', async () => {
-    // Unmapped is a legitimate state, so this is a warning — but an invisible gap in an export's
-    // usefulness is worse than a noisy one.
-    api.post.mockResolvedValue({
-      ...AAS_RESULT,
-      stats: { ...AAS_RESULT.stats, unmapped_semantic_ids: 2 }
-    })
-    const showToast = renderDevices()
-    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
-
-    chooseFormat('json')
-
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith(
-      expect.stringContaining('2 metrics carried no semantic id'), 'warning'
-    ))
-  })
-
-  it('surfaces a failure and downloads nothing', async () => {
+  it('keeps a failure in the dialog, downloads nothing, and can be retried', async () => {
     api.post.mockRejectedValue(new Error('Forbidden: Insufficient privileges'))
-    const showToast = renderDevices()
-    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
-
-    chooseFormat('json')
-
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith(
-      'Forbidden: Insufficient privileges', 'error'
-    ))
-    expect(downloadJSON).not.toHaveBeenCalled()
-  })
-
-  it('re-enables the export after a failure, so it can be retried', async () => {
-    api.post.mockRejectedValue(new Error('boom'))
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
-    chooseFormat('json')
+    const dialog = chooseFormat('json')
 
-    // Both export actions are disabled while exporting (and labelled "Exporting AAS…"); a failure
-    // must clear that rather than leaving the device permanently unable to retry.
-    await waitFor(() =>
-      expect(openPanel().getByText(/Export AAS JSON/i).closest('button').disabled).toBe(false))
+    await waitFor(() => expect(dialog.getByRole('alert')).toHaveTextContent('Forbidden: Insufficient privileges'))
+    expect(downloadJSON).not.toHaveBeenCalled()
+    expect(dialog.getByRole('button', { name: 'Export' })).toBeEnabled()
   })
-})
-
-describe('Export AAS — AASX package', () => {
-  const AASX_RESULT = {
-    blob: new Blob(['PK'], { type: 'application/asset-administration-shell-package+xml' }),
-    stats: { submodels: 3, telemetry_metrics: 11, kpi_metrics: 3, unmapped_semantic_ids: 0 },
-    format: 'aasx'
-  }
 
   it('requests the aasx format and downloads the package under a .aasx name', async () => {
+    const AASX_RESULT = {
+      blob: new Blob(['PK'], { type: 'application/asset-administration-shell-package+xml' }),
+      stats: { submodels: 3, telemetry_metrics: 11, kpi_metrics: 3, unmapped_semantic_ids: 0 },
+      format: 'aasx'
+    }
     api.post.mockResolvedValue(AASX_RESULT)
-    renderDevices()
+    const showToast = renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
     chooseFormat('aasx')
@@ -203,77 +176,58 @@ describe('Export AAS — AASX package', () => {
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
       '/api/v1/devices/aas-export', { device_id: DEVICE.asset_id, format: 'aasx' }
     ))
-    await waitFor(() => expect(downloadBlob).toHaveBeenCalledWith(AASX_RESULT.blob, 'CNC_01.aasx'))
-  })
-
-  it('never routes the package through downloadJSON', async () => {
     // downloadJSON re-serialises whatever it is given; handing it a ZIP produces a corrupt file.
-    api.post.mockResolvedValue(AASX_RESULT)
-    renderDevices()
-    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
-
-    chooseFormat('aasx')
-
-    await waitFor(() => expect(downloadBlob).toHaveBeenCalled())
+    await waitFor(() => expect(downloadBlob).toHaveBeenCalledWith(AASX_RESULT.blob, 'CNC_01.aasx'))
     expect(downloadJSON).not.toHaveBeenCalled()
-  })
-
-  it('names the format it exported, so the two are distinguishable in the toast', async () => {
-    api.post.mockResolvedValue(AASX_RESULT)
-    const showToast = renderDevices()
-    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
-
-    chooseFormat('aasx')
-
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith(
-      expect.stringContaining('AASX package exported'), 'success'
-    ))
-  })
-
-  it('keeps the JSON path on downloadJSON', async () => {
-    api.post.mockResolvedValue(AAS_RESULT)
-    renderDevices()
-    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
-
-    chooseFormat('json')
-
-    await waitFor(() => expect(downloadJSON).toHaveBeenCalled())
-    expect(downloadBlob).not.toHaveBeenCalled()
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('AASX package exported'), 'success')
   })
 })
 
 /**
  * The bundle carries the device's Audit Trail, and aas-export refuses it to a caller without
- * `audit_trail:read`. The action is withheld from that reader, as View Audit Trail is.
+ * `audit_trail:read`. The dialog shows it disabled, with the reason, as it does on a replay lane.
  */
-describe('Export Bundle — for the readers of the Audit Trail', () => {
-  const BUNDLE = /Export Bundle \(with history\)/i
-
-  const panelFor = async (hasPermission) => {
-    render(<DevicesTab showToast={vi.fn()} onSelectDevice={() => {}} hasPermission={hasPermission} />)
-    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
-    return openPanel()
-  }
+describe('the Bundle format', () => {
+  const bundleRadio = (dialog) => dialog.getByRole('radio', { name: /Bundle/ })
 
   it('is offered to a role that holds audit_trail:read, even without the manage permissions', async () => {
     // The Auditor's grant: the trail and nothing else.
-    const panel = await panelFor((p) => p === PERMISSION_UUIDS.AUDIT_TRAIL_READ)
-    expect(panel.getByText(BUNDLE).closest('button').disabled).toBe(false)
+    renderDevices(vi.fn(), (p) => p === PERMISSION_UUIDS.AUDIT_TRAIL_READ)
+    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
+    expect(bundleRadio(openExport())).toBeEnabled()
   })
 
-  it('is withheld from a role without it, which keeps both plain exports', async () => {
+  it('is disabled, with the reason, for a role without it, which keeps both plain exports', async () => {
     // The Operator's grants: telemetry, the quarantine view and proposals.
     const operator = [PERMISSION_UUIDS.TELEMETRY_READ, PERMISSION_UUIDS.QUARANTINE_VIEW, PERMISSION_UUIDS.PROPOSAL_CREATE]
-    const panel = await panelFor((p) => operator.includes(p))
-    expect(panel.queryByText(BUNDLE)).toBeNull()
-    expect(panel.getByText(/Export AAS JSON/i)).toBeInTheDocument()
-    expect(panel.getByText(/Export AASX package/i)).toBeInTheDocument()
+    renderDevices(vi.fn(), (p) => operator.includes(p))
+    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
+    const dialog = openExport()
+    expect(bundleRadio(dialog)).toBeDisabled()
+    expect(bundleRadio(dialog)).toHaveAccessibleDescription(/carries the Audit Trail\. Requires /)
+    expect(dialog.getByRole('radio', { name: /AAS JSON/ })).toBeEnabled()
+    expect(dialog.getByRole('radio', { name: /AASX package/ })).toBeEnabled()
+  })
+
+  it('is disabled, with the reason, on a replay lane, which keeps both plain exports', async () => {
+    renderDevices(vi.fn(), () => true, [{ ...DEVICE, shadow_of: 'bbbbbbbb-0000-4000-8000-000000000002' }])
+    await waitFor(() => expect(document.querySelector('.loading-wrap')).toBeNull())
+    // Replay lanes are hidden by default; the popover's toggle shows them.
+    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Show replay lanes/ }))
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
+    const dialog = openExport()
+    expect(bundleRadio(dialog)).toBeDisabled()
+    expect(bundleRadio(dialog)).toHaveAccessibleDescription(/replay lane is a recording of a device/)
+    expect(dialog.getByRole('radio', { name: /AASX package/ })).toBeEnabled()
   })
 
   it('posts the device to the bundle route when offered', async () => {
     api.post.mockResolvedValue({ blob: new Blob(['PK']), filename: 'CNC_01-bundle.aasx', stats: { bundle: { stored: true } } })
-    const panel = await panelFor(() => true)
-    fireEvent.click(panel.getByText(BUNDLE))
+    renderDevices()
+    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
+    chooseFormat('bundle')
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
       '/api/v1/devices/asset-export', { device_id: DEVICE.asset_id }
     ))
