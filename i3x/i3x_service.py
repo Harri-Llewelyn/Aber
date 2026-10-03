@@ -2971,16 +2971,28 @@ def start_reaper():
     threading.Thread(target=run, name="reaper", daemon=True).start()
 
 
+# The service-role key under both names it has: the legacy JWT and the current sb_secret_ key.
+SERVICE_KEY_VARIABLES = ("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY")
+
+
+def service_keys_in_environment(environ=None):
+    """The service-role key variables set (non-empty) in this environment."""
+    environ = os.environ if environ is None else environ
+    return [name for name in SERVICE_KEY_VARIABLES if environ.get(name)]
+
+
 def main():
     # THE ONE STARTUP REFUSAL. This process must never hold a service-role key: it authenticates the
     # caller and queries as them, and a key in the environment would let a future code path bypass
     # RLS for the whole address space. Refusing to start is the only check that cannot be forgotten,
     # and it turns a silent privilege escalation into a container that will not boot.
-    if os.getenv("SUPABASE_SERVICE_ROLE_KEY"):
+    held = service_keys_in_environment()
+    if held:
         raise SystemExit(
-            "SUPABASE_SERVICE_ROLE_KEY is set in this process's environment. The i3X service "
-            "queries PostgREST as the CALLER so that RLS applies to the address space; holding a "
-            "service-role key would defeat that. Remove it from the i3x-service environment."
+            "%s %s set in this process's environment. The i3X service queries PostgREST as the "
+            "CALLER so that RLS applies to the address space; holding a service-role key would "
+            "defeat that. Remove it from the i3x-service environment."
+            % (" and ".join(held), "is" if len(held) == 1 else "are")
         )
     if not SUPABASE_GATEWAY_KEY:
         logger.warning(

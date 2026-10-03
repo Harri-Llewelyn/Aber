@@ -3308,6 +3308,28 @@ class TestLivenessMirrorsTheDirectory(unittest.TestCase):
                          A.value_quality(A.STORED_SAMPLE_SOURCE, None, True))
 
 
+class TestNoServiceKeyAtStartup(unittest.TestCase):
+    """The service refuses to start holding the service-role key, under either of its names."""
+
+    def test_each_name_is_found(self):
+        for name in ("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY"):
+            self.assertEqual(i3x_service.service_keys_in_environment({name: "x"}), [name])
+
+    def test_an_empty_value_is_not_a_key(self):
+        self.assertEqual(i3x_service.service_keys_in_environment(
+            {"SUPABASE_SERVICE_ROLE_KEY": "", "SUPABASE_SECRET_KEY": ""}), [])
+
+    def test_main_refuses_before_it_connects_anything(self):
+        for name in ("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEY"):
+            with self.subTest(name=name), \
+                    mock.patch.dict(os.environ, {name: "sb_secret_example"}), \
+                    mock.patch.object(i3x_service, "start_mqtt") as mqtt:
+                with self.assertRaises(SystemExit) as raised:
+                    i3x_service.main()
+                self.assertIn(name, str(raised.exception))
+                mqtt.assert_not_called()
+
+
 class TestRequestValidation(unittest.TestCase):
     """Invalid parameters on the Exploratory and Query endpoints are a 400, before any read."""
 

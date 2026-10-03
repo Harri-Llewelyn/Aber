@@ -806,7 +806,7 @@ cleanup deletes by those keys. Expected values come from the Directory or from w
 | `I3X_MAX_COMPONENTS` | `10000` | Components one value or history request returns, summed over its elementIds; past it, 206 |
 | `I3X_ADDRESS_SPACE_TTL_SECONDS` | `2` | Address-space cache lifetime. `0` disables it |
 | `I3X_ADDRESS_SPACE_CACHE_MAX` | `64` | Cached address spaces retained, evicted LRU |
-| `SUPABASE_SERVICE_ROLE_KEY` | **must be absent** | Its presence is a startup refusal |
+| `SUPABASE_SECRET_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | **must be absent** | Either one is a startup refusal |
 
 ## Availability
 
