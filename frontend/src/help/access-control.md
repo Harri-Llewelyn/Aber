@@ -1,6 +1,6 @@
 ## Summary
 
-Who and what may reach this platform, and with which credential, for the machines that do not sign in: gateways, and the stack's own processes. It lists no people. It is open to Administrators. It is one card with four tabs, **Broker credentials**, **Machine identities**, **Broker accounts** and **Broker roles**, and the list inside the card scrolls while the page stays put. Each tab's **?** is at the start of the row under the tabs, its filters follow it, and its buttons are at the right-hand end.
+Who and what may reach this platform, and with which credential, for the machines that do not sign in: gateways, and the stack's own processes. It lists no people. It is open to Administrators. It is one card with four tabs, **Broker credentials**, **Machine identities**, **Broker accounts** and **Broker roles**, and the list inside the card scrolls while the page stays put. The **?** straight after the tab names explains the selected tab. Broker credentials has a row under the tabs, its filter on the left and its buttons at the right-hand end, and Machine identities has one for **New Machine Identity**. Broker accounts and Broker roles have no controls, so their list starts straight under the tabs.
 
 ## What the controls do
 

@@ -81,6 +81,26 @@ const SECTIONS = [
   { id: 'roles', label: 'Broker roles', title: 'What each broker role may publish, receive and subscribe to' },
 ]
 
+/** Each tab's "?", drawn in the tab bar for the selected tab. */
+const SECTION_HELP = {
+  credentials: {
+    label: 'About broker credentials',
+    text: 'Each gateway connects to the broker as its own Sparkplug ID, confined to its edge node. Credential is what the platform issued and recorded; Broker is what the broker holds now, read live from Dynamic Security.',
+  },
+  identities: {
+    label: 'About machine identities',
+    text: "Identities for the stack's own processes. None can sign in: each is named by a token and holds permissions of its own, not a person's role. They reach the database only, never the broker.",
+  },
+  accounts: {
+    label: 'About broker accounts',
+    text: "The broker's accounts, read live. mosquitto-init creates the stack's own at boot from each MQTT_<NAME>_USER and _PASSWORD pair. No gateway marks a gateway-shaped account no gateway claims; scripts/revoke-orphaned-broker-accounts.mjs disables those.",
+  },
+  roles: {
+    label: 'About broker roles',
+    text: 'What each role may publish, receive and subscribe to, read live from Dynamic Security. Open a role to read its rules. Purposes are declared in mosquitto/dynsec-roles.json and checked at build time.',
+  },
+}
+
 /**
  * Access Control: broker credentials and machine identities, as four tabs of one card.
  *
@@ -304,14 +324,11 @@ export function AccessControlTab({ showToast, initialSection = '', onClearSectio
             value={section}
             onChange={selectSection}
             tabs={SECTIONS}
+            help={<HelpTip label={SECTION_HELP[section].label} text={SECTION_HELP[section].text} />}
           />
 
           {section === 'credentials' && (<>
           <div className="filter-bar">
-            <HelpTip
-              label="About broker credentials"
-              text="Each gateway connects to the broker as its own Sparkplug ID, confined to its edge node. Credential is what the platform issued and recorded; Broker is what the broker holds now, read live from Dynamic Security."
-            />
             <select
               className="form-control control-lg"
               value={credentialFilter}
@@ -482,14 +499,11 @@ export function AccessControlTab({ showToast, initialSection = '', onClearSectio
               planes. The ingestion daemon connects to the broker as `aber_ingestion` and reaches the
               database as Service_Ingestor. */}
           {section === 'identities' && (<>
-          <div className="filter-bar">
-            <HelpTip
-              label="About machine identities"
-              text="Identities for the stack's own processes. None can sign in: each is named by a token and holds permissions of its own, not a person's role. They reach the database only, never the broker."
-            />
-            {/* Offered only when the list could be read: a caller the RPC refused would be refused
-                here too, and a button that opens a dialog to fail is worse than none. */}
-            {!principalError && (
+          {/* Offered only when the list could be read: a caller the RPC refused would be refused
+              here too, and a button that opens a dialog to fail is worse than none. The row holds
+              nothing else, so it goes with the button. */}
+          {!principalError && (
+            <div className="filter-bar">
               <div className="filter-bar-actions">
                 <button
                   className="btn btn-primary btn-sm"
@@ -499,8 +513,8 @@ export function AccessControlTab({ showToast, initialSection = '', onClearSectio
                   <IconPlus size={13} /> New Machine Identity
                 </button>
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {principalError && (
             <div className="card-body">
@@ -702,12 +716,6 @@ export function AccessControlTab({ showToast, initialSection = '', onClearSectio
               reconcile from the MQTT_*_USER pairs, not issued against a row. Then any gateway-shaped
               account no gateway claims, marked No gateway. */}
           {section === 'accounts' && (<>
-          <div className="filter-bar">
-            <HelpTip
-              label="About broker accounts"
-              text="The broker's accounts, read live. mosquitto-init creates the stack's own at boot from each MQTT_<NAME>_USER and _PASSWORD pair. No gateway marks a gateway-shaped account no gateway claims; scripts/revoke-orphaned-broker-accounts.mjs disables those."
-            />
-          </div>
           {inventoryLoading ? <LoadingState label="broker accounts" /> : !inventory ? (
             <EmptyState
               icon={<IconRadio size={36} />}
@@ -766,12 +774,6 @@ export function AccessControlTab({ showToast, initialSection = '', onClearSectio
           </>)}
 
           {section === 'roles' && (<>
-          <div className="filter-bar">
-            <HelpTip
-              label="About broker roles"
-              text="What each role may publish, receive and subscribe to, read live from Dynamic Security. Open a role to read its rules. Purposes are declared in mosquitto/dynsec-roles.json and checked at build time."
-            />
-          </div>
           {!inventoryLoading && !inventory && (
             <div className="card-body">
               <div className="callout callout-warning">

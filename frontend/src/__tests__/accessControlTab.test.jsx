@@ -522,6 +522,9 @@ describe('AccessControlTab', () => {
     await renderTab('Machine identities')
     await waitFor(() => expect(screen.getByText(/insufficient privileges/)).toBeTruthy())
     expect(screen.queryByRole('button', { name: /New Machine Identity/i })).toBeNull()
+    // The row held only that button, so it goes too; the tab's tip stays in the bar.
+    expect(card().querySelector('.filter-bar')).toBeNull()
+    expect(screen.getByRole('button', { name: 'About machine identities' }).parentElement).toHaveClass('tab-strip-help')
   })
 
   /**
@@ -935,21 +938,22 @@ describe('AccessControlTab card composition', () => {
     expect(heading.className).toContain('card-heading')
     expect(within(heading).getByRole('heading', { name: 'Access Control' })).toBeTruthy()
     expect(heading.querySelector('.card-heading-description')).toBeTruthy()
-    expect(heading.nextElementSibling.getAttribute('role')).toBe('tablist')
+    expect(heading.nextElementSibling).toHaveClass('tab-strip')
     // The list is the scroller: a table-wrap straight under the card, with no inline margin.
     const wrap = card().querySelector(':scope > .table-wrap')
     expect(wrap).toBeTruthy()
     expect(wrap.getAttribute('style')).toBeNull()
   })
 
-  it('puts the tab’s tip first, its filter on the left and its actions on the right of the toolbar', async () => {
+  it('puts the tab’s filter on the left and its actions on the right of the toolbar', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(card().querySelector('tbody tr')).toBeTruthy())
     const bar = card().querySelector(':scope > .tab-strip + .filter-bar')
     expect(bar).toBeTruthy()
-    expect(bar.firstElementChild.getAttribute('aria-label')).toBe('About broker credentials')
+    expect(bar.querySelector('.help-tip')).toBeNull()
+    expect(bar.firstElementChild.getAttribute('aria-label')).toBe('Filter gateways by credential state')
     expect(within(bar).getByLabelText('Filter gateways by credential state').closest('.filter-bar-actions')).toBeNull()
     expect(within(bar).getByRole('button', { name: /Refresh/ }).closest('.filter-bar-actions')).toBeTruthy()
     // The heading holds the title and description only.
@@ -986,7 +990,7 @@ describe('AccessControlTab card composition', () => {
     expect(within(screen.getByLabelText('Filter gateways by credential state')).getByText('Active (1)')).toBeTruthy()
   })
 
-  it('gives every tab its description as a tip at the start of its toolbar, and none as a paragraph', async () => {
+  it('explains the selected tab with one tip in the tab bar, and none as a paragraph', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     render(<AccessControlTab showToast={vi.fn()} />)
 
@@ -998,11 +1002,29 @@ describe('AccessControlTab card composition', () => {
       ['Broker roles', 'About broker roles'],
     ]) {
       fireEvent.click(screen.getByRole('tab', { name: label }))
-      expect(card().querySelector(':scope > .filter-bar').firstElementChild.getAttribute('aria-label')).toBe(tip)
+      const tips = card().querySelectorAll('.help-tip')
+      expect(tips).toHaveLength(1)
+      expect(tips[0].parentElement).toHaveClass('tab-strip-help')
+      expect(tips[0]).toHaveAccessibleName(tip)
     }
     expect(document.querySelector('.page-main .card p:not(.card-heading-description)')).toBeNull()
   })
 
+  it('draws a toolbar row only on the tabs that have a filter or an action', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(card().querySelector('tbody tr')).toBeTruthy())
+    for (const [label, hasRow] of [
+      ['Broker credentials', true],
+      ['Machine identities', true],
+      ['Broker accounts', false],
+      ['Broker roles', false],
+    ]) {
+      fireEvent.click(screen.getByRole('tab', { name: label }))
+      await waitFor(() => expect(Boolean(card().querySelector(':scope > .filter-bar'))).toBe(hasRow))
+    }
+  })
   it('puts New Machine Identity in the toolbar’s actions', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     await renderTab('Machine identities')
