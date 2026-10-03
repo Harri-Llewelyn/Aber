@@ -84,6 +84,18 @@ import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 const CELL_FILTER_UNASSIGNED = '__unassigned__'
 const CELL_FILTER_SITE_WIDE = '__site_wide__'
 
+/** Each tab's "?", drawn in the tab bar for the selected tab. */
+const VIEW_HELP = {
+  registered: {
+    label: 'About registered devices',
+    text: 'An asset that publishes telemetry through a gateway. Its schema says what it should publish; the historian records what it does. This page shows where the two disagree: unmodelled metrics, or no birth yet.',
+  },
+  quarantine: {
+    label: 'About the Quarantine queue',
+    text: 'A birth arrived that matches no registered device on its gateway, so its readings are held, not recorded. Approve & Onboard admits it, or accept a suggested match. Reject discards it.',
+  },
+}
+
 export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewTrail, onViewApprovals, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter, initialSection, onClearSection, activeAlerts = [] }) {
   /**
    * Which devices have an alert firing on them, via utils/deviceAlerts.js so the Site Map, Cells and
@@ -663,15 +675,10 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             { id: 'registered', label: 'Registered', title: 'Devices admitted to the platform' },
             { id: 'quarantine', label: 'Quarantine', title: 'Births from devices nobody has registered, held until approved', attention: quarantine.length }
           ]}
+          help={<HelpTip label={VIEW_HELP[view].label} text={VIEW_HELP[view].text} />}
         />
 
       {view === 'quarantine' && (<>
-        <div className="filter-bar">
-            <HelpTip
-              label="About the Quarantine queue"
-              text="A birth arrived that matches no registered device on its gateway, so its readings are held, not recorded. Approve & Onboard admits it, or accept a suggested match. Reject discards it."
-            />
-        </div>
         {loading ? <LoadingState label="quarantined devices" /> :
          quarantine.length === 0 ? (
           <EmptyState message="Nothing is waiting to be let in." />
@@ -741,11 +748,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       {view === 'registered' && (<>
       {/* The toolbar: search, status and Needs attention in the row, the rest in the popover. */}
       <div className="filter-bar">
-        <HelpTip
-          label="About registered devices"
-          text="An asset that publishes telemetry through a gateway. Its schema says what it should publish; the historian records what it does. This page shows where the two disagree: unmodelled metrics, or no birth yet."
-        />
-
         <SearchInput
           value={searchQuery}
           onChange={setSearchQuery}

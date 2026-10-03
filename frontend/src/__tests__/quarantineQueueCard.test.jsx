@@ -149,12 +149,15 @@ describe('the Quarantine tab', () => {
     expect(tab('Registered')).toHaveAttribute('aria-selected', 'true')
   })
 
-  it('lists the waiting device, with its HelpTip first in the toolbar', async () => {
+  it('lists the waiting device straight under the bar, its HelpTip in the bar and no toolbar row', async () => {
     await show([device()], [queued])
     fireEvent.click(tab(/^Quarantine/))
 
-    const bar = card().querySelector(':scope > .tab-strip + .filter-bar')
-    expect(bar.firstElementChild).toHaveAccessibleName('About the Quarantine queue')
+    // The tab has no filters or actions, so it draws no row; its "?" follows the tab names.
+    expect(card().querySelector('.filter-bar')).toBeNull()
+    expect(card().querySelector(':scope > .tab-strip + .table-wrap')).toBeTruthy()
+    expect(card().querySelector('.tab-strip-help .help-tip')).toHaveAccessibleName('About the Quarantine queue')
+    expect(screen.queryByRole('button', { name: 'About registered devices' })).toBeNull()
     const row = within(card()).getByText('Unknown_Robot').closest('tr')
     // Relative time, with the exact time on hover; a plain dash for the missing gateway name.
     const when = within(row).getByText('3h ago')
@@ -203,7 +206,8 @@ describe('the Registered tab', () => {
     await show([device()])
 
     const bar = within(card().querySelector(':scope > .tab-strip + .filter-bar'))
-    expect(card().querySelector('.filter-bar').firstElementChild).toHaveAccessibleName('About registered devices')
+    expect(card().querySelector('.filter-bar .help-tip')).toBeNull()
+    expect(card().querySelector('.tab-strip-help .help-tip')).toHaveAccessibleName('About registered devices')
     expect(bar.getByRole('searchbox', { name: 'Search devices' })).toBeInTheDocument()
     expect(bar.getByTitle('Filter by operational state')).toBeInTheDocument()
     expect(bar.getByRole('button', { name: /Needs attention/ })).toBeInTheDocument()
