@@ -5146,7 +5146,7 @@ access key ID, path-style switch and encryption recipient are `backup_offsite.*`
 `clear_backup_offsite_destination()` empties them and deletes the secret; copies already made stay
 in the bucket. The service reads the whole destination on each poll through
 `backup_offsite_destination()`, a gate no PostgREST role can call, so a change on the page applies
-without a restart.
+without a restart. The Settings page does not list these rows, so the dialog is their one editor.
 
 **The circularity, which the dialog states.** The Vault is inside every backup. Keeping the bucket
 credential there is fine for the service's own writes, but a restore after losing the site starts
@@ -5158,7 +5158,7 @@ backup service's pod (an `ipBlock` and port for the endpoint). Without one every
 connect time.
 
 **It shows.** The Backups page shows each backup's copy in an Off site column, and the destination
-above the list. The Grafana rule *Off-site Backup Stale* reads `backup_offsite_health`, which has a
+in its header button. The Grafana rule *Off-site Backup Stale* reads `backup_offsite_health`, which has a
 row only while the destination is complete: how long the newest backup has gone without a copy at
 the current destination, counted from when it was taken or the destination last changed, whichever
 is later. It fires past 12 hours (`grafana/README.md`).

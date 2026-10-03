@@ -6,8 +6,13 @@
  * in.
  */
 import { COLD_STORAGE_DIALOG_KEYS } from './utils/coldStorage'
+import { BACKUP_OFFSITE_SETTING_KEYS } from './utils/backupOffsite'
 
-const COLD_STORAGE_KEYS = new Set(COLD_STORAGE_DIALOG_KEYS)
+/** Settings a page's own destination dialog edits, with the page a search for one opens. */
+const EDITED_ON = new Map([
+  ...COLD_STORAGE_DIALOG_KEYS.map(k => [k, { tabId: 'cold-storage', page: 'Cold Storage' }]),
+  ...BACKUP_OFFSITE_SETTING_KEYS.map(k => [k, { tabId: 'backups', page: 'Backups' }])
+])
 
 /**
  * Words that should find a page but are not in its name: the vocabulary of the job rather than of
@@ -126,10 +131,10 @@ export function buildTargets(visibleTabs, settings = []) {
      log or a migration as surely as "Site name" does. The category is what the row says beneath
      its label, because it is the tab the page will open on. */
   const settingRows = reachable.has('settings')
-    ? settings.filter(s => s && s.key).map(s => (COLD_STORAGE_KEYS.has(s.key)
-      // Edited in the Cold Storage destination dialog, not on Settings, so it opens that page.
-      ? { kind: 'card', key: `setting:${s.key}`, label: s.label || s.key, tabId: 'cold-storage',
-          page: 'Cold Storage', keywords: [s.key, s.category].filter(Boolean) }
+    ? settings.filter(s => s && s.key).map(s => (EDITED_ON.has(s.key)
+      // Edited in a page's destination dialog, not on Settings, so it opens that page.
+      ? { kind: 'card', key: `setting:${s.key}`, label: s.label || s.key, ...EDITED_ON.get(s.key),
+          keywords: [s.key, s.category].filter(Boolean) }
       : {
         kind: 'setting',
         key: `setting:${s.key}`,

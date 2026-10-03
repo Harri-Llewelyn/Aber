@@ -68,6 +68,11 @@ describe('what the index holds', () => {
       .toMatchObject({ kind: 'setting', tabId: 'settings', settingKey: 'archive.tier_after_days' })
   })
 
+  it('sends a setting the Backups destination dialog edits to Backups', () => {
+    const found = buildTargets(adminTabs(), [{ key: 'backup_offsite.bucket', label: 'S3 bucket', category: 'Backups' }])
+    expect(found.find(t => t.label === 'S3 bucket')).toMatchObject({ kind: 'card', tabId: 'backups', page: 'Backups' })
+  })
+
   it('tells a card which page it is on, because that is the answer being looked for', () => {
     const credentials = targets().find(t => t.label === 'Broker credentials')
     expect(credentials.kind).toBe('card')

@@ -8,6 +8,7 @@ import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
 import { AUDIT_TRAIL_ACTIONS, ENTITY_TABLE_BY_KIND } from './constants';
 import { metricNameError } from './utils/metricGroup';
 import { readSetting } from './config';
+import { BACKUP_OFFSITE_SETTING_KEYS } from './utils/backupOffsite';
 import {
   MODEL_3D_EXTENSIONS,
   isAcceptedModelFile,
@@ -27,10 +28,6 @@ import {
  * of the identifier, so the two must move together.
  */
 const NAMEPLATE_TEMPLATE_ID = 'https://admin-shell.io/idta/nameplate/3/0/Nameplate';
-
-/** The off-site destination's settings (0018); the secret key is in the vault, not here. */
-const OFFSITE_SETTING_KEYS = ['endpoint', 'region', 'bucket', 'prefix', 'access_key_id', 'recipient', 'path_style']
-  .map(k => `backup_offsite.${k}`);
 
 /**
  * Which nameplate fields a device can answer for itself, and the OPC UA concept that answers them.
@@ -1162,7 +1159,7 @@ const apiMethods = {
    */
   backupOffsiteDestination: async () => {
     const [rows, credential] = await Promise.all([
-      supabase.from('system_settings').select('key,value').in('key', OFFSITE_SETTING_KEYS),
+      supabase.from('system_settings').select('key,value').in('key', BACKUP_OFFSITE_SETTING_KEYS),
       supabase.rpc('backup_offsite_credential_is_set')
     ]);
     const error = rows.error || credential.error;

@@ -364,6 +364,20 @@ describe('the Cold Storage rows', () => {
     expect(keys).toEqual(['archive.tier_after_days', 'archive.site_key'])
     expect(COLD_STORAGE_DIALOG_KEYS).toHaveLength(6)
   })
+
+  it('lists none of the off-site destination the Backups dialog edits', async () => {
+    vi.clearAllMocks()
+    api.get.mockResolvedValue([
+      archive('backup_offsite.endpoint', { category: 'Backups' }), archive('backup_offsite.bucket', { category: 'Backups' }),
+      archive('backup_offsite.recipient', { category: 'Backups' }),
+      archive('backup_offsite.path_style', { category: 'Backups', value: false, value_type: 'boolean' }),
+      archive('archive.tier_after_days', { value: 14, value_type: 'number' }),
+    ])
+    await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
+    const keys = [...document.querySelectorAll('[data-setting]')].map(el => el.dataset.setting)
+    expect(keys).toEqual(['archive.tier_after_days'])
+    expect(screen.queryByRole('tab', { name: /Backups/ })).toBeNull()
+  })
 })
 
 describe('which fallbacks copy', () => {

@@ -8,8 +8,10 @@ import { HelpTip } from '../common/HelpTip'
 import { LoadingState } from '../common/LoadingState'
 import { TabStrip } from '../common/TabStrip'
 import { COLD_STORAGE_DIALOG_KEYS } from '../../utils/coldStorage'
+import { BACKUP_OFFSITE_SETTING_KEYS } from '../../utils/backupOffsite'
 
-const EDITED_ON_COLD_STORAGE = new Set(COLD_STORAGE_DIALOG_KEYS)
+// Settings another page's destination dialog edits, so each value has one editor.
+const EDITED_ELSEWHERE = new Set([...COLD_STORAGE_DIALOG_KEYS, ...BACKUP_OFFSITE_SETTING_KEYS])
 
 /**
  * The runtime configuration plane as a page. It cannot add or delete a setting: the key set is
@@ -248,8 +250,9 @@ export function SettingsTab({ showToast, initialSetting = '', onClearSetting }) 
   const load = useCallback((isInitial = false) => {
     if (isInitial) setLoading(true)
     api.get('/api/v1/settings')
-      // The Cold Storage dialog is the one editor of its six rows, so they are not listed here.
-      .then(d => { setSettings((d || []).filter(s => !EDITED_ON_COLD_STORAGE.has(s.key))); setLoadError(null); setLoading(false) })
+      // The Cold Storage and Backups destination dialogs are the one editor of their rows, so
+      // those rows are not listed here.
+      .then(d => { setSettings((d || []).filter(s => !EDITED_ELSEWHERE.has(s.key))); setLoadError(null); setLoading(false) })
       .catch(e => { setLoadError(e?.message || 'Could not read settings.'); setLoading(false) })
   }, [])
 
