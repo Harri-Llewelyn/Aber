@@ -371,8 +371,8 @@ describe('the off-site copy', () => {
   it('names what is missing from a destination that cannot run', async () => {
     api.backupOffsiteDestination.mockResolvedValue({ ...DESTINATION, recipient: '', credentialSet: false })
     renderTab()
-    await waitFor(() => expect(destinationButton('Set a destination').description).toHaveTextContent('The off-site copy cannot run'))
-    const { button, description } = destinationButton('Set a destination')
+    await waitFor(() => expect(destinationButton('Complete the destination').description).toHaveTextContent('The off-site copy cannot run'))
+    const { button, description } = destinationButton('Complete the destination')
     expect(button).toHaveClass('btn-warning')
     expect(description).toHaveTextContent('the encryption recipient, the secret access key')
   })

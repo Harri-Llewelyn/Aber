@@ -667,7 +667,7 @@ function DestinationButton({ destination, onEdit }) {
   return (
     <>
       <button className="btn btn-warning btn-sm" onClick={onEdit} title={message} aria-describedby={descriptionId}>
-        <IconAlertTriangle size={14} /> Set a destination
+        <IconAlertTriangle size={14} /> {untouched ? 'Set a destination' : 'Complete the destination'}
       </button>
       <span id={descriptionId} className="sr-only">{message}</span>
     </>
