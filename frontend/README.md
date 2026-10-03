@@ -197,14 +197,14 @@ The broker read may fail without failing the page. The Broker column then reads 
 is a fact about the page load and not about any account, and the reason is stated once in the
 card. The page does not show sessions: an *Active* account is one that may connect.
 
-### Why the cold-archive secret is a dialog
+### Why the cold-archive destination is one dialog
 
-`ArchiveCredentialModal` is a dialog rather than a field on the Cold Storage card because saving is
-the one act on that page with no undo and no read-back. `set_archive_credential()` overwrites the
-secret in the vault when one exists, nothing in the stack can show either value again, and a
-mistyped one is not discovered until the nightly export fails to authenticate. Replacing a key asks
-first; setting the first one does not, since there is nothing to lose and friction only buys
-attention while it stays rare.
+`ColdStorageDestinationModal` holds the whole destination, the write-only secret key and the
+archiving switch, as Backups' destination dialog does, so each value has one editor: the Settings
+page does not list those six rows. The switch refuses "on" until the destination is complete,
+because archiving switched on with nowhere to write cannot run. The values stay `system_settings` rows written by `api.patchSetting`, so RLS, `sensitive` and the audit
+trail are unchanged. The secret key field starts empty and an empty field keeps the stored key:
+`set_archive_credential()` overwrites it with no undo and nothing can show either value again.
 
 ---
 
@@ -317,9 +317,11 @@ supplies no release version, is not evidence of drift.
 
 **A page has one card.** Its title and description are the card's `CardHeading`. The seamless tab bar
 (`common/TabStrip.jsx`, one underline style, no pills) sits under the heading and shows one tab's
-content at a time; the card scrolls, the page does not. Under the bar is a toolbar row, the existing
-`.filter-bar`: the tab's "?" `HelpTip` first, its filters next, its actions in `.filter-bar-actions`
-at the right. Tabs carry no counts. A tab with work waiting takes `attention={n}`: the label turns
+content at a time; the card scrolls, the page does not. The selected tab's "?" `HelpTip` sits in the
+bar straight after the last tab (`TabStrip`'s `help`), so a tab needs no row of its own to explain
+itself. Under the bar is a toolbar row, the existing `.filter-bar`, drawn only when the tab has
+filters or actions: its filters first, its actions in `.filter-bar-actions` at the right. Tabs carry
+no counts. A tab with work waiting takes `attention={n}`: the label turns
 the warning colour and gains an icon and the number, only while n is above 0. A row that outgrows one
 line keeps search, status and the key toggle and moves the rest into `common/FiltersPopover.jsx`.
 
@@ -327,9 +329,10 @@ line keeps search, status and the key toggle and moves the rest into `common/Fil
 <div className="card">
   <CardHeading title="Devices" description="…" />
   <TabStrip ariaLabel="Devices view" value={tab} onChange={setTab}
-    tabs={[{ id: 'roster', label: 'Roster' }, { id: 'quarantine', label: 'Quarantine', attention: waiting }]} />
+    tabs={[{ id: 'roster', label: 'Roster' }, { id: 'quarantine', label: 'Quarantine', attention: waiting }]}
+    help={<HelpTip label={`About ${selectedLabel}`} text={TAB_HELP[tab]} />} />
+  {/* Only a tab with filters or actions draws this row. */}
   <div className="filter-bar">
-    <HelpTip text="…" />
     <SearchInput … />
     <FiltersPopover activeCount={extraCount} onClear={clearExtras}>{/* the other controls */}</FiltersPopover>
     <div className="filter-bar-actions"><button className="btn btn-sm btn-primary">New …</button></div>
@@ -340,16 +343,16 @@ line keeps search, status and the key toggle and moves the rest into `common/Fil
 
 | Tab | Notes |
 | :--- | :--- |
-| `SiteMapTab` | The Site Map page (tab id `site-map`), one card: the enterprise (the gateways' Sparkplug group) and the site (the `site.name` setting) named at the top, then **Site-Wide, Simulated and Unassigned as three coloured lanes** that open the context panel, then every area drawn as its plan (`common/AreaPlan.jsx`) with its cells as pins, one to three areas to a row by how many there are. Read only: nothing is filed or placed here. One context panel serves a lane, an area (its plan, its unplaced cells and its Area-Wide assets) or a cell; cells in no area sit in a tray under the grid. The counts the page used to carry are the rail's signals (`hooks/useNavSignals.js`) |
+| `SiteMapTab` | The Site Map page (tab id `site-map`), one card: the enterprise (the gateways' Sparkplug group) and the site (the `site.name` setting) named at the top, then **Site-Wide, Simulated and Unassigned as three coloured lanes** that open the context panel, then every area in service drawn as its plan (`common/AreaPlan.jsx`) with its cells as pins (archived areas only under **Show archived areas**; `?area=<id>` opens on one), one to three areas to a row by how many there are. Read only: nothing is filed or placed here. One context panel serves a lane, an area (its cells, gateways and devices as chips) or a cell; cells in no area sit in a tray under the grid. The counts the page used to carry are the rail's signals (`hooks/useNavSignals.js`) |
 | `AreasTab` | The ISA-95 areas. Cells are filed by dragging a chip onto an area row; unfiled cells sit in a queue row above the table. Devices are never filed here: a device's area is its cell's, or its own when Area-Wide. An area's SVG plan is managed from its details panel (`common/AreaPlanPanel.jsx`); a plan is parsed as the browser parses it before upload (`utils/areaPlans.js` `readSvgPlan`), so a file that would draw as nothing, or whose stated size is not the one the browser would use, is refused with the reason. An area is archived from its panel the way a cell is, through the shared `ArchiveModal`, and hidden behind the lifecycle filter; it is deleted only from Archived Entities |
 | `CellsTab` | Cell management. Device membership is grouped from its own `/api/v1/devices` load. The area and the place on the area's plan are on the form; the place is picked by clicking the plan (`common/CellPlacementPicker.jsx`), which refuses a spot closer than `site_map.min_pin_spacing` to another pin |
-| `GatewaysTab` | **Launch UI** and **Edit** visible, the rest in the details drawer; **Restore replaces Edit** on an archived row |
-| `DevicesTab` | Quarantined devices render **in the Quarantine queue card only** (the first card, always shown) — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. Two visible actions, not seven |
-| `SchemasTab` | Metric catalog, the standard-vocabulary reference card, and the schema registry. **Building from the catalog is the only way to create a schema**; changing one is versioning, not editing |
+| `GatewaysTab` | Every action is in the details drawer, with one primary listed first; **Restore replaces Edit** on an archived gateway. The seeded Playback gateway is listed like any other, and reads Playing back or Idle rather than Offline |
+| `DevicesTab` | One card, tabs **Registered** and **Quarantine**. Quarantined devices render **on the Quarantine tab only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. The panel's **Export…** opens `modals/DeviceExportModal.jsx` (AAS JSON, AASX or Bundle), which Archived Entities opens too |
+| `SchemasTab` | The schema registry: each schema, its versions and the devices on it. **Building from the catalog is the only way to create a schema**; changing one is versioning, not editing |
 | `TelemetryTab` | Time-series viewer over the FDW view. A time window is required whenever a tag filter is active |
 | `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
-| `DirectoryTab` | Directory service configuration and the GitOps flow push |
-| `ArchivesTab` | Two cards of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (the one typed-name gate in the application) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
+| `DirectoryTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach |
+| `ArchivesTab` | One card, a tab for each stage of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (the one typed-name gate in the application) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
 
 ---
 

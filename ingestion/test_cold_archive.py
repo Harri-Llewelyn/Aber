@@ -157,7 +157,7 @@ def test_an_unconfigured_destination_names_every_gap(cold_archive):
     """
     missing = cold_archive.unconfigured({}, "")
     # NAMED AS THE PAGE NAMES THEM, not as the columns behind them. This refusal ends up in a
-    # CronJob log, and an operator matching it against Settings > Cold Storage should not have to
+    # CronJob log, and an operator matching it against the Cold Storage page should not have to
     # translate. check-docs-drift.mjs holds these labels level with the frontend's own list.
     assert "S3 endpoint" in missing
     assert "S3 region" in missing

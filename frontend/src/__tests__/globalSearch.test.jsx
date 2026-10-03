@@ -59,6 +59,20 @@ describe('what the index holds', () => {
     expect(buildTargets(adminTabs(), rows).map(t => t.label)).toContain('Site name')
   })
 
+  it('sends a setting the Cold Storage dialog edits to that page, not to Settings', () => {
+    const rows = [{ key: 'archive.bucket', label: 'S3 bucket', category: 'Cold Storage' },
+      { key: 'archive.tier_after_days', label: 'Archive chunks older than (days)', category: 'Cold Storage' }]
+    const found = buildTargets(adminTabs(), rows)
+    expect(found.find(t => t.label === 'S3 bucket')).toMatchObject({ kind: 'card', tabId: 'cold-storage', page: 'Cold Storage' })
+    expect(found.find(t => t.label === 'Archive chunks older than (days)'))
+      .toMatchObject({ kind: 'setting', tabId: 'settings', settingKey: 'archive.tier_after_days' })
+  })
+
+  it('sends a setting the Backups destination dialog edits to Backups', () => {
+    const found = buildTargets(adminTabs(), [{ key: 'backup_offsite.bucket', label: 'S3 bucket', category: 'Backups' }])
+    expect(found.find(t => t.label === 'S3 bucket')).toMatchObject({ kind: 'card', tabId: 'backups', page: 'Backups' })
+  })
+
   it('tells a card which page it is on, because that is the answer being looked for', () => {
     const credentials = targets().find(t => t.label === 'Broker credentials')
     expect(credentials.kind).toBe('card')
@@ -154,6 +168,7 @@ describe('the palette', () => {
     onSelectArea: vi.fn(),
     onSelectSchema: vi.fn(),
     onSelectSetting: vi.fn(),
+    onSelectSection: vi.fn(),
     onSelectTrail: vi.fn()
   })
 
@@ -239,6 +254,26 @@ describe('the palette', () => {
 
     fireEvent.click(await screen.findByText('Playback'))
     expect(p.onNavigate).toHaveBeenCalledWith('capture')
+  })
+
+  it('opens a card that is one tab of its page on that tab', async () => {
+    const p = props()
+    render(<GlobalSearch {...p} />)
+    type('machine identities')
+
+    fireEvent.click(await screen.findByText('Machine identities'))
+    expect(p.onSelectSection).toHaveBeenCalledWith('access-control', 'identities')
+    expect(p.onNavigate).not.toHaveBeenCalled()
+  })
+
+  it('opens the Quarantine card on the Devices page\'s Quarantine tab', async () => {
+    const p = props()
+    render(<GlobalSearch {...p} />)
+    type('quarantine')
+
+    fireEvent.click(await screen.findByText('Quarantine'))
+    expect(p.onSelectSection).toHaveBeenCalledWith('devices', 'quarantine')
+    expect(p.onNavigate).not.toHaveBeenCalled()
   })
 
   it('opens the highlighted row on Enter', async () => {

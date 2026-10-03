@@ -245,7 +245,8 @@ describe('The Site Map hands a cell over to the Cells page', () => {
 
   const openPanel = async () => {
     fireEvent.click(await screen.findByRole('button', { name: 'North Shop' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Assembly Line 1' }))
+    // The pin on the card: the area panel now lists the cell as a chip too.
+    fireEvent.click(within(document.querySelector('.area-card')).getByRole('button', { name: 'Assembly Line 1' }))
     return screen.findByRole('button', { name: /Open on Cells page/ })
   }
 

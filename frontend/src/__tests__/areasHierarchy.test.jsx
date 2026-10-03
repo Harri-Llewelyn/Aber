@@ -189,6 +189,9 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(within(document.querySelector('.site-lanes')).queryByText(/Area-Wide/)).toBeNull()
     // Every lane is empty on this fixture, so none draws a status dot.
     expect(lanes().every(l => !l.querySelector('.tile-dot'))).toBe(true)
+    // Each lane and each area card opens the panel, so each ends in a chevron, hidden from readers.
+    expect(lanes().every(l => l.querySelector('.site-lane-chevron[aria-hidden="true"] svg'))).toBe(true)
+    expect(areaCards().every(c => c.querySelector('.area-card-header > .area-card-chevron[aria-hidden="true"]'))).toBe(true)
     // The area cards are the way into an area: no selector, no arrows.
     expect(document.querySelector('.shopfloor-areas')).toBeNull()
     expect(screen.queryByRole('button', { name: /Next area|Previous area/ })).toBeNull()
@@ -287,10 +290,12 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(within(panel()).queryByRole('button', { name: /Open Gateways page/ })).toBeNull()
     expect(within(panel()).getByText('No simulated assets.')).toBeInTheDocument()
 
-    // The queue holds one of each, so both are offered.
+    // The queue holds one of each, so both are offered, the first as the one primary.
     fireEvent.click(screen.getByRole('button', { name: /Unassigned/ }))
-    expect(within(panel()).getByRole('button', { name: /Open Devices page/ })).toBeInTheDocument()
-    expect(within(panel()).getByRole('button', { name: /Open Gateways page/ })).toBeInTheDocument()
+    expect(within(panel()).getByRole('button', { name: /Open Devices page/ })).toHaveClass('btn-primary')
+    expect(within(panel()).getByRole('button', { name: /Open Gateways page/ })).not.toHaveClass('btn-primary')
+    // The panel's title carries the lane's own icon.
+    expect(panel().querySelector('.context-panel-title-row .context-panel-icon svg')).toBeTruthy()
     expect(within(panel()).getByTitle('File these 1 device(s) on the Devices page')).toBeInTheDocument()
   })
 
@@ -309,34 +314,45 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
 
   it('gives the panel to whichever of a lane, an area or a pin was clicked last', async () => {
     await renderSiteMap()
-    fireEvent.click(await screen.findByRole('button', { name: 'Bay 1' }))
+    const pinOnCard = (name) => within(areaCards()[0]).getByRole('button', { name })
+    fireEvent.click(pinOnCard('Bay 1'))
     expect(within(panel()).getByText('Five-axis machining, two shifts')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /North Shop/ }))
+    fireEvent.click(within(areaCards()[0]).getByRole('button', { name: 'North Shop' }))
     expect(within(panel()).queryByText('Five-axis machining, two shifts')).toBeNull()
-    expect(within(panel()).getByText(/An SVG plan is uploaded/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Bay 1' })).toHaveAttribute('aria-pressed', 'false')
+    expect(within(panel()).getByText('2 Cells · 1 Gateway · 2 Devices')).toBeInTheDocument()
+    expect(pinOnCard('Bay 1')).toHaveAttribute('aria-pressed', 'false')
 
     fireEvent.click(screen.getByRole('button', { name: /Simulated/ }))
-    expect(within(panel()).queryByText(/An SVG plan is uploaded/)).toBeNull()
+    expect(within(panel()).queryByText('2 Cells · 1 Gateway · 2 Devices')).toBeNull()
     expect(within(panel()).getByText('Simulated')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /North Shop/ })).toHaveAttribute('aria-pressed', 'false')
+    expect(within(areaCards()[0]).getByRole('button', { name: 'North Shop' })).toHaveAttribute('aria-pressed', 'false')
   })
 
-  it('opens an area from its name, listing what its plan cannot show', async () => {
+  it('opens an area from its name, listing its cells, gateways and devices as chips', async () => {
     await renderSiteMap()
     fireEvent.click(within(areaCards()[0]).getByRole('button', { name: 'North Shop' }))
     expect(within(panel()).getByText('2 Cells · 1 Gateway · 2 Devices')).toBeInTheDocument()
-    // Area-Wide has no place on any plan, so the panel is where it lives.
-    expect(within(panel()).getByText('BMS_A')).toBeInTheDocument()
-    // Everything in A is placed, so nothing is listed as unplaced.
-    expect(within(panel()).queryByText(/Not placed \(/)).toBeNull()
+    // The plan is drawn beside the panel, so the panel does not describe it.
+    expect(within(panel()).queryByText(/plan uploaded/i)).toBeNull()
+    expect(within(panel()).getByRole('button', { name: /^Line_Gateway/ })).toBeInTheDocument()
+    expect(within(panel()).getByRole('button', { name: /^CNC_01/ })).toBeInTheDocument()
+    // Area-Wide has no place on any plan, so the panel is where it lives, flagged as the area's own.
+    expect(within(panel()).getByRole('button', { name: /^BMS_A/ })).toHaveTextContent('AREA-WIDE')
+    expect(within(panel()).getByRole('button', { name: /^CNC_01/ })).not.toHaveTextContent('AREA-WIDE')
+    // Everything in A is placed, so no cell is flagged.
+    expect(within(panel()).queryByText('NOT PLACED')).toBeNull()
+    // The area's own icon on the title; its one primary is the page that edits it.
+    expect(panel().querySelector('.context-panel-title-row .context-panel-icon svg')).toBeTruthy()
+    expect(panel().querySelector('.context-panel-actions .btn-primary')).toHaveTextContent('Open on Areas page')
 
-    // B's cell has no place, so it is named rather than lost.
+    // A cell chip opens that cell's panel.
+    fireEvent.click(within(panel()).getByRole('button', { name: /^Bay 1/ }))
+    expect(within(panel()).getByText('Five-axis machining, two shifts')).toBeInTheDocument()
+
+    // B's cell has no place, so it is flagged rather than lost.
     fireEvent.click(within(areaCards()[1]).getByRole('button', { name: 'Press Hall' }))
-    expect(within(panel()).getByText('Not placed (1)')).toBeInTheDocument()
-    expect(within(panel()).getByText('Paint Shop')).toBeInTheDocument()
-    expect(within(panel()).getByText(/No plan uploaded/)).toBeInTheDocument()
+    expect(within(panel()).getByRole('button', { name: /^Paint Shop/ })).toHaveTextContent('NOT PLACED')
     expect(within(panel()).getByText('The annexe')).toBeInTheDocument()
   })
 
@@ -376,10 +392,42 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(clean.querySelector('.area-card-aside')).toBeNull()
   })
 
-  it('keeps drawing an archived area, muted, with its plan and its pins', async () => {
-    // The dot gives way to the archive glyph, as an archived cell's pin does.
+  it('opens an area card from the keyboard, and leaves a key on a pin to the pin', async () => {
+    await renderSiteMap()
+    const card = areaCards()[0]
+    expect(card).toHaveAttribute('tabindex', '0')
+    fireEvent.keyDown(within(card).getByRole('button', { name: 'Bay 1' }), { key: 'Enter' })
+    expect(document.querySelector('.context-panel-open')).toBeNull()
+    fireEvent.keyDown(card, { key: 'Enter' })
+    expect(within(panel()).getByText('2 Cells · 1 Gateway · 2 Devices')).toBeInTheDocument()
+    fireEvent.keyDown(card, { key: ' ' })
+    await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeNull())
+  })
+
+  it('offers no archived toggle while no area is archived', async () => {
+    await renderSiteMap()
+    expect(screen.queryByRole('button', { name: /Show archived areas/ })).toBeNull()
+  })
+
+  it('leaves an archived cell off its live area\'s plan', async () => {
+    api.get.mockImplementation(routeGet({ cells: [cells[0], { ...cells[1], is_archived: true }, cells[2], cells[3]] }))
+    await renderSiteMap()
+    expect(pinNames()).toEqual(['Bay 1'])
+  })
+
+  it('hides an archived area and its pins until asked, then draws it muted', async () => {
     api.get.mockImplementation(routeGet({ areas: [{ ...areaA, is_archived: true, archived_at: '2026-09-01T00:00:00Z' }, areaB] }))
     await renderSiteMap()
+    expect(screen.queryByRole('button', { name: 'North Shop' })).toBeNull()
+    expect(pinNames()).toEqual([])
+    const toggle = screen.getByRole('button', { name: /Show archived areas \(1\)/ })
+    expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    // Says what is hidden with it: North Shop's two cells, CNC_01 in Bay 1 and its BMS.
+    expect(toggle).toHaveAttribute('title', expect.stringMatching(/2 cells and 2 devices/))
+
+    // Shown, the dot gives way to the archive glyph and the card is muted.
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
     const card = screen.getByRole('button', { name: 'North Shop' }).closest('.area-card')
     expect(card).toHaveClass('area-card-archived')
     expect(within(card).getByText('ARCHIVED')).toBeInTheDocument()
@@ -388,6 +436,38 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(pinNames()).toEqual(expect.arrayContaining(['Bay 1', 'Bay 2']))
     // The one beside it is untouched.
     expect(screen.getByRole('button', { name: 'Press Hall' }).closest('.area-card')).not.toHaveClass('area-card-archived')
+
+    // Hidden again, its open panel closes with it.
+    fireEvent.click(screen.getByRole('button', { name: 'North Shop' }))
+    expect(document.querySelector('.context-panel-open')).toBeTruthy()
+    fireEvent.click(toggle)
+    await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeNull())
+  })
+
+  it('says so when every area is archived', async () => {
+    api.get.mockImplementation(routeGet({ areas: [{ ...areaA, is_archived: true }] }))
+    render(<SiteMapTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onNavigateTab={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText(/Every area is archived/)).toBeInTheDocument())
+    expect(areaCards()).toHaveLength(0)
+  })
+
+  it('opens on the area a plan preview named, drawing it even when archived', async () => {
+    const scrolled = vi.fn()
+    Element.prototype.scrollIntoView = scrolled
+    window.history.replaceState({}, '', '/site-map?area=area-a')
+    try {
+      api.get.mockImplementation(routeGet({ areas: [{ ...areaA, is_archived: true }, areaB] }))
+      render(<SiteMapTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onNavigateTab={vi.fn()} />)
+      await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeTruthy())
+      expect(within(panel()).getByText('2 Cells · 1 Gateway · 2 Devices')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Show archived areas/ })).toHaveAttribute('aria-pressed', 'true')
+      const name = screen.getByRole('button', { name: 'North Shop' })
+      expect(name).toHaveAttribute('aria-pressed', 'true')
+      expect(scrolled.mock.contexts[0]).toBe(name.closest('.area-card'))
+    } finally {
+      window.history.replaceState({}, '', '/')
+      delete Element.prototype.scrollIntoView
+    }
   })
 
   it('draws the uploaded plan where there is one, and the default outline where there is not', async () => {
@@ -402,7 +482,12 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     const panel = document.querySelector('.context-panel')
     expect(within(panel).getByText('Bay 1')).toBeInTheDocument()
     expect(within(panel).getByText('North Shop')).toBeInTheDocument()
-    expect(within(panel).getByText('30% across, 40% down')).toBeInTheDocument()
+    // The pin beside it says where; the panel repeats no fractions.
+    expect(within(panel).queryByText(/% across/)).toBeNull()
+    expect(within(panel).queryByText('Place on plan')).toBeNull()
+    // The cell's own icon on the title; with no dashboard, the Cells page is the one primary.
+    expect(panel.querySelector('.context-panel-title-row .context-panel-icon svg')).toBeTruthy()
+    expect(panel.querySelector('.context-panel-actions .btn-primary')).toHaveTextContent('Open on Cells page')
     expect(within(panel).getByText('Line_Gateway')).toBeInTheDocument()
     expect(within(panel).getByText('CNC_01')).toBeInTheDocument()
     expect(within(panel).getByText('Five-axis machining, two shifts')).toBeInTheDocument()
@@ -440,6 +525,21 @@ describe('AreasTab files cells into areas', () => {
     expect(within(rowA).getByText('Bay 1')).toBeInTheDocument()
     expect(within(rowA).getByText('Bay 2')).toBeInTheDocument()
     expect(within(rowFor('Press Hall')).getByText('Paint Shop')).toBeInTheDocument()
+  })
+
+  it('opens a row from the keyboard, and leaves a key on a cell chip to the chip', async () => {
+    const onSelectCell = vi.fn()
+    await renderAreas({ onSelectCell })
+    const row = rowFor('North Shop')
+    expect(row).toHaveAttribute('tabindex', '0')
+    fireEvent.keyDown(within(row).getByText('Bay 1').closest('[role="button"]'), { key: 'Enter' })
+    expect(onSelectCell).toHaveBeenCalledWith('cell-1')
+    expect(document.querySelector('.context-panel-open')).toBeNull()
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(document.querySelector('.context-panel-open')).toBeTruthy()
+    expect(row).toHaveClass('row-selected')
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(row).not.toHaveClass('row-selected')
   })
 
   it('attaches links to an area, the way every other asset carries them', async () => {
@@ -484,6 +584,9 @@ describe('AreasTab files cells into areas', () => {
     const row = rowFor('Press Hall')
     expect(within(row).getByText('ARCHIVED')).toBeInTheDocument()
     fireEvent.click(screen.getByText('Press Hall'))
+    // Archived, Restore is the one primary and comes first.
+    expect(document.querySelectorAll('.context-panel-actions .btn-primary')).toHaveLength(1)
+    expect(document.querySelector('.context-panel-actions .context-action')).toHaveTextContent('Restore Area')
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Restore Area/ })) })
     expect(api.post).toHaveBeenCalledWith('/api/v1/areas/area-b/restore', {})
   })
@@ -519,8 +622,9 @@ describe('AreasTab files cells into areas', () => {
   it('counts the devices resolving to an area and its area-wide assets separately', async () => {
     await renderAreas()
     const rowA = rowFor('North Shop')
-    expect(within(rowA).getByText('1')).toBeInTheDocument()
-    expect(within(rowA).getByText('+1 Area-Wide')).toBeInTheDocument()
+    // A plain number; the Area-Wide breakdown keeps its badge.
+    expect(within(rowA).getByText('1')).not.toHaveClass('badge')
+    expect(within(rowA).getByText('+1 Area-Wide')).toHaveClass('badge')
   })
 
   it('files a dropped cell with one write naming the area, and says so', async () => {
@@ -583,11 +687,11 @@ describe('AreasTab is the house list card', () => {
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
   }
 
-  it('scrolls inside its card and shows the count after the title', async () => {
+  it('scrolls inside its card, with no count on the heading', async () => {
     await renderAreas()
     expect(document.querySelector('.page-layout')).toHaveClass('page-fill')
     expect(document.querySelector('.card')).toHaveClass('card-fill')
-    expect(document.querySelector('.card-header .section-count')).toHaveTextContent('2')
+    expect(document.querySelector('.card-header .section-count')).toBeNull()
     expect(document.querySelector('.card-fill > .table-wrap')).toBeInTheDocument()
   })
 
@@ -597,10 +701,12 @@ describe('AreasTab is the house list card', () => {
     expect(within(document.querySelector('.card-header')).getByRole('button', { name: /New Area/ })).toBeInTheDocument()
   })
 
-  it('reads shown / total while a search narrows the list', async () => {
+  it('narrows the list under a search, and keeps the counts in the lifecycle options', async () => {
     await renderAreas()
+    expect(within(screen.getByLabelText('Lifecycle')).getByRole('option', { name: 'Active (2)' })).toBeInTheDocument()
     fireEvent.change(screen.getByPlaceholderText(/Search by area ID or name/), { target: { value: 'North Shop' } })
-    expect(document.querySelector('.card-header .section-count')).toHaveTextContent('1 / 2')
+    expect(screen.queryByText('Press Hall')).toBeNull()
+    expect(document.querySelector('.card-header .section-count')).toBeNull()
   })
 
   it('draws the unfiled banner as a page callout with one body element', async () => {
@@ -614,7 +720,6 @@ describe('AreasTab is the house list card', () => {
   it('tells none-yet from none-match', async () => {
     await renderAreas({ areas: [] })
     expect(screen.getByText('No areas yet. Add one, then file the cells into it.')).toBeInTheDocument()
-    expect(document.querySelector('.card-header .section-count')).toHaveTextContent('0')
 
     document.body.innerHTML = ''
     await renderAreas()
@@ -638,21 +743,45 @@ describe('AreasTab is the house list card', () => {
 })
 
 describe('AreasTab manages an area\'s plan from its panel', () => {
-  const openArea = async (name = 'North Shop') => {
-    render(<AreasTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
+  const openArea = async (name = 'North Shop', props = {}) => {
+    render(<AreasTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} {...props} />)
     await waitFor(() => expect(screen.getByText(name)).toBeInTheDocument())
     fireEvent.click(screen.getByText(name))
     return document.querySelector('.context-panel')
   }
 
   const planRow = () => document.querySelector('.area-plan-panel-row')
+  const planPanel = () => document.querySelector('.area-plan-panel')
 
-  it('says whether a plan is attached and how many cells are placed on it', async () => {
+  it('draws the plan with every cell on it, with the fields and above the actions', async () => {
     const panel = await openArea()
     expect(within(panel).getByText('Area plan')).toBeInTheDocument()
-    expect(planRow().getAttribute('data-plan')).toBe('uploaded')
-    expect(within(planRow()).getByText('Plan attached')).toBeInTheDocument()
-    expect(within(planRow()).getByText('2 cells placed on it')).toBeInTheDocument()
+    const preview = planPanel().querySelector('.area-plan-preview')
+    expect(preview.querySelector('.area-plan').getAttribute('data-plan')).toBe('uploaded')
+    expect([...preview.querySelectorAll('.area-plan-pin-label')].map(l => l.textContent)).toEqual(['Bay 1', 'Bay 2'])
+    // Every cell drawn alike, as marks rather than controls.
+    expect(preview.querySelector('.area-plan-pin-selected, .area-plan-pin-muted, button')).toBeNull()
+    expect(planPanel().closest('.context-panel-facts')).toBeTruthy()
+    expect(follows(planPanel(), panel.querySelector('.context-panel-actions'))).toBe(true)
+    expect(within(panel).queryByText(/Plan attached|placed on it/)).toBeNull()
+  })
+
+  it('opens the Site Map on the area from its plan, by click or Enter', async () => {
+    const onShowOnSiteMap = vi.fn()
+    await openArea('North Shop', { onShowOnSiteMap })
+    const preview = screen.getByRole('link', { name: 'Open North Shop on the Site Map' })
+    expect(preview).toHaveAttribute('tabindex', '0')
+    fireEvent.click(preview)
+    expect(onShowOnSiteMap).toHaveBeenLastCalledWith('area-a')
+    fireEvent.keyDown(preview, { key: 'Enter' })
+    expect(onShowOnSiteMap).toHaveBeenCalledTimes(2)
+  })
+
+  it('titles the panel with the area\'s icon, Edit Details its one primary', async () => {
+    const panel = await openArea()
+    expect(panel.querySelector('.context-panel-title-row .context-panel-icon svg')).toBeTruthy()
+    expect(panel.querySelectorAll('.context-panel-actions .btn-primary')).toHaveLength(1)
+    expect(panel.querySelector('.context-panel-actions .btn-primary')).toHaveTextContent('Edit Details')
   })
 
   it('offers a drop zone on an area with no plan, and Replace and Remove on one with', async () => {
@@ -661,12 +790,13 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     expect(screen.getByRole('button', { name: 'Upload plan for Press Hall' })).toBe(planRow())
     expect(within(planRow()).getByText(/Drop an SVG plan here/)).toBeInTheDocument()
     expect(within(planRow()).getByText(/Default outline · 0 cells placed on it/)).toBeInTheDocument()
+    expect(planPanel().querySelector('.area-plan-preview')).toBeNull()
     expect(screen.queryByRole('button', { name: /Remove plan/ })).toBeNull()
 
     document.body.innerHTML = ''
     await openArea('North Shop')
-    expect(within(planRow()).getByRole('button', { name: /Replace plan/ })).toBeInTheDocument()
-    expect(within(planRow()).getByRole('button', { name: /Remove plan/ })).toBeInTheDocument()
+    expect(within(planPanel()).getByRole('button', { name: /Replace plan/ })).toBeInTheDocument()
+    expect(within(planPanel()).getByRole('button', { name: /Remove plan/ })).toBeInTheDocument()
   })
 
   it('takes a plan dropped onto the zone, not only one browsed for', async () => {
@@ -692,7 +822,7 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
   it('removes a plan once the dialog is confirmed', async () => {
     api.removeAreaPlan.mockResolvedValue({})
     await openArea()
-    fireEvent.click(within(planRow()).getByRole('button', { name: /Remove plan/ }))
+    fireEvent.click(within(planPanel()).getByRole('button', { name: /Remove plan/ }))
     const dialog = document.querySelector('.modal')
     expect(within(dialog).getByText(/Remove the plan from North Shop\?/)).toBeInTheDocument()
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Remove plan' })) })
@@ -705,7 +835,7 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     await waitFor(() => expect(screen.getByText('North Shop')).toBeInTheDocument())
     fireEvent.click(screen.getByText('North Shop'))
     const file = new File(['png'], 'plan.png', { type: 'image/png' })
-    const input = within(planRow()).getByLabelText('Plan file for North Shop')
+    const input = within(planPanel()).getByLabelText('Plan file for North Shop')
     await act(async () => { fireEvent.change(input, { target: { files: [file] } }) })
     expect(api.uploadAreaPlan).not.toHaveBeenCalled()
     expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/not an SVG/), 'error')
@@ -715,8 +845,13 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     render(<AreasTab showToast={vi.fn()} hasPermission={() => false} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('North Shop')).toBeInTheDocument())
     fireEvent.click(screen.getByText('North Shop'))
-    expect(within(planRow()).getByText('Plan attached')).toBeInTheDocument()
+    expect(planPanel().querySelector('.area-plan-preview [data-plan="uploaded"]')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Upload plan|Replace plan|Remove plan/ })).toBeNull()
+
+    // With no plan, the reader sees the default outline rather than a drop zone they cannot use.
+    fireEvent.click(screen.getByText('Press Hall'))
+    expect(planPanel().querySelector('.area-plan-preview [data-plan="outline"]')).toBeTruthy()
+    expect(planRow()).toBeNull()
   })
 
   it('clears its filter with the control the other asset pages carry', async () => {

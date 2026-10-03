@@ -5,6 +5,14 @@
  * short label from a closed set, and a fuzzy matcher returns things the typed letters do not appear
  * in.
  */
+import { COLD_STORAGE_DIALOG_KEYS } from './utils/coldStorage'
+import { BACKUP_OFFSITE_SETTING_KEYS } from './utils/backupOffsite'
+
+/** Settings a page's own destination dialog edits, with the page a search for one opens. */
+const EDITED_ON = new Map([
+  ...COLD_STORAGE_DIALOG_KEYS.map(k => [k, { tabId: 'cold-storage', page: 'Cold Storage' }]),
+  ...BACKUP_OFFSITE_SETTING_KEYS.map(k => [k, { tabId: 'backups', page: 'Backups' }])
+])
 
 /**
  * Words that should find a page but are not in its name: the vocabulary of the job rather than of
@@ -44,7 +52,8 @@ export const PAGE_KEYWORDS = {
 /**
  * The sections inside each page. One entry per section somebody would type, usually the heading the
  * page renders; the Site Map's lanes have entries of their own. 'floor plan', 'floors' and
- * 'buildings' below are old names, and 'zones' is the old name for a cell.
+ * 'buildings' below are old names, and 'zones' is the old name for a cell. A section that is one tab
+ * of its page carries `section`, that tab's id, and the search opens the page on that tab.
  */
 export const CARDS = [
   { id: 'site-map',             label: 'Site Map',             tab: 'site-map',       keywords: ['floor plan', 'floors', 'plan', 'pins', 'svg', 'layout', 'areas', 'lanes'] },
@@ -56,6 +65,7 @@ export const CARDS = [
   { id: 'shopfloor-cells',      label: 'Cells',                tab: 'cells',          keywords: ['cell list', 'zones'] },
   { id: 'edge-gateways',        label: 'Gateways',             tab: 'gateways',       keywords: ['gateway list', 'nodes'] },
   { id: 'device-list',          label: 'Devices',              tab: 'devices',        keywords: ['device list', 'assets'] },
+  { id: 'quarantine-queue',     label: 'Quarantine',           tab: 'devices',        section: 'quarantine', keywords: ['quarantine queue', 'onboarding', 'approve device', 'unknown device'] },
   /* No 'Archived Entities' card: it would add no keyword the page entry does not have. */
 
   { id: 'registered-schemas',   label: 'Registered Schemas',   tab: 'schemas',        keywords: ['schema registry', 'versions', 'drafts', 'create version', 'fork'] },
@@ -65,19 +75,19 @@ export const CARDS = [
   { id: 'vocab-iso22400',       label: 'ISO 22400',            tab: 'vocabulary',     keywords: ['kpi', 'oee', 'availability', 'mtbf'] },
   { id: 'vocab-opcua',          label: 'OPC UA',               tab: 'vocabulary',     keywords: ['companion', 'machinery', 'robotics'] },
   { id: 'vocab-ashrae',         label: 'ASHRAE 223P',          tab: 'vocabulary',     keywords: ['bms', 'building', 'hvac'] },
-  { id: 'dir-applications',     label: 'Applications & User Interfaces', tab: 'directory', keywords: ['grafana', 'node-red', 'studio', 'uis'] },
-  { id: 'dir-ingestion',        label: 'Ingestion & Messaging', tab: 'directory',     keywords: ['mosquitto', 'broker', 'daemon'] },
-  { id: 'dir-infrastructure',   label: 'Data & Backend Infrastructure', tab: 'directory', keywords: ['postgres', 'timescale', 'gateway', 'envoy', 'storage'] },
+  { id: 'dir-applications',     label: 'Applications & User Interfaces', tab: 'directory', section: 'applications', keywords: ['grafana', 'node-red', 'studio', 'uis'] },
+  { id: 'dir-ingestion',        label: 'Ingestion & Messaging', tab: 'directory', section: 'ingestion', keywords: ['mosquitto', 'broker', 'daemon'] },
+  { id: 'dir-infrastructure',   label: 'Data & Backend Infrastructure', tab: 'directory', section: 'infrastructure', keywords: ['postgres', 'timescale', 'gateway', 'envoy', 'storage'] },
 
   { id: 'trail-timeline',       label: 'Audit Trail',          tab: 'audit-trail',    keywords: ['timeline', 'events', 'digital thread'] },
   { id: 'capture-list',         label: 'Capture',              tab: 'capture',        keywords: ['recordings', 'record broker', 'upload capture'] },
   { id: 'playback',             label: 'Playback',             tab: 'capture',        keywords: ['replay', 'shadow devices', 'speed'] },
   { id: 'cold-telemetry',       label: 'Cold telemetry',       tab: 'cold-storage',   keywords: ['parquet', 'objects', 'tiered'] },
 
-  { id: 'broker-credentials',   label: 'Broker credentials',   tab: 'access-control', keywords: ['mqtt accounts', 'gateway passwords', 'revoke'] },
-  { id: 'machine-identities',   label: 'Machine identities',   tab: 'access-control', keywords: ['machine accounts', 'non-human', 'service accounts', 'principals', 'tokens', 'withdraw', 'cannot sign in'] },
-  { id: 'broker-accounts',      label: 'Broker accounts',      tab: 'access-control', keywords: ['mqtt users', 'platform accounts'] },
-  { id: 'broker-roles',         label: 'Broker roles',         tab: 'access-control', keywords: ['dynamic security', 'mosquitto roles', 'topic access', 'orphaned accounts'] },
+  { id: 'broker-credentials',   label: 'Broker credentials',   tab: 'access-control', section: 'credentials', keywords: ['mqtt accounts', 'gateway passwords', 'revoke'] },
+  { id: 'machine-identities',   label: 'Machine identities',   tab: 'access-control', section: 'identities', keywords: ['machine accounts', 'non-human', 'service accounts', 'principals', 'tokens', 'withdraw', 'cannot sign in'] },
+  { id: 'broker-accounts',      label: 'Broker accounts',      tab: 'access-control', section: 'accounts', keywords: ['mqtt users', 'platform accounts', 'orphaned accounts', 'no gateway'] },
+  { id: 'broker-roles',         label: 'Broker roles',         tab: 'access-control', section: 'roles', keywords: ['dynamic security', 'mosquitto roles', 'topic access'] },
   { id: 'backup-list',          label: 'Backups',              tab: 'backups',        keywords: ['take a backup', 'stored backups', 'pinned', 'release'] }
 ]
 
@@ -110,6 +120,7 @@ export function buildTargets(visibleTabs, settings = []) {
       key: `card:${c.id}`,
       label: c.label,
       tabId: c.tab,
+      section: c.section,
       // What the row says under the label. A card's page is the ONLY thing a reader needs to be
       // told, and it is the thing they came to the search not knowing.
       page: visibleTabs.find(t => t.id === c.tab)?.label || c.tab,
@@ -120,15 +131,19 @@ export function buildTargets(visibleTabs, settings = []) {
      log or a migration as surely as "Site name" does. The category is what the row says beneath
      its label, because it is the tab the page will open on. */
   const settingRows = reachable.has('settings')
-    ? settings.filter(s => s && s.key).map(s => ({
-      kind: 'setting',
-      key: `setting:${s.key}`,
-      label: s.label || s.key,
-      tabId: 'settings',
-      settingKey: s.key,
-      page: s.category || 'Settings',
-      keywords: [s.key, s.category].filter(Boolean)
-    }))
+    ? settings.filter(s => s && s.key).map(s => (EDITED_ON.has(s.key)
+      // Edited in a page's destination dialog, not on Settings, so it opens that page.
+      ? { kind: 'card', key: `setting:${s.key}`, label: s.label || s.key, ...EDITED_ON.get(s.key),
+          keywords: [s.key, s.category].filter(Boolean) }
+      : {
+        kind: 'setting',
+        key: `setting:${s.key}`,
+        label: s.label || s.key,
+        tabId: 'settings',
+        settingKey: s.key,
+        page: s.category || 'Settings',
+        keywords: [s.key, s.category].filter(Boolean)
+      }))
     : []
 
   return [...pages, ...cards, ...settingRows]

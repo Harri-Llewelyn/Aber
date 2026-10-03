@@ -102,8 +102,8 @@ const allowAll = () => true
 const noop = () => {}
 
 /**
- * The devices table, found by a column only it has. The Quarantine queue is a card of its own above
- * the roster, so position would select the wrong table rather than fail.
+ * The devices table, found by a column only it has, so a table on the other tab would fail rather
+ * than be selected by position.
  */
 const deviceTableRows = () => {
   const table = [...document.querySelectorAll('table')]
@@ -136,6 +136,8 @@ describe('DevicesTab filters', () => {
     expect(screen.queryByText('CNC_01')).toBeNull()
     expect(screen.getByText('CNC_02')).toBeTruthy()
     expect(screen.getByText(/provisioned with schema/i).textContent).toContain('Robot-Arm-Standard')
+    // The schema select is in the Filters popover, whose button counts it.
+    expect(screen.getByRole('button', { name: 'Filters (1)' })).toBeTruthy()
   })
 
   it('reads the schema filter from the ?schema= query parameter', async () => {
@@ -208,24 +210,25 @@ describe('DevicesTab filters', () => {
     fireEvent.click(screen.getByRole('button', { name: /Needs attention/i }))
 
     await waitFor(() => expect(screen.queryByText('CNC_01')).toBeNull())
-    // Robot_03 is overdue its first birth; the quarantined device is in the Quarantine queue above.
+    // Robot_03 is overdue its first birth; the quarantined device is on the Quarantine tab.
     expect(screen.getByText('Robot_03')).toBeTruthy()
   })
 
-  // A quarantined device renders in the Quarantine queue only, not again in the roster below it with
-  // edit/archive actions that do not apply to it.
-  it('lists a quarantined device in the Quarantine queue but not in the devices table', async () => {
+  // A quarantined device renders on the Quarantine tab only, not in the roster with edit/archive
+  // actions that do not apply to it.
+  it('lists a quarantined device on the Quarantine tab but not in the devices table', async () => {
     api.get.mockImplementation(routeGet())
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
-    // Present on the page exactly once -- in the Quarantine queue.
-    expect(screen.getAllByText('Unknown_Thing')).toHaveLength(1)
-
-    // ...and that one occurrence is not in the devices table.
+    // Not in the roster...
+    expect(screen.queryByText('Unknown_Thing')).toBeNull()
     const tableNames = deviceTableRows().map(r => r.textContent)
-    expect(tableNames.some(t => t.includes('Unknown_Thing'))).toBe(false)
     expect(tableNames.some(t => t.includes('CNC_01'))).toBe(true)
+
+    // ...and exactly once on the Quarantine tab.
+    fireEvent.click(screen.getByRole('tab', { name: /^Quarantine/ }))
+    expect(screen.getAllByText('Unknown_Thing')).toHaveLength(1)
   })
 
   it('keeps quarantined devices out of the table even when a filter would match them', async () => {
@@ -234,6 +237,7 @@ describe('DevicesTab filters', () => {
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
     // gw-2 / cell-2 is the quarantined device's gateway. Only Robot_03 should surface.
+    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
     fireEvent.change(screen.getByTitle('Filter by serving gateway'), { target: { value: 'gw-2' } })
 
     await waitFor(() => expect(screen.queryByText('CNC_01')).toBeNull())
@@ -243,7 +247,7 @@ describe('DevicesTab filters', () => {
   })
 
   // The badge must agree with what switching the filter on reveals. Quarantined devices are counted
-  // by the Quarantine queue's own count.
+  // by the Quarantine tab's attention number.
   it('excludes quarantined devices from the needs-attention count', async () => {
     api.get.mockImplementation(routeGet())
     renderDevices()
@@ -258,6 +262,7 @@ describe('DevicesTab filters', () => {
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
+    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
     fireEvent.change(screen.getByTitle('Filter by serving gateway'), { target: { value: 'gw-2' } })
     await waitFor(() => expect(screen.queryByText('CNC_01')).toBeNull())
     expect(screen.getByText('Robot_03')).toBeTruthy()

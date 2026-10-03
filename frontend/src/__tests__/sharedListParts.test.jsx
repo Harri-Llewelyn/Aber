@@ -98,6 +98,16 @@ describe('ListFoot', () => {
     expect(btn).toBeDisabled()
     expect(btn).toHaveAttribute('aria-busy', 'true')
   })
+
+  it('says how many are loaded beside the button only when asked, as the total may be an estimate', () => {
+    const { rerender } = render(<ListFoot shown={30} total={57} onMore={() => {}} />)
+    expect(screen.queryByText('30 of 57')).toBeNull()
+    rerender(<ListFoot shown={30} total={57} counted onMore={() => {}} />)
+    expect(screen.getByText('30 of 57')).toBeInTheDocument()
+    rerender(<ListFoot shown={57} total={57} counted onMore={() => {}} />)
+    expect(screen.queryByText('57 of 57')).toBeNull()
+    expect(screen.getByText('All 57 shown.')).toBeInTheDocument()
+  })
 })
 
 describe('LoadingState', () => {

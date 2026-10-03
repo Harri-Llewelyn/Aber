@@ -1,18 +1,16 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useId, useMemo, useState } from 'react'
 import { api } from '../../api'
-import { useSetting } from '../../hooks/useSettings'
 import CopyableId from '../common/CopyableId'
 import { IconDatabase, IconAlertTriangle } from '../common/Icons'
-import { HelpTip } from '../common/HelpTip'
-import { PageHeading } from '../common/PageHeading'
+import { CardHeading } from '../common/CardHeading'
 import { Badge } from '../common/Badge'
-import { SectionCount } from '../common/SectionCount'
 import { LoadingState } from '../common/LoadingState'
 import { formatBytes, formatDate } from '../../utils/format'
-import { ArchiveCredentialModal } from '../modals/ArchiveCredentialModal'
+import { ColdStorageDestinationModal } from '../modals/ColdStorageDestinationModal'
 import {
   ARCHIVE_BACKLOG_TOLERANCE_DAYS,
   COLD_STATES,
+  COLD_STORAGE_DIALOG_KEYS,
   backlogTone,
   coldStateLabel,
   coldStateMeaning,
@@ -27,11 +25,10 @@ import {
 /**
  * Cold Storage: telemetry tiered out of the hypertable as Parquet objects. Not Archived Entities,
  * which sits two places below it in the rail, past Backups, and has a Restore button and a purge
- * timer; there is no restore here. An Administrator sees the Destination card first: the endpoint,
- * region, bucket and key ID are settings, and this page writes the archive credential. The
- * catalogue below leads with the span the manifest covers and what is outstanding, since the
- * hypertable can no longer say how far back the data goes. Exporting and dropping are done by
- * `python -m cold_archive`.
+ * timer; there is no restore here. An Administrator sets the destination and the on/off switch
+ * from the header button's dialog. The catalogue leads with the span the manifest covers and what
+ * is outstanding, since the hypertable can no longer say how far back the data goes. Exporting and
+ * dropping are done by `python -m cold_archive`.
  */
 /** The roles `cold_storage_rows()` returns rows to, kept in step with the function's own WHERE. */
 const COLD_STORAGE_ROLES = ['Administrator', 'Shopfloor_Manager', 'Auditor']
@@ -40,25 +37,24 @@ export function ColdStorageTab({ showToast, userRole }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  // Read so the empty state can tell "archiving is off" from "on but nothing archived". Defaults to
-  // false, matching the setting's own default, so a failed read shows the more cautious of the two.
-  const archiveEnabled = useSetting('archive.enabled', false)
+
+  // The archive settings, by key. Read once per load rather than through useSetting, so a save in
+  // the dialog is reflected on the next load. Fails soft to none: archiving reads as off, the more
+  // cautious state, and the destination as unset.
+  const [archive, setArchive] = useState({})
+  const [settingsRead, setSettingsRead] = useState(false)
 
   // The catalogue lists what has been exported; this is the other half. It fails soft: a backlog
   // that cannot be read leaves the figure absent rather than the page.
   const [backlog, setBacklog] = useState(null)
   // How long raw telemetry is kept. Soft for the same reason.
   const [rawWindow, setRawWindow] = useState(null)
-
-  // The destination is Administrator-only: the archive settings are flagged `sensitive`, so for
-  // anybody else the reads below return the fallback and the card is not rendered.
-  const isAdmin = userRole === 'Administrator'
-  const endpoint = useSetting('archive.endpoint', '')
-  const region = useSetting('archive.region', '')
-  const bucket = useSetting('archive.bucket', '')
-  const accessKeyId = useSetting('archive.access_key_id', '')
-  const siteKey = useSetting('archive.site_key', '')
   const [credentialSet, setCredentialSet] = useState(false)
+  const [editing, setEditing] = useState(false)
+
+  // The destination is Administrator-only: its settings are flagged `sensitive`, so for anybody
+  // else the read below omits them and the header button is not rendered.
+  const isAdmin = userRole === 'Administrator'
 
   const load = useCallback((initial = false) => {
     if (initial) setLoading(true)
@@ -71,10 +67,16 @@ export function ColdStorageTab({ showToast, userRole }) {
     api.rawTelemetryWindow()
       .then(setRawWindow)
       .catch(() => setRawWindow(null))
+    const settings = api.get('/api/v1/settings')
+      .then(list => setArchive(Object.fromEntries(
+        (list || []).filter(s => s?.key?.startsWith('archive.')).map(s => [s.key, s.value]))))
+      .catch(() => setArchive({}))
     // Whether, never what. Fails soft to "not set", which is the state that prompts action.
-    api.archiveCredentialIsSet()
+    const credential = api.archiveCredentialIsSet()
       .then(setCredentialSet)
       .catch(() => setCredentialSet(false))
+    // The button waits for both, so it never shows a state from half the answer.
+    Promise.all([settings, credential]).then(() => setSettingsRead(true))
   }, [])
 
   useEffect(() => { load(true) }, [load])
@@ -86,52 +88,39 @@ export function ColdStorageTab({ showToast, userRole }) {
   // that apart from an archive that is genuinely empty.
   const privileged = !userRole || COLD_STORAGE_ROLES.includes(userRole)
 
-  const missing = missingDestination({
-    values: {
-      'archive.endpoint': endpoint,
-      'archive.region': region,
-      'archive.bucket': bucket,
-      'archive.access_key_id': accessKeyId,
-    },
-    credentialSet,
+  const archiveEnabled = archive['archive.enabled'] === true
+  const siteKey = String(archive['archive.site_key'] ?? '')
+  const missing = missingDestination({ values: archive, credentialSet, siteKey })
+  const destination = destinationSummary({
+    endpoint: String(archive['archive.endpoint'] ?? ''),
+    bucket: String(archive['archive.bucket'] ?? ''),
     siteKey,
   })
+
+  const onSaved = () => {
+    setEditing(false)
+    showToast?.('Cold storage destination saved', 'success')
+    load()
+  }
 
   return (
     <div className="page-layout page-fill">
       <div className="page-main">
-
-        <PageHeading
-          icon={<IconDatabase size={15} />}
-          title="Cold Storage"
-          note={rawWindowStatement(rawWindow, archiveEnabled)}
-        >
-          Telemetry that has aged out of the historian into object storage, with no delete or restore
-          on this page.
-        </PageHeading>
-
-        {isAdmin && !loading && (
-          <DestinationCard
-            summary={destinationSummary({ endpoint, bucket, siteKey })}
-            missing={missing}
-            archiveEnabled={archiveEnabled}
-            credentialSet={credentialSet}
-            onCredentialSaved={() => { setCredentialSet(true); load() }}
-            showToast={showToast}
-          />
-        )}
-
         <div className="card card-fill">
-          <div className="card-header">
-            <h3 className="section-title">
-              Cold telemetry
-              <HelpTip
-                label="About cold telemetry"
-                text="Chunks past the retention threshold are exported to Parquet on object storage, verified, then dropped. The object is then the only copy of that span, and it sits outside the cluster and its backups."
+          <CardHeading
+            icon={<IconDatabase size={15} />}
+            title="Cold Storage"
+            description="Telemetry aged out of the historian into object storage outside this cluster, where each object is the only copy of its span."
+            note={rawWindowStatement(rawWindow, archiveEnabled)}
+            actions={isAdmin && settingsRead && (
+              <DestinationButton
+                enabled={archiveEnabled}
+                missing={missing}
+                destination={destination}
+                onOpen={() => setEditing(true)}
               />
-              <SectionCount total={rows.length} />
-            </h3>
-          </div>
+            )}
+          />
 
           {loading ? (
             <LoadingState label="the cold storage catalogue" />
@@ -193,12 +182,13 @@ export function ColdStorageTab({ showToast, userRole }) {
                       list is empty because of your role, not because nothing is archived.
                     </div>
                   ) : archiveEnabled && isAdmin && missing.length > 0 ? (
-                    /* On and unable to run: the Destination card says so, and this arm keeps the
-                       empty state from blaming eligibility instead. */
+                    /* On and unable to run: the header button says what is missing, and this arm
+                       keeps the empty state from blaming eligibility instead. */
                     <div className="empty-text">
-                      Nothing has been archived because there is nowhere to write it yet — the
-                      destination above is incomplete. Telemetry past the threshold stays in the
-                      hypertable, and no chunk is dropped, until it is set.
+                      Nothing has been archived because there is nowhere to write it yet: the
+                      destination is incomplete, and <strong>Complete the destination</strong> above
+                      says what is missing. Telemetry past the threshold stays in the hypertable, and
+                      no chunk is dropped, until it is set.
                     </div>
                   ) : archiveEnabled ? (
                     <>
@@ -219,9 +209,11 @@ export function ColdStorageTab({ showToast, userRole }) {
                   ) : (
                     <div className="empty-text">
                       No telemetry has been archived. Cold storage is off until{' '}
-                      <strong>Settings → Cold Storage → Archive telemetry before dropping it</strong> is
-                      turned on; until then raw chunks past the retention window are dropped outright and
-                      are not recoverable.
+                      {isAdmin
+                        ? <>it is set up with <strong>Set up cold storage</strong> above</>
+                        : 'an Administrator sets it up on this page'}
+                      ; until then raw chunks past the retention window are dropped outright and are
+                      not recoverable.
                     </div>
                   )}
                 </div>
@@ -266,8 +258,10 @@ export function ColdStorageTab({ showToast, userRole }) {
                             )}
                           </td>
                           <td>
+                            {/* Every key shares its site and dataset prefix, so the end, which
+                                names the span, is the part kept when it is cut. */}
                             {r.object_key
-                              ? <CopyableId value={r.object_key} label="object key" onNotify={showToast} />
+                              ? <CopyableId value={r.object_key} label="object key" onNotify={showToast} truncate="start" className="cold-object-key" />
                               : <span className="cell-meta">—</span>}
                           </td>
                         </tr>
@@ -280,100 +274,55 @@ export function ColdStorageTab({ showToast, userRole }) {
           )}
         </div>
       </div>
+
+      {editing && (
+        <ColdStorageDestinationModal
+          values={Object.fromEntries(COLD_STORAGE_DIALOG_KEYS.map(k => [k, archive[k]]))}
+          siteKey={siteKey}
+          credentialSet={credentialSet}
+          onSaved={onSaved}
+          onClose={() => setEditing(false)}
+        />
+      )}
     </div>
   )
 }
 
 /**
- * Where the only copy goes, and what is still missing before anything can go there.
- *
- * Administrator only, and rendered by the caller on that condition: the archive settings are
- * flagged `sensitive`, so for anybody else the reads return their fallbacks and this card would
- * report a configured stack as unconfigured.
- *
- * The endpoint, region, bucket and key ID are edited on the Settings page. The secret key is in the
- * vault and no API reads it back, so this card holds its write-only control beside the state it
- * unlocks.
+ * The header's way into the destination dialog, in three states: off (neutral, and its tooltip
+ * says what is lost meanwhile), on but incomplete (a warning naming what is missing, also given to
+ * a screen reader), and on and complete (neutral, naming where objects go). Administrator only,
+ * rendered by the caller on that condition: for anybody else the sensitive reads come back empty
+ * and a configured stack would read as unconfigured.
  */
-function DestinationCard({ summary, missing, archiveEnabled, credentialSet, onCredentialSaved, showToast }) {
-  const [editing, setEditing] = useState(false)
-
-  // Resolves either way so the dialog's pending state clears; the toast carries the outcome. The
-  // dialog closes only on success, so a refused write keeps the typed key in it.
-  const save = (secret) =>
-    api.setArchiveCredential(secret)
-      .then(() => {
-        setEditing(false)
-        onCredentialSaved()
-        showToast?.('Archive credential saved', 'success')
-      })
-      .catch(e => showToast?.(e?.message || 'Could not save the credential', 'error'))
-
-  return (
-    <div className="card">
-      <div className="card-header">
-        <h3 className="section-title">
-          Destination
-          <HelpTip
-            label="About the destination"
-            text="Where cold telemetry is written, deliberately outside this cluster, since an archived object is the only copy of its span. Endpoint, region, bucket and key ID are settings; the secret key stays in the vault."
-          />
-        </h3>
-        <button
-          className="btn btn-ghost btn-sm"
-          onClick={() => setEditing(true)}
-          title="Write the secret access key to the vault. It is never shown again."
-        >
-          {credentialSet ? 'Replace' : 'Set key'}
+function DestinationButton({ enabled, missing, destination, onOpen }) {
+  const describedBy = useId()
+  if (!enabled) {
+    return (
+      <button
+        className="btn btn-ghost btn-sm"
+        onClick={onOpen}
+        title="Archiving is off: raw telemetry past the retention window is dropped and cannot be recovered."
+      >
+        Set up cold storage
+      </button>
+    )
+  }
+  if (missing.length > 0) {
+    const message = `Archiving is on and cannot run. Still to set: ${missing.join(', ')}.`
+    return (
+      <>
+        <button className="btn btn-warning btn-sm" onClick={onOpen} title={message} aria-describedby={describedBy}>
+          <IconAlertTriangle size={14} /> Complete the destination
         </button>
-      </div>
-      <div className="card-body">
-        {/* On and unable to run is the state this card exists for: the switch is an ordinary
-            setting, so nothing stops it being turned on before a destination exists. */}
-        {archiveEnabled && missing.length > 0 && (
-          <div className="callout callout-warning">
-            <IconAlertTriangle size={14} className="callout-icon" />
-            <div>
-              <strong>Archiving is on and cannot run.</strong> Still to set:{' '}
-              {missing.join(', ')}. Nothing is being exported, and telemetry past the threshold
-              stays in the hypertable until it is.
-            </div>
-          </div>
-        )}
-
-        <div className="cold-destination">
-          {summary ? (
-            <>
-              <span>Objects are written to</span>
-              {/* Copyable: the address goes into an IAM policy or a ticket, and retyping it turns a
-                  wrong site prefix into what looks like an empty archive. */}
-              <CopyableId value={summary} label="destination" onNotify={showToast} />
-            </>
-          ) : (
-            <span className="cell-meta">
-              No destination set. The endpoint, region, bucket and access key ID are under{' '}
-              <strong>Settings → Cold Storage</strong>.
-            </span>
-          )}
-        </div>
-
-        <div className="cold-destination">
-          <span className="cell-meta">Secret access key</span>
-          {/* A claim about the vault: archive_credential_is_set() answers whether, never what. */}
-          <span className={credentialSet ? 'cold-key-set' : 'cell-meta'}>
-            {credentialSet ? 'Set' : 'Not set'}
-          </span>
-        </div>
-      </div>
-
-      {editing && (
-        <ArchiveCredentialModal
-          credentialSet={credentialSet}
-          onClose={() => setEditing(false)}
-          onSave={save}
-        />
-      )}
-    </div>
+        <span id={describedBy} className="sr-only">{message}</span>
+      </>
+    )
+  }
+  return (
+    <button className="btn btn-ghost btn-sm" onClick={onOpen} title={`Objects are written to ${destination}`}>
+      Change destination
+    </button>
   )
 }
 
@@ -407,7 +356,8 @@ function Stat({ label, value, title, tone, align }) {
   return (
     <div title={title} className={classes}>
       <div className="cold-stat-label">{label}</div>
-      <div className="cold-stat-value">{value}</div>
+      {/* The icon as well as the colour: colour is never the only signal. */}
+      <div className="cold-stat-value">{tone === 'warning' && <IconAlertTriangle size={16} />}{value}</div>
     </div>
   )
 }

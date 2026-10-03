@@ -95,6 +95,11 @@ function panelAction(name) {
   return screen.queryByRole('button', { name })
 }
 
+/** Drop a file anywhere on the Capture card, as an operator drags one in from disk. */
+function dropOnCard(file, target = document.querySelector('.capture-card')) {
+  fireEvent.drop(target, { dataTransfer: { files: [file], types: ['Files'] } })
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   api.get.mockImplementation(path =>
@@ -242,9 +247,7 @@ describe('the playback lane', () => {
       messages: [{ topic: 'spBv1.0/G/NDATA/gwy120000000000400080000', payload: {} }],
       identities: { edge_nodes: ['gwy120000000000400080000'], devices: [] }
     }
-    fireEvent.drop(screen.getByLabelText('Store a capture file and play it back'), {
-      dataTransfer: { files: [new File([JSON.stringify(doc)], 'edited.json', { type: 'application/json' })] }
-    })
+    dropOnCard(new File([JSON.stringify(doc)], 'edited.json', { type: 'application/json' }))
     const values = [...(await screen.findByLabelText('File it against')).options].map(o => o.value)
     expect(values).toContain('gateway:gw-1')
     expect(values).not.toContain('gateway:gw-shadow')
@@ -541,17 +544,42 @@ describe('deleting and downloading', () => {
 // =============================================================================================
 describe('the read-only role', () => {
   /**
-   * Auditor can read the bucket and both tables and nothing else, and the page says so rather than
-   * offering buttons that answer 42501.
+   * Auditor can read the bucket and both tables and nothing else. Each write is shown disabled and
+   * says who can use it, where it is, rather than in a callout above the table.
    */
-  it('offers an Auditor download and nothing that writes', async () => {
+  it('offers an Auditor download, and disables every write with who can use it', async () => {
     api.listCaptures.mockResolvedValue([CAPTURE])
     renderTab({ userRole: 'Auditor' })
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    selectRow(row); expect(panelAction(/Download/)).toBeInTheDocument()
-    expect(panelAction(/Record/)).toBeNull()
-    expect(panelAction(/Delete capture/)).toBeNull()
-    expect(screen.getByText(/require Administrator or Shopfloor Manager/)).toBeInTheDocument()
+    selectRow(row); expect(panelAction(/Download/)).not.toBeDisabled()
+    for (const name of [/Record/, /Play back/, /Delete capture/]) {
+      expect(panelAction(name)).toBeDisabled()
+      expect(panelAction(name)).toHaveAttribute('title', 'Requires Administrator or Shopfloor Manager')
+    }
+    expect(screen.getByText('Requires Administrator or Shopfloor Manager.')).toBeInTheDocument()
+    expect(document.querySelector('.callout-info')).toBeNull()
+  })
+
+  it('makes Download the Auditor\'s one primary action, listed first', async () => {
+    api.listCaptures.mockResolvedValue([CAPTURE])
+    renderTab({ userRole: 'Auditor' })
+    const panel = selectRow((await screen.findByText('Line 1 Gateway')).closest('tr'))
+    const primaries = panel.querySelectorAll('.context-action.btn-primary')
+    expect(primaries).toHaveLength(1)
+    expect(primaries[0]).toHaveTextContent('Download')
+    expect(panel.querySelector('.context-action')).toBe(primaries[0])
+  })
+
+  it('shows an Auditor the Stop on a running strip, disabled, with who can use it', async () => {
+    api.activePlaybackJob.mockResolvedValue({
+      id: 'play-1', status: 'RUNNING', target_edge_node_id: 'gwy130000000000400080000',
+      gateways: { name: 'Playback Target' }, speed: 1, messages_sent: 1, messages_total: 2,
+      elapsed_seconds: 1
+    })
+    renderTab({ userRole: 'Auditor' })
+    const stop = await screen.findByRole('button', { name: /Stop/ })
+    expect(stop).toBeDisabled()
+    expect(stop).toHaveAttribute('title', 'Requires Administrator or Shopfloor Manager')
   })
 
   it('offers a Shopfloor Manager the write actions', async () => {
@@ -968,21 +996,68 @@ describe('playing a capture back', () => {
     expect(screen.getByRole('button', { name: 'Play back' })).not.toBeDisabled()
   })
 
-  it('does not offer Play to an Auditor', async () => {
+  it('does not let an Auditor play back, and says who can', async () => {
     api.listCaptures.mockResolvedValue([PLAYABLE])
     renderTab({ userRole: 'Auditor' })
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    selectRow(row); expect(panelAction(/Play back/)).toBeNull()
+    selectRow(row); expect(panelAction(/Play back/)).toBeDisabled()
+    expect(panelAction(/Play back/)).toHaveAttribute('title', 'Requires Administrator or Shopfloor Manager')
   })
 })
 
 // =============================================================================================
-describe('the playback card', () => {
+describe('the playback strip', () => {
   const JOB = {
     id: 'play-1', status: 'RUNNING', target_edge_node_id: 'gwy130000000000400080000',
     gateways: { name: 'Playback Target' }, speed: 4,
     messages_sent: 30, messages_total: 120, elapsed_seconds: 7
   }
+  const strips = () => document.querySelector('.capture-strips')
+
+  /** Playback is not a tab: it shows inside the one card, above the table, only while it has news. */
+  it('is absent while no playback is queued, running or recently failed', async () => {
+    api.recentPlaybackJobs.mockResolvedValue([
+      { ...JOB, id: 'play-ok', status: 'COMPLETED', finished_at: new Date().toISOString() },
+      { ...JOB, id: 'play-old', status: 'FAILED', error: 'an hour ago',
+        finished_at: new Date(Date.now() - 60 * 60 * 1000).toISOString() },
+    ])
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    expect(strips()).toBeEmptyDOMElement()
+    expect(screen.queryByRole('button', { name: /Stop/ })).toBeNull()
+  })
+
+  it.each([
+    ['queued', { activePlaybackJob: { ...JOB, status: 'PENDING', messages_sent: 0, messages_total: 0 } }, /Queued as Playback Target/],
+    ['running', { activePlaybackJob: JOB }, /Playing back as Playback Target/],
+    ['recently failed', { recentPlaybackJobs: [{ ...JOB, id: 'play-9', status: 'FAILED', error: 'worker gone' }] }, /playback\s+failed: worker gone/],
+  ])('shows a %s playback inside the card, above the table', async (_state, mocks, text) => {
+    if (mocks.activePlaybackJob) api.activePlaybackJob.mockResolvedValue(mocks.activePlaybackJob)
+    if (mocks.recentPlaybackJobs) api.recentPlaybackJobs.mockResolvedValue(mocks.recentPlaybackJobs)
+    renderTab()
+    const strip = (await screen.findByText(text)).closest('.callout')
+    const card = document.querySelector('.card.card-fill')
+    expect(strips().parentElement).toBe(card)
+    expect(strips().contains(strip)).toBe(true)
+    // Above the table: the strips come before the scroller in the card.
+    expect(strips().compareDocumentPosition(card.querySelector(':scope > .table-wrap'))
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('stays in view on either tab, beside the capture strip', async () => {
+    api.activePlaybackJob.mockResolvedValue(JOB)
+    api.activeCaptureJob.mockResolvedValue({
+      id: 'job-1', status: 'RECORDING', subject_sparkplug_id: 'gwy120000000000400080000',
+      gateways: { name: 'Line 1 Gateway' }, devices: null, messages: 1, bytes: 10,
+      elapsed_seconds: 3, max_seconds: 600, birth_captured: true, max_messages: 100000, max_bytes: 52428800
+    })
+    renderTab()
+    expect(await screen.findByText(/Playing back as Playback Target/)).toBeInTheDocument()
+    expect(within(strips()).getByText(/Recording — Line 1 Gateway/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'Devices' }))
+    expect(within(strips()).getByText(/Playing back as Playback Target/)).toBeInTheDocument()
+    expect(within(strips()).getAllByRole('button', { name: /Stop/ })).toHaveLength(2)
+  })
 
   it('names the gateway it is publishing as', async () => {
     api.activePlaybackJob.mockResolvedValue(JOB)
@@ -1003,12 +1078,12 @@ describe('the playback card', () => {
     api.activePlaybackJob.mockResolvedValue(JOB)
     api.stopPlayback.mockResolvedValue(true)
     renderTab()
-    // Two Stop buttons would be ambiguous; only the playback card is present here.
+    // Two Stop buttons would be ambiguous; only the playback strip is present here.
     fireEvent.click(await screen.findByRole('button', { name: /Stop/ }))
     await waitFor(() => expect(api.stopPlayback).toHaveBeenCalledWith('play-1'))
   })
 
-  it('surfaces a failed playback after its card has gone', async () => {
+  it('surfaces a failed playback after its strip has gone', async () => {
     api.recentPlaybackJobs.mockResolvedValue([{
       id: 'play-9', status: 'FAILED', target_edge_node_id: 'gwy130000000000400080000',
       gateways: { name: 'Playback Target' },
@@ -1040,7 +1115,7 @@ describe('the playback card', () => {
     // noise is what makes the real one unreadable.
     api.recentPlaybackJobs.mockResolvedValue([lossy({ messages_out_of_window: 0 })])
     renderTab()
-    await screen.findByText(/Nothing is playing back/i)
+    await screen.findByText('Line 1 Gateway')
     expect(screen.queryByText(/timestamps too old/i)).toBeNull()
   })
 
@@ -1049,7 +1124,7 @@ describe('the playback card', () => {
     // discarded".
     api.recentPlaybackJobs.mockResolvedValue([lossy({ messages_out_of_window: undefined })])
     renderTab()
-    await screen.findByText(/Nothing is playing back/i)
+    await screen.findByText('Line 1 Gateway')
     expect(screen.queryByText(/timestamps too old/i)).toBeNull()
   })
 
@@ -1073,7 +1148,7 @@ describe('the playback card', () => {
 
     unmount()
     renderTab()
-    await screen.findByText(/Nothing is playing back/i)
+    await screen.findByText('Line 1 Gateway')
     expect(screen.queryByText(/timestamps too old/i)).toBeNull()
   })
 })
@@ -1120,18 +1195,38 @@ describe('the filter bar', () => {
     expect(screen.getByText(/No subjects match these filters/)).toBeInTheDocument()
   })
 
-  it('scrolls the Capture card inside the page, and counts the rows of the current tab', async () => {
+  it('is one card that scrolls inside the page: heading, tab bar, toolbar, then the table', async () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')
     expect(document.querySelector('.page-layout.page-fill')).not.toBeNull()
+    expect(document.querySelectorAll('.page-main > .card')).toHaveLength(1)
+    expect(document.querySelector('.page-heading')).toBeNull()
     const card = document.querySelector('.card.card-fill')
+    expect(card.querySelector(':scope > .card-heading')).toHaveTextContent('Capture')
+    expect(card.querySelector(':scope > .card-heading + .tab-strip')).not.toBeNull()
+    // The tab's "?" is in the bar after the tab names, and it is about the tab on show.
+    const help = card.querySelector(':scope > .tab-strip > .tab-strip-help')
+    expect(help.firstElementChild).toHaveClass('help-tip')
+    expect(help.firstElementChild).toHaveAttribute('aria-label', 'About capturing gateways')
+    // Both tabs have filters, so each keeps its toolbar row, which starts with them.
+    const bar = card.querySelector(':scope > .tab-strip + .filter-bar')
+    expect(bar.querySelector('.help-tip')).toBeNull()
+    expect(bar.firstElementChild).toBe(screen.getByLabelText('Stored capture filter'))
+    fireEvent.click(screen.getByRole('tab', { name: 'Devices' }))
+    expect(help.firstElementChild).toHaveAttribute('aria-label', 'About capturing devices')
+    expect(card.querySelector(':scope > .tab-strip + .filter-bar')).toBe(bar)
+    expect(bar).toContainElement(screen.getByLabelText('Gateway filter'))
     expect(card.querySelector(':scope > .table-wrap')).not.toBeNull()
-    const total = document.querySelectorAll('tbody tr').length
-    const count = () => card.querySelector('.card-header .section-count').textContent
-    expect(count()).toBe(String(total))
+  })
+
+  it('carries no count on the heading, while filtered or not', async () => {
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    const card = document.querySelector('.card.card-fill')
+    expect(card.querySelector('.card-heading .section-count')).toBeNull()
 
     fireEvent.change(screen.getByLabelText('Search subjects'), { target: { value: 'zzz' } })
-    expect(count()).toBe(`0 / ${total}`)
+    expect(card.querySelector('.card-heading .section-count')).toBeNull()
     const clear = screen.getByRole('button', { name: /Clear filters \(1\)/ })
     expect(clear.className).toContain('filter-bar-clear')
     expect(clear.className).not.toContain('filter-bar-spacer')
@@ -1174,6 +1269,33 @@ describe('the details panel', () => {
     expect(within(panel).getByText(/pre-trip bearing vibration baseline/)).toBeInTheDocument()
   })
 
+  it('opens on Enter or Space from the focused row, and not from the copy chip in it', async () => {
+    api.listCaptures.mockResolvedValue([CAPTURE])
+    renderTab()
+    const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
+    expect(row).toHaveClass('row-selectable')
+    expect(row).toHaveAttribute('tabindex', '0')
+
+    fireEvent.keyDown(within(row).getByRole('button', { name: /Sparkplug ID/i }), { key: 'Enter' })
+    expect(panelAction(/Download/)).toBeNull()
+
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(panelAction(/Download/)).toBeInTheDocument()
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(panelAction(/Download/)).toBeNull()
+  })
+
+  it('carries the subject\'s icon, and Record as its one primary action, listed first', async () => {
+    api.listCaptures.mockResolvedValue([CAPTURE])
+    renderTab()
+    const panel = selectRow((await screen.findByText('Line 1 Gateway')).closest('tr'))
+    expect(panel.querySelector('.context-panel-title-row .context-panel-icon svg')).not.toBeNull()
+    const primaries = panel.querySelectorAll('.context-action.btn-primary')
+    expect(primaries).toHaveLength(1)
+    expect(primaries[0]).toHaveTextContent('Record again')
+    expect(panel.querySelector('.context-action')).toBe(primaries[0])
+  })
+
   /** The one field on the panel that changes what an operator does next. */
   it('calls out a capture with no birth certificate', async () => {
     api.listCaptures.mockResolvedValue([
@@ -1200,10 +1322,12 @@ describe('the details panel', () => {
     expect(screen.getByLabelText('Upload a capture for Line 1 Gateway')).toBeInTheDocument()
   })
 
-  it('offers an Auditor no drop zone', async () => {
+  it('offers an Auditor no drop zone, and says who can upload where it would be', async () => {
     renderTab({ userRole: 'Auditor' })
-    selectRow((await screen.findByText('Line 1 Gateway')).closest('tr'))
+    const panel = selectRow((await screen.findByText('Line 1 Gateway')).closest('tr'))
     expect(screen.queryByLabelText(/Upload a capture for/)).not.toBeInTheDocument()
+    const label = within(panel).getByText('Upload a capture')
+    expect(label.nextElementSibling).toHaveTextContent('Requires Administrator or Shopfloor Manager.')
   })
 
   it('closes when the same row is clicked again', async () => {
@@ -1218,46 +1342,82 @@ describe('the details panel', () => {
 })
 
 // =============================================================================================
-describe('the playback card', () => {
-  /** A card whose body vanishes reads as broken rather than idle, and this one owns a card. */
-  it('explains how to start one when nothing is publishing', async () => {
+describe('playing a file', () => {
+  const EDITED = {
+    aber_capture_version: 1,
+    messages: [{ topic: 'spBv1.0/G/NDATA/gwy120000000000400080000', payload: {} }],
+    identities: { edge_nodes: ['gwy120000000000400080000'], devices: [] }
+  }
+  const editedFile = () => new File([JSON.stringify(EDITED)], 'edited.json', { type: 'application/json' })
+
+  it('offers "Play a file…" in the card header, which opens the file chooser', async () => {
+    const clicked = []
+    const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function () { clicked.push(this) })
     renderTab()
     await screen.findByText('Line 1 Gateway')
-    expect(screen.getByText(/Nothing is playing back/)).toBeInTheDocument()
+    const button = screen.getByRole('button', { name: /Play a file…/ })
+    expect(button.closest('.card-heading')).not.toBeNull()
+    fireEvent.click(button)
+    click.mockRestore()
+
+    // The chooser it opened is the one that goes on to play the file back.
+    expect(clicked).toHaveLength(1)
+    expect(clicked[0]).toHaveAttribute('type', 'file')
+    fireEvent.change(clicked[0], { target: { files: [editedFile()] } })
+    const subject = await screen.findByLabelText('File it against')
+    await waitFor(() => expect(subject.value).toBe('gateway:gw-1'))
   })
 
-  it('offers a drop zone for an edited capture', async () => {
-    renderTab()
-    await screen.findByText('Line 1 Gateway')
-    expect(screen.getByLabelText('Store a capture file and play it back')).toBeInTheDocument()
-  })
-
-  it('offers an Auditor no such zone', async () => {
+  it('disables "Play a file…" for an Auditor, says who can, and ignores a drop', async () => {
     renderTab({ userRole: 'Auditor' })
     await screen.findByText('Line 1 Gateway')
-    expect(screen.queryByLabelText('Store a capture file and play it back')).not.toBeInTheDocument()
+    const button = screen.getByRole('button', { name: /Play a file…/ })
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('title', 'Requires Administrator or Shopfloor Manager')
+
+    dropOnCard(editedFile())
+    await new Promise(r => setTimeout(r, 0))
+    expect(screen.queryByLabelText('File it against')).toBeNull()
+  })
+
+  /** The drop target is the whole card, so it has to say so while a file is over it. */
+  it('shows the drop state while a file is dragged over the card, and only for a file', async () => {
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    const card = document.querySelector('.capture-card')
+    const row = screen.getByText('Line 1 Gateway').closest('tr')
+
+    fireEvent.dragEnter(card, { dataTransfer: { types: ['text/plain'] } })
+    expect(card.className).not.toContain('capture-card-drop')
+
+    fireEvent.dragEnter(card, { dataTransfer: { types: ['Files'] } })
+    expect(card.className).toContain('capture-card-drop')
+    expect(screen.getByText(/Drop the file to store it and play it back/)).toBeInTheDocument()
+
+    // Crossing into a child is an enter on the child and a leave on the card: still over the card.
+    fireEvent.dragEnter(row, { dataTransfer: { types: ['Files'] } })
+    fireEvent.dragLeave(card, { dataTransfer: { types: ['Files'] } })
+    expect(card.className).toContain('capture-card-drop')
+
+    fireEvent.dragLeave(row, { dataTransfer: { types: ['Files'] } })
+    expect(card.className).not.toContain('capture-card-drop')
+    expect(screen.queryByText(/Drop the file to store it and play it back/)).toBeNull()
   })
 
   /**
    * Drop, store, play back. The subject is guessed from the identities in the file and offered, never
-   * filed silently.
+   * filed silently. Dropped on a table cell: the whole card is the target.
    */
   it('guesses the subject from the file and goes on to the playback dialog', async () => {
     api.uploadCapture.mockResolvedValue({
       id: 'cap-new', messages: 3, manifest: { device_ids: [], birth_captured: true }
     })
     renderTab()
-    await screen.findByText('Line 1 Gateway')
+    const cell = await screen.findByText('Line 1 Gateway')
 
-    const doc = {
-      aber_capture_version: 1,
-      messages: [{ topic: 'spBv1.0/G/NDATA/gwy120000000000400080000', payload: {} }],
-      identities: { edge_nodes: ['gwy120000000000400080000'], devices: [] }
-    }
-    const file = new File([JSON.stringify(doc)], 'edited.json', { type: 'application/json' })
-    fireEvent.drop(screen.getByLabelText('Store a capture file and play it back'), {
-      dataTransfer: { files: [file] }
-    })
+    fireEvent.dragEnter(cell, { dataTransfer: { types: ['Files'] } })
+    dropOnCard(editedFile(), cell)
+    expect(document.querySelector('.capture-card').className).not.toContain('capture-card-drop')
 
     // The upload dialog opens with the subject the file names already chosen.
     const subject = await screen.findByLabelText('File it against')
@@ -1279,10 +1439,7 @@ describe('the playback card', () => {
       messages: [{ topic: 'spBv1.0/G/NDATA/gwy999999999999999999999', payload: {} }],
       identities: { edge_nodes: ['gwy999999999999999999999'], devices: [] }
     }
-    const file = new File([JSON.stringify(doc)], 'foreign.json', { type: 'application/json' })
-    fireEvent.drop(screen.getByLabelText('Store a capture file and play it back'), {
-      dataTransfer: { files: [file] }
-    })
+    dropOnCard(new File([JSON.stringify(doc)], 'foreign.json', { type: 'application/json' }))
     const subject = await screen.findByLabelText('File it against')
     expect(subject.value).toBe('')
   })

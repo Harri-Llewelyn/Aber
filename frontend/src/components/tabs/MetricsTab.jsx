@@ -32,7 +32,6 @@ import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { Modal } from '../common/Modal'
 import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
-import { SectionCount } from '../common/SectionCount'
 import { SearchInput } from '../common/SearchInput'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
@@ -42,7 +41,9 @@ import {
   IconPlus, IconAlertTriangle, IconArchive, IconChevronDown, IconChevronUp, IconRefreshCw,
   IconPencil, IconBookOpen, IconTag
 } from '../common/Icons'
-import { PageHeading } from '../common/PageHeading'
+import { CardHeading } from '../common/CardHeading'
+import { TabStrip } from '../common/TabStrip'
+import { ExpandAllToggle } from '../common/ExpandAllToggle'
 import { HelpTip } from '../common/HelpTip'
 
 // Sentinel for the "not in the list yet" option in the group picker. Not a valid group name --
@@ -84,6 +85,18 @@ const BLANK_METRIC = {
  */
 const keepTypedSemanticId = (own) => (own && own.semanticId.trim() !== '' ? own : null)
 
+// The selected tab's "?", drawn in the tab bar after the tab names.
+const VIEW_HELP = {
+  catalog: {
+    label: 'About the metric catalog',
+    text: 'The metrics every schema is built from, grouped by the first segment of their name. A name is what a device publishes and cannot change afterwards, so an unwanted metric is deprecated, not removed.',
+  },
+  deprecated: {
+    label: 'About deprecated metrics',
+    text: 'Withheld from the schema builder, not deleted: schemas that model one keep it, and its readings stay. Restore offers it to schema authors again and clears the replacement it names.',
+  },
+}
+
 /**
  * The metric catalog: the vocabulary of metrics every schema is built from. Add Metric opens a
  * dialog; selecting a row opens a drawer with the metric's fields and its Edit, Deprecate and
@@ -119,18 +132,19 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const [deprecateTarget, setDeprecateTarget] = useState(null)
   const [restoreTarget, setRestoreTarget] = useState(null)
   const [editTarget, setEditTarget] = useState(null)
-  // Expansion state for the catalog's group sections, keyed by label; absent means collapsed. The
-  // headers carry a count, so a collapsed catalog still says what is in it.
+  // Which tab of the card is shown: 'catalog' or 'deprecated'.
+  const [view, setView] = useState('catalog')
+  // Expansion state for the catalog's group sections, keyed by label; absent means collapsed.
   const [expandedGroups, setExpandedGroups] = useState({})
   // Filters the catalog by metric name. With groups collapsed by default it is how one metric is
   // found without opening each group.
   const [catalogSearch, setCatalogSearch] = useState('')
 
   /**
-   * A group is open when the operator opened it, or when a search is narrowing the catalog: a
-   * search that left the groups shut would show headers and no matches.
+   * A group is open when the operator opened it. While a search narrows the catalog it is open
+   * unless explicitly closed: a search that left the groups shut would show headers and no matches.
    */
-  const isGroupOpen = (label) => Boolean(catalogSearch) || expandedGroups[label] === true
+  const isGroupOpen = (label) => (catalogSearch ? expandedGroups[label] !== false : expandedGroups[label] === true)
   const toggleGroup = (label) =>
     setExpandedGroups(prev => ({ ...prev, [label]: !isGroupOpen(label) }))
 
@@ -388,7 +402,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       await api.post(`/api/v1/metric-catalog/${deprecateTarget.metric_uuid}/deprecate`, { superseded_by: supersededBy })
       setDeprecateTarget(null)
       load()
-      showToast(`Metric '${deprecateTarget.name}' deprecated. Deprecated Metrics, below the catalog, can restore it.`, 'success')
+      showToast(`Metric '${deprecateTarget.name}' deprecated. The Deprecated Metrics tab can restore it.`, 'success')
     } catch (e) {
       showToast(e.message, 'error')
     }
@@ -440,12 +454,17 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
   const currentCatalog = catalog.filter(m => !m.deprecated)
   const activeCatalog = currentCatalog.filter(matchesCatalogSearch)
-  // Its own card, unfiltered: the search box belongs to the catalog card above it.
+  // Its own tab, unfiltered: the search box belongs to the catalog tab.
   const deprecatedCatalog = catalog.filter(m => m.deprecated)
   const selected = catalog.find(m => m.metric_uuid === selectedId) || null
   // Grouped by the name's first `/`-separated segment; ungrouped metrics fall into a trailing bucket.
   const catalogGroups = groupCatalog(activeCatalog)
-  // `superseded_by` is a uuid; the Deprecated Metrics card and the restore modal show the name.
+  // Writes every group explicitly, `false` included, so Collapse all also closes what a search opened.
+  const setAllGroups = (open) => setExpandedGroups(prev => ({
+    ...prev,
+    ...Object.fromEntries(groupCatalog(currentCatalog).map(g => [g.label, open]))
+  }))
+  // `superseded_by` is a uuid; the Deprecated Metrics tab and the restore modal show the name.
   const metricById = new Map(catalog.map(m => [m.metric_uuid, m]))
 
   // The vocabulary the picker offers: the curated registry (MTConnect's component types) plus
@@ -563,11 +582,15 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     datatypeChosen &&
     (newMetric.group !== NEW_GROUP || newMetric.newGroup.trim() !== '')
 
-  /** Edit is on both cards: a deprecated metric still carries its id into the schemas that model it. */
+  /**
+   * Edit is on both tabs: a deprecated metric still carries its id into the schemas that model it.
+   * The one primary is Restore on a deprecated metric and Edit otherwise; the panel lists it first.
+   */
   const metricActions = (m) => [
     {
       label: 'Edit', icon: <IconPencil size={13} />,
       onClick: () => setEditTarget(m),
+      primary: !m.deprecated,
       disabled: !canEditMetric,
       title: !canEditMetric
         ? requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
@@ -577,6 +600,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       ? {
         label: 'Restore', icon: <IconRefreshCw size={13} />,
         onClick: () => setRestoreTarget(m),
+        primary: true,
         disabled: !canDeprecateMetric,
         title: !canDeprecateMetric
           ? requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)
@@ -593,7 +617,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       }
   ]
 
-  /** The cells both cards share, so a metric reads the same in each. */
+  /** The cells both tabs share, so a metric reads the same in each. */
   const metricCells = (m) => (
     <>
       <td>
@@ -603,25 +627,23 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           <span className="cell-meta badge-follow" title="Local extension — not drawn from a standard vocabulary">local</span>
         )}
       </td>
-      <td>
-        {m.standard
-          ? <Badge size="sm" title={`Named from the ${m.standard} vocabulary`}>{m.standard}</Badge>
-          : <span className="cell-meta">{LOCAL_EXTENSION_LABEL}</span>}
+      {/* Plain text in the row's one meta style: a pill would wrap a long standard name onto two lines. */}
+      <td className="cell-meta" title={m.standard ? `Named from the ${m.standard} vocabulary` : undefined}>
+        {m.standard || LOCAL_EXTENSION_LABEL}
       </td>
-      <td>
-        {m.category
-          ? <Badge size="sm" title={`MTConnect ${m.category} observation`}>{m.category}</Badge>
-          : <span className="cell-meta">—</span>}
+      <td className="cell-meta" title={m.category ? `MTConnect ${m.category} observation` : undefined}>
+        {m.category || '—'}
       </td>
       <td className="cell-meta">{m.units || '—'}</td>
-      <td>{datatypeLabel(m.datatype)}</td>
-      {/* Capped: a semantic id is a full IRI, and an unconstrained cell widens the whole table. */}
-      <td className="metric-id-cell">
+      <td className="cell-meta">{datatypeLabel(m.datatype)}</td>
+      {/* Cut in the middle: the ids share a long prefix, and the end tells two apart. */}
+      <td>
         {m.semantic_id
           ? <CopyableId
               value={m.semantic_id}
               label={`semantic id${m.semantic_id_type ? ` (${m.semantic_id_type})` : ''}`}
               onNotify={showToast}
+              truncate="start"
             />
           : <span className="cell-meta" title="Not mapped to a standard concept. Legitimate for a local extension, which no vocabulary names. Edit can map any metric, and suggests its standard's id.">—</span>}
       </td>
@@ -631,9 +653,38 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
   const selectRow = (m) => setSelectedId(id => id === m.metric_uuid ? null : m.metric_uuid)
   const rowClass = (m) => `row-selectable${selectedId === m.metric_uuid ? ' row-selected' : ''}`
+  /** A row opens the drawer from anywhere on it, by mouse or by Enter or Space while it has focus. */
+  const rowProps = (m) => ({
+    className: rowClass(m),
+    tabIndex: 0,
+    onClick: rowSelectHandler(() => selectRow(m)),
+    onKeyDown: (e) => {
+      if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+      e.preventDefault()
+      selectRow(m)
+    },
+    title: 'Click to inspect this metric'
+  })
 
   const selectedReplacement = selected?.superseded_by ? metricById.get(selected.superseded_by) : null
   const selectedUsage = selected ? usageCountFor(selected.name) : 0
+
+  /**
+   * One column set for both tabs, fixed (`.metric-table`), so opening a group cannot move a column
+   * and the two tabs line up. Description takes what is left; the deprecated tab adds Superseded By.
+   */
+  const metricColumns = (superseded) => (
+    <colgroup>
+      <col className="metric-col-name" />
+      <col className="metric-col-standard" />
+      <col className="metric-col-category" />
+      <col className="metric-col-units" />
+      <col className="metric-col-datatype" />
+      <col className="metric-col-semantic-id" />
+      <col />
+      {superseded && <col className="metric-col-superseded" />}
+    </colgroup>
+  )
 
   const catalogHeaders = (
     <>
@@ -648,142 +699,154 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   )
 
   return (
-    <div className="page-layout">
-      <div className="page-main stack">
-        <PageHeading icon={<IconTag size={15} />} title="Metrics">
-          The catalog of metrics that schemas are built from, and the ones since deprecated.
-        </PageHeading>
+    <div className="page-layout page-fill">
+      <div className="page-main">
+        {/* One card: the catalog and the deprecated metrics are two tabs of it, and the table of the
+            tab on show scrolls inside it. */}
+        <div className="card card-fill">
+          <CardHeading
+            icon={<IconTag size={15} />}
+            title="Metrics"
+            description="The catalog of metrics that schemas are built from, and the ones since deprecated."
+          />
 
-        <div className="card">
-          <div className="card-header">
-            <h3 className="section-title">
-              Metric Catalog
-              <HelpTip
-                label="About the metric catalog"
-                text="The metrics every schema is built from, grouped by the first segment of their name. A name is what a device publishes and cannot change afterwards, so an unwanted metric is deprecated, not removed."
-              />
-              <SectionCount total={currentCatalog.length} shown={activeCatalog.length} />
-            </h3>
-            <ActionButton
-              className="btn btn-primary btn-sm"
-              permitted={canManageSchema}
-              deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)}
-              title="Add a new metric to the catalog"
-              onClick={() => setShowAddMetric(true)}
-            >
-              <IconPlus size={13} /> Add Metric
-            </ActionButton>
-          </div>
+          {/* Both tabs are always there, so a deprecation has a known place to be undone. */}
+          <TabStrip
+            ariaLabel="Metric list"
+            value={view}
+            onChange={id => { if (id !== view) { setView(id); setSelectedId(null) } }}
+            tabs={[
+              { id: 'catalog', label: 'Metric Catalog', title: 'The metrics schema authors can build from' },
+              { id: 'deprecated', label: 'Deprecated Metrics', title: 'Metrics withheld from the schema builder, and what replaced each' },
+            ]}
+            help={<HelpTip {...VIEW_HELP[view]} />}
+          />
 
-          <div className="card-body">
-            {/* The groups start collapsed, so typing is how a known metric is reached; it opens
-                the groups that matched (isGroupOpen). */}
-            <div className="filter-bar">
-              <SearchInput
-                value={catalogSearch}
-                onChange={setCatalogSearch}
-                placeholder="Search metrics…"
-                ariaLabel="Search the metric catalog"
-              />
-              <ClearFilters count={catalogSearch ? 1 : 0} onClear={() => setCatalogSearch('')} />
-            </div>
-          </div>
+          {view === 'catalog' && (
+            <>
+              {/* The groups start collapsed, so typing is how a known metric is reached; it opens
+                  the groups that matched (isGroupOpen). */}
+              <div className="filter-bar">
+                <SearchInput
+                  value={catalogSearch}
+                  onChange={setCatalogSearch}
+                  placeholder="Search metrics…"
+                  ariaLabel="Search the metric catalog"
+                />
+                <ExpandAllToggle
+                  anyOpen={catalogGroups.some(g => isGroupOpen(g.label))}
+                  onExpandAll={() => setAllGroups(true)}
+                  onCollapseAll={() => setAllGroups(false)}
+                  noun="groups"
+                  disabled={catalogGroups.length === 0}
+                />
+                <div className="filter-bar-actions">
+                  <ClearFilters count={catalogSearch ? 1 : 0} onClear={() => setCatalogSearch('')} />
+                  <ActionButton
+                    className="btn btn-primary btn-sm"
+                    permitted={canManageSchema}
+                    deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)}
+                    title="Add a new metric to the catalog"
+                    onClick={() => setShowAddMetric(true)}
+                  >
+                    <IconPlus size={13} /> Add Metric
+                  </ActionButton>
+                </div>
+              </div>
 
-          {!loaded ? <LoadingState label="catalog" /> : catalogGroups.length === 0 ? (
-            <EmptyState
-              icon={<IconBookOpen size={36} />}
-              filtered={Boolean(catalogSearch)}
-              message={deprecatedCatalog.length > 0
-                ? 'Every metric in the catalog is deprecated.'
-                : 'No metrics in the catalog yet.'}
-              filteredMessage={<>No metric matches <strong>{catalogSearch}</strong>.</>}
-            />
-          ) : (
-            <div className="table-wrap">
-              <table>
-                <thead><tr>{catalogHeaders}</tr></thead>
-                {catalogGroups.map(group => {
-                  const open = isGroupOpen(group.label)
-                  return (
-                    <tbody key={group.label}>
-                      <tr className="table-group-row">
-                        <td colSpan={7}>
-                          {/* The whole header row is the control, as on the Vocabulary page. */}
-                          <button
-                            type="button"
-                            className="table-group-button"
-                            onClick={() => toggleGroup(group.label)}
-                            aria-expanded={open}
-                            title={open
-                              ? `Collapse ${group.label}`
-                              : `Expand ${group.label} (${group.metrics.length} metric${group.metrics.length === 1 ? '' : 's'})`}
-                          >
-                            {open ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
-                            <span
-                              className={`table-group-label${group.isUngrouped ? ' table-group-label-muted' : ''}`}
-                              title={group.isUngrouped
-                                ? 'These metric names carry no "Group/Metric" prefix, so they belong to no component'
-                                : `Metrics named "${group.label}/…"`}
-                            >
-                              {group.label}
-                            </span>
-                            <span className="section-count">{group.metrics.length}</span>
-                          </button>
-                        </td>
+              {!loaded ? <LoadingState label="catalog" /> : catalogGroups.length === 0 ? (
+                <EmptyState
+                  icon={<IconBookOpen size={36} />}
+                  filtered={Boolean(catalogSearch)}
+                  message={deprecatedCatalog.length > 0
+                    ? 'Every metric in the catalog is deprecated.'
+                    : 'No metrics in the catalog yet.'}
+                  filteredMessage={<>No metric matches <strong>{catalogSearch}</strong>.</>}
+                />
+              ) : (
+                <div className="table-wrap">
+                  <table className="metric-table">
+                    {metricColumns(false)}
+                    <thead><tr>{catalogHeaders}</tr></thead>
+                    {catalogGroups.map(group => {
+                      const open = isGroupOpen(group.label)
+                      return (
+                        <tbody key={group.label}>
+                          <tr className="table-group-row">
+                            <td colSpan={7}>
+                              {/* The whole header row is the control, as on the Vocabulary page. */}
+                              <button
+                                type="button"
+                                className="table-group-button"
+                                onClick={() => toggleGroup(group.label)}
+                                aria-expanded={open}
+                                title={open
+                                  ? `Collapse ${group.label}`
+                                  : `Expand ${group.label} (${group.metrics.length} metric${group.metrics.length === 1 ? '' : 's'})`}
+                              >
+                                {open ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
+                                <span
+                                  className={`table-group-label${group.isUngrouped ? ' table-group-label-muted' : ''}`}
+                                  title={group.isUngrouped
+                                    ? 'These metric names carry no "Group/Metric" prefix, so they belong to no component'
+                                    : `Metrics named "${group.label}/…"`}
+                                >
+                                  {group.label}
+                                </span>
+                              </button>
+                            </td>
+                          </tr>
+                          {open && group.metrics.map(m => (
+                            <tr key={m.metric_uuid} {...rowProps(m)}>
+                              {metricCells(m)}
+                            </tr>
+                          ))}
+                        </tbody>
+                      )
+                    })}
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+
+          {view === 'deprecated' && (
+            <>
+              {/* Kept mounted across a reload (`loaded` stays true), so the rows do not vanish and
+                  reappear after a save. */}
+              {!loaded ? <LoadingState label="catalog" /> : deprecatedCatalog.length === 0 ? (
+                <EmptyState icon={<IconArchive size={36} />} message="No metric is deprecated." />
+              ) : (
+                <div className="table-wrap">
+                  <table className="metric-table metric-table-deprecated">
+                    {metricColumns(true)}
+                    <thead>
+                      <tr>
+                        {catalogHeaders}
+                        <th title="The metric named as this one's replacement when it was deprecated">Superseded By</th>
                       </tr>
-                      {open && group.metrics.map(m => (
-                        <tr key={m.metric_uuid} className={rowClass(m)} onClick={rowSelectHandler(() => selectRow(m))} title="Click to inspect this metric">
-                          {metricCells(m)}
-                        </tr>
-                      ))}
+                    </thead>
+                    <tbody>
+                      {deprecatedCatalog.map(m => {
+                        const replacement = m.superseded_by ? metricById.get(m.superseded_by) : null
+                        return (
+                          <tr key={m.metric_uuid} {...rowProps(m)}>
+                            {metricCells(m)}
+                            <td>
+                              {replacement
+                                ? <span className="mono">{replacement.name}</span>
+                                : <span className="cell-meta" title="No replacement was named">—</span>}
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
-                  )
-                })}
-              </table>
-            </div>
+                  </table>
+                </div>
+              )}
+            </>
           )}
         </div>
-
-        {/* Kept mounted across a reload, so the card does not vanish and reappear after a save. */}
-        {loaded && deprecatedCatalog.length > 0 && (
-          <div className="card">
-            <div className="card-header">
-              <h3 className="section-title">
-                Deprecated Metrics
-                <HelpTip
-                  label="About deprecated metrics"
-                  text="Withheld from the schema builder, not deleted: schemas that model one keep it, and its readings stay. Restore offers it to schema authors again and clears the replacement it names."
-                />
-                <SectionCount total={deprecatedCatalog.length} />
-              </h3>
-            </div>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    {catalogHeaders}
-                    <th title="The metric named as this one's replacement when it was deprecated">Superseded By</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {deprecatedCatalog.map(m => {
-                    const replacement = m.superseded_by ? metricById.get(m.superseded_by) : null
-                    return (
-                      <tr key={m.metric_uuid} className={rowClass(m)} onClick={rowSelectHandler(() => selectRow(m))} title="Click to inspect this metric">
-                        {metricCells(m)}
-                        <td>
-                          {replacement
-                            ? <span className="mono">{replacement.name}</span>
-                            : <span className="cell-meta" title="No replacement was named">—</span>}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
       </div>
 
       <ContextPanel
@@ -793,6 +856,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
         subject="metric"
         onCopy={showToast}
         title={selected?.name || ''}
+        icon={<IconTag size={16} />}
         subtitle={selected?.deprecated && <Badge tone="warning" size="sm">Deprecated</Badge>}
         fields={selected ? [
           { label: 'Name', value: selected.name, mono: true, copyable: true },

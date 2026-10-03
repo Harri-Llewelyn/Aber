@@ -1,8 +1,9 @@
 import React from 'react'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ArchivesTab } from '../components/tabs/ArchivesTab'
+import { ArchivesTab, purgeIsSoon } from '../components/tabs/ArchivesTab'
 import { api } from '../api'
+import { expectCardHeading } from '../test/cardHeading'
 
 vi.mock('../api', () => ({
   api: {
@@ -428,7 +429,7 @@ describe('ArchivesTab restore asks first', () => {
 
 /**
  * The lifecycle's other rows: an area archives like everything else, a device can be taken away
- * before it is taken out, and what has been deleted leaves a tombstone on a second card. The page
+ * before it is taken out, and what has been deleted leaves a tombstone on the Retired tab. The page
  * reads three lists, so these route the mock by path rather than answering every GET alike.
  */
 import { downloadBlob } from '../utils/downloadBlob'
@@ -475,6 +476,16 @@ const showLifecycle = async (lists, props = {}) => {
   return { showToast, onViewTrail }
 }
 
+/** The page with its Retired tab chosen, once the first tombstone (or the empty line) is drawn. */
+const showRetired = async (lists) => {
+  api.get.mockImplementation(routed(lists))
+  const onViewTrail = vi.fn()
+  render(<ArchivesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={onViewTrail} />)
+  fireEvent.click(screen.getByRole('tab', { name: 'Retired' }))
+  await screen.findByText(lists.retired?.[0]?.name || /Nothing has been retired/)
+  return { onViewTrail }
+}
+
 describe('ArchivesTab lists archived areas', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
@@ -512,7 +523,7 @@ describe('ArchivesTab lists archived areas', () => {
 describe('ArchivesTab exports a device before it goes', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
-  it('offers Export Bundle on a device, and posts the device id to the bundle route', async () => {
+  it('offers Export Bundle on a device through the export dialog, and posts the device id to the bundle route', async () => {
     api.post.mockResolvedValue({
       blob: new Blob(['zip']), filename: 'CNC_01-bundle.aasx', format: 'bundle',
       stats: { bundle: { stored: true, raw_rows: 10, hourly_rows: 2, trail_rows: 3, cold_objects: 1 } }
@@ -520,6 +531,7 @@ describe('ArchivesTab exports a device before it goes', () => {
     const { showToast } = await showLifecycle({ archives: [ARCHIVED_DEVICE] })
 
     fireEvent.click(screen.getByRole('button', { name: /Export Bundle/i }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: /^Export$/ }))
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/v1/devices/asset-export', { device_id: 'dev-1' }))
     await waitFor(() => expect(downloadBlob).toHaveBeenCalledWith(expect.any(Blob), 'CNC_01-bundle.aasx'))
@@ -536,6 +548,7 @@ describe('ArchivesTab exports a device before it goes', () => {
     const { showToast } = await showLifecycle({ archives: [ARCHIVED_DEVICE] })
 
     fireEvent.click(screen.getByRole('button', { name: /Export Bundle/i }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: /^Export$/ }))
 
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/NOT stored.*bucket missing/), 'warning'))
     expect(downloadBlob).toHaveBeenCalled()
@@ -567,15 +580,14 @@ describe('ArchivesTab exports a device before it goes', () => {
 describe('ArchivesTab shows what has been retired', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
-  it('says when nothing has been retired, in a second card that is always there', async () => {
-    await showLifecycle({ archives: [ARCHIVED_CELL] })
-    expect(screen.getByText('Retired Entities')).toBeInTheDocument()
+  it('says when nothing has been retired, in a tab that is always there', async () => {
+    await showRetired({ archives: [ARCHIVED_CELL] })
     expect(screen.getByText(/Nothing has been retired/)).toBeInTheDocument()
   })
 
   it('lists the tombstone with its name, type, who retired it and the historian id', async () => {
-    await showLifecycle({ retired: [RETIRED_DEVICE, RETIRED_GATEWAY] })
-    const rows = screen.getByText('Retired Entities').closest('.card').querySelectorAll('tbody tr')
+    await showRetired({ retired: [RETIRED_DEVICE, RETIRED_GATEWAY] })
+    const rows = document.querySelectorAll('tbody tr')
     expect(rows).toHaveLength(2)
     expect(rows[0].textContent).toContain('CNC_01')
     expect(rows[0].textContent).toContain('DEVICE')
@@ -586,13 +598,13 @@ describe('ArchivesTab shows what has been retired', () => {
   })
 
   it('opens the audit trail with deleted entities shown, since the row is gone', async () => {
-    const { onViewTrail } = await showLifecycle({ retired: [RETIRED_DEVICE] })
+    const { onViewTrail } = await showRetired({ retired: [RETIRED_DEVICE] })
     fireEvent.click(screen.getByRole('button', { name: /Audit Trail/i }))
     expect(onViewTrail).toHaveBeenCalledWith({ id: 'dev-1', type: 'DEVICE', purged: true })
   })
 
   it('links a gateway to its repository in the forge, which archiving kept', async () => {
-    await showLifecycle({ retired: [RETIRED_DEVICE, RETIRED_GATEWAY] })
+    await showRetired({ retired: [RETIRED_DEVICE, RETIRED_GATEWAY] })
     const links = screen.getAllByRole('link', { name: /Forge repository/i })
     // Only the gateway, and only because the sweep recorded that it had a repository.
     expect(links).toHaveLength(1)
@@ -602,7 +614,7 @@ describe('ArchivesTab shows what has been retired', () => {
   it('offers a bundle exported while the device was alive, from the cold tier\'s bucket', async () => {
     api.assetExportDownloadUrl.mockResolvedValue('https://stack.example.test/signed?apikey=x')
     const open = vi.spyOn(window, 'open').mockImplementation(() => null)
-    await showLifecycle({ retired: [RETIRED_DEVICE] })
+    await showRetired({ retired: [RETIRED_DEVICE] })
 
     fireEvent.click(screen.getByRole('button', { name: /^Bundle/i }))
 
@@ -612,19 +624,20 @@ describe('ArchivesTab shows what has been retired', () => {
   })
 
   it('offers nothing to download for a device that was never exported', async () => {
-    await showLifecycle({ retired: [{ ...RETIRED_DEVICE, exports: [] }] })
+    await showRetired({ retired: [{ ...RETIRED_DEVICE, exports: [] }] })
     expect(screen.queryByRole('button', { name: /^Bundle/i })).toBeNull()
     expect(screen.getByRole('button', { name: /Audit Trail/i })).toBeInTheDocument()
   })
 
-  it('still shows the archived card when the tombstones cannot be read', async () => {
+  it('still shows the Archived tab when the tombstones cannot be read', async () => {
     // The tombstone policy admits archive:manage or audit_trail:read; a reader with neither
-    // still has the first card, and the page must not fail closed on the second.
+    // still has the Archived tab, and the page must not fail closed on the Retired one.
     api.get.mockImplementation((path) => path.startsWith('/api/v1/archives/retired') || path.startsWith('/api/v1/archives/exports')
       ? Promise.reject(new Error('permission denied'))
       : Promise.resolve([ARCHIVED_CELL]))
     render(<ArchivesTab showToast={vi.fn()} hasPermission={() => true} />)
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('tab', { name: 'Retired' }))
     expect(screen.getByText(/Nothing has been retired/)).toBeInTheDocument()
   })
 })
@@ -632,22 +645,77 @@ describe('ArchivesTab shows what has been retired', () => {
 describe('ArchivesTab layout', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
-  it('scrolls the Archived card and leaves Retired at its natural height, each with a count', async () => {
+  it('is one scrolling card named for the page, with a tab per stage and no counts', async () => {
     await showLifecycle({ archives: [ARCHIVED_CELL, ARCHIVED_AREA], retired: [RETIRED_DEVICE] })
     expect(document.querySelector('.page-layout.page-fill > .page-main')).not.toBeNull()
-    const archived = screen.getAllByText('Archived Entities')
-      .map(el => el.closest('.card')).find(Boolean)
-    expect(archived).toHaveClass('card-fill')
-    expect(archived.querySelector('.section-count').textContent).toBe('2')
-    const retired = screen.getByText('Retired Entities').closest('.card')
-    expect(retired).not.toHaveClass('card-fill')
-    expect(retired.querySelector('.section-count').textContent).toBe('1')
+    expect(document.querySelector('.page-heading')).toBeNull()
+    const cards = document.querySelectorAll('.card')
+    expect(cards).toHaveLength(1)
+    expect(cards[0]).toHaveClass('card-fill')
+    expectCardHeading('Archived Entities', /out of commission/)
+
+    const strip = cards[0].querySelector('.tab-strip')
+    expect(strip.parentElement).toBe(cards[0])
+    expect(within(strip).getAllByRole('tab').map(t => t.textContent)).toEqual(['Archived', 'Retired'])
+    expect(document.querySelector('.section-count')).toBeNull()
+    // The selected tab's "?" sits in the bar after the tab names. Neither stage has filters or
+    // actions, so no toolbar row is drawn and the table follows the bar.
+    const help = strip.querySelector(':scope > .tab-strip-help')
+    expect(help).toContainElement(screen.getByRole('button', { name: 'About archived entities' }))
+    expect(document.querySelector('.filter-bar')).toBeNull()
+    expect(strip.nextElementSibling).toHaveClass('table-wrap')
+    fireEvent.click(screen.getByRole('tab', { name: 'Retired' }))
+    expect(help).toContainElement(screen.getByRole('button', { name: 'About retired entities' }))
+    expect(screen.queryByRole('button', { name: 'About archived entities' })).toBeNull()
+    expect(document.querySelector('.filter-bar')).toBeNull()
+    expect(strip.nextElementSibling).toHaveClass('table-wrap')
+  })
+
+  it('orders and styles the shared columns alike in both tables', async () => {
+    await showLifecycle({ archives: [ARCHIVED_DEVICE], retired: [RETIRED_DEVICE] })
+    const heads = () => [...document.querySelectorAll('thead th')].slice(0, 3).map(th => th.textContent)
+    const typeBadge = () => document.querySelector('tbody tr').children[1].querySelector('.badge')
+
+    expect(heads()).toEqual(['Name', 'Type', 'Entity ID'])
+    expect(typeBadge()).toHaveTextContent('DEVICE')
+    expect(typeBadge()).toHaveClass('badge-neutral')
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Retired' }))
+    expect(heads()).toEqual(['Name', 'Type', 'Entity ID'])
+    expect(typeBadge()).toHaveTextContent('DEVICE')
+    expect(typeBadge()).toHaveClass('badge-neutral')
   })
 
   it('right-aligns the What Survives header over its actions and names the timer Auto-Purge', async () => {
     await showLifecycle({ archives: [ARCHIVED_CELL], retired: [RETIRED_DEVICE] })
-    expect(screen.getByText('What Survives')).toHaveClass('row-actions')
     expect(screen.getByText('Auto-Purge')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'Retired' }))
+    expect(screen.getByText('What Survives')).toHaveClass('row-actions')
+  })
+
+  it('shows the auto-purge as a plain date, flagged with an icon as well as colour within a week', async () => {
+    const inDays = (d) => new Date(Date.now() + d * 24 * 60 * 60 * 1000).toISOString()
+    await showLifecycle({ archives: [
+      { ...ARCHIVED_CELL, auto_delete_at: inDays(30) },
+      { ...ARCHIVED_AREA, auto_delete_at: inDays(3) }
+    ] })
+    const [later, soon] = document.querySelectorAll('.cell-purge-date')
+
+    expect(later).not.toHaveClass('mono')
+    expect(later).not.toHaveClass('cell-purge-date-soon')
+    expect(later.textContent).not.toMatch(/Purges/)
+    expect(later.querySelector('svg')).toBeNull()
+
+    expect(soon).toHaveClass('cell-purge-date-soon')
+    expect(soon.querySelector('svg')).not.toBeNull()
+    expect(soon).toHaveTextContent(/Within a week/)
+  })
+
+  it('counts a purge as soon from seven days out, overdue included', () => {
+    const now = Date.parse('2026-10-03T00:00:00Z')
+    expect(purgeIsSoon('2026-10-10T00:00:00Z', now)).toBe(true)
+    expect(purgeIsSoon('2026-10-10T00:00:01Z', now)).toBe(false)
+    expect(purgeIsSoon('2026-10-01T00:00:00Z', now)).toBe(true)
   })
 
   it('names the roles behind a disabled button', async () => {

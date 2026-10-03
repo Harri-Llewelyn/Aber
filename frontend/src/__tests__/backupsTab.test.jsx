@@ -113,12 +113,13 @@ beforeEach(() => {
 })
 
 describe('the list of runs', () => {
-  it('names the page in its card header, with the count and the action', async () => {
+  it('names the page in its card header, with the destination and the action, and no count', async () => {
     renderTab()
-    await screen.findByText(/before the areas migration/)
+    await screen.findByTestId('run-j-1')
     const header = expectCardHeading('Backups', /newest first/)
-    expect(header.querySelector('.section-count')).toBeInTheDocument()
-    expect(header).toHaveTextContent('Take a backup')
+    expect(header.querySelector('.section-count')).toBeNull()
+    const buttons = within(header).getAllByRole('button').map(b => b.textContent.trim())
+    expect(buttons).toEqual(['Set a destination', 'Take a backup'])
   })
 
   it('lists a completed run with its backup: note, size, contents and retention', async () => {
@@ -148,14 +149,22 @@ describe('the list of runs', () => {
     expect(failed.querySelector('button')).toBeNull()
   })
 
-  it('shows the start of a long reason on the row and the whole of it in the tooltip', async () => {
+  it('cuts a long reason to one line on the row, and gives the whole of it in the run\'s panel', async () => {
     const reason = `pg_dump supabase-db failed: ${'x'.repeat(400)}`
     serveRuns([{ ...FAILED, error: reason }])
     renderTab()
     const failed = await screen.findByTestId('run-j-3')
-    const cell = within(failed).getByTitle(reason)
-    expect(cell.textContent.length).toBeLessThan(reason.length)
-    expect(cell.textContent.endsWith('…')).toBe(true)
+    expect(within(failed).getByTitle(reason)).toHaveClass('truncate')
+    fireEvent.click(within(failed).getAllByRole('cell')[2])
+    expect(within(panel()).getByText(reason)).toBeInTheDocument()
+  })
+
+  it('keeps the short columns on one line', async () => {
+    renderTab()
+    const cells = within(await screen.findByTestId('run-j-1')).getAllByRole('cell')
+    // When, Origin, Size, Retention and Off site; Holds cuts to a line like the reason.
+    for (const i of [0, 2, 4, 6, 7]) expect(cells[i]).toHaveClass('backup-run-short')
+    expect(cells[5].firstElementChild).toHaveClass('truncate')
   })
 
   it('lists a cancelled run as cancelled, with no backup', async () => {
@@ -184,27 +193,95 @@ describe('the list of runs', () => {
     for (const i of [4, 5, 6, 7]) expect(cells[i]).toHaveTextContent('—')
   })
 
-  it('counts every run under the filter in the card header, whatever is loaded', async () => {
+  it('says how many runs under the filter are loaded at the foot, beside Show more', async () => {
     serveRuns(Array.from({ length: 45 }, (_, i) => ({ ...PRUNED, id: `m-${i}` })))
     renderTab()
     await screen.findByTestId('run-m-0')
-    expect(document.querySelector('.section-count')).toHaveTextContent('30 / 45')
+    const foot = document.querySelector('.list-foot')
+    expect(foot).toHaveTextContent('30 of 45')
+    expect(within(foot).getByRole('button', { name: 'Show 15 more' })).toBeInTheDocument()
+    expect(document.querySelector('.section-count')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Show 15 more' }))
-    await waitFor(() => expect(document.querySelector('.section-count')).toHaveTextContent(/^45$/))
+    await waitFor(() => expect(document.querySelector('.list-foot')).toHaveTextContent('All 45 shown.'))
   })
 
-  it('shows a count of 0 when nothing has run', async () => {
+  it('shows no count when nothing has run', async () => {
     api.backupRunSummary.mockResolvedValue({ firstRecordedAt: null, lastSuccess: null, latestOutcome: null })
     serveRuns([])
     renderTab()
     await screen.findByText('No backups yet.')
-    expect(document.querySelector('.section-count')).toHaveTextContent(/^0$/)
+    expect(document.querySelector('.section-count')).toBeNull()
+    expect(document.querySelector('.list-foot')).toBeNull()
   })
 
   it('lists newest first, in the order the query returns', async () => {
     renderTab()
     await screen.findByTestId('run-j-3')
     expect(screen.getAllByTestId(/^run-/).map(r => r.dataset.testid)).toEqual(['run-j-3', 'run-j-1', 'run-j-2', 'run-j-4', 'run-j-5'])
+  })
+})
+
+/** The run panel, while open. */
+const panel = () => document.querySelector('.context-panel-open')
+
+describe('a run\'s panel', () => {
+  it('opens from anywhere on the row, with the times and the files', async () => {
+    renderTab()
+    const row = await screen.findByTestId('run-j-1')
+    expect(row).toHaveClass('row-selectable')
+    expect(panel()).toBeNull()
+
+    fireEvent.click(within(row).getByText('On request'))
+    expect(row).toHaveClass('row-selected')
+    const open = panel()
+    expect(open).toHaveAttribute('aria-label', expect.stringMatching(/backup run/))
+    expect(open.querySelector('.context-panel-icon svg')).not.toBeNull()
+    for (const label of ['Queued', 'Started', 'Finished']) expect(within(open).getByText(label)).toBeInTheDocument()
+    expect(within(open).getByText('/backups/20260911T143000Z')).toBeInTheDocument()
+    const files = [...open.querySelectorAll('.backup-files li')].map(li => li.textContent)
+    expect(files).toEqual([
+      'supabase-db-20260911T143000Z.sql.gz2.0 MiB',
+      'timescaledb-20260911T143000Z.sql.gz1.0 MiB',
+      'forge-20260911T143000Z.tar.gz1.0 KiB'
+    ])
+
+    // A second click on the same row closes it.
+    fireEvent.click(within(row).getByText('On request'))
+    expect(panel()).toBeNull()
+  })
+
+  it('opens on Enter or Space from the row, and not from the row\'s own Release button', async () => {
+    renderTab()
+    const row = await screen.findByTestId('run-j-1')
+    expect(row).toHaveAttribute('tabindex', '0')
+
+    fireEvent.keyDown(within(row).getByRole('button', { name: 'Release' }), { key: 'Enter' })
+    expect(panel()).toBeNull()
+    fireEvent.click(within(row).getByRole('button', { name: 'Release' }))
+    expect(panel()).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    row.focus()
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(panel()).not.toBeNull()
+    expect(panel()).toHaveTextContent('before the areas migration')
+
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(panel()).toBeNull()
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(panel()).not.toBeNull()
+  })
+
+  it('makes Release the one primary action on a pinned backup, and offers none on a failed run', async () => {
+    renderTab()
+    fireEvent.click(within(await screen.findByTestId('run-j-1')).getAllByRole('cell')[0])
+    const actions = panel().querySelectorAll('.context-action')
+    expect([...actions].map(a => a.textContent.trim())).toEqual(['Release'])
+    expect(actions[0]).toHaveClass('btn-primary')
+
+    fireEvent.click(within(screen.getByTestId('run-j-3')).getAllByRole('cell')[0])
+    expect(panel()).toHaveTextContent('pg_dump timescaledb failed: connection refused')
+    expect(panel().querySelector('.context-action')).toBeNull()
   })
 })
 
@@ -277,20 +354,32 @@ describe('the off-site copy', () => {
     backup: { ...SCHEDULED.backup, id: `b-${id}`, stamp: `2026091${id}T023000Z`, ...fields }
   })
 
-  it('says every backup shares a disk with the data when no destination is set', async () => {
+  /** The header button, and the text its aria-describedby names. */
+  const destinationButton = (name) => {
+    const button = screen.getByRole('button', { name })
+    const description = document.getElementById(button.getAttribute('aria-describedby'))
+    return { button, description }
+  }
+
+  it('warns, with an icon and a description, that every backup shares a disk when no destination is set', async () => {
     renderTab()
-    const line = await screen.findByTestId('offsite-line')
-    expect(line).toHaveTextContent('No off-site copy')
-    expect(line).toHaveTextContent('same disk')
-    expect(within(line).getByRole('button', { name: 'Set a destination' })).toBeInTheDocument()
+    await screen.findByRole('button', { name: 'Set a destination' })
+    const { button, description } = destinationButton('Set a destination')
+    expect(button).toHaveClass('btn', 'btn-warning', 'btn-sm')
+    expect(button.querySelector('svg')).not.toBeNull()
+    expect(description).toHaveClass('sr-only')
+    expect(description).toHaveTextContent('Every backup is on the same disk as the data it protects')
+    expect(button).toHaveAttribute('title', description.textContent)
+    expect(screen.queryByTestId('offsite-line')).toBeNull()
   })
 
   it('names what is missing from a destination that cannot run', async () => {
     api.backupOffsiteDestination.mockResolvedValue({ ...DESTINATION, recipient: '', credentialSet: false })
     renderTab()
-    const line = await screen.findByTestId('offsite-line')
-    await waitFor(() => expect(line).toHaveTextContent('The off-site copy cannot run'))
-    expect(line).toHaveTextContent('the encryption recipient, the secret access key')
+    await waitFor(() => expect(destinationButton('Complete the destination').description).toHaveTextContent('The off-site copy cannot run'))
+    const { button, description } = destinationButton('Complete the destination')
+    expect(button).toHaveClass('btn-warning')
+    expect(description).toHaveTextContent('the encryption recipient, the secret access key')
   })
 
   it('shows where copies go, and each backup\'s copy', async () => {
@@ -302,8 +391,10 @@ describe('the off-site copy', () => {
       withCopy(4, { offsite_state: 'COPIED', offsite_location: 'https://old.example/b/p/20260914T023000Z/' })
     ])
     renderTab()
-    await waitFor(() => expect(screen.getByTestId('offsite-line')).toHaveTextContent('Every backup is copied, encrypted, to'))
-    expect(screen.getByTestId('offsite-line')).toHaveTextContent(BASE)
+    const change = await screen.findByRole('button', { name: 'Change destination' })
+    expect(change).toHaveClass('btn-ghost')
+    expect(change).not.toHaveAttribute('aria-describedby')
+    expect(change).toHaveAttribute('title', `Every backup is copied, encrypted, to ${BASE}`)
     expect(screen.getByTestId('run-j-1')).toHaveTextContent('Copied')
     const failed = screen.getByTestId('run-j-2')
     expect(failed).toHaveTextContent('Failed, retrying')
@@ -344,7 +435,7 @@ describe('the off-site copy', () => {
     api.backupOffsiteDestination.mockResolvedValue(DESTINATION)
     api.setBackupOffsiteDestination.mockRejectedValue(new Error('backup_offsite.bucket must be an S3 bucket name'))
     renderTab()
-    fireEvent.click(await screen.findByRole('button', { name: 'Change' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Change destination' }))
     expect(screen.getByLabelText('Secret access key')).toHaveAttribute('placeholder', expect.stringMatching(/Stored/))
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(await screen.findByText(/must be an S3 bucket name/)).toBeInTheDocument()
@@ -355,7 +446,7 @@ describe('the off-site copy', () => {
     api.backupOffsiteDestination.mockResolvedValue(DESTINATION)
     api.clearBackupOffsiteDestination.mockResolvedValue(true)
     renderTab()
-    fireEvent.click(await screen.findByRole('button', { name: 'Change' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Change destination' }))
     fireEvent.click(screen.getByRole('button', { name: 'Remove the destination' }))
     expect(screen.getByText(/Copies already made stay in the bucket/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }))

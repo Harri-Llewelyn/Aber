@@ -7,8 +7,8 @@ import { PERMISSION_UUIDS } from '../constants'
 
 /**
  * The Type column and the control behind it, in the Gateways tab. What is asserted: the four values
- * are not interchangeable, and Shadow earns the fourth because a shadow spindle's readings did
- * happen on a real machine on the day of the capture; Shadow cannot be chosen, since the single
+ * are not interchangeable, and Playback earns the fourth because a replayed spindle's readings did
+ * happen on a real machine on the day of the capture; Playback cannot be chosen, since the single
  * Playback gateway is seeded and a trigger refuses any other; one control writes two columns, so
  * the translation happens in one place; and it is not a data-path switch.
  */
@@ -49,11 +49,6 @@ const routeGet = (rows) => (path) => {
 const show = async (rows) => {
   api.get.mockImplementation(routeGet(rows))
   render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} />)
-  // A shadow gateway is filtered out of the fleet list by default, so a fixture that is one has to
-  // be revealed before the Type column can be read. The filter has its own test elsewhere.
-  if (rows.some(r => r.is_shadow)) {
-    fireEvent.click(await screen.findByText(/Show playback gateway/))
-  }
   await waitFor(() => expect(screen.getByText('Playback_Lab')).toBeTruthy())
 }
 
@@ -69,7 +64,7 @@ const typeSelect = () => document.querySelector('#gateway-type')
  * matched "Remote" there first.
  */
 const typeCell = () => within(document.querySelector('table')).getAllByText(
-  /^(Host|Remote|Simulated|Shadow)$/
+  /^(Host|Remote|Simulated|Playback)$/
 )[0]
 
 beforeEach(() => vi.clearAllMocks())
@@ -91,11 +86,11 @@ describe('the Type column', () => {
     expect(typeCell().textContent).toBe('Remote')
   })
 
-  it('reports a shadow gateway as Shadow, not Simulated', async () => {
-    // The precedence that earns the fourth value: a shadow gateway is necessarily simulated too, so
-    // without an explicit order it lands in Simulated.
+  it('reports the Playback gateway as Playback, not Simulated', async () => {
+    // The precedence that earns the fourth value: the Playback gateway is necessarily simulated too,
+    // so without an explicit order it lands in Simulated.
     await show([gateway({ deployment: 'host', is_simulated: true, is_shadow: true })])
-    expect(typeCell().textContent).toBe('Shadow')
+    expect(typeCell().textContent).toBe('Playback')
   })
 
   it('reports a row with no deployment as Remote rather than Host', async () => {
@@ -107,18 +102,18 @@ describe('the Type column', () => {
   })
 
   // The drawer says the same one word as the column, in one badge. It once showed HOST-RUN and
-  // SIMULATED as two, so a Shadow gateway read as both.
+  // SIMULATED as two, so the Playback gateway read as both.
   it.each([
     ['Simulated', { deployment: 'host', is_simulated: true }],
     ['Host', { deployment: 'host' }],
     ['Remote', { deployment: 'remote' }],
-    ['Shadow', { deployment: 'host', is_simulated: true, is_shadow: true }],
+    ['Playback', { deployment: 'host', is_simulated: true, is_shadow: true }],
   ])('shows one %s badge in the drawer', async (label, fields) => {
     await show([gateway(fields)])
     fireEvent.click(within(document.querySelector('.page-main')).getByText('Playback_Lab'))
     const panel = within(document.querySelector('.context-panel'))
 
-    expect(panel.getAllByText(/^(Host|Remote|Simulated|Shadow)$/).map(el => el.textContent)).toEqual([label])
+    expect(panel.getAllByText(/^(Host|Remote|Simulated|Playback)$/).map(el => el.textContent)).toEqual([label])
     expect(panel.queryByText('HOST-RUN')).toBeNull()
     expect(panel.queryByText('SIMULATED')).toBeNull()
   })
@@ -133,11 +128,11 @@ describe('the Type control', () => {
     expect(values).toEqual(['remote', 'host', 'simulated'])
   })
 
-  it('does not offer Shadow', async () => {
+  it('does not offer Playback', async () => {
     // The one Playback gateway is seeded and the database refuses any other.
     await show([gateway()])
     openEdit()
-    expect([...typeSelect().options].map(o => o.value)).not.toContain('shadow')
+    expect([...typeSelect().options].map(o => o.value)).not.toContain('playback')
   })
 
   it('reflects the gateway it is editing', async () => {

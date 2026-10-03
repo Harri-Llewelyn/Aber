@@ -387,7 +387,7 @@ describe('Devices page drawer', () => {
 
     const p = within(panel())
     expect(p.getByText('Assembly Line 1')).toBeTruthy()
-    expect(p.getByText('inherited')).toBeTruthy()
+    expect(p.getByText('(from gateway)')).toBeTruthy()
     expect(p.getByText('Host_Gateway_NodeRED')).toBeTruthy()
   })
 })
@@ -686,8 +686,12 @@ describe('A card is a composition: header, description, filters, table', () => {
         initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewTrail={vi.fn()} />
     )
     await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
-    // The Quarantine queue is the first card; the roster is the one that scrolls.
-    composedCard(/New Device/i, '.page-main .card-fill')
+    // One tabbed card: the heading, the tab bar, then the toolbar, its action at the end.
+    const card = document.querySelector('.page-main .card-fill')
+    expect(card.querySelector(':scope > .card-heading .card-heading-description')).toBeTruthy()
+    const actions = card.querySelector(':scope > .tab-strip + .filter-bar .filter-bar-actions')
+    expect(within(actions).getByRole('button', { name: /New Device/i }).className).toMatch(/btn-primary/)
+    expect(document.querySelector('.page-main > .filter-bar')).toBeNull()
     expect(screen.queryByRole('button', { name: /Export CSV/i })).toBeNull()
   })
 

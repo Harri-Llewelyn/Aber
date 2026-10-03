@@ -8,6 +8,7 @@ import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
 import { AUDIT_TRAIL_ACTIONS, ENTITY_TABLE_BY_KIND } from './constants';
 import { metricNameError } from './utils/metricGroup';
 import { readSetting } from './config';
+import { BACKUP_OFFSITE_SETTING_KEYS } from './utils/backupOffsite';
 import {
   MODEL_3D_EXTENSIONS,
   isAcceptedModelFile,
@@ -27,10 +28,6 @@ import {
  * of the identifier, so the two must move together.
  */
 const NAMEPLATE_TEMPLATE_ID = 'https://admin-shell.io/idta/nameplate/3/0/Nameplate';
-
-/** The off-site destination's settings (0018); the secret key is in the vault, not here. */
-const OFFSITE_SETTING_KEYS = ['endpoint', 'region', 'bucket', 'prefix', 'access_key_id', 'recipient', 'path_style']
-  .map(k => `backup_offsite.${k}`);
 
 /**
  * Which nameplate fields a device can answer for itself, and the OPC UA concept that answers them.
@@ -821,6 +818,38 @@ const apiMethods = {
   },
 
   /**
+   * One audit row by id, read from `audit_trail` as the reads beside it are, so its policies
+   * decide; null when the row is absent or hidden from the caller.
+   *
+   * An approval's row (PROPOSAL_APPLIED, `change_proposals.applied_trail_id`) carries no
+   * `old_data`: the values it replaced are on the UPDATE the target's own trigger wrote in the
+   * same transaction. For that row `replaced` is that UPDATE's `old_data`, or null where it
+   * cannot be read.
+   */
+  getAuditTrailRow: async (id) => {
+    const { data, error } = await supabase
+      .from('audit_trail')
+      .select('id,entity_type,entity_id,action,old_data,new_data,recorded_at,causation_id')
+      .eq('id', id)
+      .limit(1);
+    const row = !error && data?.[0];
+    if (!row) return null;
+    if (row.action !== 'PROPOSAL_APPLIED' || row.causation_id == null) return row;
+
+    const { data: change, error: changeError } = await supabase
+      .from('audit_trail')
+      .select('old_data')
+      .eq('causation_id', row.causation_id)
+      .eq('entity_type', row.entity_type)
+      .eq('entity_id', row.entity_id)
+      .eq('action', 'UPDATE')
+      // A nameplate approval can INSERT the row before it UPDATEs it; the UPDATE is the later one.
+      .order('id', { ascending: false })
+      .limit(1);
+    return { ...row, replaced: (!changeError && change?.[0]?.old_data) || null };
+  },
+
+  /**
    * The jtis `auth_pre_request()` is currently refusing, as a Set.
    *
    * Separate from listServiceTokens(): that is the permanent history, this reads
@@ -1130,7 +1159,7 @@ const apiMethods = {
    */
   backupOffsiteDestination: async () => {
     const [rows, credential] = await Promise.all([
-      supabase.from('system_settings').select('key,value').in('key', OFFSITE_SETTING_KEYS),
+      supabase.from('system_settings').select('key,value').in('key', BACKUP_OFFSITE_SETTING_KEYS),
       supabase.rpc('backup_offsite_credential_is_set')
     ]);
     const error = rows.error || credential.error;

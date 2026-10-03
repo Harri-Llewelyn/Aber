@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { api } from '../api'
 import { expectCardHeading } from '../test/cardHeading'
+import { PERMISSION_UUIDS } from '../constants'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -36,25 +37,29 @@ const show = async (rows, hasPermission = () => true) => {
   api.get.mockImplementation(routeGet(rows))
   render(<GatewaysTab showToast={vi.fn()} hasPermission={hasPermission} initialSearchFilter="" onClearFilter={vi.fn()} />)
 
-  /* The list opens on Active and hides the playback gateway, so a fixture holding an archived or a
-     playback row has to reveal it first. Each filter has its own test. */
+  /* The list opens on Active, so a fixture holding an archived row has to reveal it first. The
+     lifecycle filter has its own test. */
   if (rows.some(r => r.is_archived)) {
     fireEvent.change(await screen.findByTitle('Filter by lifecycle state'), { target: { value: 'all' } })
   }
-  if (rows.some(r => r.is_shadow)) {
-    fireEvent.click(await screen.findByText(/Show playback gateway/))
-  }
-  await waitFor(() => expect(screen.getByText(rows[0].gateway_name)).toBeInTheDocument())
+  await waitFor(() => expect(rowNamed(rows[0].gateway_name)).toBeTruthy())
 }
+
+/** The table row whose name cell reads `name`: "Playback" is also a Type badge and a filter option. */
+const rowNamed = (name) => [...document.querySelectorAll('tbody tr')]
+  .find(tr => tr.querySelector('td strong')?.textContent === name)
 
 /**
  * Select a gateway row and return its context panel, where every action lives.
  */
 const openPanel = (name = 'Host_Gateway_NodeRED') => {
-  fireEvent.click(within(document.querySelector('.page-main')).getByText(name))
+  fireEvent.click(rowNamed(name).querySelector('td strong'))
   return within(document.querySelector('.context-panel'))
 }
 const inRow = () => within(document.querySelector('.page-main'))
+/** The panel's highlighted actions; the rule is exactly one, listed first. */
+const primaries = () => [...document.querySelectorAll('.context-panel .context-action.btn-primary')]
+const firstAction = () => document.querySelector('.context-panel .context-action')
 
 beforeEach(() => vi.clearAllMocks())
 
@@ -95,6 +100,69 @@ describe('gateway row actions', () => {
 
     expect(panel.getByRole('button', { name: /Generate Broker Credential/i }).className).toMatch(/btn-primary/)
     expect(panel.getByRole('link', { name: /Launch UI/i }).className).not.toMatch(/btn-primary/)
+    expect(primaries()).toHaveLength(1)
+    expect(firstAction()).toHaveTextContent('Generate Broker Credential')
+  })
+
+  it('puts setup first on a remote gateway awaiting it, above Request Rebirth', async () => {
+    await show([gateway({ deployment: 'remote', status: 'PENDING_ENROLLMENT', access_url: null })])
+    openPanel()
+
+    expect(primaries()).toHaveLength(1)
+    expect(firstAction()).toHaveTextContent('Set Up Gateway')
+  })
+
+  it('keeps setup the one primary on a pending gateway with a console', async () => {
+    await show([gateway({ deployment: 'remote', status: 'AWAITING_BIRTH' })])
+    const panel = openPanel()
+
+    expect(primaries()).toHaveLength(1)
+    expect(firstAction()).toHaveTextContent('Re-issue Setup')
+    expect(panel.getByRole('link', { name: /Launch UI/i }).className).not.toMatch(/btn-primary/)
+  })
+
+  it('disables Request Rebirth on a pending gateway, and says why', async () => {
+    await show([gateway({ deployment: 'remote', status: 'PENDING_ENROLLMENT' })])
+    const rebirth = openPanel().getByText('Request Rebirth').closest('button')
+
+    expect(rebirth.disabled).toBe(true)
+    expect(rebirth.title).toMatch(/once this gateway has published/)
+  })
+
+  it('leaves Request Rebirth enabled once the gateway has published', async () => {
+    await show([gateway()])
+    expect(openPanel().getByText('Request Rebirth').closest('button').disabled).toBe(false)
+  })
+
+  it('makes Edit Details the primary when there is no setup and no console', async () => {
+    await show([gateway({ access_url: null })])
+    openPanel()
+
+    expect(primaries()).toHaveLength(1)
+    expect(firstAction()).toHaveTextContent('Edit Details')
+  })
+
+  it('makes Propose a Change the primary for someone who may only propose', async () => {
+    const proposerOnly = (uuid) => uuid === PERMISSION_UUIDS.PROPOSAL_CREATE
+    await show([gateway({ access_url: null })], proposerOnly)
+    openPanel()
+
+    expect(primaries()).toHaveLength(1)
+    expect(firstAction()).toHaveTextContent('Propose a Change')
+  })
+
+  it('makes Restore the primary on an archived gateway with no console', async () => {
+    await show([gateway({ is_archived: true, access_url: null })])
+    openPanel()
+
+    expect(primaries()).toHaveLength(1)
+    expect(firstAction()).toHaveTextContent('Restore Gateway')
+  })
+
+  it('carries the gateway icon in the panel title', async () => {
+    await show([gateway()])
+    openPanel()
+    expect(document.querySelector('.context-panel .context-panel-icon svg')).not.toBeNull()
   })
 
   it('omits Launch UI for a gateway with no access URL', async () => {
@@ -165,13 +233,15 @@ describe('gateway row actions', () => {
  * subscription, so the NCMD reaches nothing). Issuing a credential is not in that list.
  */
 describe('the playback gateway', () => {
-  const playback = () => gateway({
+  const playback = (overrides = {}) => gateway({
     gateway_id: 'gw-shadow',
     gateway_name: 'Playback',
     sparkplug_id: 'gwy160000000000400080000',
     cell_id: null,
     is_simulated: true,
     is_shadow: true,
+    access_url: null,
+    ...overrides
   })
 
   it('cannot be archived from the drawer', async () => {
@@ -199,6 +269,41 @@ describe('the playback gateway', () => {
     // The action exists for every Host and Simulated gateway, and this page is where the Playback
     // gateway's credential is issued.
     expect(openPanel('Playback').queryByText(/Credential/i)).not.toBeNull()
+  })
+
+  it('highlights its credential, since it cannot be edited', async () => {
+    await show([playback()])
+    openPanel('Playback')
+
+    expect(primaries()).toHaveLength(1)
+    expect(firstAction()).toHaveTextContent('Generate Broker Credential')
+  })
+
+  it('reads Idle between playbacks, never Offline', async () => {
+    await show([playback({ status: 'OFFLINE', last_heartbeat: null })])
+    const statusCell = rowNamed('Playback').querySelectorAll('td')[4]
+
+    expect(statusCell).toHaveTextContent('IDLE')
+    expect(statusCell).not.toHaveTextContent('OFFLINE')
+  })
+
+  it('reads Playing back while it publishes', async () => {
+    await show([playback({ status: 'ONLINE', last_heartbeat: new Date().toISOString() })])
+    expect(rowNamed('Playback').querySelectorAll('td')[4]).toHaveTextContent('PLAYING BACK')
+  })
+
+  it('reads Idle once its heartbeat goes quiet, rather than Stale', async () => {
+    await show([playback({ status: 'ONLINE', last_heartbeat: new Date(Date.now() - 10 * 60_000).toISOString() })])
+    const row = rowNamed('Playback')
+
+    expect(row.querySelectorAll('td')[4]).toHaveTextContent('IDLE')
+    // The heartbeat age is not flagged either: a quiet Playback gateway is not a fault.
+    expect(row.querySelector('.gateway-cell-warning')).toBeNull()
+  })
+
+  it('is not raised in the offline banner', async () => {
+    await show([playback({ status: 'OFFLINE', last_heartbeat: null })])
+    expect(screen.queryByText(/gateways? offline:/)).toBeNull()
   })
 
   it('leaves both actions on an ordinary gateway', async () => {
@@ -242,67 +347,84 @@ describe('gateway document links', () => {
 
 
 /**
- * The playback gateway is hidden from the fleet list by default: it connects to no machine and
- * reads as permanently offline. Hidden, not removed, since its broker credential is issued here.
+ * The Playback gateway is listed like any other: it holds a broker credential and publishes into
+ * the historian, and hiding it made the lifecycle counts disagree with the list.
  */
-describe('the playback gateway is filtered out by default', () => {
+describe('the playback gateway is listed', () => {
   const playbackRow = () => ({
     ...gateway(),
     gateway_id: 'gw-playback', gateway_name: 'Playback',
     sparkplug_id: 'gwy160000000000400080000',
     cell_id: null, is_simulated: true, is_shadow: true,
+    status: 'OFFLINE', last_heartbeat: null, access_url: null,
   })
+  const retired = () => gateway({ gateway_id: 'gw-old', gateway_name: 'Retired_Gateway', is_archived: true })
 
-  it('does not list it until asked', async () => {
-    api.get.mockImplementation(routeGet([gateway(), playbackRow()]))
+  const open = async (rows) => {
+    api.get.mockImplementation(routeGet(rows))
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
+    await waitFor(() => expect(screen.queryByText(/Loading gateways/)).toBeNull())
+  }
+  const listed = () => [...document.querySelectorAll('tbody tr td strong')].map(el => el.textContent)
+  const lifecycle = () => screen.getByTitle('Filter by lifecycle state')
+  const lifecycleOption = (value) => lifecycle().querySelector(`option[value="${value}"]`).textContent
+  const typeFilter = () => screen.getByTitle(/filter by the type column/i)
 
-    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
-    expect(screen.queryByText('Playback')).toBeNull()
-  })
+  it('lists it by default, with no toggle to show it', async () => {
+    await open([gateway(), playbackRow()])
 
-  it('offers a toggle that reveals the playback gateway', async () => {
-    api.get.mockImplementation(routeGet([gateway(), playbackRow()]))
-    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
-
-    // No count on the toggle: a stack holds one Playback gateway.
-    const toggle = await screen.findByText(/Show playback gateway/)
-    expect(toggle.textContent.trim()).toBe('Show playback gateway')
-    fireEvent.click(toggle)
-    await waitFor(() => expect(screen.getByText('Playback')).toBeInTheDocument())
-  })
-
-  it('is hidden again by Clear filters', async () => {
-    api.get.mockImplementation(routeGet([gateway(), playbackRow()]))
-    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
-
-    fireEvent.click(await screen.findByText(/Show playback gateway/))
-    await waitFor(() => expect(screen.getByText('Playback')).toBeInTheDocument())
-    // Showing it is a filter, so it counts and it clears with the rest.
-    fireEvent.click(screen.getByText(/Clear filters \(1\)/))
-    await waitFor(() => expect(screen.queryByText('Playback')).toBeNull())
+    expect(listed()).toEqual(['Host_Gateway_NodeRED', 'Playback'])
+    expect(screen.queryByText(/Show playback gateway/)).toBeNull()
     expect(screen.queryByText(/Clear filters/)).toBeNull()
   })
 
-  it('offers no toggle on a stack that has none', async () => {
-    // A control for an absent row is a puzzle rather than a filter.
-    api.get.mockImplementation(routeGet([gateway()]))
-    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
+  it('counts the same rows in the lifecycle filter as the list shows', async () => {
+    await open([gateway(), playbackRow(), retired()])
 
-    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
-    expect(screen.queryByText(/Show playback gateway/)).toBeNull()
+    expect(lifecycleOption('active')).toBe('Active (2)')
+    expect(listed()).toHaveLength(2)
+
+    fireEvent.change(lifecycle(), { target: { value: 'archived' } })
+    expect(lifecycleOption('archived')).toBe('Archived (1)')
+    expect(listed()).toHaveLength(1)
+
+    fireEvent.change(lifecycle(), { target: { value: 'all' } })
+    expect(lifecycleOption('all')).toBe('All (3)')
+    expect(listed()).toHaveLength(3)
+  })
+
+  it('offers every type in the Type filter, Playback included', async () => {
+    await open([gateway(), playbackRow()])
+
+    expect([...typeFilter().options].map(o => o.value)).toEqual(['', 'remote', 'host', 'simulated', 'playback'])
+    fireEvent.change(typeFilter(), { target: { value: 'playback' } })
+    expect(listed()).toEqual(['Playback'])
   })
 
   it('is not surfaced by choosing Simulated in the Type filter', async () => {
-    /* The regression this guards: a shadow gateway is simulated, so a Type filter that matched on
-       the flag rather than the derived type would bring the playback gateway back under
-       "Simulated". */
-    api.get.mockImplementation(routeGet([gateway(), playbackRow()]))
-    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
+    /* The regression this guards: the Playback gateway is simulated too, so a Type filter that
+       matched on the flag rather than the derived type would list it under "Simulated". */
+    await open([gateway(), playbackRow()])
+    fireEvent.change(typeFilter(), { target: { value: 'simulated' } })
+    expect(listed()).not.toContain('Playback')
+  })
 
-    await waitFor(() => expect(screen.getByText('Host_Gateway_NodeRED')).toBeInTheDocument())
-    fireEvent.change(screen.getByTitle(/filter by the type column/i), { target: { value: 'simulated' } })
-    expect(screen.queryByText('Playback')).toBeNull()
+  it('is not listed under the Offline status filter while idle', async () => {
+    await open([gateway(), playbackRow()])
+    fireEvent.change(screen.getByTitle(/filter by status/i), { target: { value: 'OFFLINE' } })
+    expect(listed()).not.toContain('Playback')
+  })
+
+  it('still prompts a new install for its first gateway, under the Playback row', async () => {
+    await open([playbackRow()])
+
+    expect(listed()).toEqual(['Playback'])
+    expect(screen.getByText('No gateways yet besides the Playback gateway.')).toBeInTheDocument()
+  })
+
+  it('drops the prompt once a gateway of its own exists', async () => {
+    await open([gateway(), playbackRow()])
+    expect(screen.queryByText(/No gateways yet/)).toBeNull()
   })
 })
 
@@ -331,20 +453,9 @@ describe('the Gateways list', () => {
     expect(screen.queryByText('Retired_Gateway')).toBeNull()
   })
 
-  it('counts the lifecycle lane on the card title, as shown / total only while another filter narrows it', async () => {
+  it('puts no count on the card heading', async () => {
     await open([live(), retired()])
-    expect(document.querySelector('.section-count').textContent).toBe('1')
-
-    fireEvent.change(screen.getByTitle('Filter by lifecycle state'), { target: { value: 'all' } })
-    expect(document.querySelector('.section-count').textContent).toBe('2')
-
-    fireEvent.change(screen.getByPlaceholderText(/Search/), { target: { value: 'Retired' } })
-    expect(document.querySelector('.section-count').textContent).toBe('1 / 2')
-  })
-
-  it('shows a count of 0 on a stack with no gateways', async () => {
-    await open([])
-    expect(document.querySelector('.section-count').textContent).toBe('0')
+    expect(document.querySelector('.card-header .section-count')).toBeNull()
   })
 
   it('tells none yet from none match', async () => {
@@ -373,6 +484,37 @@ describe('the Gateways list', () => {
     const button = screen.getByRole('button', { name: /New Gateway/ })
     expect(button.disabled).toBe(true)
     expect(button.title).toBe('Requires Administrator or Shopfloor Manager')
+  })
+
+  it('opens the drawer from the keyboard: the row takes focus, and Enter opens and closes it', async () => {
+    await open([live()])
+    const row = rowNamed('Host_Gateway_NodeRED')
+    const panelOpen = () => document.querySelector('.context-panel').getAttribute('aria-hidden') === 'false'
+
+    expect(row.tabIndex).toBe(0)
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(panelOpen()).toBe(true)
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(panelOpen()).toBe(false)
+    // A key pressed on a control inside the row is that control's, not the row's.
+    fireEvent.keyDown(row.querySelector('button'), { key: 'Enter' })
+    expect(panelOpen()).toBe(false)
+  })
+
+  it('drops the columns the drawer repeats while it is open, and puts them back on close', async () => {
+    await open([live()])
+    const headers = () => [...document.querySelectorAll('thead th')].map(th => th.textContent)
+    expect(headers()).toContain('Gateway UUID')
+    expect(headers()).toContain('Connected Devices')
+
+    fireEvent.click(rowNamed('Host_Gateway_NodeRED').querySelector('td strong'))
+    expect(headers()).not.toContain('Gateway UUID')
+    expect(headers()).not.toContain('Connected Devices')
+    // Every row drops the same cells, so the columns stay aligned.
+    expect(rowNamed('Host_Gateway_NodeRED').querySelectorAll('td')).toHaveLength(headers().length)
+
+    fireEvent.click(rowNamed('Host_Gateway_NodeRED').querySelector('td strong'))
+    expect(headers()).toContain('Gateway UUID')
   })
 
   it('scrolls inside its card', async () => {

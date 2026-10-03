@@ -15,7 +15,6 @@ import {
 import CopyableId from '../common/CopyableId'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { ActionButton } from '../common/ActionButton'
-import { SectionCount } from '../common/SectionCount'
 import { SearchInput } from '../common/SearchInput'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
@@ -25,6 +24,7 @@ import {
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
+import { plural } from '../../utils/format'
 
 /**
  * @param {Function} onSelectSchema Opens the Devices page filtered to a schema.
@@ -262,7 +262,6 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           icon={<IconClipboardList size={15} />}
           title="Schemas"
           description="What each device is modelled to publish, built from the Metrics page. A published schema is read-only; version it to edit."
-          count={<SectionCount total={inStatusView.length} shown={visibleSchemas.length} />}
           actions={(
             <>
               {/* The only way to create a schema. Building from the catalog is what guarantees every
@@ -326,11 +325,20 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                 {visibleSchemas.map(sch => {
                   const count = deviceCountFor(sch.schema_uuid)
                   const status = schemaStatus(sch)
+                  const toggle = () => setSelectedId(id => id === sch.schema_uuid ? null : sch.schema_uuid)
                   return (
                     <tr
                       key={sch.schema_uuid}
                       className={`row-selectable${selectedId === sch.schema_uuid ? ' row-selected' : ''}${status === SCHEMA_STATUS.ARCHIVED ? ' row-archived' : ''}`}
-                      onClick={rowSelectHandler(() => setSelectedId(id => id === sch.schema_uuid ? null : sch.schema_uuid))}
+                      onClick={rowSelectHandler(toggle)}
+                      // In the Tab order, and Enter or Space opens it. Only when the row itself has
+                      // focus: the link and the copy chip inside it answer their own keys.
+                      tabIndex={0}
+                      onKeyDown={e => {
+                        if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+                        e.preventDefault()
+                        toggle()
+                      }}
                       title="Click to inspect this schema in the details panel"
                     >
                       <td>
@@ -361,19 +369,18 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                       </td>
                       <td><CopyableId value={sch.schema_uuid} label="schema UUID" onNotify={showToast} /></td>
                       <td>
-                        {/* The count is the natural entry point to "which devices are these?",
-                            so it navigates to the Devices page filtered to this schema. */}
-                        <button
-                          type="button"
-                          className="count-link"
-                          disabled={count === 0}
-                          onClick={() => count > 0 && onSelectSchema?.(sch.schema_uuid)}
-                          title={count === 0
-                            ? 'No devices are provisioned with this schema'
-                            : `Show the ${count} device${count === 1 ? '' : 's'} using this schema`}
-                        >
-                          <span className="section-count">{count}</span>
-                        </button>
+                        {/* A link to "which devices are these?": the Devices page filtered to this
+                            schema. Nothing to open at zero, so a plain dash. */}
+                        {count > 0 ? (
+                          <button
+                            type="button"
+                            className="count-link"
+                            onClick={() => onSelectSchema?.(sch.schema_uuid)}
+                            title={`Show the ${plural(count, 'device')} using this schema`}
+                          >
+                            {plural(count, 'device')}
+                          </button>
+                        ) : '—'}
                       </td>
                     </tr>
                   )
@@ -452,6 +459,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
         open={!!selectedSchema}
         onClose={() => setSelectedId(null)}
         type="SCHEMA"
+        icon={<IconClipboardList size={16} />}
         onCopy={showToast}
         title={selectedSchema?.schema_name || ''}
         subtitle={selectedSchema && (

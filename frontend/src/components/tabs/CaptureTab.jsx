@@ -13,12 +13,11 @@ import { StartCaptureModal } from '../modals/StartCaptureModal'
 import { StartPlaybackModal } from '../modals/StartPlaybackModal'
 import { UploadCaptureModal } from '../modals/UploadCaptureModal'
 import {
-  IconDownload, IconPlay, IconRecord, IconShieldAlert, IconTrash, IconUpload, IconX
+  IconCpu, IconDownload, IconPlay, IconRadio, IconRecord, IconShieldAlert, IconTrash, IconUpload, IconX
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
-import { PageHeading } from '../common/PageHeading'
+import { CardHeading } from '../common/CardHeading'
 import { Badge } from '../common/Badge'
-import { SectionCount } from '../common/SectionCount'
 import { TabStrip } from '../common/TabStrip'
 import { SearchInput } from '../common/SearchInput'
 import { ClearFilters } from '../common/ClearFilters'
@@ -26,13 +25,17 @@ import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { formatBytes, formatDateTime, plural } from '../../utils/format'
 
+// Role checks, as the RLS makes them (`has_role`), not a permission; the title names the same list.
+const WRITE_ROLES = ['Administrator', 'Shopfloor_Manager']
+const DENIED_TITLE = `Requires ${WRITE_ROLES.map(r => r.replace(/_/g, ' ')).join(' or ')}`
+
 /**
  * Recording the broker, and playing a recording back.
  *
  * Nothing on this page records or plays back: a browser cannot open an MQTT subscription, so the
  * page queues a row and the ingestion daemon (capture) or the playback worker (playback) does
- * the work, with results arriving over Realtime. Two cards, because capture reads the wire and
- * playback writes into the historian under a gateway's identity. One capture at a time and one
+ * the work, with results arriving over Realtime. One card lists the subjects; a capture or
+ * playback in flight is a strip above the list on either tab. One capture at a time and one
  * stored capture per subject are partial unique indexes, not rules of this component. The role
  * gates mirror the RLS: SELECT for Administrator, Shopfloor_Manager and Auditor, writes for the
  * first two.
@@ -61,17 +64,20 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   const [gatewayFilter, setGatewayFilter] = useState('')
   const [search, setSearch] = useState('')
   const [draggingPlay, setDraggingPlay] = useState(false)
-  // Set when a file is dropped on the Playback card: once it has been stored, the playback dialog
-  // opens on the capture it produced rather than sending the operator back to the table to find it.
+  // Set when a file comes in through "Play a file…" or a drop on the card: once it has been stored,
+  // the playback dialog opens on the capture it produced rather than sending the operator back to
+  // the table to find it.
   const [playAfterUpload, setPlayAfterUpload] = useState(false)
   const [schemas, setSchemas] = useState([])
 
   const fileRef = useRef(null)
   const playFileRef = useRef(null)
+  // A depth, not a flag: dragenter and dragleave fire for every child the pointer crosses.
+  const dragDepth = useRef(0)
   const [stopPending, runStop] = usePendingAction()
   const [stopPlayPending, runStopPlay] = usePendingAction()
 
-  const canManage = userRole === 'Administrator' || userRole === 'Shopfloor_Manager'
+  const canManage = WRITE_ROLES.includes(userRole)
 
   // Loading
   const loadSubjects = useCallback(async () => {
@@ -309,8 +315,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   }
 
   /**
-   * A file dropped on the Playback card: store it, then play it back. The subject is inferred from
-   * the file's `identities` and offered, not assumed. The file is read twice on purpose:
+   * A file from "Play a file…" or dropped on the card: store it, then play it back. The subject is
+   * inferred from the file's `identities` and offered, not assumed. The file is read twice on purpose:
    * UploadCaptureModal does the validation, so this guess is not a second definition of a valid
    * capture.
    */
@@ -354,8 +360,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     showToast(`Uploaded ${plural(messages, 'message')} for ${subject.name}.`, 'success')
     await refreshAll()
 
-    // Straight into the playback dialog when the file arrived on the Playback card, built from what
-    // the upload returned rather than found in the refreshed list.
+    // Straight into the playback dialog when the file came in to be played, built from what the
+    // upload returned rather than found in the refreshed list.
     if (chain) {
       setPlayFor({
         id,
@@ -371,30 +377,126 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   // ------------------------------------------------------------------------------------------
   const capture = selected?.capture || null
 
+  // Only a dragged file lights the card up; a drop is offered to the roles that can store one.
+  const hasFiles = e => Array.from(e.dataTransfer?.types || []).includes('Files')
+  const cardDrop = canManage ? {
+    onDragEnter: e => {
+      if (!hasFiles(e)) return
+      dragDepth.current += 1
+      setDraggingPlay(true)
+    },
+    onDragOver: e => { if (hasFiles(e)) e.preventDefault() },
+    onDragLeave: () => {
+      if (dragDepth.current === 0) return
+      dragDepth.current -= 1
+      if (dragDepth.current === 0) setDraggingPlay(false)
+    },
+    onDrop: e => {
+      e.preventDefault()
+      dragDepth.current = 0
+      setDraggingPlay(false)
+      const dropped = e.dataTransfer?.files?.[0]
+      if (dropped) onPlayFileChosen(dropped)
+    },
+  } : {}
+
   return (
     <div className="page-layout page-fill">
       <div className="page-main">
 
-        <PageHeading icon={<IconRecord size={15} />} title="Capture">
-          What the plant actually published, kept verbatim and played back through the real broker
-          as the Playback gateway.
-        </PageHeading>
+        {/* One card. A file dropped anywhere on it is stored and played back, as "Play a file…"
+            does: the panel's own drop zone is the one that only stores. */}
+        <div className={`card card-fill capture-card${draggingPlay ? ' capture-card-drop' : ''}`} {...cardDrop}>
+          <CardHeading
+            icon={<IconRecord size={15} />}
+            title="Capture"
+            description="What the plant actually published, kept verbatim and played back through the real broker as the Playback gateway."
+            actions={(
+              /* Stored first, then played: the worker reads its capture out of Storage. */
+              <ActionButton
+                className="btn btn-ghost btn-sm"
+                permitted={canManage}
+                deniedTitle={DENIED_TITLE}
+                onClick={() => playFileRef.current?.click()}
+                title="Store a capture file and go straight to playing it back. Dropping the file on this card does the same."
+              >
+                <IconPlay size={13} /> Play a file…
+              </ActionButton>
+            )}
+          />
 
-        {/* Playback in a card of its own, above capture: it writes into the historian under a
-            gateway's identity. It keeps its height; the Capture card below gives way. */}
-        <div className="card">
-          <div className="card-header">
-            <h3 className="section-title">
-              Playback
+          <TabStrip
+            ariaLabel="Capture subject"
+            value={subjectKind}
+            onChange={kind => { setSubjectKind(kind); setSelectedId(null) }}
+            tabs={[
+              { id: 'gateway', label: 'Gateways', title: 'Record everything one gateway publishes, every device beneath it included' },
+              { id: 'device', label: 'Devices', title: "Record one device, plus its gateway's birth certificate" },
+            ]}
+            help={(
               <HelpTip
-                label="About playback"
-                text="Play a stored capture back into the stack as the Playback gateway, through the real broker and ingestion path, rebased onto now. Captured identities are rewritten onto the gateway's own devices."
+                label={subjectKind === 'gateway' ? 'About capturing gateways' : 'About capturing devices'}
+                text={`${subjectKind === 'gateway'
+                  ? 'Record everything one gateway publishes, every device beneath it included.'
+                  : "Record one device, plus its gateway's birth certificate."} One capture per subject; recording again replaces it. Select a row to inspect, upload or play back.`}
               />
-            </h3>
+            )}
+          />
+
+          <div className="filter-bar">
+            <select
+              className="form-control control-md"
+              value={storedFilter}
+              onChange={e => setStoredFilter(e.target.value)}
+              title="Filter by whether a capture is stored for the subject"
+              aria-label="Stored capture filter"
+            >
+              <option value="all">All subjects ({allRows.length})</option>
+              <option value="with">With a capture ({withCapture})</option>
+              <option value="without">Without a capture ({allRows.length - withCapture})</option>
+            </select>
+
+            {/* Only on the Devices tab, where a device's gateway is how the four devices behind
+                one machine are found. */}
+            {subjectKind === 'device' && (
+              <select
+                className="form-control control-lg"
+                value={gatewayFilter}
+                onChange={e => setGatewayFilter(e.target.value)}
+                title="Filter devices by the gateway they publish through"
+                aria-label="Gateway filter"
+              >
+                <option value="">All gateways</option>
+                {gateways.map(g => (
+                  <option key={g.id} value={g.id}>
+                    {g.name} ({devices.filter(d => d.gateway_id === g.id).length})
+                  </option>
+                ))}
+              </select>
+            )}
+
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              placeholder="Search name or Sparkplug ID…"
+              ariaLabel="Search subjects"
+            />
+
+            <ClearFilters count={activeFilterCount} onClear={clearFilters} />
           </div>
 
-          <div className="card-body">
-            <PlaybackCard
+          {/* What is in flight or has just failed, on either tab. Each strip renders nothing when
+              there is nothing to say, and the container then collapses (:empty in App.css). */}
+          <div className="capture-strips">
+            {error && (
+              <div className="callout callout-danger">
+                <IconShieldAlert size={14} className="callout-icon" />
+                <div>{error}</div>
+              </div>
+            )}
+            <RunningCard job={activeJob} onStop={onStop} stopPending={stopPending} canManage={canManage} />
+            <RecentFailures jobs={recentJobs} />
+            <PlaybackStrip
               job={activePlayback}
               onStop={onStopPlayback}
               stopPending={stopPlayPending}
@@ -402,122 +504,6 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             />
             <RecentFailures jobs={recentPlaybacks} kind="playback" />
             <RecentDiscards jobs={recentPlaybacks} />
-
-            {/* Play back a file straight from disk, chaining the two dialogs: file in, subject
-                confirmed, then the playback dialog with the new capture selected. The file is
-                stored first because the worker reads its capture out of Storage. */}
-            {canManage && (
-              <div
-                role="button"
-                tabIndex={0}
-                aria-label="Store a capture file and play it back"
-                onClick={() => playFileRef.current?.click()}
-                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') playFileRef.current?.click() }}
-                onDragOver={e => { e.preventDefault(); setDraggingPlay(true) }}
-                onDragLeave={() => setDraggingPlay(false)}
-                onDrop={e => {
-                  e.preventDefault()
-                  setDraggingPlay(false)
-                  const dropped = e.dataTransfer?.files?.[0]
-                  if (dropped) onPlayFileChosen(dropped)
-                }}
-                className={`capture-drop capture-drop-play${draggingPlay ? ' capture-drop-active' : ''}`}
-                title="Store a capture file and go straight to playing it back"
-              >
-                <IconPlay size={13} className="capture-drop-icon" />
-                Drop an edited capture here to store it and play it back
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ==================================================================================== */}
-        <div className="card card-fill">
-          <div className="card-header">
-            <h3 className="section-title">
-              Capture
-              <HelpTip
-                label="About capture"
-                text="Record what a gateway or a single device actually said, and keep it. One capture per subject; recording again replaces it. Select a row to inspect, upload or play back."
-              />
-              <SectionCount total={allRows.length} shown={rows.length} />
-            </h3>
-
-            {/* The subject switch lives in the header because it changes what is listed rather than
-                narrowing it. */}
-            <TabStrip
-              ariaLabel="Capture subject"
-              value={subjectKind}
-              onChange={kind => { setSubjectKind(kind); setSelectedId(null) }}
-              tabs={[
-                { id: 'gateway', label: 'Gateways', title: 'Record everything one gateway publishes, every device beneath it included' },
-                { id: 'device', label: 'Devices', title: "Record one device, plus its gateway's birth certificate" },
-              ]}
-            />
-          </div>
-
-          <div className="card-body">
-            {error && (
-              <div className="callout callout-danger">
-                <IconShieldAlert size={14} className="callout-icon" />
-                <div>{error}</div>
-              </div>
-            )}
-
-            {!canManage && (
-              <div className="callout callout-info">
-                <IconShieldAlert size={14} className="callout-icon" />
-                <div>
-                  You can read captures and download them. Recording, replacing, playing back and
-                  deleting require Administrator or Shopfloor Manager.
-                </div>
-              </div>
-            )}
-
-            <RunningCard job={activeJob} onStop={onStop} stopPending={stopPending} canManage={canManage} />
-            <RecentFailures jobs={recentJobs} />
-
-            <div className="filter-bar">
-              <select
-                className="form-control control-md"
-                value={storedFilter}
-                onChange={e => setStoredFilter(e.target.value)}
-                title="Filter by whether a capture is stored for the subject"
-                aria-label="Stored capture filter"
-              >
-                <option value="all">All subjects ({allRows.length})</option>
-                <option value="with">With a capture ({withCapture})</option>
-                <option value="without">Without a capture ({allRows.length - withCapture})</option>
-              </select>
-
-              {/* Only on the Devices tab, where a device's gateway is how the four devices behind
-                  one machine are found. */}
-              {subjectKind === 'device' && (
-                <select
-                  className="form-control control-lg"
-                  value={gatewayFilter}
-                  onChange={e => setGatewayFilter(e.target.value)}
-                  title="Filter devices by the gateway they publish through"
-                  aria-label="Gateway filter"
-                >
-                  <option value="">All gateways</option>
-                  {gateways.map(g => (
-                    <option key={g.id} value={g.id}>
-                      {g.name} ({devices.filter(d => d.gateway_id === g.id).length})
-                    </option>
-                  ))}
-                </select>
-              )}
-
-              <SearchInput
-                value={search}
-                onChange={setSearch}
-                placeholder="Search name or Sparkplug ID…"
-                ariaLabel="Search subjects"
-              />
-
-              <ClearFilters count={activeFilterCount} onClear={clearFilters} />
-            </div>
           </div>
 
           {loading ? (
@@ -570,6 +556,12 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             </table>
           </div>
           )}
+
+          {draggingPlay && (
+            <div className="capture-drop-overlay">
+              <IconPlay size={16} /> Drop the file to store it and play it back
+            </div>
+          )}
         </div>
       </div>
 
@@ -582,6 +574,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         type={selected?.kind === 'device' ? 'DEVICE' : 'GATEWAY'}
         onCopy={showToast}
         title={selected?.name || ''}
+        icon={selected?.kind === 'device' ? <IconCpu size={15} /> : <IconRadio size={15} />}
         subtitle={selected && (
           <>
             <Badge
@@ -736,78 +729,89 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
           </>
         )}
         actions={selected ? [
-          canManage && {
+          {
             label: capture ? 'Record again' : 'Record capture',
             icon: <IconRecord size={13} />,
-            primary: true,
-            disabled: !!activeJob,
-            title: activeJob
-              ? 'A capture is already running. One at a time on this stack.'
-              : capture
-                ? 'Record again — this replaces the stored capture'
-                : 'Record this subject',
+            // The one primary: Record for a role that can; Download, below, for one that cannot.
+            primary: canManage || !capture,
+            disabled: !canManage || !!activeJob,
+            title: !canManage
+              ? DENIED_TITLE
+              : activeJob
+                ? 'A capture is already running. One at a time on this stack.'
+                : capture
+                  ? 'Record again — this replaces the stored capture'
+                  : 'Record this subject',
             onClick: () => setStartFor(selected)
           },
-          canManage && capture && {
+          capture && {
             label: 'Play back…',
             icon: <IconPlay size={13} />,
-            disabled: !!activePlayback,
-            title: activePlayback
-              ? 'A playback is already running'
-              : 'Play this capture back onto the Playback gateway',
+            disabled: !canManage || !!activePlayback,
+            title: !canManage
+              ? DENIED_TITLE
+              : activePlayback
+                ? 'A playback is already running'
+                : 'Play this capture back onto the Playback gateway',
             onClick: () => setPlayFor(capture)
           },
           capture && {
             label: 'Download',
             icon: <IconDownload size={13} />,
+            primary: !canManage,
             pending: busyId === capture.id,
             pendingLabel: 'Preparing…',
             title: 'Download the capture file',
             onClick: () => onDownload(capture)
           },
-          canManage && capture && {
+          capture && {
             label: 'Delete capture',
             icon: <IconTrash size={13} />,
             danger: true,
-            title: 'Remove this capture and its file',
+            disabled: !canManage,
+            title: !canManage ? DENIED_TITLE : 'Remove this capture and its file',
             onClick: () => setDeleteFor(capture)
           }
         ].filter(Boolean) : []}
       >
         {/* The drop zone knows its subject, like the Model3DUploader on the Devices page: a control
             that belongs to the entity the panel describes. */}
-        {canManage && selected && (
+        {selected && (
           <div>
             <div className="context-panel-section-label">
               {capture ? 'Replace by upload' : 'Upload a capture'}
             </div>
-            <div
-              role="button"
-              tabIndex={0}
-              aria-label={`Upload a capture for ${selected.name}`}
-              onClick={() => fileRef.current?.click()}
-              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') fileRef.current?.click() }}
-              onDragOver={e => { e.preventDefault(); setDragging(true) }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={e => {
-                e.preventDefault()
-                setDragging(false)
-                const dropped = e.dataTransfer?.files?.[0]
-                if (dropped) setUploadFile({ file: dropped, preset: { kind: selected.kind, id: selected.id } })
-              }}
-              className={`capture-drop${dragging ? ' capture-drop-active' : ''}`}
-              title="Upload a capture recorded elsewhere, or by ingestion/capture.py record"
-            >
-              <IconUpload size={14} className="capture-drop-icon" />
-              Drop a capture file here, or click to choose one
-            </div>
+            {canManage ? (
+              <div
+                role="button"
+                tabIndex={0}
+                aria-label={`Upload a capture for ${selected.name}`}
+                onClick={() => fileRef.current?.click()}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') fileRef.current?.click() }}
+                onDragOver={e => { e.preventDefault(); setDragging(true) }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={e => {
+                  e.preventDefault()
+                  setDragging(false)
+                  const dropped = e.dataTransfer?.files?.[0]
+                  if (dropped) setUploadFile({ file: dropped, preset: { kind: selected.kind, id: selected.id } })
+                }}
+                className={`capture-drop${dragging ? ' capture-drop-active' : ''}`}
+                title="Upload a capture recorded elsewhere, or by ingestion/capture.py record"
+              >
+                <IconUpload size={14} className="capture-drop-icon" />
+                Drop a capture file here, or click to choose one
+              </div>
+            ) : (
+              <p className="form-hint">{DENIED_TITLE}.</p>
+            )}
           </div>
         )}
       </ContextPanel>
 
-      {/* Two inputs, because the two drop zones do different things with a file: one stores it, the
-          other stores it and plays it back. A shared input could play back a file somebody meant
-          only to store. */}
+      {/* Two inputs, because the panel's drop zone and "Play a file…" do different things with a
+          file: one stores it, the other stores it and plays it back. A shared input could play back
+          a file somebody meant only to store. */}
       <input
         ref={fileRef}
         type="file"
@@ -934,32 +938,24 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
           </div>
         )}
       </div>
-      {canManage && (
-        <ActionButton
-          className="btn btn-ghost"
-          pending={stopPending}
-          pendingLabel="Stopping…"
-          onClick={onStop}
-          title="Finish this capture now and keep what it has recorded"
-        >
-          Stop
-        </ActionButton>
-      )}
+      <ActionButton
+        className="btn btn-ghost"
+        permitted={canManage}
+        deniedTitle={DENIED_TITLE}
+        pending={stopPending}
+        pendingLabel="Stopping…"
+        onClick={onStop}
+        title="Finish this capture now and keep what it has recorded"
+      >
+        Stop
+      </ActionButton>
     </div>
   )
 }
 
-/** The playback in flight, or a line saying how to start one. */
-function PlaybackCard({ job, onStop, stopPending, canManage }) {
-  if (!job) {
-    return (
-      <div style={{ color: 'var(--text-dim)', fontSize: '12px', padding: '10px 0' }}>
-        Nothing is playing back. Select a subject with a stored capture below, then choose
-        <strong> Play back</strong> — the dialog publishes it as the Playback gateway and maps each
-        captured device onto one of that gateway's own.
-      </div>
-    )
-  }
+/** The playback queued or in flight, beside the capture's strip. Nothing when none is. */
+function PlaybackStrip({ job, onStop, stopPending, canManage }) {
+  if (!job) return null
 
   const target = job.gateways?.name || job.target_edge_node_id
   const pending = job.status === 'PENDING'
@@ -973,7 +969,7 @@ function PlaybackCard({ job, onStop, stopPending, canManage }) {
           <strong>{pending ? 'Queued' : 'Playing back'} as {target}</strong>
           <span style={{ color: 'var(--text-muted)' }}> · {job.speed}× speed</span>
         </div>
-        {/* A bar is unambiguous here, unlike the capture card: a playback has exactly one total.
+        {/* A bar is unambiguous here, unlike the capture strip: a playback has exactly one total.
             Rendered only once `messages_total` is written by the worker's first progress call, so a
             queued job shows no bar at 0%. */}
         {!pending && total > 0 && (
@@ -1003,17 +999,17 @@ function PlaybackCard({ job, onStop, stopPending, canManage }) {
             : `${job.messages_sent}${total ? ` of ${total}` : ''} message${job.messages_sent === 1 ? '' : 's'} played back · ${job.elapsed_seconds}s`}
         </div>
       </div>
-      {canManage && (
-        <ActionButton
-          className="btn btn-ghost"
-          pending={stopPending}
-          pendingLabel="Stopping…"
-          onClick={onStop}
-          title="Stop the playback now. What has already been published stays in the historian."
-        >
-          Stop
-        </ActionButton>
-      )}
+      <ActionButton
+        className="btn btn-ghost"
+        permitted={canManage}
+        deniedTitle={DENIED_TITLE}
+        pending={stopPending}
+        pendingLabel="Stopping…"
+        onClick={onStop}
+        title="Stop the playback now. What has already been published stays in the historian."
+      >
+        Stop
+      </ActionButton>
     </div>
   )
 }
@@ -1167,7 +1163,14 @@ function SubjectRow({ row, selected, onSelect }) {
   return (
     <tr
       className={`row-selectable${selected ? ' row-selected' : ''}`}
+      tabIndex={0}
       onClick={rowSelectHandler(onSelect)}
+      // Enter or Space on the row itself; a key pressed on the copy chip inside it stays the chip's.
+      onKeyDown={e => {
+        if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+        e.preventDefault()
+        onSelect()
+      }}
       title="Click to inspect this subject in the details panel"
     >
       <td>{row.name}</td>

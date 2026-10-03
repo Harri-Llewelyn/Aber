@@ -1,13 +1,13 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import { api } from '../../api'
 import { POLL_INTERVAL_MS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
-import { IconExternalLink, IconBookOpen } from '../common/Icons'
+import { IconExternalLink, IconBookOpen, IconAlertTriangle } from '../common/Icons'
 import { EmptyState } from '../common/EmptyState'
 import { HelpTip } from '../common/HelpTip'
 import { LoadingState } from '../common/LoadingState'
-import { PageHeading } from '../common/PageHeading'
-import { SectionCount } from '../common/SectionCount'
+import { CardHeading } from '../common/CardHeading'
+import { TabStrip } from '../common/TabStrip'
 import CopyableId from '../common/CopyableId'
 import { formatDateTime } from '../../utils/format'
 
@@ -119,13 +119,14 @@ function EndpointCell({ url, exposure, viewerOnHost, onNotify }) {
 }
 
 /**
- * The stack, in the order an operator looks for it: something to open, the path telemetry arrives
- * on, then the stores behind it. Keyed on service_type, not the editable name. The order of `types`
- * within a group is the render order; names break ties. Each group has a description, since each
- * card is a different kind of thing.
+ * The stack, one tab per group, in the order an operator looks for it: something to open, the path
+ * telemetry arrives on, then the stores behind it. Keyed on service_type, not the editable name.
+ * The order of `types` within a group is the row order; names break ties. Each group's description
+ * is its tab's "?".
  */
 const SERVICE_GROUPS = [
   {
+    id: 'applications',
     title: 'Applications & User Interfaces',
     description: 'The things with a front door. These are meant to be opened — a link here is where '
       + 'you go to do something the dashboard does not do itself.',
@@ -134,15 +135,17 @@ const SERVICE_GROUPS = [
     types: ['MONITORING', 'EDGE_NODE', 'GRAPHICAL_UI', 'SOURCE_CONTROL', 'DOCUMENTATION']
   },
   {
+    id: 'ingestion',
     title: 'Ingestion & Messaging',
     description: 'The path a reading takes from a machine to the historian. If telemetry has stopped '
       + 'arriving, the fault is almost always one of these.',
     types: ['MQTT_BROKER', 'INGESTION', 'API_GATEWAY']
   },
   {
+    id: 'infrastructure',
     title: 'Data & Backend Infrastructure',
-    description: 'What everything above is built on. Listed because a registry that named only the '
-      + 'parts with a URL would describe the stack as smaller than it is.',
+    description: 'What the services on the other tabs are built on. Listed because a registry that '
+      + 'named only the parts with a URL would describe the stack as smaller than it is.',
     types: ['REST_API', 'AUTHENTICATION', 'SERVERLESS', 'DATABASE', 'TIME_SERIES_DB', 'METRICS_EXPORTER']
   }
 ]
@@ -154,7 +157,7 @@ const SERVICE_GROUPS = [
  */
 const UNGROUPED_TITLE = 'Other Registered Services'
 
-/** Splits the flat directory into the sections above, dropping any that came back empty. */
+/** Splits the flat directory into the groups above, dropping any that came back empty. */
 function groupServices(services) {
   // service_type -> [group index, position within that group].
   const rank = new Map()
@@ -162,12 +165,12 @@ function groupServices(services) {
 
   const byName = (a, b) => String(a.service_name || '').localeCompare(String(b.service_name || ''))
 
-  const sections = SERVICE_GROUPS.map(g => ({ title: g.title, description: g.description, rows: [] }))
+  const sections = SERVICE_GROUPS.map(g => ({ id: g.id, title: g.title, description: g.description, rows: [] }))
   const ungrouped = {
+    id: 'other',
     title: UNGROUPED_TITLE,
-    description: 'Registered with a type none of the groups above claims. `directory_services` is a '
-      + 'registry anything can write into, so a type nobody anticipated lands here rather than '
-      + 'being dropped.',
+    description: 'Registered with a type none of the other tabs claims. Anything can register a '
+      + 'service, so a type nobody anticipated lands here rather than being dropped.',
     rows: []
   }
 
@@ -185,13 +188,40 @@ function groupServices(services) {
   return [...sections, ungrouped].filter(s => s.rows.length > 0)
 }
 
+/** A service type as words: it names a category, not a state, so it is plain text. */
+const SERVICE_TYPE_LABELS = new Map([
+  ['MONITORING', 'Monitoring'],
+  ['EDGE_NODE', 'Edge node'],
+  ['GRAPHICAL_UI', 'Graphical UI'],
+  ['SOURCE_CONTROL', 'Source control'],
+  ['DOCUMENTATION', 'Documentation'],
+  ['MQTT_BROKER', 'MQTT broker'],
+  ['INGESTION', 'Ingestion'],
+  ['API_GATEWAY', 'API gateway'],
+  ['REST_API', 'REST API'],
+  ['AUTHENTICATION', 'Authentication'],
+  ['SERVERLESS', 'Serverless functions'],
+  ['DATABASE', 'Database'],
+  ['TIME_SERIES_DB', 'Time-series database'],
+  ['METRICS_EXPORTER', 'Metrics exporter']
+])
+
+/** The label for a service type; a type nobody mapped reads title-cased, underscores as spaces. */
+export function serviceTypeLabel(type) {
+  const raw = String(type ?? '').trim()
+  if (SERVICE_TYPE_LABELS.has(raw)) return SERVICE_TYPE_LABELS.get(raw)
+  return raw.split('_').filter(Boolean)
+    .map(word => word[0].toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ')
+}
+
 /**
  * One service's observed liveness, written every minute by `refresh_directory_liveness()` from
- * Prometheus's `up` series. ACTIVE and DOWN are observations; anything else means nothing scrapes
- * it, said in words rather than left blank beside green badges. It cannot be probed from inside the
- * stack: `endpoint_url` holds browser addresses, which name the wrong host from a container.
- * `last_heartbeat` is shown only beside ACTIVE; it is cleared for the other two so a timestamp
- * cannot read as last seen at.
+ * Prometheus's `up` series. ACTIVE and DOWN are observations, so they are the column's only badges;
+ * anything else means nothing scrapes it, said in dim words rather than left blank. It cannot be
+ * probed from inside the stack: `endpoint_url` holds browser addresses, which name the wrong host
+ * from a container. `last_heartbeat` is shown only beside ACTIVE; it is cleared for the other two
+ * so a timestamp cannot read as last seen at.
  */
 function LivenessCell({ status, lastHeartbeat }) {
   if (status === 'ACTIVE') {
@@ -212,8 +242,7 @@ function LivenessCell({ status, lastHeartbeat }) {
   }
   return (
     <span
-      className="badge badge-neutral"
-      style={{ opacity: 0.75 }}
+      className="directory-unobserved"
       title="Nothing in this stack observes this service. Its endpoint_url is a browser address, so a probe from inside a container would be asking about the wrong host."
     >
       not observed
@@ -273,7 +302,8 @@ export function imageVersion(ref) {
 /**
  * The version of the image this release deploys for the service, with the full reference in the
  * tooltip. db-init records it from the chart, so it is the release's pin rather than an
- * observation of the running container. No image is said in words.
+ * observation of the running container. One leading "v" is dropped so `v3.14.0` reads like
+ * `13.2.0`. No image is said in words.
  */
 function VersionCell({ image }) {
   const version = imageVersion(image)
@@ -283,7 +313,7 @@ function VersionCell({ image }) {
         className="mono"
         title={`${image} -- the image this release deploys, recorded from the chart at the last install or upgrade`}
       >
-        {version}
+        {version.replace(/^[vV](?=\d)/, '')}
       </span>
     )
   }
@@ -295,8 +325,8 @@ function VersionCell({ image }) {
 }
 
 /**
- * One group's table. `.table-directory` pins the column widths so the tables line up as one list
- * broken into sections.
+ * One group's table. `.table-directory` pins the column widths so the columns hold still when the
+ * tab changes.
  */
 function ServiceTable({ rows, onNotify }) {
   // Read once per render rather than per row. `window` is guarded because this module is imported
@@ -322,7 +352,7 @@ function ServiceTable({ rows, onNotify }) {
           {rows.map(s => (
             <tr key={s.service_uuid}>
               <td><strong>{s.service_name}</strong></td>
-              <td><span className="badge badge-neutral">{s.service_type}</span></td>
+              <td title={`Registered as ${s.service_type}`}>{serviceTypeLabel(s.service_type)}</td>
               <td className="cell-version">
                 <VersionCell image={s.image} />
               </td>
@@ -348,7 +378,7 @@ function ServiceTable({ rows, onNotify }) {
   )
 }
 
-export function DirectoryTab({ showToast }) {
+export function DirectoryTab({ showToast, initialSection = '', onClearSection }) {
   const [services, setServices] = useState([])
   const [loading, setLoading]   = useState(true)
   // The latest read's failure, cleared by the next success; `lastGoodAt` is when `services` was read.
@@ -379,51 +409,64 @@ export function DirectoryTab({ showToast }) {
   usePolling(loadAll, POLL_INTERVAL_MS)
 
   const groups = groupServices(services)
+  // Null until a tab is chosen, which means the first. A group has a tab only while it has rows, so
+  // if the chosen one empties between polls the first tab takes over and keeps the selection.
+  const [groupId, setGroupId] = useState(null)
+  const active = groups.find(g => g.id === groupId) || groups[0]
+  if (groupId !== null && active && active.id !== groupId) setGroupId(active.id)
+
+  // Opens the group a search-bar card named (`initialSection`, a group id), then drops the request
+  // so a later visit starts on the first tab. Before the first read there are no groups to fall
+  // back from, so the choice holds until the list arrives.
+  useEffect(() => {
+    if (!initialSection) return
+    setGroupId(initialSection)
+    onClearSection?.()
+  }, [initialSection, onClearSection])
 
   return (
-    <div className="page-layout">
+    <div className="page-layout page-fill">
       <div className="page-main">
-        <PageHeading icon={<IconBookOpen size={15} />} title="Directory">
-          Every service this deployment runs, grouped by purpose, with its version, its address and
-          whether that address works beyond the deployment host.
-        </PageHeading>
+        {loadError && lastGoodAt && (
+          <div className="callout callout-warning callout-page">
+            <IconAlertTriangle size={18} className="callout-icon" />
+            <div>
+              {`The latest read of the directory failed (${loadError}). The list is as of ${formatDateTime(lastGoodAt)}.`}
+            </div>
+          </div>
+        )}
 
-        {/* No search box or type picker: the grouping solves the scanning problem those controls
-            existed for. */}
-        {loading ? (
-          <div className="card"><LoadingState label="directory" /></div>
-        ) : loadError && !lastGoodAt ? (
-          <div className="card">
+        <div className="card card-fill">
+          <CardHeading
+            icon={<IconBookOpen size={15} />}
+            title="Directory"
+            description="Every service this deployment runs, grouped by purpose, with its version, its address and whether that address works beyond the deployment host."
+          />
+
+          {loading ? (
+            <LoadingState label="directory" />
+          ) : loadError && !lastGoodAt ? (
             <div className="callout callout-danger">
               {`The directory could not be read: ${loadError}`}
             </div>
-          </div>
-        ) : groups.length === 0 ? (
-          <div className="card">
+          ) : !active ? (
             <EmptyState
               icon={<IconBookOpen size={36} />}
               message="No services are registered in the directory."
             />
-          </div>
-        ) : (<>
-          {loadError && (
-            <div className="callout callout-warning">
-              {`The latest read of the directory failed (${loadError}). The list is as of ${formatDateTime(lastGoodAt)}.`}
-            </div>
-          )}
-          {groups.map(g => (
-          <div className="card directory-group" key={g.title}>
-            <div className="card-header">
-              <h3 className="section-title">
-                {g.title}
-                {g.description && <HelpTip label={`About ${g.title}`} text={g.description} />}
-                <SectionCount total={g.rows.length} />
-              </h3>
-            </div>
-            <ServiceTable rows={g.rows} onNotify={showToast} />
-          </div>
-          ))}
-        </>)}
+          ) : (<>
+            <TabStrip
+              ariaLabel="Service group"
+              value={active.id}
+              onChange={setGroupId}
+              tabs={groups.map(g => ({ id: g.id, label: g.title }))}
+              help={<HelpTip label={`About ${active.title}`} text={active.description} />}
+            />
+            {/* No toolbar row: a tab holds a dozen rows at most, so there is no search box or type
+                picker. */}
+            <ServiceTable rows={active.rows} onNotify={showToast} />
+          </>)}
+        </div>
       </div>
     </div>
   )

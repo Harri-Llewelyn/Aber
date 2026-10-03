@@ -2378,9 +2378,11 @@ destination type means one code path, exercised at every site.
 
 #### Configuring it, which is a page and not a values file (`0134`)
 
-**Settings → Cold Storage**, as an Administrator: the S3 endpoint, region, bucket and access key
-ID. The **secret access key** is set on the Cold Storage page itself, because it is not a setting —
-it goes into the vault, and nothing reads it back.
+**Cold Storage → Set up cold storage**, as an Administrator: one dialog holds the S3 endpoint,
+region, bucket, access key ID and path style, the **secret access key**, and the `archive.enabled`
+switch, which it refuses to turn on until the destination is complete. The secret key is not a
+setting — it goes into the vault, and nothing reads it back. The other six stay settings rows, and
+the Settings page does not list them.
 
 Those five rows are flagged `sensitive`, which is a column `0134` adds to `system_settings` and one
 clause on its SELECT policy: `USING (NOT sensitive OR has_role(ARRAY['Administrator']))`. Every
@@ -2846,7 +2848,8 @@ leak for one junk account per gateway ever deleted.
   gateway row (archived included — those belong to the trigger and the sweep), and disables what is
   left through `revoke_gateway_credential()`. Dry run by default. It considers only enabled
   `gwy` + 21 hex character accounts, so it can never select `aber_ingestion` and stop the
-  stack ingesting. The Access Control page lists the same accounts under *Accounts with no gateway*.
+  stack ingesting. The Access Control page lists the same accounts under *Broker accounts*, marked
+  *No gateway*.
 
 ### What the inventory still cannot see
 
@@ -2938,11 +2941,11 @@ holds at the moment of the read — *Active*, *Disabled* or *No account* — thr
 `broker-inventory` function, which forwards the credential service's `listClients` and `listRoles`
 to an Administrator with every hash stripped. The pair is the point: a gateway issued on the host
 reads *No platform record* beside *Active*, and one revoked since reads *Issued* beside *Disabled*.
-Accounts shaped like a gateway id that no row claims and nothing declares are listed under
-*Accounts with no gateway*, which is what `scripts/revoke-orphaned-broker-accounts.mjs` disables.
-The page is two sections: *Gateways* holds those two lists, *Services* the database principals,
-the broker's own accounts and the broker roles. *Broker accounts* is every non-gateway account the
-broker holds, live, with the purpose of the role each holds; the validator's test gateway
+The page is four tabs of one card: *Broker credentials*, *Machine identities* (the database
+principals), *Broker accounts* and *Broker roles*. *Broker accounts* is every non-gateway account
+the broker holds, live, with the purpose of the role each holds, then any account shaped like a
+gateway id that no row claims and nothing declares, marked *No gateway*: what
+`scripts/revoke-orphaned-broker-accounts.mjs` disables. The validator's test gateway
 (`gwy11…`, created at boot from `MQTT_VALIDATOR_*` rather than issued against a row, and only when
 that pair is set) is declared in `serviceIdentities.js` and listed there rather than as a stray.
 The roles table counts each role's live rules and opens them in the context drawer, annotated with
@@ -5143,7 +5146,7 @@ access key ID, path-style switch and encryption recipient are `backup_offsite.*`
 `clear_backup_offsite_destination()` empties them and deletes the secret; copies already made stay
 in the bucket. The service reads the whole destination on each poll through
 `backup_offsite_destination()`, a gate no PostgREST role can call, so a change on the page applies
-without a restart.
+without a restart. The Settings page does not list these rows, so the dialog is their one editor.
 
 **The circularity, which the dialog states.** The Vault is inside every backup. Keeping the bucket
 credential there is fine for the service's own writes, but a restore after losing the site starts
@@ -5155,7 +5158,7 @@ backup service's pod (an `ipBlock` and port for the endpoint). Without one every
 connect time.
 
 **It shows.** The Backups page shows each backup's copy in an Off site column, and the destination
-above the list. The Grafana rule *Off-site Backup Stale* reads `backup_offsite_health`, which has a
+in its header button. The Grafana rule *Off-site Backup Stale* reads `backup_offsite_health`, which has a
 row only while the destination is complete: how long the newest backup has gone without a copy at
 the current destination, counted from when it was taken or the destination last changed, whichever
 is later. It fires past 12 hours (`grafana/README.md`).

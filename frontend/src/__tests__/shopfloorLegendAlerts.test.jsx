@@ -66,8 +66,8 @@ const renderMap = ({ devices = [], activeAlerts = [] } = {}) => {
   )
 }
 
-/** The one cell's pin, once the map has loaded. */
-const pin = () => screen.findByRole('button', { name: 'Assembly Line 1' })
+/** The one cell's pin, once the map has loaded: on the card, since an open area panel lists the cell too. */
+const pin = () => waitFor(() => within(document.querySelector('.area-card')).getByRole('button', { name: 'Assembly Line 1' }))
 
 /** The chip for the one device in the fixture, in the panel the pin opens. */
 const chip = async () => {

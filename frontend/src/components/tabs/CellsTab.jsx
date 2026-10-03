@@ -14,9 +14,10 @@ import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { patchFromForm, formFromPatch, submitProposal } from '../../utils/proposeFromForm'
 import { CellIcon, CELL_ICONS, DEFAULT_CELL_ICON } from '../../utils/cellIcon'
 import { AreaIcon } from '../../utils/areaIcon'
-import { formatPlace, isPlaced, MIN_PIN_SPACING_SETTING, DEFAULT_MIN_PIN_SPACING } from '../../utils/areaPlans'
+import { isPlaced, MIN_PIN_SPACING_SETTING, DEFAULT_MIN_PIN_SPACING } from '../../utils/areaPlans'
 import { useSetting } from '../../hooks/useSettings'
 import { CellPlacementPicker } from '../common/CellPlacementPicker'
+import { AreaPlanPreview } from '../common/AreaPlanPreview'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
 import {
@@ -33,7 +34,6 @@ import {
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { Badge, ArchivedBadge } from '../common/Badge'
-import { SectionCount } from '../common/SectionCount'
 import { SearchInput } from '../common/SearchInput'
 import { ClearFilters } from '../common/ClearFilters'
 import { LoadingState } from '../common/LoadingState'
@@ -44,7 +44,7 @@ import { deviceLifecycleStatus, deviceStatusTitle, deviceDotColor } from '../../
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
-export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectArea, onViewTrail, hasPermission, initialSearchFilter, onClearFilter, activeAlerts = [] }) {
+export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectArea, onViewTrail, onShowOnSiteMap, hasPermission, initialSearchFilter, onClearFilter, activeAlerts = [] }) {
   /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js. */
   const alerts = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
   /**
@@ -189,6 +189,14 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   // An ID, not the cell object: this page polls, so the selection is resolved against `cells` on
   // every render.
   const [selectedId, setSelectedId] = useState(null)
+  const toggleCell = (cellId) => setSelectedId(id => id === cellId ? null : cellId)
+  // Enter or Space on the element itself acts as its click; a key on a control inside it is that
+  // control's.
+  const onOwnKey = (act) => (e) => {
+    if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+    if (e.key === ' ') e.preventDefault()
+    act()
+  }
 
   const canManage = hasPermission(PERMISSION_UUIDS.CELL_MANAGE)
   const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
@@ -248,9 +256,6 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   const emptyCount = cells.filter(c => !c.is_archived && cellIsEmpty(c)).length
   const activeFilterCount =
     (searchQuery ? 1 : 0) + (attentionOnly ? 1 : 0) + (emptyOnly ? 1 : 0) + (filterMode !== 'active' ? 1 : 0)
-  // The lifecycle select scopes the list; the count reads scope-size, or `shown / scope` under a filter.
-  const inLifecycle = cells.filter(c =>
-    filterMode === 'all' || (filterMode === 'archived' ? c.is_archived : !c.is_archived))
 
   // Arriving from a cell chip or the Site Map with one cell named: open it, and show it whatever
   // its state. Identifier equality only, since the search predicate also matches names.
@@ -268,6 +273,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   const selectedCell = cells.find(c => c.cell_id === selectedId) || null
   const selectedCellGateways = selectedCell?.gateways || []
   const selectedCellDevices = selectedCell ? (devicesByCell.get(selectedCell.cell_id) || []) : []
+  const selectedCellArea = selectedCell ? areaOf(selectedCell.area_id) : null
 
   return (
     <div className="page-layout page-fill">
@@ -292,7 +298,6 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
           icon={<IconLayoutDashboard size={15} />}
           title="Cells"
           description="A line, bay or group of assets within an area. Gateways and devices are filed in cells, which can be pinned on the area’s plan."
-          count={<SectionCount total={inLifecycle.length} shown={filteredCells.length} />}
           actions={(
             <>
               {/* The primary action in the header, where every card keeps its. */}
@@ -394,7 +399,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                     <tr
                       key={c.cell_id}
                       className={`row-selectable${selectedId === c.cell_id ? ' row-selected' : ''}${c.is_archived ? ' row-archived' : ''}`}
-                      onClick={rowSelectHandler(() => setSelectedId(id => id === c.cell_id ? null : c.cell_id))}
+                      tabIndex={0}
+                      onClick={rowSelectHandler(() => toggleCell(c.cell_id))}
+                      onKeyDown={onOwnKey(() => toggleCell(c.cell_id))}
                       title="Click to inspect this cell in the details panel"
                     >
                       <td className="cell-icon-col"><CellIcon cell={c} size={16} /></td>
@@ -418,7 +425,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                         {c.area_id && (
                           <div className="cell-meta">
                             {isPlaced(c)
-                              ? <span title={`On the plan: ${formatPlace(c)}`}>placed</span>
+                              ? <span title="Has a place on its area's plan; the details panel shows where">placed</span>
                               : <Badge tone="warning" size="sm" title="In the area but not yet placed on its plan — set a place in Edit Details">not placed</Badge>}
                           </div>
                         )}
@@ -605,6 +612,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
         type="CELL"
         onCopy={showToast}
         title={selectedCell?.cell_name || ''}
+        icon={selectedCell && <CellIcon cell={selectedCell} size={16} />}
         subtitle={selectedCell && (
           <>
             <Badge size="sm">{plural(selectedCellGateways.length, 'Gateway')} · {plural(selectedCellDevices.length, 'Device')}</Badge>
@@ -631,9 +639,16 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
             title: 'The ISA-95 area this cell is in. Its devices derive their area from it.'
           },
           {
+            // The plan itself, with this cell's pin ringed and the area's other cells dimmed.
             label: 'Place on plan',
-            value: selectedCell.area_id ? (formatPlace(selectedCell) || 'Not placed — set a place in Edit Details') : null,
-            title: "Where the Site Map draws this cell on its area's plan, as fractions of the plan"
+            value: !selectedCell.area_id
+              ? null
+              : !isPlaced(selectedCell)
+                ? 'Not placed — set a place in Edit Details'
+                : selectedCellArea
+                  ? <AreaPlanPreview area={selectedCellArea} cells={cells} highlightCellId={selectedCell.cell_id} onOpen={onShowOnSiteMap} />
+                  : "Placed on its area's plan",
+            full: true
           },
           {
             // Chips rather than a comma-joined string: a cell is a junction, and its panel must
@@ -706,6 +721,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
           },
           {
             label: proposeMode ? 'Propose a Change' : 'Edit Details', icon: <IconPencil size={13} />,
+            // The primary when there is no dashboard to open and the cell is not archived.
+            primary: !selectedCell.is_archived,
             onClick: () => {
               // Seeded with the open proposal's patch when there is one: one open proposal per
               // asset per person, so a second field extends the request.
@@ -746,6 +763,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
           // Archive is a thing done to one cell you have chosen, like the actions before it.
           selectedCell.is_archived ? {
             label: 'Restore Cell', icon: <IconRefreshCw size={13} />,
+            primary: true,
             onClick: () => runRestore(selectedCell.cell_id, () => restoreCell(selectedCell.cell_id, selectedCell.cell_name)),
             pending: restoringId === selectedCell.cell_id,
             pendingLabel: 'Restoring…',

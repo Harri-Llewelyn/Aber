@@ -1,4 +1,6 @@
 import React from 'react'
+import fs from 'node:fs'
+import path from 'node:path'
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
@@ -6,9 +8,11 @@ import {
   isBrowsableEndpoint,
   endpointReach,
   viewerIsOnDeploymentHost,
-  imageVersion
+  imageVersion,
+  serviceTypeLabel
 } from '../components/tabs/DirectoryTab'
 import { api } from '../api'
+import { expectCardHeading } from '../test/cardHeading'
 
 vi.mock('../api', () => ({
   api: {
@@ -53,6 +57,13 @@ async function renderTab() {
   return { showToast }
 }
 
+const tab = (title) => screen.getByRole('tab', { name: title })
+const openTab = (title) => fireEvent.click(tab(title))
+
+/** Runs `read` on every group's tab in turn, and returns what each call returned, flattened. */
+const acrossTabs = (read) =>
+  screen.getAllByRole('tab').map(t => t.textContent).flatMap(title => { openTab(title); return read() })
+
 /**
  * The page must make no claim about what Node-RED is running: it has no way to observe the editor,
  * and this is the assertion most likely to be undone by somebody adding a status badge.
@@ -83,7 +94,7 @@ describe('DirectoryTab claims nothing it cannot observe', () => {
   })
 })
 
-/** Three named sections, one table each. */
+/** Three named groups, a tab each, in one card. */
 describe('DirectoryTab service groups', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -94,18 +105,28 @@ describe('DirectoryTab service groups', () => {
   const INGEST = 'Ingestion & Messaging'
   const DATA = 'Data & Backend Infrastructure'
 
-  const card = (title) => screen.getByRole('heading', { name: new RegExp(title) }).closest('.card')
-  const namesIn = (title) =>
-    [...card(title).querySelectorAll('tbody tr td:first-child')].map(td => td.textContent)
+  const namesIn = (title) => {
+    openTab(title)
+    return [...document.querySelectorAll('tbody tr td:first-child')].map(td => td.textContent)
+  }
 
-  it('renders one table per category rather than one list of everything', async () => {
+  it('puts each group on a tab of one card, showing one table at a time', async () => {
     await renderTab()
 
-    for (const title of [APPS, INGEST, DATA]) {
-      expect(card(title)).toBeTruthy()
-      expect(card(title).querySelector('table')).toBeTruthy()
-    }
-    expect(document.querySelectorAll('table')).toHaveLength(3)
+    expect(document.querySelectorAll('.card')).toHaveLength(1)
+    expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual([APPS, INGEST, DATA])
+    expect(tab(APPS)).toHaveAttribute('aria-selected', 'true')
+    expect(document.querySelectorAll('table')).toHaveLength(1)
+    // The bar is straight inside the card under its heading, with the table straight under the bar.
+    expect(document.querySelector('.card > .card-heading + .tab-strip')).toBeTruthy()
+    expect(document.querySelector('.card > .tab-strip + .table-wrap')).toBeTruthy()
+  })
+
+  it('opens the group a search-bar card names, then drops the request', async () => {
+    const onClearSection = vi.fn()
+    render(<DirectoryTab showToast={vi.fn()} initialSection="ingestion" onClearSection={onClearSection} />)
+    await waitFor(() => expect(tab(INGEST)).toHaveAttribute('aria-selected', 'true'))
+    expect(onClearSection).toHaveBeenCalled()
   })
 
   // The point of the change: a service is found by what it IS, not by where the alphabet put it.
@@ -141,33 +162,48 @@ describe('DirectoryTab service groups', () => {
     expect(namesIn('Other Registered Services')).toEqual(['Some Future Broker'])
   })
 
-  // An empty section is a heading asserting a category exists with nothing in it, which reads as
-  // a stack with a missing piece rather than as a stack that never had one.
-  it('renders no card for a category nothing registered into', async () => {
+  // An empty group is a tab asserting a category exists with nothing in it, which reads as a stack
+  // with a missing piece rather than as a stack that never had one.
+  it('draws no tab for a group nothing registered into', async () => {
     api.get.mockResolvedValue(SERVICES.filter(s => s.service_type === 'MQTT_BROKER'))
     await renderTab()
 
-    expect(screen.queryByRole('heading', { name: new RegExp(APPS) })).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: /Other Registered Services/ })).not.toBeInTheDocument()
-    expect(card(INGEST)).toBeTruthy()
+    expect(screen.queryByRole('tab', { name: APPS })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: /Other Registered Services/ })).not.toBeInTheDocument()
+    expect(tab(INGEST)).toHaveAttribute('aria-selected', 'true')
   })
 
-  it('explains each category behind a tip on its heading, and counts its services', async () => {
+  it('explains the selected group with the "?" after the tab names, and counts nothing', async () => {
     await renderTab()
 
-    const expected = { [APPS]: '4', [INGEST]: '3', [DATA]: '5' }
     for (const title of [APPS, INGEST, DATA]) {
-      const heading = screen.getByRole('heading', { name: new RegExp(title) })
-      expect(heading.querySelector('.help-tip')).toHaveAttribute('aria-label', `About ${title}`)
-      // The count follows the tip, and equals the rows in the card.
-      expect(heading.querySelector('.section-count').textContent).toBe(expected[title])
-      expect(card(title).querySelectorAll('tbody tr')).toHaveLength(Number(expected[title]))
+      openTab(title)
+      const tips = document.querySelectorAll('.tab-strip-help > .help-tip')
+      expect(tips).toHaveLength(1)
+      expect(tips[0]).toHaveAttribute('aria-label', `About ${title}`)
     }
+    expect(document.querySelector('.section-count')).toBeNull()
+    for (const t of screen.getAllByRole('tab')) expect(t.textContent).not.toMatch(/\d/)
   })
 
-  it('sits in the page layout like every other page', async () => {
+  it('opens on the first tab, and shows another group on a click', async () => {
     await renderTab()
-    expect(document.querySelector('.page-layout > .page-main .directory-group')).toBeTruthy()
+    expect(tab(APPS)).toHaveAttribute('aria-selected', 'true')
+    expect(namesIn(DATA)).toContain('Supabase PostgreSQL')
+    expect(tab(DATA)).toHaveAttribute('aria-selected', 'true')
+    expect(tab(APPS)).toHaveAttribute('aria-selected', 'false')
+  })
+
+  it('is one card with its heading, in a page that does not scroll', async () => {
+    await renderTab()
+    expect(document.querySelector('.page-layout.page-fill > .page-main > .card.card-fill')).toBeTruthy()
+    const header = expectCardHeading('Directory', /^Every service this deployment runs/)
+    // One sentence of at most 28 words; the detail is in the help drawer.
+    const description = header.querySelector('.card-heading-description').textContent
+    expect(description.match(/[.!?](\s|$)/g)).toHaveLength(1)
+    expect(description.split(/\s+/).length).toBeLessThanOrEqual(28)
+    // The table is the card's scroller: a .table-wrap directly under the .card-fill.
+    expect(document.querySelector('.card-fill > .table-wrap > table.table-directory')).toBeTruthy()
   })
 
   it('says loading and none registered inside a card', async () => {
@@ -194,7 +230,7 @@ describe('DirectoryTab service groups', () => {
 
     // The eight http fixtures. The other four are mqtt:// and postgres:// and render as copy
     // buttons below.
-    const links = [...document.querySelectorAll('tbody a')]
+    const links = acrossTabs(() => [...document.querySelectorAll('tbody a')])
     const browsable = SERVICES.filter(s => isBrowsableEndpoint(s.endpoint_url))
     expect(links).toHaveLength(browsable.length)
     expect(links.length).toBeGreaterThan(0)
@@ -213,11 +249,23 @@ describe('DirectoryTab service groups', () => {
 
       const unopenable = SERVICES.filter(s => !isBrowsableEndpoint(s.endpoint_url))
       expect(unopenable.length).toBeGreaterThan(0)
-      for (const s of unopenable) {
-        const el = screen.getByText(s.endpoint_url).closest('button, a')
+      const chips = acrossTabs(() => unopenable
+        .map(s => screen.queryByText(s.endpoint_url)?.closest('button, a'))
+        .filter(Boolean))
+      expect(chips).toHaveLength(unopenable.length)
+      for (const el of chips) {
         expect(el.tagName).toBe('BUTTON')
         expect(el).toHaveClass('copyable-id')
       }
+    })
+
+    // The copy chip also carries `.mono` (13px), so the shared chip rule has to come after it.
+    it('draws the copy chip and the open chip in one typeface and size', () => {
+      const css = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
+      const shared = css.match(/\n\.copyable-id,\s*\.endpoint-action \{([^}]*)\}/)
+      expect(shared[1]).toMatch(/font-family:\s*var\(--font-mono\)/)
+      expect(shared[1]).toMatch(/font-size:\s*12px/)
+      expect(shared.index).toBeGreaterThan(css.search(/\n\.mono \{/))
     })
 
     it('copies the address and says so', async () => {
@@ -231,6 +279,7 @@ describe('DirectoryTab service groups', () => {
       try {
         const { showToast } = await renderTab()
 
+        openTab('Ingestion & Messaging')
         fireEvent.click(screen.getByText('mqtt://localhost:1883').closest('button'))
 
         await waitFor(() => expect(writeText).toHaveBeenCalledWith('mqtt://localhost:1883'))
@@ -302,6 +351,19 @@ describe('DirectoryTab service groups', () => {
     expect(screen.queryByText('—')).not.toBeInTheDocument()
   })
 
+  // The column's badges are only observations; "nobody is looking" is dim words, not a pill.
+  it('says "not observed" as dim text, not a badge', async () => {
+    api.get.mockResolvedValue([
+      { ...svc('Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323'),
+        status: 'UNKNOWN', last_heartbeat: null }
+    ])
+    await renderTab()
+
+    const words = screen.getByText('not observed')
+    expect(words).toHaveClass('directory-unobserved')
+    expect(words.className).not.toMatch(/badge/)
+  })
+
   it('explains WHY an unobserved service cannot be probed', async () => {
     // Otherwise "not observed" reads as a gap somebody should close with a probe against
     // endpoint_url, a browser address that would answer about the wrong host from inside a
@@ -337,18 +399,28 @@ describe('DirectoryTab service groups', () => {
     ])
     await renderTab()
 
-    expect(screen.getByText('DOWN')).toBeInTheDocument()
-    expect(screen.getByText(/not observed/i)).toBeInTheDocument()
+    expect(screen.getByText('DOWN')).toHaveClass('badge')
+    expect(screen.getByText(/not observed/i)).not.toHaveClass('badge')
   })
 
   it('still lists what is deployed and how to reach it', async () => {
     // What the page honestly IS, asserted so removing the two columns cannot quietly hollow it out.
     await renderTab()
 
-    for (const svc of SERVICES) {
-      expect(screen.getByText(svc.service_name)).toBeInTheDocument()
-      expect(screen.getByText(svc.endpoint_url)).toBeInTheDocument()
-    }
+    const shown = acrossTabs(() => SERVICES.filter(s =>
+      screen.queryByText(s.service_name) && screen.queryByText(s.endpoint_url)))
+    expect(shown.map(s => s.service_name).sort()).toEqual(SERVICES.map(s => s.service_name).sort())
+  })
+
+  // A category, not a state: words in plain text, with the registered enum on hover.
+  it('names each service type in words, as plain text', async () => {
+    await renderTab()
+
+    const node = screen.getByText('Node-RED (Host-Run Gateways)').closest('tr').children[1]
+    expect(node).toHaveTextContent(/^Edge node$/)
+    expect(node.querySelector('.badge')).toBeNull()
+    expect(node).toHaveAttribute('title', 'Registered as EDGE_NODE')
+    expect(screen.queryByText('GRAPHICAL_UI')).not.toBeInTheDocument()
   })
 
   it('says so when nothing is registered at all', async () => {
@@ -373,7 +445,7 @@ describe('DirectoryTab refresh', () => {
 
   afterEach(() => { vi.useRealTimers() })
 
-  it('carries no filter bar, no search, no type picker and no Refresh button', async () => {
+  it('carries no search, no type picker and no Refresh button, so it draws no toolbar row', async () => {
     await renderTab()
 
     expect(document.querySelector('.filter-bar')).toBeNull()
@@ -381,11 +453,35 @@ describe('DirectoryTab refresh', () => {
     expect(screen.queryByPlaceholderText(/Search services/)).not.toBeInTheDocument()
     expect(screen.queryByTitle(/Show only one kind of service/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Refresh Directory/i })).not.toBeInTheDocument()
-    // The page is a read-only directory with no controls of its own. The endpoint cells are still
-    // buttons, one per row a browser cannot open, so this counts what is not an endpoint.
+    // The page is a read-only directory with no controls of its own beyond its tabs. The endpoint
+    // cells are still buttons, one per row a browser cannot open, so this counts what is neither.
     const buttons = screen.getAllByRole('button')
       .filter(b => !b.classList.contains('copyable-id') && !b.classList.contains('help-tip'))
     expect(buttons).toHaveLength(0)
+  })
+
+  // "Other Registered Services" is the sign of a type nobody anticipated, so it is a tab only while
+  // it has rows; selected when it empties, the selection falls back to the first tab and stays.
+  it('shows the Other tab only while it has rows, and falls back to the first tab when it empties', async () => {
+    const stray = svc('Some Future Broker', 'AMQP_BROKER', 'amqp://localhost:5672')
+    api.get.mockResolvedValue([...SERVICES, stray])
+    await renderTab()
+
+    openTab('Other Registered Services')
+    expect(screen.getByText('Some Future Broker')).toBeInTheDocument()
+
+    api.get.mockResolvedValue(SERVICES)
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
+    await waitFor(() =>
+      expect(screen.queryByRole('tab', { name: 'Other Registered Services' })).not.toBeInTheDocument())
+    expect(tab('Applications & User Interfaces')).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('Grafana Dashboards')).toBeInTheDocument()
+
+    // Its return does not take the selection back.
+    api.get.mockResolvedValue([...SERVICES, stray])
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
+    await waitFor(() => expect(tab('Other Registered Services')).toBeInTheDocument())
+    expect(tab('Applications & User Interfaces')).toHaveAttribute('aria-selected', 'true')
   })
 
   // The poll is a setTimeout chain (see usePolling), so a fresh response only reaches the
@@ -395,6 +491,7 @@ describe('DirectoryTab refresh', () => {
        changes. */
     await renderTab()
     expect(api.get).toHaveBeenCalledTimes(1)
+    openTab('Ingestion & Messaging')
 
     const moved = 'mqtt://broker.plant.local:8883'
     api.get.mockResolvedValue(
@@ -539,9 +636,11 @@ describe('Directory reachability', () => {
       await renderTab()
       expect(screen.getByText('network')).toBeInTheDocument()
       expect(screen.getByText('host only')).toBeInTheDocument()
-      expect(screen.getByText('internal')).toBeInTheDocument()
       // The row with no exposure at all says so in words; a dash reads as a rendering gap.
       expect(screen.getByText('not recorded')).toBeInTheDocument()
+      // The exporter is infrastructure, on its own tab.
+      openTab('Data & Backend Infrastructure')
+      expect(screen.getByText('internal')).toBeInTheDocument()
     })
 
     it('keeps the loopback links clickable for a reader who is on the host', async () => {
@@ -600,6 +699,18 @@ describe('the Version column', () => {
     expect(version.getAttribute('title')).toMatch(/this release deploys/)
   })
 
+  // "v3.14.0" beside "13.2.0" reads as two formats; the tooltip keeps the tag as published.
+  it('drops one leading "v", and only from the display', async () => {
+    api.get.mockResolvedValue([
+      { ...svc('Prometheus Metrics Store', 'MONITORING', 'http://localhost:9090'), image: 'prom/prometheus:v3.14.0' },
+      { ...svc('Something Vendored', 'MONITORING', 'http://localhost:9091'), image: 'example/thing:vendor-2' }
+    ])
+    await renderTab()
+    const version = screen.getByText('3.14.0')
+    expect(version.getAttribute('title')).toMatch(/^prom\/prometheus:v3\.14\.0 /)
+    expect(screen.getByText('vendor-2')).toBeInTheDocument()
+  })
+
   it('says "not recorded" for a service with no image, rather than leaving a blank', async () => {
     await renderTab()
     const missing = screen.getByText('not recorded')
@@ -611,5 +722,25 @@ describe('the Version column', () => {
     await renderTab()
     const headers = [...document.querySelector('table').querySelectorAll('th')].map(th => th.textContent)
     expect(headers).toEqual(['Service Name', 'Service Type', 'Version', 'Endpoint URL', 'Reach', 'Liveness'])
+  })
+})
+
+describe('serviceTypeLabel', () => {
+  it('names every seeded type in words', () => {
+    expect(serviceTypeLabel('EDGE_NODE')).toBe('Edge node')
+    expect(serviceTypeLabel('GRAPHICAL_UI')).toBe('Graphical UI')
+    expect(serviceTypeLabel('REST_API')).toBe('REST API')
+    expect(serviceTypeLabel('MQTT_BROKER')).toBe('MQTT broker')
+    expect(serviceTypeLabel('TIME_SERIES_DB')).toBe('Time-series database')
+    expect(serviceTypeLabel('SOURCE_CONTROL')).toBe('Source control')
+    for (const s of SERVICES) expect(serviceTypeLabel(s.service_type)).not.toMatch(/_/)
+  })
+
+  // Anything can register into the directory, so an unmapped type still reads as words.
+  it('title-cases a type nobody mapped, with underscores as spaces', () => {
+    expect(serviceTypeLabel('AMQP_BROKER')).toBe('Amqp Broker')
+    expect(serviceTypeLabel('cache')).toBe('Cache')
+    expect(serviceTypeLabel('constructor')).toBe('Constructor')
+    expect(serviceTypeLabel(null)).toBe('')
   })
 })

@@ -215,20 +215,18 @@ describe('clearing schema filters', () => {
     expect(registryNames()).not.toContain('CNC_Mill_Profile_v1')
   })
 
-  /* The total is the rows in the chosen status view, so the page reads a bare count at rest and
-     "shown / total" only while the search narrows it. */
-  it('reads a bare count at rest and shown / total while searching', async () => {
+  /* No count on the card heading, resting or searching: the status options say how many versions
+     each view holds. */
+  it('puts no count on the card heading, while the status options keep theirs', async () => {
     renderTab()
     await ready()
 
     const count = () => registryCard().querySelector('.card-header .section-count')
-    expect(count()).toHaveTextContent(/^2$/)
-
-    fireEvent.change(statusSelect(), { target: { value: 'all' } })
-    expect(count()).toHaveTextContent(/^3$/)
+    expect(count()).toBeNull()
 
     fireEvent.change(searchBox(), { target: { value: 'robot' } })
-    expect(count()).toHaveTextContent('1 / 3')
+    expect(count()).toBeNull()
+    expect(within(statusSelect()).getByText('Current (2)')).toBeInTheDocument()
   })
 })
 

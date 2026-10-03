@@ -1628,7 +1628,7 @@ class TestAssetBundle(unittest.TestCase):
     The stored object is deleted on teardown, as the Administrator the suite signs in as (the
     bucket's delete policy admits that role alone). The `asset_exports` row cannot be: the table has
     no write policy for any role, by design, so a run leaves one row that names a device the fixture
-    then deletes -- which is precisely the state the Archived Entities page's second card exists to
+    then deletes -- which is precisely the state the Archived Entities page's Retired tab exists to
     show, and is harmless on the ephemeral stacks this class runs against.
     """
 

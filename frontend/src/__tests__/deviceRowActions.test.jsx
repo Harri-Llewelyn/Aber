@@ -39,8 +39,10 @@ const routeGet = (rows) => (path) => {
 const show = async (rows, hasPermission = () => true) => {
   api.get.mockImplementation(routeGet(rows))
   render(<DevicesTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={hasPermission} />)
-  // The roster opens on Active, so a fixture holding an archived row asks for All first.
+  // The roster opens on Active, so a fixture holding an archived row asks for All first, from the
+  // Filters popover.
   if (rows.some(r => r.is_archived)) {
+    fireEvent.click(await screen.findByRole('button', { name: /^Filters/ }))
     fireEvent.change(await screen.findByTitle('Filter by lifecycle state'), { target: { value: 'all' } })
   }
   await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
@@ -87,12 +89,22 @@ describe('device row actions', () => {
 
     const labels = panelLabels()
     for (const expected of [/Audit Trail/i, /Configuration Parameters/i,
-      /Export AAS JSON/i, /Export AASX package/i, /Archive Device/i,
+      /Export…/, /Archive Device/i,
       /Digital Nameplate/i, /View Telemetry/i, /Edit Details/i]) {
       expect(labels).toMatch(expected)
     }
     // Attached Links opens the editor that lists and attaches links.
     expect(labels).toMatch(/Attached Links/i)
+  })
+
+  it('lists Edit Details first as the one primary action, under a title carrying the device icon', async () => {
+    await show([device()])
+    openPanel()
+
+    const actions = [...document.querySelectorAll('.context-panel-actions .context-action')]
+    expect(actions[0].textContent.trim()).toBe('Edit Details')
+    expect(actions.filter(a => a.classList.contains('btn-primary'))).toEqual([actions[0]])
+    expect(document.querySelector('.context-panel-title-row .context-panel-icon svg')).toBeTruthy()
   })
 
   it('replaces Edit with Restore on an archived device', async () => {
@@ -102,6 +114,7 @@ describe('device row actions', () => {
 
     const panel = openPanel()
     expect(panel.getByText(/Restore Device/i)).toBeInTheDocument()
+    expect(panel.getByText(/Restore Device/i).closest('button')).toHaveClass('btn-primary')
     expect(panel.queryByText('Edit Details')).not.toBeInTheDocument()
   })
 
@@ -120,7 +133,7 @@ describe('device row actions', () => {
     expect(btn('Edit Details').disabled).toBe(true)
     // These reads are not gated: an export is a read, and Configuration Parameters shows what the
     // device declared at birth.
-    expect(btn(/Export AAS JSON/i).disabled).toBe(false)
+    expect(btn(/Export…/).disabled).toBe(false)
     expect(btn(/Configuration Parameters/i).disabled).toBe(false)
 
     // The audit trace is withdrawn, not disabled: without `audit_trail:read` the page returns no

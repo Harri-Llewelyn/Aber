@@ -90,11 +90,10 @@ const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
 const renderTab = (props = {}) =>
   render(<VocabularyTab hasPermission={() => true} onUseEntry={vi.fn()} {...props} />)
 
-/* One card on the page: the entries of whichever standard is selected. The page's own heading sits
-   above it, outside every card. */
+/* The page's one card: its heading, the tab per standard, and the selected standard's entries. */
 const card = () => within(document.querySelector('.card'))
 
-/** The standard pills are the page's tablist, above the card. */
+/** The standard tabs, inside the card under its heading. */
 const standardTab = (name) => screen.getByRole('tab', { name })
 const ready = async () => {
   await waitFor(() => expect(screen.getByRole('tablist')).toBeTruthy())
@@ -132,10 +131,10 @@ describe('Vocabulary page', () => {
     renderTab()
     await ready()
 
-    expect(card().queryByRole('button', { name: /OEE/ })).toBeNull()
+    expect(card().queryByRole('button', { name: /^OEE/ })).toBeNull()
     fireEvent.click(standardTab(/ISO 22400/))
-    expect(card().getByRole('button', { name: /OEE/ })).toBeTruthy()
-    expect(card().queryByRole('button', { name: /Data Item Types/ })).toBeNull()
+    expect(card().getByRole('button', { name: /^OEE/ })).toBeTruthy()
+    expect(card().queryByRole('button', { name: /^Data Item Types/ })).toBeNull()
   })
 
   it('starts every section collapsed - the vocabularies are reference, not the working set', async () => {
@@ -143,7 +142,7 @@ describe('Vocabulary page', () => {
     await ready()
 
     fireEvent.click(standardTab(/ISO 22400/))
-    expect(card().getByRole('button', { name: /OEE/ })).toBeTruthy()
+    expect(card().getByRole('button', { name: /^OEE/ })).toBeTruthy()
     expect(card().queryByTitle(/^AVAILABILITY \(A\)/)).toBeNull()
   })
 
@@ -167,7 +166,7 @@ describe('Vocabulary page — a click hands off to the Metrics page', () => {
     await ready()
 
     fireEvent.click(standardTab(/ISO 22400/))
-    fireEvent.click(card().getByRole('button', { name: /OEE/ }))
+    fireEvent.click(card().getByRole('button', { name: /^OEE/ }))
     fireEvent.click(card().getByTitle(/^AVAILABILITY \(A\)/))
 
     expect(onUseEntry).toHaveBeenCalledWith({ standard: 'ISO 22400', name: 'AVAILABILITY' })
@@ -179,7 +178,7 @@ describe('Vocabulary page — a click hands off to the Metrics page', () => {
     await ready()
 
     fireEvent.click(standardTab(/OPC UA/))
-    fireEvent.click(card().getByRole('button', { name: /OPC 40010 Robotics/ }))
+    fireEvent.click(card().getByRole('button', { name: /^OPC 40010 Robotics/ }))
     fireEvent.click(card().getByTitle(/^ActualPosition —/))
 
     // Both parts are required: opcua_vocabulary is keyed on (companion_spec, name) because two
@@ -197,7 +196,7 @@ describe('Vocabulary page — a click hands off to the Metrics page', () => {
     await ready()
 
     fireEvent.click(standardTab(/ISO 22400/))
-    fireEvent.click(card().getByRole('button', { name: /OEE/ }))
+    fireEvent.click(card().getByRole('button', { name: /^OEE/ }))
     const chip = card().getByTitle(/^AVAILABILITY \(A\)/)
     expect(chip.getAttribute('role')).toBeNull()
     fireEvent.click(chip)
@@ -213,12 +212,12 @@ describe('Vocabulary page — a click hands off to the Metrics page', () => {
     await ready()
 
     fireEvent.click(standardTab(/ASHRAE 223P/))
-    fireEvent.click(card().getByRole('button', { name: /Sensor/ }))
+    fireEvent.click(card().getByRole('button', { name: /^Sensor/ }))
     fireEvent.click(card().getByTitle(/^Temperature sensor —/))
     expect(onUseEntry).toHaveBeenCalledWith({ standard: 'ASHRAE 223P', name: 'TemperatureSensor' })
 
     onUseEntry.mockClear()
-    fireEvent.click(card().getByRole('button', { name: /Root/ }))
+    fireEvent.click(card().getByRole('button', { name: /^Root/ }))
     const relation = card().getByTitle(/^has property —/)
     expect(relation.getAttribute('role')).toBeNull()
     fireEvent.click(relation)
@@ -227,11 +226,13 @@ describe('Vocabulary page — a click hands off to the Metrics page', () => {
 })
 
 describe('Vocabulary page — the pointer to Metrics', () => {
+  const description = () => document.querySelector('.card-heading-description').textContent
+
   it('says an entry is clicked to start a catalog metric, not "used"', async () => {
     renderTab()
     await ready()
 
-    const text = document.querySelector('.page-heading p').textContent
+    const text = description()
     expect(text).toMatch(/click an entry to start a catalog metric from it/)
     expect(text.match(/[.!?](\s|$)/g)).toHaveLength(1)
     expect(text.split(' ').length).toBeLessThanOrEqual(28)
@@ -242,17 +243,19 @@ describe('Vocabulary page — the pointer to Metrics', () => {
     renderTab({ hasPermission: () => false })
     await ready()
 
-    expect(document.querySelector('.page-heading p').textContent).toMatch(/Requires Administrator to start a catalog metric/)
+    expect(description()).toMatch(/Requires Administrator to start a catalog metric/)
   })
 
-  it('counts the entries on the card, and shown / total while searching', async () => {
+  it('counts nothing on the card or its section headings, and keeps "N in use"', async () => {
     renderTab()
     await ready()
 
-    const count = () => document.querySelector('.card-header .section-count').textContent
-    expect(count()).toBe('4')
-    fireEvent.change(screen.getByLabelText('Search the MTConnect vocabulary'), { target: { value: 'angle' } })
-    expect(count()).toBe('1 / 4')
+    expect(document.querySelector('.card .section-count')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Search the MTConnect vocabulary'), { target: { value: 'a' } })
+    expect(document.querySelector('.card .section-count')).toBeNull()
+    // The one figure that ties a standard to this stack's catalog: Axes names a catalog metric.
+    const components = card().getByRole('button', { name: /^Components/ }).closest('.vocab-section-head')
+    expect(within(components).getByText('1 in use')).toBeTruthy()
   })
 
   it('says nothing matches with an icon, rather than an empty card', async () => {
@@ -271,21 +274,56 @@ describe('Vocabulary page — the pointer to Metrics', () => {
   })
 })
 
-describe('Vocabulary page — heading, tabs, then the card', () => {
-  it('states the page once, in the rail\'s word, above a switch that changes only which card is shown', async () => {
-    /* The shape Access Control and Settings use. The heading names the page and does not move when
-       a tab does; the tablist is a page control, so it is not inside the card it swaps. */
+describe('Vocabulary page — one card: heading, tabs, toolbar, sections', () => {
+  it('names the page once, in the card heading, with the tabs directly under it', async () => {
     renderTab()
     await ready()
 
-    const heading = screen.getByRole('heading', { name: 'Vocabulary' })
-    expect(heading.closest('.card')).toBeNull()
-    expect(screen.getByRole('tablist').closest('.card')).toBeNull()
+    const cardEl = document.querySelector('.card')
+    expect(document.querySelectorAll('.card')).toHaveLength(1)
+    expect(document.querySelector('.page-heading')).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Vocabulary' }).closest('.card-heading')).toBeTruthy()
+    expect(screen.getByRole('tablist').closest('.tab-strip').parentElement).toBe(cardEl)
+    // The tab names the standard on show; no second heading repeats it.
+    expect(screen.getAllByRole('heading')).toHaveLength(1)
+  })
 
-    // The card names the standard on show, and holds the search for it.
-    const header = document.querySelector('.card-header')
-    expect(within(header).getByRole('heading', { name: /MTConnect/ })).toBeTruthy()
-    expect(document.querySelector('.card-body .filter-bar')).toBeTruthy()
+  it('puts the selected standard’s "?" in the tab bar, after the last tab', async () => {
+    renderTab()
+    await ready()
+
+    const help = () => document.querySelector('.card > .tab-strip > .tab-strip-help')
+    expect(help().previousElementSibling).toBe(screen.getByRole('tablist'))
+    expect(within(help()).getByRole('button', { name: 'About the MTConnect vocabulary' })).toBeTruthy()
+
+    fireEvent.click(standardTab(/ISO 22400/))
+    expect(within(help()).getByRole('button', { name: 'About the ISO 22400 vocabulary' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'About the MTConnect vocabulary' })).toBeNull()
+  })
+
+  it('keeps the toolbar row under the tabs for the search and Expand all, with no "?" in it', async () => {
+    renderTab()
+    await ready()
+
+    const bar = document.querySelector('.card > .tab-strip + .filter-bar')
+    expect(bar).toBeTruthy()
+    expect(within(bar).getByLabelText('Search the MTConnect vocabulary')).toBeTruthy()
+    expect(within(bar).getByRole('button', { name: /^(Expand|Collapse) all$/ })).toBeTruthy()
+    expect(bar.querySelector('.help-tip')).toBeNull()
+  })
+
+  it('scrolls inside the card, with the sections as the scroller', async () => {
+    renderTab()
+    await ready()
+
+    const page = document.querySelector('.page-fill')
+    expect(page).toBeTruthy()
+    const fill = page.querySelectorAll('.card-fill')
+    expect(fill).toHaveLength(1)
+    const scroller = fill[0].querySelector(':scope > .card-fill-scroll')
+    expect(scroller).toHaveClass('vocab-sections')
+    // A section heading pins to the top of this scroller, so nothing above it may pad it down.
+    expect(APP_CSS).toMatch(/\n\.vocab-sections \{ padding: 0 0 4px; \}/)
   })
 
   it('reads a standard’s explanation on demand rather than above every entry', async () => {
@@ -313,12 +351,152 @@ describe('Vocabulary page — heading, tabs, then the card', () => {
   })
 })
 
+describe('Vocabulary page — section headings', () => {
+  const sectionToggle = (name) => card().getByRole('button', { name })
+
+  it('gives a section’s explanation a "?" beside its toggle, not a line in its body', async () => {
+    renderTab()
+    await ready()
+
+    const toggle = sectionToggle('Data Item Types — SAMPLE')
+    const tipButton = screen.getByRole('button', { name: 'About Data Item Types — SAMPLE' })
+    // In the band, beside the toggle; a button cannot hold a button.
+    expect(tipButton.closest('.vocab-section-head')).toBe(toggle.closest('.vocab-section-head'))
+    expect(toggle.contains(tipButton)).toBe(false)
+
+    fireEvent.click(toggle)
+    expect(screen.queryByText(/The only category that carries units/)).toBeNull()
+    fireEvent.mouseEnter(tipButton)
+    expect(screen.getByRole('tooltip').textContent).toMatch(/The only category that carries units/)
+  })
+
+  it('opens the "?" without toggling the section, and toggles on a click elsewhere on the band', async () => {
+    renderTab()
+    await ready()
+
+    const toggle = sectionToggle('Components')
+    fireEvent.click(screen.getByRole('button', { name: 'About Components' }))
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+
+    fireEvent.click(toggle.closest('.vocab-section-head').querySelector('.vocab-in-use'))
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+  })
+})
+
+describe('Vocabulary page — Expand all / Collapse all', () => {
+  const toggles = () => [...document.querySelectorAll('.vocab-section-head > .table-group-button')]
+  const openCount = () => toggles().filter(b => b.getAttribute('aria-expanded') === 'true').length
+  const allButton = () => screen.getByRole('button', { name: /^(Expand|Collapse) all$/ })
+
+  it('sits in the toolbar row and reads "Expand all" while every section is shut', async () => {
+    renderTab()
+    await ready()
+
+    expect(allButton().closest('.filter-bar')).toBeTruthy()
+    expect(allButton().textContent).toBe('Expand all')
+    expect(openCount()).toBe(0)
+  })
+
+  it('opens every section, then reads "Collapse all" and shuts them again', async () => {
+    renderTab()
+    await ready()
+
+    fireEvent.click(allButton())
+    expect(openCount()).toBe(toggles().length)
+    expect(allButton().textContent).toBe('Collapse all')
+
+    fireEvent.click(allButton())
+    expect(openCount()).toBe(0)
+    expect(allButton().textContent).toBe('Expand all')
+  })
+
+  it('reads "Collapse all" while any one section is open', async () => {
+    renderTab()
+    await ready()
+
+    fireEvent.click(card().getByRole('button', { name: /^Components/ }))
+    expect(allButton().textContent).toBe('Collapse all')
+  })
+
+  it('closes the sections a search opened, and keeps the search', async () => {
+    renderTab()
+    await ready()
+
+    fireEvent.change(screen.getByLabelText('Search the MTConnect vocabulary'), { target: { value: 'a' } })
+    expect(openCount()).toBe(toggles().length)
+    expect(allButton().textContent).toBe('Collapse all')
+
+    fireEvent.click(allButton())
+    expect(openCount()).toBe(0)
+    expect(card().queryByTitle(/^ANGLE/)).toBeNull()
+    expect(screen.getByLabelText('Search the MTConnect vocabulary').value).toBe('a')
+    expect(allButton().textContent).toBe('Expand all')
+
+    fireEvent.click(allButton())
+    expect(card().getByTitle(/^ANGLE/)).toBeTruthy()
+  })
+
+  it('acts on the selected standard only', async () => {
+    renderTab()
+    await ready()
+
+    fireEvent.click(allButton())
+    fireEvent.click(standardTab(/ISO 22400/))
+    expect(openCount()).toBe(0)
+    expect(allButton().textContent).toBe('Expand all')
+  })
+
+  it('has nothing to open when a search matches nothing', async () => {
+    renderTab()
+    await ready()
+
+    fireEvent.change(screen.getByLabelText('Search the MTConnect vocabulary'), { target: { value: 'zzz' } })
+    expect(allButton().disabled).toBe(true)
+  })
+})
+
+describe('Vocabulary page — a chip that starts a metric', () => {
+  it('carries a "+" and an accessible name saying what it does; a chip that cannot has neither', async () => {
+    renderTab()
+    await ready()
+    fireEvent.click(card().getByRole('button', { name: /^Data Item Types — SAMPLE/ }))
+    fireEvent.click(card().getByRole('button', { name: /^Components/ }))
+
+    const angle = card().getByTitle(/^ANGLE/)
+    expect(angle.getAttribute('aria-label')).toBe('Start a catalog metric from ANGLE')
+    expect(angle.querySelector('.vocab-chip-plus')).toBeTruthy()
+
+    // A component is not a metric on its own, so it starts nothing.
+    const axes = card().getByTitle(/^Axes/)
+    expect(axes.getAttribute('role')).toBeNull()
+    expect(axes.getAttribute('aria-label')).toBeNull()
+    expect(axes.querySelector('.vocab-chip-plus')).toBeNull()
+  })
+
+  it('shows the "+" on hover and on keyboard focus, not at rest', () => {
+    expect(APP_CSS).toMatch(/\n\.vocab-chip-plus \{[^}]*visibility: hidden;/)
+    expect(APP_CSS).toMatch(
+      /\n\.vocab-chip-action:hover \.vocab-chip-plus,\n\.vocab-chip-action:focus-visible \.vocab-chip-plus \{ visibility: visible; \}/
+    )
+  })
+
+  it('starts the metric from the keyboard as well', async () => {
+    const onUseEntry = vi.fn()
+    renderTab({ onUseEntry })
+    await ready()
+    fireEvent.click(card().getByRole('button', { name: /^Data Item Types — SAMPLE/ }))
+
+    fireEvent.keyDown(card().getByRole('button', { name: 'Start a catalog metric from ANGLE' }), { key: 'Enter' })
+    expect(onUseEntry).toHaveBeenCalledWith({ standard: 'MTConnect', type: 'ANGLE' })
+  })
+})
+
 /**
  * The explanatory text runs the full width of the column: a measure cap would stack two sentences
  * into six short lines on a page whose purpose is to get a long list on screen. jsdom does no
  * layout, so this is asserted against App.css directly.
  *
- * This page's standing text is the shared `.page-heading` description, so the rule lives there and
+ * This page's standing text is the shared CardHeading description, so the rule lives there and
  * guards every page carrying one.
  */
 describe('A page description is not measure-capped', () => {
@@ -326,7 +504,10 @@ describe('A page description is not measure-capped', () => {
     APP_CSS.match(new RegExp(`\\n${selector.replace(/[.:()\\-]/g, '\\$&')} \\{([\\s\\S]*?)\\n\\}`))?.[1]
 
   it('lets the description run the width of the column', () => {
-    const description = rule('.page-heading p')
+    // The description shares one rule with the note under it, so the block is read by its last
+    // selector after checking the description is in it.
+    expect(APP_CSS).toMatch(/\n\.card-heading \.card-heading-description,\n\.card-heading \.card-heading-note \{/)
+    const description = rule('.card-heading .card-heading-note')
     expect(description).toBeTruthy()
     expect(description).not.toMatch(/max-width/)
   })
@@ -337,6 +518,6 @@ describe('A page description is not measure-capped', () => {
     renderTab()
     await ready()
     const heading = screen.getByRole('heading', { name: 'Vocabulary' })
-    expect(heading.closest('.page-heading')?.querySelector('p')).toBeTruthy()
+    expect(heading.closest('.card-heading')?.querySelector('.card-heading-description')).toBeTruthy()
   })
 })

@@ -31,6 +31,21 @@ function FieldError({ children }) {
 }
 
 /**
+ * A group's band in a metric picker: the group's name, and how many of its listed metrics are
+ * ticked once any are. Pinned to the top of the list while its metrics are in view.
+ */
+export function MetricGroupHeading({ group, picked, title }) {
+  return (
+    <div className="metric-picker-group" title={title}>
+      <span className={`table-group-label${group.isUngrouped ? ' table-group-label-muted' : ''}`}>
+        {group.label}
+      </span>
+      {picked > 0 && <span className="metric-picker-group-selected">{picked} selected</span>}
+    </div>
+  )
+}
+
+/**
  * Build a schema from catalog metrics. It does this and nothing else: a device is given its schema
  * on the Devices page, where the rest of what a device needs -- its gateway, its cell, its
  * conformance policy -- is also decided.
@@ -209,12 +224,11 @@ export function SchemaBuilderModal({ catalog, onSubmit, onCancel }) {
             // stays navigable.
             groupCatalog(filteredCatalog).map(group => (
               <div key={group.label}>
-                <div
-                  style={{ position: 'sticky', top: 0, background: 'var(--bg-glass)', backdropFilter: 'blur(4px)', padding: '5px 12px', borderBottom: '1px solid var(--border)', fontSize: '11px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: group.isUngrouped ? 'var(--text-muted)' : 'var(--accent)' }}
+                <MetricGroupHeading
+                  group={group}
+                  picked={group.metrics.filter(m => selectedIds.has(m.metric_uuid)).length}
                   title={group.isUngrouped ? 'Metric names carrying no "Group/Metric" prefix' : `Metrics named "${group.label}/…"`}
-                >
-                  {group.label} <span style={{ opacity: 0.7 }}>({group.metrics.length})</span>
-                </div>
+                />
                 {group.metrics.map(m => (
                   <label key={m.metric_uuid} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}>
                     <input type="checkbox" checked={selectedIds.has(m.metric_uuid)} onChange={() => toggleMetric(m.metric_uuid)} />

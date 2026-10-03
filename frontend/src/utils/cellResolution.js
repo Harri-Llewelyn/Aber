@@ -48,7 +48,7 @@ const SOURCE_LABELS = {
   [SOURCE_SITE_WIDE]: 'Site-Wide',
   [SOURCE_UNASSIGNED]: 'Unassigned',
   [SOURCE_SIMULATED]: 'Simulated',
-  [SOURCE_SHADOW]: 'Shadow'
+  [SOURCE_SHADOW]: 'Replay lane'
 }
 
 /** Short badge text for a location source. */
@@ -81,7 +81,7 @@ export function gatewayAcceptsCell(gateway) {
 export function noCellReason(gateway) {
   if (gatewayAcceptsCell(gateway)) return null
   return gateway?.is_shadow
-    ? 'Its gateway is the playback gateway, so its devices are replay lanes rather than in a cell.'
+    ? 'Its gateway is the Playback gateway, so its devices are replay lanes rather than in a cell.'
     : 'Its gateway is simulated, so its assets belong to the Simulated lane rather than to a cell.'
 }
 

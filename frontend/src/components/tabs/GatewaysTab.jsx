@@ -6,12 +6,12 @@ import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
 import {
-  gatewayLiveStatus, isGatewayOnline, isGatewayPending, formatHeartbeat, formatUptime,
+  gatewayDisplayStatus, isGatewayOnline, isGatewayPending, formatHeartbeat, formatUptime,
   formatCertExpiry, isCertExpiring, holdsOlderRoot, formatBytes, CERT_EXPIRY_WARN_DAYS
 } from '../../utils/gatewayStatus'
 import { gatewaySparkplugId } from '../../utils/sparkplugId'
 import {
-  GATEWAY_TYPES, SELECTABLE_TYPES, gatewayType, gatewayTypeFields,
+  GATEWAY_TYPES, SELECTABLE_TYPES, LISTED_TYPES, gatewayType, gatewayTypeFields,
   gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone,
 } from '../../utils/gatewayType'
 import { deviceLifecycleStatus, deviceStatusTitle, deviceDotColor } from '../../utils/deviceStatus'
@@ -24,7 +24,6 @@ import CopyableId from '../common/CopyableId'
 import { TagList } from '../common/TagList'
 import { StatusBadge } from '../common/StatusBadge'
 import { Badge, ArchivedBadge } from '../common/Badge'
-import { SectionCount } from '../common/SectionCount'
 import { SearchInput } from '../common/SearchInput'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
@@ -97,8 +96,6 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const [liveStatusFilter, setLiveStatusFilter] = useState('')
   const [kindFilter, setKindFilter] = useState('')
   const [quarantineOnly, setQuarantineOnly] = useState(false)
-  // The Playback gateway: hidden by default, and not a Type option.
-  const [showShadowGateways, setShowShadowGateways] = useState(false)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -123,7 +120,6 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
     setLiveStatusFilter('')
     setKindFilter('')
     setQuarantineOnly(false)
-    setShowShadowGateways(false)
     setFilterMode('active')
     handleClearSearch()
   }
@@ -277,8 +273,6 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   )
 
   const filteredGateways = gateways.filter(g => {
-    // The Playback gateway is hidden by default; its broker credential is issued from here.
-    if (!showShadowGateways && g.is_shadow) return false
     if (filterMode === 'active'   && g.is_archived) return false
     if (filterMode === 'archived' && !g.is_archived) return false
     if (searchQuery) {
@@ -288,24 +282,16 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
         .filter(Boolean).join(' ').toLowerCase()
       if (!haystack.includes(q)) return false
     }
-    if (liveStatusFilter && gatewayLiveStatus(g) !== liveStatusFilter) return false
+    if (liveStatusFilter && gatewayDisplayStatus(g) !== liveStatusFilter) return false
     // The derived type, not `deployment`: Simulated and Host share a deployment.
     if (kindFilter && gatewayType(g) !== kindFilter) return false
     if (quarantineOnly && !gatewaysWithQuarantine.has(g.gateway_id)) return false
     return true
   })
 
-  // Counted across the whole fleet: the toggle is offered whenever one exists, hidden or not.
-  const shadowGatewayCount = gateways.filter(g => g.is_shadow).length
-  // The count's total: every gateway in the lifecycle lane the select names, so the page at rest
-  // reads a bare count and only the other filters narrow it to shown / total. The Playback gateway
-  // counts only once it is asked for.
-  const inLane = g => filterMode === 'all' || (filterMode === 'archived') === !!g.is_archived
-  const listable = gateways.filter(g => (showShadowGateways || !g.is_shadow) && inLane(g))
-
   const activeFilterCount =
     [searchQuery, liveStatusFilter, kindFilter].filter(Boolean).length +
-    (quarantineOnly ? 1 : 0) + (showShadowGateways ? 1 : 0) + (filterMode !== 'active' ? 1 : 0)
+    (quarantineOnly ? 1 : 0) + (filterMode !== 'active' ? 1 : 0)
 
   // Arriving from a cell's gateway chip or a device's Serving Gateway chip names ONE gateway: open it.
   useArrivalSelection(
@@ -321,7 +307,25 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const selectedCell = selected ? cells.find(c => c.cell_id === selected.cell_id) : null
 
   // "None yet" only when the stack holds no gateway of its own; anything else is a filter's doing.
-  const isFiltered = gateways.some(g => !g.is_shadow) || activeFilterCount > 0
+  // The seeded Playback gateway does not count, so a new install still prompts under its row.
+  const hasOwnGateway = gateways.some(g => !isShadowGateway(g))
+  const isFiltered = hasOwnGateway || activeFilterCount > 0
+  // With the drawer open, the columns it repeats are dropped so the table fits beside it.
+  const compact = !!selected
+
+  // The panel's one primary: setup while pending, else the console, else Restore when archived,
+  // else Edit. The Playback gateway cannot be edited, so its credential takes Edit's place.
+  const selectedPending = !!selected && isGatewayPending(selected)
+  const offersSetup = !!selected && !selected.is_archived && selected.deployment === 'remote' && selectedPending && canManage
+  const offersCredential = !!selected && !selected.is_archived && selected.deployment === 'host' && canManage
+  const primaryAction = !selected ? null
+    : offersSetup ? 'setup'
+    : offersCredential && selectedPending ? 'credential'
+    : selected.access_url ? 'launch'
+    : selected.is_archived ? 'restore'
+    : !selected.is_shadow ? 'edit'
+    : offersCredential ? 'credential'
+    : null
 
   return (
     <div className="page-layout page-fill">
@@ -370,7 +374,6 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           icon={<IconRadio size={15} />}
           title="Gateways"
           description="The edge nodes that publish to the broker, each with its own broker credential, and the status each last reported."
-          count={<SectionCount total={listable.length} shown={filteredGateways.length} />}
           actions={(
             <>
               <ActionButton
@@ -416,9 +419,9 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
         </select>
 
         {/* The same value the Type column prints, through the same helper. */}
-        <select className="form-control control-sm" value={kindFilter} onChange={e => setKindFilter(e.target.value)} title="Filter by the Type column: Remote (an appliance on the plant network), Host (a connector inside this stack), or Simulated (host-run, readings generated)">
+        <select className="form-control control-sm" value={kindFilter} onChange={e => setKindFilter(e.target.value)} title="Filter by the Type column: Remote (an appliance on the plant network), Host (a connector inside this stack), Simulated (host-run, readings generated), or Playback (republishes recorded captures)">
           <option value="">Any type</option>
-          {SELECTABLE_TYPES.map(t => (
+          {LISTED_TYPES.map(t => (
             <option key={t} value={t}>{gatewayTypeLabel(t)}</option>
           ))}
         </select>
@@ -430,17 +433,6 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
         >
           <IconShieldAlert size={13} /> Has quarantined devices ({gatewaysWithQuarantine.size})
         </button>
-
-        {/* Offered only when one exists. */}
-        {shadowGatewayCount > 0 && (
-          <button
-            className={`btn btn-sm ${showShadowGateways ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => setShowShadowGateways(v => !v)}
-            title="The Playback gateway publishes recorded captures as shadow devices and connects to no machine, so it is hidden by default. It stays reachable so its broker credential can be issued."
-          >
-            <IconRadio size={13} /> Show playback gateway
-          </button>
-        )}
 
         <ClearFilters count={activeFilterCount} onClear={resetFilters} />
       </div>
@@ -456,17 +448,18 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
              filteredMessage="No gateways match these filters."
            />
          ) : (
+           <>
            <div className="table-wrap">
              <table>
                <thead>
                  <tr>
                    <th title="Human-readable gateway name">Gateway Name</th>
-                   <th title="The gateway's database identifier -- the id to quote in a query, a ticket or an API call. Its Sparkplug edge node id is derived from this, so nothing is lost by showing it here.">Gateway UUID</th>
-                   <th title="Where this gateway's connector runs, and whether its readings are real: Remote (an appliance on the plant network), Host (inside this stack), Simulated (host-run, readings generated), Shadow (republishes recorded captures)">Type</th>
+                   {!compact && <th title="The gateway's database identifier -- the id to quote in a query, a ticket or an API call. Its Sparkplug edge node id is derived from this, so nothing is lost by showing it here.">Gateway UUID</th>}
+                   <th title="Where this gateway's connector runs, and whether its readings are real: Remote (an appliance on the plant network), Host (inside this stack), Simulated (host-run, readings generated), Playback (republishes recorded captures)">Type</th>
                    <th title="Where this gateway serves: a cell, a whole area, or the whole site">Location</th>
                    <th title="What the gateway last reported, shown as Stale once its heartbeat is over 90 seconds old">Gateway Status</th>
                    <th title="Age of the last Sparkplug B node heartbeat (NBIRTH/NDATA/NDEATH)">Last Heartbeat</th>
-                   <th title="Devices assigned to this gateway">Connected Devices</th>
+                   {!compact && <th title="Devices assigned to this gateway">Connected Devices</th>}
                  </tr>
                </thead>
                <tbody>
@@ -474,7 +467,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                    const gwAssets = g.devices || []
                    const onlineCount = gwAssets.filter(a => a.status === 'ONLINE' || !a.status).length
                    const offlineCount = gwAssets.filter(a => a.status === 'OFFLINE').length
-                   const liveStatus = gatewayLiveStatus(g)
+                   const liveStatus = gatewayDisplayStatus(g)
                    const type = gatewayType(g)
 
                    return (
@@ -484,6 +477,13 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                        <tr
                          className={`row-selectable${selectedId === g.gateway_id ? ' row-selected' : ''}${g.is_archived ? ' row-archived' : ''}`}
                          onClick={rowSelectHandler(() => setSelectedId(id => id === g.gateway_id ? null : g.gateway_id))}
+                         // Focusable, and Enter or Space on the row itself does what a click does.
+                         tabIndex={0}
+                         onKeyDown={e => {
+                           if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+                           e.preventDefault()
+                           setSelectedId(id => id === g.gateway_id ? null : g.gateway_id)
+                         }}
                          title="Click to inspect this gateway in the details panel"
                        >
                          <td>
@@ -493,7 +493,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                              <ArchivedBadge size="sm" className="gateway-name-badge" title="Archived: out of service. Restore it from its drawer." />
                            )}
                          </td>
-                         <td><CopyableId value={g.gateway_id} label="Gateway UUID" onNotify={showToast} /></td>
+                         {!compact && <td><CopyableId value={g.gateway_id} label="Gateway UUID" onNotify={showToast} /></td>}
                          <td>
                            <Badge tone={gatewayTypeTone(type)} size="sm" title={gatewayTypeDescription(type)}>
                              {gatewayTypeLabel(type)}
@@ -525,7 +525,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                          >
                            {formatHeartbeat(g.last_heartbeat)}
                          </td>
-                         <td>
+                         {!compact && <td>
                            {g.is_archived ? (
                              <span className="cell-meta">—</span>
                            ) : gwAssets.length === 0 ? (
@@ -557,7 +557,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                                ]}
                              />
                            )}
-                         </td>
+                         </td>}
                        </tr>
                      </React.Fragment>
                    )
@@ -565,6 +565,10 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                </tbody>
              </table>
            </div>
+           {!hasOwnGateway && (
+             <EmptyState icon={<IconRadio size={36} />} message="No gateways yet besides the Playback gateway." />
+           )}
+           </>
          )}
       </div>
 
@@ -716,10 +720,11 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
         onClose={() => setSelectedId(null)}
         type="GATEWAY"
         onCopy={showToast}
+        icon={<IconRadio size={16} />}
         title={selected?.gateway_name || ''}
         subtitle={selected && (
           <>
-            <StatusBadge status={gatewayLiveStatus(selected)} />
+            <StatusBadge status={gatewayDisplayStatus(selected)} />
             <Badge tone={gatewayTypeTone(gatewayType(selected))} title={gatewayTypeDescription(gatewayType(selected))}>
               {gatewayTypeLabel(gatewayType(selected))}
             </Badge>
@@ -937,7 +942,11 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           !selected.is_archived && !selected.is_shadow && canManage && {
             label: 'Request Rebirth',
             icon: <IconRefreshCw size={13} />,
-            title: 'Ask this edge node to republish its birth certificate. Harmless — it restates '
+            // Withheld until the first birth: before it there is nothing to restate.
+            disabled: selectedPending,
+            title: selectedPending
+              ? 'Available once this gateway has published: it has not sent a birth certificate yet, so there is none to restate.'
+              : 'Ask this edge node to republish its birth certificate. Harmless — it restates '
               + 'the metric names and aliases it already publishes, and briefly appears in the live '
               + 'stream for every subscriber. The daemon sends it within a few seconds.',
             onClick: () => runRebirth(selected.gateway_id, async () => {
@@ -954,10 +963,10 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           // Setup while it is unfinished, and for AWAITING_BIRTH so an appliance that enrolled and never
           // published can be re-issued. Absent once ONLINE, since re-issuing invalidates a working
           // credential. Confirms first, unlike the dialog straight after creation.
-          !selected.is_archived && selected.deployment === 'remote' && isGatewayPending(selected) && canManage && {
+          offersSetup && {
             label: selected.status === 'AWAITING_BIRTH' ? 'Re-issue Setup' : 'Set Up Gateway',
             icon: <IconDownload size={13} />,
-            primary: true,
+            primary: primaryAction === 'setup',
             // Withheld, not hidden, while the deployment cannot issue setup: the banner says why.
             disabled: enrolmentBlocked,
             onClick: () => setBundleForGw({
@@ -976,11 +985,10 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           // Host and Simulated gateways (`deployment === 'host'`) have no enrolment lifecycle. Not on an
           // archived gateway, since a credential issued then would resurrect the row. This is the only
           // place a password appears in the product.
-          !selected.is_archived && selected.deployment === 'host' && canManage && {
+          offersCredential && {
             label: 'Generate Broker Credential',
             icon: <IconLock size={13} />,
-            // Setup outranks the console only while the gateway has never published.
-            primary: isGatewayPending(selected),
+            primary: primaryAction === 'credential',
             onClick: () => setCredentialForGw({
               gateway_id: selected.gateway_id,
               gateway_name: selected.gateway_name,
@@ -990,7 +998,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             title: 'Issue this Host or Simulated gateway a broker account and show the password once. A Remote gateway enrols itself instead, and its credential never passes through a browser.'
           },
           selected.access_url && {
-            label: 'Launch UI', icon: <IconExternalLink size={13} />, href: selected.access_url, primary: true,
+            label: 'Launch UI', icon: <IconExternalLink size={13} />, href: selected.access_url, primary: primaryAction === 'launch',
             title: 'Open this gateway’s own console — Node-RED for a host-run connector, the appliance’s web UI for a Remote one'
           },
           // Restore replaces Edit on an archived gateway: editing one is refused anyway.
@@ -1000,11 +1008,12 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
             pending: restoringId === selected.gateway_id,
             pendingLabel: 'Restoring…',
             disabled: !canArchive,
-            primary: !selected.access_url,
+            primary: primaryAction === 'restore',
             title: !canArchive ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE) : 'Restore gateway back to active service'
           } : !selected.is_shadow && {
             // Not offered for the Playback gateway: two of the three Type options are refused on it.
             label: proposeMode ? 'Propose a Change' : 'Edit Details', icon: <IconPencil size={13} />,
+            primary: primaryAction === 'edit',
             onClick: () => {
               setEditing(selected)
               const mine = proposeMode

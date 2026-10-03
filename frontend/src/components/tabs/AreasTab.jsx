@@ -17,7 +17,6 @@ import { ActionButton } from '../common/ActionButton'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { CardHeading } from '../common/CardHeading'
 import { Badge, ArchivedBadge } from '../common/Badge'
-import { SectionCount } from '../common/SectionCount'
 import { SearchInput } from '../common/SearchInput'
 import { ClearFilters } from '../common/ClearFilters'
 import { LoadingState } from '../common/LoadingState'
@@ -46,9 +45,10 @@ import {
  * rows are drop targets. The banner is gone once the queue drains, and is itself the drop target
  * that takes a cell out of its area; a cell also leaves its area from its own form on the Cells
  * page. Devices are not filed here: a device's area is its cell's, or its own when it is
- * Area-Wide, which is set on the Devices page. An area's plan is managed from its details panel.
+ * Area-Wide, which is set on the Devices page. An area's plan is managed from its details panel,
+ * whose preview opens the Site Map on the area through `onShowOnSiteMap`.
  */
-export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGateway, onViewTrail, hasPermission, initialSearchFilter, onClearFilter }) {
+export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGateway, onViewTrail, onShowOnSiteMap, hasPermission, initialSearchFilter, onClearFilter }) {
   const [areas, setAreas]       = useState([])
   const [cells, setCells]       = useState([])
   const [assets, setAssets]     = useState([])
@@ -160,7 +160,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
 
   /**
    * Archiving an area moves nothing: its cells stay filed in it and every uns/ topic beneath it
-   * keeps its name. It leaves this table, is drawn muted on the Site Map, and runs its timer on the
+   * keeps its name. It leaves this table, is hidden from the Site Map, and runs its timer on the
    * Archived Entities page, which is where deleting it lives.
    */
   const archiveArea = async (days) => {
@@ -205,6 +205,14 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   }
 
   const [selectedId, setSelectedId] = useState(null)
+  const toggleArea = (areaId) => setSelectedId(id => id === areaId ? null : areaId)
+  // Enter or Space on the element itself acts as its click; a key on a control inside it is that
+  // control's.
+  const onOwnKey = (act) => (e) => {
+    if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+    if (e.key === ' ') e.preventDefault()
+    act()
+  }
 
   // Membership, derived: cells by area from the cell list, devices by cell from the device list.
   const cellsByArea = useMemo(() => groupCellsByArea(cells), [cells])
@@ -215,9 +223,6 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   const areaWideDevices = (areaId) => assets.filter(a => a.location_source === SOURCE_AREA_WIDE && a.effective_area_id === areaId)
   const areaWideGateways = (areaId) => gateways.filter(g => g.location_scope === SCOPE_AREA_WIDE && g.area_id === areaId)
 
-  // The lifecycle select scopes the list; the count reads scope-size, or `shown / scope` under a search.
-  const inLifecycle = areas.filter(a =>
-    filterMode === 'all' || (filterMode === 'archived' ? a.is_archived : !a.is_archived))
   const filteredAreas = areas.filter(a => {
     if (filterMode === 'active'   && a.is_archived) return false
     if (filterMode === 'archived' && !a.is_archived) return false
@@ -246,7 +251,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
       onClick={e => { e.stopPropagation(); onSelectCell?.(c.cell_id) }}
       role="button"
       tabIndex={0}
-      onKeyDown={e => { if (e.key === 'Enter') onSelectCell?.(c.cell_id) }}
+      onKeyDown={onOwnKey(() => onSelectCell?.(c.cell_id))}
       title={`${c.cell_name} — ${(devicesByCell.get(c.cell_id) || []).length} device(s). ${canManage ? 'Drag onto an area to file it; click' : 'Click'} to open on the Cells page`}
     >
       <CellIcon cell={c} size={11} />
@@ -283,7 +288,6 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
           icon={<IconFactory size={15} />}
           title="Areas"
           description="The ISA-95 level between the site and its cells, such as a hall or a yard, so readings can say where they came from."
-          count={<SectionCount total={inLifecycle.length} shown={filteredAreas.length} />}
           actions={(
             <>
               <ActionButton
@@ -354,7 +358,9 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                     <tr
                       key={a.area_id}
                       className={`row-selectable${selectedId === a.area_id ? ' row-selected' : ''}${a.is_archived ? ' row-archived' : ''}`}
-                      onClick={rowSelectHandler(() => setSelectedId(id => id === a.area_id ? null : a.area_id))}
+                      tabIndex={0}
+                      onClick={rowSelectHandler(() => toggleArea(a.area_id))}
+                      onKeyDown={onOwnKey(() => toggleArea(a.area_id))}
                       onDragOver={handleDragOver}
                       onDrop={e => handleDrop(e, a.area_id)}
                       title={canManage ? 'Drop a cell here to file it in this area; click to inspect' : 'Click to inspect this area'}
@@ -385,7 +391,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                         )}
                       </td>
                       <td>
-                        <Badge size="sm" title="Devices resolving to a cell in this area">{deviceCountOf(areaCells)}</Badge>
+                        <span title="Devices resolving to a cell in this area">{deviceCountOf(areaCells)}</span>
                         {wide > 0 && (
                           <Badge size="sm" className="badge-follow" title="Area-Wide assets: filed in the area rather than in any one cell">+{wide} Area-Wide</Badge>
                         )}
@@ -497,6 +503,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
         type="AREA"
         onCopy={showToast}
         title={selectedArea?.area_name || ''}
+        icon={selectedArea && <AreaIcon area={selectedArea} size={16} />}
         subtitle={selectedArea && (
           <Badge size="sm">{plural(selectedCells.length, 'Cell')} · {plural(deviceCountOf(selectedCells), 'Device')}</Badge>
         )}
@@ -536,6 +543,8 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
         actions={selectedArea ? [
           {
             label: proposeMode ? 'Propose a Change' : 'Edit Details', icon: <IconPencil size={13} />,
+            // The primary unless archived: an area has no destination, and Restore outranks it.
+            primary: !selectedArea.is_archived,
             onClick: () => {
               // Seeded with the open proposal's patch when there is one: one open proposal per
               // asset per person, so a second field extends the request.
@@ -573,6 +582,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
           selectedArea.is_archived
             ? {
               label: 'Restore Area', icon: <IconRefreshCw size={13} />,
+              primary: true,
               onClick: () => restoreArea(selectedArea),
               disabled: !canArchive,
               title: !canArchive ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE) : 'Return this area to service; its retention timer is cleared'
@@ -587,17 +597,17 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                 : 'Archive this area. Its cells stay filed in it and its topics keep their name; deleting it is done from Archived Entities.'
             }
         ].filter(Boolean) : []}
-      >
-        {selectedArea && (
+        beforeActions={selectedArea && (
           <AreaPlanPanel
             area={selectedArea}
             cells={selectedCells}
             canManage={canManage}
             showToast={showToast}
             onChanged={loadAll}
+            onOpen={onShowOnSiteMap}
           />
         )}
-      </ContextPanel>
+      />
     </div>
   )
 }

@@ -23,8 +23,8 @@ export function GatewayRepositoryPanel({ gateway, canOpenForge }) {
   // Nothing for a role the forge would refuse, rather than a disabled link.
   if (!canOpenForge) return null
 
-  // A host-run gateway has no repository: one is created only when an appliance enrols. Shadow is
-  // tested first because a shadow gateway is also simulated.
+  // A host-run gateway has no repository: one is created only when an appliance enrols. The Playback
+  // gateway is tested first because it is also simulated.
   if (gateway?.deployment === 'host') {
     let reason
     if (gateway.is_shadow) {

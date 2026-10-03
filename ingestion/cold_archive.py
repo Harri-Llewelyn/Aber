@@ -1001,7 +1001,7 @@ def main():
         log("cold telemetry archival is not configured. Missing:")
         for name in missing:
             log(f"  {name}")
-        log("Set them under Settings > Cold Storage as an Administrator. supabase/README.md,")
+        log("Set them on the Cold Storage page as an Administrator. supabase/README.md,")
         log("'Cold telemetry archival', has the bucket policy the credential needs.")
         return 2
 
@@ -1054,13 +1054,13 @@ def main():
 
         while True:
             # RE-READ EVERY PASS, so switching the setting off stops the next pass rather than
-            # needing the container restarted. The switch on the Settings page is the control.
+            # needing the container restarted. The switch on the Cold Storage page is the control.
             settings = read_settings()
             report_armed(conn, settings, args.dry_run)
             if not settings["enabled"] and not args.force:
                 if args.loop is None:
                     log("archive.enabled is off; nothing to do.")
-                    log("Turn it on under Settings > Cold Storage, or pass --force for a one-off run.")
+                    log("Turn it on from the Cold Storage page, or pass --force for a one-off run.")
                     return 0
                 log("archive.enabled is off; waiting.")
             elif missing:

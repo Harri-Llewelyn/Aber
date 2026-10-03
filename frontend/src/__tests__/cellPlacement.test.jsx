@@ -7,6 +7,7 @@ import { render, screen, waitFor, fireEvent, within, act } from '@testing-librar
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CellsTab } from '../components/tabs/CellsTab'
 import { CellPlacementPicker } from '../components/common/CellPlacementPicker'
+import { AreaPlanPreview } from '../components/common/AreaPlanPreview'
 import { api } from '../api'
 
 vi.mock('../api', async () => {
@@ -57,9 +58,47 @@ describe('CellsTab places a cell on its area plan', () => {
     const row2 = screen.getByText('Bay 2').closest('tr')
     expect(within(row2).getByText('not placed')).toBeInTheDocument()
 
+    // The panel draws the place rather than stating fractions of it.
     fireEvent.click(screen.getByText('Bay 1'))
     const panel = document.querySelector('.context-panel')
-    expect(within(panel).getByText('50% across, 50% down')).toBeInTheDocument()
+    expect(within(panel).queryByText(/% across/)).toBeNull()
+    expect(panel.querySelector('.area-plan-preview .area-plan-pin-selected')).toHaveTextContent('Bay 1')
+
+    fireEvent.click(screen.getByText('Bay 2'))
+    expect(panel.querySelector('.area-plan-preview')).toBeNull()
+    expect(within(panel).getByText('Not placed — set a place in Edit Details')).toBeInTheDocument()
+  })
+
+  it('opens a row from the keyboard with Enter or Space', async () => {
+    await renderCells()
+    const row = screen.getByText('Bay 1').closest('tr')
+    expect(row).toHaveAttribute('tabindex', '0')
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(row).toHaveClass('row-selected')
+    expect(document.querySelector('.context-panel-open')).toBeTruthy()
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(row).not.toHaveClass('row-selected')
+    // A key on the copy chip inside the row is the chip's.
+    fireEvent.keyDown(within(row).getByRole('button', { name: /cell UUID/i }), { key: 'Enter' })
+    expect(row).not.toHaveClass('row-selected')
+  })
+
+  it('opens the Site Map on the cell\'s area from the panel\'s plan', async () => {
+    const onShowOnSiteMap = vi.fn()
+    render(<CellsTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} onShowOnSiteMap={onShowOnSiteMap} />)
+    await waitFor(() => expect(screen.getByText('Bay 1')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Bay 1'))
+    fireEvent.keyDown(screen.getByRole('link', { name: 'Open North Shop on the Site Map' }), { key: 'Enter' })
+    expect(onShowOnSiteMap).toHaveBeenCalledWith('area-1')
+  })
+
+  it('titles the panel with the cell\'s icon, Edit Details its one primary without a dashboard', async () => {
+    await renderCells()
+    fireEvent.click(screen.getByText('Bay 1'))
+    const panel = document.querySelector('.context-panel')
+    expect(panel.querySelector('.context-panel-title-row .context-panel-icon svg')).toBeTruthy()
+    expect(panel.querySelectorAll('.context-panel-actions .btn-primary')).toHaveLength(1)
+    expect(panel.querySelector('.context-panel-actions .btn-primary')).toHaveTextContent('Edit Details')
   })
 
   it('shows the plan to click once an area is chosen, and not before', async () => {
@@ -119,7 +158,7 @@ describe('CellsTab places a cell on its area plan', () => {
     expect(screen.getByText(/Not placed/)).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('Area'), { target: { value: '' } })
-    expect(document.querySelector('.area-plan')).toBeNull()
+    expect(document.querySelector('.modal .area-plan')).toBeNull()
 
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })) })
     expect(api.put).toHaveBeenCalledWith('/api/v1/cells/cell-1', expect.objectContaining({
@@ -159,5 +198,46 @@ describe('CellPlacementPicker on its own', () => {
     render(<CellPlacementPicker area={area} cells={cells} cellId="cell-9" value={null} onChange={onChange} />)
     fireEvent.click(screen.getByTitle('Bay 1 — already in this area'))
     expect(onChange).not.toHaveBeenCalled()
+  })
+})
+
+describe('AreaPlanPreview on its own', () => {
+  const placed = [
+    { cell_id: 'c1', cell_name: 'Bay 1', area_id: 'area-1', plan_x: 0.2, plan_y: 0.2, is_archived: false },
+    { cell_id: 'c2', cell_name: 'Bay 2', area_id: 'area-1', plan_x: 0.8, plan_y: 0.8, is_archived: false },
+    { cell_id: 'c3', cell_name: 'Old Bay', area_id: 'area-1', plan_x: 0.5, plan_y: 0.2, is_archived: true },
+    { cell_id: 'c4', cell_name: 'Elsewhere', area_id: 'area-2', plan_x: 0.5, plan_y: 0.5, is_archived: false }
+  ]
+  const pinFor = (name) => [...document.querySelectorAll('.area-plan-pin')].find(p => p.textContent === name)
+
+  it('rings the highlighted cell and dims the area\'s others, by size as well as colour', () => {
+    render(<AreaPlanPreview area={area} cells={placed} highlightCellId="c1" />)
+    // This area's live cells only: not another area's, and not an archived one.
+    expect([...document.querySelectorAll('.area-plan-pin-label')].map(l => l.textContent)).toEqual(['Bay 1', 'Bay 2'])
+    expect(pinFor('Bay 1')).toHaveClass('area-plan-pin-selected')
+    expect(pinFor('Bay 1')).not.toHaveClass('area-plan-pin-small')
+    expect(pinFor('Bay 2')).toHaveClass('area-plan-pin-muted', 'area-plan-pin-small')
+  })
+
+  it('draws an archived cell when it is the one highlighted', () => {
+    render(<AreaPlanPreview area={area} cells={placed} highlightCellId="c3" />)
+    expect(pinFor('Old Bay')).toHaveClass('area-plan-pin-selected')
+  })
+
+  it('is a link to the Site Map by click or Enter, and nothing to tab to without one', () => {
+    const onOpen = vi.fn()
+    const { unmount } = render(<AreaPlanPreview area={area} cells={placed} onOpen={onOpen} />)
+    const link = screen.getByRole('link', { name: 'Open North Shop on the Site Map' })
+    fireEvent.click(link)
+    fireEvent.keyDown(link, { key: ' ' })
+    fireEvent.keyDown(link, { key: 'Enter' })
+    expect(onOpen.mock.calls).toEqual([['area-1'], ['area-1']])
+    // The pins are marks inside the link, not controls of their own.
+    expect(link.querySelector('button')).toBeNull()
+    unmount()
+
+    render(<AreaPlanPreview area={area} cells={placed} />)
+    expect(screen.queryByRole('link')).toBeNull()
+    expect(document.querySelector('.area-plan-preview')).not.toHaveAttribute('tabindex')
   })
 })

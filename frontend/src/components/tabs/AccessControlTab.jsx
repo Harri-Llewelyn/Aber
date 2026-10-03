@@ -10,16 +10,16 @@ import { ServicePrincipalCreateModal } from '../modals/ServicePrincipalCreateMod
 import { ServicePrincipalDescribeModal } from '../modals/ServicePrincipalDescribeModal'
 import {
   IconBot, IconDownload, IconLock, IconPencil, IconPlus, IconRadio, IconRefreshCw, IconShieldAlert,
+  IconShieldCheck,
 } from '../common/Icons'
 import { Badge, ArchivedBadge } from '../common/Badge'
+import { CardHeading } from '../common/CardHeading'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { HelpTip } from '../common/HelpTip'
 import { LoadingState } from '../common/LoadingState'
-import { PageHeading } from '../common/PageHeading'
-import { SectionCount } from '../common/SectionCount'
 import { TabStrip } from '../common/TabStrip'
-import { ContextPanel } from '../common/ContextPanel'
+import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { formatDateTime } from '../../utils/format'
 import {
   CREDENTIAL_STATES,
@@ -42,8 +42,6 @@ import {
   permissionReach,
   tokenStatus,
   tokenStatusDetail,
-  tokenStatusLabel,
-  tokenStatusTone,
 } from '../../utils/serviceIdentities'
 import { gatewayType, gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone } from '../../utils/gatewayType'
 
@@ -75,18 +73,49 @@ const ROLE_ENTRIES = [
   },
 ]
 
+/** The page's lists, one per tab, in tab order. A search-bar card opens one by its id. */
+const SECTIONS = [
+  { id: 'credentials', label: 'Broker credentials', title: "Every gateway's broker credential, recorded and live" },
+  { id: 'identities', label: 'Machine identities', title: "The stack's own processes, on the database side" },
+  { id: 'accounts', label: 'Broker accounts', title: "The broker's own accounts, and any no gateway claims" },
+  { id: 'roles', label: 'Broker roles', title: 'What each broker role may publish, receive and subscribe to' },
+]
+
+/** Each tab's "?", drawn in the tab bar for the selected tab. */
+const SECTION_HELP = {
+  credentials: {
+    label: 'About broker credentials',
+    text: 'Each gateway connects to the broker as its own Sparkplug ID, confined to its edge node. Credential is what the platform issued and recorded; Broker is what the broker holds now, read live from Dynamic Security.',
+  },
+  identities: {
+    label: 'About machine identities',
+    text: "Identities for the stack's own processes. None can sign in: each is named by a token and holds permissions of its own, not a person's role. They reach the database only, never the broker.",
+  },
+  accounts: {
+    label: 'About broker accounts',
+    text: "The broker's accounts, read live. mosquitto-init creates the stack's own at boot from each MQTT_<NAME>_USER and _PASSWORD pair. No gateway marks a gateway-shaped account no gateway claims; scripts/revoke-orphaned-broker-accounts.mjs disables those.",
+  },
+  roles: {
+    label: 'About broker roles',
+    text: 'What each role may publish, receive and subscribe to, read live from Dynamic Security. Open a role to read its rules. Purposes are declared in mosquitto/dynsec-roles.json and checked at build time.',
+  },
+}
+
 /**
- * Access Control: broker credentials and machine identities, as two sections of one page.
+ * Access Control: broker credentials and machine identities, as four tabs of one card.
  *
- * Gateways is the per-gateway list, with two sources side by side: what the platform issued and
- * recorded (the database), and what the broker holds right now (its Dynamic Security plugin, read
- * through broker-inventory). A credential issued outside a dashboard session reads `No platform
- * record` and `Active`, which is the honest pair. Services is the non-human identities on both
- * planes. Administrator only, gated on the role as Settings is; the page is narrower than the RPCs
- * behind it, which also admit Shopfloor_Manager. The page scrolls: it holds several peer cards.
+ * Broker credentials is the per-gateway list, with two sources side by side: what the platform
+ * issued and recorded (the database), and what the broker holds right now (its Dynamic Security
+ * plugin, read through broker-inventory). A credential issued outside a dashboard session reads `No
+ * platform record` and `Active`, which is the honest pair. The other three tabs are the non-human
+ * identities on both planes. Administrator only, gated on the role as Settings is; the page is
+ * narrower than the RPCs behind it, which also admit Shopfloor_Manager. The card scrolls.
+ *
+ * `initialSection` is a SECTIONS id handed over by the search bar; `onClearSection` drops it once
+ * the tab is open.
  */
-export function AccessControlTab({ showToast }) {
-  const [section, setSection] = useState('gateways')
+export function AccessControlTab({ showToast, initialSection = '', onClearSection }) {
+  const [section, setSection] = useState('credentials')
   // The role whose rules the drawer shows, by name; null when closed.
   const [openRole, setOpenRole] = useState(null)
   const [rows, setRows] = useState([])
@@ -184,6 +213,20 @@ export function AccessControlTab({ showToast }) {
 
   useEffect(() => { load(true) }, [load])
 
+  // The drawer belongs to Broker roles, so leaving that tab closes it.
+  const selectSection = useCallback((id) => {
+    setSection(id)
+    if (id !== 'roles') setOpenRole(null)
+  }, [])
+
+  // Opens the tab a search-bar card named, then drops the request so a later visit starts on the
+  // default.
+  useEffect(() => {
+    if (!initialSection) return
+    if (SECTIONS.some(s => s.id === initialSection)) selectSection(initialSection)
+    onClearSection?.()
+  }, [initialSection, onClearSection, selectSection])
+
   // Counts per filter value, over the whole list, so the dropdown answers "is there any?" without
   // being selected. Archived rows count only under Archived: archiving rotated their credential to
   // a password nobody holds, so their state is not one of the four.
@@ -228,7 +271,7 @@ export function AccessControlTab({ showToast }) {
 
   // The broker's own accounts: everything that is not a gateway, plus any declared fixture. Each
   // with the purpose of the platform role it holds, or its own declaration. In policy order, so
-  // the list reads the same way as the roles beneath it.
+  // the list reads the same way as Broker roles.
   const platformAccounts = useMemo(() => {
     if (!inventory) return []
     const order = new Map(ROLE_ENTRIES.map((e, i) => [e.rolename, i]))
@@ -245,6 +288,12 @@ export function AccessControlTab({ showToast }) {
       .sort((a, b) => rank(a) - rank(b) || a.username.localeCompare(b.username))
   }, [inventory])
 
+  // Broker accounts lists both: the platform's own in policy order, then any no gateway claims.
+  const brokerAccounts = useMemo(
+    () => [...platformAccounts, ...orphanAccounts.map(c => ({ ...c, noGateway: true }))],
+    [platformAccounts, orphanAccounts]
+  )
+
   const afterAction = useCallback(() => {
     setCredentialForGw(null)
     setBundleForGw(null)
@@ -259,65 +308,52 @@ export function AccessControlTab({ showToast }) {
 
   // The credential filter is the only control on the page that can be off its default.
   const filterCount = credentialFilter !== 'active' ? 1 : 0
-  const gatewayTotal = credentialFilter === 'archived' ? filterCounts.archived : filterCounts.active
 
   return (
-    <div className="page-layout">
+    <div className="page-layout page-fill">
       <div className="page-main">
-        <PageHeading icon={<IconLock size={15} />} title="Access Control">
-          The credentials that let gateways and the stack's own processes reach the broker and the
-          database, kept on two separate planes.
-        </PageHeading>
+        <div className="card card-fill">
+          <CardHeading
+            icon={<IconLock size={15} />}
+            title="Access Control"
+            description="The credentials that let gateways and the stack's own processes reach the broker and the database, kept on two separate planes."
+          />
 
-        {/* Two sections, one page: a gateway's credential and a machine identity are different
-            questions with different actions, and interleaving their cards read as one long list.
-            The heading above does not change with the tab, because the subject does not. */}
-        <TabStrip
-          ariaLabel="Access Control section"
-          value={section}
-          onChange={id => { setSection(id); if (id === 'gateways') setOpenRole(null) }}
-          tabs={[
-            { id: 'gateways', label: 'Gateways', title: "Every gateway's broker credential, and any broker account no gateway claims" },
-            { id: 'services', label: 'Services', title: "The stack's own identities: machine identities, broker accounts and broker roles" },
-          ]}
-        />
+          <TabStrip
+            ariaLabel="Access Control list"
+            value={section}
+            onChange={selectSection}
+            tabs={SECTIONS}
+            help={<HelpTip label={SECTION_HELP[section].label} text={SECTION_HELP[section].text} />}
+          />
 
-        {section === 'gateways' && (
-        <div className="stack">
-        <div className="card">
-          <div className="card-header">
-            <h3 className="section-title">
-              Broker credentials
-              <HelpTip
-                label="About broker credentials"
-                text="Each gateway connects to the broker as its own Sparkplug ID, confined to its edge node. Credential is what the platform issued and recorded; Broker is what the broker holds now, read live from Dynamic Security."
-              />
-              <SectionCount total={gatewayTotal} shown={visible.length} />
-            </h3>
-          </div>
-
-          <div className="card-body">
-            <div className="filter-bar">
-              <select
-                className="form-control control-lg"
-                value={credentialFilter}
-                onChange={e => setCredentialFilter(e.target.value)}
-                aria-label="Filter gateways by credential state"
-                title="Filter by the Credential column. An archived gateway's credential was rotated to a password nobody holds; it can be issued a new one only after being restored."
-              >
-                <option value="active">Active ({filterCounts.active})</option>
-                <option value={CREDENTIAL_STATES.ISSUED}>Issued ({filterCounts[CREDENTIAL_STATES.ISSUED]})</option>
-                <option value={CREDENTIAL_STATES.AWAITING_ENROLMENT}>Setup outstanding ({filterCounts[CREDENTIAL_STATES.AWAITING_ENROLMENT]})</option>
-                <option value={CREDENTIAL_STATES.REVOKED}>Revoked ({filterCounts[CREDENTIAL_STATES.REVOKED]})</option>
-                <option value={CREDENTIAL_STATES.UNRECORDED}>No platform record ({filterCounts[CREDENTIAL_STATES.UNRECORDED]})</option>
-                <option value="archived">Archived ({filterCounts.archived})</option>
-              </select>
+          {section === 'credentials' && (<>
+          <div className="filter-bar">
+            <select
+              className="form-control control-lg"
+              value={credentialFilter}
+              onChange={e => setCredentialFilter(e.target.value)}
+              aria-label="Filter gateways by credential state"
+              title="Filter by the Credential column. An archived gateway's credential was rotated to a password nobody holds; it can be issued a new one only after being restored."
+            >
+              <option value="active">Active ({filterCounts.active})</option>
+              <option value={CREDENTIAL_STATES.ISSUED}>Issued ({filterCounts[CREDENTIAL_STATES.ISSUED]})</option>
+              <option value={CREDENTIAL_STATES.AWAITING_ENROLMENT}>Setup outstanding ({filterCounts[CREDENTIAL_STATES.AWAITING_ENROLMENT]})</option>
+              <option value={CREDENTIAL_STATES.REVOKED}>Revoked ({filterCounts[CREDENTIAL_STATES.REVOKED]})</option>
+              <option value={CREDENTIAL_STATES.UNRECORDED}>No platform record ({filterCounts[CREDENTIAL_STATES.UNRECORDED]})</option>
+              <option value="archived">Archived ({filterCounts.archived})</option>
+            </select>
+            {/* Clear sits in the actions group: two auto margins in one bar would split the row. */}
+            <div className="filter-bar-actions">
+              <ClearFilters count={filterCount} onClear={() => setCredentialFilter('active')} />
               <button className="btn btn-ghost btn-sm" onClick={() => load()} title="Re-read credentials">
                 <IconRefreshCw size={14} /> Refresh
               </button>
-              <ClearFilters count={filterCount} onClear={() => setCredentialFilter('active')} />
             </div>
+          </div>
 
+          {(inventoryError || loadError) && (
+          <div className="card-body">
             {/* Shown only when the broker could not be read: the Broker column then reads Not read
                 for every row, and this says why once rather than on each. When it WAS read, the
                 column is the statement and no callout is needed. */}
@@ -340,6 +376,7 @@ export function AccessControlTab({ showToast }) {
               </div>
             )}
           </div>
+          )}
 
           {/* A failed read shows its callout alone: an empty state beside it would say nothing is
               registered when the page simply could not tell. */}
@@ -359,7 +396,7 @@ export function AccessControlTab({ showToast }) {
                 <thead>
                   <tr>
                     <th>Gateway</th>
-                    <th title="The kind of gateway: Remote (an appliance on the plant network), Host (inside this stack), Simulated (readings generated), Shadow (republishes recorded captures)">Type</th>
+                    <th title="The kind of gateway: Remote (an appliance on the plant network), Host (inside this stack), Simulated (readings generated), Playback (republishes recorded captures)">Type</th>
                     <th>MQTT username</th>
                     <th title="What the platform issued and recorded, from the database">Credential</th>
                     <th title="What the broker holds right now, read live from its Dynamic Security plugin">Broker</th>
@@ -378,7 +415,7 @@ export function AccessControlTab({ showToast }) {
                         </td>
                         <td>
                           {/* The same four words as the Gateways and Capture pages, from the same
-                              helper: a simulator and a shadow gateway hold a credential for
+                              helper: a simulator and a playback gateway hold a credential for
                               different reasons. */}
                           <Badge
                             size="sm"
@@ -456,81 +493,28 @@ export function AccessControlTab({ showToast }) {
               </table>
             </div>
           )}
-        </div>
+          </>)}
 
-        {/* Accounts the broker holds that no gateway row claims. Shown only when the broker was read
-            AND there is at least one: an empty card on every healthy stack is noise. */}
-        {orphanAccounts.length > 0 && (
-          <div className="card">
-            <div className="card-header">
-              <h3 className="section-title">
-                Accounts with no gateway
-                <HelpTip
-                  label="About accounts with no gateway"
-                  text="Broker accounts shaped like a gateway id that no gateway claims and nothing declares. scripts/revoke-orphaned-broker-accounts.mjs lists and disables them; it never deletes an account."
-                />
-                <SectionCount total={orphanAccounts.length} />
-              </h3>
+          {/* Machine identities and the broker, as separate tabs: nothing holds an identity on both
+              planes. The ingestion daemon connects to the broker as `aber_ingestion` and reaches the
+              database as Service_Ingestor. */}
+          {section === 'identities' && (<>
+          {/* Offered only when the list could be read: a caller the RPC refused would be refused
+              here too, and a button that opens a dialog to fail is worse than none. The row holds
+              nothing else, so it goes with the button. */}
+          {!principalError && (
+            <div className="filter-bar">
+              <div className="filter-bar-actions">
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => setCreating(true)}
+                  title="Create a machine identity for a process that uses this stack through the API. It reaches the database only, never the broker, and holds no token until one is issued."
+                >
+                  <IconPlus size={13} /> New Machine Identity
+                </button>
+              </div>
             </div>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>MQTT username</th>
-                    <th>Roles</th>
-                    <th>Broker</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {orphanAccounts.map(c => (
-                    <tr key={c.username}>
-                      <td>
-                        <CopyableId
-                          value={c.username}
-                          label="MQTT username"
-                          title={`Copy ${c.username}`}
-                          onNotify={showToast}
-                        />
-                      </td>
-                      <td className="mono cell-meta">{(c.roles || []).join(', ') || '—'}</td>
-                      <td>{brokerBadge(brokerState(c, true))}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-        </div>
-        )}
-
-        {section === 'services' && (
-        <div className="stack">
-        {/* Machine identities and the broker, as separate cards: nothing holds an identity on both
-            planes. The ingestion daemon connects to the broker as `aber_ingestion` and reaches the
-            database as Service_Ingestor. */}
-        <div className="card">
-          <div className="card-header">
-            <h3 className="section-title">
-              Machine identities
-              <HelpTip
-                label="About machine identities"
-                text="Identities for the stack's own processes. None can sign in: each is named by a token and holds permissions of its own, not a person's role. They reach the database only, never the broker."
-              />
-              <SectionCount total={principals.length} />
-            </h3>
-            {/* Offered only when the list could be read: a caller the RPC refused would be refused
-                here too, and a button that opens a dialog to fail is worse than none. */}
-            {!principalError && (
-              <button
-                className="btn btn-primary btn-sm"
-                onClick={() => setCreating(true)}
-                title="Create a machine identity for a process that uses this stack through the API. It reaches the database only, never the broker, and holds no token until one is issued."
-              >
-                <IconPlus size={13} /> New Machine Identity
-              </button>
-            )}
-          </div>
+          )}
 
           {principalError && (
             <div className="card-body">
@@ -634,31 +618,19 @@ export function AccessControlTab({ showToast }) {
                         </td>
                         {/* The count is the way in: an identity has N tokens and
                             `revoke_service_token()` takes a jti, so a row-level Revoke would have
-                            to pick one. A plain badge when there is nothing to list. */}
+                            to pick one. A dash when nothing is recorded to list. */}
                         <td>
                           {status.rows.length > 0 ? (
                             <button
                               type="button"
                               className="count-link"
                               onClick={() => setTokensFor({ principal: p, name: meta.name, status })}
+                              title={`${tokenStatusDetail(status)} Click to list them and revoke one.`}
                             >
-                              <Badge
-                                size="sm"
-                                tone={tokenStatusTone(status)}
-                                title={`${tokenStatusDetail(status)} Click to list them and revoke one.`}
-                              >
-                                {tokenStatusLabel(status)}
-                              </Badge>
+                              {status.outstanding} active
                             </button>
                           ) : (
-                            <Badge
-                              size="sm"
-                              tone={tokenStatusTone(status)}
-                              className="hint-underline"
-                              title={tokenStatusDetail(status)}
-                            >
-                              {tokenStatusLabel(status)}
-                            </Badge>
+                            <span title={tokenStatusDetail(status)}>—</span>
                           )}
                         </td>
                         {/* A button where a token is actually read, and the command everywhere
@@ -737,29 +709,19 @@ export function AccessControlTab({ showToast }) {
               </table>
             </div>
           ))}
-        </div>
+          </>)}
 
-        {/* The broker's own accounts, live. Every account that is not a gateway's, and any gateway
-            -shaped account the repository declares as a fixture: those are created by the boot
-            reconcile from the MQTT_*_USER pairs, not issued against a row, so they belong here and
-            not among the gateways. */}
-        <div className="card">
-          <div className="card-header">
-            <h3 className="section-title">
-              Broker accounts
-              <HelpTip
-                label="About broker accounts"
-                text="The broker's own accounts for the stack's processes, read live. mosquitto-init creates each at boot from its MQTT_<NAME>_USER and _PASSWORD pair, including the validator's test gateway. Purpose is that of the role held."
-              />
-              <SectionCount total={platformAccounts.length} />
-            </h3>
-          </div>
+          {/* The broker's own accounts, live. Every account that is not a gateway's, and any gateway
+              -shaped account the repository declares as a fixture: those are created by the boot
+              reconcile from the MQTT_*_USER pairs, not issued against a row. Then any gateway-shaped
+              account no gateway claims, marked No gateway. */}
+          {section === 'accounts' && (<>
           {inventoryLoading ? <LoadingState label="broker accounts" /> : !inventory ? (
             <EmptyState
               icon={<IconRadio size={36} />}
               message="The broker was not read, so its accounts cannot be listed."
             />
-          ) : platformAccounts.length === 0 ? (
+          ) : brokerAccounts.length === 0 ? (
             <EmptyState
               icon={<IconRadio size={36} />}
               message="The broker holds no platform account. Every account it has belongs to a gateway."
@@ -776,7 +738,7 @@ export function AccessControlTab({ showToast }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {platformAccounts.map(c => (
+                  {brokerAccounts.map(c => (
                     <tr key={c.username}>
                       <td>
                         <CopyableId
@@ -785,11 +747,22 @@ export function AccessControlTab({ showToast }) {
                           title={`Copy ${c.username}`}
                           onNotify={showToast}
                         />
+                        {c.noGateway && (
+                          <Badge
+                            size="sm"
+                            className="badge-follow"
+                            title="No gateway claims this account and nothing declares it. scripts/revoke-orphaned-broker-accounts.mjs lists and disables such accounts; it never deletes one."
+                          >
+                            No gateway
+                          </Badge>
+                        )}
                       </td>
                       <td className="mono cell-meta">{(c.roles || []).join(', ') || '—'}</td>
                       <td className="cell-meta" style={{ maxWidth: '46ch' }}>
                         {c.name && <strong>{c.name}. </strong>}
-                        {c.purpose || 'Holds no platform role; nothing in the repository declares it.'}
+                        {c.noGateway
+                          ? 'Shaped like a gateway’s account, but no gateway claims it and nothing declares it.'
+                          : c.purpose || 'Holds no platform role; nothing in the repository declares it.'}
                       </td>
                       <td>{brokerBadge(brokerState(c, true))}</td>
                     </tr>
@@ -798,19 +771,9 @@ export function AccessControlTab({ showToast }) {
               </table>
             </div>
           )}
-        </div>
+          </>)}
 
-        <div className="card">
-          <div className="card-header">
-            <h3 className="section-title">
-              Broker roles
-              <HelpTip
-                label="About broker roles"
-                text="What each role may publish, receive and subscribe to, read live from Dynamic Security. Open a rule count to read the rules. Purposes are declared in mosquitto/dynsec-roles.json and checked at build time."
-              />
-              <SectionCount total={ROLE_ENTRIES.length} />
-            </h3>
-          </div>
+          {section === 'roles' && (<>
           {!inventoryLoading && !inventory && (
             <div className="card-body">
               <div className="callout callout-warning">
@@ -828,7 +791,7 @@ export function AccessControlTab({ showToast }) {
                 <tr>
                   <th>Role</th>
                   <th>Access</th>
-                  <th title="How many rules the broker reports for the role; open one to read them">Rules</th>
+                  <th title="How many rules the broker reports for the role; open the role to read them">Rules</th>
                   <th>Purpose</th>
                 </tr>
               </thead>
@@ -837,34 +800,31 @@ export function AccessControlTab({ showToast }) {
                   const live = rolesByName.get(entry.rolename)
                   const allowed = (live?.acls || []).filter(a => a.allow)
                   const writes = live ? allowed.some(a => a.acltype === 'publishClientSend') : entry.writes
-                  const rules = `${allowed.length} ${allowed.length === 1 ? 'rule' : 'rules'}`
+                  // A count in the table and the rules in the drawer: the ingestion role alone is
+                  // nine lines, and the table is for comparing roles. Only a role the broker
+                  // reported opens, since there is nothing else to show. Enter or Space on the row
+                  // itself toggles it as a click does; keys on a control inside are ignored.
+                  const toggle = () => setOpenRole(r => (r === entry.rolename ? null : entry.rolename))
+                  const opens = live ? {
+                    className: `row-selectable${openRole === entry.rolename ? ' row-selected' : ''}`,
+                    onClick: rowSelectHandler(toggle),
+                    onKeyDown: e => {
+                      if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+                      e.preventDefault()
+                      toggle()
+                    },
+                    tabIndex: 0,
+                    title: `Open the rules the broker holds for ${entry.rolename}`,
+                  } : {}
                   return (
-                    <tr key={entry.rolename} className={openRole === entry.rolename ? 'row-selected' : undefined}>
+                    <tr key={entry.rolename} {...opens}>
                       <td className="mono">{entry.rolename}</td>
                       <td>
                         <Badge size="sm" tone={writes ? 'pending' : 'success'}>
                           {writes ? 'CAN PUBLISH' : 'READ ONLY'}
                         </Badge>
                       </td>
-                      {/* A count that opens the drawer, not the rules inline: the ingestion role
-                          alone is nine lines, and the table is for comparing roles. The drawer
-                          prints the plugin's own rules, verb and topic, for comparing against the
-                          policy. */}
-                      <td>
-                        {live ? (
-                          <button
-                            type="button"
-                            className="count-link"
-                            onClick={() => setOpenRole(entry.rolename)}
-                            aria-label={rules}
-                            title={`Open the ${allowed.length === 1 ? 'rule' : 'rules'} the broker holds for ${entry.rolename}`}
-                          >
-                            <span className="section-count">{allowed.length}</span>
-                          </button>
-                        ) : (
-                          <span className="cell-meta">Not read</span>
-                        )}
-                      </td>
+                      <td>{live ? allowed.length : <span className="cell-meta">Not read</span>}</td>
                       <td className="cell-meta" style={{ maxWidth: '46ch' }}>{entry.purpose}</td>
                     </tr>
                   )
@@ -872,9 +832,8 @@ export function AccessControlTab({ showToast }) {
               </tbody>
             </table>
           </div>
+          </>)}
         </div>
-        </div>
-        )}
       </div>
 
       {/* One role at a time, beside the table it came from. */}
@@ -895,6 +854,7 @@ export function AccessControlTab({ showToast }) {
             subject="role"
             onCopy={showToast}
             title={entry?.rolename || ''}
+            icon={<IconShieldCheck size={16} />}
             subtitle={entry && (
               <Badge size="sm" tone={writes ? 'pending' : 'success'}>
                 {writes ? 'CAN PUBLISH' : 'READ ONLY'}

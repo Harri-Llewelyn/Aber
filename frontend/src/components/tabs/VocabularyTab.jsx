@@ -53,8 +53,10 @@ export function VocabularyTab({ onUseEntry, hasPermission }) {
   // who cannot submit it would be a dead end.
   const canUse = !!hasPermission?.(PERMISSION_UUIDS.SCHEMA_MANAGE)
 
+  // `page-fill`: the panel is the page's one card, and its sections scroll inside it.
   return (
-    <>
+    <div className="page-layout page-fill">
+      <div className="page-main">
       {loading && <LoadingState label="vocabularies" />}
 
       {!loading && (
@@ -103,6 +105,7 @@ export function VocabularyTab({ onUseEntry, hasPermission }) {
           ]}
         />
       )}
-    </>
+      </div>
+    </div>
   )
 }

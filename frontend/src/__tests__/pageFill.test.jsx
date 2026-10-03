@@ -45,7 +45,7 @@ describe('the page-fill rules', () => {
   })
 
   it('keep two cards in a row a stack apart, without a flex gap that would double the heading margin', () => {
-    // Cold Storage, Archived Entities, Capture and Devices stack a second card under the first.
+    // A page that stacks a second card under the first keeps them a stack apart.
     expect(ruleFor('.page-fill > .page-main > .card + .card')).toMatch(/margin-top:\s*var\(--stack\)/)
     expect(ruleFor('.page-fill > .page-main')).not.toMatch(/\bgap:/)
   })

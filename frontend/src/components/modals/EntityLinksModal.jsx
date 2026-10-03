@@ -159,6 +159,7 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
       size="lg"
       onClose={onClose}
       footer={<button className="btn btn-ghost" onClick={onClose}>Close</button>}
+      fill
     >
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
@@ -219,7 +220,8 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
           </div>
         )}
 
-        <div style={{ maxHeight: '340px', overflowY: 'auto' }}>
+        {/* The list takes the dialog's spare height and scrolls inside it, down to a floor. */}
+        <div className="modal-fill" style={{ minHeight: '120px', overflowY: 'auto' }}>
           {loading ? <LoadingState label="links" /> :
            links.length === 0 ? (
              <EmptyState icon={<IconBookOpen size={30} />} message={`No links attached to this ${entityType}.`} />

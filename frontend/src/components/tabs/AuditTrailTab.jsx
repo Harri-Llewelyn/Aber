@@ -10,6 +10,7 @@ import {
 import { CardHeading } from '../common/CardHeading'
 import { SearchInput } from '../common/SearchInput'
 import { ClearFilters } from '../common/ClearFilters'
+import { FiltersPopover } from '../common/FiltersPopover'
 import { ListFoot } from '../common/ListFoot'
 import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
@@ -98,12 +99,51 @@ const GOVERNANCE_FIELDS = new Set([
    and it is provenance written by ingestion rather than operator configuration. `name` and `icon`
    are cosmetic, not governance. */
 
-/** The four marker classes. `kind` is a CSS suffix as well as a key -- see `.trail-node-*`. */
+/**
+ * The four marker classes. `kind` is a CSS suffix as well as a key -- see `.trail-node-*`. Each has
+ * a shape as well as a colour, so the classes stay apart without colour vision.
+ */
 export const MARKERS = {
-  creation:    { label: 'Created',       hint: 'Row created — provisioning, or a first DBIRTH admitting the device' },
-  operational: { label: 'Operational',   hint: 'State change — status, cell, or another running-time property' },
-  governance:  { label: 'Configuration', hint: 'Governance change — schema binding or declared configuration' },
-  critical:    { label: 'Lifecycle',     hint: 'Lifecycle event — deleted, archived, deprecated, or quarantined' }
+  creation:    { label: 'Created',       shape: 'square',   hint: 'Row created — provisioning, or a first DBIRTH admitting the device' },
+  operational: { label: 'Operational',   shape: 'circle',   hint: 'State change — status, cell, or another running-time property' },
+  governance:  { label: 'Configuration', shape: 'diamond',  hint: 'Governance change — schema binding or declared configuration' },
+  critical:    { label: 'Lifecycle',     shape: 'triangle', hint: 'Lifecycle event — deleted, archived, deprecated, or quarantined' }
+}
+
+/**
+ * Each shape's outline in the 13px box `CLUSTER_GAP_PX` is measured against, sized to carry about
+ * the weight of the 9px circle: the square smaller, the diamond and the triangle larger, the
+ * triangle raised a little so it does not sit low on the track.
+ */
+const MARKER_PATHS = {
+  circle:   'M2 6.5a4.5 4.5 0 1 0 9 0a4.5 4.5 0 1 0 -9 0Z',
+  square:   'M2.75 2.75h7.5v7.5h-7.5Z',
+  diamond:  'M6.5 1L12 6.5L6.5 12L1 6.5Z',
+  triangle: 'M6.5 0.5L12.5 11.5H0.5Z'
+}
+
+/**
+ * One event-class marker, on the track and in the legend alike. The selected ring is the same
+ * outline stroked wider underneath, inside the SVG, so it follows a triangle as it does a circle;
+ * a box-shadow would ring the button's box instead.
+ */
+export function TrailMarker({ kind, selected = false }) {
+  const shape = (MARKERS[kind] || MARKERS.operational).shape
+  const d = MARKER_PATHS[shape]
+  return (
+    <svg
+      className={`trail-node-mark trail-node-${kind}`}
+      data-shape={shape}
+      viewBox="0 0 13 13"
+      width="13"
+      height="13"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {selected && <path className="trail-node-ring" d={d} />}
+      <path className="trail-node-shape" d={d} />
+    </svg>
+  )
 }
 
 /** Deep-enough equality for a JSONB snapshot: scalars by value, objects by serialisation. */
@@ -376,7 +416,7 @@ export const isPartial = (shown, total) => typeof total === 'number' && total > 
 
 /**
  * What is drawn over what there is, as a ratio: "200/467", or "200" when that is all of them. The
- * events against the whole match, on the header row and the Export button.
+ * events against the whole match, in the foot and on the Export button.
  */
 export const countRatio = (shown, total) =>
   isPartial(shown, total) ? `${shown}/${total}` : String(shown)
@@ -963,8 +1003,8 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
   }, [allEvents, entityNames, showPurged, lookupsLoaded, loadedKinds])
 
   /**
-   * The counts the page renders, derived here so the header row and the Export button cannot end
-   * up describing different sets.
+   * The counts the page renders, derived here so the foot and the Export button cannot end up
+   * describing different sets.
    */
   const eventRatio = countRatio(events.length, totalMatching)
   const hasMoreToLoad = isPartial(events.length, totalMatching)
@@ -980,6 +1020,11 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
   /** Where the next page starts; null at the end, which is the only end-of-data signal. */
   const [nextCursor, setNextCursor] = useState(null)
   const [loadingMore, setLoadingMore] = useState(false)
+
+  /** What the foot counts against: the whole match, or, without one, another page while a cursor exists. */
+  const footTotal = typeof totalMatching === 'number'
+    ? totalMatching
+    : events.length + (nextCursor ? PAGE_SIZE : 0)
 
   /**
    * The loaded events, mirrored into a ref so the poll can merge without putting `allEvents` in
@@ -1074,10 +1119,14 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
   const rangeIsFiltering =
     rangePreset === 'custom' ? !!(customStart || customEnd) : rangePreset !== 'all'
 
-  const activeFilterCount =
-    (entityTypeFilter ? 1 : 0) + (nameFilter ? 1 : 0) + (actionFilter ? 1 : 0) +
+  /** The controls in the Filters popover that are off their default; its own Clear resets them. */
+  const popoverFilterCount = (entityTypeFilter ? 1 : 0) + (actionFilter ? 1 : 0)
+
+  const activeFilterCount = popoverFilterCount + (nameFilter ? 1 : 0) +
     // Showing deleted entities is the deviation, so Clear filters returns them to hidden.
     (rangeIsFiltering ? 1 : 0) + (showPurged ? 1 : 0)
+
+  const clearPopoverFilters = () => { setEntityTypeFilter(''); setActionFilter('') }
 
   /**
    * Load every row one transaction wrote, by searching its id.
@@ -1269,6 +1318,10 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
   // out of the filter, the drawer closes.
   const selected = events.find(e => String(e.event_id) === String(selectedEventId)) || null
   const selectedAnalysis = selected ? analysis.get(selected.event_id) : null
+  // The drawer's title icon: the selected entity's section glyph.
+  const SelectedIcon = selected
+    ? (SECTION_ICONS[entityKind(selected.entity_type)] || FALLBACK_SECTION_ICON)
+    : null
 
   /**
    * The selected entity's events, oldest first: Previous goes back in time and Next forward. Drawn
@@ -1394,38 +1447,12 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
           <div className="card-body">
 
         <div className="filter-bar">
-          <select
-            className="form-control control-sm"
-            value={entityTypeFilter}
-            onChange={e => setEntityTypeFilter(e.target.value)}
-            title="Show only events against one kind of entity"
-          >
-            <option value="">All entities</option>
-            {/* Every kind this role may ask for, from the same table the sections are built from,
-                so a kind cannot be drawable and unfilterable. */}
-            {entityTypes.map(({ kind, label }) => (
-              <option key={kind} value={kind}>{label}</option>
-            ))}
-          </select>
-
           <SearchInput
             value={nameFilter}
             onChange={setNameFilter}
             placeholder="Search a name or any ID…"
             ariaLabel="Search by name, entity ID, mutation ID or transaction ID"
           />
-
-          <select
-            className="form-control control-sm"
-            value={actionFilter}
-            onChange={e => setActionFilter(e.target.value)}
-            title="Filter by the database action recorded on the audit row, as the event drawer's badge shows it. The coloured markers below are a separate classification; see the key beside the timeline."
-          >
-            <option value="">Any action</option>
-            {Object.entries(AUDIT_TRAIL_ACTIONS).map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
 
           {/* All time is the default (see timeWindow). The window is a query parameter, so a
               narrower range does not spend the row budget outside it. */}
@@ -1465,11 +1492,42 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
             </>
           )}
 
+          {/* The secondary filters: the kind of entity and the action. Search, the range and the
+              deleted-entities toggle stay in the bar. */}
+          <FiltersPopover activeCount={popoverFilterCount} onClear={clearPopoverFilters}>
+            <select
+              className="form-control"
+              value={entityTypeFilter}
+              onChange={e => setEntityTypeFilter(e.target.value)}
+              title="Show only events against one kind of entity"
+            >
+              <option value="">All entities</option>
+              {/* Every kind this role may ask for, from the same table the sections are built from,
+                  so a kind cannot be drawable and unfilterable. */}
+              {entityTypes.map(({ kind, label }) => (
+                <option key={kind} value={kind}>{label}</option>
+              ))}
+            </select>
+
+            <select
+              className="form-control"
+              value={actionFilter}
+              onChange={e => setActionFilter(e.target.value)}
+              title="Filter by the database action recorded on the audit row, as the event drawer's badge shows it. The markers below are a separate classification; see the key above the timeline."
+            >
+              <option value="">Any action</option>
+              {Object.entries(AUDIT_TRAIL_ACTIONS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </FiltersPopover>
+
           {/* Shown only when something is deleted. The tooltip says no longer in the database,
               because absence from the lookups is all the test sees. */}
           {purgedEntityCount > 0 && (
             <button
               className={`btn btn-sm ${showPurged ? 'btn-primary' : 'btn-ghost'}`}
+              aria-pressed={showPurged}
               onClick={() => setShowPurged(v => !v)}
               title="Include events for entities that are no longer in the database. The records are kept either way -- this only changes what is listed."
             >
@@ -1485,31 +1543,15 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
             `trail-timeline` is the one part of the card that gives way when the viewport is short; its own
             scroller is `trail-scroll`. */}
         <div className="card-body card-fill-scroll trail-timeline">
-          {/* One row above the timeline, always drawn so the card keeps its shape: how much of the
-              trail is on screen at the left, the colour key at the right. A lane can be a
-              setting, a role assignment or a backup job, so the first number counts entities. */}
+          {/* One row above the timeline, always drawn so the card keeps its shape: the key. How
+              much of the trail is loaded is stated at the foot, beside Show more. */}
           <div className="trail-header">
-            <div
-              className="trail-count"
-              title={[
-                `${lanes.length} ${lanes.length === 1 ? 'entity has' : 'entities have'} a lane.`,
-                hasMoreToLoad
-                  ? `${events.length} of the ${totalMatching} events matching these filters `
-                    + 'are loaded; "Show more", at the foot of the card, loads the rest.'
-                  : 'Every event matching these filters is loaded.'
-              ].join('\n')}
-            >
-              {lanes.length}
-              {' '}{lanes.length === 1 ? 'entity' : 'entities'}
-              {' · '}{eventRatio} {events.length === 1 && !hasMoreToLoad ? 'event' : 'events'}
-            </div>
-
-            {/* The legend for a derived colour scale: nothing else on the page says what amber
-                means. */}
+            {/* The legend for a derived classification: nothing else on the page says what a
+                triangle means. The same marker the track draws. */}
             <div className="trail-legend">
               {Object.entries(MARKERS).map(([kind, m]) => (
                 <span key={kind} className="trail-legend-item" title={m.hint}>
-                  <span className={`trail-node-dot trail-node-${kind}`} aria-hidden="true" />
+                  <TrailMarker kind={kind} />
                   {m.label}
                 </span>
               ))}
@@ -1590,7 +1632,6 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
                           <div className="trail-lane-label">
                             <section.Icon size={12} className="trail-section-icon" />
                             <span className="trail-section-name">{section.label}</span>
-                            <span className="trail-section-count">{section.lanes.length}</span>
                           </div>
                           <div className="trail-track" aria-hidden="true" />
                         </div>
@@ -1680,7 +1721,9 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
                                     title={`${e.event_type} · ${MARKERS[kind].label}\n${actorLabel(e, machinePrincipals)}\n${new Date(e.timestamp).toLocaleString()}`}
                                     aria-label={`${e.event_type} on ${lane.name || lane.entityId} at ${new Date(e.timestamp).toLocaleString()}`}
                                     aria-pressed={isSelected}
-                                  />
+                                  >
+                                    <TrailMarker kind={kind} selected={isSelected} />
+                                  </button>
                                 )
                               })}
                             </div>
@@ -1718,12 +1761,13 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
               ) : (
                 <ListFoot
                   shown={events.length}
-                  total={typeof totalMatching === 'number'
-                    ? totalMatching
-                    : events.length + (nextCursor ? PAGE_SIZE : 0)}
+                  total={footTotal}
                   step={PAGE_SIZE}
                   onMore={loadMore}
                   pending={loadingMore}
+                  /* "200 of 242" beside Show more, only against the server's own total: without
+                     one, `footTotal` is an estimate. */
+                  counted={typeof totalMatching === 'number'}
                 />
               )}
             </>
@@ -1736,6 +1780,7 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
         open={!!selected}
         onClose={() => setSelectedEventId(null)}
         type={selected ? entityKind(selected.entity_type) : ''}
+        icon={SelectedIcon && <SelectedIcon size={15} />}
         onCopy={showToast}
         title={selected
           ? (entityNames.get(selected.entity_id) || snapshotIdentity(selected)?.label || selected.entity_id)

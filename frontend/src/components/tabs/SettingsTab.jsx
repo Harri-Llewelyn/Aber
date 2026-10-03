@@ -1,12 +1,17 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { api } from '../../api'
 import { IconSettings, IconX, IconAlertTriangle } from '../common/Icons'
+import CopyableId from '../common/CopyableId'
+import { CardHeading } from '../common/CardHeading'
 import { EmptyState } from '../common/EmptyState'
 import { HelpTip } from '../common/HelpTip'
 import { LoadingState } from '../common/LoadingState'
-import { PageHeading } from '../common/PageHeading'
-import { SectionCount } from '../common/SectionCount'
 import { TabStrip } from '../common/TabStrip'
+import { COLD_STORAGE_DIALOG_KEYS } from '../../utils/coldStorage'
+import { BACKUP_OFFSITE_SETTING_KEYS } from '../../utils/backupOffsite'
+
+// Settings another page's destination dialog edits, so each value has one editor.
+const EDITED_ELSEWHERE = new Set([...COLD_STORAGE_DIALOG_KEYS, ...BACKUP_OFFSITE_SETTING_KEYS])
 
 /**
  * The runtime configuration plane as a page. It cannot add or delete a setting: the key set is
@@ -61,10 +66,27 @@ export function groupByCategory(settings) {
   return groups
 }
 
+/**
+ * The part of a fallback worth copying, or null for prose. A `values.yaml <path>` copies the path,
+ * and a fallback that is one identifier copies whole; a sentence that mentions one stays text.
+ */
+export function fallbackCopy(text) {
+  const path = /^values\.yaml\s+(\S+)$/.exec(text || '')
+  if (path) return { lead: 'values.yaml ', value: path[1], label: 'values.yaml path' }
+  if (/^[A-Za-z_][\w.]*(\(\))?$/.test(text || '')) return { lead: '', value: text, label: 'identifier' }
+  return null
+}
+
 function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
   const [draft, setDraft] = useState(() => displayValue(setting.value, setting.value_type))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
+  const rowRef = useRef(null)
+
+  // The row the search bar asked for is scrolled to the middle of the card's scroller.
+  useEffect(() => {
+    if (highlighted) rowRef.current?.scrollIntoView?.({ block: 'center' })
+  }, [highlighted])
 
   // A refresh replaces every setting object. An unsaved draft survives it; a saved one shows the
   // stored value. Keyed on the stored value so the field re-seeds only when the row changed.
@@ -99,16 +121,24 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
   }
 
   const reset = () => { setDraft(stored); setError(null) }
+  const copy = fallbackCopy(setting.fallback_source)
+  // A number or an on/off choice takes the short field; text takes the longer one.
+  const short = setting.value_type === 'number' || setting.value_type === 'boolean'
 
   return (
-    <div className={`setting-row${highlighted ? ' setting-row-found' : ''}`} data-setting={setting.key}>
+    <div ref={rowRef} className={`setting-row${highlighted ? ' setting-row-found' : ''}`} data-setting={setting.key}>
       <div className="setting-meta">
         <div className="setting-label-row">
           <label className="setting-label" htmlFor={`setting-${setting.key}`}>{setting.label}</label>
           {setting.description && <HelpTip label={`About ${setting.label}`} text={setting.description} />}
         </div>
         <div className="setting-provenance">
-          <span className="mono setting-key" title="The key the code reads. Immutable.">{setting.key}</span>
+          <CopyableId
+            value={setting.key}
+            label="setting key"
+            title="The key the code reads. It cannot be changed. Click to copy it."
+            onNotify={showToast}
+          />
           {/* Named, because an absent row is not an absent value: what applies when this has never
               been changed is the env var or constant below, and the first thing to check when a
               setting appears to do nothing. A read-only row's source is not a fallback -- it is
@@ -121,7 +151,11 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
                 : 'What applies if this setting is never changed'}
             >
               {setting.read_only ? 'set by ' : 'falls back to '}
-              <span className="mono">{setting.fallback_source}</span>
+              {copy ? (
+                <>{copy.lead}<CopyableId value={copy.value} label={copy.label} onNotify={showToast} /></>
+              ) : (
+                <span>{setting.fallback_source}</span>
+              )}
             </span>
           )}
         </div>
@@ -135,7 +169,7 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
         {setting.read_only ? (
           <input
             id={`setting-${setting.key}`}
-            className="form-control"
+            className={`form-control${short ? ' setting-input-short' : ''}`}
             type="text"
             value={stored}
             readOnly
@@ -144,7 +178,7 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
         ) : setting.value_type === 'boolean' ? (
           <select
             id={`setting-${setting.key}`}
-            className="form-control"
+            className="form-control setting-input-short"
             value={draft === 'true' ? 'true' : 'false'}
             onChange={e => setDraft(e.target.value)}
           >
@@ -162,7 +196,7 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
         ) : (
           <input
             id={`setting-${setting.key}`}
-            className="form-control"
+            className={`form-control${short ? ' setting-input-short' : ''}`}
             type={setting.value_type === 'number' ? 'number' : 'text'}
             value={draft}
             onChange={e => setDraft(e.target.value)}
@@ -185,20 +219,18 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
           </div>
         )}
 
-        <div className="setting-actions">
-          {/* SHOWN ONLY WHEN THERE IS A CHANGE TO SAVE. A permanently enabled Save invites the
-              click that does nothing, and then the toast that says it worked. */}
-          {dirty && (
-            <>
-              <button className="btn btn-primary btn-sm" onClick={save} disabled={saving}>
-                {saving ? 'Saving…' : 'Save'}
-              </button>
-              <button className="btn btn-ghost btn-sm" onClick={reset} disabled={saving}>
-                <IconX size={13} /> Discard
-              </button>
-            </>
-          )}
-        </div>
+        {/* SHOWN ONLY WHEN THERE IS A CHANGE TO SAVE, beside the field, reserving nothing. A
+            permanently enabled Save invites the click that does nothing, then a toast saying it worked. */}
+        {dirty && (
+          <div className="setting-actions">
+            <button className="btn btn-primary btn-sm" onClick={save} disabled={saving}>
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={reset} disabled={saving}>
+              <IconX size={13} /> Discard
+            </button>
+          </div>
+        )}
 
         {error && <div className="setting-error">{error}</div>}
       </div>
@@ -218,7 +250,9 @@ export function SettingsTab({ showToast, initialSetting = '', onClearSetting }) 
   const load = useCallback((isInitial = false) => {
     if (isInitial) setLoading(true)
     api.get('/api/v1/settings')
-      .then(d => { setSettings(d); setLoadError(null); setLoading(false) })
+      // The Cold Storage and Backups destination dialogs are the one editor of their rows, so
+      // those rows are not listed here.
+      .then(d => { setSettings((d || []).filter(s => !EDITED_ELSEWHERE.has(s.key))); setLoadError(null); setLoading(false) })
       .catch(e => { setLoadError(e?.message || 'Could not read settings.'); setLoading(false) })
   }, [])
 
@@ -245,75 +279,58 @@ export function SettingsTab({ showToast, initialSetting = '', onClearSetting }) 
   const activeGroup = groups.find(g => g.category === activeCategory)
 
   return (
-    <div className="page-layout">
+    <div className="page-layout page-fill">
       <div className="page-main">
-        {/* The page states its own limit, because it is surprising and deliberate: the list cannot
-            be added to from here. */}
-        <PageHeading icon={<IconSettings size={15} />} title="Settings">
-          Values that take effect without a restart and override the environment defaults they name;
-          the list is fixed, not added to by hand.
-        </PageHeading>
+        <div className="card card-fill">
+          {/* The page states its own limit, because it is surprising and deliberate: the list
+              cannot be added to from here. */}
+          <CardHeading
+            icon={<IconSettings size={15} />}
+            title="Settings"
+            description="Values that take effect without a restart and override the environment defaults they name; the list is fixed, not added to by hand."
+          />
 
-        {/* The second thing to say is a warning rather than a description, so it keeps the shape a
-            warning has everywhere else instead of being a second paragraph nobody reads. */}
-        <div className="callout callout-warning callout-page">
-          <IconAlertTriangle size={14} className="callout-icon" />
-          <div>
-            <strong>Nothing secret is stored here.</strong> Every signed-in user can read this
-            page. Credentials — S3 keys, OIDC client secrets — belong in the secret store, not in
-            a setting.
-          </div>
-        </div>
+          {loadError && (
+            <div className="card-body">
+              <div className="callout callout-danger">
+                <IconAlertTriangle size={14} className="callout-icon" />
+                <div>{loadError}</div>
+              </div>
+            </div>
+          )}
 
-        {loadError && (
-          <div className="callout callout-danger callout-page">
-            <IconAlertTriangle size={14} className="callout-icon" />
-            <div>{loadError}</div>
-          </div>
-        )}
-
-        {loading ? (
-          <div className="card"><LoadingState label="settings" /></div>
-        ) : settings.length === 0 && !loadError ? (
-          <div className="card">
+          {loading ? (
+            <LoadingState label="settings" />
+          ) : settings.length === 0 && !loadError ? (
             <EmptyState
               icon={<IconSettings size={36} />}
               message="No settings are declared yet. They arrive by migration, alongside the code that reads them."
             />
-          </div>
-        ) : (<>
-          {/* One category at a time. The categories were stacked as titled cards, which made a page
-              of thirty settings a scroll to find the one being changed. */}
-          <TabStrip
-            ariaLabel="Settings category"
-            value={activeCategory}
-            // Choosing a category by hand ends the search's highlight: it has been seen.
-            onChange={category => { setCategory(category); setFoundKey('') }}
-            tabs={groups.map(group => ({
-              id: group.category,
-              label: group.category,
-              title: `${group.settings.length} setting${group.settings.length === 1 ? '' : 's'}`,
-            }))}
-          />
+          ) : groups.length > 0 && (<>
+            {/* One category at a time; the card scrolls, the page does not. */}
+            <TabStrip
+              ariaLabel="Settings category"
+              value={activeCategory}
+              // Choosing a category by hand ends the search's highlight: it has been seen.
+              onChange={category => { setCategory(category); setFoundKey('') }}
+              tabs={groups.map(group => ({ id: group.category, label: group.category }))}
+              help={(
+                <HelpTip
+                  label={`About ${activeCategory} settings`}
+                  text="A change takes effect without a restart. Edit a value and Save, or Discard to go back. The ? beside a setting says what it controls, and the line beneath it names the default it overrides."
+                />
+              )}
+            />
 
-          {activeGroup && (
-            <div className="card settings-group" key={activeGroup.category}>
-              <div className="card-header">
-                <h3 className="section-title">
-                  {activeGroup.category}
-                  <HelpTip
-                    label={`About ${activeGroup.category} settings`}
-                    text="A change takes effect without a restart. Edit a value and Save, or Discard to go back. The ? beside a setting says what it controls, and a note beneath it names the default it overrides."
-                  />
-                  <SectionCount total={activeGroup.settings.length} />
-                </h3>
+            {activeGroup && (
+              <div className="card-fill-scroll settings-group" key={activeGroup.category}>
+                {activeGroup.settings.map(s => (
+                  <SettingRow key={s.key} setting={s} onSaved={() => load(false)} showToast={showToast} highlighted={s.key === foundKey} />
+                ))}
               </div>
-              {activeGroup.settings.map(s => (
-                <SettingRow key={s.key} setting={s} onSaved={() => load(false)} showToast={showToast} highlighted={s.key === foundKey} />
-              ))}
-            </div>
-          )}
-        </>)}
+            )}
+          </>)}
+        </div>
       </div>
     </div>
   )

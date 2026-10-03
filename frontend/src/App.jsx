@@ -376,6 +376,8 @@ function Dashboard({ session, onSignOut }) {
   const [selectedAreaFilter, setSelectedAreaFilter] = useState('')
   // Set by the search bar; consumed by SettingsTab, which opens that setting's category on it.
   const [selectedSettingKey, setSelectedSettingKey] = useState('')
+  // Set by a search-bar card that is one tab of its page; consumed by AccessControlTab.
+  const [selectedSection, setSelectedSection] = useState('')
   // Set by an "Audit Trail" action on an asset row; consumed by AuditTrailTab as { id, type }.
   const [selectedTrailEntity, setSelectedTrailEntity] = useState(null)
   // Set by clicking an entry on the Vocabulary page; consumed by MetricsTab, which resolves it
@@ -409,11 +411,14 @@ function Dashboard({ session, onSignOut }) {
   const showGateway = (id) => { setSelectedGatewayFilter(id); setTab('gateways', { search: id }) }
   const showCell    = (id) => { setSelectedCellFilter(id);    setTab('cells',    { search: id }) }
   const showArea    = (id) => { setSelectedAreaFilter(id);    setTab('areas',    { search: id }) }
+  /** The Site Map on one area: a plan preview on the Areas or Cells page. The map reads `area`. */
+  const showOnSiteMap = (id) => setTab('site-map', { area: id })
   /** Open ONE schema's drawer on the Schemas page -- a device drawer's Schema chip. */
   const showSchema  = (uuid) => { setSelectedSchemaId(uuid);  setTab('schemas',  { search: uuid }) }
   /* A setting is reached by its key, not a UUID: the key is what the page, the code and every
      migration call it, and it is what a link to one should carry. */
   const showSetting = (key) => { setSelectedSettingKey(key); setTab('settings', { search: key }) }
+  const showSection = (tabId, section) => { handleNavClick(tabId); setSelectedSection(section) }
   /** The opposite direction: every device provisioned with a schema. Note the `schema` key. */
   const showDevicesForSchema = (uuid) => {
     setSelectedSchemaFilter(uuid)
@@ -534,6 +539,7 @@ function Dashboard({ session, onSignOut }) {
           onSelectArea={showArea}
           onSelectSchema={showSchema}
           onSelectSetting={showSetting}
+          onSelectSection={showSection}
           /* No type: the search knows the id and not what it belongs to, and the trail's own
              search matches an entity id whatever kind carries it. */
           onSelectTrail={(id) => viewTrailFor(id, '')}
@@ -607,15 +613,16 @@ function Dashboard({ session, onSignOut }) {
       {/* The rail is a permanent gutter. In hover mode its expanded panel paints over the page; in
           expanded mode the row reflows. See Sidebar.jsx. */}
       <div className="app-body">
-        <Sidebar tabs={navTabs} currentTab={tab} onNavigate={handleNavClick} mode={sidebarMode} onChangeMode={setSidebarMode} signals={navSignals} />
+        {/* Devices' signal is the quarantine queue, so while it shows, the item opens that tab. */}
+        <Sidebar tabs={navTabs} currentTab={tab} onNavigate={id => (id === 'devices' && navSignals.devices ? showSection('devices', 'quarantine') : handleNavClick(id))} mode={sidebarMode} onChangeMode={setSidebarMode} signals={navSignals} />
 
         <main className="content">
           <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
             {tab === 'site-map'       && <SiteMapTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} showToast={showToast} onNavigateTab={t => setTab(t)} />}
-            {tab === 'areas'          && <AreasTab showToast={showToast} onViewTrail={a => viewTrailFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} hasPermission={hasPermission} initialSearchFilter={selectedAreaFilter} onClearFilter={() => setSelectedAreaFilter('')} />}
-            {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewTrail={c => viewTrailFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
+            {tab === 'areas'          && <AreasTab showToast={showToast} onViewTrail={a => viewTrailFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} initialSearchFilter={selectedAreaFilter} onClearFilter={() => setSelectedAreaFilter('')} />}
+            {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewTrail={c => viewTrailFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
             {tab === 'gateways'       && <GatewaysTab userRole={userRole} activeAlerts={firingAlerts} showToast={showToast} onViewTrail={g => viewTrailFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
-            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewTrail={a => viewTrailFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} activeAlerts={firingAlerts} />}
+            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewTrail={a => viewTrailFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} initialSection={selectedSection} onClearSection={() => setSelectedSection('')} activeAlerts={firingAlerts} />}
             {/* Re-checked here: `tab` arrives from the URL as well as the nav, so hiding the item
                 is not the same as closing the page. */}
             {tab === 'audit-trail' && hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ) && (
@@ -629,7 +636,7 @@ function Dashboard({ session, onSignOut }) {
             {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={showDevicesForSchema} onSelectDevice={showDevice} initialSchemaId={selectedSchemaId} />}
             {tab === 'metrics'        && <MetricsTab showToast={showToast} hasPermission={hasPermission} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} />}
             {tab === 'vocabulary'     && <VocabularyTab hasPermission={hasPermission} onUseEntry={entry => { setPendingVocabularyEntry(entry); setTab('metrics') }} />}
-            {tab === 'directory'      && <DirectoryTab showToast={showToast} />}
+            {tab === 'directory'      && <DirectoryTab showToast={showToast} initialSection={selectedSection} onClearSection={() => setSelectedSection('')} />}
             {/* `currentUserId` lets the page say "you" and offer Edit and Withdraw on the
                 proposer's own rows. The transition guard and RLS re-derive the proposer from
                 auth.uid(). */}
@@ -653,7 +660,7 @@ function Dashboard({ session, onSignOut }) {
               <ColdStorageTab showToast={showToast} userRole={userRole} />}
             {/* The role is re-checked here, not only in the nav: routing can put `tab` on a value
                 the nav never offered. Still a courtesy -- RLS is what refuses the write. */}
-            {tab === 'access-control' && userRole === 'Administrator' && <AccessControlTab showToast={showToast} />}
+            {tab === 'access-control' && userRole === 'Administrator' && <AccessControlTab showToast={showToast} initialSection={selectedSection} onClearSection={() => setSelectedSection('')} />}
             {tab === 'backups' && userRole === 'Administrator' && <BackupsTab showToast={showToast} />}
             {tab === 'settings' && userRole === 'Administrator' && <SettingsTab showToast={showToast} initialSetting={selectedSettingKey} onClearSetting={() => setSelectedSettingKey('')} />}
           </Suspense>

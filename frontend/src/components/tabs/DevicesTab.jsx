@@ -8,8 +8,6 @@ import { usePolling } from '../../hooks/usePolling'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { formatDateTime, formatRelative } from '../../utils/format'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
-import { downloadJSON } from '../../utils/downloadJSON'
-import { downloadBlob } from '../../utils/downloadBlob'
 import { edgeFunctionErrorMessage } from '../../utils/edgeFunctionError'
 import { describeAuthFailure } from '../../utils/sessionError'
 import CopyableId from '../common/CopyableId'
@@ -21,15 +19,18 @@ import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { Modal } from '../common/Modal'
 import { SearchInput } from '../common/SearchInput'
-import { SectionCount } from '../common/SectionCount'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { TagList } from '../common/TagList'
 import { Model3DUploader } from '../common/Model3DUploader'
 import { QuarantinePayloadCell } from '../common/QuarantinePayloadCell'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
+import { CardHeading } from '../common/CardHeading'
+import { TabStrip } from '../common/TabStrip'
+import { FiltersPopover } from '../common/FiltersPopover'
 import { ApproveQuarantineModal } from '../modals/ApproveQuarantineModal'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { AssetConfigModal } from '../modals/AssetConfigModal'
+import { DeviceExportModal } from '../modals/DeviceExportModal'
 import { DeviceNameplateModal } from '../modals/DeviceNameplateModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
 import { TelemetryExportModal } from '../modals/TelemetryExportModal'
@@ -41,7 +42,7 @@ import {
   deviceStatusBadge
 } from '../../utils/deviceStatus'
 import {
-  SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, SOURCE_EXPLICIT, SOURCE_AREA_WIDE, SOURCE_SITE_WIDE, NON_CELL_SOURCES,
+  SCOPE_CELL, SCOPE_AREA_WIDE, SCOPE_SITE_WIDE, SOURCE_EXPLICIT, SOURCE_INHERITED, SOURCE_AREA_WIDE, SOURCE_SITE_WIDE, SOURCE_UNASSIGNED, NON_CELL_SOURCES,
   resolveDeviceLocation, needsCellAssignment, unassignedHint,
   locationSourceLabel, gatewayAcceptsCell, noCellReason
 } from '../../utils/cellResolution'
@@ -75,7 +76,6 @@ import {
   IconRadio,
   IconLayoutDashboard
 } from '../common/Icons'
-import { PageHeading } from '../common/PageHeading'
 import { HelpTip } from '../common/HelpTip'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
@@ -84,7 +84,19 @@ import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 const CELL_FILTER_UNASSIGNED = '__unassigned__'
 const CELL_FILTER_SITE_WIDE = '__site_wide__'
 
-export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewTrail, onViewApprovals, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter, activeAlerts = [] }) {
+/** Each tab's "?", drawn in the tab bar for the selected tab. */
+const VIEW_HELP = {
+  registered: {
+    label: 'About registered devices',
+    text: 'An asset that publishes telemetry through a gateway. Its schema says what it should publish; the historian records what it does. This page shows where the two disagree: unmodelled metrics, or no birth yet.',
+  },
+  quarantine: {
+    label: 'About the Quarantine queue',
+    text: 'A birth arrived that matches no registered device on its gateway, so its readings are held, not recorded. Approve & Onboard admits it, or accept a suggested match. Reject discards it.',
+  },
+}
+
+export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewTrail, onViewApprovals, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter, initialSection, onClearSection, activeAlerts = [] }) {
   /**
    * Which devices have an alert firing on them, via utils/deviceAlerts.js so the Site Map, Cells and
    * Gateways resolve alerts the same way.
@@ -131,6 +143,19 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [areas, setAreas]       = useState([])
   const [form, setForm]         = useState(blank)
   const [filterMode, setFilterMode] = useState('active')
+  // The card's tab: 'registered' or 'quarantine'. `initialSection` is a one-shot hand-over from App
+  // (the rail's quarantine signal, the search), consumed and cleared so a second one still lands.
+  const [view, setView] = useState(initialSection === 'quarantine' ? 'quarantine' : 'registered')
+  useEffect(() => {
+    if (!initialSection) return
+    if (initialSection === 'quarantine') {
+      setView('quarantine')
+      setSelectedId(null)
+    }
+    onClearSection?.()
+  }, [initialSection, onClearSection])
+  // The device whose export dialog is open, or null.
+  const [exportFor, setExportFor] = useState(null)
 
   /**
    * Latest value per (device, metric), plus the catalog that says which values are legal. Outside
@@ -241,9 +266,20 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     setCellFilter('')
     setAttentionOnly(false)
     setFilterMode('active')
+    setShowShadows(false)
     clearUrlQuery()
     if (onClearFilter) onClearFilter()
     if (onClearSchemaFilter) onClearSchemaFilter()
+  }
+
+  // The Filters popover's own Clear: only the filters inside it, the schema hand-over included.
+  const clearPopoverFilters = () => {
+    setFilterMode('active')
+    setTagFilter('')
+    handleSchemaFilterChange('')
+    setGatewayFilter('')
+    setCellFilter('')
+    setShowShadows(false)
   }
 
   const loadAll = useCallback(async (signal) => {
@@ -343,71 +379,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // share one key because both reload the list.
   const [saving, runSave] = usePendingAction()
   const [rowBusyId, runRowAction] = usePendingKey()
-
-  // Tracks the device currently exporting, so the row's own button can show progress rather than
-  // a page-wide spinner -- composing a shell is a few round trips and the table stays usable.
-  const [exportingAas, setExportingAas] = useState(null)
-
-  /**
-   * Download this device's Asset Administration Shell (IEC 63278) as AAS V3 JSON. Composed
-   * server-side by the `aas-export` edge function, which holds the service role needed to read
-   * `asset_config` and the whole catalog.
-   */
-  const exportAas = async (asset, format = 'json') => {
-    setExportingAas(asset.asset_id)
-    try {
-      // THE BUNDLE IS THE AASX WITH THE DEVICE'S HISTORY IN IT: the trail, the telemetry still in
-      // the live historian, and a manifest naming the cold objects. Stored beside the cold tier
-      // and recorded, so the Archived Entities page can offer it after the row is gone.
-      if (format === 'bundle') {
-        const result = await api.post('/api/v1/devices/asset-export', { device_id: asset.asset_id })
-        downloadBlob(result.blob, result.filename || `${asset.asset_name}-bundle.aasx`)
-        const b = result.stats?.bundle || {}
-        const summary = `${b.raw_rows ?? 0} raw and ${b.hourly_rows ?? 0} hourly readings, ${b.trail_rows ?? 0} audit trail rows, ${b.cold_objects ?? 0} cold object${b.cold_objects === 1 ? '' : 's'} named`
-        if (b.stored === false) {
-          showToast(`Bundle downloaded for '${asset.asset_name}' (${summary}) — it was NOT stored on the platform: ${b.reason || 'unknown reason'}. Keep the file.`, 'warning')
-        } else if (b.truncated) {
-          showToast(`Bundle exported for '${asset.asset_name}' (${summary}) — a cap was reached; the manifest says what is not included`, 'warning')
-        } else {
-          showToast(`Bundle exported for '${asset.asset_name}' (${summary})`, 'success')
-        }
-        return
-      }
-
-      const result = await api.post('/api/v1/devices/aas-export', { device_id: asset.asset_id, format })
-
-      if (format === 'aasx') {
-        // Already a packaged ZIP; downloadJSON would re-serialise it. Anchor-download the blob
-        // directly, the same mechanism downloadJSON/downloadCSV use.
-        downloadBlob(result.blob, `${asset.asset_name}.aasx`)
-      } else {
-        downloadJSON(result.aas, `${asset.asset_name}_aas_v3.json`)
-      }
-
-      // An unmapped metric is reported as a warning: `semantic_id` is nullable and a local
-      // extension legitimately has none.
-      const stats = result.stats || {}
-      const unmapped = stats.unmapped_semantic_ids || 0
-      const label = format === 'aasx' ? 'AASX package' : 'AAS JSON'
-      const summary = `${stats.submodels || 0} submodels, ${stats.telemetry_metrics || 0} metrics`
-      // An unreachable model URL outranks an unmapped metric: a loopback 3D reference resolves only
-      // on the exporter's own machine.
-      if (result.warning) {
-        showToast(`${label} exported for '${asset.asset_name}' — ${result.warning}`, 'warning')
-      } else if (unmapped > 0) {
-        showToast(
-          `${label} exported for '${asset.asset_name}' (${summary}) — ${unmapped} metric${unmapped === 1 ? '' : 's'} carried no semantic id`,
-          'warning'
-        )
-      } else {
-        showToast(`${label} exported for '${asset.asset_name}' (${summary})`, 'success')
-      }
-    } catch (e) {
-      showToast(e.message, 'error')
-    } finally {
-      setExportingAas(null)
-    }
-  }
 
   const approveQuarantine = async (assetId, body) => {
     const targetGateway = body?.active_gateway_id || body?.gateway_id || null
@@ -632,27 +603,35 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     [assets, schemas, latestBySparkplugId, catalog]
   )
   // The roster's own rows: everything but the queue, and the replay lanes unless they are shown.
-  // The lifecycle counts and the card's total are taken from it.
+  // The lifecycle counts are taken from it.
   const roster = useMemo(
     () => assets.filter(a => !a.is_quarantined && (showShadows || !a.shadow_of)),
     [assets, showShadows]
   )
   const archivedCount = roster.filter(a => a.is_archived).length
-  const laneTotal = filterMode === 'archived' ? archivedCount
-    : filterMode === 'active' ? roster.length - archivedCount
-    : roster.length
+  // The filters inside the Filters popover, which its button counts; the bar's Clear counts all.
+  const popoverFilterCount =
+    [schemaFilter, tagFilter, gatewayFilter, cellFilter].filter(Boolean).length +
+    (showShadows ? 1 : 0) + (filterMode !== 'active' ? 1 : 0)
   const activeFilterCount =
-    [schemaFilter, statusFilter, tagFilter, gatewayFilter, cellFilter, searchQuery].filter(Boolean).length +
-    (attentionOnly ? 1 : 0) + (showShadows ? 1 : 0) + (filterMode !== 'active' ? 1 : 0)
+    popoverFilterCount + [statusFilter, searchQuery].filter(Boolean).length + (attentionOnly ? 1 : 0)
   const schemaName = schemas.find(s => s.schema_uuid === schemaFilter)?.schema_name
 
+  // A tab change closes the panel: it belongs to the list it was opened from.
+  const chooseView = (next) => { setView(next); setSelectedId(null) }
+
   // Arriving from a chip, an alert row or the Site Map with one device named: open it rather than
-  // leave a one-row table. Identifier equality only; see the hook.
+  // leave a one-row table. A quarantined device has no panel; it lands on the Quarantine tab.
+  // Identifier equality only; see the hook.
   useArrivalSelection(
     searchQuery,
     assets,
     (a, term) => a.asset_id === term || effectiveSparkplugId(a) === term,
-    (a) => setSelectedId(a.asset_id)
+    (a) => {
+      if (a.is_quarantined) { chooseView('quarantine'); return }
+      setView('registered')
+      setSelectedId(a.asset_id)
+    }
   )
 
   // Resolved fresh every render, as the note on selectedId says. A deleted device resolves to null
@@ -672,31 +651,36 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     ? gateways.find(g => g.gateway_id === selectedDevice.active_gateway_id) || null
     : null
   // The panel reports the RESOLVED cell, so it has to run the same resolution the table does
-  // rather than reading `cell_id` directly -- an inherited device has none of its own.
-  const selectedLocation = selectedDevice ? resolveDeviceLocation(selectedDevice, selectedGateway) : null
+  // rather than reading `cell_id` directly -- an inherited device has none of its own. The cells
+  // resolve the area above a cell.
+  const selectedLocation = selectedDevice ? resolveDeviceLocation(selectedDevice, selectedGateway, cellById) : null
 
   return (
     <div className="page-layout page-fill">
       <div className="page-main">
 
-      <PageHeading icon={<IconCpu size={15} />} title="Devices">
-        Shopfloor devices that publish through a gateway, and the births still waiting to be let in.
-      </PageHeading>
+      {/* One card, two tabs, and the card scrolls. The Quarantine tab carries the attention state
+          while a birth waits, so the roster never moves when a device arrives. */}
+      <div className="card card-fill">
+        <CardHeading
+          icon={<IconCpu size={15} />}
+          title="Devices"
+          description="Shopfloor devices that publish through a gateway, and the births still waiting to be let in."
+        />
+        <TabStrip
+          ariaLabel="Devices"
+          value={view}
+          onChange={chooseView}
+          tabs={[
+            { id: 'registered', label: 'Registered', title: 'Devices admitted to the platform' },
+            { id: 'quarantine', label: 'Quarantine', title: 'Births from devices nobody has registered, held until approved', attention: quarantine.length }
+          ]}
+          help={<HelpTip label={VIEW_HELP[view].label} text={VIEW_HELP[view].text} />}
+        />
 
-      {/* The Quarantine queue: always the first card, so the roster below never moves when a device
-          arrives. It wears the attention border only while it holds one. */}
-      <div className={`card queue-card${quarantine.length > 0 ? ' card-attention' : ''}`}>
-        <div className="card-header">
-          <h3 className="section-title">
-            Quarantine queue
-            <HelpTip
-              label="About the Quarantine queue"
-              text="A birth arrived that matches no registered device on its gateway, so its readings are held, not recorded. Approve & Onboard admits it, or accept a suggested match. Reject discards it."
-            />
-            <SectionCount total={quarantine.length} />
-          </h3>
-        </div>
-        {quarantine.length === 0 ? (
+      {view === 'quarantine' && (<>
+        {loading ? <LoadingState label="quarantined devices" /> :
+         quarantine.length === 0 ? (
           <EmptyState message="Nothing is waiting to be let in." />
         ) : (
           <div className="table-wrap">
@@ -759,45 +743,11 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             </table>
           </div>
         )}
-      </div>
+      </>)}
 
-      {/* The roster: title, primary action, filters, table. It is the card that scrolls. */}
-      <div className="card card-fill">
-        <div className="card-header">
-          <h3 className="section-title">
-            Registered devices
-            <HelpTip
-              label="About registered devices"
-              text="An asset that publishes telemetry through a gateway. Its schema says what it should publish; the historian records what it does. This page shows where the two disagree: unmodelled metrics, or no birth yet."
-            />
-            <SectionCount total={laneTotal} shown={filteredAssets.length} />
-          </h3>
-          <ActionButton
-            className="btn btn-primary btn-sm"
-            permitted={canManage}
-            deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.DEVICE_MANAGE)}
-            onClick={() => (setEditing(null), setForm(blank), setShowForm(true))}
-            title="Register a new shopfloor device"
-          >
-            <IconPlus size={14} /> New Device
-          </ActionButton>
-        </div>
-
-        <div className="card-body">
-      {/* Filters live on their own row within the card, under the header. */}
+      {view === 'registered' && (<>
+      {/* The toolbar: search, status and Needs attention in the row, the rest in the popover. */}
       <div className="filter-bar">
-        {/* Lifecycle is a filter like the rest; the counts are in the option labels. */}
-        <select
-          className="form-control control-sm"
-          value={filterMode}
-          onChange={e => setFilterMode(e.target.value)}
-          title="Filter by lifecycle state"
-        >
-          <option value="all">All ({roster.length})</option>
-          <option value="active">Active ({roster.length - archivedCount})</option>
-          <option value="archived">Archived ({archivedCount})</option>
-        </select>
-
         <SearchInput
           value={searchQuery}
           onChange={setSearchQuery}
@@ -814,67 +764,96 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           <option value="unmodelled">Publishing unmodelled metrics</option>
         </select>
 
-        <select
-          className="form-control control-sm"
-          value={tagFilter}
-          onChange={e => setTagFilter(e.target.value)}
-          disabled={tagOptions.length === 0}
-          title={tagOptions.length === 0
-            ? 'No device carries a tag yet — tags come from the metric groups a device\'s schema models'
-            : 'Filter by device type, derived from the metric groups the assigned schema models'}
-        >
-          <option value="">Any type</option>
-          {tagOptions.map(t => <option key={t} value={t}>{t}</option>)}
-        </select>
-
-        <select className="form-control control-md" value={schemaFilter} onChange={e => handleSchemaFilterChange(e.target.value)} title="Filter by the schema a device was provisioned with">
-          <option value="">Any schema</option>
-          {schemas.map(s => <option key={s.schema_uuid} value={s.schema_uuid}>{s.schema_name}</option>)}
-        </select>
-
-        <select className="form-control control-md" value={gatewayFilter} onChange={e => setGatewayFilter(e.target.value)} title="Filter by serving gateway">
-          <option value="">Any gateway</option>
-          {gateways.map(g => <option key={g.gateway_id} value={g.gateway_id}>{g.gateway_name}</option>)}
-        </select>
-
-        {/* Filters on the RESOLVED cell, plus the two derived lanes. */}
-        <select className="form-control control-md" value={cellFilter} onChange={e => setCellFilter(e.target.value)} title="Filter by the cell a device resolves to — its own if set, otherwise its gateway's">
-          <option value="">Any cell</option>
-          <option value={CELL_FILTER_UNASSIGNED}>Unassigned (needs a cell)</option>
-          <option value={CELL_FILTER_SITE_WIDE}>Site-Wide</option>
-          {cells.map(c => <option key={c.cell_id} value={c.cell_id}>{c.cell_name}</option>)}
-        </select>
-
         <button
           className={`btn btn-sm ${attentionOnly ? 'btn-primary' : 'btn-ghost'}`}
           onClick={() => setAttentionOnly(v => !v)}
-          title="Show only devices that need action: past their first-birth window, matched by legacy name, publishing unmodelled metrics, with no cell, in a different cell from their gateway, or in an archived cell. Quarantined devices are in the Quarantine queue above."
+          aria-pressed={attentionOnly}
+          title="Show only devices that need action: past their first-birth window, matched by legacy name, publishing unmodelled metrics, with no cell, in a different cell from their gateway, or in an archived cell. Quarantined devices are on the Quarantine tab."
         >
           <IconAlertTriangle size={13} /> Needs attention ({attentionCount})
         </button>
 
-        {/* Shown only when there are any: it appears the moment a playback mints the first lane. */}
-        {shadowCount > 0 && (
-          <button
-            className={`btn btn-sm ${showShadows ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => setShowShadows(v => !v)}
-            title="Shadow devices created by broker playback, one per device a capture recorded, so a replay is never mistaken for live plant data. Hidden by default because they are not machines."
+        <FiltersPopover activeCount={popoverFilterCount} onClear={clearPopoverFilters}>
+          {/* Lifecycle is a filter like the rest; the counts are in the option labels. */}
+          <select
+            className="form-control"
+            value={filterMode}
+            onChange={e => setFilterMode(e.target.value)}
+            aria-label="Lifecycle"
+            title="Filter by lifecycle state"
           >
-            <IconPlay size={13} /> Show shadow devices ({shadowCount})
-          </button>
-        )}
+            <option value="all">All ({roster.length})</option>
+            <option value="active">Active ({roster.length - archivedCount})</option>
+            <option value="archived">Archived ({archivedCount})</option>
+          </select>
 
-        <ClearFilters count={activeFilterCount} onClear={resetFilters} />
+          <select
+            className="form-control"
+            value={tagFilter}
+            onChange={e => setTagFilter(e.target.value)}
+            disabled={tagOptions.length === 0}
+            aria-label="Type"
+            title={tagOptions.length === 0
+              ? 'No device carries a tag yet — tags come from the metric groups a device\'s schema models'
+              : 'Filter by device type, derived from the metric groups the assigned schema models'}
+          >
+            <option value="">Any type</option>
+            {tagOptions.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
 
+          <select className="form-control" value={schemaFilter} onChange={e => handleSchemaFilterChange(e.target.value)} aria-label="Schema" title="Filter by the schema a device was provisioned with">
+            <option value="">Any schema</option>
+            {schemas.map(s => <option key={s.schema_uuid} value={s.schema_uuid}>{s.schema_name}</option>)}
+          </select>
+
+          <select className="form-control" value={gatewayFilter} onChange={e => setGatewayFilter(e.target.value)} aria-label="Gateway" title="Filter by serving gateway">
+            <option value="">Any gateway</option>
+            {gateways.map(g => <option key={g.gateway_id} value={g.gateway_id}>{g.gateway_name}</option>)}
+          </select>
+
+          {/* Filters on the RESOLVED cell, plus the two derived lanes. */}
+          <select className="form-control" value={cellFilter} onChange={e => setCellFilter(e.target.value)} aria-label="Cell" title="Filter by the cell a device resolves to — its own if set, otherwise its gateway's">
+            <option value="">Any cell</option>
+            <option value={CELL_FILTER_UNASSIGNED}>Unassigned (needs a cell)</option>
+            <option value={CELL_FILTER_SITE_WIDE}>Site-Wide</option>
+            {cells.map(c => <option key={c.cell_id} value={c.cell_id}>{c.cell_name}</option>)}
+          </select>
+
+          {/* Shown only when there are any: it appears the moment a playback mints the first lane. */}
+          {shadowCount > 0 && (
+            <button
+              className={`btn btn-sm ${showShadows ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => setShowShadows(v => !v)}
+              aria-pressed={showShadows}
+              title="Replay lanes created by broker playback, one per device a capture recorded, so a replay is never mistaken for live plant data. Hidden by default because they are not machines."
+            >
+              <IconPlay size={13} /> Show replay lanes ({shadowCount})
+            </button>
+          )}
+        </FiltersPopover>
+
+        <div className="filter-bar-actions">
+          <ClearFilters count={activeFilterCount} onClear={resetFilters} />
+          <ActionButton
+            className="btn btn-primary btn-sm"
+            permitted={canManage}
+            deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.DEVICE_MANAGE)}
+            onClick={() => (setEditing(null), setForm(blank), setShowForm(true))}
+            title="Register a new shopfloor device"
+          >
+            <IconPlus size={14} /> New Device
+          </ActionButton>
+        </div>
       </div>
 
+      {/* Named here because the schema filter sits inside the popover, out of sight. */}
       {schemaName && (
-        <div className="form-hint">
-          Showing devices provisioned with schema <strong>{schemaName}</strong>.
+        <div className="card-body">
+          <div className="form-hint">
+            Showing devices provisioned with schema <strong>{schemaName}</strong>.
+          </div>
         </div>
       )}
-
-        </div>{/* .card-body */}
 
         {loading ? <LoadingState label="devices" /> :
          filteredAssets.length === 0 ? (
@@ -893,10 +872,17 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                   return (
                     <React.Fragment key={a.asset_id}>
                       {/* Clicks originating on a button, link or input inside the row are ignored
-                          -- see rowSelectHandler. */}
+                          -- see rowSelectHandler. Enter or Space on the row itself does what a click
+                          does; keys on a control inside it stay that control's. */}
                       <tr
                         className={`row-selectable${selectedId === a.asset_id ? ' row-selected' : ''}${a.is_archived ? ' row-archived' : ''}`}
                         onClick={rowSelectHandler(() => setSelectedId(id => id === a.asset_id ? null : a.asset_id))}
+                        tabIndex={0}
+                        onKeyDown={e => {
+                          if ((e.key !== 'Enter' && e.key !== ' ') || e.target !== e.currentTarget) return
+                          e.preventDefault()
+                          setSelectedId(id => id === a.asset_id ? null : a.asset_id)
+                        }}
                         title="Click to inspect this device in the details panel"
                       >
                         <td>
@@ -906,8 +892,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                               happened, wherever the row is seen. */}
                           {a.shadow_of && (
                             <Badge size="sm" className="cell-tag" icon={<IconPlay size={11} />}
-                                   title="A shadow device, not a machine. It receives recorded readings republished by broker playback, so its values did happen — on the real device, on the day the capture was taken.">
-                              SHADOW
+                                   title="A replay lane, not a machine. It receives recorded readings republished by broker playback, so its values did happen — on the real device, on the day the capture was taken.">
+                              Replay lane
                             </Badge>
                           )}
                           {a.is_archived && (
@@ -1057,6 +1043,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             </table>
           </div>
         )}
+      </>)}
       </div>
 
       {showForm && (
@@ -1380,6 +1367,22 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           showToast={showToast}
         />
       )}
+      {/* The bundle is withheld from a replay lane, which is a recording of an asset rather than
+          one, and from a reader without `audit_trail:read`: the bundle carries the trail, and
+          aas-export refuses it on the same permission. */}
+      {exportFor && (
+        <DeviceExportModal
+          device={{ id: exportFor.asset_id, name: exportFor.asset_name }}
+          initialFormat="json"
+          bundleDisabledReason={exportFor.shadow_of
+            ? 'A replay lane is a recording of a device. Take the bundle from the device it was recorded from.'
+            : !canReadTrail
+              ? `The bundle carries the Audit Trail. ${requiresRolesTitle(PERMISSION_UUIDS.AUDIT_TRAIL_READ)}.`
+              : null}
+          onClose={() => setExportFor(null)}
+          showToast={showToast}
+        />
+      )}
       </div>
 
       <ContextPanel
@@ -1388,6 +1391,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         type="DEVICE"
         onCopy={showToast}
         alert={selectedDevice ? alertFor(selectedDevice) : null}
+        icon={<IconCpu size={16} />}
         title={selectedDevice?.asset_name || ''}
         subtitle={selectedDevice && (
           <>
@@ -1438,55 +1442,60 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             title: "The edge node carrying this device's data. Reassign it in Edit Details."
           },
           {
-            // Resolved, not the explicit override. Site-Wide is not a link: it asserts the device
-            // belongs to no cell.
-            label: 'Location (resolved)',
-            value: selectedLocation?.location_scope === SCOPE_SITE_WIDE
-              ? 'Site-Wide'
-              : selectedLocation?.location_scope === SCOPE_AREA_WIDE
-                ? `Area-Wide — ${areaById.get(selectedLocation?.effective_area_id)?.area_name || 'its area'}`
-              : (() => {
-                  const cell = cells.find(c => c.cell_id === selectedLocation?.effective_cell_id)
-                  if (!cell) return null
-                  return (
-                    <button
-                      className="chip chip-link"
-                      onClick={() => onSelectCell?.(cell.cell_id)}
-                      title="Open this cell on the Cells page"
-                    >
-                      <IconLayoutDashboard size={11} />
-                      <span className="chip-name">{cell.cell_name}</span>
-                    </button>
-                  )
-                })(),
-            title: selectedLocation?.location_source === SOURCE_EXPLICIT
-              ? 'Set on the device itself, so it stays here regardless of its gateway.'
-              : selectedLocation?.location_scope === SCOPE_SITE_WIDE
-                ? 'Marked Site-Wide: it belongs to no single cell.'
-                : selectedLocation?.location_scope === SCOPE_AREA_WIDE
-                  ? 'Marked Area-Wide: it belongs to an area rather than to any one cell in it.'
-                  : 'Inherited from its gateway. It will follow the gateway if that moves.'
-          },
-          {
-            label: 'Area (resolved)',
-            value: selectedLocation?.effective_area_id
-              ? (
+            // One row for where the device is: Area › Cell, the lane standing in for a cell, or
+            // Unassigned. The resolved location, not the explicit override; "(from gateway)" marks
+            // the inherited case, which moves when the gateway does.
+            label: 'Location',
+            full: true,
+            value: selectedLocation && (() => {
+              const source = selectedLocation.location_source
+              if (source === SOURCE_UNASSIGNED) {
+                return <Badge tone="warning" size="sm" icon={<IconAlertTriangle size={10} />}>Unassigned</Badge>
+              }
+              const area = areaById.get(selectedLocation.effective_area_id)
+              const cell = cellById.get(selectedLocation.effective_cell_id)
+              const place = cell ? (
                 <button
                   className="chip chip-link"
-                  onClick={() => onSelectArea?.(selectedLocation.effective_area_id)}
-                  title="Open this area on the Areas page"
+                  onClick={() => onSelectCell?.(cell.cell_id)}
+                  title="Open this cell on the Cells page"
                 >
-                  <AreaIcon area={areaById.get(selectedLocation.effective_area_id)} size={11} />
-                  <span className="chip-name">{areaById.get(selectedLocation.effective_area_id)?.area_name || selectedLocation.effective_area_id}</span>
+                  <IconLayoutDashboard size={11} />
+                  <span className="chip-name">{cell.cell_name}</span>
                 </button>
+              ) : NON_CELL_SOURCES.has(source) ? <span>{locationSourceLabel(source)}</span> : null
+              if (!place) return null
+              return (
+                <div className="device-location">
+                  {area && (
+                    <>
+                      <button
+                        className="chip chip-link"
+                        onClick={() => onSelectArea?.(area.area_id)}
+                        title="Open this area on the Areas page"
+                      >
+                        <AreaIcon area={area} size={11} />
+                        <span className="chip-name">{area.area_name}</span>
+                      </button>
+                      <span aria-hidden="true">›</span>
+                    </>
+                  )}
+                  {place}
+                  {source === SOURCE_INHERITED && <span className="cell-meta">(from gateway)</span>}
+                </div>
               )
-              : null,
-            title: 'The ISA-95 area: its cell\'s, or its own when it is Area-Wide. Site-wide and unassigned devices have none.'
-          },
-          {
-            label: 'Location Source',
-            value: selectedLocation?.location_source || null,
-            title: 'explicit = set on the device; inherited = from its gateway; area_wide = no single cell, one area; site_wide = no single cell, the campus; unassigned = nothing to inherit.'
+            })(),
+            title: selectedLocation?.location_source === SOURCE_UNASSIGNED
+              ? unassignedHint(selectedDevice, selectedGateway) || 'No cell resolved'
+              : selectedLocation?.location_source === SOURCE_EXPLICIT
+                ? 'Set on the device itself, so it stays here regardless of its gateway.'
+                : selectedLocation?.location_source === SOURCE_INHERITED
+                  ? 'Inherited from its gateway. It will follow the gateway if that moves.'
+                  : selectedLocation?.location_scope === SCOPE_SITE_WIDE
+                    ? 'Marked Site-Wide: it belongs to no single cell.'
+                    : selectedLocation?.location_scope === SCOPE_AREA_WIDE
+                      ? 'Marked Area-Wide: it belongs to an area rather than to any one cell in it.'
+                      : noCellReason(selectedGateway) || undefined
           },
           {
             // Resolved through schemasForDevice, not `selectedDevice.schema_id`: a schema arrives
@@ -1554,8 +1563,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               setShowForm(true)
             },
             disabled: !canManage && !canPropose,
-            // Not `primary`: the Gateways and Cells drawers style their edit action as a secondary,
-            // and editing is not what a device panel is opened to do.
+            primary: true,
             title: proposeMode
               ? 'Ask for a change to this device — an approver applies it, or says why not'
               : !canManage && !canPropose
@@ -1599,29 +1607,12 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               : `View this device's nameplate. ${requiresRolesTitle(PERMISSION_UUIDS.DEVICE_MANAGE)} to edit it`
           },
           {
-            label: exportingAas === selectedDevice.asset_id ? 'Exporting AAS…' : 'Export AAS JSON (V3)',
+            // One action for the three formats. A read, so not gated on device:manage and not
+            // refused for an archived device; the dialog says when the bundle is withheld.
+            label: 'Export…',
             icon: <IconDownload size={13} />,
-            onClick: () => exportAas(selectedDevice, 'json'),
-            disabled: exportingAas === selectedDevice.asset_id,
-            title: "Download this device's Asset Administration Shell as AAS Part 5 JSON"
-          },
-          {
-            label: exportingAas === selectedDevice.asset_id ? 'Exporting AAS…' : 'Export AASX package',
-            icon: <IconDownload size={13} />,
-            onClick: () => exportAas(selectedDevice, 'aasx'),
-            disabled: exportingAas === selectedDevice.asset_id,
-            title: 'Download an AASX (OPC) package, with any attached 3D model bundled in'
-          },
-          /* Withheld from a replay lane, which is a recording of an asset rather than one: the
-             bundle is for taking a machine away, and a lane goes with its original. Withheld too
-             from a reader without `audit_trail:read`: the bundle carries the trail, and
-             aas-export refuses it on the same permission. */
-          !selectedDevice.shadow_of && canReadTrail && {
-            label: exportingAas === selectedDevice.asset_id ? 'Exporting AAS…' : 'Export Bundle (with history)',
-            icon: <IconDownload size={13} />,
-            onClick: () => exportAas(selectedDevice, 'bundle'),
-            disabled: exportingAas === selectedDevice.asset_id,
-            title: 'Download the AASX with this device\'s audit trail, the telemetry still in the live historian and a manifest naming the cold objects; a copy is kept beside the cold tier'
+            onClick: () => setExportFor(selectedDevice),
+            title: 'Download this device as AAS JSON, an AASX package or a bundle with its history'
           },
           /* Also withheld from a replay lane: links are resolved through `shadow_of` at read time,
              and a copy here would go stale. */

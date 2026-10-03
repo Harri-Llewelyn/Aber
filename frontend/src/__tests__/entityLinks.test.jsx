@@ -153,4 +153,16 @@ describe('the states around the list', () => {
 
     expect(screen.getByRole('button', { name: /Add Link/i })).toBeDisabled()
   })
+
+  it('gives the list the spare height of the dialog, so it scrolls inside it and the header stays', async () => {
+    await show([link()])
+
+    const list = await waitFor(() => {
+      const el = document.querySelector('.modal-body-fill > .modal-fill')
+      expect(el).toBeTruthy()
+      return el
+    })
+    expect(within(list).getByText('Operating Manual')).toBeInTheDocument()
+    expect(list.style.maxHeight).toBe('')
+  })
 })

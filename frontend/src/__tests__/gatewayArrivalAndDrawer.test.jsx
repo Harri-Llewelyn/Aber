@@ -44,8 +44,6 @@ const routeGet = (rows) => (path) => {
 const show = async (rows, initialSearchFilter = '') => {
   api.get.mockImplementation(routeGet(rows))
   render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter={initialSearchFilter} onClearFilter={vi.fn()} />)
-  // The playback gateway is hidden until revealed.
-  if (rows.some(r => r.is_shadow)) fireEvent.click(await screen.findByText(/Show playback gateway/))
   await waitFor(() => expect(screen.getAllByText(rows[0].gateway_name).length).toBeGreaterThan(0))
 }
 

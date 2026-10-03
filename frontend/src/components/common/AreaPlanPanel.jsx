@@ -4,15 +4,18 @@ import { AREA_PLAN_MAX_BYTES, isSvgFile } from '../../utils/areaPlans'
 import { HelpTip } from './HelpTip'
 import { plural } from '../../utils/format'
 import { ConfirmModal } from '../modals/ConfirmModal'
-import { IconUpload, IconImage, IconTrash } from './Icons'
+import { AreaPlanPreview } from './AreaPlanPreview'
+import { IconUpload, IconTrash } from './Icons'
 
 /**
  * The plan of one area, managed from the area's details panel: attach an SVG, replace it, or
- * remove it. An area with no plan shows the drop zone rather than a button, the same gesture a
- * device's 3D model takes. The write is one call and the panel asks the page to reload rather
- * than patching its own copy.
+ * remove it. A plan is drawn as a preview with every cell on it, Replace and Remove beside its
+ * heading. An area with no plan shows the drop zone rather than a button, the same gesture a
+ * device's 3D model takes; a reader who may not upload sees the default outline instead. The
+ * write is one call and the panel asks the page to reload rather than patching its own copy.
+ * `onOpen` is handed to the preview: it opens the Site Map on the area.
  */
-export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) {
+export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged, onOpen }) {
   const [busy, setBusy] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [confirm, setConfirm] = useState(false)
@@ -101,28 +104,22 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
             size={12}
           />
         </span>
+        {area.plan_path && canManage && (
+          <span className="area-plan-panel-actions">
+            {picker}
+            <button className="btn btn-ghost btn-sm" disabled={busy} onClick={openPicker} title="Upload a plan in place of this one">
+              <IconUpload size={12} /> Replace plan
+            </button>
+            <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setConfirm(true)} title="Remove the plan; the area keeps the default outline">
+              <IconTrash size={12} /> Remove plan
+            </button>
+          </span>
+        )}
       </div>
 
-      {area.plan_path ? (
-        <div className="area-plan-panel-row" data-plan="uploaded">
-          <IconImage size={16} className="area-plan-panel-glyph" />
-          <span className="area-plan-panel-state">
-            <strong>Plan attached</strong>
-            <span className="area-plan-panel-meta">{placedLine}</span>
-          </span>
-          {canManage && (
-            <span className="area-plan-panel-actions">
-              {picker}
-              <button className="btn btn-ghost btn-sm" disabled={busy} onClick={openPicker} title="Upload a plan in place of this one">
-                <IconUpload size={12} /> Replace plan
-              </button>
-              <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setConfirm(true)} title="Remove the plan; the area keeps the default outline">
-                <IconTrash size={12} /> Remove plan
-              </button>
-            </span>
-          )}
-        </div>
-      ) : canManage ? (
+      {area.plan_path || !canManage ? (
+        <AreaPlanPreview area={area} cells={cells} onOpen={onOpen} />
+      ) : (
         <div
           className="area-plan-panel-row area-plan-panel-drop"
           data-plan="outline"
@@ -145,14 +142,6 @@ export function AreaPlanPanel({ area, cells, canManage, showToast, onChanged }) 
           </span>
           <span className="area-plan-panel-meta">
             Default outline · {placedLine} · SVG up to {limitMiB} MiB
-          </span>
-        </div>
-      ) : (
-        <div className="area-plan-panel-row" data-plan="outline">
-          <IconImage size={16} className="area-plan-panel-glyph" />
-          <span className="area-plan-panel-state">
-            <strong>Default outline</strong>
-            <span className="area-plan-panel-meta">{placedLine}</span>
           </span>
         </div>
       )}

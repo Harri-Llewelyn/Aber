@@ -1,6 +1,18 @@
 import React from 'react'
-import { GATEWAY_STATUS_LABELS } from '../../utils/gatewayStatus'
+import { GATEWAY_STATUS_LABELS, GATEWAY_STATUS_PLAYING_BACK, GATEWAY_STATUS_IDLE } from '../../utils/gatewayStatus'
 import { Badge } from './Badge'
+
+/** The Playback gateway's two states (gatewayDisplayStatus): publishing a capture, or resting. */
+const PLAYBACK_STATES = {
+  [GATEWAY_STATUS_PLAYING_BACK]: {
+    tone: 'info',
+    title: 'A capture is playing: the playback worker is publishing as this gateway.'
+  },
+  [GATEWAY_STATUS_IDLE]: {
+    tone: 'neutral',
+    title: 'No capture is playing. This gateway publishes only during a playback, so idle is its resting state, not a fault.'
+  }
+}
 
 /**
  * The gateway status chip, drawn through Badge. `warning` is the default for anything
@@ -8,6 +20,9 @@ import { Badge } from './Badge'
  * open.
  */
 export function StatusBadge({ status }) {
+  const playback = PLAYBACK_STATES[status]
+  if (playback) return <Badge tone={playback.tone} dot title={playback.title}>{GATEWAY_STATUS_LABELS[status]}</Badge>
+
   const isOnline = status === 'ONLINE' || status === 'ACTIVE'
   const isOffline = status === 'OFFLINE'
 
