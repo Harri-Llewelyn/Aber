@@ -490,7 +490,10 @@ describe('A page description is not measure-capped', () => {
     APP_CSS.match(new RegExp(`\\n${selector.replace(/[.:()\\-]/g, '\\$&')} \\{([\\s\\S]*?)\\n\\}`))?.[1]
 
   it('lets the description run the width of the column', () => {
-    const description = rule('.card-heading .card-heading-description')
+    // The description shares one rule with the note under it, so the block is read by its last
+    // selector after checking the description is in it.
+    expect(APP_CSS).toMatch(/\n\.card-heading \.card-heading-description,\n\.card-heading \.card-heading-note \{/)
+    const description = rule('.card-heading .card-heading-note')
     expect(description).toBeTruthy()
     expect(description).not.toMatch(/max-width/)
   })
