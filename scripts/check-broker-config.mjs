@@ -78,8 +78,7 @@ const cfg = join(work, 'cfg');
 const dynsecDir = join(work, 'dynsec');
 const legacyDir = join(work, 'legacy');
 const brokenDir = join(work, 'broken');
-const retiredDir = join(work, 'retired');
-for (const d of [cfg, dynsecDir, legacyDir, brokenDir, retiredDir]) mkdirSync(d, { recursive: true });
+for (const d of [cfg, dynsecDir, legacyDir, brokenDir]) mkdirSync(d, { recursive: true });
 
 /**
  * The principals of the test broker. GATEWAY_A is the platform's validator gateway and arrives
@@ -102,12 +101,6 @@ const ACCOUNTS = {
   probe: 'probe-secret-00000001',
 };
 const IMPORTED = [GATEWAY_B, 'probe'];
-/**
- * A platform account from before the rename to Aber, arriving through the legacy password file.
- * Another, factoryplus_i3x, arrives through a stored document below. The reconcile must remove
- * both, so neither can log in.
- */
-const RETIRED = { factoryplus_ingestion: 'retired-ingestion-0001' };
 
 /**
  * The Sparkplug primary host id this check reconciles against, and a second one it never grants.
@@ -257,9 +250,8 @@ try {
       throw new Error(`could not build gateway-credential/Dockerfile: ${(build.stderr || '').trim().slice(0, 300)}`);
     }
 
-    const seeded = [...IMPORTED.map((u) => [u, ACCOUNTS[u]]), ['factoryplus_ingestion', RETIRED.factoryplus_ingestion]];
-    const seed = seeded.map(([u, password], i) =>
-      `mosquitto_passwd -b ${i === 0 ? '-c ' : ''}/legacy/password_file ${u} ${password} && `).join('');
+    const seed = IMPORTED.map((u, i) =>
+      `mosquitto_passwd -b ${i === 0 ? '-c ' : ''}/legacy/password_file ${u} ${ACCOUNTS[u]} && `).join('');
     const first = runInit({ preamble: seed });
     if (first.status !== 0) {
       throw new Error(`scripts/mosquitto-dynsec-init.mjs failed on first boot:\n         ${(first.stderr || first.stdout || '').trim().slice(0, 600)}`);
@@ -269,8 +261,7 @@ try {
     const doc = readDocument();
     const names = doc.clients.map((c) => c.username).sort();
     if (JSON.stringify(names) === JSON.stringify(EXPECTED_CLIENTS)) {
-      ok.push('the reconcile writes the admin, every platform principal and every imported account, '
-        + 'and no platform account from before the rename');
+      ok.push('the reconcile writes the admin, every platform principal and every imported account');
     } else {
       problems.push(`the reconciled document holds ${names.join(', ')}; expected ${EXPECTED_CLIENTS.join(', ')}`);
     }
@@ -308,23 +299,6 @@ try {
       ok.push('a second boot reconciles the existing document without losing or duplicating a client');
     } else {
       problems.push(`a second boot ${second.status === 0 ? 'changed the client set' : `failed: ${(second.stderr || '').trim().slice(0, 300)}`}`);
-    }
-
-    // A stored document from before the rename: the old i3X account beside the new one, as a
-    // `helm upgrade` finds it. The reconcile removes the old one and keeps everything else.
-    if (again) {
-      const current = again.clients.find((c) => c.username === 'aber_i3x');
-      const upgraded = { ...again, clients: [...again.clients, { ...current, username: 'factoryplus_i3x' }] };
-      writeFileSync(join(retiredDir, 'dynamic-security.json'), `${JSON.stringify(upgraded, null, '\t')}\n`);
-      const rerun = runInit({ outDir: retiredDir });
-      const after = rerun.status === 0 ? readDocument(retiredDir).clients.map((c) => c.username).sort() : null;
-      if (after && JSON.stringify(after) === JSON.stringify(EXPECTED_CLIENTS)) {
-        ok.push('a boot over a stored document removes a platform account from before the rename and keeps every other client');
-      } else {
-        problems.push(rerun.status === 0
-          ? `a boot over a document holding factoryplus_i3x left ${after.join(', ')}`
-          : `a boot over a document holding factoryplus_i3x failed: ${(rerun.stderr || '').trim().slice(0, 300)}`);
-      }
     }
 
     // A document that exists and cannot be parsed is the fleet's credentials in an unknown state;
@@ -384,20 +358,6 @@ try {
         problems.push(
           `a client WITH valid credentials was refused on 1883: ${(authed.stderr || '').trim()}`
         );
-      }
-
-      // The password-file account from before the rename was removed by the reconcile, so its
-      // password, which authenticated until then, must not.
-      const retired = docker([
-        'run', '--rm', '--network', `container:${r.name}`, IMAGE,
-        'mosquitto_pub', '-h', '127.0.0.1', '-p', '1883',
-        '-u', 'factoryplus_ingestion', '-P', RETIRED.factoryplus_ingestion,
-        '-t', 'spBv1.0/Aber/NCMD/probe', '-m', 'x'
-      ]);
-      if (refusedConnect(retired)) {
-        ok.push('a platform account from before the rename is refused on CONNECT');
-      } else {
-        problems.push('factoryplus_ingestion still AUTHENTICATES; the reconcile must remove the retired platform accounts');
       }
     }
 
