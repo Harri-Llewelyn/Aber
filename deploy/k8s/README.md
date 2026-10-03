@@ -1151,6 +1151,10 @@ The edge functions load their dependencies from the image. The image build resol
 a lock file and boots every function with no network, so a function that would fetch fails the
 build instead (`supabase/README.md`, *Edge function dependencies*).
 
+The dashboard's 3D viewer decodes a Draco- or KTX2-compressed model with decoders the dashboard
+serves itself, under `/decoders/`. `@google/model-viewer`'s default fetches them from
+www.gstatic.com; `Model3DViewer.jsx` points it at the dashboard's copies.
+
 An administrator can opt Node-RED into update notifications from its User Settings. The runtime
 keeps that choice over `settings.js`.
 

@@ -11,10 +11,22 @@ import { IconAlertTriangle } from './Icons'
  */
 let modelViewerModule = null
 
+/** Where the viewer fetches its Draco and KTX2 decoders: served by the dashboard itself
+ *  (frontend/modelViewerDecoders.js) instead of the viewer's default, www.gstatic.com. */
+export const DECODER_LOCATIONS = {
+  dracoDecoderLocation: `${import.meta.env.BASE_URL}decoders/draco/`,
+  ktx2TranscoderLocation: `${import.meta.env.BASE_URL}decoders/basis/`,
+}
+
 function loadModelViewer() {
   // Failures are not cached: the caller clears the promise on rejection, so re-opening the drawer
   // retries.
-  if (!modelViewerModule) modelViewerModule = import('@google/model-viewer')
+  if (!modelViewerModule) {
+    // The viewer reads this global config each time it constructs an element and falls back to
+    // its CDN defaults, so it is set here rather than on the class after the import.
+    self.ModelViewerElement = { ...self.ModelViewerElement, ...DECODER_LOCATIONS }
+    modelViewerModule = import('@google/model-viewer')
+  }
   return modelViewerModule
 }
 
