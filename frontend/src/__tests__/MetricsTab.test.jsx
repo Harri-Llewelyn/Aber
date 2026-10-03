@@ -1,6 +1,8 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
 import { MetricsTab } from '../components/tabs/MetricsTab'
 import { api } from '../api'
 import { PERMISSION_UUIDS } from '../constants'
@@ -109,18 +111,21 @@ const routes = {
   '/api/v1/devices': []
 }
 
+const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
+
 const renderTab = () => render(
   <MetricsTab showToast={vi.fn()} hasPermission={() => true} />
 )
 
 /**
- * Located by its heading, not by its position: the two cards have swapped order before, and a
- * positional query silently points at the wrong table.
+ * The table on a tab of the page's one card, selecting that tab first. Located by the tab's name,
+ * not by position. Null until the tab's table renders.
  */
-const cardTable = (heading) => {
-  const title = [...document.querySelectorAll('.card-header .section-title')]
-    .find(h => h.textContent.includes(heading))
-  return title?.closest('.card')?.querySelector('table')
+const cardTable = (tabName) => {
+  const tab = screen.queryByRole('tab', { name: tabName })
+  if (!tab) return null
+  if (tab.getAttribute('aria-selected') !== 'true') fireEvent.click(tab)
+  return document.querySelector('.card table')
 }
 
 const catalogTable = () => cardTable('Metric Catalog')
@@ -155,25 +160,82 @@ beforeEach(() => {
   })
 })
 
-describe('Metrics page heading', () => {
-  it('opens with the rail icon, the rail label and a one-sentence description, above the cards', async () => {
+describe('Metrics page: one card with two tabs', () => {
+  it('names the page in the card heading, with the rail icon and a one-sentence description', async () => {
     renderTab()
     await waitFor(() => expect(catalogTable()).toBeTruthy())
 
-    const heading = document.querySelector('.page-heading')
-    expect(heading.querySelector('h2.section-title').textContent).toBe('Metrics')
-    expect(heading.querySelector('h2 svg')).toBeTruthy()
-    expect(heading.querySelector('p').textContent.match(/[.!?]/g)).toHaveLength(1)
-    expect(heading.compareDocumentPosition(document.querySelector('.page-main .card')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    // The cards keep their own titles.
-    expect(screen.getByRole('button', { name: 'About the metric catalog' })).toBeTruthy()
+    expect(document.querySelector('.page-heading')).toBeNull()
+    expect(document.querySelectorAll('.card')).toHaveLength(1)
+    const heading = document.querySelector('.card-heading')
+    expect(heading.querySelector('h3.section-title').textContent).toBe('Metrics')
+    expect(heading.querySelector('h3 svg')).toBeTruthy()
+    const description = heading.querySelector('.card-heading-description').textContent
+    expect(description.match(/[.!?](\s|$)/g)).toHaveLength(1)
+    expect(description.split(' ').length).toBeLessThanOrEqual(28)
+  })
+
+  it('puts the tabs directly in the card, catalog first and selected, Deprecated always present', async () => {
+    renderTab()
+    await waitFor(() => expect(catalogTable()).toBeTruthy())
+
+    const tablist = screen.getByRole('tablist')
+    expect(tablist.parentElement).toHaveClass('card')
+    expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['Metric Catalog', 'Deprecated Metrics'])
+    expect(screen.getByRole('tab', { name: 'Metric Catalog' }).getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('scrolls the table inside the card, not the page', async () => {
+    renderTab()
+    await waitFor(() => expect(catalogTable()).toBeTruthy())
+
+    const fill = document.querySelector('.page-fill .card-fill')
+    expect(fill).toBeTruthy()
+    expect(catalogTable().parentElement).toHaveClass('table-wrap')
+    expect(catalogTable().parentElement.parentElement).toBe(fill)
+    expect(deprecatedTableOf().parentElement.parentElement).toBe(fill)
+  })
+
+  it('carries no count on the card, its tabs or the group headings', async () => {
+    renderTab()
+    await waitFor(() => expect(catalogTable()).toBeTruthy())
+
+    expect(document.querySelector('.card .section-count')).toBeNull()
+    for (const tab of screen.getAllByRole('tab')) expect(tab.textContent).not.toMatch(/\d/)
+  })
+
+  it('puts the tab’s "?" first in the toolbar row and Add Metric at its right-hand end', async () => {
+    renderTab()
+    await waitFor(() => expect(catalogTable()).toBeTruthy())
+
+    const bar = screen.getByRole('tablist').nextElementSibling
+    expect(bar).toHaveClass('filter-bar')
+    expect(bar.firstElementChild).toBe(screen.getByRole('button', { name: 'About the metric catalog' }))
+    expect(screen.getByRole('button', { name: /Add Metric/ }).closest('.filter-bar-actions').parentElement).toBe(bar)
+
+    deprecatedTableOf()
+    const deprecatedBar = screen.getByRole('tablist').nextElementSibling
+    expect(deprecatedBar.firstElementChild).toBe(screen.getByRole('button', { name: 'About deprecated metrics' }))
+    expect(screen.queryByRole('button', { name: /Add Metric/ })).toBeNull()
+  })
+
+  it('closes the drawer when the tab changes, since its row is no longer listed', async () => {
+    renderTab()
+    await waitForCatalog()
+
+    selectMetric(catalogTable(), 'Axes/DISPLACEMENT')
+    expect(drawer().getAttribute('aria-hidden')).toBe('false')
+    fireEvent.click(screen.getByRole('tab', { name: 'Deprecated Metrics' }))
+    expect(drawer().getAttribute('aria-hidden')).toBe('true')
   })
 })
 
+/** The Deprecated Metrics tab's table, selecting the tab first. */
+const deprecatedTableOf = () => cardTable('Deprecated Metrics')
+
 describe('Metric Catalog — collapsible groups', () => {
-  it('opens COLLAPSED, showing each group header and its count rather than every row', async () => {
-    // Collapsed on arrival: the catalog outgrew being unrolled, and the header count says what is
-    // inside.
+  it('opens COLLAPSED, showing each group header rather than every row', async () => {
+    // Collapsed on arrival: the catalog outgrew being unrolled.
     renderTab()
 
     await waitFor(() => expect(screen.getByTitle('Expand Controller (2 metrics)')).toBeTruthy())
@@ -181,10 +243,10 @@ describe('Metric Catalog — collapsible groups', () => {
     expect(screen.queryByText('Controller/EXECUTION')).toBeNull()
     expect(screen.queryByText('safety_interlock')).toBeNull()
 
-    // Collapsed is not uninformative: the header carries the group and how many metrics it has.
+    // The header names the group and carries no count; its tooltip says how many it holds.
     const header = screen.getByTitle('Expand Controller (2 metrics)')
     expect(within(header).getByText('Controller')).toBeTruthy()
-    expect(within(header).getByText('2')).toBeTruthy()
+    expect(header.querySelector('.section-count')).toBeNull()
   })
 
   it('expands a single group without touching the others', async () => {
@@ -230,10 +292,10 @@ const WITH_REPLACEMENT = [
 ]
 
 /**
- * #468. Deprecated metrics moved out of a collapsed tail inside the catalog table, where there was
- * nothing to act on, to a card of their own with a Restore per row.
+ * Deprecated metrics have a tab of their own, where Restore is one row away, rather than a
+ * collapsed tail inside the catalog table.
  */
-describe('Deprecated Metrics card', () => {
+describe('Deprecated Metrics tab', () => {
   const withCatalog = (rows) => api.get.mockImplementation((path) =>
     Promise.resolve(path.startsWith('/api/v1/metric-catalog')
       ? rows
@@ -241,7 +303,7 @@ describe('Deprecated Metrics card', () => {
 
   const deprecatedTable = () => cardTable('Deprecated Metrics')
 
-  it('lists deprecated metrics on their own card, and not in the catalog table', async () => {
+  it('lists deprecated metrics on their own tab, and not in the catalog table', async () => {
     renderTab()
     await waitForCatalog()
     await waitFor(() => expect(deprecatedTable()).toBeTruthy())
@@ -251,12 +313,14 @@ describe('Deprecated Metrics card', () => {
     expect(within(catalogTable()).queryByText('temperature')).toBeNull()
   })
 
-  it('renders no card when nothing is deprecated', async () => {
+  it('keeps the tab when nothing is deprecated, and says so', async () => {
     withCatalog(CATALOG.filter(m => !m.deprecated))
     renderTab()
     await waitForCatalog()
 
-    expect(screen.queryByText('Deprecated Metrics')).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: 'Deprecated Metrics' }))
+    expect(screen.getByText('No metric is deprecated.')).toBeTruthy()
+    expect(document.querySelector('.card table')).toBeNull()
   })
 
   it('names the replacement, not its uuid', async () => {
@@ -269,12 +333,13 @@ describe('Deprecated Metrics card', () => {
     expect(within(row).queryByText('m2')).toBeNull()
   })
 
-  it('is not narrowed by the catalog search, which belongs to the card above', async () => {
+  it('is not narrowed by the catalog search, which belongs to the catalog tab', async () => {
     renderTab()
-    await waitFor(() => expect(deprecatedTable()).toBeTruthy())
+    await waitFor(() => expect(catalogTable()).toBeTruthy())
 
     fireEvent.change(screen.getByLabelText('Search the metric catalog'), { target: { value: 'EXECUTION' } })
     expect(within(deprecatedTable()).getByText('temperature')).toBeTruthy()
+    expect(screen.queryByLabelText('Search the metric catalog')).toBeNull()
   })
 
   it('disables Restore and Deprecate for a Shopfloor Manager, who holds archive:manage and not schema:manage', async () => {
@@ -657,12 +722,72 @@ describe('Metric Catalog — search', () => {
     fireEvent.change(search(), { target: { value: '' } })
     expect(screen.queryByText('Controller/EXECUTION')).toBeNull()
   })
+
+  it('lets a group the search opened be closed', async () => {
+    renderTab()
+    await waitFor(() => expect(screen.getByTitle('Expand Controller (2 metrics)')).toBeTruthy())
+
+    fireEvent.change(search(), { target: { value: 'EXECUTION' } })
+    fireEvent.click(screen.getByTitle('Collapse Controller'))
+    expect(screen.queryByText('Controller/EXECUTION')).toBeNull()
+  })
+})
+
+describe('Metric Catalog — Expand all / Collapse all', () => {
+  const allButton = () => screen.getByRole('button', { name: /^(Expand|Collapse) all$/ })
+  const groupToggles = () => [...catalogTable().querySelectorAll('.table-group-button')]
+  const openGroups = () => groupToggles().filter(b => b.getAttribute('aria-expanded') === 'true').length
+
+  it('sits in the toolbar row and reads "Expand all" while every group is shut', async () => {
+    renderTab()
+    await waitFor(() => expect(catalogTable()).toBeTruthy())
+
+    expect(allButton().closest('.filter-bar')).toBeTruthy()
+    expect(allButton().textContent).toBe('Expand all')
+    expect(openGroups()).toBe(0)
+  })
+
+  it('opens every group, then reads "Collapse all" and shuts them again', async () => {
+    renderTab()
+    await waitFor(() => expect(catalogTable()).toBeTruthy())
+
+    fireEvent.click(allButton())
+    expect(openGroups()).toBe(groupToggles().length)
+    expect(screen.getByText('safety_interlock')).toBeTruthy()
+    expect(allButton().textContent).toBe('Collapse all')
+
+    fireEvent.click(allButton())
+    expect(openGroups()).toBe(0)
+    expect(allButton().textContent).toBe('Expand all')
+  })
+
+  it('closes the groups a search opened, and keeps the search', async () => {
+    renderTab()
+    await waitFor(() => expect(catalogTable()).toBeTruthy())
+
+    fireEvent.change(screen.getByLabelText('Search the metric catalog'), { target: { value: 'o' } })
+    expect(openGroups()).toBe(groupToggles().length)
+    expect(allButton().textContent).toBe('Collapse all')
+
+    fireEvent.click(allButton())
+    expect(openGroups()).toBe(0)
+    expect(screen.queryByText('Controller/EXECUTION')).toBeNull()
+    expect(screen.getByLabelText('Search the metric catalog').value).toBe('o')
+    expect(allButton().textContent).toBe('Expand all')
+  })
+
+  it('pins each group heading below the table header while its rows scroll', () => {
+    // jsdom does no layout, so the rule is read from the stylesheet: the band sticks at the pinned
+    // header's height inside the card's table scroller.
+    expect(APP_CSS).toMatch(/\n\.table-group-row > td \{\n {2}position: sticky;\n {2}top: var\(--table-head-height, 0px\);/)
+    expect(APP_CSS).toMatch(/\n\.card-fill > \.table-wrap \{ --table-head-height: 40px; \}/)
+  })
 })
 
 describe('Metric Catalog — Add Metric dialog', () => {
   const addButton = () => screen.getByRole('button', { name: /Add Metric/ })
 
-  it('is a filled header button that opens no form until pressed', async () => {
+  it('is a filled toolbar button that opens no form until pressed', async () => {
     renderTab()
     await waitForCatalog()
 
@@ -764,14 +889,61 @@ describe('Metric drawer', () => {
     expect(inDrawer.queryByRole('button', { name: 'Deprecate' })).toBeNull()
   })
 
-  it('shows a count on both cards', async () => {
+  it('shows the metric icon and one primary, listed first: Edit on a catalog metric', async () => {
+    renderTab()
+    await waitForCatalog()
+
+    selectMetric(catalogTable(), 'Axes/DISPLACEMENT')
+    expect(drawer().querySelector('.context-panel-icon svg')).toBeTruthy()
+    const actions = [...drawer().querySelectorAll('.context-action')]
+    expect(actions.filter(a => a.classList.contains('btn-primary'))).toHaveLength(1)
+    expect(actions[0].textContent).toMatch(/Edit/)
+    expect(actions[0]).toHaveClass('btn-primary')
+  })
+
+  it('makes Restore the one primary on a deprecated metric, listed first', async () => {
     renderTab()
     await waitFor(() => expect(cardTable('Deprecated Metrics')).toBeTruthy())
 
-    const count = (heading) => [...document.querySelectorAll('.card-header .section-title')]
-      .find(h => h.textContent.includes(heading)).querySelector('.section-count').textContent
-    expect(count('Metric Catalog')).toBe('4')
-    expect(count('Deprecated Metrics')).toBe('1')
+    selectMetric(cardTable('Deprecated Metrics'), 'temperature')
+    const actions = [...drawer().querySelectorAll('.context-action')]
+    expect(actions.filter(a => a.classList.contains('btn-primary'))).toHaveLength(1)
+    expect(actions[0].textContent).toMatch(/Restore/)
+    expect(actions[0]).toHaveClass('btn-primary')
+  })
+
+  it('opens from a row on Enter, on both tabs, and every row is a selectable row', async () => {
+    renderTab()
+    await waitForCatalog()
+
+    const row = within(catalogTable()).getByText('Axes/DISPLACEMENT').closest('tr')
+    expect(row).toHaveClass('row-selectable')
+    expect(row.tabIndex).toBe(0)
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(drawer().getAttribute('aria-hidden')).toBe('false')
+    expect(within(drawer()).getAllByText('Axes/DISPLACEMENT').length).toBeGreaterThan(0)
+
+    const deprecatedRow = within(cardTable('Deprecated Metrics')).getByText('temperature').closest('tr')
+    expect(deprecatedRow).toHaveClass('row-selectable')
+    fireEvent.keyDown(deprecatedRow, { key: ' ' })
+    expect(within(drawer()).getByRole('button', { name: 'Restore' })).toBeTruthy()
+  })
+
+  it('leaves a key pressed on the copy chip to the chip, and toggles closed on a second Enter', async () => {
+    api.get.mockImplementation((path) => Promise.resolve(path.startsWith('/api/v1/metric-catalog')
+      ? CATALOG.map(m => (m.metric_uuid === 'm1' ? { ...m, semantic_id: 'https://aber.local/semantics/x/DISPLACEMENT', semantic_id_type: 'IRI' } : m))
+      : (routes[Object.keys(routes).find(r => path.startsWith(r))] || [])))
+    renderTab()
+    await waitForCatalog()
+
+    const row = within(catalogTable()).getByText('Axes/DISPLACEMENT').closest('tr')
+    fireEvent.keyDown(within(row).getByRole('button', { name: /Copy semantic id/ }), { key: 'Enter' })
+    expect(drawer().getAttribute('aria-hidden')).toBe('true')
+
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(drawer().getAttribute('aria-hidden')).toBe('false')
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(drawer().getAttribute('aria-hidden')).toBe('true')
   })
 })
 
@@ -792,9 +964,6 @@ const addMetricButton = () => screen.getByRole('button', { name: /^Add$/ })
 // wrong element kind, so it names the select.
 const unitsSelect = () =>
   screen.getAllByTitle(/The unit of measure|Only SAMPLE data items carry units/).find(el => el.tagName === 'SELECT')
-
-/** The card a section lives in, for scoping queries away from its neighbours. */
-const cardFor = (heading) => screen.getByRole('heading', { name: heading }).closest('.card')
 
 /** The "Devices will publish this metric as …" line. */
 const namePreview = () => screen.getByText(/Devices will publish this metric as/)
@@ -1466,7 +1635,7 @@ describe('Metric Catalog table — standard and semantic id columns', () => {
     expect(within(row).getByTitle(/Not mapped to a standard concept/)).toBeTruthy()
   })
 
-  it('renders a semantic id as a copyable value', async () => {
+  it('renders a semantic id as a copyable value that keeps its end', async () => {
     const mapped = [{
       metric_uuid: 'm5', name: 'OEE/AVAILABILITY', metric_group: 'OEE', datatype: 10,
       category: 'SAMPLE', units: 'PERCENT', standard: 'ISO 22400', deprecated: false,
@@ -1479,13 +1648,43 @@ describe('Metric Catalog table — standard and semantic id columns', () => {
         : (routes[Object.keys(routes).find(r => path.startsWith(r))] || [])))
 
     renderTab()
-    const catalog = () => within(cardFor(/Metric Catalog/))
+    const catalog = () => within(catalogTable())
     // Groups start collapsed, so the row has to be revealed before it can be read.
     await waitForCatalog()
     await waitFor(() => expect(catalog().getByText('OEE/AVAILABILITY')).toBeTruthy())
 
     const row = catalog().getByText('OEE/AVAILABILITY').closest('tr')
-    expect(within(row).getByRole('button', { name: /Copy semantic id \(IRI\)/ })).toBeTruthy()
+    const chip = within(row).getByRole('button', { name: /Copy semantic id \(IRI\)/ })
+    // Cut in the middle: every id shares the prefix, so the end is what tells two apart.
+    expect(chip.querySelector('.copyable-id-tail').textContent).toBe('cs/iso22400/AVAILABILITY')
+  })
+
+  it('writes Standard, Category and Datatype as plain text in the row\'s one meta style', async () => {
+    renderTab()
+    await waitForCatalog()
+
+    const row = screen.getByText('Axes/DISPLACEMENT').closest('tr')
+    expect(row.querySelector('.badge')).toBeNull()
+    for (const text of ['MTConnect', 'SAMPLE', 'Double', 'MILLIMETER']) {
+      expect(within(row).getByText(text).closest('td')).toHaveClass('cell-meta')
+    }
+  })
+
+  it('shares one fixed column set between the two tabs', async () => {
+    renderTab()
+    await waitForCatalog()
+
+    const cols = (table) => [...table.querySelectorAll(':scope > colgroup > col')].map(c => c.className)
+    const catalogCols = cols(catalogTable())
+    const deprecatedCols = cols(cardTable('Deprecated Metrics'))
+    expect(catalogCols).toHaveLength(7)
+    expect(deprecatedCols.slice(0, 7)).toEqual(catalogCols)
+    expect(deprecatedCols[7]).toBe('metric-col-superseded')
+    // Fixed layout: the widths come from the colgroup, not from the rows that happen to be open.
+    expect(APP_CSS).toMatch(/\n\.metric-table \{ table-layout: fixed;/)
+    for (const c of catalogCols.filter(Boolean)) {
+      expect(APP_CSS).toMatch(new RegExp(`\\n\\.${c} \\{ width: \\d+px; \\}`))
+    }
   })
 })
 

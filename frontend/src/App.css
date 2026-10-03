@@ -5164,8 +5164,20 @@ pre.gateway-code-wrap { white-space: pre-wrap; }
 
 .metric-form .form-group { margin: 0; }
 
-/* A semantic id is a full IRI; the cap keeps it from widening the catalog table. */
-.metric-id-cell { max-width: 260px; }
+/* The Metrics tables: one fixed column set (MetricsTab's colgroup), so opening a group cannot move a
+   column and the two tabs line up. Description takes what is left; under the min-width, which keeps
+   it legible, the table scrolls sideways. Each width holds its header on one line. */
+.metric-table { table-layout: fixed; min-width: 1050px; }
+.metric-table-deprecated { min-width: 1270px; }
+.metric-table td { overflow-wrap: anywhere; }
+.metric-col-name { width: 200px; }
+.metric-col-standard { width: 124px; }
+.metric-col-category { width: 112px; }
+.metric-col-units { width: 112px; }
+.metric-col-datatype { width: 112px; }
+/* The chip keeps the id's last 24 characters (CopyableId truncate="start") at this width. */
+.metric-col-semantic-id { width: 252px; }
+.metric-col-superseded { width: 220px; }
 
 /* The label of a group header, on Metrics and on the Vocabulary sections. */
 .table-group-label {
