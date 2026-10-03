@@ -180,7 +180,7 @@ describe('Metrics page: one card with two tabs', () => {
     await waitFor(() => expect(catalogTable()).toBeTruthy())
 
     const tablist = screen.getByRole('tablist')
-    expect(tablist.parentElement).toHaveClass('card')
+    expect(tablist.closest('.tab-strip').parentElement).toHaveClass('card')
     expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['Metric Catalog', 'Deprecated Metrics'])
     expect(screen.getByRole('tab', { name: 'Metric Catalog' }).getAttribute('aria-selected')).toBe('true')
   })
@@ -204,18 +204,32 @@ describe('Metrics page: one card with two tabs', () => {
     for (const tab of screen.getAllByRole('tab')) expect(tab.textContent).not.toMatch(/\d/)
   })
 
-  it('puts the tab’s "?" first in the toolbar row and Add Metric at its right-hand end', async () => {
+  it('puts the selected tab’s "?" in the tab bar, after the last tab', async () => {
     renderTab()
     await waitFor(() => expect(catalogTable()).toBeTruthy())
 
-    const bar = screen.getByRole('tablist').nextElementSibling
-    expect(bar).toHaveClass('filter-bar')
-    expect(bar.firstElementChild).toBe(screen.getByRole('button', { name: 'About the metric catalog' }))
+    const help = () => document.querySelector('.card > .tab-strip > .tab-strip-help')
+    expect(help().previousElementSibling).toBe(screen.getByRole('tablist'))
+    expect(within(help()).getByRole('button', { name: 'About the metric catalog' })).toBeTruthy()
+
+    deprecatedTableOf()
+    expect(within(help()).getByRole('button', { name: 'About deprecated metrics' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'About the metric catalog' })).toBeNull()
+    expect(document.querySelectorAll('.card .help-tip')).toHaveLength(1)
+  })
+
+  it('keeps the catalog’s toolbar row, with Add Metric at its right-hand end, and draws none for Deprecated', async () => {
+    renderTab()
+    await waitFor(() => expect(catalogTable()).toBeTruthy())
+
+    const bar = document.querySelector('.card > .tab-strip + .filter-bar')
+    expect(bar).toBeTruthy()
+    expect(screen.getByLabelText('Search the metric catalog').closest('.filter-bar')).toBe(bar)
     expect(screen.getByRole('button', { name: /Add Metric/ }).closest('.filter-bar-actions').parentElement).toBe(bar)
 
     deprecatedTableOf()
-    const deprecatedBar = screen.getByRole('tablist').nextElementSibling
-    expect(deprecatedBar.firstElementChild).toBe(screen.getByRole('button', { name: 'About deprecated metrics' }))
+    expect(document.querySelector('.card .filter-bar')).toBeNull()
+    expect(document.querySelector('.card > .tab-strip').nextElementSibling).toHaveClass('table-wrap')
     expect(screen.queryByRole('button', { name: /Add Metric/ })).toBeNull()
   })
 

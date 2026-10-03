@@ -85,6 +85,18 @@ const BLANK_METRIC = {
  */
 const keepTypedSemanticId = (own) => (own && own.semanticId.trim() !== '' ? own : null)
 
+// The selected tab's "?", drawn in the tab bar after the tab names.
+const VIEW_HELP = {
+  catalog: {
+    label: 'About the metric catalog',
+    text: 'The metrics every schema is built from, grouped by the first segment of their name. A name is what a device publishes and cannot change afterwards, so an unwanted metric is deprecated, not removed.',
+  },
+  deprecated: {
+    label: 'About deprecated metrics',
+    text: 'Withheld from the schema builder, not deleted: schemas that model one keep it, and its readings stay. Restore offers it to schema authors again and clears the replacement it names.',
+  },
+}
+
 /**
  * The metric catalog: the vocabulary of metrics every schema is built from. Add Metric opens a
  * dialog; selecting a row opens a drawer with the metric's fields and its Edit, Deprecate and
@@ -707,6 +719,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
               { id: 'catalog', label: 'Metric Catalog', title: 'The metrics schema authors can build from' },
               { id: 'deprecated', label: 'Deprecated Metrics', title: 'Metrics withheld from the schema builder, and what replaced each' },
             ]}
+            help={<HelpTip {...VIEW_HELP[view]} />}
           />
 
           {view === 'catalog' && (
@@ -714,10 +727,6 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
               {/* The groups start collapsed, so typing is how a known metric is reached; it opens
                   the groups that matched (isGroupOpen). */}
               <div className="filter-bar">
-                <HelpTip
-                  label="About the metric catalog"
-                  text="The metrics every schema is built from, grouped by the first segment of their name. A name is what a device publishes and cannot change afterwards, so an unwanted metric is deprecated, not removed."
-                />
                 <SearchInput
                   value={catalogSearch}
                   onChange={setCatalogSearch}
@@ -803,13 +812,6 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
           {view === 'deprecated' && (
             <>
-              <div className="filter-bar">
-                <HelpTip
-                  label="About deprecated metrics"
-                  text="Withheld from the schema builder, not deleted: schemas that model one keep it, and its readings stay. Restore offers it to schema authors again and clears the replacement it names."
-                />
-              </div>
-
               {/* Kept mounted across a reload (`loaded` stays true), so the rows do not vanish and
                   reappear after a save. */}
               {!loaded ? <LoadingState label="catalog" /> : deprecatedCatalog.length === 0 ? (
