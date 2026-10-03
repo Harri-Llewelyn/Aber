@@ -2575,18 +2575,29 @@ td.row-actions, th.row-actions {
 
 .area-card .area-plan,
 .area-plan-preview .area-plan {
-  width: min(100%, calc(var(--plan-max-height) * var(--plan-aspect, 1.3333)));
+  width: min(100%, calc(var(--plan-max-height) * var(--plan-aspect, 1.3333) + 2 * var(--plan-inset-x)));
   margin: 0 auto;
 }
 
+/* The frame keeps a margin of half a pin round the drawing, so a pin centred on the plan's edge is
+   drawn whole: across, half the disc and its selection ring; down, half the disc, gap and label
+   (`.area-plan-pin`) and the ring. Resize these with the pin. */
 .area-plan {
-  position: relative;
+  --plan-inset-x: 24px;
+  --plan-inset-y: 34px;
   width: 100%;
+  padding: var(--plan-inset-y) var(--plan-inset-x);
   background: var(--bg-glass);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   overflow: hidden;
   user-select: none;
+}
+
+/* What a place is a fraction of. A container, so a pin's label can measure the plan's width. */
+.area-plan-drawing {
+  position: relative;
+  container-type: inline-size;
 }
 
 .area-plan-interactive { cursor: crosshair; }
@@ -2697,6 +2708,13 @@ span.area-plan-pin { cursor: inherit; }
   max-width: 150px;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* Slides sideways just far enough to end inside the frame, the disc staying on its place:
+     --pin-x is the place's fraction across, 100cqw the drawing's width, 50% half the label's. */
+  translate: clamp(
+    calc(50% - var(--pin-x, 0.5) * 100cqw - var(--plan-inset-x, 0px) + 4px),
+    0px,
+    calc((1 - var(--pin-x, 0.5)) * 100cqw + var(--plan-inset-x, 0px) - 4px - 50%)
+  );
 }
 
 .area-plan-pin-small .area-plan-pin-label { font-size: 11px; padding: 0 4px; max-width: 90px; }

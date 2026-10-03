@@ -37,10 +37,10 @@ beforeEach(() => {
   api.post.mockResolvedValue({})
 })
 
-/** A plan 400 wide and 300 tall at the origin, so a click at (200, 150) is the middle. */
+/** A drawing 400 wide and 300 tall at the origin, so a click at (200, 150) is the middle. */
 const sizePlan = () => {
   const plan = document.querySelector('.area-plan')
-  plan.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 300, right: 400, bottom: 300 })
+  plan.querySelector('.area-plan-drawing').getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 300, right: 400, bottom: 300 })
   return plan
 }
 

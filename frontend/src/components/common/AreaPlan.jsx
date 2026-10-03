@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { loadAreaPlanUrl } from '../../api'
 import { planAspect, planFractionsFromEvent } from '../../utils/areaPlans'
 
@@ -7,6 +7,9 @@ import { planAspect, planFractionsFromEvent } from '../../utils/areaPlans'
  * is an <img> fed a blob URL, never inline markup: an SVG in an image element can run nothing.
  * An area with no plan gets the default outline, drawn here in the same coordinate space, so a
  * place set before a plan is uploaded stays where it was put.
+ *
+ * Places are fractions of the drawing, not of the frame: the frame keeps a margin of half a pin
+ * round the drawing (`.area-plan` in App.css), so a pin on the plan's edge is drawn whole.
  */
 
 /** The blob URL for an area's plan, or null while loading or when the area has none. */
@@ -32,6 +35,7 @@ export function AreaPlan({ area, onPlaceClick, children, title }) {
   const hasPlan = !!area?.plan_path
   // The blob URL the browser refused to draw, if any: a file it cannot render fires error, not load.
   const [undrawable, setUndrawable] = useState(null)
+  const drawingRef = useRef(null)
   const broken = !!url && undrawable === url
   const unavailable = error ? 'The plan could not be loaded' : broken ? 'The browser cannot draw this plan; replace it from the area\'s details' : null
 
@@ -39,25 +43,28 @@ export function AreaPlan({ area, onPlaceClick, children, title }) {
     if (!onPlaceClick) return
     // A click on a pin is the pin's, not a placement.
     if (e.target.closest('.area-plan-pin')) return
-    const place = planFractionsFromEvent(e, e.currentTarget)
+    // Measured against the drawing: a click on the margin round it lands on the nearest edge.
+    const place = planFractionsFromEvent(e, drawingRef.current)
     if (place) onPlaceClick(place)
   }
 
   return (
     <div
       className={`area-plan${onPlaceClick ? ' area-plan-interactive' : ''}`}
-      style={{ aspectRatio: String(aspect), '--plan-aspect': aspect }}
+      style={{ '--plan-aspect': aspect }}
       onClick={handleClick}
       title={title}
       role={onPlaceClick ? 'button' : undefined}
       data-plan={hasPlan ? (unavailable ? 'unavailable' : 'uploaded') : 'outline'}
     >
-      {hasPlan && url && !broken ? (
-        <img className="area-plan-image" src={url} alt="" draggable={false} onError={() => setUndrawable(url)} />
-      ) : (
-        <DefaultOutline aspect={aspect} unavailable={hasPlan ? unavailable : null} />
-      )}
-      {children}
+      <div className="area-plan-drawing" ref={drawingRef} style={{ aspectRatio: String(aspect) }}>
+        {hasPlan && url && !broken ? (
+          <img className="area-plan-image" src={url} alt="" draggable={false} onError={() => setUndrawable(url)} />
+        ) : (
+          <DefaultOutline aspect={aspect} unavailable={hasPlan ? unavailable : null} />
+        )}
+        {children}
+      </div>
     </div>
   )
 }
@@ -88,10 +95,11 @@ function DefaultOutline({ aspect, unavailable }) {
  * tile rollup (normal, attention, idle), `alert` when Grafana has raised one against a device
  * here, or `muted` for a pin that is context rather than the subject. Without `onClick` the pin
  * is a mark, not a control: a span, so a read-only plan puts no dead stops in the tab order.
+ * `--pin-x` lets the label slide inward at the plan's side edges while the disc stays put.
  */
 export function AreaPlanPin({ x, y, status = 'idle', Icon, label, title, selected = false, onClick, small = false, iconSize = null }) {
   const className = `area-plan-pin area-plan-pin-${status}${selected ? ' area-plan-pin-selected' : ''}${small ? ' area-plan-pin-small' : ''}`
-  const style = { left: `${Number(x) * 100}%`, top: `${Number(y) * 100}%` }
+  const style = { left: `${Number(x) * 100}%`, top: `${Number(y) * 100}%`, '--pin-x': Number(x) }
   const content = (
     <>
       <span className="area-plan-pin-disc">{Icon && <Icon size={iconSize ?? (small ? 9 : 18)} />}</span>
