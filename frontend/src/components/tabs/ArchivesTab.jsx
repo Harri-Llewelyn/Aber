@@ -28,6 +28,18 @@ export function purgeIsSoon(at, now = Date.now()) {
   return new Date(at).getTime() - now <= PURGE_SOON_DAYS * 24 * 60 * 60 * 1000
 }
 
+/** Each stage tab's "?", drawn in the tab bar for the selected stage. */
+const STAGE_HELP = {
+  archived: {
+    label: 'About archived entities',
+    text: 'Out of commission but not gone: identity and history kept, hidden from the asset pages, a timer running to auto-purge. Restore returns it intact. Export a device as a bundle before it is purged.',
+  },
+  retired: {
+    label: 'About retired entities',
+    text: 'Archived and then deleted, by timer or by hand. Only this tombstone remains, linking to what survives: the audit trail, a forge repository, any exported bundle. Readings stay in the historian under its id.',
+  },
+}
+
 /**
  * One card, two tabs, two stages of one lifecycle. Archived is what archiving leaves: the row still
  * in its table, restorable, its retention timer running. Retired is what deleting leaves: the row
@@ -160,15 +172,10 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
             { id: 'archived', label: 'Archived', title: 'Out of commission, restorable, a timer running to auto-purge' },
             { id: 'retired', label: 'Retired', title: 'Archived and then deleted: the tombstone and what survives it' },
           ]}
+          help={<HelpTip label={STAGE_HELP[stage].label} text={STAGE_HELP[stage].text} />}
         />
 
         {stage === 'archived' && (<>
-        <div className="filter-bar">
-          <HelpTip
-            label="About archived entities"
-            text="Out of commission but not gone: identity and history kept, hidden from the asset pages, a timer running to auto-purge. Restore returns it intact. Export a device as a bundle before it is purged."
-          />
-        </div>
         {loading ? <LoadingState label="archived entities" /> :
          archives.length === 0 ? (
            <EmptyState icon={<IconArchive size={36} />} message="Nothing is archived." />
@@ -241,12 +248,6 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail }) {
 
         {/* The second stage: the row is gone and this is what is left of it. */}
         {stage === 'retired' && (<>
-        <div className="filter-bar">
-          <HelpTip
-            label="About retired entities"
-            text="Archived and then deleted, by timer or by hand. Only this tombstone remains, linking to what survives: the audit trail, a forge repository, any exported bundle. Readings stay in the historian under its id."
-          />
-        </div>
         {loading ? <LoadingState label="retired entities" /> :
          retired.length === 0 ? (
            <EmptyState icon={<IconTrash size={36} />} message="Nothing has been retired: no archived entity has been deleted yet." />

@@ -658,11 +658,17 @@ describe('ArchivesTab layout', () => {
     expect(strip.parentElement).toBe(cards[0])
     expect(within(strip).getAllByRole('tab').map(t => t.textContent)).toEqual(['Archived', 'Retired'])
     expect(document.querySelector('.section-count')).toBeNull()
-    // Each tab's "?" starts the toolbar row under the bar.
-    expect(strip.nextElementSibling).toHaveClass('filter-bar')
-    expect(strip.nextElementSibling.firstElementChild).toBe(screen.getByRole('button', { name: 'About archived entities' }))
+    // The selected tab's "?" sits in the bar after the tab names. Neither stage has filters or
+    // actions, so no toolbar row is drawn and the table follows the bar.
+    const help = strip.querySelector(':scope > .tab-strip-help')
+    expect(help).toContainElement(screen.getByRole('button', { name: 'About archived entities' }))
+    expect(document.querySelector('.filter-bar')).toBeNull()
+    expect(strip.nextElementSibling).toHaveClass('table-wrap')
     fireEvent.click(screen.getByRole('tab', { name: 'Retired' }))
-    expect(strip.nextElementSibling.firstElementChild).toBe(screen.getByRole('button', { name: 'About retired entities' }))
+    expect(help).toContainElement(screen.getByRole('button', { name: 'About retired entities' }))
+    expect(screen.queryByRole('button', { name: 'About archived entities' })).toBeNull()
+    expect(document.querySelector('.filter-bar')).toBeNull()
+    expect(strip.nextElementSibling).toHaveClass('table-wrap')
   })
 
   it('orders and styles the shared columns alike in both tables', async () => {
