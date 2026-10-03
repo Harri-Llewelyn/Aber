@@ -60,7 +60,10 @@ enrolment. The runbook is in `docs/remote-gateways.md`.
 `aber-gateway-converge` (installed by the `converge` role, run by its timer hourly and at boot):
 
 1. reads `platform.yml` from the appliance's checkout of its own repository's `main`
-   (`/var/lib/aber-gateway/data/gitops/repo/platform.yml`), which `flow-sync` keeps current;
+   (`/var/lib/aber-gateway/data/gitops/repo/platform.yml`), which `flow-sync` keeps current.
+   Until the first pull there is none, and the tag enrolment recorded is used. A `platform.yml`
+   that cannot be read (a bad merge, or no `python3-yaml`) is refused and recorded with Python's
+   error, and the appliance stays on the tag it last converged to;
 2. runs `ansible-pull` against this repository at that tag, over SSH with the appliance's own
    deploy key and the forge's pinned host key, the same identity and the same verification the
    puller uses; the key is read-only here and read-write on the gateway's own repository;
