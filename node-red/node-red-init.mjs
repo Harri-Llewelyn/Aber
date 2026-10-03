@@ -33,7 +33,7 @@ const credentialSecret = process.env.NODERED_CREDENTIAL_SECRET;
 // A gateway credential, not a shared platform account: the broker's roles confine each client to
 // `spBv1.0/+/+/<sparkplug_id>/#`, so the username must be the gateway's `sparkplug_id`. This pair is the
 // legacy fallback for a `mqtt-broker-config` node (see brokerCredentialFor()); current flows
-// name their own pair per broker node through `acsCredentialsEnv`.
+// name their own pair per broker node through `aberCredentialsEnv`.
 const mqttUser = process.env.MQTT_USER || 'gwy100000000000400080000';
 const mqttPassword = process.env.MQTT_PASSWORD;
 const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
@@ -178,6 +178,32 @@ if (fs.existsSync(flowsPath)) {
       `[node-red-init] moved tls-config node '${LEGACY_TLS_NODE.id}' to '${TLS_NODE_ID}' ` +
         `(${occurrences - 1} reference(s) with it)`
     );
+  }
+}
+
+// The broker node property naming its credential pair was named for ACS before the rename to
+// Aber. Moved in the file's text like the tls-config node: a key is the quoted name after `{` or
+// `,` and before `:`, so a string that mentions it (its quotes escaped) is left as it is. Not when
+// a node carries both names, which would leave it two keys of one name.
+const CREDENTIALS_ENV_KEY = 'aberCredentialsEnv';
+const LEGACY_CREDENTIALS_ENV_KEY = 'acsCredentialsEnv';
+const holds = (key) => (n) => n !== null && typeof n === 'object' && Object.hasOwn(n, key);
+if (fs.existsSync(flowsPath)) {
+  const text = fs.readFileSync(flowsPath, 'utf8');
+  let nodes = [];
+  try { nodes = JSON.parse(text); } catch { /* read again below, where an unreadable flow stops the boot */ }
+  const count = (list, key) => (Array.isArray(list) ? list.filter(holds(key)).length : 0);
+  const legacy = count(nodes, LEGACY_CREDENTIALS_ENV_KEY);
+  const both = (n) => holds(LEGACY_CREDENTIALS_ENV_KEY)(n) && holds(CREDENTIALS_ENV_KEY)(n);
+  if (legacy && !nodes.some(both)) {
+    const key = new RegExp(`([{,]\\s*)"${LEGACY_CREDENTIALS_ENV_KEY}"(\\s*:)`, 'g');
+    const moved = text.replace(key, (_, before, after) => `${before}"${CREDENTIALS_ENV_KEY}"${after}`);
+    const movedNodes = JSON.parse(moved);
+    if (count(movedNodes, LEGACY_CREDENTIALS_ENV_KEY) === 0
+        && count(movedNodes, CREDENTIALS_ENV_KEY) === count(nodes, CREDENTIALS_ENV_KEY) + legacy) {
+      fs.writeFileSync(flowsPath, moved);
+      console.log(`[node-red-init] moved '${LEGACY_CREDENTIALS_ENV_KEY}' to '${CREDENTIALS_ENV_KEY}' on ${legacy} node(s)`);
+    }
   }
 }
 
@@ -736,13 +762,13 @@ function storedBrokerCredential(nodeId = BROKER_NODE_ID) {
  * Which credential each broker node in the flow should carry.
  *
  * One connection per gateway, because the broker's roles pin the edge-node segment to the username.
- * The env prefix is declared on the node in `acsCredentialsEnv`, not derived from its id: a
+ * The env prefix is declared on the node in `aberCredentialsEnv`, not derived from its id: a
  * convention is invisible when it breaks, and the only symptom is "Connection failed to broker".
  * The credential tooling emits exactly these variable names. The legacy node keeps reading
  * MQTT_USER / MQTT_PASSWORD with no declaration.
  */
 function brokerCredentialFor(node) {
-  const prefix = node.acsCredentialsEnv;
+  const prefix = node[CREDENTIALS_ENV_KEY];
 
   if (!prefix) {
     if (node.id === BROKER_NODE_ID) {
@@ -763,9 +789,12 @@ function brokerCredentialFor(node) {
       return { user: mqttUser, password: mqttPassword };
     }
     fail(
-      `broker node '${node.id}' (${node.name || 'unnamed'}) declares no 'acsCredentialsEnv' and is ` +
+      `broker node '${node.id}' (${node.name || 'unnamed'}) declares no '${CREDENTIALS_ENV_KEY}' and is ` +
         `not the legacy '${BROKER_NODE_ID}'. It would connect with no username, and Mosquitto ` +
-        'refuses that with CONNACK 5 while Node-RED reports only "Connection failed to broker".'
+        'refuses that with CONNACK 5 while Node-RED reports only "Connection failed to broker".' +
+        (holds(LEGACY_CREDENTIALS_ENV_KEY)(node)
+          ? `\n  It carries the retired '${LEGACY_CREDENTIALS_ENV_KEY}', which was not moved; rename it.`
+          : '')
     );
   }
 
@@ -777,7 +806,7 @@ function brokerCredentialFor(node) {
   // this script exists to remove. Naming both the node and the variable makes it one fix.
   if (!user || !password) {
     fail(
-      `broker node '${node.id}' declares acsCredentialsEnv='${prefix}', but ` +
+      `broker node '${node.id}' declares ${CREDENTIALS_ENV_KEY}='${prefix}', but ` +
         `${prefix}_USER and/or ${prefix}_PASSWORD are not set.\n` +
         '  Mint the credential from the dashboard: Gateways tab, Generate broker credential.\n' +
         '  Add them to the release Secret and restart node-red-init.'

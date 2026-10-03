@@ -118,7 +118,7 @@ spec:
               no credential to exist for a gateway nobody has created.
 
               A USER BUILDING A FLOW mints its credential from the dashboard and adds the pair to
-              the chart Secret under the names their broker node's `acsCredentialsEnv` declares.
+              the chart Secret under the names their broker node's `aberCredentialsEnv` declares.
               node-red-init reconciles env pairs onto broker nodes at init and FAILS CLOSED when a
               declared pair is absent -- deliberately, because the alternative is seeding an empty
               username, which the broker refuses with CONNACK 5 while Node-RED reports only

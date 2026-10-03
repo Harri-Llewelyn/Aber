@@ -118,7 +118,7 @@ B lifecycle to be recognised:
    moves every broker node to 8883 with the CA on the next start, so leave the port as the chart
    sets it.
 2. Give it the username and password from step 4. Set them as an env pair on the Node-RED pod and
-   name that pair in the broker node's `acsCredentialsEnv` property — `node-red-init` reconciles env
+   name that pair in the broker node's `aberCredentialsEnv` property — `node-red-init` reconciles env
    pairs onto broker nodes at init, which is what keeps the secret out of the flow file and out of
    git.
 3. Publish an **NBIRTH** on `spBv1.0/<group>/NBIRTH/<gateway sparkplug_id>`.
