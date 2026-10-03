@@ -486,6 +486,21 @@ describe('the Gateways list', () => {
     expect(button.title).toBe('Requires Administrator or Shopfloor Manager')
   })
 
+  it('opens the drawer from the keyboard: the row takes focus, and Enter opens and closes it', async () => {
+    await open([live()])
+    const row = rowNamed('Host_Gateway_NodeRED')
+    const panelOpen = () => document.querySelector('.context-panel').getAttribute('aria-hidden') === 'false'
+
+    expect(row.tabIndex).toBe(0)
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(panelOpen()).toBe(true)
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(panelOpen()).toBe(false)
+    // A key pressed on a control inside the row is that control's, not the row's.
+    fireEvent.keyDown(row.querySelector('button'), { key: 'Enter' })
+    expect(panelOpen()).toBe(false)
+  })
+
   it('drops the columns the drawer repeats while it is open, and puts them back on close', async () => {
     await open([live()])
     const headers = () => [...document.querySelectorAll('thead th')].map(th => th.textContent)

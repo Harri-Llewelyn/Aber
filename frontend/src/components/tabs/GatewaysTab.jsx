@@ -477,6 +477,13 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                        <tr
                          className={`row-selectable${selectedId === g.gateway_id ? ' row-selected' : ''}${g.is_archived ? ' row-archived' : ''}`}
                          onClick={rowSelectHandler(() => setSelectedId(id => id === g.gateway_id ? null : g.gateway_id))}
+                         // Focusable, and Enter or Space on the row itself does what a click does.
+                         tabIndex={0}
+                         onKeyDown={e => {
+                           if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+                           e.preventDefault()
+                           setSelectedId(id => id === g.gateway_id ? null : g.gateway_id)
+                         }}
                          title="Click to inspect this gateway in the details panel"
                        >
                          <td>
