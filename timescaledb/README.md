@@ -363,7 +363,9 @@ and reporting a failing backup is Historian Backup Stale's job. `physical_backup
 type: full on `fullOn`, or whenever the repository's newest full stopped more than seven days ago,
 so a missed Sunday does not leave differentials building on a full that `retainFull` can never
 expire. Both are SQL rather than shell so `test_physical_backup.py` can ask them about any moment
-in a rolled-back transaction; both are revoked from PUBLIC.
+in a rolled-back transaction; both are revoked from PUBLIC. The Backups page repeats both rules to
+say when the next backup is due (`frontend/src/utils/historianBackupSchedule.js`), and
+`scripts/check-mirror-drift.mjs` runs that copy at each rule's boundary.
 
 **What the Backups page reads.** `physical_backup_schedule` is one row, the `hourUtc` and `fullOn`
 the sidecar started with (`physical_backup_record_schedule()`), so the page can say when the next

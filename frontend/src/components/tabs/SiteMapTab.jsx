@@ -50,10 +50,11 @@ import {
 /**
  * How wide the grid runs and how big a pin is drawn on it: one area takes the width, two split it,
  * and three or more settle on thirds. The pin scales with the tile because this is the only view
- * of the map -- at the narrowest tile a pin is still above the 24px a pointer needs.
+ * of the map -- at the narrowest tile a pin is still above the 24px a pointer needs. No pin exceeds
+ * 40px, the disc the plan frame's margin is sized for (`.area-plan` in App.css).
  */
 const COLUMNS_FOR = (n) => Math.min(3, Math.max(1, n))
-const PIN_SIZE = { 1: 44, 2: 36, 3: 28 }
+const PIN_SIZE = { 1: 40, 2: 36, 3: 28 }
 const PIN_ICON = { 1: 20, 2: 16, 3: 12 }
 
 /**

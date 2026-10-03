@@ -2710,10 +2710,11 @@ span.area-plan-pin { cursor: inherit; }
 .area-plan-pin-alert     { --pin-colour: var(--danger); }
 .area-plan-pin-muted     { --pin-colour: var(--text-dim); opacity: 0.55; }
 
+/* The Site Map's grid sets --pin-size by its column count; 40px elsewhere, and the largest drawn. */
 .area-plan-pin-disc {
   position: relative;
-  width: 40px;
-  height: 40px;
+  width: var(--pin-size, 40px);
+  height: var(--pin-size, 40px);
   border-radius: 50%;
   display: flex;
   align-items: center;
