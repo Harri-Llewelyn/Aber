@@ -19,8 +19,8 @@
 -- (Unassigned and Site-Wide are derived lanes, never rows); the `storage.buckets` row (created
 -- by `scripts/storage-init.mjs`).
 --
--- PSQL VARIABLES. `-v nodered_admin_token` and `-v grafana_oauth_client_secret`, defaulted at
--- the point of use, with an absent value treated as normal rather than as an error.
+-- PSQL VARIABLES. `-v grafana_oauth_client_secret` and the others named beside their blocks below,
+-- defaulted at the point of use, with an absent value treated as normal rather than as an error.
 -- =============================================================================================
 
 -- -------------------------------------------------------------------------------------------
@@ -2670,57 +2670,15 @@ SELECT public.ensure_cron_job(
 );
 
 -- ---------------------------------------------------------------------------------------------
--- Vault: the Node-RED admin token
+-- Vault: never reachable through PostgREST
 -- ---------------------------------------------------------------------------------------------
 -- Vault holds only secrets read from SQL. MQTT_PASSWORD / DB_PASSWORD / POSTGRES_PASSWORD stay
 -- in .env: mosquitto-init and supabase-db need them before the database accepts connections.
-\if :{?nodered_admin_token}
-\else
-\set nodered_admin_token ''
-\endif
-
--- psql does NOT substitute :variables inside dollar-quoted strings, so the token cannot be
--- referenced directly from the DO block below -- it would be read as literal text and fail to
--- parse. archived migration 0010 gets away with :'ts_host' because those appear in plain SQL.
--- Stash it in a session GUC out here, where substitution does happen, and read it back inside.
--- Session-local (is_local = false but never committed to a role), so it does not persist.
-SELECT set_config('aber.nodered_admin_token', :'nodered_admin_token', false);
-
-DO $$
-DECLARE
-  v_token TEXT := current_setting('aber.nodered_admin_token', true);
-  v_id    UUID;
-BEGIN
-  -- An absent token is the default: the break-glass static-token path is shut. An empty secret
-  -- would be indistinguishable from a real one to whatever reads it, so record nothing.
-  IF v_token IS NULL OR v_token = '' THEN
-    RAISE NOTICE 'vault: nodered_admin_token not supplied; leaving it unset';
-    RETURN;
-  END IF;
-
-  SELECT id INTO v_id FROM vault.secrets WHERE name = 'nodered_admin_token';
-
-  IF v_id IS NULL THEN
-    PERFORM vault.create_secret(
-      v_token,
-      'nodered_admin_token',
-      'Bearer token for the Node-RED admin API: NODERED_ADMIN_TOKEN, the break-glass path.'
-    );
-  ELSE
-    -- update_secret rather than create: supabase-db-init replays every migration on every
-    -- stack start, and create_secret would fail the UNIQUE on name the second time.
-    PERFORM vault.update_secret(v_id, v_token);
-  END IF;
-END $$;
-
--- vault.decrypted_secrets is a view that decrypts on read. It must never become reachable
--- through PostgREST -- `vault` is not in PGRST_DB_SCHEMAS today, but these REVOKEs mean that
--- adding it later still would not expose plaintext to a logged-in user.
+-- vault.decrypted_secrets is a view that decrypts on read. `vault` is not in PGRST_DB_SCHEMAS
+-- today, but these REVOKEs mean that adding it later still would not expose plaintext to a
+-- logged-in user.
 REVOKE ALL ON vault.decrypted_secrets FROM anon, authenticated;
 REVOKE ALL ON vault.secrets           FROM anon, authenticated;
-
--- Do not leave the plaintext sitting in the session's settings after the migration.
-SELECT set_config('aber.nodered_admin_token', '', false);
 
 -- ---------------------------------------------------------------------------------------------
 -- Grafana OAuth client registration
@@ -8256,7 +8214,7 @@ SELECT public.ensure_cron_job(
 -- psql does NOT substitute :variables inside dollar-quoted strings, so neither secret can be
 -- referenced directly from the DO blocks below -- it would be read as literal text. Stash them
 -- in session GUCs out here, where substitution does happen, and read them back inside. Same
--- arrangement 0002_seed_data.sql uses for the Vault token and the Grafana secret.
+-- arrangement this file uses for the Grafana secret.
 SELECT set_config('aber.nodered_oauth_client_secret', :'nodered_oauth_client_secret', false);
 SELECT set_config('aber.nodered_webhook_jwt_secret',  :'nodered_webhook_jwt_secret',  false);
 SELECT set_config('aber.nodered_redirect_uri',        :'nodered_redirect_uri',        false);

@@ -3128,6 +3128,11 @@ matched by its id **and** its original URL so a site that re-pointed it at a flo
 the row. Webhooks stay: a row a site adds whose `secret_name` is `nodered_webhook_jwt_secret` is
 signed with the key Node-RED's `httpNodeAuth` verifies every `http in` request against.
 
+The row's own secret is retired with it. `0002` kept a vault copy of the Node-RED admin token for
+that row and nothing else; it no longer writes one, and `0031` deletes it unless a
+`webhook_endpoints` row still names it, so a row a site added with it keeps working. Node-RED's
+break-glass token is read from its own environment and is unaffected.
+
 ---
 
 ## Edge Functions

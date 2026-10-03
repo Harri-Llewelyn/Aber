@@ -45,9 +45,9 @@ CREATE EXTENSION IF NOT EXISTS supabase_vault WITH SCHEMA vault;
 -- for Postgres 17; removing it is this line plus the signer in the dispatcher.
 CREATE EXTENSION IF NOT EXISTS pgjwt WITH SCHEMA extensions;
 
--- Vault holds only secrets that must be read *from SQL* -- in practice the Node-RED admin token
--- the quarantine webhook attaches to its outbound request. Neither browser-facing role may read
--- the store, so the revocation is part of the structure rather than of the seeding.
+-- Vault holds only secrets that must be read *from SQL* -- the webhook signing key and the keys
+-- the pg_net callers attach to their requests. Neither browser-facing role may read the store,
+-- so the revocation is part of the structure rather than of the seeding.
 REVOKE ALL ON vault.secrets           FROM anon, authenticated;
 REVOKE ALL ON vault.decrypted_secrets FROM anon, authenticated;
 

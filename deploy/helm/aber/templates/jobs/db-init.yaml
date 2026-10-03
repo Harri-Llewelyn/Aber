@@ -104,7 +104,6 @@ spec:
             - name: TS_USER
               value: {{ .Values.timescaledb.username | quote }}
             {{- include "aber.secretEnv" (dict "name" "TS_PASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
-            {{- include "aber.secretEnv" (dict "name" "NODERED_ADMIN_TOKEN" "secretName" $secretName "key" "NODERED_ADMIN_TOKEN") | nindent 12 }}
             {{- include "aber.secretEnv" (dict "name" "GRAFANA_OAUTH_CLIENT_SECRET" "secretName" $secretName "key" "GRAFANA_OAUTH_CLIENT_SECRET") | nindent 12 }}
             {{- include "aber.secretEnv" (dict "name" "NODERED_OAUTH_CLIENT_SECRET" "secretName" $secretName "key" "NODERED_OAUTH_CLIENT_SECRET") | nindent 12 }}
             {{- include "aber.secretEnv" (dict "name" "NODERED_WEBHOOK_JWT_SECRET" "secretName" $secretName "key" "NODERED_WEBHOOK_JWT_SECRET") | nindent 12 }}
@@ -284,7 +283,6 @@ spec:
                     -v ts_user="$TS_USER" \
                     -v ts_password="$TS_PASSWORD" \
                     -v ts_sslrootcert="$TS_SSLROOTCERT" \
-                    -v nodered_admin_token="$NODERED_ADMIN_TOKEN" \
                     -v grafana_oauth_client_secret="$GRAFANA_OAUTH_CLIENT_SECRET" \
                     -v grafana_public_url="$GRAFANA_PUBLIC_URL" \
                     -v studio_oauth_client_secret="$STUDIO_OAUTH_CLIENT_SECRET" \
