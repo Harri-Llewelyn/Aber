@@ -709,7 +709,7 @@ Every suite, what each one needs, the five CI jobs and the release workflow are 
 **[`docs/testing.md`](docs/testing.md)**. The short version:
 
 ```bash
-cd frontend && npm test                 # Frontend — 1,600+ tests
+cd frontend && npm test                 # Frontend — 3,600+ tests
 npm run test:py                         # Python unit lane — no services needed
 npm run test:db                         # database lane, against a throwaway Postgres
 npm run dev:test                        # validate.py and the stack lane, against the k3d cluster

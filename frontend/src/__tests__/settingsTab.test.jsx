@@ -164,9 +164,9 @@ describe('the page', () => {
 
     fireEvent.change(screen.getByLabelText('Refresh interval (seconds)'), { target: { value: '45' } })
 
-    /* Awaited, like every other post-fireEvent assertion in the file: nothing in the page's
-       contract promises the button appears in the same tick, and the guarantee (Save must appear)
-       is unchanged. */
+    /* Awaited, like every other lookup after a fireEvent in the file. What once hid Save was not
+       the tick but the effect race show() settles: an edit made before SettingRow's effect
+       re-seeded the draft was overwritten by it. */
     const save = await screen.findByRole('button', { name: /^Save$/ })
     // Beside the field, in the same control row, rather than on a line of its own beneath the row.
     expect(save.closest('.setting-control')).toContainElement(screen.getByLabelText('Refresh interval (seconds)'))
@@ -210,8 +210,8 @@ describe('the page', () => {
     await show()
     const input = screen.getByLabelText('Refresh interval (seconds)')
     fireEvent.change(input, { target: { value: '45' } })
-    // Awaited for the reason given above: neither control is promised in the tick that changed
-    // the input, and a synchronous lookup here is a pass that depends on how busy the run is.
+    // Awaited like the other lookups. The failure this once seemed to need it for was the effect
+    // race show() settles, not the tick that changed the input.
     fireEvent.click(await screen.findByRole('button', { name: /Discard/i }))
 
     await waitFor(() => expect(input.value).toBe('60'))

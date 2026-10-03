@@ -629,7 +629,7 @@ has already been told.
 
 ## Testing
 
-Vitest with globals enabled and a jsdom environment. **607 tests across 39 files.**
+Vitest with globals enabled and a jsdom environment. **3,655 tests across 152 files** at the last count (2026-10-03).
 
 The suite treats an unhandled promise rejection as a defect, not noise — Vitest reports them
 separately and they can mask real failures.

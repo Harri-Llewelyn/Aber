@@ -2981,8 +2981,8 @@ span.area-plan-pin { cursor: inherit; }
   align-items: center;
   gap: 5px;
   padding: 0 6px;
-  /* 28px, the same as the shortcuts button and the account avatar. The three controls on the right
-     are now one row of one size rather than a 78px pill flanked by two circles. */
+  /* 28px, the same as the other four controls on the right (the bell, the shortcuts and help keys,
+     and the account avatar), so the five are one row of one size. */
   height: 28px;
   border-radius: 999px;
   font-size: 12px;
