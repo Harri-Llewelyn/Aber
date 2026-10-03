@@ -47,7 +47,8 @@ export const PAGE_KEYWORDS = {
 /**
  * The sections inside each page. One entry per section somebody would type, usually the heading the
  * page renders; the Site Map's lanes have entries of their own. 'floor plan', 'floors' and
- * 'buildings' below are old names, and 'zones' is the old name for a cell.
+ * 'buildings' below are old names, and 'zones' is the old name for a cell. A section that is one tab
+ * of its page carries `section`, that tab's id, and the search opens the page on that tab.
  */
 export const CARDS = [
   { id: 'site-map',             label: 'Site Map',             tab: 'site-map',       keywords: ['floor plan', 'floors', 'plan', 'pins', 'svg', 'layout', 'areas', 'lanes'] },
@@ -77,10 +78,10 @@ export const CARDS = [
   { id: 'playback',             label: 'Playback',             tab: 'capture',        keywords: ['replay', 'shadow devices', 'speed'] },
   { id: 'cold-telemetry',       label: 'Cold telemetry',       tab: 'cold-storage',   keywords: ['parquet', 'objects', 'tiered'] },
 
-  { id: 'broker-credentials',   label: 'Broker credentials',   tab: 'access-control', keywords: ['mqtt accounts', 'gateway passwords', 'revoke'] },
-  { id: 'machine-identities',   label: 'Machine identities',   tab: 'access-control', keywords: ['machine accounts', 'non-human', 'service accounts', 'principals', 'tokens', 'withdraw', 'cannot sign in'] },
-  { id: 'broker-accounts',      label: 'Broker accounts',      tab: 'access-control', keywords: ['mqtt users', 'platform accounts'] },
-  { id: 'broker-roles',         label: 'Broker roles',         tab: 'access-control', keywords: ['dynamic security', 'mosquitto roles', 'topic access', 'orphaned accounts'] },
+  { id: 'broker-credentials',   label: 'Broker credentials',   tab: 'access-control', section: 'credentials', keywords: ['mqtt accounts', 'gateway passwords', 'revoke'] },
+  { id: 'machine-identities',   label: 'Machine identities',   tab: 'access-control', section: 'identities', keywords: ['machine accounts', 'non-human', 'service accounts', 'principals', 'tokens', 'withdraw', 'cannot sign in'] },
+  { id: 'broker-accounts',      label: 'Broker accounts',      tab: 'access-control', section: 'accounts', keywords: ['mqtt users', 'platform accounts', 'orphaned accounts', 'no gateway'] },
+  { id: 'broker-roles',         label: 'Broker roles',         tab: 'access-control', section: 'roles', keywords: ['dynamic security', 'mosquitto roles', 'topic access'] },
   { id: 'backup-list',          label: 'Backups',              tab: 'backups',        keywords: ['take a backup', 'stored backups', 'pinned', 'release'] }
 ]
 
@@ -113,6 +114,7 @@ export function buildTargets(visibleTabs, settings = []) {
       key: `card:${c.id}`,
       label: c.label,
       tabId: c.tab,
+      section: c.section,
       // What the row says under the label. A card's page is the ONLY thing a reader needs to be
       // told, and it is the thing they came to the search not knowing.
       page: visibleTabs.find(t => t.id === c.tab)?.label || c.tab,

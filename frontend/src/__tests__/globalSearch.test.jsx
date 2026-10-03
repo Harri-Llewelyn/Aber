@@ -163,6 +163,7 @@ describe('the palette', () => {
     onSelectArea: vi.fn(),
     onSelectSchema: vi.fn(),
     onSelectSetting: vi.fn(),
+    onSelectSection: vi.fn(),
     onSelectTrail: vi.fn()
   })
 
@@ -248,6 +249,16 @@ describe('the palette', () => {
 
     fireEvent.click(await screen.findByText('Playback'))
     expect(p.onNavigate).toHaveBeenCalledWith('capture')
+  })
+
+  it('opens a card that is one tab of its page on that tab', async () => {
+    const p = props()
+    render(<GlobalSearch {...p} />)
+    type('machine identities')
+
+    fireEvent.click(await screen.findByText('Machine identities'))
+    expect(p.onSelectSection).toHaveBeenCalledWith('access-control', 'identities')
+    expect(p.onNavigate).not.toHaveBeenCalled()
   })
 
   it('opens the highlighted row on Enter', async () => {

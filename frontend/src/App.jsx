@@ -376,6 +376,8 @@ function Dashboard({ session, onSignOut }) {
   const [selectedAreaFilter, setSelectedAreaFilter] = useState('')
   // Set by the search bar; consumed by SettingsTab, which opens that setting's category on it.
   const [selectedSettingKey, setSelectedSettingKey] = useState('')
+  // Set by a search-bar card that is one tab of its page; consumed by AccessControlTab.
+  const [selectedSection, setSelectedSection] = useState('')
   // Set by an "Audit Trail" action on an asset row; consumed by AuditTrailTab as { id, type }.
   const [selectedTrailEntity, setSelectedTrailEntity] = useState(null)
   // Set by clicking an entry on the Vocabulary page; consumed by MetricsTab, which resolves it
@@ -414,6 +416,7 @@ function Dashboard({ session, onSignOut }) {
   /* A setting is reached by its key, not a UUID: the key is what the page, the code and every
      migration call it, and it is what a link to one should carry. */
   const showSetting = (key) => { setSelectedSettingKey(key); setTab('settings', { search: key }) }
+  const showSection = (tabId, section) => { handleNavClick(tabId); setSelectedSection(section) }
   /** The opposite direction: every device provisioned with a schema. Note the `schema` key. */
   const showDevicesForSchema = (uuid) => {
     setSelectedSchemaFilter(uuid)
@@ -534,6 +537,7 @@ function Dashboard({ session, onSignOut }) {
           onSelectArea={showArea}
           onSelectSchema={showSchema}
           onSelectSetting={showSetting}
+          onSelectSection={showSection}
           /* No type: the search knows the id and not what it belongs to, and the trail's own
              search matches an entity id whatever kind carries it. */
           onSelectTrail={(id) => viewTrailFor(id, '')}
@@ -653,7 +657,7 @@ function Dashboard({ session, onSignOut }) {
               <ColdStorageTab showToast={showToast} userRole={userRole} />}
             {/* The role is re-checked here, not only in the nav: routing can put `tab` on a value
                 the nav never offered. Still a courtesy -- RLS is what refuses the write. */}
-            {tab === 'access-control' && userRole === 'Administrator' && <AccessControlTab showToast={showToast} />}
+            {tab === 'access-control' && userRole === 'Administrator' && <AccessControlTab showToast={showToast} initialSection={selectedSection} onClearSection={() => setSelectedSection('')} />}
             {tab === 'backups' && userRole === 'Administrator' && <BackupsTab showToast={showToast} />}
             {tab === 'settings' && userRole === 'Administrator' && <SettingsTab showToast={showToast} initialSetting={selectedSettingKey} onClearSetting={() => setSelectedSettingKey('')} />}
           </Suspense>

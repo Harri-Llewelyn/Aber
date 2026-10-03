@@ -34,7 +34,7 @@ const ENTITY_ICON = {
 const isMac = () =>
   typeof navigator !== 'undefined' && /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent || '')
 
-export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onSelectSetting, onSelectTrail }) {
+export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onSelectSetting, onSelectSection, onSelectTrail }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const [cursor, setCursor] = useState(0)
@@ -197,9 +197,12 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
       // A setting CAN be jumped to: the page is a tablist by category, so its category is an
       // anchor in all but name and landing on the wrong one would hide the row that was asked for.
       onSelectSetting(result.target.settingKey)
+    } else if (result.kind === 'card' && result.target.section && onSelectSection) {
+      // A card that is one tab of its page opens the page on that tab.
+      onSelectSection(result.target.tabId, result.target.section)
     } else {
-      // A card navigates to its page and no further: there are no anchors on cards, and claiming to
-      // jump to a heading would be worse than landing at the top.
+      // Any other card navigates to its page and no further: there are no anchors on cards, and
+      // claiming to jump to a heading would be worse than landing at the top.
       onNavigate?.(result.target.tabId)
     }
     dismiss()
