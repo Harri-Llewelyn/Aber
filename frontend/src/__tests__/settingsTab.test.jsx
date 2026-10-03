@@ -403,7 +403,7 @@ describe('the page frame', () => {
     const tabs = screen.getByRole('tablist', { name: 'Settings category' })
     const card = heading.closest('.card')
     expect(heading.closest('.card-heading')).toBeTruthy()
-    expect(tabs.parentElement).toBe(card)
+    expect(tabs.closest('.tab-strip').parentElement).toBe(card)
     expect(heading.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // The card scrolls, not the page.
     expect(document.querySelector('.page-layout.page-fill')).not.toBeNull()
@@ -412,16 +412,19 @@ describe('the page frame', () => {
     expect(document.querySelectorAll('.card')).toHaveLength(1)
   })
 
-  it('puts the tab\'s tip in the toolbar row under the tabs, and counts nothing', async () => {
+  it('puts the selected tab\'s tip in the tab bar, draws no toolbar row, and counts nothing', async () => {
     await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
-    const bar = document.querySelector('.card > .tab-strip + .filter-bar')
-    expect(bar.querySelector('.help-tip')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'About Audit Trail settings' })).toBeInTheDocument()
+    const help = document.querySelector('.card > .tab-strip > .tab-strip-help')
+    expect(help).toContainElement(screen.getByRole('button', { name: 'About Audit Trail settings' }))
+    // A category has no filters or actions, so nothing sits between the bar and its rows.
+    expect(document.querySelector('.filter-bar')).toBeNull()
+    expect(document.querySelector('.card > .tab-strip').nextElementSibling).toHaveClass('card-fill-scroll')
     expect(document.querySelector('.section-count')).toBeNull()
     for (const tab of screen.getAllByRole('tab')) expect(tab).not.toHaveAttribute('title')
 
     fireEvent.click(screen.getByRole('tab', { name: /^Retention/ }))
-    expect(screen.getByRole('button', { name: 'About Retention settings' })).toBeInTheDocument()
+    expect(help).toContainElement(screen.getByRole('button', { name: 'About Retention settings' }))
+    expect(screen.queryByRole('button', { name: 'About Audit Trail settings' })).toBeNull()
   })
 
   it('shows a load error as a danger callout inside the card', async () => {

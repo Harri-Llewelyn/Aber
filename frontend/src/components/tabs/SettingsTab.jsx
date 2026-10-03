@@ -314,14 +314,13 @@ export function SettingsTab({ showToast, initialSetting = '', onClearSetting }) 
               // Choosing a category by hand ends the search's highlight: it has been seen.
               onChange={category => { setCategory(category); setFoundKey('') }}
               tabs={groups.map(group => ({ id: group.category, label: group.category }))}
+              help={(
+                <HelpTip
+                  label={`About ${activeCategory} settings`}
+                  text="A change takes effect without a restart. Edit a value and Save, or Discard to go back. The ? beside a setting says what it controls, and the line beneath it names the default it overrides."
+                />
+              )}
             />
-
-            <div className="filter-bar">
-              <HelpTip
-                label={`About ${activeCategory} settings`}
-                text="A change takes effect without a restart. Edit a value and Save, or Discard to go back. The ? beside a setting says what it controls, and the line beneath it names the default it overrides."
-              />
-            </div>
 
             {activeGroup && (
               <div className="card-fill-scroll settings-group" key={activeGroup.category}>
