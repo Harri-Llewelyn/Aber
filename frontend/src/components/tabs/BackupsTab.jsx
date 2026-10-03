@@ -442,7 +442,7 @@ function RunRow({ run, inFloor, offsiteBase: base, retentionDays, releasing, onR
   return (
     <tr
       data-testid={`run-${run.id}`}
-      className={`row-selectable backup-run${selected ? ' row-selected' : ''}`}
+      className={`row-selectable${selected ? ' row-selected' : ''}`}
       tabIndex={0}
       onClick={rowSelectHandler(onSelect)}
       // Enter on the row itself only: Enter on the Release button inside it is that button's.

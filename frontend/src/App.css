@@ -1452,7 +1452,6 @@ tbody tr:hover { background: var(--bg-glass); }
 .backup-run-failed { color: var(--danger-text); }
 .backup-run-holds { max-width: 28ch; }
 .backup-run-short { white-space: nowrap; }
-tr.backup-run:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 /* The files a backup holds, in its run's panel: each file's name, then its size. */
 .backup-files {
@@ -3785,6 +3784,9 @@ tr.row-selectable > td:last-child::after {
 
 tr.row-selectable:hover > td:last-child::after { background-color: var(--text-primary); }
 tr.row-selectable.row-selected > td:last-child::after { background-color: var(--accent); }
+/* A row that opens a panel also opens from the keyboard (Enter or Space on the focused row), so its
+   focus is drawn on the row itself; the outline is inset so a scrolling table does not clip it. */
+tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 /* The app-level drawer, which is the help panel. It is a sibling of `.content` rather than inside
    `.page-layout`, so there is no scrolling ancestor for `position: sticky`; it takes the full
@@ -5381,7 +5383,6 @@ pre.gateway-code-wrap { white-space: pre-wrap; }
   border-bottom: 1px solid var(--border);
 }
 .capture-strips:empty { display: none; }
-.capture-card tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* A file dragged over the card: an accent frame and a line saying what a drop does. */
 .capture-card-drop { border-color: var(--accent); }
 .capture-drop-overlay {
