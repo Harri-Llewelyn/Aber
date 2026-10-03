@@ -777,6 +777,11 @@ function edgeFunctionNames() {
     // The baseline's copy fails it closed to security and folds forward at the next squash.
     'public.audit_domain_for': '0010 adds metric_catalog to the asset lane; the baseline holds the pre-0010 form',
 
+    // 0028 records each revocation's pg_net request id and judges the stamp by that request's own
+    // reply, the same signatures and return types. The baseline accepts any 2xx after the stamp.
+    'public.revoke_gateway_credential': '0028 records the request id in gateway_revocation_requests; the baseline records nothing',
+    'public.sweep_gateway_credential_revocations': '0028 judges each stamp by the reply to its own request; the baseline accepts any 2xx pg_net recorded',
+
     // 0013 widens the allow-list to the six a machine may hold and gives each refusal its own
     // reason, the same signature and return type. The baseline refuses all but three reads.
     'public.create_machine_principal': '0013 allows schema:manage, proposal:create and archive:manage and states why each other permission is refused; the baseline holds the pre-0013 form',
@@ -980,6 +985,10 @@ function edgeFunctionNames() {
       'one row holding the in-flight pg_net request id for the Prometheus liveness probe (0054). ' +
       'RLS on with no policy and the anon/authenticated grants revoked -- infrastructure, and a ' +
       'writable request-id table would let a caller redirect where the probe reads liveness from',
+    gateway_revocation_requests:
+      'the in-flight pg_net request id behind each archived gateway\'s revocation stamp (0028). RLS ' +
+      'on with no policy, nothing granted to anon/authenticated, and service_role may only read it: ' +
+      'revoke_gateway_credential() writes it and the revocation sweep deletes it',
     forge_sweep_lease:
       'one row saying which forge-sweep pass may run (0025). RLS on with no policy, nothing granted ' +
       'to anon/authenticated, and service_role may only read it: it moves through three service_role ' +

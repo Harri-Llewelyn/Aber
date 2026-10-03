@@ -225,5 +225,125 @@ class TestTheSweepAgrees(RevocationBase):
         self.assertIsNotNone(self.cur.fetchone()[0])
 
 
+class TestTheSweepJudgesItsOwnReply(RevocationBase):
+    """
+    A stamp is judged by the reply to its own request, never by another call's (0028).
+
+    The forge sweep and the liveness probe answer 200 every few minutes, so a sweep that accepted
+    any 2xx left a failed revocation stamped and the broker account working. Replies are written
+    into net._http_response by hand under the request's id; the transaction rolls back, so pg_net's
+    worker never sees the queued request.
+    """
+
+    def archived_and_asked(self, minutes_ago=10):
+        """An archived host gateway whose revocation was queued `minutes_ago` and is unanswered."""
+        gid, _ = self.a_gateway(host_run=True, with_credential=True)
+        self.cur.execute("UPDATE public.gateways SET is_archived = true WHERE id = %s;", (gid,))
+        self.cur.execute(
+            "UPDATE public.gateway_revocation_requests "
+            "SET requested_at = now() - make_interval(mins => %s) WHERE gateway_id = %s "
+            "RETURNING request_id;",
+            (minutes_ago, gid),
+        )
+        request_id = self.cur.fetchone()[0]
+        self.cur.execute(
+            "UPDATE public.gateways SET credential_revoked_at = now() - make_interval(mins => %s) "
+            "WHERE id = %s RETURNING credential_revoked_at;",
+            (minutes_ago, gid),
+        )
+        return gid, request_id, self.cur.fetchone()[0]
+
+    def reply(self, request_id, status):
+        self.cur.execute(
+            "INSERT INTO net._http_response (id, status_code, content) VALUES (%s, %s, '{}');",
+            (request_id, status),
+        )
+
+    def an_unrelated_request_id(self):
+        self.cur.execute("SELECT coalesce(max(id), 0) + 1000000 FROM net.http_request_queue;")
+        return self.cur.fetchone()[0]
+
+    def state(self, gid):
+        self.cur.execute(
+            "SELECT g.credential_revoked_at, q.request_id FROM public.gateways g "
+            "LEFT JOIN public.gateway_revocation_requests q ON q.gateway_id = g.id "
+            "WHERE g.id = %s;",
+            (gid,),
+        )
+        return self.cur.fetchone()
+
+    def sweep(self):
+        self.cur.execute("SELECT public.sweep_gateway_credential_revocations();")
+        return self.cur.fetchone()[0]
+
+    def test_archiving_records_the_queued_request(self):
+        gid, _ = self.a_gateway(host_run=True, with_credential=True)
+        self.cur.execute("UPDATE public.gateways SET is_archived = true WHERE id = %s;", (gid,))
+        _, request_id = self.state(gid)
+        self.assertIsNotNone(request_id, "archiving recorded no request id for the sweep to judge")
+        self.cur.execute("SELECT EXISTS (SELECT 1 FROM net.http_request_queue WHERE id = %s);",
+                         (request_id,))
+        self.assertTrue(self.cur.fetchone()[0], "the recorded id is not the queued request")
+
+    def test_a_failed_revocation_is_asked_again_despite_another_calls_2xx(self):
+        """The issue's case: another call's 200 nearby, and a 503 for the revocation itself."""
+        gid, request_id, stamped = self.archived_and_asked()
+        self.reply(self.an_unrelated_request_id(), 200)
+        self.reply(request_id, 503)
+        before = self.queue_depth()
+
+        self.assertGreaterEqual(self.sweep(), 1)
+
+        stamp, new_request = self.state(gid)
+        self.assertGreater(self.queue_depth(), before, "the failed revocation was not asked again")
+        self.assertNotEqual(new_request, request_id)
+        self.assertNotEqual(stamp, stamped, "the stamp of a revocation answered 503 survived")
+
+    def test_no_reply_after_five_minutes_is_asked_again(self):
+        gid, request_id, stamped = self.archived_and_asked(minutes_ago=10)
+        self.reply(self.an_unrelated_request_id(), 200)
+
+        self.sweep()
+
+        stamp, new_request = self.state(gid)
+        self.assertNotEqual(new_request, request_id)
+        self.assertNotEqual(stamp, stamped)
+
+    def test_a_non_2xx_reply_is_asked_again_at_once(self):
+        gid, request_id, stamped = self.archived_and_asked(minutes_ago=1)
+        self.reply(request_id, 502)
+
+        self.sweep()
+
+        _, new_request = self.state(gid)
+        self.assertNotEqual(new_request, request_id)
+
+    def test_a_2xx_to_its_own_request_keeps_the_stamp(self):
+        gid, request_id, stamped = self.archived_and_asked()
+        self.reply(request_id, 200)
+        before = self.queue_depth()
+
+        self.sweep()
+
+        stamp, pending = self.state(gid)
+        self.assertEqual(stamp, stamped, "a revocation answered 200 was cleared")
+        self.assertIsNone(pending, "a confirmed request was left to be judged again")
+        self.assertEqual(self.queue_depth(), before)
+
+        # The verdict outlives pg_net pruning the reply.
+        self.cur.execute("DELETE FROM net._http_response WHERE id = %s;", (request_id,))
+        self.sweep()
+        self.assertEqual(self.state(gid)[0], stamped)
+
+    def test_an_unanswered_request_younger_than_five_minutes_waits(self):
+        gid, request_id, stamped = self.archived_and_asked(minutes_ago=1)
+        before = self.queue_depth()
+
+        self.sweep()
+
+        self.assertEqual(self.state(gid), (stamped, request_id))
+        self.assertEqual(self.queue_depth(), before)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

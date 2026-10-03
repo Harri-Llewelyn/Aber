@@ -2853,6 +2853,31 @@ leak for one junk account per gateway ever deleted.
   stack ingesting. The Access Control page lists the same accounts under *Broker accounts*, marked
   *No gateway*.
 
+### The retry judges each revocation by its own reply (`0028`)
+
+Archiving stamps `credential_revoked_at` when the revocation is **queued**, because `net.http_post`
+answers only after the transaction commits. `sweep_gateway_credential_revocations()` is what makes
+that optimism eventually correct, and until `0028` it judged a stamp by whether **any** 2xx reached
+`net._http_response` after it. Since the forge sweep and the directory liveness probe answer 200
+every few minutes, a revocation that failed (a 503 from a functions pod with no revoke secret, a
+502 from the credential service, a timeout) almost always kept its stamp, and the gateway read as
+revoked while its broker account still worked.
+
+`revoke_gateway_credential()` now records the request id `net.http_post` returns in
+`gateway_revocation_requests`, one row per gateway. The sweep reads the reply with that id:
+
+- **a 2xx** confirms the stamp and deletes the row, so the verdict outlives pg_net pruning its
+  replies after six hours;
+- **any other reply, or none five minutes after the request**, clears the stamp, and the same pass
+  asks again.
+
+The stamps `0028` found on its first run had been judged the old way, so it cleared them once,
+for every archived gateway that still holds a broker credential, and the next sweep asked each one
+again. The id lives in its own table rather than on `gateways`: an UPDATE of the row being deleted
+would abort the `BEFORE DELETE` trigger that also revokes, and a new `gateways` column breaks the
+replay of `0001`'s `gateway_status` view, whose column list is fixed. The directory liveness probe
+already reads its reply by request id, and `sweep_forge()` does not read replies at all.
+
 ### What the inventory still cannot see
 
 `npm run setup` mints `SUPABASE_INGESTION_KEY` and `SUPABASE_PLAYBACK_KEY` — the keys the ingestion
