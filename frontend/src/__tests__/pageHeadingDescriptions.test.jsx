@@ -11,7 +11,6 @@ const SOURCES = import.meta.glob('../components/tabs/*.jsx', { query: '?raw', im
 const PAGES = [
   ['ApprovalsTab', '../components/tabs/ApprovalsTab.jsx'],
   ['DevicesTab', '../components/tabs/DevicesTab.jsx'],
-  ['DirectoryTab', '../components/tabs/DirectoryTab.jsx'],
   ['MetricsTab', '../components/tabs/MetricsTab.jsx']
 ]
 

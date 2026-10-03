@@ -1501,8 +1501,7 @@ tr.backup-run:focus-visible { outline: 2px solid var(--accent); outline-offset: 
   cursor: help;
 }
 
-/* Stacks its direct children with the page gap. The one way to space cards, banners and blocks;
-   a wrapper that also holds a directory-group keeps that group's own rule. */
+/* Stacks its direct children with the page gap. The one way to space cards, banners and blocks. */
 .stack > * + * { margin-top: var(--stack); }
 
 /* A table row whose entity is archived: the amber tint. The generic row hover paints over it. */
@@ -1517,9 +1516,9 @@ td.row-actions, th.row-actions {
 
 .row-actions .btn + .btn { margin-left: 8px; }
 
-/* Directory service tables: one table per category, so `table-layout: fixed` plus the widths below
-   pin all three to the same column grid. Widths are set on the header cells only; under fixed
-   layout the first row decides every column. */
+/* Directory service tables: one table per tab, so `table-layout: fixed` plus the widths below keep
+   every tab on the same column grid. Widths are set on the header cells only; under fixed layout
+   the first row decides every column. */
 .table-directory {
   table-layout: fixed;
   /* Below this the fixed columns crush rather than wrap, so `.table-wrap` scrolls instead. */
@@ -1550,6 +1549,9 @@ td.row-actions, th.row-actions {
 .table-directory .cell-version { overflow-wrap: anywhere; }
 .table-directory .cell-version .mono { font-size: 12px; }
 
+/* "not observed" in the Liveness column: words, not a badge, so its badges are only observations. */
+.directory-unobserved { color: var(--text-dim); }
+
 /* An endpoint that opens is a link chip: accent text. */
 .endpoint-action {
   text-decoration: none;
@@ -1557,10 +1559,6 @@ td.row-actions, th.row-actions {
 }
 .endpoint-open { color: var(--accent); }
 .endpoint-open:hover { border-color: var(--accent); }
-
-/* Between the category cards. Deliberately not `.card + .card`: several pages stack cards that
-   are meant to sit tight against each other. */
-.directory-group + .directory-group { margin-top: var(--stack); }
 
 /* The one chip shape for what copies and what opens: bordered, monospace, an icon at rest. The copy
    chip is quiet text; the link chip (.endpoint-open) is accent text. The icon says which is which. */
