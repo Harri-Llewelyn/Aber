@@ -189,6 +189,14 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   // An ID, not the cell object: this page polls, so the selection is resolved against `cells` on
   // every render.
   const [selectedId, setSelectedId] = useState(null)
+  const toggleCell = (cellId) => setSelectedId(id => id === cellId ? null : cellId)
+  // Enter or Space on the element itself acts as its click; a key on a control inside it is that
+  // control's.
+  const onOwnKey = (act) => (e) => {
+    if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+    if (e.key === ' ') e.preventDefault()
+    act()
+  }
 
   const canManage = hasPermission(PERMISSION_UUIDS.CELL_MANAGE)
   const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
@@ -391,7 +399,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                     <tr
                       key={c.cell_id}
                       className={`row-selectable${selectedId === c.cell_id ? ' row-selected' : ''}${c.is_archived ? ' row-archived' : ''}`}
-                      onClick={rowSelectHandler(() => setSelectedId(id => id === c.cell_id ? null : c.cell_id))}
+                      tabIndex={0}
+                      onClick={rowSelectHandler(() => toggleCell(c.cell_id))}
+                      onKeyDown={onOwnKey(() => toggleCell(c.cell_id))}
                       title="Click to inspect this cell in the details panel"
                     >
                       <td className="cell-icon-col"><CellIcon cell={c} size={16} /></td>

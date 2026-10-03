@@ -9,6 +9,7 @@ A cell is a line or a bay on the shopfloor, and it exists so that gateways and d
 - **Area** files the cell in an area, or leaves it unfiled. Once an area is chosen, **Place on the plan** shows that area's plan: click it to pin the cell where it stands, and **Clear place** takes the pin off while the cell stays in the area. An area with no plan shows the default outline. The Site Map draws only the cells that have a place.
 - **Place on plan**, in a placed cell's details panel, draws its area's plan with this cell's pin ringed and the area's other cells small and dimmed. Click it, or press Enter on it, to open the Site Map on that area.
 - **Description** is optional free text. When a cell has one, it shows in the cell's details panel on the Site Map and sits under its name in the table here.
+- **The table** opens a cell's details panel from a click on its row, or Enter on it; the chevron at the row's end says so.
 - **Cell UUID** is the identifier to quote in a query or a ticket, and it is copyable from the detail drawer -- which is most of why the drawer exists.
 - **Dashboard / UI URL** can be attached to a cell, and the drawer's **Open Dashboard** opens it; it is the drawer's main action when there is one, and otherwise **Edit Details** is (or **Restore Cell** for an archived cell). It is a link, not an embed: dashboards and thresholds live in Grafana and are not mirrored here.
 - **Assigned Gateways** and **Devices** list what is currently located in the cell. Assignment itself is edited from the Gateways and Devices pages, where the entity is.

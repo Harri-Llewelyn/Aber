@@ -392,6 +392,18 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(clean.querySelector('.area-card-aside')).toBeNull()
   })
 
+  it('opens an area card from the keyboard, and leaves a key on a pin to the pin', async () => {
+    await renderSiteMap()
+    const card = areaCards()[0]
+    expect(card).toHaveAttribute('tabindex', '0')
+    fireEvent.keyDown(within(card).getByRole('button', { name: 'Bay 1' }), { key: 'Enter' })
+    expect(document.querySelector('.context-panel-open')).toBeNull()
+    fireEvent.keyDown(card, { key: 'Enter' })
+    expect(within(panel()).getByText('2 Cells · 1 Gateway · 2 Devices')).toBeInTheDocument()
+    fireEvent.keyDown(card, { key: ' ' })
+    await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeNull())
+  })
+
   it('offers no archived toggle while no area is archived', async () => {
     await renderSiteMap()
     expect(screen.queryByRole('button', { name: /Show archived areas/ })).toBeNull()
@@ -513,6 +525,21 @@ describe('AreasTab files cells into areas', () => {
     expect(within(rowA).getByText('Bay 1')).toBeInTheDocument()
     expect(within(rowA).getByText('Bay 2')).toBeInTheDocument()
     expect(within(rowFor('Press Hall')).getByText('Paint Shop')).toBeInTheDocument()
+  })
+
+  it('opens a row from the keyboard, and leaves a key on a cell chip to the chip', async () => {
+    const onSelectCell = vi.fn()
+    await renderAreas({ onSelectCell })
+    const row = rowFor('North Shop')
+    expect(row).toHaveAttribute('tabindex', '0')
+    fireEvent.keyDown(within(row).getByText('Bay 1').closest('[role="button"]'), { key: 'Enter' })
+    expect(onSelectCell).toHaveBeenCalledWith('cell-1')
+    expect(document.querySelector('.context-panel-open')).toBeNull()
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(document.querySelector('.context-panel-open')).toBeTruthy()
+    expect(row).toHaveClass('row-selected')
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(row).not.toHaveClass('row-selected')
   })
 
   it('attaches links to an area, the way every other asset carries them', async () => {

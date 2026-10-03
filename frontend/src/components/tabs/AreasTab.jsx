@@ -205,6 +205,14 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   }
 
   const [selectedId, setSelectedId] = useState(null)
+  const toggleArea = (areaId) => setSelectedId(id => id === areaId ? null : areaId)
+  // Enter or Space on the element itself acts as its click; a key on a control inside it is that
+  // control's.
+  const onOwnKey = (act) => (e) => {
+    if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+    if (e.key === ' ') e.preventDefault()
+    act()
+  }
 
   // Membership, derived: cells by area from the cell list, devices by cell from the device list.
   const cellsByArea = useMemo(() => groupCellsByArea(cells), [cells])
@@ -243,7 +251,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
       onClick={e => { e.stopPropagation(); onSelectCell?.(c.cell_id) }}
       role="button"
       tabIndex={0}
-      onKeyDown={e => { if (e.key === 'Enter') onSelectCell?.(c.cell_id) }}
+      onKeyDown={onOwnKey(() => onSelectCell?.(c.cell_id))}
       title={`${c.cell_name} — ${(devicesByCell.get(c.cell_id) || []).length} device(s). ${canManage ? 'Drag onto an area to file it; click' : 'Click'} to open on the Cells page`}
     >
       <CellIcon cell={c} size={11} />
@@ -350,7 +358,9 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
                     <tr
                       key={a.area_id}
                       className={`row-selectable${selectedId === a.area_id ? ' row-selected' : ''}${a.is_archived ? ' row-archived' : ''}`}
-                      onClick={rowSelectHandler(() => setSelectedId(id => id === a.area_id ? null : a.area_id))}
+                      tabIndex={0}
+                      onClick={rowSelectHandler(() => toggleArea(a.area_id))}
+                      onKeyDown={onOwnKey(() => toggleArea(a.area_id))}
                       onDragOver={handleDragOver}
                       onDrop={e => handleDrop(e, a.area_id)}
                       title={canManage ? 'Drop a cell here to file it in this area; click to inspect' : 'Click to inspect this area'}

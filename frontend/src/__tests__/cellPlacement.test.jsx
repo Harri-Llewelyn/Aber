@@ -69,6 +69,20 @@ describe('CellsTab places a cell on its area plan', () => {
     expect(within(panel).getByText('Not placed — set a place in Edit Details')).toBeInTheDocument()
   })
 
+  it('opens a row from the keyboard with Enter or Space', async () => {
+    await renderCells()
+    const row = screen.getByText('Bay 1').closest('tr')
+    expect(row).toHaveAttribute('tabindex', '0')
+    fireEvent.keyDown(row, { key: 'Enter' })
+    expect(row).toHaveClass('row-selected')
+    expect(document.querySelector('.context-panel-open')).toBeTruthy()
+    fireEvent.keyDown(row, { key: ' ' })
+    expect(row).not.toHaveClass('row-selected')
+    // A key on the copy chip inside the row is the chip's.
+    fireEvent.keyDown(within(row).getByRole('button', { name: /cell UUID/i }), { key: 'Enter' })
+    expect(row).not.toHaveClass('row-selected')
+  })
+
   it('opens the Site Map on the cell\'s area from the panel\'s plan', async () => {
     const onShowOnSiteMap = vi.fn()
     render(<CellsTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} onShowOnSiteMap={onShowOnSiteMap} />)

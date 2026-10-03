@@ -134,6 +134,13 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     setOpenLane(open => open === key ? null : key)
   }
   const closePanel = () => { setOpenLane(null); setSelectedCellId(null); setSelectedAreaId(null) }
+  // Enter or Space on the element itself acts as its click; a key on a control inside it is that
+  // control's.
+  const onOwnKey = (act) => (e) => {
+    if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+    if (e.key === ' ') e.preventDefault()
+    act()
+  }
 
   // Arriving from a plan on the Areas or Cells page names one area: open its panel, draw it even
   // when archived, and bring its card into view once it is drawn.
@@ -385,9 +392,8 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   /**
    * One area, drawn as its plan with every cell it holds pinned on it. The whole card opens the
    * area's panel and each pin opens its cell's, so nothing is hidden behind a view you have to
-   * enter. The card carries no role of its own: a role="button" around the name button and the
-   * pins would be a lie to a screen reader, so the click is a shortcut to the name below it and
-   * the keyboard still goes through the real controls.
+   * enter. The card takes focus and opens on Enter or Space, as a row does, but carries no role:
+   * a role="button" around the name button and the pins would be a lie to a screen reader.
    */
   const areaCard = (ar) => {
     const areaCells = cellsOf(ar)
@@ -407,6 +413,8 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         data-area={ar.area_id}
         /* A pin stops its own click (AreaPlanPin), so a click that reaches here is the area's. */
         onClick={() => toggleArea(ar.area_id)}
+        tabIndex={0}
+        onKeyDown={onOwnKey(() => toggleArea(ar.area_id))}
       >
         <div className="area-card-header">
           {/* The one dot that goes red: an alert against a device here outranks the rollup. An
