@@ -122,6 +122,13 @@ describe('DirectoryTab service groups', () => {
     expect(document.querySelector('.card > .tab-strip + .filter-bar')).toBeTruthy()
   })
 
+  it('opens the group a search-bar card names, then drops the request', async () => {
+    const onClearSection = vi.fn()
+    render(<DirectoryTab showToast={vi.fn()} initialSection="ingestion" onClearSection={onClearSection} />)
+    await waitFor(() => expect(tab(INGEST)).toHaveAttribute('aria-selected', 'true'))
+    expect(onClearSection).toHaveBeenCalled()
+  })
+
   // The point of the change: a service is found by what it IS, not by where the alphabet put it.
   it('files each service under its category', async () => {
     await renderTab()

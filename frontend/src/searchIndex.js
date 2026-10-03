@@ -69,9 +69,9 @@ export const CARDS = [
   { id: 'vocab-iso22400',       label: 'ISO 22400',            tab: 'vocabulary',     keywords: ['kpi', 'oee', 'availability', 'mtbf'] },
   { id: 'vocab-opcua',          label: 'OPC UA',               tab: 'vocabulary',     keywords: ['companion', 'machinery', 'robotics'] },
   { id: 'vocab-ashrae',         label: 'ASHRAE 223P',          tab: 'vocabulary',     keywords: ['bms', 'building', 'hvac'] },
-  { id: 'dir-applications',     label: 'Applications & User Interfaces', tab: 'directory', keywords: ['grafana', 'node-red', 'studio', 'uis'] },
-  { id: 'dir-ingestion',        label: 'Ingestion & Messaging', tab: 'directory',     keywords: ['mosquitto', 'broker', 'daemon'] },
-  { id: 'dir-infrastructure',   label: 'Data & Backend Infrastructure', tab: 'directory', keywords: ['postgres', 'timescale', 'gateway', 'envoy', 'storage'] },
+  { id: 'dir-applications',     label: 'Applications & User Interfaces', tab: 'directory', section: 'applications', keywords: ['grafana', 'node-red', 'studio', 'uis'] },
+  { id: 'dir-ingestion',        label: 'Ingestion & Messaging', tab: 'directory', section: 'ingestion', keywords: ['mosquitto', 'broker', 'daemon'] },
+  { id: 'dir-infrastructure',   label: 'Data & Backend Infrastructure', tab: 'directory', section: 'infrastructure', keywords: ['postgres', 'timescale', 'gateway', 'envoy', 'storage'] },
 
   { id: 'trail-timeline',       label: 'Audit Trail',          tab: 'audit-trail',    keywords: ['timeline', 'events', 'digital thread'] },
   { id: 'capture-list',         label: 'Capture',              tab: 'capture',        keywords: ['recordings', 'record broker', 'upload capture'] },

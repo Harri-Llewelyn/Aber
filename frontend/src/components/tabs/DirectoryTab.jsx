@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import { api } from '../../api'
 import { POLL_INTERVAL_MS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
@@ -378,7 +378,7 @@ function ServiceTable({ rows, onNotify }) {
   )
 }
 
-export function DirectoryTab({ showToast }) {
+export function DirectoryTab({ showToast, initialSection = '', onClearSection }) {
   const [services, setServices] = useState([])
   const [loading, setLoading]   = useState(true)
   // The latest read's failure, cleared by the next success; `lastGoodAt` is when `services` was read.
@@ -414,6 +414,15 @@ export function DirectoryTab({ showToast }) {
   const [groupId, setGroupId] = useState(null)
   const active = groups.find(g => g.id === groupId) || groups[0]
   if (groupId !== null && active && active.id !== groupId) setGroupId(active.id)
+
+  // Opens the group a search-bar card named (`initialSection`, a group id), then drops the request
+  // so a later visit starts on the first tab. Before the first read there are no groups to fall
+  // back from, so the choice holds until the list arrives.
+  useEffect(() => {
+    if (!initialSection) return
+    setGroupId(initialSection)
+    onClearSection?.()
+  }, [initialSection, onClearSection])
 
   return (
     <div className="page-layout page-fill">
