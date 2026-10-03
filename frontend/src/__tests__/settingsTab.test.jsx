@@ -9,6 +9,7 @@ import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SettingsTab, coerceValue, displayValue, fallbackCopy, groupByCategory } from '../components/tabs/SettingsTab'
 import { api } from '../api'
+import { COLD_STORAGE_DIALOG_KEYS } from '../utils/coldStorage'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -337,6 +338,31 @@ describe('a setting that is fixed at install', () => {
   it('copies the values.yaml path it is set by, not the words around it', async () => {
     await show()
     expect(screen.getByRole('button', { name: 'Copy values.yaml path ingestion.sparkplugGroup' })).toBeInTheDocument()
+  })
+})
+
+describe('the Cold Storage rows', () => {
+  /* Six archive settings are edited in the Cold Storage destination dialog, so each value has one
+     editor. The threshold and the read-only site key stay here. */
+  const archive = (key, extra = {}) => ({
+    id: key, key, value: '', value_type: 'string', category: 'Cold Storage', label: key,
+    description: null, fallback_source: null, updated_at: '2026-09-20T10:00:00Z', updated_by: null, ...extra
+  })
+
+  it('lists the threshold and the site key, and none of what the dialog edits', async () => {
+    vi.clearAllMocks()
+    api.get.mockResolvedValue([
+      archive('archive.enabled', { value: false, value_type: 'boolean' }),
+      archive('archive.endpoint'), archive('archive.region'), archive('archive.bucket'),
+      archive('archive.access_key_id'),
+      archive('archive.path_style', { value: false, value_type: 'boolean' }),
+      archive('archive.tier_after_days', { value: 14, value_type: 'number' }),
+      archive('archive.site_key', { value: 'broughton', read_only: true }),
+    ])
+    await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
+    const keys = [...document.querySelectorAll('[data-setting]')].map(el => el.dataset.setting)
+    expect(keys).toEqual(['archive.tier_after_days', 'archive.site_key'])
+    expect(COLD_STORAGE_DIALOG_KEYS).toHaveLength(6)
   })
 })
 

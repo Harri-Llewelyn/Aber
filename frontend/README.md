@@ -197,14 +197,14 @@ The broker read may fail without failing the page. The Broker column then reads 
 is a fact about the page load and not about any account, and the reason is stated once in the
 card. The page does not show sessions: an *Active* account is one that may connect.
 
-### Why the cold-archive secret is a dialog
+### Why the cold-archive destination is one dialog
 
-`ArchiveCredentialModal` is a dialog rather than a field on the Cold Storage card because saving is
-the one act on that page with no undo and no read-back. `set_archive_credential()` overwrites the
-secret in the vault when one exists, nothing in the stack can show either value again, and a
-mistyped one is not discovered until the nightly export fails to authenticate. Replacing a key asks
-first; setting the first one does not, since there is nothing to lose and friction only buys
-attention while it stays rare.
+`ColdStorageDestinationModal` holds the whole destination, the write-only secret key and the
+archiving switch, as Backups' destination dialog does, so each value has one editor: the Settings
+page does not list those six rows. The switch refuses "on" until the destination is complete,
+because archiving switched on with nowhere to write cannot run. The values stay `system_settings` rows written by `api.patchSetting`, so RLS, `sensitive` and the audit
+trail are unchanged. The secret key field starts empty and an empty field keeps the stored key:
+`set_archive_credential()` overwrites it with no undo and nothing can show either value again.
 
 ---
 

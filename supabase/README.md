@@ -2378,9 +2378,11 @@ destination type means one code path, exercised at every site.
 
 #### Configuring it, which is a page and not a values file (`0134`)
 
-**Settings → Cold Storage**, as an Administrator: the S3 endpoint, region, bucket and access key
-ID. The **secret access key** is set on the Cold Storage page itself, because it is not a setting —
-it goes into the vault, and nothing reads it back.
+**Cold Storage → Set up cold storage**, as an Administrator: one dialog holds the S3 endpoint,
+region, bucket, access key ID and path style, the **secret access key**, and the `archive.enabled`
+switch, which it refuses to turn on until the destination is complete. The secret key is not a
+setting — it goes into the vault, and nothing reads it back. The other six stay settings rows, and
+the Settings page does not list them.
 
 Those five rows are flagged `sensitive`, which is a column `0134` adds to `system_settings` and one
 clause on its SELECT policy: `USING (NOT sensitive OR has_role(ARRAY['Administrator']))`. Every

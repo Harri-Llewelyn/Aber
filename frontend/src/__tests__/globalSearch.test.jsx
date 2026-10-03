@@ -59,6 +59,15 @@ describe('what the index holds', () => {
     expect(buildTargets(adminTabs(), rows).map(t => t.label)).toContain('Site name')
   })
 
+  it('sends a setting the Cold Storage dialog edits to that page, not to Settings', () => {
+    const rows = [{ key: 'archive.bucket', label: 'S3 bucket', category: 'Cold Storage' },
+      { key: 'archive.tier_after_days', label: 'Archive chunks older than (days)', category: 'Cold Storage' }]
+    const found = buildTargets(adminTabs(), rows)
+    expect(found.find(t => t.label === 'S3 bucket')).toMatchObject({ kind: 'card', tabId: 'cold-storage', page: 'Cold Storage' })
+    expect(found.find(t => t.label === 'Archive chunks older than (days)'))
+      .toMatchObject({ kind: 'setting', tabId: 'settings', settingKey: 'archive.tier_after_days' })
+  })
+
   it('tells a card which page it is on, because that is the answer being looked for', () => {
     const credentials = targets().find(t => t.label === 'Broker credentials')
     expect(credentials.kind).toBe('card')

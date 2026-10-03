@@ -16,6 +16,10 @@ import React from 'react'
  * @param {React.ReactNode} [description] One sentence, about 20 words. The detail goes in the
  * page's help file.
  *
+ * @param {React.ReactNode} [note] A muted line under the description stating a fact about the
+ * stack's current state, such as a setting's effect ("Raw telemetry is kept for 14 days."). Falsy
+ * renders nothing.
+ *
  * @param {React.ReactNode} [count] A `SectionCount`, drawn after the title.
  *
  * @param {React.ReactNode} [actions] The primary button, Export, or a legend, on the right.
@@ -32,7 +36,7 @@ import React from 'react'
  *     actions={<button className="btn btn-primary btn-sm">New Area</button>}
  *   />
  */
-export function CardHeading({ icon, title, description, count, actions, id, level = 'h3' }) {
+export function CardHeading({ icon, title, description, note, count, actions, id, level = 'h3' }) {
   const Title = level
   return (
     <div className="card-header card-heading">
@@ -43,6 +47,7 @@ export function CardHeading({ icon, title, description, count, actions, id, leve
       </Title>
       {actions}
       {description && <p className="card-heading-description">{description}</p>}
+      {note && <p className="card-heading-note">{note}</p>}
     </div>
   )
 }

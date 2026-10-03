@@ -10,6 +10,7 @@ Platform settings an administrator owns: retention windows, thresholds, and the 
 - **Enabled / Disabled** switches turn scheduled behaviour on and off. They take effect on the next run of whatever they gate, not retroactively.
 - **The `?` beside each field** explains what the setting actually controls. It is worth reading before the value is changed, because several of them read like each other and act very differently.
 - **The line beneath a label** shows the setting's key, which copies when clicked, and what applies if the setting has never been changed (**falls back to**). Where that fallback is a `values.yaml` path or a single identifier, it copies too.
+- **Cold Storage** here holds the archive threshold and the read-only site key. The archive destination and the switch that turns archiving on are set in one dialog on the Cold Storage page, so they are not listed here.
 - **A read-only setting** shows **set by** and the place it is set, in a greyed field: the Sparkplug group and the archive site key are fixed when the stack is installed and cannot be changed here. Changing the group would re-address every gateway.
 
 ## What the states mean
@@ -21,6 +22,6 @@ A setting takes effect without a restart and overrides the environment default i
 
 ## What is not here
 
-**Nothing secret is stored on this page.** Passwords, keys and broker credentials are not settings: they live in the deployment's own secret store. The S3 secret keys are set on Cold Storage and in the Backups destination dialog, and broker credentials are issued on Access Control. A page that mixed the two would make every routine settings change look like a credential change in the audit trail, and make the audit trail worth less.
+**Nothing secret is stored on this page.** Passwords, keys and broker credentials are not settings: they live in the deployment's own secret store. The S3 secret keys are set in the Cold Storage and Backups destination dialogs, and broker credentials are issued on Access Control. A page that mixed the two would make every routine settings change look like a credential change in the audit trail, and make the audit trail worth less.
 
 Alert thresholds are not here either. Grafana owns those, along with silences and state history -- this stack links to them rather than mirroring them, so there is one place a threshold can be wrong.

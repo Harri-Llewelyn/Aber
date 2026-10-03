@@ -5,6 +5,9 @@
  * short label from a closed set, and a fuzzy matcher returns things the typed letters do not appear
  * in.
  */
+import { COLD_STORAGE_DIALOG_KEYS } from './utils/coldStorage'
+
+const COLD_STORAGE_KEYS = new Set(COLD_STORAGE_DIALOG_KEYS)
 
 /**
  * Words that should find a page but are not in its name: the vocabulary of the job rather than of
@@ -120,15 +123,19 @@ export function buildTargets(visibleTabs, settings = []) {
      log or a migration as surely as "Site name" does. The category is what the row says beneath
      its label, because it is the tab the page will open on. */
   const settingRows = reachable.has('settings')
-    ? settings.filter(s => s && s.key).map(s => ({
-      kind: 'setting',
-      key: `setting:${s.key}`,
-      label: s.label || s.key,
-      tabId: 'settings',
-      settingKey: s.key,
-      page: s.category || 'Settings',
-      keywords: [s.key, s.category].filter(Boolean)
-    }))
+    ? settings.filter(s => s && s.key).map(s => (COLD_STORAGE_KEYS.has(s.key)
+      // Edited in the Cold Storage destination dialog, not on Settings, so it opens that page.
+      ? { kind: 'card', key: `setting:${s.key}`, label: s.label || s.key, tabId: 'cold-storage',
+          page: 'Cold Storage', keywords: [s.key, s.category].filter(Boolean) }
+      : {
+        kind: 'setting',
+        key: `setting:${s.key}`,
+        label: s.label || s.key,
+        tabId: 'settings',
+        settingKey: s.key,
+        page: s.category || 'Settings',
+        keywords: [s.key, s.category].filter(Boolean)
+      }))
     : []
 
   return [...pages, ...cards, ...settingRows]

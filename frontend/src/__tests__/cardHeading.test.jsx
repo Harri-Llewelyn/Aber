@@ -33,6 +33,16 @@ describe('CardHeading', () => {
     render(<CardHeading title="Audit Trail" level="h2" id="trail-title" />)
     expect(screen.getByRole('heading', { name: 'Audit Trail', level: 2 })).toHaveAttribute('id', 'trail-title')
     expect(document.querySelector('.card-heading-description')).toBeNull()
+    expect(document.querySelector('.card-heading-note')).toBeNull()
     expect(document.querySelector('.section-count')).toBeNull()
+  })
+
+  it('draws a note as its own line after the description', () => {
+    render(<CardHeading title="Cold Storage" description="Telemetry on object storage." note="Raw telemetry is kept for 14 days." />)
+    const description = document.querySelector('.card-heading-description')
+    const note = screen.getByText('Raw telemetry is kept for 14 days.')
+    expect(note).toHaveClass('card-heading-note')
+    expect(description.nextElementSibling).toBe(note)
+    expect(screen.getByRole('heading', { name: 'Cold Storage' }).contains(note)).toBe(false)
   })
 })

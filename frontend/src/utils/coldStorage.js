@@ -133,11 +133,21 @@ export function backlogTone(seconds) {
  * that log against this page should not have to translate. Two languages, one list; a test asserts
  * the page's half and the migration seeds exactly these keys.
  */
-const DESTINATION_FIELDS = [
+export const DESTINATION_FIELDS = [
   { key: 'archive.endpoint', label: 'S3 endpoint' },
   { key: 'archive.region', label: 'S3 region' },
   { key: 'archive.bucket', label: 'S3 bucket' },
   { key: 'archive.access_key_id', label: 'S3 access key ID' },
+]
+
+/**
+ * The settings the Cold Storage destination dialog edits: the switch, the four fields above and the
+ * path style. The Settings page does not render them, so each value has one editor.
+ */
+export const COLD_STORAGE_DIALOG_KEYS = [
+  'archive.enabled',
+  ...DESTINATION_FIELDS.map(f => f.key),
+  'archive.path_style',
 ]
 
 /**

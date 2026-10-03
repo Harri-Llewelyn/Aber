@@ -7,6 +7,9 @@ import { EmptyState } from '../common/EmptyState'
 import { HelpTip } from '../common/HelpTip'
 import { LoadingState } from '../common/LoadingState'
 import { TabStrip } from '../common/TabStrip'
+import { COLD_STORAGE_DIALOG_KEYS } from '../../utils/coldStorage'
+
+const EDITED_ON_COLD_STORAGE = new Set(COLD_STORAGE_DIALOG_KEYS)
 
 /**
  * The runtime configuration plane as a page. It cannot add or delete a setting: the key set is
@@ -245,7 +248,8 @@ export function SettingsTab({ showToast, initialSetting = '', onClearSetting }) 
   const load = useCallback((isInitial = false) => {
     if (isInitial) setLoading(true)
     api.get('/api/v1/settings')
-      .then(d => { setSettings(d); setLoadError(null); setLoading(false) })
+      // The Cold Storage dialog is the one editor of its six rows, so they are not listed here.
+      .then(d => { setSettings((d || []).filter(s => !EDITED_ON_COLD_STORAGE.has(s.key))); setLoadError(null); setLoading(false) })
       .catch(e => { setLoadError(e?.message || 'Could not read settings.'); setLoading(false) })
   }, [])
 

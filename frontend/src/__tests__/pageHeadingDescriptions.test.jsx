@@ -13,7 +13,6 @@ const PAGES = [
   ['ApprovalsTab', '../components/tabs/ApprovalsTab.jsx'],
   ['ArchivesTab', '../components/tabs/ArchivesTab.jsx'],
   ['CaptureTab', '../components/tabs/CaptureTab.jsx'],
-  ['ColdStorageTab', '../components/tabs/ColdStorageTab.jsx'],
   ['DevicesTab', '../components/tabs/DevicesTab.jsx'],
   ['DirectoryTab', '../components/tabs/DirectoryTab.jsx'],
   ['MetricsTab', '../components/tabs/MetricsTab.jsx']

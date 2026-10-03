@@ -872,7 +872,7 @@ coldArchive:
   #
   # A SEED, NOT THE SOURCE, since 0134. These configure a NEW stack: each is written into its
   # settings row only while that row is empty, so an install can be described here and an
-  # Administrator can change it afterwards from Settings > Cold Storage without the next
+  # Administrator can change it afterwards from the Cold Storage page without the next
   # `helm upgrade` quietly putting it back. Leaving them empty is now the ordinary case.
   #
   # siteKey is the exception and belongs here: it is the IAM prefix every object is addressed
