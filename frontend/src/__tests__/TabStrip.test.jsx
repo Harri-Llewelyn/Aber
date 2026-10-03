@@ -75,9 +75,23 @@ describe('TabStrip', () => {
 
   it('marks the selected tab and has one style', () => {
     render(<Harness />)
-    expect(screen.getByRole('tablist').className).toBe('tab-strip')
+    expect(screen.getByRole('tablist').className).toBe('tab-strip-tabs')
+    expect(screen.getByRole('tablist').parentElement.className).toBe('tab-strip')
     expect(screen.getByRole('tab', { name: 'Alpha, 3 waiting' }).className).toContain('tab-strip-tab-selected')
     expect(screen.getByRole('tab', { name: 'Beta' }).className).not.toContain('tab-strip-tab-selected')
+  })
+
+  it('draws the selected tab\'s help after the tabs, beside the tablist rather than inside it', () => {
+    render(<TabStrip ariaLabel="Sections" value="a" onChange={() => {}} tabs={TABS} help={<button>About Alpha</button>} />)
+    const help = screen.getByRole('button', { name: 'About Alpha' })
+    expect(screen.getByRole('tablist')).not.toContainElement(help)
+    expect(help.parentElement).toHaveClass('tab-strip-help')
+    expect(help.parentElement.previousElementSibling).toBe(screen.getByRole('tablist'))
+  })
+
+  it('draws nothing after the tabs without help', () => {
+    render(<TabStrip ariaLabel="Sections" value="a" onChange={() => {}} tabs={TABS} />)
+    expect(document.querySelector('.tab-strip-help')).toBeNull()
   })
 
   it('declares the wrapping in CSS', () => {

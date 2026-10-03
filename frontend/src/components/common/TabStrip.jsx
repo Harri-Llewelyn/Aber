@@ -12,12 +12,16 @@ import { IconAlertTriangle } from './Icons'
  *   <TabStrip ariaLabel="Settings category" value={category} onChange={setCategory}
  *     tabs={[{ id: 'general', label: 'General' }, { id: 'quarantine', label: 'Quarantine', attention: waiting }]} />
  *
+ * `help` is the selected tab's "?" (a HelpTip), drawn in the bar straight after the last tab, so a tab
+ * needs no row of its own to explain itself. It sits beside the tablist, not inside it: a tablist
+ * holds only tabs.
+ *
  * `tabs` is `[{ id, label, title?, attention? }]`. Tabs carry no counts. `attention` is the number of
  * items waiting behind the tab: above 0 the label takes the warning colour, a warning icon and the
  * number, and the accessible name reads "Quarantine, 3 waiting"; at 0 or absent nothing extra
  * renders. `onChange(id)` runs on a click and on an arrow key alike, so do any reset there.
  */
-export function TabStrip({ tabs, value, onChange, ariaLabel }) {
+export function TabStrip({ tabs, value, onChange, ariaLabel, help }) {
   const refs = useRef([])
   const selectedIndex = Math.max(0, tabs.findIndex(t => t.id === value))
 
@@ -42,33 +46,36 @@ export function TabStrip({ tabs, value, onChange, ariaLabel }) {
   }
 
   return (
-    <div role="tablist" aria-label={ariaLabel} className="tab-strip">
-      {tabs.map((tab, i) => {
-        const selected = i === selectedIndex
-        const waiting = tab.attention > 0
-        return (
-          <button
-            key={tab.id}
-            ref={el => { refs.current[i] = el }}
-            type="button"
-            role="tab"
-            aria-selected={selected}
-            aria-label={waiting ? `${tab.label}, ${tab.attention} waiting` : undefined}
-            tabIndex={selected ? 0 : -1}
-            className={`tab-strip-tab${selected ? ' tab-strip-tab-selected' : ''}${waiting ? ' tab-strip-tab-attention' : ''}`}
-            title={tab.title}
-            onClick={() => onChange(tab.id)}
-            onKeyDown={e => onKeyDown(e, i)}
-          >
-            {tab.label}
-            {waiting && (
-              <span className="tab-strip-attention" aria-hidden="true">
-                <IconAlertTriangle size={13} />{tab.attention}
-              </span>
-            )}
-          </button>
-        )
-      })}
+    <div className="tab-strip">
+      <div role="tablist" aria-label={ariaLabel} className="tab-strip-tabs">
+        {tabs.map((tab, i) => {
+          const selected = i === selectedIndex
+          const waiting = tab.attention > 0
+          return (
+            <button
+              key={tab.id}
+              ref={el => { refs.current[i] = el }}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              aria-label={waiting ? `${tab.label}, ${tab.attention} waiting` : undefined}
+              tabIndex={selected ? 0 : -1}
+              className={`tab-strip-tab${selected ? ' tab-strip-tab-selected' : ''}${waiting ? ' tab-strip-tab-attention' : ''}`}
+              title={tab.title}
+              onClick={() => onChange(tab.id)}
+              onKeyDown={e => onKeyDown(e, i)}
+            >
+              {tab.label}
+              {waiting && (
+                <span className="tab-strip-attention" aria-hidden="true">
+                  <IconAlertTriangle size={13} />{tab.attention}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+      {help && <span className="tab-strip-help">{help}</span>}
     </div>
   )
 }

@@ -837,10 +837,14 @@ html, body, #root {
 .tab-strip {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0 4px;
   margin-bottom: var(--stack);
   border-bottom: 1px solid var(--border);
 }
+.tab-strip-tabs { display: flex; flex-wrap: wrap; gap: 0 4px; align-self: stretch; }
+/* The selected tab's "?", straight after the last tab. */
+.tab-strip-help { display: inline-flex; align-items: center; margin-left: 4px; }
 .card > .tab-strip { margin-bottom: 0; padding: 0 var(--inset); }
 /* In a card header the bar takes its own line and runs flush over the header's padding and rule. */
 .card-header > .tab-strip {
