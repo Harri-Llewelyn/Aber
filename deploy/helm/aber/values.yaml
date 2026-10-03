@@ -1006,7 +1006,9 @@ i3xService:
   subscriptionTtlSeconds: 300
   # How many update batches one subscription may queue before the oldest are dropped. Dropping
   # is reported: the next /sync answers 206 and the client backfills from /objects/history.
-  subscriptionQueueLimit: 10000
+  # A count, not bytes: raising it or maxSubscriptions is a memory decision (i3x/README.md ->
+  # What causes a restart).
+  subscriptionQueueLimit: 500
   # Past these, creating a subscription or opening a stream answers 429 naming the limit. A
   # principal is the token's `sub`, so every token minted for one service principal shares its
   # allowance. Each open stream holds a server thread.
@@ -1023,7 +1025,8 @@ i3xService:
   maxComponents: 10000
   resources:
     requests: { cpu: 100m, memory: 128Mi }
-    # Sized for connection handling; the value cache and queues are bounded.
+    # The subscription queues are bounded by count, not by memory; the defaults above keep them
+    # well inside this. Past it the pod is OOM-killed and every client loses its subscriptions.
     limits: { memory: 512Mi }
 
 # ---------------------------------------------------------------------------------------------

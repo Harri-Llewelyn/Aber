@@ -12,7 +12,7 @@ controlled queue:
     acknowledgement if the server happens to produce updates while it is watching, and a demo device
     publishing every five seconds does not reliably do that inside the window. So the MUSTs that
     protect against losing a client's unprocessed updates are covered here, or nowhere.
-  * Queue overflow needs 10,000 batches to fall off the end. Nothing generates that against a live
+  * Queue overflow needs I3X_SUBSCRIPTION_QUEUE_LIMIT (500) batches to fall off the end. Nothing generates that against a live
     broker in test time.
   * TTL expiry needs minutes of wall clock, which is why the registry takes an injectable clock.
 

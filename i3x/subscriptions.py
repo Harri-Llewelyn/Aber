@@ -37,7 +37,7 @@ from typing import Callable, Dict, Iterable, List, Optional
 # The spec fixes no numbers here; these are this server's declared limits and both are reported to
 # the client when they bite -- the queue depth in the 206 detail, the TTL by a 404 on a reaped
 # subscription.
-DEFAULT_QUEUE_LIMIT = 10_000
+DEFAULT_QUEUE_LIMIT = 500
 DEFAULT_TTL_SECONDS = 300
 # Past these, create and stream answer 429 naming the limit. An open stream holds a server thread.
 DEFAULT_MAX_PER_PRINCIPAL = 20
