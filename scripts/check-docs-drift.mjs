@@ -2356,10 +2356,6 @@ function edgeFunctionNames() {
 // reads the Factory+ payload marker. What is checked is the product naming itself Factory+ in
 // the strings a user reads, scoped to the files that carry product identity with a per-file
 // reason.
-//
-// Deliberately not listed, because renaming it is not cosmetic:
-//   * deploy/k8s/internal-ca.yaml `commonName: Factory+ Internal CA`: changing a cert-manager
-//     commonName re-mints the CA, which takes the whole fleet offline (docs/incidents.md).
 // -------------------------------------------------------------------------------------------------
 {
   /** file -> why this file's prose is product identity rather than a framework reference. */
@@ -2370,6 +2366,8 @@ function edgeFunctionNames() {
       'the OAuth consent screen, which names the identity a user is being asked to share',
     'deploy/helm/aber/values.yaml':
       'supabaseStudio.organizationName is displayed in Studio',
+    'deploy/k8s/internal-ca.yaml':
+      "the root's commonName and organisation are what every trust store in the plant displays",
     'deploy/helm/aber/templates/NOTES.txt':
       'Helm prints it after every install and upgrade, and its first line names the product',
     // Swagger UI renders info.title as the page heading. Whole-file, because every other Factory+
@@ -3204,7 +3202,7 @@ function edgeFunctionNames() {
   const STILL_RIGHT = [
     'the scheduling floor and the upgrade floor',
     'A building with two floors is two areas; an overview of the chart',
-    '`factoryplus_payload_uuid`, the Factory+ payload marker, and the Factory+ Internal CA',
+    '`factoryplus_payload_uuid` and the Factory+ payload marker',
     'SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are the tokens the upstream images read',
     'a simulated gateway beside a host-run one, inspired by the AMRC Connectivity Stack (ACS)',
     'supabase-envoy, area-plans, aber-tls-config, aber/flow-shape, dacs-1 and MACS_ADDR',

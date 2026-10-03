@@ -1,5 +1,5 @@
 # =====================================================================================================
-# Factory+ internal certificate authority.
+# Aber internal certificate authority.
 #
 # Apply this ONCE per cluster, before installing the chart:
 #
@@ -24,18 +24,17 @@
 #     the broker -- becomes unverifiable, and re-issuing means redistributing a new root to every
 #     machine that trusts this one. A reinstall is a routine act; losing the CA is not.
 #  2. It is CLUSTER-SCOPED and SHARED. A ClusterIssuer is not owned by a namespace or a release, and
-#     two Factory+ installations (staging and production in one cluster, say) should share one root
+#     two Aber installations (staging and production in one cluster, say) should share one root
 #     rather than fight over which release owns it.
 #  3. It OUTLIVES the chart. The root is a 10-year artefact; the chart is upgraded monthly.
 #
-# WHY AN INTERNAL CA RATHER THAN ACME/LET'S ENCRYPT
+# WHY AN INTERNAL CA, AND ONLY AN INTERNAL CA
 #
-# The deployment target is an on-premises k3s cluster on a private domain. ACME cannot serve it:
-# HTTP-01 needs the cluster reachable from the public internet, DNS-01 needs a public zone plus
-# provider API credentials in a Secret, a wildcard requires DNS-01 specifically, and an internal-only
-# domain cannot be validated at all. ACME remains the right answer for a genuinely public domain --
-# swap the `clusterIssuer` values above for an ACME issuer and nothing else in the chart changes,
-# because the chart only ever names an issuer and never assumes what kind it is.
+# Aber runs on a site's own network, on a private domain, and every certificate it serves is for
+# that network. This root is the supported issuer for all of them. A public issuer is not: ACME
+# cannot validate a private domain at all, and Remote enrolment hands each appliance the root from
+# the broker's Secret (ca.crt), which a public issuer does not put there. Reaching the site from
+# outside is the operator's VPN, not a public certificate.
 #
 # THE COST IS TRUST DISTRIBUTION, AND IT IS REAL. Until the root below is in a machine's trust store,
 # every browser sees a warning on all nine subdomains. That matters more than the usual "click
@@ -81,12 +80,12 @@ metadata:
     app.kubernetes.io/part-of: aber
 spec:
   isCA: true
-  commonName: Factory+ Internal CA
+  commonName: Aber Internal CA
   # The name distributed to every trust store in the plant, so it should say whose it is. It is not
   # a hostname and is never matched against one.
   subject:
     organizations:
-      - Factory+
+      - Aber
     organizationalUnits:
       - Asset Tracking Platform
   secretName: aber-ca-key-pair

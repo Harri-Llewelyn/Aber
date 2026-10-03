@@ -138,25 +138,15 @@ function openssl(argv, { quiet = true } = {}) {
 }
 
 /**
- * Escape a DN attribute VALUE for `openssl req -subj`.
- *
- * NOT OPTIONAL. OpenSSL 3 reads `+` inside a -subj string as
- * the separator between the components of a MULTI-VALUED RDN. The organisation here is literally
- * "Factory+", so the unescaped form
- *
- *     -subj "/O=Factory+/OU=Asset Tracking Platform/CN=Factory+ Internal CA"
- *
- * does not produce that subject and does not quietly produce a different one either -- it fails
- * with `req: Missing '=' after RDN type string` and an `unknown object name` error pointing at
- * obj_dat.c, neither of which mentions the plus sign. OpenSSL 1.x accepted it, so this is another
- * instance of the mosquitto duplicate-password_file lesson: syntax that is valid until the tool is
- * pinned.
+ * Escape a DN attribute VALUE for `openssl req -subj`. OpenSSL 3 reads an unescaped `+` as the
+ * separator of a multi-valued RDN and fails with `req: Missing '=' after RDN type string`, which
+ * does not mention the plus sign; `/`, `=` and `,` are just as structural.
  */
 function dn(value) {
   return String(value).replace(/([\\/+=,])/g, '\\$1');
 }
 
-const ORG = dn('Factory+');
+const ORG = dn('Aber');
 const ORG_UNIT = dn('Asset Tracking Platform');
 
 // -------------------------------------------------------------------------------------------------
@@ -234,7 +224,7 @@ function issueCa() {
   openssl([
     'req', '-x509', '-newkey', 'rsa:4096', '-sha256', '-days', String(CA_DAYS), '-nodes',
     '-keyout', CA_KEY, '-out', CA_CRT,
-    '-subj', `/O=${ORG}/OU=${ORG_UNIT}/CN=${dn('Factory+ Internal CA (fixture)')}`,
+    '-subj', `/O=${ORG}/OU=${ORG_UNIT}/CN=${dn('Aber Internal CA (fixture)')}`,
     // pathlen:0 -- this root signs LEAVES and may not delegate. A CA that can mint intermediates is
     // a broader authority than anything here needs, and narrowing it costs nothing.
     '-addext', 'basicConstraints=critical,CA:TRUE,pathlen:0',
