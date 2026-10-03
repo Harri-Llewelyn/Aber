@@ -392,8 +392,8 @@ const SETTINGS_JS = `/**
  *
  *   adminAuth.strategy  -- humans, in a browser. OAuth2 + PKCE against GoTrue, identity and
  *                          role from the nodered-userinfo edge function.
- *   adminAuth.tokens    -- services calling the admin API. Verifies the Supabase access token
- *                          that deploy-nodered forwards from the operator who triggered it.
+ *   adminAuth.tokens    -- services calling the admin API. Verifies a Supabase access token
+ *                          a service forwards for the operator it acts for.
  *   httpNodeAuth        -- the http-in nodes (POST /hooks/quarantine). adminAuth does NOT
  *                          cover these: they mount under httpNodeRoot, a separate Express
  *                          mount (Node-RED's red.js:426), which is why the webhook stayed open
@@ -639,9 +639,9 @@ module.exports = {
     },
 
     /**
-     * Machine-to-machine access to the admin API, read from Authorization: Bearer. deploy-nodered
-     * forwards the operator's access token; the role is re-derived from public.user_roles rather
-     * than trusted, so a revocation takes effect on both sides at once.
+     * Machine-to-machine access to the admin API, read from Authorization: Bearer: a Supabase
+     * access token, whose role is re-derived from public.user_roles rather than trusted, so a
+     * revocation takes effect on both sides at once.
      */
     tokenHeader: 'authorization',
     tokens: async function (token) {

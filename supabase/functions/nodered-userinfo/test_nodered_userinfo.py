@@ -11,7 +11,7 @@ fail-closed behaviour is the whole of Node-RED's authorization. Two properties m
     Deleting a user's user_roles row IS how a role is revoked, so an app_metadata fallback
     re-grants the privilege for as long as the token lives.
 
-The behavioural half is a Python mirror of index.ts, as in test_deploy_nodered.py; the source
+The behavioural half is a Python mirror of index.ts, as in test_approve_quarantine.py; the source
 assertions guard the two properties above against a well-intentioned "make login work again"
 edit, since there is no Deno runtime in this suite.
 """
@@ -100,12 +100,8 @@ class TestPermissionMapping(unittest.TestCase):
 
     def test_shopfloor_manager_is_read_only(self):
         """
-        THIS TEST USED TO ASSERT '*', and the inversion is 0069 rather than a tightened default.
-
-        `gitops:manage` is Administrator-only now, and the Node-RED editor is the SECOND door onto
-        it: the Directory page's Sync button goes through deploy-nodered, the editor deploys
-        directly. Narrowing one and not the other produces a manager who cannot press the button
-        and can still deploy -- worse than before, because it reads as a control.
+        `gitops:manage` is Administrator-only, and the Node-RED editor deploys directly, so a
+        manager with '*' could deploy a flow the permission says they may not.
 
         'read' rather than absent: the editor still opens and the running flow is still
         inspectable, which is most of what the page is for when the shopfloor is misbehaving.
@@ -149,7 +145,7 @@ class TestFailClosed(unittest.TestCase):
 class TestSourceInvariants(unittest.TestCase):
     """
     Asserted against index.ts because there is no Deno runtime here -- the same approach
-    test_deploy_nodered.py and test_aas_export.py take.
+    test_aas_export.py takes.
     """
 
     @classmethod

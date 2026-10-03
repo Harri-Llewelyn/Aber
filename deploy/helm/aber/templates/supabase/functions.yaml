@@ -68,9 +68,9 @@ spec:
             {{- include "aber.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
             {{- include "aber.secretEnv" (dict "name" "SUPABASE_SERVICE_ROLE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
             {{- include "aber.secretEnv" (dict "name" "JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
-            # false because EACH FUNCTION CHECKS ITS OWN ROLE CLAIM. approve-quarantine and
-            # deploy-nodered allow-list Administrator/Shopfloor_Manager; aas-export additionally
-            # allows the read-scoped roles. Verifying here would be a second, coarser gate that
+            # false because EACH FUNCTION CHECKS ITS OWN ROLE CLAIM. approve-quarantine
+            # allow-lists Administrator/Shopfloor_Manager; aas-export also allows the read-scoped
+            # roles. Verifying here would be a second, coarser gate that
             # could only ever be wrong about one of them.
             - name: VERIFY_JWT
               value: {{ .Values.supabaseFunctions.verifyJwt | quote }}

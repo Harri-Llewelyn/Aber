@@ -292,11 +292,9 @@ entire recovery story.
 
 ## 3. Appliances are never reached into
 
-**Nothing in this platform pushes a flow to a plant appliance.** The dashboard's *"Sync Edge Flows
-via GitOps"* action and the `deploy-nodered` edge function both target
-`http://node-red:1880/flows` — the **central** Node-RED, which runs the host-run gateways. A
-Remote gateway's Node-RED has no inbound path at all: it dials out to the broker on 8883 and
-nothing anywhere assumes traffic in the other direction.
+**Nothing in this platform pushes a flow to a plant appliance.** A Remote gateway's Node-RED has
+no inbound path at all: it dials out to the broker on 8883 and nothing anywhere assumes traffic in
+the other direction.
 
 So an appliance keeps running the flow it was bundled with, across every platform upgrade, until
 somebody deliberately changes it.

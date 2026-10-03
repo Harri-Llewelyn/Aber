@@ -103,7 +103,7 @@ describe('usePermissions hook', () => {
 
     // The platform permissions belong to Administrator alone. These are assertions about what is
     // offered; each is enforced server-side: SCHEMA_MANAGE by the write policies on schemas,
-    // metric_catalog and metric_groups, GITOPS_MANAGE by ALLOWED_ROLES in deploy-nodered.
+    // metric_catalog and metric_groups, GITOPS_MANAGE by nodered-userinfo and the forge's rule on main.
     expect(result.current.hasPermission(PERMISSION_UUIDS.SCHEMA_MANAGE)).toBe(false)
     expect(result.current.hasPermission(PERMISSION_UUIDS.GITOPS_MANAGE)).toBe(false)
     expect(result.current.hasPermission(PERMISSION_UUIDS.AUTHZ_MANAGE)).toBe(false)
