@@ -2031,7 +2031,7 @@ paths:
         The row carries what the entity was called, the `sparkplug_id` its readings are still keyed
         by in the historian, when it was archived and retired, who retired it (`retired_by` is null
         when the timer did), the id of the trail's `DELETE` row, and `old_data`, the whole row as
-        it was. It is the Archived Entities page's second card, where each row links to what
+        it was. It is the Archived Entities page's Retired tab, where each row links to what
         survives it: the audit trail, a gateway's repository in the forge, and any bundle in
         `asset_exports`.
 

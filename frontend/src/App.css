@@ -4336,6 +4336,9 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   z-index: 3;
 }
 
+/* The selected badge stays above its neighbours, which the rule above would otherwise hold at 3. */
+.trail-track .trail-cluster.trail-node-selected { z-index: 4; }
+
 .trail-track .trail-cluster:hover,
 .trail-track .trail-cluster:focus-visible {
   /* A smaller lift than a dot's 1.4x: the badge is already 18px, and at 1.4 it would overhang the
