@@ -9,7 +9,6 @@ import { describe, it, expect } from 'vitest'
 const SOURCES = import.meta.glob('../components/tabs/*.jsx', { query: '?raw', import: 'default', eager: true })
 
 const PAGES = [
-  ['AccessControlTab', '../components/tabs/AccessControlTab.jsx'],
   ['ApprovalsTab', '../components/tabs/ApprovalsTab.jsx'],
   ['ArchivesTab', '../components/tabs/ArchivesTab.jsx'],
   ['CaptureTab', '../components/tabs/CaptureTab.jsx'],

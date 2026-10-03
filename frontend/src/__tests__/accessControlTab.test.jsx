@@ -93,13 +93,13 @@ beforeEach(() => {
   api.listRevokedServicePrincipals.mockResolvedValue(new Map())
 })
 
-/** The card whose title starts with `title`. */
-const cardOf = (title) => screen.getByRole('heading', { name: (name) => name.startsWith(title) }).closest('.card')
+/** The page's one card. */
+const card = () => document.querySelector('.page-main > .card')
 
-/** The page opens on Gateways; the machine identities are the other section. */
-async function renderServices() {
+/** The page opens on Broker credentials; the other three lists are a tab each. */
+async function renderTab(label) {
   const result = render(<AccessControlTab showToast={vi.fn()} />)
-  fireEvent.click(await screen.findByRole('tab', { name: /Services/ }))
+  fireEvent.click(await screen.findByRole('tab', { name: label }))
   return result
 }
 
@@ -169,8 +169,8 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByText('Disabled')).toBeTruthy())
   })
 
-  /** An account the broker holds that no gateway row claims gets its own section. */
-  it('lists a broker account with no gateway row as an orphan', async () => {
+  /** An account the broker holds that no gateway row claims joins Broker accounts, marked in words. */
+  it('lists a broker account with no gateway row among the broker accounts, marked No gateway', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     api.listBrokerInventory.mockResolvedValue({
       clients: [
@@ -180,15 +180,23 @@ describe('AccessControlTab', () => {
       ],
       roles: [],
     })
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderTab('Broker accounts')
 
-    await waitFor(() => expect(screen.getByText(/Accounts with no gateway/i)).toBeTruthy())
-    // The gateway-shaped stray is listed; the platform principal is not an orphan.
-    expect(screen.getByRole('button', { name: /gwy999999999999999999999/ })).toBeTruthy()
+    const stray = (await screen.findByRole('button', { name: /gwy999999999999999999999/ })).closest('tr')
+    const badge = within(stray).getByText('No gateway')
+    expect(badge.className).toContain('badge-neutral')
+    expect(badge.title).toMatch(/revoke-orphaned-broker-accounts/)
+    expect(within(stray).getByText(/no gateway claims it/)).toBeTruthy()
+    // The platform account is listed beside it, first, and unmarked; a known gateway is not listed.
+    const names = screen.getAllByRole('button', { name: /Copy MQTT username/ }).map(b => b.textContent)
+    expect(names).toEqual(['aber_ingestion', 'gwy999999999999999999999'])
+    expect(within(screen.getByRole('button', { name: /aber_ingestion/ }).closest('tr')).queryByText('No gateway')).toBeNull()
+    // Its live state and its copy control are what every other account has.
+    expect(within(stray).getByText('Active')).toBeTruthy()
   })
 
-  /** No orphan section on a healthy stack whose broker holds only known gateways. */
-  it('shows no orphan section when every broker account is a known gateway', async () => {
+  /** The tab is there whether or not a stray exists, and marks none on a healthy stack. */
+  it('marks no account No gateway when every broker account is a known gateway', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     api.listBrokerInventory.mockResolvedValue({
       clients: [{ username: provisioned.sparkplug_id, roles: ['gateway'], disabled: false }],
@@ -197,7 +205,10 @@ describe('AccessControlTab', () => {
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(screen.getAllByText('No platform record').length).toBeGreaterThan(0))
-    expect(screen.queryByText(/Accounts with no gateway/i)).toBeNull()
+    expect(screen.getAllByRole('tab')).toHaveLength(4)
+    fireEvent.click(screen.getByRole('tab', { name: 'Broker accounts' }))
+    await waitFor(() => expect(screen.getByText(/The broker holds no platform account/)).toBeTruthy())
+    expect(screen.queryByText('No gateway')).toBeNull()
   })
 
   it('offers a mint for a host-run gateway and a bundle for a Remote one', async () => {
@@ -265,10 +276,9 @@ describe('AccessControlTab', () => {
     fireEvent.change(filter, { target: { value: 'awaiting-enrolment' } })
     await waitFor(() => expect(screen.queryByText('Sim_Gateway_Cell1_Machining')).toBeNull())
     expect(screen.getByText('Cell 5 Press Line')).toBeTruthy()
-    // No summary pills under the table: the filter carries the counts, and the card's count reads
-    // "narrowed / total" while a filter is on.
+    // No summary pills under the table and no count on the heading: the filter carries the counts.
     expect(screen.queryByText(/no record$/)).toBeNull()
-    expect(cardOf('Broker credentials').querySelector('.section-count').textContent).toBe('1 / 2')
+    expect(card().querySelector('.section-count')).toBeNull()
   })
 
   it('heads the two action columns Actions', async () => {
@@ -277,7 +287,7 @@ describe('AccessControlTab', () => {
 
     await waitFor(() => expect(screen.getByRole('columnheader', { name: 'Actions' })).toBeTruthy())
     expect(screen.queryByRole('columnheader', { name: 'Issue' })).toBeNull()
-    fireEvent.click(screen.getByRole('tab', { name: /Services/ }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Machine identities' }))
     await waitFor(() => expect(screen.getByRole('columnheader', { name: 'Actions' })).toBeTruthy())
     expect(screen.queryByRole('columnheader', { name: 'Mint' })).toBeNull()
   })
@@ -292,27 +302,55 @@ describe('AccessControlTab', () => {
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(screen.getAllByText('No platform record').length).toBeGreaterThan(0))
-    // The refusal is reported where the list would have been, on the Services section.
-    fireEvent.click(screen.getByRole('tab', { name: /Services/ }))
+    // The refusal is reported where the list would have been, on the Machine identities tab.
+    fireEvent.click(screen.getByRole('tab', { name: 'Machine identities' }))
     await waitFor(() => expect(screen.getByText(/insufficient privileges/i)).toBeTruthy())
   })
 
-  it('opens on Gateways and keeps the service identities under Services', async () => {
+  it('opens on Broker credentials, with one list per tab in a fixed order', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     render(<AccessControlTab showToast={vi.fn()} />)
 
-    await waitFor(() => expect(cardOf('Broker credentials')).toBeTruthy())
-    expect(screen.queryByText(/^Machine identities/)).toBeNull()
-    expect(screen.queryByText(/^Broker roles/)).toBeNull()
+    await waitFor(() => expect(screen.getByText('Sim_Gateway_Cell1_Machining')).toBeTruthy())
+    // No counts on the tabs: each accessible name is the label alone.
+    expect(screen.getAllByRole('tab').map(t => t.textContent))
+      .toEqual(['Broker credentials', 'Machine identities', 'Broker accounts', 'Broker roles'])
+    expect(screen.getByRole('tab', { name: 'Broker credentials' }).getAttribute('aria-selected')).toBe('true')
 
-    fireEvent.click(screen.getByRole('tab', { name: /Services/ }))
-    await waitFor(() => expect(cardOf('Machine identities')).toBeTruthy())
-    expect(cardOf('Broker roles')).toBeTruthy()
-    expect(screen.queryByText(/^Broker credentials/)).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: 'Machine identities' }))
+    await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
+    expect(screen.queryByText('Sim_Gateway_Cell1_Machining')).toBeNull()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Broker roles' }))
+    expect(screen.getByText('ingestion', { selector: 'td' })).toBeTruthy()
+    expect(screen.queryByText('MCP read-only client')).toBeNull()
+
+    // The arrow keys move between tabs too, through the shared tab bar.
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Broker roles' }), { key: 'ArrowLeft' })
+    expect(screen.getByRole('tab', { name: 'Broker accounts' }).getAttribute('aria-selected')).toBe('true')
   })
 
-  /** A declared fixture is named rather than listed as a stray; anything undeclared is the stray. */
-  it('names a declared fixture among the accounts with no gateway', async () => {
+  /** A search-bar card names one list; the page opens on its tab and hands the request back. */
+  it('opens the tab a search-bar card names, and drops the request', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    const onClearSection = vi.fn()
+    render(<AccessControlTab showToast={vi.fn()} initialSection="roles" onClearSection={onClearSection} />)
+
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Broker roles' }).getAttribute('aria-selected')).toBe('true'))
+    expect(onClearSection).toHaveBeenCalled()
+  })
+
+  it('ignores a section it does not have, and still drops the request', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    const onClearSection = vi.fn()
+    render(<AccessControlTab showToast={vi.fn()} initialSection="services" onClearSection={onClearSection} />)
+
+    await waitFor(() => expect(onClearSection).toHaveBeenCalled())
+    expect(screen.getByRole('tab', { name: 'Broker credentials' }).getAttribute('aria-selected')).toBe('true')
+  })
+
+  /** A declared fixture is named rather than marked as a stray; anything undeclared is the stray. */
+  it('names a declared fixture among the broker accounts and marks only the stray', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     api.listBrokerInventory.mockResolvedValue({
       clients: [
@@ -321,19 +359,13 @@ describe('AccessControlTab', () => {
       ],
       roles: [],
     })
-    render(<AccessControlTab showToast={vi.fn()} />)
+    await renderTab('Broker accounts')
 
-    // The stray is the orphan; the declared fixture is not listed among them.
-    await waitFor(() => expect(screen.getByText(/Accounts with no gateway/i)).toBeTruthy())
-    expect(screen.getByRole('button', { name: /gwy999999999999999999999/ })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /gwy110000000000400080000/ })).toBeNull()
-
-    // It is a platform account, listed with the others under Services.
-    fireEvent.click(screen.getByRole('tab', { name: /Services/ }))
-    await waitFor(() => expect(screen.getByText('Broker accounts')).toBeTruthy())
-    expect(screen.getByRole('button', { name: /gwy110000000000400080000/ })).toBeTruthy()
-    expect(screen.getByText(/Validator test gateway/)).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /gwy999999999999999999999/ })).toBeNull()
+    const fixture = (await screen.findByRole('button', { name: /gwy110000000000400080000/ })).closest('tr')
+    expect(within(fixture).getByText(/Validator test gateway/)).toBeTruthy()
+    expect(within(fixture).queryByText('No gateway')).toBeNull()
+    const stray = screen.getByRole('button', { name: /gwy999999999999999999999/ }).closest('tr')
+    expect(within(stray).getByText('No gateway')).toBeTruthy()
   })
 
   /** The broker's own accounts are listed live, each with the purpose of the role it holds. */
@@ -348,17 +380,17 @@ describe('AccessControlTab', () => {
       ],
       roles: [],
     })
-    await renderServices()
+    await renderTab('Broker accounts')
 
-    await waitFor(() => expect(screen.getByText('Broker accounts')).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: /aber_monitor/ })).toBeTruthy())
     // Policy order, not alphabetical: ingestion, monitor, admin.
     const names = screen.getAllByRole('button', { name: /Copy MQTT username/ }).map(b => b.textContent)
     expect(names).toEqual(['aber_ingestion', 'aber_monitor', 'dynsec-admin'])
-    // Scoped to the row: the same purpose is printed beside the role in the table beneath.
+    // Scoped to the row: the same purpose is printed beside the role on Broker roles.
     const monitorRow = screen.getByRole('button', { name: /aber_monitor/ }).closest('tr')
     expect(within(monitorRow).getByText(/The broker health probes and the metrics exporter/)).toBeTruthy()
     expect(screen.getByText('Disabled')).toBeTruthy()
-    expect(screen.queryByText(/Accounts with no gateway/i)).toBeNull()
+    expect(screen.queryByText('No gateway')).toBeNull()
   })
 
   /** An unrecognised machine identity is more interesting than a recognised one, so it is listed. */
@@ -367,7 +399,7 @@ describe('AccessControlTab', () => {
     api.listServicePrincipals.mockResolvedValue([
       { principal_id: 'c0000000-0000-4000-8000-000000000009', permissions: [], created_at: null, can_sign_in: false }
     ])
-    await renderServices()
+    await renderTab('Machine identities')
 
     await waitFor(() => expect(screen.getByText(/Undocumented machine identity/i)).toBeTruthy())
     // Both origins, which is the assertion rather than the exact sentence: an unknown principal may
@@ -390,7 +422,7 @@ describe('AccessControlTab', () => {
       { principal_id: 'b0000000-0000-4000-8000-000000000002', permissions: ['telemetry:read'], created_at: null, can_sign_in: false },
       { principal_id: 'b0000000-0000-4000-8000-000000000003', permissions: ['telemetry:read'], created_at: null, can_sign_in: false }
     ])
-    await renderServices()
+    await renderTab('Machine identities')
 
     await waitFor(() => expect(screen.getByText('Service_Ingestor')).toBeTruthy())
     expect(screen.getByText('Service_Playback')).toBeTruthy()
@@ -409,7 +441,7 @@ describe('AccessControlTab', () => {
       { principal_id: 'b0000000-0000-4000-8000-000000000002', permissions: ['telemetry:read'], created_at: null, can_sign_in: false },
       { principal_id: 'b0000000-0000-4000-8000-000000000003', permissions: ['telemetry:read'], created_at: null, can_sign_in: false }
     ])
-    await renderServices()
+    await renderTab('Machine identities')
 
     await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
 
@@ -429,7 +461,7 @@ describe('AccessControlTab', () => {
     api.listServicePrincipals.mockResolvedValue([
       { principal_id: 'c0000000-0000-4000-8000-000000000009', permissions: [], created_at: null, can_sign_in: false }
     ])
-    await renderServices()
+    await renderTab('Machine identities')
 
     await waitFor(() => expect(screen.getByText(/Undocumented machine identity/i)).toBeTruthy())
     expect(screen.getByRole('button', { name: /Issue Token/i })).toBeTruthy()
@@ -447,7 +479,7 @@ describe('AccessControlTab', () => {
         created_at: null, can_sign_in: false, name: 'Line 4 OEE report', purpose: 'Reads the hourly rollup.',
       }
     ])
-    await renderServices()
+    await renderTab('Machine identities')
 
     await waitFor(() => expect(screen.getByText('Line 4 OEE report')).toBeTruthy())
     expect(screen.getByTitle('Reads the hourly rollup.')).toBeTruthy()
@@ -468,7 +500,7 @@ describe('AccessControlTab', () => {
         created_at: null, can_sign_in: false, name: 'Line 4 OEE report', purpose: null,
       }
     ])
-    await renderServices()
+    await renderTab('Machine identities')
     await waitFor(() => expect(screen.getByText('Line 4 OEE report')).toBeTruthy())
 
     expect(screen.queryByRole('button', { name: /Describe MCP read-only client/ })).toBeNull()
@@ -476,9 +508,9 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByTestId('describe-modal').textContent).toBe('Line 4 OEE report'))
   })
 
-  it('offers New Machine Identity on the machine identities card', async () => {
+  it('offers New Machine Identity on the Machine identities tab', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    await renderServices()
+    await renderTab('Machine identities')
     await waitFor(() => expect(screen.getByRole('button', { name: /New Machine Identity/i })).toBeTruthy())
     // Which plane, on the button itself.
     expect(screen.getByRole('button', { name: /New Machine Identity/i }).title).toMatch(/never the broker/)
@@ -487,7 +519,7 @@ describe('AccessControlTab', () => {
   it('withholds New Machine Identity when the principal read was refused', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServicePrincipals.mockRejectedValue(new Error('insufficient privileges to list machine principals'))
-    await renderServices()
+    await renderTab('Machine identities')
     await waitFor(() => expect(screen.getByText(/insufficient privileges/)).toBeTruthy())
     expect(screen.queryByRole('button', { name: /New Machine Identity/i })).toBeNull()
   })
@@ -498,7 +530,7 @@ describe('AccessControlTab', () => {
    */
   it('opens the token dialog for a principal the moment it is created', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    await renderServices()
+    await renderTab('Machine identities')
     await waitFor(() => expect(screen.getByRole('button', { name: /New Machine Identity/i })).toBeTruthy())
 
     fireEvent.click(screen.getByRole('button', { name: /New Machine Identity/i }))
@@ -513,7 +545,7 @@ describe('AccessControlTab', () => {
 
   it('opens the token dialog for the principal whose button was pressed', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    await renderServices()
+    await renderTab('Machine identities')
 
     await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
     screen.getByRole('button', { name: /Issue Token/i }).click()
@@ -536,13 +568,13 @@ describe('AccessControlTab', () => {
         { jti: 'b', issued_at: '2026-09-02T00:00:00Z', expires_at: '2099-02-01T00:00:00Z' }
       ]
     ]]))
-    await renderServices()
+    await renderTab('Machine identities')
 
-    await waitFor(() => expect(screen.getByText('2 active tokens')).toBeTruthy())
-    screen.getByRole('button', { name: /2 active tokens/i }).click()
+    await waitFor(() => expect(screen.getByText('2 active')).toBeTruthy())
+    screen.getByRole('button', { name: '2 active' }).click()
 
     // The STATUS is passed rather than recomputed in the dialog, so asserting the row count here
-    // asserts that the list and the badge cannot disagree.
+    // asserts that the list and the link cannot disagree.
     await waitFor(() => expect(screen.getByTestId('inventory-modal').textContent)
       .toBe('MCP read-only client:2'))
   })
@@ -558,19 +590,35 @@ describe('AccessControlTab', () => {
       ]
     ]]))
     api.listRevokedServiceTokens.mockResolvedValue(new Set(['a']))
-    await renderServices()
+    await renderTab('Machine identities')
 
-    await waitFor(() => expect(screen.getByText('1 active token')).toBeTruthy())
-    expect(screen.queryByText('2 active tokens')).toBeNull()
+    await waitFor(() => expect(screen.getByText('1 active')).toBeTruthy())
+    expect(screen.queryByText('2 active')).toBeNull()
   })
 
-  /** Nothing to list means nothing to open -- a button onto an empty dialog is worse than a badge. */
-  it('leaves the badge inert when no mint is recorded', async () => {
+  /** Nothing to list means nothing to open -- a link onto an empty dialog is worse than a dash. */
+  it('shows a plain dash when no mint is recorded', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    await renderServices()
+    await renderTab('Machine identities')
 
-    await waitFor(() => expect(screen.getByText('No token on record')).toBeTruthy())
-    expect(screen.queryByRole('button', { name: /No token on record/i })).toBeNull()
+    await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
+    const cell = screen.getByTitle(/not the same as none existing/i)
+    expect(cell.textContent).toBe('—')
+    expect(cell.tagName).toBe('SPAN')
+    expect(within(cell.closest('tr')).queryByText(/active$/)).toBeNull()
+  })
+
+  /** Every token expired or revoked: still a way in to the list, reading 0 active. */
+  it('links 0 active when every recorded token has lapsed', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listServiceTokens.mockResolvedValue(new Map([[
+      MCP_PRINCIPAL.principal_id,
+      [{ jti: 'a', issued_at: '2026-01-01T00:00:00Z', expires_at: '2026-02-01T00:00:00Z' }],
+    ]]))
+    await renderTab('Machine identities')
+
+    const link = await screen.findByRole('button', { name: '0 active' })
+    expect(link.title).toMatch(/The last token expired on/)
   })
 
   /**
@@ -579,7 +627,7 @@ describe('AccessControlTab', () => {
    */
   it('offers Withdraw beside Issue Token for a live identity', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    await renderServices()
+    await renderTab('Machine identities')
 
     await waitFor(() => expect(screen.getByRole('button', { name: /Issue Token/i })).toBeTruthy())
     expect(screen.getByRole('button', { name: /^Withdraw$/i })).toBeTruthy()
@@ -596,7 +644,7 @@ describe('AccessControlTab', () => {
       MCP_PRINCIPAL.principal_id,
       { principal_id: MCP_PRINCIPAL.principal_id, revoked_at: '2026-09-03T12:00:00Z', reason: 'leaked' }
     ]]))
-    await renderServices()
+    await renderTab('Machine identities')
 
     await waitFor(() => expect(screen.getByText('WITHDRAWN')).toBeTruthy())
     expect(screen.queryByText('REVOKED')).toBeNull()
@@ -607,7 +655,7 @@ describe('AccessControlTab', () => {
 
   it('opens the dialog in the direction the identity needs', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    await renderServices()
+    await renderTab('Machine identities')
 
     await waitFor(() => expect(screen.getByRole('button', { name: /^Withdraw$/i })).toBeTruthy())
     screen.getByRole('button', { name: /^Withdraw$/i }).click()
@@ -617,7 +665,7 @@ describe('AccessControlTab', () => {
 
   it('shows the broker roles and marks which ones can publish', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    await renderServices()
+    await renderTab('Broker roles')
 
     // Role names, not usernames: the page renders the policy's roles.
     await waitFor(() => expect(screen.getByText('ingestion', { selector: 'td' })).toBeTruthy())
@@ -630,49 +678,97 @@ describe('AccessControlTab', () => {
     expect(screen.getAllByText('READ ONLY').length).toBe(3)
   })
 
+  const LIVE_ROLES = {
+    clients: [
+      { username: 'aber_monitor', roles: ['monitor'], disabled: false },
+    ],
+    roles: [
+      { rolename: 'monitor', acls: [{ acltype: 'subscribePattern', topic: '$SYS/#', allow: true }] },
+      {
+        rolename: 'ingestion',
+        acls: [
+          { acltype: 'subscribePattern', topic: 'spBv1.0/#', allow: true },
+          { acltype: 'publishClientReceive', topic: 'spBv1.0/#', allow: true },
+          { acltype: 'publishClientSend', topic: 'spBv1.0/+/NCMD/+', allow: true },
+        ],
+      },
+    ],
+  }
+  const roleRow = (name) => screen.getByText(name, { selector: 'td' }).closest('tr')
+  const rolePanel = () => document.querySelector('.context-panel')
+
   /**
    * With a live inventory the rules come from the broker, verb and topic, not from a literal. The
-   * table carries a count; the rules themselves open in the drawer, since one role is nine lines.
+   * table carries a plain count; the rules open in the drawer from anywhere on the row, since one
+   * role is nine lines.
    */
-  it('counts a role’s live rules in the table and opens them in the drawer', async () => {
+  it('counts a role’s live rules in the table and opens them in the drawer from the row', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    api.listBrokerInventory.mockResolvedValue({
-      clients: [
-        { username: 'aber_monitor', roles: ['monitor'], disabled: false },
-      ],
-      roles: [
-        { rolename: 'monitor', acls: [{ acltype: 'subscribePattern', topic: '$SYS/#', allow: true }] },
-        {
-          rolename: 'ingestion',
-          acls: [
-            { acltype: 'subscribePattern', topic: 'spBv1.0/#', allow: true },
-            { acltype: 'publishClientReceive', topic: 'spBv1.0/#', allow: true },
-            { acltype: 'publishClientSend', topic: 'spBv1.0/+/NCMD/+', allow: true },
-          ],
-        },
-      ],
-    })
-    await renderServices()
+    api.listBrokerInventory.mockResolvedValue(LIVE_ROLES)
+    await renderTab('Broker roles')
 
-    const monitor = await screen.findByRole('button', { name: '1 rule' })
-    expect(screen.getByRole('button', { name: '3 rules' })).toBeTruthy()
+    await waitFor(() => expect(roleRow('monitor').className).toContain('row-selectable'))
+    // The count is plain text: the row is what opens.
+    expect(within(roleRow('monitor')).queryByRole('button')).toBeNull()
+    expect(roleRow('monitor').querySelector('.section-count')).toBeNull()
+    expect(roleRow('ingestion').children[2].textContent).toBe('3')
     // Not in the table.
     expect(screen.queryByText('$SYS/#')).toBeNull()
 
-    fireEvent.click(monitor)
+    // Any cell opens it, the purpose included.
+    fireEvent.click(roleRow('monitor').lastElementChild)
     const panel = await screen.findByRole('complementary', { name: 'monitor role' })
     expect(within(panel).getByText('$SYS/#')).toBeTruthy()
     expect(within(panel).getByText('subscribe')).toBeTruthy()
     expect(within(panel).getByText('1 account')).toBeTruthy()
+    expect(roleRow('monitor').className).toContain('row-selected')
+    // The title carries the role's icon. A role is read-only here, so the panel offers no action
+    // and therefore no primary.
+    expect(panel.querySelector('.context-panel-title-row .context-panel-icon svg')).toBeTruthy()
+    expect(panel.querySelector('.context-panel-actions')).toBeNull()
+
+    // A second click on the same row closes it.
+    fireEvent.click(roleRow('monitor').firstElementChild)
+    await waitFor(() => expect(rolePanel().getAttribute('aria-hidden')).toBe('true'))
   })
 
-  it('reports a role as Not read when the broker was not', async () => {
+  it('opens a role from the keyboard: the row is in the Tab order and Enter opens it', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listBrokerInventory.mockResolvedValue(LIVE_ROLES)
+    await renderTab('Broker roles')
+
+    await waitFor(() => expect(roleRow('ingestion').getAttribute('tabindex')).toBe('0'))
+    roleRow('ingestion').focus()
+    expect(document.activeElement).toBe(roleRow('ingestion'))
+    fireEvent.keyDown(roleRow('ingestion'), { key: 'Enter' })
+    expect(await screen.findByRole('complementary', { name: 'ingestion role' })).toBeTruthy()
+    // Another key does nothing.
+    fireEvent.keyDown(roleRow('monitor'), { key: 'a' })
+    expect(screen.queryByRole('complementary', { name: 'monitor role' })).toBeNull()
+  })
+
+  it('closes the role drawer when Broker roles is left', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listBrokerInventory.mockResolvedValue(LIVE_ROLES)
+    await renderTab('Broker roles')
+
+    await waitFor(() => expect(roleRow('monitor').className).toContain('row-selectable'))
+    fireEvent.click(roleRow('monitor'))
+    await screen.findByRole('complementary', { name: 'monitor role' })
+    fireEvent.click(screen.getByRole('tab', { name: 'Broker accounts' }))
+    await waitFor(() => expect(rolePanel().getAttribute('aria-hidden')).toBe('true'))
+    fireEvent.click(screen.getByRole('tab', { name: 'Broker roles' }))
+    expect(roleRow('monitor').className).not.toContain('row-selected')
+  })
+
+  it('reports a role as Not read when the broker was not, and opens none', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listBrokerInventory.mockRejectedValue(new Error('credential service unreachable'))
-    await renderServices()
+    await renderTab('Broker roles')
 
     await waitFor(() => expect(screen.getAllByText('Not read').length).toBe(5))
-    expect(screen.queryByRole('button', { name: /rules?$/ })).toBeNull()
+    expect(document.querySelector('tr.row-selectable')).toBeNull()
+    expect(document.querySelector('tr[tabindex]')).toBeNull()
   })
 
   /**
@@ -686,7 +782,7 @@ describe('AccessControlTab', () => {
     // CopyableId renders a button, which is what makes it keyboard-reachable and announced as an
     // action -- a clickable span would be neither.
     await waitFor(() => expect(screen.getByRole('button', { name: /gwy120000000000400080000/ })).toBeTruthy())
-    fireEvent.click(screen.getByRole('tab', { name: /Services/ }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Machine identities' }))
     // Exact, because the mint command in the next column also contains this id. CopyableId's
     // accessible name is `Copy <label> <value>`, so naming the label makes this exact.
     await waitFor(() => expect(screen.getByRole('button', { name: 'Copy principal id b0000000-0000-4000-8000-000000000001' })).toBeTruthy())
@@ -698,7 +794,7 @@ describe('AccessControlTab', () => {
    */
   it('offers the mint command as well as the Issue Token button', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    await renderServices()
+    await renderTab('Machine identities')
 
     await waitFor(() => expect(
       screen.getByRole('button', {
@@ -722,22 +818,22 @@ describe('AccessControlTab', () => {
         { expires_at: inDays(-3), jti: 'expired-and-not-counted' }
       ]]
     ]))
-    await renderServices()
+    await renderTab('Machine identities')
 
-    await waitFor(() => expect(screen.getByText('2 active tokens')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('2 active')).toBeTruthy())
     // The earliest expiry is the one reported: the next date on which something stops working. Read
-    // off the tooltip; the badge carries the state and the tooltip the detail.
-    expect(screen.getByText('2 active tokens').getAttribute('title')).toMatch(/in 12 days/i)
+    // off the tooltip; the link carries the count and the tooltip the detail.
+    expect(screen.getByText('2 active').getAttribute('title')).toMatch(/in 12 days/i)
   })
 
   it('says a principal has no token on record rather than implying it has none at all', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    await renderServices()
+    await renderTab('Machine identities')
 
-    await waitFor(() => expect(screen.getByText('No token on record')).toBeTruthy())
-    // An empty cell is a fact about the record, not the credential, stated on the badge's tooltip.
-    expect(screen.getByText('No token on record').getAttribute('title'))
-      .toMatch(/not the same as none existing/i)
+    await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
+    // An empty cell is a fact about the record, not the credential, stated on the dash's tooltip.
+    const row = screen.getByText('MCP read-only client').closest('tr')
+    expect(within(row).getByTitle(/not the same as none existing/i).textContent).toBe('—')
   })
 
   /**
@@ -746,14 +842,13 @@ describe('AccessControlTab', () => {
    */
   it('states the credentials it cannot see, so an empty list is not read as none', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    await renderServices()
+    await renderTab('Machine identities')
 
     await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())
-    // On the row: the badge itself says an empty cell is a statement about the record.
-    expect(screen.getByText('No token on record').getAttribute('title'))
-      .toMatch(/not the same as none existing/i)
-    expect(screen.getByText('No token on record').getAttribute('title'))
-      .toMatch(/before this database exists/i)
+    // On the row: the dash itself says an empty cell is a statement about the record.
+    const dash = within(screen.getByText('MCP read-only client').closest('tr')).getByText('—')
+    expect(dash.getAttribute('title')).toMatch(/not the same as none existing/i)
+    expect(dash.getAttribute('title')).toMatch(/before this database exists/i)
   })
 
   /**
@@ -766,7 +861,7 @@ describe('AccessControlTab', () => {
       { principal_id: 'b0000000-0000-4000-8000-000000000002', permissions: ['telemetry:read'], created_at: null, can_sign_in: false },
       { principal_id: 'b0000000-0000-4000-8000-000000000001', permissions: ['telemetry:read'], created_at: null, can_sign_in: false }
     ])
-    await renderServices()
+    await renderTab('Machine identities')
 
     await waitFor(() => expect(screen.getByText('Service_Ingestor')).toBeTruthy())
     const rowOf = (name) => screen.getByText(name).closest('tr')
@@ -787,7 +882,7 @@ describe('AccessControlTab', () => {
    */
   it('renders the copy control as a ghost button, not as an understated identifier', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    await renderServices()
+    await renderTab('Machine identities')
 
     await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
 
@@ -803,10 +898,10 @@ describe('AccessControlTab', () => {
   it('still lists identities when the token history cannot be read', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServiceTokens.mockRejectedValue(new Error('permission denied for table audit_trail'))
-    await renderServices()
+    await renderTab('Machine identities')
 
     await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())
-    expect(screen.getByText('No token on record')).toBeTruthy()
+    expect(screen.getByTitle(/No token recorded for this identity/).textContent).toBe('—')
   })
 
   it('surfaces a failed read rather than rendering an empty inventory', async () => {
@@ -817,99 +912,118 @@ describe('AccessControlTab', () => {
   })
 })
 
-/** The house card: header (title, tip, count), a filter bar in the body, the table on the seam. */
+/** The house card: one CardHeading, the tab bar under it, each tab's toolbar row, then its list. */
 describe('AccessControlTab card composition', () => {
-  const countOf = (title) => cardOf(title).querySelector('.card-header .section-count').textContent
-
-  it('keeps the credential filter and Refresh in a filter bar inside the card body', async () => {
+  it('is one card whose list scrolls, with the tab bar directly under the heading', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     render(<AccessControlTab showToast={vi.fn()} />)
 
-    await waitFor(() => expect(cardOf('Broker credentials').querySelector('tbody tr')).toBeTruthy())
-    const card = cardOf('Broker credentials')
-    const bar = card.querySelector('.card-body > .filter-bar')
-    expect(bar).toBeTruthy()
-    expect(within(bar).getByLabelText('Filter gateways by credential state')).toBeTruthy()
-    expect(within(bar).getByRole('button', { name: /Refresh/ })).toBeTruthy()
-    // Nothing but the title, its tip and its count in the header.
-    expect(card.querySelector('.card-header select')).toBeNull()
-    expect(card.querySelector('.card-header .help-tip')).toBeTruthy()
-    // The table sits on the body's seam, with no inline margin.
-    const wrap = card.querySelector('.card-body + .table-wrap')
+    await waitFor(() => expect(card().querySelector('tbody tr')).toBeTruthy())
+    expect(document.querySelectorAll('.page-main .card')).toHaveLength(1)
+    expect(document.querySelector('.page-heading')).toBeNull()
+    expect(document.querySelector('.page-layout').className).toContain('page-fill')
+    expect(card().className).toContain('card-fill')
+    // The heading carries the page's title and description; the bar follows it inside the card.
+    const heading = card().firstElementChild
+    expect(heading.className).toContain('card-heading')
+    expect(within(heading).getByRole('heading', { name: 'Access Control' })).toBeTruthy()
+    expect(heading.querySelector('.card-heading-description')).toBeTruthy()
+    expect(heading.nextElementSibling.getAttribute('role')).toBe('tablist')
+    // The list is the scroller: a table-wrap straight under the card, with no inline margin.
+    const wrap = card().querySelector(':scope > .table-wrap')
     expect(wrap).toBeTruthy()
     expect(wrap.getAttribute('style')).toBeNull()
+  })
+
+  it('puts the tab’s tip first, its filter on the left and its actions on the right of the toolbar', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(card().querySelector('tbody tr')).toBeTruthy())
+    const bar = card().querySelector(':scope > .tab-strip + .filter-bar')
+    expect(bar).toBeTruthy()
+    expect(bar.firstElementChild.getAttribute('aria-label')).toBe('About broker credentials')
+    expect(within(bar).getByLabelText('Filter gateways by credential state').closest('.filter-bar-actions')).toBeNull()
+    expect(within(bar).getByRole('button', { name: /Refresh/ }).closest('.filter-bar-actions')).toBeTruthy()
+    // The heading holds the title and description only.
+    expect(card().querySelector('.card-header select')).toBeNull()
+    expect(card().querySelector('.card-header .help-tip')).toBeNull()
   })
 
   it('offers Clear filters only while the credential filter is off Active', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     render(<AccessControlTab showToast={vi.fn()} />)
 
-    await waitFor(() => expect(cardOf('Broker credentials')).toBeTruthy())
+    await waitFor(() => expect(card().querySelector('tbody tr')).toBeTruthy())
     expect(screen.queryByRole('button', { name: /Clear filters/ })).toBeNull()
     fireEvent.change(screen.getByLabelText('Filter gateways by credential state'), { target: { value: 'issued' } })
     fireEvent.click(screen.getByRole('button', { name: /Clear filters \(1\)/ }))
     expect(screen.getByLabelText('Filter gateways by credential state').value).toBe('active')
   })
 
-  it('shows a count on every card, 0 included', async () => {
-    api.listGatewayCredentials.mockResolvedValue([])
-    api.listServicePrincipals.mockResolvedValue([])
-    render(<AccessControlTab showToast={vi.fn()} />)
-
-    await waitFor(() => expect(countOf('Broker credentials')).toBe('0'))
-    fireEvent.click(screen.getByRole('tab', { name: /Services/ }))
-    await waitFor(() => expect(countOf('Machine identities')).toBe('0'))
-    expect(countOf('Broker accounts')).toBe('0')
-    // The five declared roles, whether or not the broker was read.
-    expect(countOf('Broker roles')).toBe('5')
-  })
-
-  it('counts the orphan card and the machine identities', async () => {
+  it('puts no count on the heading or the tabs; the filter options keep theirs', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     api.listBrokerInventory.mockResolvedValue({
       clients: [{ username: 'gwy999999999999999999999', roles: ['gateway'], disabled: false }],
       roles: [],
     })
     render(<AccessControlTab showToast={vi.fn()} />)
-    await waitFor(() => expect(countOf('Accounts with no gateway')).toBe('1'))
-    expect(countOf('Broker credentials')).toBe('1')
-    fireEvent.click(screen.getByRole('tab', { name: /Services/ }))
-    await waitFor(() => expect(countOf('Machine identities')).toBe('1'))
-  })
 
-  it('gives every card its description as a tip and none as a paragraph', async () => {
-    api.listGatewayCredentials.mockResolvedValue([provisioned])
-    await renderServices()
-
-    for (const title of ['Machine identities', 'Broker accounts', 'Broker roles']) {
-      expect(cardOf(title).querySelector('.card-header .help-tip')).toBeTruthy()
+    await waitFor(() => expect(card().querySelector('tbody tr')).toBeTruthy())
+    for (const label of ['Broker credentials', 'Machine identities', 'Broker accounts', 'Broker roles']) {
+      fireEvent.click(screen.getByRole('tab', { name: label }))
+      expect(card().querySelector('.section-count')).toBeNull()
+      expect(screen.getByRole('tab', { name: label }).textContent).toBe(label)
     }
-    expect(document.querySelector('.page-main .card p')).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: 'Broker credentials' }))
+    expect(within(screen.getByLabelText('Filter gateways by credential state')).getByText('Active (1)')).toBeTruthy()
   })
 
-  it('draws a count that opens something as a count-link', async () => {
+  it('gives every tab its description as a tip at the start of its toolbar, and none as a paragraph', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(card().querySelector('tbody tr')).toBeTruthy())
+    for (const [label, tip] of [
+      ['Broker credentials', 'About broker credentials'],
+      ['Machine identities', 'About machine identities'],
+      ['Broker accounts', 'About broker accounts'],
+      ['Broker roles', 'About broker roles'],
+    ]) {
+      fireEvent.click(screen.getByRole('tab', { name: label }))
+      expect(card().querySelector(':scope > .filter-bar').firstElementChild.getAttribute('aria-label')).toBe(tip)
+    }
+    expect(document.querySelector('.page-main .card p:not(.card-heading-description)')).toBeNull()
+  })
+
+  it('puts New Machine Identity in the toolbar’s actions', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    await renderTab('Machine identities')
+
+    const create = await screen.findByRole('button', { name: /New Machine Identity/i })
+    expect(create.closest('.filter-bar-actions')).toBeTruthy()
+    expect(create.className).toContain('btn-primary')
+  })
+
+  it('draws a token count that opens something as a count-link, with no pill inside', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServiceTokens.mockResolvedValue(new Map([[
       MCP_PRINCIPAL.principal_id,
       [{ jti: 'a', issued_at: '2026-09-01T00:00:00Z', expires_at: '2099-01-01T00:00:00Z' }],
     ]]))
-    api.listBrokerInventory.mockResolvedValue({
-      clients: [],
-      roles: [{ rolename: 'monitor', acls: [{ acltype: 'subscribePattern', topic: '$SYS/#', allow: true }] }],
-    })
-    await renderServices()
+    await renderTab('Machine identities')
 
-    const tokens = await screen.findByRole('button', { name: /1 active token/ })
+    const tokens = await screen.findByRole('button', { name: '1 active' })
     expect(tokens.className).toBe('count-link')
-    expect(screen.getByRole('button', { name: '1 rule' }).className).toBe('count-link')
+    expect(tokens.querySelector('.badge, .section-count')).toBeNull()
   })
 
   it('puts row actions in a right-aligned Actions column at btn-sm, with Withdraw as the danger action', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
-    await renderServices()
+    await renderTab('Machine identities')
 
     await screen.findByRole('button', { name: /Issue Token/i })
-    expect(within(cardOf('Machine identities')).getByRole('columnheader', { name: 'Actions' }).className).toContain('row-actions')
+    expect(within(card()).getByRole('columnheader', { name: 'Actions' }).className).toContain('row-actions')
     const row = screen.getByText('MCP read-only client').closest('tr')
     const cell = row.querySelector('td.row-actions')
     expect(cell).toBeTruthy()
@@ -918,10 +1032,9 @@ describe('AccessControlTab card composition', () => {
     expect(withdraw.className).toContain('btn-danger')
     expect(withdraw.className).toContain('btn-danger-reveal')
 
-    fireEvent.click(screen.getByRole('tab', { name: /Gateways/ }))
-    const credentials = cardOf('Broker credentials')
-    expect(within(credentials).getByRole('columnheader', { name: 'Actions' }).className).toContain('row-actions')
-    expect(within(credentials).getByRole('button', { name: /Generate/ }).className).toContain('btn-sm')
+    fireEvent.click(screen.getByRole('tab', { name: 'Broker credentials' }))
+    expect(within(card()).getByRole('columnheader', { name: 'Actions' }).className).toContain('row-actions')
+    expect(within(card()).getByRole('button', { name: /Generate/ }).className).toContain('btn-sm')
   })
 
   it('says loading inside the card while the first read is out, then says none yet', async () => {
@@ -930,7 +1043,7 @@ describe('AccessControlTab card composition', () => {
     render(<AccessControlTab showToast={vi.fn()} />)
 
     // The heading and the card are there; only the list is loading.
-    expect(cardOf('Broker credentials').textContent).toMatch(/Loading credentials/)
+    expect(card().textContent).toMatch(/Loading credentials/)
     resolve([])
     await waitFor(() => expect(screen.getByText(/No gateways registered\./)).toBeTruthy())
     expect(screen.getByText(/Gateways page/)).toBeTruthy()
@@ -941,7 +1054,7 @@ describe('AccessControlTab card composition', () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     render(<AccessControlTab showToast={vi.fn()} />)
 
-    await waitFor(() => expect(cardOf('Broker credentials')).toBeTruthy())
+    await waitFor(() => expect(card().querySelector('tbody tr')).toBeTruthy())
     fireEvent.change(screen.getByLabelText('Filter gateways by credential state'), { target: { value: 'revoked' } })
     expect(screen.getByText('No gateway matches this filter.')).toBeTruthy()
     expect(screen.queryByText(/No gateways registered/)).toBeNull()
@@ -950,16 +1063,17 @@ describe('AccessControlTab card composition', () => {
   it('says the broker was not read as a state, and keeps the declared roles', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listBrokerInventory.mockRejectedValue(new Error('unreachable'))
-    await renderServices()
+    await renderTab('Broker accounts')
 
     await waitFor(() => expect(screen.getByText('The broker was not read, so its accounts cannot be listed.')).toBeTruthy())
-    expect(cardOf('Broker roles').querySelector('.callout-warning')).toBeTruthy()
-    expect(cardOf('Broker roles').querySelectorAll('tbody tr')).toHaveLength(5)
+    fireEvent.click(screen.getByRole('tab', { name: 'Broker roles' }))
+    expect(card().querySelector('.callout-warning')).toBeTruthy()
+    expect(card().querySelectorAll('tbody tr')).toHaveLength(5)
   })
 
   it('names the machine identity as the noun, never a principal or a service identity', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    await renderServices()
+    await renderTab('Machine identities')
     await screen.findByText('MCP read-only client')
     expect(document.body.textContent).not.toMatch(/Database principals|service principal|Service identit|machine principal/i)
   })

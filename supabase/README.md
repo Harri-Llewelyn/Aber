@@ -2848,7 +2848,8 @@ leak for one junk account per gateway ever deleted.
   gateway row (archived included — those belong to the trigger and the sweep), and disables what is
   left through `revoke_gateway_credential()`. Dry run by default. It considers only enabled
   `gwy` + 21 hex character accounts, so it can never select `aber_ingestion` and stop the
-  stack ingesting. The Access Control page lists the same accounts under *Accounts with no gateway*.
+  stack ingesting. The Access Control page lists the same accounts under *Broker accounts*, marked
+  *No gateway*.
 
 ### What the inventory still cannot see
 
@@ -2940,11 +2941,11 @@ holds at the moment of the read — *Active*, *Disabled* or *No account* — thr
 `broker-inventory` function, which forwards the credential service's `listClients` and `listRoles`
 to an Administrator with every hash stripped. The pair is the point: a gateway issued on the host
 reads *No platform record* beside *Active*, and one revoked since reads *Issued* beside *Disabled*.
-Accounts shaped like a gateway id that no row claims and nothing declares are listed under
-*Accounts with no gateway*, which is what `scripts/revoke-orphaned-broker-accounts.mjs` disables.
-The page is two sections: *Gateways* holds those two lists, *Services* the database principals,
-the broker's own accounts and the broker roles. *Broker accounts* is every non-gateway account the
-broker holds, live, with the purpose of the role each holds; the validator's test gateway
+The page is four tabs of one card: *Broker credentials*, *Machine identities* (the database
+principals), *Broker accounts* and *Broker roles*. *Broker accounts* is every non-gateway account
+the broker holds, live, with the purpose of the role each holds, then any account shaped like a
+gateway id that no row claims and nothing declares, marked *No gateway*: what
+`scripts/revoke-orphaned-broker-accounts.mjs` disables. The validator's test gateway
 (`gwy11…`, created at boot from `MQTT_VALIDATOR_*` rather than issued against a row, and only when
 that pair is set) is declared in `serviceIdentities.js` and listed there rather than as a stray.
 The roles table counts each role's live rules and opens them in the context drawer, annotated with
