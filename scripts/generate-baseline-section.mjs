@@ -73,6 +73,20 @@ function blocks(sql) {
  */
 const REBUILT_BY = { gateway_status: 'public.ensure_gateway_status_view()' };
 
+/**
+ * Statements emitted around a partition's CREATE. The audit trail's monthly partitions are made
+ * BEFORE its DEFAULT partition, so no write can reach the default while db-init runs: a row there
+ * for a month with no partition stops that month's partition from ever being created ("updated
+ * partition constraint for default partition would be violated"), and every later boot fails. The
+ * default is then secured, since a partition does not take its parent's privileges.
+ */
+const AROUND_PARTITION = {
+  audit_trail_default: {
+    before: 'SELECT public.ensure_audit_trail_partitions(3);',
+    after: "SELECT public.secure_audit_trail_partition('public.audit_trail_default'::regclass);",
+  },
+};
+
 const esc = (s) => s.replace(/'/g, "''");
 const bare = (s) => (s || '').replace(/^public\./, '').replace(/"/g, '');
 
@@ -244,7 +258,11 @@ function rewrite(b) {
   if (t === 'SCHEMA') return s.replace(/^CREATE SCHEMA /m, 'CREATE SCHEMA IF NOT EXISTS ');
   if (t === 'TABLE' || t === 'FOREIGN TABLE') {
     const p = partitionOf.get(bare(b.name));
-    if (p) return `CREATE TABLE IF NOT EXISTS ${b.schema}.${b.name} PARTITION OF ${p.parent} ${p.bound};`;
+    if (p) {
+      const create = `CREATE TABLE IF NOT EXISTS ${b.schema}.${b.name} PARTITION OF ${p.parent} ${p.bound};`;
+      const around = AROUND_PARTITION[b.name];
+      return around ? `${around.before}\n${create}\n${around.after}` : create;
+    }
     // A CHECK written inline in the table rather than as its own ALTER still went through the
     // dump's BETWEEN expansion.
     s = restoreBetween(s.replace(/^CREATE (TABLE|FOREIGN TABLE) /m, 'CREATE $1 IF NOT EXISTS '));

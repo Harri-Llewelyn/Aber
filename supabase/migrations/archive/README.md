@@ -84,6 +84,12 @@ variable the equivalence probes never pass, so a fold that dropped the call woul
 clean and left every Directory version blank on a real install. It is in `0002` now. Read every
 folded file for `:'name'` and `:{?name}` before trusting the comparison.
 
+**The audit trail's monthly partitions come before its default** (`AROUND_PARTITION` in the
+generator). The third squash created them in a tail section after every audit trigger existed, so
+on a first install anything audited while db-init was still running landed in the default
+partition. That month's partition could then never be created, and every later boot failed. CI
+found it on this squash's first run.
+
 **`gateway_status` is built by its function** (`REBUILT_BY` in the generator). The baseline used
 to state the view with a dumped column list, so a migration that widened `gateways` and rebuilt
 the view broke the replay after it.
@@ -168,7 +174,8 @@ found by reading it.
    addressed directly. The chain created `digital_thread_default` through a helper that withdraws
    everything; a baseline that creates it directly gets the image's default privileges instead,
    which hand `service_role` INSERT, UPDATE, DELETE and TRUNCATE on the default partition of the
-   append-only audit table. Section 4b calls that helper.
+   append-only audit table. The generator calls that helper beside the default partition's
+   `CREATE` (`AROUND_PARTITION`).
 
 7. **`BETWEEN` does not round-trip.** pg_dump expands `x BETWEEN a AND b` into
    `((x >= a) AND (x <= b))`, and re-parsing that flattens the pair into the enclosing `AND` — so

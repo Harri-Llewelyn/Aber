@@ -9787,7 +9787,9 @@ ALTER SEQUENCE public.audit_trail_id_seq OWNED BY public.audit_trail.id;
 --
 
 -- audit_trail_default :: TABLE
+SELECT public.ensure_audit_trail_partitions(3);
 CREATE TABLE IF NOT EXISTS public.audit_trail_default PARTITION OF public.audit_trail DEFAULT;
+SELECT public.secure_audit_trail_partition('public.audit_trail_default'::regclass);
 
 --
 
@@ -19054,27 +19056,6 @@ BEGIN
 END
 $overloads$;
 
-
--- ---------------------------------------------------------------------------------------------
--- 4b. The partitions audit_trail can accept, and their privileges
--- ---------------------------------------------------------------------------------------------
--- BEFORE 0002 SEEDS, and that ordering is the whole point of where this sits. Section 4 creates
--- the partitioned parent and the DEFAULT partition only -- the monthly partitions are run-time
--- objects, not schema. Leave the second line out and the seed's audit rows land in the DEFAULT
--- partition, and the first boot of the partition maintainer then cannot attach the month they
--- belong to: "updated partition constraint for default partition would be violated by some row".
--- The old chain did not need it because 0002 seeded a table that was not yet partitioned and
--- 0079 converted it afterwards, routing each row as it went.
---
--- THE FIRST LINE IS A PRIVILEGE FIX, NOT A TIDY-UP. A partition's privileges are checked when it
--- is addressed directly, so they do not follow the parent's. 0079 created this partition through
--- secure_audit_trail_partition(), which withdraws everything; section 4 creates it directly,
--- where the image's default privileges hand `service_role` INSERT, UPDATE, DELETE and TRUNCATE on
--- it -- on the default partition of the append-only audit table, which is exactly what the
--- parent's own grants refuse. `ensure_audit_trail_partitions()` secures the months it creates;
--- nothing secures this one but this line.
-SELECT public.secure_audit_trail_partition('public.audit_trail_default'::regclass);
-SELECT public.ensure_audit_trail_partitions(3);
 
 -- ---------------------------------------------------------------------------------------------
 -- 5. Realtime publication
