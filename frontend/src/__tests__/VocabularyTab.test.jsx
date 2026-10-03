@@ -283,19 +283,33 @@ describe('Vocabulary page — one card: heading, tabs, toolbar, sections', () =>
     expect(document.querySelectorAll('.card')).toHaveLength(1)
     expect(document.querySelector('.page-heading')).toBeNull()
     expect(screen.getByRole('heading', { name: 'Vocabulary' }).closest('.card-heading')).toBeTruthy()
-    expect(screen.getByRole('tablist').parentElement).toBe(cardEl)
+    expect(screen.getByRole('tablist').closest('.tab-strip').parentElement).toBe(cardEl)
     // The tab names the standard on show; no second heading repeats it.
     expect(screen.getAllByRole('heading')).toHaveLength(1)
   })
 
-  it('puts the standard’s "?" first in the toolbar row under the tabs, beside the search', async () => {
+  it('puts the selected standard’s "?" in the tab bar, after the last tab', async () => {
     renderTab()
     await ready()
 
-    const bar = screen.getByRole('tablist').nextElementSibling
-    expect(bar).toHaveClass('filter-bar')
-    expect(bar.firstElementChild).toBe(screen.getByRole('button', { name: 'About the MTConnect vocabulary' }))
+    const help = () => document.querySelector('.card > .tab-strip > .tab-strip-help')
+    expect(help().previousElementSibling).toBe(screen.getByRole('tablist'))
+    expect(within(help()).getByRole('button', { name: 'About the MTConnect vocabulary' })).toBeTruthy()
+
+    fireEvent.click(standardTab(/ISO 22400/))
+    expect(within(help()).getByRole('button', { name: 'About the ISO 22400 vocabulary' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'About the MTConnect vocabulary' })).toBeNull()
+  })
+
+  it('keeps the toolbar row under the tabs for the search and Expand all, with no "?" in it', async () => {
+    renderTab()
+    await ready()
+
+    const bar = document.querySelector('.card > .tab-strip + .filter-bar')
+    expect(bar).toBeTruthy()
     expect(within(bar).getByLabelText('Search the MTConnect vocabulary')).toBeTruthy()
+    expect(within(bar).getByRole('button', { name: /^(Expand|Collapse) all$/ })).toBeTruthy()
+    expect(bar.querySelector('.help-tip')).toBeNull()
   })
 
   it('scrolls inside the card, with the sections as the scroller', async () => {

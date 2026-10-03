@@ -5,7 +5,7 @@ Reference vocabularies: the published sets of terms that industrial standards de
 ## What the controls do
 
 - **The four standard tabs** -- MTConnect, ISO 22400, OPC UA and ASHRAE 223P -- each show one standard's entries in the same card. Switching tab keeps the search text, so one query asks every standard.
-- **The "?"** at the start of the row under the tabs says what the selected standard is and what to watch for in it.
+- **The "?"** in the tab bar, after the last tab, says what the selected standard is and what to watch for in it.
 - **Search** filters the selected standard by name and by the text shown on hover (an ISO 22400 KPI is found by its formula). A search opens the sections that match.
 - **The sections** group each standard's entries: MTConnect's data item types, components, sub types and units, ISO 22400's KPI families, OPC UA's companion specifications and ASHRAE 223P's superclasses. They start collapsed. A header shows **N in use** when a catalog metric already uses N of its entries, and a **?** beside the title where the section needs explaining. A header stays at the top of the card while its entries scroll under it.
 - **Expand all** opens every section of the selected standard, and reads **Collapse all** while any is open. Collapse all also closes the sections a search opened, and keeps the search.

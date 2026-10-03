@@ -8,9 +8,10 @@ import { EmptyState } from './EmptyState'
 import { ExpandAllToggle } from './ExpandAllToggle'
 
 /**
- * The standard vocabularies as the page's one card: its heading, a tab per standard, a toolbar row
- * (the standard's "?", the search, Expand all), then the selected standard's sections, which scroll
- * inside the card (`.card-fill`; the page supplies `.page-fill`). What differs per standard arrives
+ * The standard vocabularies as the page's one card: its heading, a tab per standard with the selected
+ * standard's "?" after the last tab, a toolbar row (the search, Expand all), then the selected
+ * standard's sections, which scroll inside the card (`.card-fill`; the page supplies `.page-fill`).
+ * What differs per standard arrives
  * as a tab descriptor (how sections are derived, what an entry's tooltip says, what counts as in
  * use); see common/MTConnectVocabularyPanel.jsx and its siblings. Sections start collapsed, and
  * searching opens only the sections that match. An entry is clickable when its tab has an `onUse`
@@ -87,10 +88,10 @@ export function VocabularyPanel({ title = 'Vocabulary', subtitle, tabs, canAddMe
           label: tab.label,
           title: tab.hint || `Browse the ${tab.label} vocabulary`,
         }))}
+        help={<HelpTip label={`About the ${active.label} vocabulary`} text={standardTip} />}
       />
 
       <div className="filter-bar">
-        <HelpTip label={`About the ${active.label} vocabulary`} text={standardTip} />
         <SearchInput
           value={search}
           onChange={setSearch}
