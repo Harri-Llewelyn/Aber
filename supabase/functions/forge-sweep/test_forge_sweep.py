@@ -9,8 +9,8 @@ the database WITHOUT passing the door again is taken out of their team by one sw
 again when the role returns; a gateway repository whose push webhook was deleted gets it back; a
 repository somebody made by hand in the organisation has `main` protected; a gateway repository
 whose `appliance` and `**` rules were deleted and whose `main` was opened to deploy keys gets all
-three back the way enrolment set them; a `main` still requiring the shape check under its old name
-requires it under the current one; a key somebody re-registered read-only is read-write again;
+three back the way enrolment set them; a `main` whose required contexts were replaced by hand
+requires the shape check again; a key somebody re-registered read-only is read-write again;
 an archived gateway's key is removed and its repository is put into the forge's archive, read-only
 with every branch kept, and taken back out when the gateway is restored (#197); and the database's
 own sweep_forge() answers true, which is
