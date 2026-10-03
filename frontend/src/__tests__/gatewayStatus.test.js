@@ -3,6 +3,7 @@ import {
   HEARTBEAT_STALE_MS,
   isHeartbeatStale,
   gatewayLiveStatus,
+  gatewayDisplayStatus,
   isGatewayOnline,
   formatHeartbeat,
   formatUptime
@@ -44,6 +45,26 @@ describe('gateway heartbeat freshness', () => {
   it('is defensive about unparseable timestamps', () => {
     expect(formatHeartbeat('not-a-date', NOW)).toBe('Never');
     expect(isHeartbeatStale('not-a-date', NOW)).toBe(false);
+  });
+});
+
+describe('the Playback gateway status', () => {
+  const playback = (fields) => ({ is_shadow: true, ...fields });
+
+  it('reads PLAYING_BACK while its heartbeat is fresh', () => {
+    expect(gatewayDisplayStatus(playback({ status: 'ONLINE', last_heartbeat: agoMs(30_000) }), NOW)).toBe('PLAYING_BACK');
+  });
+
+  it('reads IDLE when offline, stale or never heard from, never OFFLINE or STALE', () => {
+    expect(gatewayDisplayStatus(playback({ status: 'OFFLINE' }), NOW)).toBe('IDLE');
+    expect(gatewayDisplayStatus(playback({ status: 'ONLINE', last_heartbeat: agoMs(HEARTBEAT_STALE_MS + 1) }), NOW)).toBe('IDLE');
+    expect(gatewayDisplayStatus(playback({}), NOW)).toBe('IDLE');
+  });
+
+  it('leaves every other gateway on its live status', () => {
+    const stale = { status: 'ONLINE', last_heartbeat: agoMs(HEARTBEAT_STALE_MS + 1) };
+    expect(gatewayDisplayStatus(stale, NOW)).toBe(gatewayLiveStatus(stale, NOW));
+    expect(gatewayDisplayStatus({ status: 'OFFLINE' }, NOW)).toBe('OFFLINE');
   });
 });
 

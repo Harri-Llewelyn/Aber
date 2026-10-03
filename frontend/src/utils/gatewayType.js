@@ -2,9 +2,10 @@
  * What kind of gateway this is, as one word: the Type column, the drawer badge and the form's
  * select all read it from here. `gateways` carries `deployment` ('host' | 'remote') and
  * `is_simulated`; a simulated gateway is always host-run, which leaves three legal combinations.
- * Shadow is a fourth value that is never selectable: only the seeded Playback gateway is one.
+ * Playback is a fourth value that is never selectable: only the seeded Playback gateway (`is_shadow`)
+ * is one.
  *
- * Precedence is most-specific-first, as in `device_locations` and utils/cellResolution.js: shadow,
+ * Precedence is most-specific-first, as in `device_locations` and utils/cellResolution.js: playback,
  * then simulated, then deployment.
  */
 
@@ -12,7 +13,7 @@ export const GATEWAY_TYPES = {
   HOST: 'host',
   REMOTE: 'remote',
   SIMULATED: 'simulated',
-  SHADOW: 'shadow',
+  PLAYBACK: 'playback',
 }
 
 /** What the create/edit form may choose. */
@@ -22,11 +23,14 @@ export const SELECTABLE_TYPES = [
   GATEWAY_TYPES.SIMULATED,
 ]
 
+/** What the list's Type filter offers: every type, the form's three first. */
+export const LISTED_TYPES = [...SELECTABLE_TYPES, GATEWAY_TYPES.PLAYBACK]
+
 const LABELS = {
   [GATEWAY_TYPES.HOST]: 'Host',
   [GATEWAY_TYPES.REMOTE]: 'Remote',
   [GATEWAY_TYPES.SIMULATED]: 'Simulated',
-  [GATEWAY_TYPES.SHADOW]: 'Shadow',
+  [GATEWAY_TYPES.PLAYBACK]: 'Playback',
 }
 
 /** The sentence a reader needs, in terms of what it means for the numbers. */
@@ -41,7 +45,7 @@ const DESCRIPTIONS = {
     'A host-run connector whose readings are generated rather than observed. Its devices inherit '
     + 'the mark; they have no setting of their own. Ingestion is unchanged: this is a label for '
     + 'dashboards, retention and reports, not a filter on the data path.',
-  [GATEWAY_TYPES.SHADOW]:
+  [GATEWAY_TYPES.PLAYBACK]:
     'Republishes recorded captures. Its readings DID happen, on a real machine, on the day the '
     + 'capture was taken — which is what makes it different from Simulated rather than a kind of it.',
 }
@@ -51,7 +55,7 @@ const TONES = {
   [GATEWAY_TYPES.HOST]: 'neutral',
   [GATEWAY_TYPES.REMOTE]: 'neutral',
   [GATEWAY_TYPES.SIMULATED]: 'warning',
-  [GATEWAY_TYPES.SHADOW]: 'warning',
+  [GATEWAY_TYPES.PLAYBACK]: 'warning',
 }
 
 /**
@@ -60,7 +64,7 @@ const TONES = {
  */
 export function gatewayType(gateway) {
   if (!gateway) return GATEWAY_TYPES.REMOTE
-  if (gateway.is_shadow) return GATEWAY_TYPES.SHADOW
+  if (gateway.is_shadow) return GATEWAY_TYPES.PLAYBACK
   if (gateway.is_simulated) return GATEWAY_TYPES.SIMULATED
   // Remote when `deployment` is absent: claiming host wrongly would hide the kind that needs setup.
   return gateway.deployment === 'host' ? GATEWAY_TYPES.HOST : GATEWAY_TYPES.REMOTE
@@ -79,7 +83,7 @@ export function gatewayTypeTone(type) {
 }
 
 /**
- * The two columns a chosen type writes back; the translation lives here once. `shadow` is absent
+ * The two columns a chosen type writes back; the translation lives here once. `playback` is absent
  * because it is not selectable.
  */
 export function gatewayTypeFields(type) {

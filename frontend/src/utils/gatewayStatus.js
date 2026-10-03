@@ -29,10 +29,19 @@ export function isGatewayPending(gateway) {
   return PENDING_STATUSES.has(gateway?.status);
 }
 
+/**
+ * The Playback gateway's two states, derived on read and never stored: it publishes only while a
+ * playback runs, so between playbacks it is idle, not offline.
+ */
+export const GATEWAY_STATUS_PLAYING_BACK = 'PLAYING_BACK';
+export const GATEWAY_STATUS_IDLE = 'IDLE';
+
 /** Human labels for the SCREAMING_SNAKE wire values. */
 export const GATEWAY_STATUS_LABELS = {
   [GATEWAY_STATUS_PENDING_ENROLMENT]: 'AWAITING SETUP',
   [GATEWAY_STATUS_AWAITING_BIRTH]: 'ENROLLED — NO DATA YET',
+  [GATEWAY_STATUS_PLAYING_BACK]: 'PLAYING BACK',
+  [GATEWAY_STATUS_IDLE]: 'IDLE',
   OFFLINE: 'OFFLINE',
 };
 
@@ -59,6 +68,17 @@ export function gatewayLiveStatus(gateway, now = Date.now()) {
 
 export function isGatewayOnline(gateway, now = Date.now()) {
   return gatewayLiveStatus(gateway, now) === 'ONLINE';
+}
+
+/**
+ * The status the Gateways page prints and filters on. The Playback gateway reads PLAYING_BACK while
+ * its heartbeat is fresh (the playback worker publishes as it only during a playback) and IDLE
+ * otherwise; every other gateway reads gatewayLiveStatus().
+ */
+export function gatewayDisplayStatus(gateway, now = Date.now()) {
+  const live = gatewayLiveStatus(gateway, now);
+  if (!gateway?.is_shadow) return live;
+  return live === 'ONLINE' ? GATEWAY_STATUS_PLAYING_BACK : GATEWAY_STATUS_IDLE;
 }
 
 /**
