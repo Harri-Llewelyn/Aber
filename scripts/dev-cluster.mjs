@@ -782,6 +782,9 @@ async function test () {
   // The preflight before the forwards, so a machine that cannot run the lane says so without first
   // opening seventeen tunnels `die` would leave behind.
   await assertIngressHostsResolve()
+  // The in-cluster run first: it and the host's validate.py seed and clean up the same VALIDATE_
+  // fixtures, so the two must never overlap. `up --e2e` has already waited; `reset --e2e` has not.
+  if (flag('e2e')) await waitForE2e()
   const env = testEnvironment()
   step('port-forwards')
   const forwards = await openForwards({ tls })
@@ -799,7 +802,6 @@ async function test () {
     if (option('filter')) args.push('--filter', option('filter'))
     const r = await runAsync('node', args, { env })
     if (r.status !== 0) failed = true
-    if (flag('e2e')) await waitForE2e()
   } finally {
     forwards.close()
   }
