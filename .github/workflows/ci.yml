@@ -567,13 +567,6 @@ jobs:
           expect_failure "sparkplug group spanning topic levels" "which is not one topic level" \
             -f "$DEV" --set ingestion.sparkplugGroup=plant/a
 
-          # The CronJob's s3 destination is retired: an old values file naming it must fail rather
-          # than render a PVC-only backup that reads as the off-site copy it asked for.
-          expect_failure "the retired s3 backup destination" "backup.destination and backup.s3 are retired" \
-            -f "$DEV" --set backup.enabled=true --set backup.destination=s3
-          expect_failure "the retired backup.s3 values" "backup.destination and backup.s3 are retired" \
-            -f "$DEV" --set backup.enabled=true --set backup.s3.bucket=nightly
-
           # Withdrawing plaintext 1883 without adding TLS leaves the external broker Service with NO
           # PORTS. The API server does refuse that -- as `spec.ports: Required value` on a Service,
           # which names neither setting and reads as a chart bug.

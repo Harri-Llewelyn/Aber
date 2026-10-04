@@ -1220,9 +1220,7 @@ every backup. **Under `networkPolicy.enabled` the endpoint needs an egress rule*
 starts from the bucket are in
 [`../../supabase/README.md`](../../supabase/README.md#an-encrypted-copy-off-site-0151).
 
-The CronJob writes to the PVC only. Its `backup.destination: s3` and `backup.s3.*` are retired, and
-a values file that still sets them fails the render: the upload could not run, having no `aws` CLI
-in its image, and it left the storage archive behind and pruned nothing in the bucket.
+The CronJob writes to the PVC only.
 
 Ad hoc, without waiting for the schedule:
 
