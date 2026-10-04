@@ -6,8 +6,7 @@
 # untagged path. No `latest` tag is pushed, so a chart release can only run the images built beside
 # it. linux/amd64 only: an arm64 cluster should build locally with the commands in
 # deploy/k8s/README.md. Credentials are the built-in GITHUB_TOKEN with `packages: write`. GHCR
-# creates every new package private and GITHUB_TOKEN cannot change that; deploy/k8s/README.md
-# carries the `gh` commands for the one-time visibility flip.
+# links each package to this repository, and a package takes the repository's visibility.
 #
 # Every image is published with an SPDX SBOM and SLSA provenance in its index, and every image and
 # the chart is signed with cosign, keyless: the signature is bound to this workflow's OIDC identity
@@ -481,13 +480,14 @@ jobs:
         if: needs.prepare-release.outputs.push == 'true'
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
-      # `helm push` prints the digest it pushed; that, never the tag, is what gets signed.
+      # `helm push` prints the digest it pushed; that, never the tag, is what gets signed. Helm 3
+      # prints it on stderr, so both streams go to the log the digest is read from.
       - name: Push
         id: push
         if: needs.prepare-release.outputs.push == 'true'
         run: |
-          set -eu
-          helm push '${{ steps.package.outputs.package }}' "$CHART_REPO" | tee /tmp/helm-push.log
+          set -euo pipefail
+          helm push '${{ steps.package.outputs.package }}' "$CHART_REPO" 2>&1 | tee /tmp/helm-push.log
           DIGEST=$(sed -nE 's/^Digest: (sha256:[0-9a-f]{64}).*$/\1/p' /tmp/helm-push.log)
           test -n "$DIGEST"
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
