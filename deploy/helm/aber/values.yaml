@@ -478,7 +478,7 @@ realtime:
   enabled: true
   image:
     repository: supabase/realtime
-    tag: v2.102.3
+    tag: v2.134.10
     pullPolicy: IfNotPresent
   # Never more than one: Realtime holds a logical replication slot, which is per-instance state.
   replicas: 1
@@ -528,7 +528,7 @@ supabaseAuth:
   enabled: true
   image:
     repository: supabase/gotrue
-    tag: v2.189.0
+    tag: v2.197.0
     pullPolicy: IfNotPresent
   replicas: 1
   # Whether GoTrue refuses self-registration at POST /auth/v1/signup. True is closed, and it is
@@ -558,7 +558,7 @@ supabaseRest:
   enabled: true
   image:
     repository: postgrest/postgrest
-    tag: v14.12
+    tag: v14.17
     pullPolicy: IfNotPresent
   # Stateless; an HPA candidate.
   replicas: 1
@@ -574,7 +574,7 @@ supabaseEnvoy:
   image:
     repository: envoyproxy/envoy
     # Minimum 1.34: the oauth2 filter gained PKCE there, and GoTrue requires it.
-    tag: "v1.39.1"
+    tag: "v1.39.2"
     pullPolicy: IfNotPresent
   replicas: 1
   logLevel: info
@@ -640,7 +640,7 @@ supabaseStorage:
   enabled: true
   image:
     repository: supabase/storage-api
-    tag: v1.60.4
+    tag: v1.74.0
     pullPolicy: IfNotPresent
   # One replica on the file backend (a single-writer ReadWriteOnce PVC). s3 lifts that.
   replicas: 1
@@ -686,7 +686,7 @@ supabaseMeta:
   image:
     # The version the official stack pairs with the Studio tag below (Zod-coupled).
     repository: supabase/postgres-meta
-    tag: v0.96.6
+    tag: v0.99.0
     pullPolicy: IfNotPresent
   replicas: 1
   resources:
@@ -697,7 +697,7 @@ supabaseStudio:
   enabled: true
   image:
     repository: supabase/studio
-    tag: 2026.07.07-sha-a6a04f2
+    tag: 2026.09.28-sha-5e59b60
     pullPolicy: IfNotPresent
   replicas: 1
   organizationName: Aber
@@ -731,6 +731,16 @@ initJobs:
   waitTimeout: 600
   # Kept after success so `kubectl logs job/...` still answers "what did the migrations say".
   ttlSecondsAfterFinished: 3600
+  # The wait-for initContainers that probe over HTTP, in Jobs and Deployments alike.
+  curlImage:
+    repository: curlimages/curl
+    tag: "8.22.0"
+    pullPolicy: IfNotPresent
+  # storage-init runs one script with node; npm is never run.
+  storageInitImage:
+    repository: node
+    tag: "24.21.0-alpine3.24"
+    pullPolicy: IfNotPresent
 
 # ---------------------------------------------------------------------------------------------
 # db-init -- supabase/postgres with supabase/migrations/*.sql copied in. An image because a
@@ -759,7 +769,8 @@ mosquitto:
     fsGroupChangePolicy: OnRootMismatch
   # Broker metrics via an exporter sidecar (Mosquitto publishes its statistics to `$SYS/#`
   # and has no HTTP endpoint). The metric prefix is `broker_`, not `mosquitto_`; 48 series.
-  # Authenticates with the monitor account.
+  # Authenticates with the monitor account. The image is the maintained fork of
+  # sapcc/mosquitto-exporter, with the same flags, environment and series names.
   #
   # ON BY DEFAULT since the databases' exporters were added, and for the same reason: these three
   # exporters describe the platform's own subject -- the broker the fleet publishes to and the two
@@ -770,8 +781,8 @@ mosquitto:
     enabled: true
     port: 9234
     image:
-      repository: sapcc/mosquitto-exporter
-      tag: "0.8.0"
+      repository: jryberg/mosquitto-exporter
+      tag: "v0.7.9"
       pullPolicy: IfNotPresent
     resources:
       requests: { cpu: 10m, memory: 16Mi }
@@ -1105,7 +1116,7 @@ grafana:
     repository: grafana/grafana
     # Pinned: grafana.ini depends on
     # `use_pkce`, `auth_style` and the env-override mapping, which have moved between releases.
-    tag: "13.2.0"
+    tag: "13.2.3"
     pullPolicy: IfNotPresent
   persistence:
     enabled: true
@@ -1135,7 +1146,7 @@ gitea:
   enabled: true
   image:
     repository: gitea/gitea
-    tag: "1.27.3"
+    tag: "28.0.0"
     pullPolicy: IfNotPresent
   # The local administrator, reachable only through `gitea admin` on the volume: the password
   # form is off and the web login is the gateway's `forge` listener. The password is
@@ -1320,7 +1331,7 @@ observability:
   prometheus:
     image:
       repository: prom/prometheus
-      tag: "v3.14.0"
+      tag: "v3.15.0"
       pullPolicy: IfNotPresent
     retentionTime: 30d
     retentionSize: 8GB
@@ -1335,7 +1346,7 @@ observability:
   loki:
     image:
       repository: grafana/loki
-      tag: "3.5.7"
+      tag: "3.7.8"
       pullPolicy: IfNotPresent
     persistence:
       enabled: true
@@ -1348,7 +1359,7 @@ observability:
   alloy:
     image:
       repository: grafana/alloy
-      tag: "v1.11.2"
+      tag: "v1.20.1"
       pullPolicy: IfNotPresent
     # Node metrics from the host's /proc, /sys and /, mounted read-only. Disk is the one that
     # matters: the databases, the metrics store and the log store share the node's volume, and

@@ -992,6 +992,11 @@ Read by ingress.yaml, NOTES.txt and the NetworkPolicies, so the public surface h
 {{- toYaml $routes -}}
 {{- end -}}
 
+{{/* The image of a wait-for initContainer whose probe is an HTTP request. */}}
+{{- define "aber.curlImage" -}}
+{{- include "aber.image" (dict "image" .Values.initJobs.curlImage "ctx" .) -}}
+{{- end -}}
+
 {{/*
 Wait-for initContainer. Kubernetes has no depends_on, so these loops make ordering explicit and
 leave the pod in Init: with a legible reason; bounded, because an unbounded wait is Init: forever

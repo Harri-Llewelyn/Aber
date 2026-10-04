@@ -68,7 +68,7 @@ spec:
           state rather than a clean one.
 
         */}}
-        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-auth" "image" "curlimages/curl:8.10.1" "command" "curl -sf http://supabase-auth:9999/health >/dev/null 2>&1" "describe" "supabase-auth (it owns the auth schema the migrations build on)") | nindent 8 }}
+        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-auth" "image" (include "aber.curlImage" $) "command" "curl -sf http://supabase-auth:9999/health >/dev/null 2>&1" "describe" "supabase-auth (it owns the auth schema the migrations build on)") | nindent 8 }}
         {{- end }}
       containers:
         - name: db-init

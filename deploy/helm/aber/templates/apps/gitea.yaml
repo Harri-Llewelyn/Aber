@@ -21,8 +21,6 @@ in one database and the server opens another, with nothing reporting a fault.
      address that actually routes. */}}
 - name: GITEA__server__ROOT_URL
   value: {{ printf "%s/" . | quote }}
-- name: GITEA__server__DOMAIN
-  value: {{ include "aber.hostOf" (dict "ctx" $ "name" "gitea") | quote }}
 {{- end }}
 {{/* SSH IS SERVED BY THE IMAGE'S OWN sshd on 22, with Gitea writing the git user's
      authorized_keys, so Gitea's built-in SSH server is turned OFF -- it would bind
@@ -95,10 +93,17 @@ in one database and the server opens another, with nothing reporting a fault.
 # Projects and Packages are hidden from every repository; the wiki and issues stay.
 - name: GITEA__repository__DISABLED_REPO_UNITS
   value: "repo.projects,repo.packages"
-# Webhooks may call private addresses: the one they call is the edge runtime (forge-events), a
-# cluster-internal Service. Gitea's default admits public addresses only.
+# Gitea's outbound calls may reach private addresses on port 9000 and nothing else: the one webhook
+# is the edge runtime's forge-events, a cluster-internal Service. Strict mode refuses every other
+# host, public ones included; an entry without a port allows only 80 and 443.
+- name: GITEA__security__EGRESS_MODE
+  value: strict
+- name: GITEA__security__ALLOWED_HOST_LIST
+  value: "private:9000"
+# Blank, because Gitea reads this deprecated key before [security] and an upgraded app.ini keeps the
+# portless `private` an earlier release wrote, which would refuse port 9000.
 - name: GITEA__webhook__ALLOWED_HOST_LIST
-  value: "private"
+  value: ""
 - name: GITEA__log__LEVEL
   value: {{ .Values.gitea.logLevel | quote }}
 {{- end -}}

@@ -222,7 +222,7 @@ spec:
 {{- if .Values.postgresTls.enabled }}
 ---
 {{/*
-The image's priv/repo/seeds.exs (v2.102.3) with one change: `ssl_enforced` comes from DB_SSL
+The image's priv/repo/seeds.exs (v2.134.10) with one change: `ssl_enforced` comes from DB_SSL
 instead of being false. SEED_SELF_HOST runs this on every start, deleting and recreating the
 tenant, so a row updated any other way would not survive a restart. Re-copy on a tag bump.
 */}}
@@ -238,12 +238,15 @@ data:
 
     import Ecto.Adapters.SQL, only: [query: 3]
 
+    alias Realtime.Api
     alias Realtime.Api.Tenant
     alias Realtime.Repo
     alias Realtime.Tenants
 
     tenant_name = System.get_env("SELF_HOST_TENANT_NAME", "realtime-dev")
     default_db_host = "host.docker.internal"
+
+    {:ok, _flag} = Api.upsert_feature_flag(%{name: "gcm_encryption_backfill", enabled: true})
 
     {:ok, tenant} =
       Repo.transaction(fn ->

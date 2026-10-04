@@ -77,7 +77,7 @@ further reason not to republish that image yourself.
 
 ## Grafana — AGPL-3.0
 
-`grafana/grafana:13.2.0` is licensed AGPL-3.0, confirmed from `/usr/share/grafana/LICENSE` in the
+`grafana/grafana:13.2.3` is licensed AGPL-3.0, confirmed from `/usr/share/grafana/LICENSE` in the
 pinned image. This is the most restrictive licence in the stack — more so than TimescaleDB's, which
 is worth stating plainly because it is the opposite of the usual assumption.
 
@@ -99,8 +99,8 @@ relying on any of them.
 | :--- | :--- | :--- |
 | `timescale/timescaledb:2.29.2-pg17` | Timescale License (core Apache 2.0) | `SHOW timescaledb.license` → `timescale` |
 | pgBackRest 2.57.0, added to that image as `ghcr.io/harri-llewelyn/aber/timescaledb` (`timescaledb/Dockerfile`) | MIT | `apk info -a pgbackrest` → `license: MIT` |
-| `grafana/grafana:13.2.0` | AGPL-3.0 | `/usr/share/grafana/LICENSE` |
-| `prom/prometheus:v3.14.0` | Apache 2.0 | `/LICENSE` |
+| `grafana/grafana:13.2.3` | AGPL-3.0 | `/usr/share/grafana/LICENSE` |
+| `prom/prometheus:v3.15.0` | Apache 2.0 | `/LICENSE` |
 | `eclipse-mosquitto:2.0.22` | EPL-2.0 / EDL-1.0 | `/usr/share/licenses/mosquitto/` |
 
 ### Not verified from the image — consult upstream
@@ -111,14 +111,14 @@ project's own repository.
 | Component | Project |
 | :--- | :--- |
 | `supabase/postgres:17.6.1.175` | PostgreSQL and its extensions, packaged by Supabase |
-| `postgrest/postgrest:v14.12` | PostgREST |
-| `supabase/gotrue:v2.189.0` | Supabase Auth |
-| `supabase/realtime:v2.102.3` | Supabase Realtime |
-| `supabase/storage-api:v1.60.4` | Supabase Storage |
+| `postgrest/postgrest:v14.17` | PostgREST |
+| `supabase/gotrue:v2.197.0` | Supabase Auth |
+| `supabase/realtime:v2.134.10` | Supabase Realtime |
+| `supabase/storage-api:v1.74.0` | Supabase Storage |
 | `supabase/edge-runtime:v1.77.0` | Supabase Edge Runtime |
-| `supabase/postgres-meta:v0.96.6` | Supabase postgres-meta |
-| `supabase/studio:2026.07.07-sha-a6a04f2` | Supabase Studio |
-| `envoyproxy/envoy:v1.39.1` | Envoy Proxy |
+| `supabase/postgres-meta:v0.99.0` | Supabase postgres-meta |
+| `supabase/studio:2026.09.28-sha-5e59b60` | Supabase Studio |
+| `envoyproxy/envoy:v1.39.2` | Envoy Proxy |
 | `swaggerapi/swagger-ui:v5.33.0` | Swagger UI |
 | `node:24-alpine`, `alpine:3.24` | Node.js, Alpine Linux and their packages |
 

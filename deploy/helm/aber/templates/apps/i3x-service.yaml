@@ -57,7 +57,7 @@ spec:
         */}}
         {{- $brokerPort := ternary 8883 1883 (and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients) }}
         {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-mosquitto" "command" (printf "nc -z mosquitto %d" (int $brokerPort)) "describe" (printf "mosquitto:%d (the spBv1.0/# subscription that feeds every i3X value)" (int $brokerPort))) | nindent 8 }}
-        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-gateway" "image" "curlimages/curl:8.10.1" "command" (printf "curl -s -o /dev/null %s/rest/v1/" (include "aber.supabase.internalUrl" .)) "describe" "supabase-envoy (every metadata read is a PostgREST call made as the caller)") | nindent 8 }}
+        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-gateway" "image" (include "aber.curlImage" $) "command" (printf "curl -s -o /dev/null %s/rest/v1/" (include "aber.supabase.internalUrl" .)) "describe" "supabase-envoy (every metadata read is a PostgREST call made as the caller)") | nindent 8 }}
       containers:
         - name: i3x-service
           image: {{ include "aber.image" (dict "image" .Values.i3xService.image "ctx" $) | quote }}

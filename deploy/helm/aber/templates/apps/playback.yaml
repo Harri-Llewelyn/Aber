@@ -60,7 +60,7 @@ spec:
           ORDERING ONLY: a worker that cannot reach it fails the job it claimed with the reason,
           which is the behaviour that matters long after boot when no initContainer helps.
         */}}
-        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-gateway" "image" "curlimages/curl:8.10.1" "command" "curl -sf -o /dev/null http://supabase-envoy:8000/auth/v1/health" "describe" "supabase-envoy (the capture is read through it)") | nindent 8 }}
+        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-gateway" "image" (include "aber.curlImage" $) "command" "curl -sf -o /dev/null http://supabase-envoy:8000/auth/v1/health" "describe" "supabase-envoy (the capture is read through it)") | nindent 8 }}
       containers:
         - name: playback
           image: {{ include "aber.image" (dict "image" .Values.ingestion.image "ctx" $) | quote }}

@@ -285,7 +285,7 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 
 | Component | Image | Reached at |
 | :--- | :--- | :--- |
-| `alloy` | `grafana/alloy:v1.11.2` | the one collector: logs, metrics and host metrics; `alloy:12345` |
+| `alloy` | `grafana/alloy:v1.20.1` | the one collector: logs, metrics and host metrics; `alloy:12345` |
 | `backup` | `supabase/postgres:17.6.1.175` | the nightly CronJob, when the backup service is off |
 | `backup-service` | `ghcr.io/harri-llewelyn/aber/backup-service` | the Backups page's worker (`backupService.enabled`) |
 | `cold-archive` | `ghcr.io/harri-llewelyn/aber/ingestion` | CronJob: exports, verifies and drops cold chunks |
@@ -294,27 +294,27 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `e2e-aas-export` | `ghcr.io/harri-llewelyn/aber/test-runner` | Job (`e2e.enabled`): the AAS conformance suite |
 | `e2e-validate` | `ghcr.io/harri-llewelyn/aber/test-runner` | Job (`e2e.enabled`): `validate.py` in-cluster |
 | `frontend` | `ghcr.io/harri-llewelyn/aber/frontend` | `app.<domain>` |
-| `gitea` | `gitea/gitea:1.27.3` | `git.<domain>` through the gateway's forge listener; SSH on `gitea-external:22` (LoadBalancer) |
-| `grafana` | `grafana/grafana:13.2.0` | `grafana.<domain>` |
+| `gitea` | `gitea/gitea:28.0.0` | `git.<domain>` through the gateway's forge listener; SSH on `gitea-external:22` (LoadBalancer) |
+| `grafana` | `grafana/grafana:13.2.3` | `grafana.<domain>` |
 | `i3x-service` | `ghcr.io/harri-llewelyn/aber/i3x-service` | `i3x.<domain>` |
 | `ingestion` | `ghcr.io/harri-llewelyn/aber/ingestion` | no route; `ingestion-metrics:9108` is scraped |
 | `load-test` | `ghcr.io/harri-llewelyn/aber/test-runner` | Job (`loadTest.enabled`): synthetic Sparkplug load, applied by `scripts/load-test.mjs` |
-| `loki` | `grafana/loki:3.5.7` | `loki:3100`, read by Grafana |
-| `mosquitto` | `eclipse-mosquitto:2.0.22`, the `gateway-credential` sidecar, `sapcc/mosquitto-exporter:0.8.0` when metrics are on | `mosquitto-external:1883` (LoadBalancer), 8883 with TLS; `mqtt.<domain>` for WebSockets |
+| `loki` | `grafana/loki:3.7.8` | `loki:3100`, read by Grafana |
+| `mosquitto` | `eclipse-mosquitto:2.0.22`, the `gateway-credential` sidecar, `jryberg/mosquitto-exporter:v0.7.9` when metrics are on | `mosquitto-external:1883` (LoadBalancer), 8883 with TLS; `mqtt.<domain>` for WebSockets |
 | `node-red` | `ghcr.io/harri-llewelyn/aber/node-red` | `nodered.<domain>` |
 | `playback` | `ghcr.io/harri-llewelyn/aber/ingestion` | the broker playback worker (`playback.enabled`) |
-| `prometheus` | `prom/prometheus:v3.14.0` | `prometheus:9090`, read by Grafana |
-| `realtime` | `supabase/realtime:v2.102.3` | behind `api.<domain>/realtime/v1`; Service `realtime-dev:4000` |
-| `storage-init` | `node:24-alpine` | hook Job: the storage buckets |
+| `prometheus` | `prom/prometheus:v3.15.0` | `prometheus:9090`, read by Grafana |
+| `realtime` | `supabase/realtime:v2.134.10` | behind `api.<domain>/realtime/v1`; Service `realtime-dev:4000` |
+| `storage-init` | `node:24.21.0-alpine3.24` | hook Job: the storage buckets |
 | `storage-policies` | `supabase/postgres:17.6.1.175` | hook Job: the storage RLS policies |
-| `supabase-auth` | `supabase/gotrue:v2.189.0` | behind `api.<domain>/auth/v1` |
+| `supabase-auth` | `supabase/gotrue:v2.197.0` | behind `api.<domain>/auth/v1` |
 | `supabase-db` | `supabase/postgres:17.6.1.175`, `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` as a sidecar | `supabase-db:5432`; `:9187` is scraped |
-| `supabase-envoy` | `envoyproxy/envoy:v1.39.1` | the gateway: `api.<domain>` (in-cluster `supabase-envoy:8000`), Studio on 8001, the forge on 8002 |
+| `supabase-envoy` | `envoyproxy/envoy:v1.39.2` | the gateway: `api.<domain>` (in-cluster `supabase-envoy:8000`), Studio on 8001, the forge on 8002 |
 | `supabase-functions` | `ghcr.io/harri-llewelyn/aber/edge-runtime` | behind `api.<domain>/functions/v1` |
-| `supabase-meta` | `supabase/postgres-meta:v0.96.6` | in-cluster only, for Studio |
-| `supabase-rest` | `postgrest/postgrest:v14.12` | behind `api.<domain>/rest/v1`; admin port 3001 is scraped |
-| `supabase-storage` | `supabase/storage-api:v1.60.4` | behind `api.<domain>/storage/v1` |
-| `supabase-studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `studio.<domain>`, off by default, behind the gateway's login |
+| `supabase-meta` | `supabase/postgres-meta:v0.99.0` | in-cluster only, for Studio |
+| `supabase-rest` | `postgrest/postgrest:v14.17` | behind `api.<domain>/rest/v1`; admin port 3001 is scraped |
+| `supabase-storage` | `supabase/storage-api:v1.74.0` | behind `api.<domain>/storage/v1` |
+| `supabase-studio` | `supabase/studio:2026.09.28-sha-5e59b60` | `studio.<domain>`, off by default, behind the gateway's login |
 | `swagger-ui` | `ghcr.io/harri-llewelyn/aber/swagger-ui` | `docs.<domain>`; the two specs are baked into the image |
 | `test-db-tls` | `supabase/postgres:17.6.1.175` | `helm test` Pod (`postgresTls.enabled`): both databases refuse plaintext and every remote backend is on TLS |
 | `test-fdw` | `supabase/postgres:17.6.1.175` | `helm test`: the postgres_fdw gate |

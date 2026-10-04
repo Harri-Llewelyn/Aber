@@ -3901,8 +3901,10 @@ when, and the SHA-256 of `flows.json` at that commit, read through the machine a
 shows it as **Committed**, so a merge is visible at once rather than on the appliance's next tick.
 Pushes to other branches, repositories that are not a gateway's, deleted branches and unknown
 gateways are answered 200 with `ignored`, because a non-2xx is a failed delivery on the hook's page.
-Gitea's `webhook.ALLOWED_HOST_LIST` defaults to public addresses only and refuses every in-stack
-target; it is `private` here. `0095` ends with `ensure_gateway_status_view()`, and the baseline's
+Gitea's outbound calls are `[security] EGRESS_MODE = strict` with `ALLOWED_HOST_LIST = private:9000`,
+which admits this one target; the deprecated `[webhook] ALLOWED_HOST_LIST` is set blank, because
+Gitea reads it first and an upgraded `app.ini` still holds a portless `private` that would refuse
+port 9000. `0095` ends with `ensure_gateway_status_view()`, and the baseline's
 dumped copy of that view became a call to the same function, because `CREATE OR REPLACE VIEW`
 cannot narrow a view the function has just widened and every boot after the first was failing in
 `0001`.

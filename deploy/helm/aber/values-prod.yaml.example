@@ -265,7 +265,7 @@ networkPolicy:
   # actually encrypts the fleet's credentials in flight; this is defence in depth behind it.
   mqttAllowedCidrs:
     - 10.0.0.0/8
-  # Your service CIDR, so the e2e Job's kubectl call is not permitted to reach the whole internet.
+  # Your service CIDR, so the e2e Job's API server call is not permitted to reach the whole internet.
   apiServerCidr: 10.43.0.0/16
   # Flows the chart cannot express: an SMTP relay for GoTrue, the ESO webhook, an S3 endpoint for
   # backups, a corporate proxy.

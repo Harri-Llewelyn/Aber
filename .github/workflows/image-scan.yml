@@ -10,12 +10,17 @@
 # does not change between two commits an hour apart. CVEs are published on the world's schedule,
 # not on this repository's.
 #
-# THE IMAGE LIST IS READ OUT OF THE RENDERED CHART RATHER THAN WRITTEN HERE, which is the same rule
-# every other guard in this repository follows: a hardcoded list is a second place for a version to
-# live, and it would go stale silently -- scanning the images this stack USED to run and reporting
-# green. Images built from this repository are excluded because release.yml scans each of them
-# before it is pushed, against the same policy; check-docs-drift.mjs holds that exclusion to the
-# release workflow, so this comment cannot outlive the step it points at.
+# THE WORK IS scripts/scan-images.mjs (`npm run scan:images`), so a red run reproduces on a laptop.
+# It reads the image list out of the rendered chart rather than a list written anywhere, which is
+# the same rule every other guard in this repository follows: a hardcoded list is a second place
+# for a version to live, and it would go stale silently -- scanning the images this stack USED to
+# run and reporting green. Images built from this repository are excluded because release.yml
+# scans each of them before it is pushed, against the same policy; check-docs-drift.mjs holds that
+# exclusion to the release workflow, so this comment cannot outlive the step it points at.
+#
+# A finding with no fix this stack can take yet is accepted in scripts/lint/image-allowlist.json,
+# grouped by image repository with a reason and an expiry date. An expired group fails the scan,
+# so every acceptance is re-read on the first scan after its date.
 # =================================================================================================
 name: Container Image CVE Scan
 
@@ -46,82 +51,21 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+
       - name: Set up Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.16.3
 
-      - name: Collect The Pinned Images
-        id: collect
-        run: |
-          set -euo pipefail
-          # Every image a full render names, with the optional workloads switched on so their
-          # images are scanned too; the chart's own builds are scanned by release.yml, before
-          # each one is pushed.
-          helm template aber deploy/helm/aber -f deploy/helm/aber/values-dev.yaml \
-            --set backup.enabled=true --set backupService.enabled=true --set playback.enabled=true \
-            --set e2e.enabled=true \
-            | grep -hoE '^[[:space:]]+image:[[:space:]]+"?[^"[:space:]]+' \
-            | sed -E 's/^[[:space:]]+image:[[:space:]]+"?//' \
-            | grep -v '^ghcr\.io/harri-llewelyn/' \
-            | sort -u > /tmp/images.txt
-
-          COUNT=$(wc -l < /tmp/images.txt)
-          # A scan that finds nothing to scan must not report success. If the chart is
-          # restructured so this grep stops matching, silence would look exactly like "no
-          # vulnerabilities" -- the same class of failure the ServiceMonitor guard is written about.
-          if [ "$COUNT" -lt 10 ]; then
-            echo "::error::Only $COUNT image(s) parsed out of the rendered chart, expected 10+."
-            echo "::error::The parser has probably drifted from the file's formatting."
-            exit 1
-          fi
-          echo "Scanning $COUNT image(s):"
-          sed 's/^/  /' /tmp/images.txt
-
       - name: Install Trivy
         uses: ./.github/actions/install-trivy
 
+      # Fixable HIGH and CRITICAL only, every image in turn, and a summary table on the run page.
+      # It fails on a finding outside the allow-list, on an expired group, and on an allow-list
+      # entry that no longer matches anything.
       - name: Scan
-        run: |
-          # The runner starts bash with -e, so each scan's status is caught with `||`: one vulnerable
-          # image must not stop the scans of the rest.
-          set -uo pipefail
-          FAILED=0
-          echo "## Container CVE scan" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Image | Result |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| :--- | :--- |" >> "$GITHUB_STEP_SUMMARY"
-
-          while read -r IMAGE; do
-            [ -z "$IMAGE" ] && continue
-            echo "::group::$IMAGE"
-            # --ignore-unfixed IS THE POLICY, and it is the difference between a signal and a
-            # standing red X. An unfixed CVE in a base image is not something this repository can
-            # act on: there is no version to move to, so failing on it would train everyone to
-            # ignore this job. HIGH and CRITICAL only, for the same reason.
-            STATUS=0
-            trivy image \
-              --severity HIGH,CRITICAL \
-              --ignore-unfixed \
-              --exit-code 1 \
-              --no-progress \
-              --scanners vuln \
-              "$IMAGE" || STATUS=$?
-            echo "::endgroup::"
-
-            if [ "$STATUS" -ne 0 ]; then
-              FAILED=1
-              echo "| \`$IMAGE\` | **fixable HIGH/CRITICAL found** |" >> "$GITHUB_STEP_SUMMARY"
-              echo "::warning::$IMAGE has fixable HIGH/CRITICAL vulnerabilities"
-            else
-              echo "| \`$IMAGE\` | clean |" >> "$GITHUB_STEP_SUMMARY"
-            fi
-          done < /tmp/images.txt
-
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          if [ "$FAILED" -ne 0 ]; then
-            echo "Every finding above has a fixed version available upstream." >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::One or more images carry fixable HIGH/CRITICAL vulnerabilities."
-            exit 1
-          fi
-          echo "No fixable HIGH or CRITICAL vulnerabilities." >> "$GITHUB_STEP_SUMMARY"
+        run: node scripts/scan-images.mjs --trivy-binary

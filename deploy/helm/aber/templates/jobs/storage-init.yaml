@@ -59,11 +59,11 @@ spec:
           The RLS policies on storage.objects moved out of 0001 for the same reason -- see the
           storage-policies Job, which runs at weight 18.
         */}}
-        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-storage" "image" "curlimages/curl:8.10.1" "command" "curl -sf http://supabase-storage:5000/status >/dev/null 2>&1" "describe" "supabase-storage (it migrates the storage schema on boot)") | nindent 8 }}
+        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-storage" "image" (include "aber.curlImage" $) "command" "curl -sf http://supabase-storage:5000/status >/dev/null 2>&1" "describe" "supabase-storage (it migrates the storage schema on boot)") | nindent 8 }}
       containers:
         - name: storage-init
-          image: node:24-alpine
-          imagePullPolicy: IfNotPresent
+          image: {{ include "aber.image" (dict "image" .Values.initJobs.storageInitImage "ctx" .) | quote }}
+          imagePullPolicy: {{ .Values.initJobs.storageInitImage.pullPolicy }}
           env:
             - name: STORAGE_URL
               value: http://supabase-storage:5000

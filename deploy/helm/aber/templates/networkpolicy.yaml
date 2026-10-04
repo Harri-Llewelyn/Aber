@@ -421,7 +421,7 @@ The Kubernetes API server, for the pods that talk to it.
 
 `alloy` discovers pods and tails their logs through it: under default-deny it collects nothing and
 the dashboards' log panel is simply empty. `e2e-aas-export`'s wait-for-validate step reads a Job's
-status with kubectl; dropped, it times out blaming a Job that had already completed.
+status from it; dropped, it times out blaming a Job that had already completed.
 
 THE ADDRESS IS ENVIRONMENT-SPECIFIC AND CANNOT BE SELECTED: NetworkPolicy has no selector for the
 API server, so this is an ipBlock. Default 0.0.0.0/0 on the API ports only; set

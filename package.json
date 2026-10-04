@@ -26,6 +26,7 @@
     "lint:deno": "node scripts/lint-deno.mjs",
     "scan:secrets": "node scripts/scan-secrets.mjs",
     "scan:config": "node scripts/scan-config.mjs",
+    "scan:images": "node scripts/scan-images.mjs",
     "scan:source": "node scripts/scan-source.mjs",
     "audit:deps": "node scripts/audit-dependencies.mjs",
     "//functions:lock": "Re-resolves supabase/functions/deno.lock after deno.json or an import changes; the edge-runtime image build refuses a lock that does not cover the module graph (supabase/README.md, Edge function dependencies).",
