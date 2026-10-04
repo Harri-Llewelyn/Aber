@@ -35,8 +35,9 @@ const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
 // Bumped whenever the body of the generated settings.js changes in a way an existing volume
 // needs; without it a settings.js that merely has an adminAuth passes settingsAreCorrect()
 // forever. v2 adminAuth.users; v3 persisted username -> permissions map; v4 constant-time
-// NODERED_ADMIN_TOKEN comparison; v5 editorTheme.tours off; v6 telemetry off.
-const SETTINGS_VERSION = 6;
+// NODERED_ADMIN_TOKEN comparison; v5 editorTheme.tours off; v6 telemetry off; v7 the editor's
+// response headers.
+const SETTINGS_VERSION = 7;
 
 function fail(message) {
   console.error(`[node-red-init] ERROR: ${message}`);
@@ -296,6 +297,7 @@ function settingsAreCorrect() {
       // adminAuth.default re-opens the anonymous path wholesale. Treat its presence as a
       // broken file rather than as a preference to preserve.
       loaded?.adminAuth?.default === undefined &&
+      typeof loaded?.httpAdminMiddleware === 'function' &&
       typeof loaded?.httpNodeAuth === 'function'
     );
   } catch (err) {
@@ -472,6 +474,17 @@ module.exports = {
   telemetry: {
     enabled: false,
     updateNotification: false
+  },
+
+  // The editor's and the admin API's response headers. Nothing frames the editor from another
+  // origin, and it uses no camera, microphone or location.
+  httpAdminMiddleware: function (req, res, next) {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    next();
   },
 
   adminAuth: {
