@@ -53,6 +53,9 @@ together. All three come from the release workflow itself, with no key to manage
 - **SLSA provenance** naming the commit, the Dockerfile, every build argument and every base image
   by digest.
 
+Verifying a signature needs **cosign 3 or later**. A release stores its signature bundles as OCI 1.1
+referrers, which cosign 2 does not read: it answers "no signatures found".
+
 ```bash
 # The image signature, bound to this repository's release workflow at the tag it released from.
 cosign verify ghcr.io/harri-llewelyn/aber/ingestion:1.0.0 \
