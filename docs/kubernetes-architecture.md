@@ -853,8 +853,8 @@ Verified in the rendered output, both clients matching exactly:
 | Node-RED | `settings.js` callbackURL = `http://nodered.<domain>/auth/strategy/callback` | the identical string |
 
 And the split holds: `auth_url`, `API_EXTERNAL_URL`, `GOTRUE_SITE_URL` and `SUPABASE_PUBLIC_URL` are
-ingress hosts; `token_url`, `NODERED_USERINFO_URL`, Studio's `SUPABASE_URL` / `STUDIO_PG_META_URL`
-and Storage's `POSTGREST_URL` are in-cluster Service names.
+ingress hosts; `token_url`, `NODERED_USERINFO_URL` and Studio's `SUPABASE_URL` / `STUDIO_PG_META_URL`
+are in-cluster Service names.
 
 **A CI check now asserts all of it** — the two redirect-URI equalities, that each browser-facing URL
 resolves to a real ingress host, and that no in-cluster URL contains a dot (i.e. is not a domain).

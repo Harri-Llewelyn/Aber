@@ -14,8 +14,7 @@ spec:
     {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
   ports:
     - name: http
-      # storage-api reaches this as POSTGREST_URL=http://supabase-rest:3000, and the gateway routes
-      # /rest/v1/ to it on the same address.
+      # The gateway routes /rest/v1/ here.
       port: 3000
       targetPort: http
       protocol: TCP
@@ -75,8 +74,8 @@ spec:
                   key: POSTGRES_PASSWORD
             - name: PGRST_DB_URI
               value: "postgres://authenticator:$(POSTGRES_PASSWORD)@{{ include "aber.supabaseDb.host" . }}:{{ include "aber.supabaseDb.port" . }}/postgres?{{ include "aber.dsnSslParams" . }}"
-            # `storage` is exposed because storage-api resolves the caller's claims through
-            # PostgREST; `graphql_public` because the Supabase client expects it to exist.
+            # The schemas upstream's compose exposes; the Supabase client expects `graphql_public`
+            # to exist.
             - name: PGRST_DB_SCHEMAS
               value: public,storage,graphql_public
             - name: PGRST_DB_ANON_ROLE

@@ -766,7 +766,7 @@ kubectl -n aber wait --for=condition=complete \
 kubectl -n aber logs job/aber-e2e-validate
 ```
 
-- **`validate.py`** — the same 20 checks `npm run dev:test` runs from the host. In-cluster it needs
+- **`validate.py`** — the same checks `npm run dev:test` runs from the host. In-cluster it needs
   **no host or port overrides at all**: the Service names *are* the correct configuration.
 - **`test_aas_export.py`** — starts automatically once the first Job completes, ordered by an
   initContainer inside the Job rather than by the order you run things. Its subject,
