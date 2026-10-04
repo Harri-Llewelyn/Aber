@@ -28,7 +28,7 @@ describe('GRANTABLE_PERMISSIONS', () => {
 
   it('offers nothing that decides: no device write, quarantine or proposal decision, or access control', () => {
     for (const refused of ['device:manage', 'quarantine:approve', 'quarantine:reject', 'cell:manage',
-      'gateway:manage', 'authz:manage', 'link:manage', 'gitops:manage']) {
+      'gateway:manage', 'authz:manage', 'link:manage']) {
       expect(GRANTABLE_PERMISSIONS).not.toContain(refused)
     }
   })

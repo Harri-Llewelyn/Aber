@@ -2157,7 +2157,7 @@ BEGIN
                       'person''s act: machines propose, people decide'
                WHEN r.perm = 'authz:manage'
                  THEN 'access control stays with people'
-               WHEN r.perm IN ('link:manage', 'gitops:manage')
+               WHEN r.perm = 'link:manage'
                  THEN 'no check a machine passes consults it, so the grant would do nothing'
                ELSE 'nobody has decided that a machine may hold it'
              END), '; ' ORDER BY r.first_at)
@@ -2235,7 +2235,7 @@ ALTER FUNCTION public.create_machine_principal(p_name text, p_permissions text[]
 --
 
 -- FUNCTION create_machine_principal(p_name text, p_permissions text[], p_purpose text) :: COMMENT
-COMMENT ON FUNCTION public.create_machine_principal(p_name text, p_permissions text[], p_purpose text) IS 'Create a machine identity that cannot sign in, holding permissions of its own and a name the Access Control page lists it by. Administrator only. Machines propose, people decide: allows telemetry:read, quarantine:view, audit_trail:read, archive:manage, proposal:create and schema:manage, and refuses every other permission with its reason -- device writes, quarantine decisions, deciding proposals and access control are made by people, and no check a machine passes consults link:manage or gitops:manage. revoke_service_token() and revoke_service_principal() withdraw what it creates at PostgREST, where every check those grants open is reached. The name is unique ignoring case. One form only: an overload whose extra arguments default makes every RPC call ambiguous.';
+COMMENT ON FUNCTION public.create_machine_principal(p_name text, p_permissions text[], p_purpose text) IS 'Create a machine identity that cannot sign in, holding permissions of its own and a name the Access Control page lists it by. Administrator only. Machines propose, people decide: allows telemetry:read, quarantine:view, audit_trail:read, archive:manage, proposal:create and schema:manage, and refuses every other permission with its reason -- device writes, quarantine decisions, deciding proposals and access control are made by people, and no check a machine passes consults link:manage. revoke_service_token() and revoke_service_principal() withdraw what it creates at PostgREST, where every check those grants open is reached. The name is unique ignoring case. One form only: an overload whose extra arguments default makes every RPC call ambiguous.';
 
 --
 

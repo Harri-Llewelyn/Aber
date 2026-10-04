@@ -69,7 +69,6 @@ REFUSED = {
                       "person's act: machines propose, people decide",
     "authz:manage": "access control stays with people",
     "link:manage": "no check a machine passes consults it",
-    "gitops:manage": "no check a machine passes consults it",
 }
 
 

@@ -6,7 +6,7 @@ import { PERMISSION_UUIDS } from '../constants';
  * The static fallback, used when a session carries a role claim but no `role_permissions` rows
  * resolve. It mirrors the grants seeded in `0002_seed_data.sql`; `scripts/check-mirror-drift.mjs`
  * compares the two. Shopfloor_Manager is enumerated because it does not hold the platform
- * permissions (AUTHZ_MANAGE, SCHEMA_MANAGE, GITOPS_MANAGE); Administrator holds every permission by
+ * permissions (AUTHZ_MANAGE, SCHEMA_MANAGE); Administrator holds every permission by
  * definition. This map decides what is offered, and each permission is enforced server-side.
  */
 export const DEFAULT_ROLE_PERMISSIONS_MAP = {

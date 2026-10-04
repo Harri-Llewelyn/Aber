@@ -103,13 +103,12 @@ describe('usePermissions hook', () => {
 
     // The platform permissions belong to Administrator alone. These are assertions about what is
     // offered; each is enforced server-side: SCHEMA_MANAGE by the write policies on schemas,
-    // metric_catalog and metric_groups, GITOPS_MANAGE by nodered-userinfo and the forge's rule on main.
+    // metric_catalog and metric_groups, AUTHZ_MANAGE by the access-control functions.
     expect(result.current.hasPermission(PERMISSION_UUIDS.SCHEMA_MANAGE)).toBe(false)
-    expect(result.current.hasPermission(PERMISSION_UUIDS.GITOPS_MANAGE)).toBe(false)
     expect(result.current.hasPermission(PERMISSION_UUIDS.AUTHZ_MANAGE)).toBe(false)
   })
 
-  it('grants an Administrator the three permissions a Shopfloor_Manager no longer holds', async () => {
+  it('grants an Administrator the two permissions a Shopfloor_Manager does not hold', async () => {
     // The other side of the pair, which would catch a fallback map narrowed too far: a split that
     // took a capability from both roles would leave nobody able to publish a schema.
     const session = {
@@ -127,7 +126,6 @@ describe('usePermissions hook', () => {
     })
 
     expect(result.current.hasPermission(PERMISSION_UUIDS.SCHEMA_MANAGE)).toBe(true)
-    expect(result.current.hasPermission(PERMISSION_UUIDS.GITOPS_MANAGE)).toBe(true)
     expect(result.current.hasPermission(PERMISSION_UUIDS.AUTHZ_MANAGE)).toBe(true)
   })
 
@@ -155,7 +153,6 @@ describe('usePermissions hook', () => {
     expect(result.current.hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)).toBe(false)
     expect(result.current.hasPermission(PERMISSION_UUIDS.LINK_MANAGE)).toBe(false)
     expect(result.current.hasPermission(PERMISSION_UUIDS.SCHEMA_MANAGE)).toBe(false)
-    expect(result.current.hasPermission(PERMISSION_UUIDS.GITOPS_MANAGE)).toBe(false)
 
     // Read permissions should be allowed
     expect(result.current.hasPermission(PERMISSION_UUIDS.TELEMETRY_READ)).toBe(true)

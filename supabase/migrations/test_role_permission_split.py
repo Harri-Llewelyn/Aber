@@ -1,12 +1,12 @@
 """
 The Administrator / Shopfloor_Manager split (archived migration 0069).
 
-WHAT THIS SUITE IS DEFENDING, because "the manager lost three permissions" is the easy half and
+WHAT THIS SUITE IS DEFENDING, because "the manager lost two permissions" is the easy half and
 only the first class below is about it:
 
   1. THE GRANTS DIVERGED, AND STAYED DIVERGED. Both privileged roles held the same thirteen
      permissions from 0002 until 0069, which made the distinction between them presentational.
-     0002 no longer seeds the three and 0069 withdraws them from databases that already ran it --
+     0002 does not seed the two and 0069 withdraws them from databases that already ran it --
      two mechanisms for one outcome, so a test that only checked the count would pass while one
      of them silently stopped working.
 
@@ -45,10 +45,10 @@ DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgr
 ADMIN_ID = "5e771465-0069-4000-8000-00000000ad11"
 MANAGER_ID = "5e771465-0069-4000-8000-00000000009f"
 
-# The three that moved to Administrator, by name. The migration deletes by id for a reason 0049
+# The two Administrator holds alone, by name. The migration deletes by id for a reason 0049
 # recorded -- a rename must not silently stop matching -- but a TEST should fail when the name it
 # names has gone, because the name is what the documentation and the UI constant both use.
-WITHDRAWN = ("authz:manage", "schema:manage", "gitops:manage")
+WITHDRAWN = ("authz:manage", "schema:manage")
 
 
 def get_connection():
@@ -222,7 +222,7 @@ class TheGrantsDiverged(RoleSplitFixture):
                 "0069 withdrew from Shopfloor_Manager moved TO."
             )
 
-    def test_shopfloor_manager_holds_none_of_the_three(self):
+    def test_shopfloor_manager_holds_neither(self):
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT p.name FROM public.role_permissions rp"
@@ -241,7 +241,7 @@ class TheGrantsDiverged(RoleSplitFixture):
         """
         The property, rather than a count. This is what 'presentational' meant: identical sets
         under two names. A future permission granted to both would restore that state without
-        touching any of the three names above, and only this test would notice.
+        touching either name above, and only this test would notice.
         """
         with self.conn.cursor() as cur:
             cur.execute(
@@ -260,7 +260,7 @@ class TheGrantsDiverged(RoleSplitFixture):
             )
 
     def test_the_manager_keeps_the_shopfloor(self):
-        """The withdrawal is three permissions, not a demotion to read-only."""
+        """The withdrawal is two permissions, not a demotion to read-only."""
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT p.name FROM public.role_permissions rp"
@@ -274,7 +274,7 @@ class TheGrantsDiverged(RoleSplitFixture):
                 self.assertIn(
                     kept, held,
                     f"Shopfloor_Manager lost {kept}, which is shopfloor work rather than platform "
-                    "work. 0069 withdraws three permissions and no others."
+                    "work. Only the two platform permissions are withheld."
                 )
 
 
@@ -488,7 +488,7 @@ class ReadingSurvived(RoleSplitFixture):
 
     def test_manager_still_reads_the_audit_trail(self):
         """
-        `audit_trail:read` is NOT one of the three, and the distinction matters: 0070 splits
+        `audit_trail:read` is NOT one of the two, and the distinction matters: 0070 splits
         that table into asset and security domains and takes the security lane away from this
         role. That is a separate change with its own argument, and it must not arrive by
         accident here.

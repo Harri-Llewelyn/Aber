@@ -222,10 +222,10 @@ made. The demo user accounts are seeded separately, by `supabase/seed.sql`.
 **Sign in to the React dashboard first.** Node-RED and Grafana both federate to Supabase Auth, and
 the consent step needs your dashboard session — going straight to either shows a "sign in required"
 prompt rather than a login form. In Node-RED, click **Sign in with Aber**; Administrator can
-deploy, every other role gets a read-only editor. Deploying a flow is `gitops:manage`, which
-`0069` made Administrator-only. The editor used to be the *second* door onto that permission; since
-the Directory page's Sync button and the `deploy-nodered` function were retired with the
-demonstrator, it is the only one.
+deploy, every other role gets a read-only editor (`nodered-userinfo` maps Administrator to full
+permissions and every other role to `read`). An appliance deploys the flow on the `main` branch of
+its gateway repository in the forge, where pushes are disabled and a merge needs one approval from
+the `administrators` team, which `forge-membership` fills from each person's Postgres role.
 
 **Demo accounts** — seeded by [`supabase/seed.sql`](supabase/seed.sql), password `aber123`:
 

@@ -2057,8 +2057,8 @@ function edgeFunctionNames() {
 // each read is open to all, and no has_authority() consults the permission. Gating one later
 // moves its entry to `gates`.
 //
-// Two refusal reasons are facts and are held here too: nothing consults link:manage or
-// gitops:manage through has_authority(), and cell:manage and gateway:manage are consulted only
+// Two refusal reasons are facts and are held here too: nothing consults link:manage through
+// has_authority(), and cell:manage and gateway:manage are consulted only
 // where a proposal is decided. So is may_decide_proposal()'s answer: its cell and gateway lanes
 // consult the permission, those tables' write policies name a role pair, that pair are the only
 // roles granted the permission, and no machine may hold it -- so the lane agrees with the table
@@ -2221,7 +2221,7 @@ function edgeFunctionNames() {
     }
 
     // The refusal reasons that are facts.
-    for (const perm of ['link:manage', 'gitops:manage']) {
+    for (const perm of ['link:manage']) {
       const by = consultedBy(perm);
       if (by.length) bad(`create_machine_principal() refuses ${perm} because no check a machine passes consults it, and ${by.join(', ')} now does; decide whether a machine may hold it, and restate the reason`);
     }

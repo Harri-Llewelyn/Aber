@@ -100,8 +100,8 @@ class TestPermissionMapping(unittest.TestCase):
 
     def test_shopfloor_manager_is_read_only(self):
         """
-        `gitops:manage` is Administrator-only, and the Node-RED editor deploys directly, so a
-        manager with '*' could deploy a flow the permission says they may not.
+        Deploying a flow is Administrator's, and the Node-RED editor deploys directly, so a
+        manager with '*' could deploy a flow nobody else approved.
 
         'read' rather than absent: the editor still opens and the running flow is still
         inspectable, which is most of what the page is for when the shopfloor is misbehaving.

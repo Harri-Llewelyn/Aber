@@ -39,7 +39,7 @@ INSERT INTO public.roles VALUES (4, 'Auditor', 'Read-only access to the audit tr
 ON CONFLICT (id) DO NOTHING;
 
 -- -------------------------------------------------------------------------------------------
--- RBAC permissions  (14 rows)
+-- RBAC permissions  (13 rows)
 -- -------------------------------------------------------------------------------------------
 -- The permission UUIDs are mirrored by PERMISSION_UUIDS in frontend/src/constants.js.
 
@@ -69,8 +69,6 @@ INSERT INTO public.permissions VALUES ('e012c345-6789-4c1d-8706-933e08544e39', '
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.permissions VALUES ('f123d456-7890-4c1d-8706-933e08544e40', 'schema:manage', 'Register and validate industrial schemas')
 ON CONFLICT (id) DO NOTHING;
-INSERT INTO public.permissions VALUES ('c234e567-8901-4c1d-8706-933e08544e41', 'gitops:manage', 'Deploy flows and manage GitOps edge configurations')
-ON CONFLICT (id) DO NOTHING;
 -- `audit_trail:read`, renamed with the page before 1.0. THE ID DOES NOT MOVE, as with `link:manage`
 -- above.
 INSERT INTO public.permissions VALUES ('d345e678-9012-4c1d-8706-933e08544e42', 'audit_trail:read', 'View the audit trail')
@@ -82,11 +80,10 @@ INSERT INTO public.permissions VALUES ('b678f901-2345-4c1d-8706-933e08544e43', '
 ON CONFLICT (id) DO NOTHING;
 
 -- -------------------------------------------------------------------------------------------
--- RBAC role/permission grants  (29 rows)
+-- RBAC role/permission grants  (28 rows)
 -- -------------------------------------------------------------------------------------------
--- 14 Administrator, 11 Shopfloor_Manager, 3 Operator, 1 Auditor. `authz:manage`,
--- `schema:manage` and `gitops:manage` belong to Administrator alone and are simply not granted
--- to role 2 here.
+-- 13 Administrator, 11 Shopfloor_Manager, 3 Operator, 1 Auditor. `authz:manage` and
+-- `schema:manage` belong to Administrator alone and are simply not granted to role 2 here.
 --
 -- Mirrored by DEFAULT_ROLE_PERMISSIONS_MAP in frontend/src/hooks/usePermissions.js and
 -- compared by scripts/check-mirror-drift.mjs.
@@ -113,8 +110,6 @@ INSERT INTO public.role_permissions VALUES (1, 'e012c345-6789-4c1d-8706-933e0854
 ON CONFLICT DO NOTHING;
 INSERT INTO public.role_permissions VALUES (1, 'f123d456-7890-4c1d-8706-933e08544e40')
 ON CONFLICT DO NOTHING;
-INSERT INTO public.role_permissions VALUES (1, 'c234e567-8901-4c1d-8706-933e08544e41')
-ON CONFLICT DO NOTHING;
 INSERT INTO public.role_permissions VALUES (1, 'd345e678-9012-4c1d-8706-933e08544e42')
 ON CONFLICT DO NOTHING;
 INSERT INTO public.role_permissions VALUES (2, 'cb46a943-42e1-4c1d-8706-933e08544e30')
@@ -135,8 +130,8 @@ INSERT INTO public.role_permissions VALUES (2, 'b345c678-9012-4c1d-8706-933e0854
 ON CONFLICT DO NOTHING;
 INSERT INTO public.role_permissions VALUES (2, 'a012b345-6789-4c1d-8706-933e08544e38')
 ON CONFLICT DO NOTHING;
--- Not granted to role 2: `authz:manage` (...e39), `schema:manage` (...e40) and `gitops:manage`
--- (...e41) are Administrator's.
+-- Not granted to role 2: `authz:manage` (...e39) and `schema:manage` (...e40) are
+-- Administrator's.
 INSERT INTO public.role_permissions VALUES (2, 'd345e678-9012-4c1d-8706-933e08544e42')
 ON CONFLICT DO NOTHING;
 INSERT INTO public.role_permissions VALUES (3, 'f012a345-6789-4c1d-8706-933e08544e36')
