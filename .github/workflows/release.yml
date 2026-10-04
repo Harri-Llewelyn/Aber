@@ -216,7 +216,10 @@ jobs:
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       # Built to an OCI archive and scanned before anything is pushed. Build & Push repeats these
-      # inputs and resolves every layer from this builder's cache, so nothing is built twice.
+      # inputs and resolves every layer from this builder's cache, so nothing is built twice. No
+      # layer cache from earlier runs: a cached `apk upgrade` or `apt-get upgrade` layer would ship
+      # the packages of the day it was cached, and this build must take what the distribution
+      # ships today.
       - name: Build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -224,8 +227,6 @@ jobs:
           file: ${{ matrix.dockerfile }}
           build-args: ${{ matrix.build_args }}
           outputs: type=oci,dest=/tmp/oci/${{ matrix.name }}.tar
-          cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
       - name: Install Trivy
         uses: ./.github/actions/install-trivy
@@ -266,8 +267,6 @@ jobs:
           # docker-bake.hcl declares the same two for the ingestion chain.
           sbom: true
           provenance: mode=max
-          cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
       # Sign by digest, verify the signature as a consumer would, and refuse an image whose SBOM or
       # provenance did not arrive. Nothing to sign on a dry run: nothing was pushed.
@@ -289,7 +288,7 @@ jobs:
   # run at all --
   # and the second publishes from the cache the first filled. A pushed ingestion beside a
   # test-runner that failed to build would be a half-published release whose missing half is the
-  # thing that reports on it. No GHA layer cache here, which is acceptable on a tag. test-runner is
+  # thing that reports on it. No layer cache from earlier runs, as above. test-runner is
   # published so the conformance suites can be pointed at the cluster they judge; `e2e.enabled` is
   # still false by default.
   build-ingestion-chain:
