@@ -964,32 +964,17 @@ Three consequences worth knowing before the first signed release:
   the second is `FROM` the first, and Bake's `target:` context hands one build's result to the other
   without a registry round-trip, on the driver the attestations need.
 
-### One-time: make the packages public
+### Package visibility
 
-**GHCR creates every new package private, whatever the repository's visibility**, and
-`GITHUB_TOKEN` cannot change it — package visibility is an account-level setting, not a repository
-one. So the first release publishes eleven packages that nobody else can pull, and the symptom on a
-consumer's machine is an authentication error on a repository that is public. The signatures and
-attestations live inside each image's package, so making the package public covers them too.
-
-After the first successful release, once per package:
-
-```bash
-for p in aber edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential backup-service db-init swagger-ui; do
-  gh api --method PATCH -H "Accept: application/vnd.github+json" \
-    "/user/packages/container/aber%2F$p" -f visibility=public
-done
-```
-
-The `%2F` is required — the package name is `aber/edge-runtime` and the slash must be encoded
-or the path resolves to a different endpoint. This needs a `gh auth login` with the `write:packages`
-scope; `gh auth refresh -s write:packages` adds it to an existing login. The same thing is four
-clicks per package under *Profile → Packages → <package> → Package settings → Change visibility*.
+**Each package takes the repository's visibility, so it is public.** The release links the eleven
+images and the chart to this repository through the `org.opencontainers.image.source` label, and
+GHCR created all twelve packages public, as the repository is. The signatures and attestations live
+inside each image's package, so they are public with it.
 
 Verify from somewhere with no credentials at all:
 
 ```bash
-helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 0.2.0
+helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 1.0.0
 ```
 
 ### What the release does not do
