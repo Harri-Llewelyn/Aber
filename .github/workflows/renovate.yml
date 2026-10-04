@@ -1,9 +1,9 @@
 # =================================================================================================
 # Renovate, run from this repository rather than by the hosted app.
 #
-# WHY SELF-HOSTED. This repository is PRIVATE, and Mend's hosted Renovate app is free for public
-# repositories. Running the CLI here needs no third-party access to the code and no plan; the cost
-# is that this file exists and that the token below has to be provisioned by a person.
+# WHY SELF-HOSTED. Running the CLI here installs no third-party app with write access to the
+# repository, and every run's log is in this repository's Actions. The cost is that this file exists
+# and that the token below has to be provisioned by a person.
 #
 # IT DOES NOTHING UNTIL `RENOVATE_TOKEN` IS SET, and that is stated loudly rather than left to be
 # discovered. A scheduled workflow that fails silently every Monday is worse than no workflow: the
