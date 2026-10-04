@@ -125,7 +125,10 @@ class ColdArchiveBacklog(unittest.TestCase):
         false, no frontier. A row at all proves it, because this lane has no historian to read.
         """
         with self.conn.cursor() as cur:
-            cur.execute(f"SELECT enabled, oldest_unexported, overdue_seconds FROM {STATE_FN};")
+            cur.execute(
+                "SELECT enabled, oldest_unexported, overdue_seconds "
+                "FROM public.cold_archive_backlog_state();"
+            )
             rows = cur.fetchall()
         self.assertEqual(
             rows, [(False, None, None)],
