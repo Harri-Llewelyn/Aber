@@ -1853,10 +1853,9 @@ from the ConfigMap, re-hashes the platform principals and the plugin's admin fro
 (so rotating one in values reaches the broker on the next restart), keeps every gateway client
 exactly as stored, and refuses to write a document that would lose one.
 
-`mosquitto-passwords` is still a Secret, for two things only: the playback delivery file (`0078`),
-and a `password_file` left by a release from before the plugin, which the initContainer imports
-once — every appliance's password intact — and leaves in place. It is created empty on first
-install and preserved thereafter (`resource-policy: keep` plus a `lookup` through a re-render).
+`mosquitto-passwords` is still a Secret, for one thing only: the playback delivery file. It is
+created empty on first install and preserved thereafter (`resource-policy: keep` plus a `lookup`
+through a re-render).
 
 > **There is no shared broker account.** One credential holding `readwrite spBv1.0/#` could forge
 > `DBIRTH`/`DDATA` for any machine on the site, which `verify_gateway_binding()` cannot detect for

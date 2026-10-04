@@ -121,9 +121,8 @@ spec:
         {{- end }}
         # ONE KEY OUT OF THE BROKER'S CREDENTIAL SECRET, named explicitly.
         #
-        # `items` is what keeps this honest: that Secret also holds `password_file`, every gateway's
-        # hashed broker password, and mounting it whole would hand the replay worker the broker's
-        # account file. Naming the one key means a future key added there is not silently exposed.
+        # `items` is what keeps this honest: naming the one key means a key added to that Secret
+        # later is not silently exposed to the replay worker.
         #
         # THE KEY SHARING IS AN RBAC DECISION. gateway-credential's Role grants `patch` on exactly
         # one Secret by name; a separate Secret for delivery would widen the authority of the

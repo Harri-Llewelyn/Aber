@@ -10,11 +10,11 @@
  *
  * The document the broker boots on is written by the real boot reconcile
  * (scripts/mosquitto-dynsec-init.mjs) in the credential service's image, from the repository's
- * roles, the environment and a seeded legacy password file, so the import, the hash transplant and
- * a second idempotent run are exercised. The plugin's control API is then driven through
- * mosquitto_rr the way the credential service drives it: issue, re-issue, disable, re-enable, with
- * a live session held across the two that drop one. The TLS listener is checked when a certificate
- * can be produced.
+ * roles, the environment and a seeded stored document, so the reconcile of stored clients, the
+ * hash transplant and a second idempotent run are exercised. The plugin's control API is then
+ * driven through mosquitto_rr the way the credential service drives it: issue, re-issue, disable,
+ * re-enable, with a live session held across the two that drop one. The TLS listener is checked
+ * when a certificate can be produced.
  *
  * Requires Docker, and skips with a clear message without it.
  *
@@ -29,7 +29,10 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { assertOk, isRefusal, issueWithControl, summariseInventory } from './lib/mosquitto-dynsec.mjs';
+import { hashArgvForUsername } from './lib/mosquitto-credentials.mjs';
+import {
+  assertOk, clientFromPasswordEntry, isRefusal, issueWithControl, summariseInventory,
+} from './lib/mosquitto-dynsec.mjs';
 import { controlSender } from './lib/mosquitto-control.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -76,16 +79,15 @@ if (docker(['image', 'inspect', IMAGE]).status !== 0) {
 const work = mkdtempSync(join(tmpdir(), 'fp-broker-'));
 const cfg = join(work, 'cfg');
 const dynsecDir = join(work, 'dynsec');
-const legacyDir = join(work, 'legacy');
 const brokenDir = join(work, 'broken');
-for (const d of [cfg, dynsecDir, legacyDir, brokenDir]) mkdirSync(d, { recursive: true });
+for (const d of [cfg, dynsecDir, brokenDir]) mkdirSync(d, { recursive: true });
 
 /**
  * The principals of the test broker. GATEWAY_A is the platform's validator gateway and arrives
- * from the environment; GATEWAY_B and `probe` arrive through the legacy password file the reconcile
- * imports; GATEWAY_C is issued over the control API. GATEWAY_B is not a real gateway: it exists so
- * "a gateway cannot publish under another edge node" is testable, the forgery
- * `verify_gateway_binding()` cannot detect. `probe` matches no role and must reach nothing.
+ * from the environment; GATEWAY_B and `probe` are clients already in the stored document the
+ * reconcile starts from; GATEWAY_C is issued over the control API. GATEWAY_B is not a real
+ * gateway: it exists so "a gateway cannot publish under another edge node" is testable, the
+ * forgery `verify_gateway_binding()` cannot detect. `probe` matches no role and must reach nothing.
  */
 const GATEWAY_A = 'gwy100000000000400080000';
 const GATEWAY_B = 'gwy999999999999999999999';
@@ -100,7 +102,6 @@ const ACCOUNTS = {
   [GATEWAY_B]: 'gateway-b-secret-0001',
   probe: 'probe-secret-00000001',
 };
-const IMPORTED = [GATEWAY_B, 'probe'];
 
 /**
  * The Sparkplug primary host id this check reconciles against, and a second one it never grants.
@@ -124,7 +125,6 @@ const EXPECTED_CLIENTS = Object.keys(ACCOUNTS).sort();
 const INIT_ENV = {
   DYNSEC_FILE: '/out/dynamic-security.json',
   DYNSEC_POLICY_FILE: '/policy/dynsec-roles.json',
-  LEGACY_PASSWORD_FILE: '/legacy/password_file',
   DYNSEC_REQUIRED_PRINCIPALS: 'INGESTION I3X VALIDATOR MONITOR',
   MQTT_DYNSEC_ADMIN_USER: ADMIN,
   MQTT_DYNSEC_ADMIN_PASSWORD: ACCOUNTS[ADMIN],
@@ -146,19 +146,28 @@ const INIT_ENV = {
 
 /**
  * Run the real reconcile in the credential service's image, as the chart does before the broker
- * starts. `outDir` is where the document lands; `preamble` runs first in the same shell.
+ * starts. `outDir` holds the stored document and is where the reconciled one lands.
  */
-function runInit({ outDir = dynsecDir, preamble = '' } = {}) {
+function runInit({ outDir = dynsecDir } = {}) {
   const args = ['run', '--rm'];
   for (const [k, v] of Object.entries(INIT_ENV)) args.push('-e', `${k}=${v}`);
   args.push(
     '-v', `${outDir}:/out`,
-    '-v', `${legacyDir}:/legacy`,
     '-v', `${join(REPO, 'scripts')}:/scripts:ro`,
     '-v', `${join(REPO, 'mosquitto', 'dynsec-roles.json')}:/policy/dynsec-roles.json:ro`,
-    CREDENTIAL_IMAGE, 'sh', '-c', `${preamble}exec node /scripts/mosquitto-dynsec-init.mjs`,
+    CREDENTIAL_IMAGE, 'sh', '-c', 'exec node /scripts/mosquitto-dynsec-init.mjs',
   );
   return docker(args);
+}
+
+/**
+ * One client as the stored document holds it: hashed by the image's own mosquitto_passwd, the way
+ * the reconcile and the credential service hash, and transplanted into the plugin's fields.
+ */
+function storedClient(username, roles) {
+  const r = docker(['run', '--rm', CREDENTIAL_IMAGE, '/bin/sh', ...hashArgvForUsername(username, ACCOUNTS[username])]);
+  if (r.status !== 0) throw new Error(`mosquitto_passwd failed for '${username}': ${(r.stderr || '').trim()}`);
+  return clientFromPasswordEntry(r.stdout.trim(), roles);
 }
 
 /**
@@ -242,17 +251,23 @@ const refusedConnect = (result) => /not authorised|Connection Refused/i.test(res
 
 try {
   // 0. The boot reconcile writes the document the broker will start on. This is the real script in
-  // the real image, so the import of a legacy password file, the transplant of mosquitto_passwd's
-  // hash and the file's ownership are what the deployment will do, not a model of it.
+  // the real image, so the reconcile of a stored document, the transplant of mosquitto_passwd's hash
+  // and the file's ownership are what the deployment will do, not a model of it.
   {
     const build = docker(['build', '-q', '-t', CREDENTIAL_IMAGE, join(REPO, 'gateway-credential')]);
     if (build.status !== 0) {
       throw new Error(`could not build gateway-credential/Dockerfile: ${(build.stderr || '').trim().slice(0, 300)}`);
     }
 
-    const seed = IMPORTED.map((u, i) =>
-      `mosquitto_passwd -b ${i === 0 ? '-c ' : ''}/legacy/password_file ${u} ${ACCOUNTS[u]} && `).join('');
-    const first = runInit({ preamble: seed });
+    // The stored document every boot after the first starts from. GATEWAY_B holds only the shared
+    // role, so the reconcile must add its own; `probe` holds none and must be kept as it is.
+    const stored = {
+      clients: [storedClient(GATEWAY_B, ['gateway']), storedClient('probe', [])],
+      roles: [],
+      groups: [],
+    };
+    writeFileSync(join(dynsecDir, 'dynamic-security.json'), JSON.stringify(stored, null, '\t'));
+    const first = runInit();
     if (first.status !== 0) {
       throw new Error(`scripts/mosquitto-dynsec-init.mjs failed on first boot:\n         ${(first.stderr || first.stdout || '').trim().slice(0, 600)}`);
     }
@@ -261,20 +276,20 @@ try {
     const doc = readDocument();
     const names = doc.clients.map((c) => c.username).sort();
     if (JSON.stringify(names) === JSON.stringify(EXPECTED_CLIENTS)) {
-      ok.push('the reconcile writes the admin, every platform principal and every imported account');
+      ok.push('the reconcile writes the admin, every platform principal and every stored client');
     } else {
       problems.push(`the reconciled document holds ${names.join(', ')}; expected ${EXPECTED_CLIENTS.join(', ')}`);
     }
     const rolesOf = (u) => (doc.clients.find((c) => c.username === u)?.roles || []).map((r) => r.rolename).sort();
     if (JSON.stringify(rolesOf(GATEWAY_B)) === JSON.stringify(['gateway', `gateway-${GATEWAY_B}`].sort())) {
-      ok.push('an imported gateway account holds the shared role and its own');
+      ok.push('a stored gateway client is given its own role beside the shared one, once each');
     } else {
-      problems.push(`imported gateway ${GATEWAY_B} holds roles ${rolesOf(GATEWAY_B).join(', ') || '(none)'}`);
+      problems.push(`stored gateway ${GATEWAY_B} holds roles ${rolesOf(GATEWAY_B).join(', ') || '(none)'}`);
     }
     if (rolesOf('probe').length === 0) {
-      ok.push('an imported account matching no principal holds no role');
+      ok.push('a stored client matching no principal is kept with no role');
     } else {
-      problems.push(`imported account 'probe' was given roles ${rolesOf('probe').join(', ')}`);
+      problems.push(`stored client 'probe' was given roles ${rolesOf('probe').join(', ')}`);
     }
     if (doc.clients.every((c) => typeof c.salt === 'string' && Number.isInteger(c.iterations))) {
       ok.push('every stored client is a PBKDF2 hash with its salt and iterations, never a password');
@@ -286,13 +301,8 @@ try {
     } else {
       problems.push('defaultACLAccess must deny receive and subscribe; mosquitto_ctrl init writes receive: true and that is rejected here');
     }
-    if (existsSync(join(legacyDir, 'password_file.imported')) && !existsSync(join(legacyDir, 'password_file'))) {
-      ok.push('the legacy password file is renamed .imported once its accounts are in the document');
-    } else {
-      problems.push('the legacy password file was not renamed to password_file.imported after import');
-    }
 
-    // The second boot: the document exists, so nothing is imported and nothing is lost.
+    // The second boot replays onto the document the first wrote: nothing is lost or duplicated.
     const second = runInit();
     const again = second.status === 0 ? readDocument() : null;
     if (again && JSON.stringify(again.clients.map((c) => c.username).sort()) === JSON.stringify(EXPECTED_CLIENTS)) {
@@ -353,7 +363,7 @@ try {
         '-t', 'spBv1.0/Aber/DDATA/probe/dev1', '-m', 'x'
       ]);
       if (authed.status === 0) {
-        ok.push('1883 accepts a client whose hash was transplanted from a password file');
+        ok.push('1883 accepts a stored client whose hash mosquitto_passwd wrote');
       } else {
         problems.push(
           `a client WITH valid credentials was refused on 1883: ${(authed.stderr || '').trim()}`
@@ -401,17 +411,17 @@ try {
         false
       );
       expect(
-        'an imported gateway account is confined exactly as an issued one',
+        'a stored gateway client is confined exactly as an issued one',
         (delivers(GATEWAY_B, `spBv1.0/Aber/DDATA/${GATEWAY_B}/dev1`)),
         true
       );
       expect(
-        'an imported account with no role authenticates and reaches nothing (publish)',
+        'a stored client with no role authenticates and reaches nothing (publish)',
         (delivers('probe', 'spBv1.0/Aber/DDATA/probe/dev1')),
         false
       );
       expect(
-        'an imported account with no role authenticates and reaches nothing (subscribe)',
+        'a stored client with no role authenticates and reaches nothing (subscribe)',
         (delivers('aber_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_A}`, 'probe', 'spBv1.0/#')),
         false
       );

@@ -785,10 +785,8 @@ mosquitto:
     storageClass: ""
     # A claim you manage yourself, in place of the one the chart creates.
     existingClaim: ""
-  # The Secret the credential service patches: the playback delivery file (0078), read by
-  # playback through its own projection, and a `password_file` left by a release from before
-  # the plugin, which the broker's initContainer imports once. Created empty if absent and never
-  # overwritten.
+  # The Secret the credential service patches: the playback delivery file, read by playback
+  # through its own projection. Created empty if absent and never overwritten.
   credentials:
     secretName: mosquitto-passwords
   # MQTTS on 8883. Off by default: needs cert-manager and a ClusterIssuer the chart cannot

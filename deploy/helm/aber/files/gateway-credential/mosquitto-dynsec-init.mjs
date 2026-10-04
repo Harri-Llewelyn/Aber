@@ -2,16 +2,14 @@
 // Writes the broker's Dynamic Security document before the broker starts, as its assemble-config
 // initContainer on the credential service's image (node plus the broker's own mosquitto_passwd). It
 // reconciles the stored document with the repository's roles and the platform principals from the
-// environment, imports a legacy password file when there is no document yet, and refuses to write
-// anything that would lose a client. mosquitto/README.md states the rules; lib/mosquitto-dynsec.mjs
-// implements them.
+// environment, and refuses to write anything that would lose a client. mosquitto/README.md states
+// the rules; lib/mosquitto-dynsec.mjs implements them.
 //
 // Environment:
 //   DYNSEC_FILE                  the document (default /mosquitto/data/dynamic-security.json)
 //   DYNSEC_POLICY_FILE           the roles (default /policy/dynsec-roles.json)
 //   PRIMARY_HOST_ID              required; the ingestion role is granted write on spBv1.0/STATE/<id>
 //   DIRECTORY_MQTT_TOPIC_PREFIX  required; the ingestion role is granted <prefix>/#
-//   LEGACY_PASSWORD_FILE         imported when DYNSEC_FILE does not exist (default none)
 //   DYNSEC_REQUIRED_PRINCIPALS   space-separated env names that must carry a password; MONITOR always
 //   MQTT_DYNSEC_ADMIN_USER / MQTT_DYNSEC_ADMIN_PASSWORD   the credential service's account, required
 //   MQTT_<NAME>_USER / MQTT_<NAME>_PASSWORD               one pair per PLATFORM_PRINCIPALS entry
@@ -29,7 +27,6 @@ import {
   PLATFORM_PRINCIPALS,
   clientFromPasswordEntry,
   directoryTopicFilter,
-  importPasswordFile,
   primaryHostStateTopic,
   reconcile,
   rolesFor,
@@ -45,7 +42,6 @@ const fail = (message) => {
 
 const FILE = process.env.DYNSEC_FILE || DYNSEC_FILE;
 const POLICY_FILE = process.env.DYNSEC_POLICY_FILE || '/policy/dynsec-roles.json';
-const LEGACY_FILE = process.env.LEGACY_PASSWORD_FILE || '';
 const BROKER_UID = Number.parseInt(process.env.MQTT_BROKER_UID || '1883', 10);
 const REQUIRED = new Set(['MONITOR', ...(process.env.DYNSEC_REQUIRED_PRINCIPALS || '').split(/\s+/).filter(Boolean)]);
 
@@ -114,7 +110,6 @@ function main() {
   }
   // The managed clients: the admin, then each platform principal that has a password.
   const managed = [hashed(adminUser, adminPassword, [ADMIN_ROLE])];
-  const platformRoles = new Map();
 
   for (const { env, role } of PLATFORM_PRINCIPALS) {
     const username = process.env[`MQTT_${env}_USER`] || '';
@@ -125,7 +120,6 @@ function main() {
         + 'lowercase hex characters: the broker confines the account to spBv1.0/+/+/<username>/# and '
         + 'verify_gateway_binding() requires that segment to be the gateway row\'s generated id.');
     }
-    platformRoles.set(username, role);
     if (!password) {
       if (REQUIRED.has(env)) {
         fail(`MQTT_${env}_PASSWORD is empty. `
@@ -139,9 +133,8 @@ function main() {
     managed.push(hashed(username, password, rolesFor(role, username).map((r) => r.rolename)));
   }
 
-  // The stored document, or a legacy password file, or nothing.
+  // The stored document, or nothing.
   let existing = null;
-  let imported = null;
   if (existsSync(FILE)) {
     try {
       existing = JSON.parse(readFileSync(FILE, 'utf8'));
@@ -150,17 +143,6 @@ function main() {
         + 'credentials; repair or move the file by hand.');
     }
     log(`reconciling ${FILE} (${(existing.clients || []).length} client(s) stored)`);
-  } else if (LEGACY_FILE && existsSync(LEGACY_FILE)) {
-    const result = importPasswordFile(readFileSync(LEGACY_FILE, 'utf8'), platformRoles);
-    existing = { clients: result.clients, roles: [], groups: [] };
-    imported = result;
-    log(`no ${FILE}; importing ${result.clients.length} account(s) from ${LEGACY_FILE}`);
-    if (result.unassigned.length) {
-      log(`imported with NO ROLE (they authenticate and reach nothing): ${result.unassigned.join(', ')}`);
-    }
-    if (result.malformed.length) {
-      log(`NOT imported, malformed: ${result.malformed.join(', ')}`);
-    }
   } else {
     log(`no ${FILE}; starting from the policy and the environment`);
   }
@@ -187,15 +169,6 @@ function main() {
   }
   chmodSync(tmp, 0o600);
   renameSync(tmp, FILE);
-
-  if (imported) {
-    try {
-      renameSync(LEGACY_FILE, `${LEGACY_FILE}.imported`);
-      log(`renamed ${LEGACY_FILE} to ${LEGACY_FILE}.imported`);
-    } catch (err) {
-      log(`imported, but could not rename ${LEGACY_FILE}: ${err.message}`);
-    }
-  }
 
   log(
     `wrote ${FILE}: ${config.clients.length} client(s), ${config.roles.length} role(s); `

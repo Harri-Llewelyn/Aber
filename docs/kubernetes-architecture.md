@@ -647,8 +647,7 @@ listed there):
   runs `scripts/mosquitto-dynsec-init.mjs` on every start: the roles from the ConfigMap replace the
   stored ones, the platform principals and the plugin's admin are re-hashed from `secrets.mqtt*`
   with the broker's own `mosquitto_passwd`, every gateway client is kept as stored, and a document
-  that would lose a client is refused. A `password_file` in the `mosquitto-passwords` Secret from
-  a release before the plugin is imported on the first start, hashes transplanted intact.
+  that would lose a client is refused.
 - The credential service is a sidecar dialling loopback, sending one plugin command per
   `mosquitto_rr` request as an admin whose role reaches `$CONTROL/dynamic-security/#` only. Three
   verbs: issue, disable, list. Its Role on the API server is `get`/`patch` on one Secret, for the
