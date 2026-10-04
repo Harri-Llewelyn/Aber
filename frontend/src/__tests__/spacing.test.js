@@ -13,7 +13,7 @@ const SRC = path.resolve(__dirname, '..')
 const APP_CSS = fs.readFileSync(path.join(SRC, 'App.css'), 'utf8')
 
 const rule = (selector) =>
-  APP_CSS.match(new RegExp(`\\n${selector.replace(/[.\-+>[\]"=()]/g, '\\$&')} \\{([\\s\\S]*?)\\n\\}`))?.[1]
+  APP_CSS.match(new RegExp(`\\n${selector.replace(/[.*+?^$(){}|[\]\\\->"=]/g, '\\$&')} \\{([\\s\\S]*?)\\n\\}`))?.[1]
 
 const root = APP_CSS.match(/:root, \[data-theme="dark"\] \{([\s\S]*?)\n\}/)[1]
 const token = (name) => Number(root.match(new RegExp(`${name}:\\s*(\\d+)px`))[1])
