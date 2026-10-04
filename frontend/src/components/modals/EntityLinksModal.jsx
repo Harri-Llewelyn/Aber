@@ -67,15 +67,22 @@ const TAG_HINTS = {
   other:             'Anything else with a URL',
 }
 
+// The badge names the site by the link's host, so a path or query that merely mentions a domain
+// cannot borrow its badge. Links are always http(s), which the form requires.
+function linkHost(url) {
+  try { return new URL(url).hostname.toLowerCase() } catch { return '' }
+}
+const onDomain = (host, domain) => host === domain || host.endsWith(`.${domain}`)
+
 function getDomainBadgeIcon(url = '') {
-  const lower = url.toLowerCase()
-  if (lower.includes('sharepoint.com')) {
+  const host = linkHost(url)
+  if (onDomain(host, 'sharepoint.com')) {
     return <Badge tone="brand" brand="sharepoint" size="sm" icon={<IconSharePoint size={12} />}>SharePoint</Badge>
   }
-  if (lower.includes('drive.google.com') || lower.includes('docs.google.com')) {
+  if (host === 'drive.google.com' || host === 'docs.google.com') {
     return <Badge tone="brand" brand="drive" size="sm" icon={<IconDrive size={12} />}>Google Drive</Badge>
   }
-  if (lower.includes('github.com')) {
+  if (onDomain(host, 'github.com')) {
     return <Badge size="sm" icon={<IconGithub size={12} />}>GitHub</Badge>
   }
   return <Badge size="sm" icon={<IconGlobe size={12} />}>External Link</Badge>

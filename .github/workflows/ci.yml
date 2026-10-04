@@ -15,6 +15,10 @@ concurrency:
   group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: true
 
+# Every job reads the repository and writes nothing back to it.
+permissions:
+  contents: read
+
 jobs:
   # Which paths changed. A job-level filter, not `paths-ignore` on the trigger: the cheap jobs run
   # on everything, only the end-to-end stack is gated. Fails open (a range it cannot compute

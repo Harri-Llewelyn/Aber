@@ -76,7 +76,7 @@ function tokenMatches(presented) {
 
 function authorised(req) {
   const header = req.headers.authorization || '';
-  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+  const match = /^Bearer\s+(\S+)$/i.exec(header.trim());
   return match ? tokenMatches(match[1]) : false;
 }
 

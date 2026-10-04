@@ -10,7 +10,7 @@ import path from 'node:path'
 const SRC = path.resolve(__dirname, '..')
 const APP_CSS = fs.readFileSync(path.join(SRC, 'App.css'), 'utf8')
 
-const esc = (s) => s.replace(/[.\-+>[\]"=()*:]/g, '\\$&')
+const esc = (s) => s.replace(/[.*+?^$(){}|[\]\\\->"=:]/g, '\\$&')
 const rule = (selector) => APP_CSS.match(new RegExp(`\\n${esc(selector)} \\{([\\s\\S]*?)\\n\\}`))?.[1]
 const inline = (selector) => APP_CSS.match(new RegExp(`\\n${esc(selector)} \\{([^}]*)\\}`))?.[1]
 const root = APP_CSS.match(/:root, \[data-theme="dark"\] \{([\s\S]*?)\n\}/)[1]

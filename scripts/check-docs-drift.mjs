@@ -378,7 +378,7 @@ const chartPins = new Map();
     const sql = read(f);
     // The right-hand side runs to the statement's `;`. A bare literal starts with a quote; an
     // expression (`format(...)`, a text variable) is already typed and resolves correctly.
-    for (const m of sql.matchAll(/:=\s*v_problems\s*\|\|\s*('(?:[^']|'')*'(?:\s*'(?:[^']|'')*')*)\s*(;|::)/g)) {
+    for (const m of sql.matchAll(/:=\s*v_problems\s*\|\|\s*('(?:[^']|'')*'(?:\s+'(?:[^']|'')*')*)\s*(;|::)/g)) {
       if (m[2] !== '::') offenders.push(`${f.replace('supabase/migrations/', '')}`);
     }
   }
@@ -2965,7 +2965,7 @@ function edgeFunctionNames() {
 
   const TOP = readdirSync(REPO, { withFileTypes: true })
     .filter((e) => e.isDirectory() && !['.git', 'node_modules'].includes(e.name))
-    .map((e) => e.name.replace(/\./g, '\\.'));
+    .map((e) => e.name.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&'));
   const REPO_PATH = new RegExp(String.raw`(?<![\w./@:$~-])((?:\.{1,2}/)*(?:${TOP.join('|')})/[\w.@/-]*)`, 'g');
   const SCRIPT_PATH = /((?:\.{1,2}\/)*(?:[\w.-]+\/)*scripts\/[\w.-]+\.(?:mjs|js|sh|py))/g;
 
