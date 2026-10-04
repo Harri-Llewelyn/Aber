@@ -30,6 +30,9 @@ RUN deno cache --frozen */index.ts
 
 FROM supabase/edge-runtime:v1.77.0 AS runtime
 
+# The base's Debian packages as of its build; the security updates published since come in here.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
+
 ENV DENO_DIR=/home/deno/deno-dir
 COPY --from=modules /deno-dir/npm /home/deno/deno-dir/npm
 COPY --from=modules /deno-dir/remote /home/deno/deno-dir/remote

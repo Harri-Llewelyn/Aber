@@ -84,8 +84,8 @@ files. [`upgrades.md`](upgrades.md#2-the-database-upgrades-itself-forwards-on-ev
 mechanism.
 
 **Nothing below 1.0.0 upgrades to it.** 0.1.0 and any install from a checkout before 1.0 reach it
-by reinstalling, with their data or without it; [`upgrades.md`](upgrades.md#the-floor-100) says
-which.
+by reinstalling, and no data is carried across; [`upgrades.md`](upgrades.md#the-floor-100) says
+why.
 
 **Skipping minors is supported. Rolling back is not.** The images can be rolled back and the schema
 cannot — there are no down-migrations. Take a backup before upgrading if a rollback is a real
