@@ -513,7 +513,7 @@ describe('the palette', () => {
        and a tablist besides -- so finding one has to land on its category, not on the page. */
     it('finds a setting by its label and opens the page on its category', async () => {
       api.get.mockResolvedValue([
-        { key: 'site.name', label: 'Site name', category: 'Site', value: 'AMRC Cymru', value_type: 'string' },
+        { key: 'site.name', label: 'Site name', category: 'Site', value: 'Broughton Works', value_type: 'string' },
         { key: 'alerts.retention_days', label: 'Alert history kept for (days)', category: 'Retention', value: 7, value_type: 'number' }
       ])
       const p = props()
