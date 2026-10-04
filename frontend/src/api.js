@@ -1848,8 +1848,8 @@ const apiMethods = {
       ]);
       if (error) throw error;
 
-      // The schemas attached through device_submodels, read from the `device_schemas` view so the
-      // fallback to the legacy 1:1 devices.schema_id is applied once, in SQL. Non-fatal:
+      // The schemas attached to each device, read from the `device_schemas` view so the choice
+      // between device_submodels rows and devices.schema_id is made once, in SQL. Non-fatal:
       // schemasForDevice() falls back to schema_id.
       const { data: links } = await supabase.from('device_schemas').select('device_id, schema_id');
       const schemasByDevice = new Map();

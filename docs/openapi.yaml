@@ -1036,9 +1036,10 @@ paths:
       tags: [Registry]
       summary: Schemas attached to a device
       description: |
-        Many schemas per device, one AAS Submodel each. **Prefer `device_schemas`** for
-        reading — it is the union of these rows and the legacy 1:1 `devices.schema_id`,
-        and is what the exporter and the frontend resolve through.
+        Many schemas per device, one AAS Submodel each, written through the API; the dashboard
+        attaches its one schema through `devices.schema_id`. **Prefer `device_schemas`** for
+        reading — it reads these rows, or `devices.schema_id` for a device that has none, and is
+        what the exporter and the frontend resolve through.
 
         The modelled metric set is the **union** across attachments. Judging a device against
         one schema flags it for publishing what another of its own submodels accounts for.
@@ -1082,9 +1083,10 @@ paths:
   /rest/v1/device_schemas:
     get:
       tags: [Registry]
-      summary: Resolved schema attachments (join rows plus the 1:1 fallback)
+      summary: Resolved schema attachments (join rows, or devices.schema_id)
       description: |
-        Read-only view. `source` says which arm supplied the row (`submodel` | `device`).
+        Read-only view. `source` says which arm supplied the row (`device_submodels` |
+        `devices.schema_id`).
         Read this rather than `device_submodels` unless you are writing attachments.
       parameters:
         - $ref: '#/components/parameters/Select'
@@ -3387,8 +3389,8 @@ paths:
         devices still attached, which is a migration that has not finished. `status` is returned
         so the caller can tell the two apart.
 
-        Members are read through the `device_schemas` **view**, so a device provisioned through
-        the legacy 1:1 `devices.schema_id` is reported alongside one carrying `device_submodels`
+        Members are read through the `device_schemas` **view**, so a device the dashboard
+        attached through `devices.schema_id` is reported alongside one carrying `device_submodels`
         rows. Each device reports its **full** schema set, not just this one. Archived devices are
         excluded; a schema nothing implements is `200` with an empty `devices` array, not `404`.
       security:
@@ -4016,7 +4018,7 @@ components:
           type: string
           format: uuid
           nullable: true
-          description: 'The legacy 1:1 attachment, RETAINED as the `device_schemas` fallback arm. New code writes `device_submodels`.'
+          description: 'The one schema the dashboard attaches. `device_submodels` holds further attachments written through the API; `device_schemas` reads both.'
         model_3d_path:
           type: string
           nullable: true
@@ -4126,7 +4128,7 @@ components:
         device_id: { type: string, format: uuid }
         schema_id: { type: string, format: uuid }
         submodel_key: { type: string, nullable: true }
-        source: { type: string, enum: [submodel, device], description: '`device` means the row came from the legacy `devices.schema_id` fallback.' }
+        source: { type: string, enum: [device_submodels, devices.schema_id], description: '`devices.schema_id` means the row is the dashboard''s attachment on a device with no `device_submodels` rows.' }
 
     TelemetryRow:
       type: object
@@ -4765,7 +4767,7 @@ components:
         schemas:
           type: array
           items: { type: string, format: uuid }
-          description: 'Resolved through the `device_schemas` view, so join rows and the legacy 1:1 column agree.'
+          description: 'Resolved through the `device_schemas` view, so join rows and `devices.schema_id` agree.'
 
     Link:
       type: object

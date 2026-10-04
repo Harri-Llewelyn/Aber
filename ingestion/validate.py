@@ -833,8 +833,8 @@ def seed_supabase():
     SEEDED["kpi_schema_uuid"] = k_res.data[0]["id"] if k_res.data else None
 
     if SEEDED.get("schema_uuid") and SEEDED.get("known_uuid"):
-        # devices.schema_id is still written: it is the fallback arm archived migration 0034 deliberately
-        # retains, and leaving it unset would mean the join table were the only thing under test.
+        # devices.schema_id is written as the dashboard writes it; leaving it unset would mean the
+        # join table were the only thing under test.
         supabase_client.table("devices").update(
             {"schema_id": SEEDED["schema_uuid"]}
         ).eq("id", SEEDED["known_uuid"]).execute()

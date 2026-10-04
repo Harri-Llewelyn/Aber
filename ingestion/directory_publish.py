@@ -166,11 +166,11 @@ def _attach_schemas(supabase, entries):
     """
     Fill in each entry's `schemas` from the `device_schemas` VIEW.
 
-    THE VIEW, NOT `device_submodels`. The view unions the join table with the legacy 1:1
-    `devices.schema_id`, and reading the join table alone would report "no schema" for every device
-    provisioned the old way -- which is exactly the population an unfinished migration leaves
-    behind. The edge function reads the view for the same reason, and the two answers have to agree
-    or the same device describes itself differently depending on which surface asked.
+    THE VIEW, NOT `device_submodels`. The view reads the join table and `devices.schema_id`, the
+    dashboard's attachment, and reading the join table alone would report "no schema" for every
+    device the dashboard attached. The edge function reads the view for the same reason, and the
+    two answers have to agree or the same device describes itself differently depending on which
+    surface asked.
 
     ONE query for the whole fleet, not one per device.
     """

@@ -2474,11 +2474,13 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    -- Counted BEFORE the delete, because the CASCADE is what removes them and it reports nothing.
-    -- A draft can be attached to a machine to try it out -- publish_schema_version() relies on
-    -- that being possible -- so this is a real number rather than always zero.
+    -- Counted BEFORE the delete, because the CASCADE and the SET NULL are what detach them and
+    -- neither reports anything. A draft can be attached to a machine to try it out, through either
+    -- arm, so this is a real number rather than always zero. A device on both arms counts once.
     SELECT count(*) INTO v_detached
-      FROM public.device_submodels WHERE schema_id = p_schema_id;
+      FROM (SELECT d.id FROM public.devices d WHERE d.schema_id = p_schema_id
+            UNION
+            SELECT ds.device_id FROM public.device_submodels ds WHERE ds.schema_id = p_schema_id) attached;
 
     -- Attributes the audit row this DELETE fires to the person who asked for it. SET LOCAL, so it
     -- is discarded at COMMIT and cannot bleed into the connection's next user.
@@ -2502,7 +2504,7 @@ ALTER FUNCTION public.discard_schema_draft(p_schema_id uuid) OWNER TO postgres;
 --
 
 -- FUNCTION discard_schema_draft(p_schema_id uuid) :: COMMENT
-COMMENT ON FUNCTION public.discard_schema_draft(p_schema_id uuid) IS 'Delete a draft schema version, returning it to the state before the fork. Refuses anything that is not a draft: devices.schema_id is ON DELETE SET NULL and device_submodels.schema_id is ON DELETE CASCADE, so deleting an active schema would silently detach every device bound to it. Returns the count of draft attachments the cascade removed.';
+COMMENT ON FUNCTION public.discard_schema_draft(p_schema_id uuid) IS 'Delete a draft schema version, returning it to the state before the fork. Refuses anything that is not a draft: devices.schema_id is ON DELETE SET NULL and device_submodels.schema_id is ON DELETE CASCADE, so deleting an active schema would silently detach every device bound to it. Returns the number of devices attached to the draft through either arm, each detached by the delete.';
 
 --
 
@@ -6215,7 +6217,7 @@ DECLARE
   parent           public.schemas%ROWTYPE;
   published        public.schemas%ROWTYPE;
   v_submodels      INTEGER := 0;
-  v_legacy         INTEGER := 0;
+  v_schema_ids     INTEGER := 0;
   v_merged         INTEGER := 0;
 BEGIN
   -- NARROWED BY 0087. This admitted the pair while the RLS write policies it is the transactional
@@ -6258,11 +6260,11 @@ BEGIN
     UPDATE public.device_submodels SET schema_id = draft.id WHERE schema_id = parent.id;
     GET DIAGNOSTICS v_submodels = ROW_COUNT;
 
-    -- The legacy 1:1 pointer moves too: `devices.schema_id` is the fallback arm of the
+    -- The dashboard's attachment moves too: `devices.schema_id` is the other arm of the
     -- `device_schemas` view. This UPDATE fires `log_audit_trail_event()`, so the rebinding lands in
     -- the audit trail per device.
     UPDATE public.devices SET schema_id = draft.id WHERE schema_id = parent.id;
-    GET DIAGNOSTICS v_legacy = ROW_COUNT;
+    GET DIAGNOSTICS v_schema_ids = ROW_COUNT;
 
     IF parent.status = 'active' THEN
       UPDATE public.schemas SET status = 'archived' WHERE id = parent.id;
@@ -6275,9 +6277,9 @@ BEGIN
     'schema', to_jsonb(published),
     'archived_schema_id', parent.id,
     'archived_schema_name', parent.schema_name,
-    'devices_rebound', v_submodels + v_legacy,
+    'devices_rebound', v_submodels + v_schema_ids,
     'submodels_rebound', v_submodels,
-    'legacy_pointers_rebound', v_legacy,
+    'schema_ids_rebound', v_schema_ids,
     'duplicate_submodels_removed', v_merged
   );
 END;
@@ -6289,7 +6291,7 @@ ALTER FUNCTION public.publish_schema_version(draft_schema_id uuid) OWNER TO post
 --
 
 -- FUNCTION publish_schema_version(draft_schema_id uuid) :: COMMENT
-COMMENT ON FUNCTION public.publish_schema_version(draft_schema_id uuid) IS 'Activates a draft version, archives its parent, and atomically repoints every device_submodels row and legacy devices.schema_id from the parent to it.';
+COMMENT ON FUNCTION public.publish_schema_version(draft_schema_id uuid) IS 'Activates a draft version, archives its parent, and atomically repoints every device_submodels row and devices.schema_id from the parent to it.';
 
 --
 
@@ -11293,7 +11295,7 @@ END $c$;
 --
 
 -- TABLE device_submodels :: COMMENT
-COMMENT ON TABLE public.device_submodels IS 'Schemas attached to a device, one AAS Submodel each. Supersedes the 1:1 devices.schema_id, which is retained as a fallback for devices with no rows here.';
+COMMENT ON TABLE public.device_submodels IS 'Submodel attachments written through the API, one AAS Submodel each. The dashboard attaches its one schema through devices.schema_id; device_schemas reads both.';
 
 --
 
@@ -11320,7 +11322,7 @@ ALTER VIEW public.device_schemas OWNER TO postgres;
 --
 
 -- VIEW device_schemas :: COMMENT
-COMMENT ON VIEW public.device_schemas IS 'Every schema attached to a device: device_submodels rows, plus the legacy devices.schema_id for devices that have none.';
+COMMENT ON VIEW public.device_schemas IS 'Every schema attached to a device: its device_submodels rows, or devices.schema_id (the dashboard''s attachment) for a device that has none.';
 
 --
 

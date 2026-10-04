@@ -2221,7 +2221,7 @@ class TestObjectsMatchTheirTypes(unittest.TestCase):
         ]
         rows["devices"][0]["schema_id"] = "s-semantic"
         rows["devices"][1]["schema_id"] = "s-local"
-        # The view's legacy arm: each device's devices.schema_id, since neither has submodels.
+        # The view's devices.schema_id arm, since neither device has submodels.
         rows["device_schemas"] = [
             {"device_id": "d-explicit", "schema_id": "s-semantic"},
             {"device_id": "d-inherits", "schema_id": "s-local"},
@@ -2606,7 +2606,7 @@ class TestMetricsAreComponentsOfTheirDevice(_MetricSpace):
 
 class TestDevicesAreTypedByEveryAttachedSchema(_MetricSpace):
     """
-    A device is typed by every schema the `device_schemas` view attaches, not by the legacy
+    A device is typed by every schema the `device_schemas` view attaches, not by
     `devices.schema_id` alone: one schema is its type; several are one synthesized `allOf` type per
     distinct set. `isExtended` is computed against their union.
     """

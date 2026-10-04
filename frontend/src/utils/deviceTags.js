@@ -52,7 +52,7 @@ export function hasUnmodelledMetrics(device, schemaOrSchemas) {
 
 /**
  * Every schema attached to a device. Reads `submodel_schema_ids` (the device_submodels join) and
- * falls back to the 1:1 `schema_id`. Returns [] rather than [null] when nothing is attached.
+ * falls back to `schema_id`, the dashboard's attachment. Returns [] rather than [null] when nothing is attached.
  */
 export function schemasForDevice(device, schemas) {
   const ids = Array.isArray(device?.submodel_schema_ids) && device.submodel_schema_ids.length > 0

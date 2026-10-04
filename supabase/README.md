@@ -929,7 +929,7 @@ holds them for every other writer, a Manager's PATCH included.
 | :--- | :--- |
 | `gateway_status` | `gateways` plus read-time `live_status` / `is_stale` (90 s threshold) |
 | `device_locations` | A device's effective cell: `COALESCE(device.cell_id, gateway.cell_id)` |
-| `device_schemas` | Union of `device_submodels` join rows, falling back to `devices.schema_id` |
+| `device_schemas` | A device's `device_submodels` rows, or its `devices.schema_id` (the dashboard's attachment) when it has none |
 | `telemetry` | `security_invoker` view over `timescale.telemetry`, a `postgres_fdw` foreign table |
 
 > The raw foreign table lives in its own `timescale` schema, deliberately kept out of
@@ -1027,7 +1027,7 @@ SELECT status FROM public.schemas WHERE id=parent  →  'archived'
 
 The direct write was refused and the RPC performed it. **This is not a cosmetic status flip**:
 publishing activates a draft, archives its predecessor and repoints every `device_submodels` row
-and the legacy `devices.schema_id` onto the new version, so it changes what ingestion judges every
+and `devices.schema_id` onto the new version, so it changes what ingestion judges every
 attached device against.
 
 **`fork_schema()` carried the same gate**, under a comment claiming *"Same allow-list as the RLS
@@ -3180,8 +3180,8 @@ holds, and the most useful case it answers is the one a filter would hide — an
 with devices still attached to it, which is a migration that has not finished. Answering `404`
 there would report "no such schema" about a schema whose members are the answer, so the row's
 `status` is returned instead and the caller decides. Members are read through the `device_schemas`
-**view**, not `device_submodels`, so a device provisioned through the legacy 1:1 `devices.schema_id`
-is not silently omitted — and those are exactly the devices an old schema still holds. A schema
+**view**, not `device_submodels`, so a device the dashboard attached through `devices.schema_id`
+is not silently omitted. A schema
 nothing implements is a `200` with an empty list.
 
 **What it does not claim.** Schema and service identifiers are this deployment's own UUIDs, and the
@@ -3422,7 +3422,7 @@ able to refuse a schema publication could block an Administrator-only decision i
 operator would read that refusal as the platform's answer.
 
 **The lane proposes an act, not a column edit.** Publishing activates the draft, archives its
-parent, repoints every `device_submodels` row and the legacy `devices.schema_id`, and drops the
+parent, repoints every `device_submodels` row and `devices.schema_id`, and drops the
 duplicate links that would collide — one transaction. A patch of `{"status": "active"}` would name
 one column write while the apply path did six other things, so the patch is `{"publish": true}` and
 `proposable_columns()` returns `publish` for this lane. Its contract is *the keys a patch may name*:
@@ -3535,8 +3535,8 @@ admitted an Administrator since the baseline, and that is precisely the problem:
 `devices.schema_id` is `ON DELETE SET NULL` and `device_submodels.schema_id` is `ON DELETE CASCADE`,
 so deleting an **active** schema silently detaches every device bound to it — no error, no warning,
 and the next conformance run reports every metric as unmodelled. `discard_schema_draft()` refuses
-anything whose status is not `draft`, and returns the number of device attachments the cascade
-removed rather than letting them disappear out of sight. The policy is unchanged; what the UI calls
+anything whose status is not `draft`, and returns the number of devices attached to the draft
+through either column rather than letting them disappear out of sight. The policy is unchanged; what the UI calls
 is now a door that cannot make that mistake.
 
 **A draft may legitimately have devices attached** — `publish_schema_version()` depends on that
@@ -3566,9 +3566,9 @@ would freeze. So `reject_archived_schema_assignment()` returns early on an `UPDA
 `schema_id` unchanged, and on a detach to `NULL`. What it refuses is an `INSERT` or an `UPDATE` that
 *arrives at* an archived schema.
 
-**Both arms, because a guard on one column is not a guard.** `device_schemas` unions
-`device_submodels` with the legacy 1:1 `devices.schema_id`; the trigger is on both tables, one
-function body switching on `TG_TABLE_NAME`.
+**Both arms, because a guard on one column is not a guard.** `device_schemas` reads
+`device_submodels` and `devices.schema_id`, the dashboard's attachment; the trigger is on both
+tables, one function body switching on `TG_TABLE_NAME`.
 
 **A draft is still assignable**, deliberately — attaching a draft to a real machine is how a version
 is tried before publishing, and `publish_schema_version()` already merges that state rather than

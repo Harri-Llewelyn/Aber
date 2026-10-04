@@ -656,7 +656,7 @@ class TestPublish(SchemaVersioningTestCase):
         self.assertEqual((published["version"], published["status"]), (2, "active"))
         self.assertEqual(result["archived_schema_id"], v1_id)
 
-    def test_publishing_rebinds_device_submodels_and_the_legacy_pointer(self):
+    def test_publishing_rebinds_device_submodels_and_devices_schema_id(self):
         v1_id, _, _, _ = self._seed_schema("TESTVER_Rebind")
         device_id = self._seed_device_on(v1_id, "REBIND")
         self._act_as(ADMIN_USER_ID, "Administrator")
@@ -673,14 +673,13 @@ class TestPublish(SchemaVersioningTestCase):
             "the submodel attachment must point at the newly published version",
         )
 
-        # The legacy 1:1 arm archived migration 0034 retains. A device provisioned only through it would
-        # otherwise stay pinned to an archived version and report the new version's metrics as
-        # Unmodelled.
+        # The dashboard's attachment. A device attached only through it would otherwise stay pinned
+        # to an archived version and report the new version's metrics as Unmodelled.
         self.cur.execute("SELECT schema_id::text FROM public.devices WHERE id = %s;", (device_id,))
         self.assertEqual(self.cur.fetchone()[0], v2["id"])
 
         self.assertEqual(result["submodels_rebound"], 1)
-        self.assertEqual(result["legacy_pointers_rebound"], 1)
+        self.assertEqual(result["schema_ids_rebound"], 1)
         self.assertEqual(result["devices_rebound"], 2)
 
     def test_publishing_resolves_a_device_attached_to_both_versions(self):
@@ -819,7 +818,7 @@ class TestTheRpcsDoNotGoAroundThePolicy(SchemaVersioningTestCase):
 
     Measured before the fix, in one transaction as a Manager: the direct `UPDATE public.schemas`
     was refused (0 rows) and `publish_schema_version()` then archived the parent anyway. That is
-    not a status flip -- publishing repoints every `device_submodels` row and the legacy
+    not a status flip -- publishing repoints every `device_submodels` row and
     `devices.schema_id` onto the new version, so it changes what ingestion judges each attached
     device against.
 
@@ -973,6 +972,46 @@ class TestDiscardingADraft(SchemaVersioningTestCase):
             message_contains="not found",
         )
         self.assertEqual(err.pgcode, "P0002")
+
+    def test_every_device_the_discard_detaches_is_counted_once(self):
+        """
+        The dashboard attaches through `devices.schema_id` and offers drafts in its picker. That
+        column is ON DELETE SET NULL, so a device attached there is detached by the discard as
+        surely as a `device_submodels` row is removed, and the count the page reports includes it.
+        A device attached both ways counts once.
+        """
+        v1_id, _, _, _ = self._seed_schema("TESTVER_Discard_Counted")
+        self._act_as(ADMIN_USER_ID, "Administrator")
+        draft = self._fork(v1_id, "tried on two machines")
+
+        self._act_as_owner()
+        self.cur.execute(
+            "INSERT INTO public.gateways (name) VALUES ('TESTVER_GW_DISCARD') RETURNING id::text;"
+        )
+        gateway_id = self.cur.fetchone()[0]
+        device_ids = []
+        for suffix in ("PICKER", "BOTH"):
+            self.cur.execute(
+                "INSERT INTO public.devices (name, gateway_id, schema_id) "
+                "VALUES (%s, %s, %s) RETURNING id::text;",
+                (f"TESTVER_DEV_DISCARD_{suffix}", gateway_id, draft["id"]),
+            )
+            device_ids.append(self.cur.fetchone()[0])
+        self.cur.execute(
+            "INSERT INTO public.device_submodels (device_id, schema_id) VALUES (%s, %s);",
+            (device_ids[1], draft["id"]),
+        )
+
+        self._act_as(ADMIN_USER_ID, "Administrator")
+        result = self._discard(draft["id"])
+        self.assertEqual(result["devices_detached"], 2)
+
+        self._act_as_owner()
+        self.cur.execute(
+            "SELECT count(*) FROM public.devices WHERE id = ANY(%s::uuid[]) AND schema_id IS NULL;",
+            (device_ids,),
+        )
+        self.assertEqual(self.cur.fetchone()[0], 2)
 
     def test_discarding_frees_the_lineage_for_a_new_fork(self):
         # The state the missing action created: forking is refused while a draft is open, so a

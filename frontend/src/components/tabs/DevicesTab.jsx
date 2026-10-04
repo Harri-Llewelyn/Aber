@@ -542,7 +542,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
 
     if (filterMode === 'active'   && a.is_archived) return false
     if (filterMode === 'archived' && !a.is_archived) return false
-    // Matches either the legacy 1:1 column or any attached submodel, so a device filtered by
+    // Matches either `devices.schema_id` or any attached submodel, so a device filtered by
     // schema is found however it was provisioned.
     if (schemaFilter && !schemasForDevice(a, schemas).some(s => s.schema_uuid === schemaFilter)) return false
     if (tagFilter && !deviceHasTag(a, schemasForDevice(a, schemas), tagFilter, latestFor(a), catalog)) return false
@@ -1493,7 +1493,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           },
           {
             // Resolved through schemasForDevice, not `selectedDevice.schema_id`: a schema arrives
-            // by either the 1:1 column or a `device_submodels` row (`submodel_schema_ids`). All of
+            // by either `devices.schema_id` or a `device_submodels` row (`submodel_schema_ids`). All of
             // them, since a device may carry several.
             label: 'Schema',
             value: (() => {

@@ -73,7 +73,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   useEffect(() => { load() }, [load])
 
   /**
-   * The devices provisioned against one exact schema version: submodels if any, else the 1:1
+   * The devices provisioned against one exact schema version: submodels if any, else
    * `schema_id`, the rule `schemasForDevice` applies from the other direction. The list, with the
    * count derived from it.
    */

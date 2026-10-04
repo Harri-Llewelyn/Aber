@@ -351,7 +351,7 @@ def _read_address_space(pg: PostgrestClient) -> dict:
                    "change_description"},
     )
     # Every schema attached to a device, as the dashboard, the AAS exporter and ingestion read it:
-    # device_submodels rows, else the legacy devices.schema_id.
+    # device_submodels rows, else devices.schema_id, the dashboard's attachment.
     attached = _read_relation(pg, "device_schemas", {"select": "device_id,schema_id"})
     # A metric's catalog row is its type on every device that carries it.
     catalog = _read_relation(
