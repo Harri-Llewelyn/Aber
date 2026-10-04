@@ -519,7 +519,7 @@ existingSecret.
 {{- range $field := list "mqttValidatorUser" -}}
 {{- $v := get $.Values.secrets $field -}}
 {{- if not (regexMatch "^gwy[0-9a-f]{21}$" $v) -}}
-{{- fail (printf "\n\naber: secrets.%s is %q, which is not a gateway sparkplug_id.\n\nIt must be 'gwy' followed by exactly 21 lowercase hex characters. The broker confines a gateway\naccount to `spBv1.0/+/+/<username>/#`, and ingestion's verify_gateway_binding() requires that same\ntopic segment to be the gateway row's GENERATED sparkplug_id -- so any other value AUTHENTICATES\nFINE and then has every published message silently dropped by the broker, with nothing logged at\neither end.\n\nThe id is derived from the row's pinned UUID: 'gwy' + the first 21 hex characters of it.\n  10000000-0000-4000-8000-000000000001 -> gwy100000000000400080000  (Virtual_Gateway_NodeRED)\n  11000000-0000-4000-8000-000000000001 -> gwy110000000000400080000  (validate.py's gateway)\n" $field $v) -}}
+{{- fail (printf "\n\naber: secrets.%s is %q, which is not a gateway sparkplug_id.\n\nIt must be 'gwy' followed by exactly 21 lowercase hex characters. The broker confines a gateway\naccount to `spBv1.0/+/+/<username>/#`, and ingestion's verify_gateway_binding() requires that same\ntopic segment to be the gateway row's GENERATED sparkplug_id -- so any other value AUTHENTICATES\nFINE and then has every published message silently dropped by the broker, with nothing logged at\neither end.\n\nThe id is derived from the row's pinned UUID: 'gwy' + the first 21 hex characters of it.\n  11000000-0000-4000-8000-000000000001 -> gwy110000000000400080000  (validate.py's gateway)\n" $field $v) -}}
 {{- end -}}
 {{- end -}}
 {{- if not .Values.secrets.mqttMonitorPassword -}}

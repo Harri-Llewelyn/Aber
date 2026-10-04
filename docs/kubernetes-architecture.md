@@ -939,8 +939,8 @@ Both targets must stay green.
 5. Run `ingestion/validate.py` **as a Job in the namespace** (§2.5), then
    `supabase/functions/aas-export/test_aas_export.py` the same way — ordered after `validate.py` so
    that a failed conformance run stops the export suite rather than being reported twice. Its
-   subject, `Sim_CNC_Mill_01`, is seeded by the migrations (`0002`, then `0020` for its schema and
-   IDTA nameplate), so it carries no data dependency on the first Job.
+   subject, `AAS_Conformance_Device`, is provisioned by the suite at pinned ids
+   (`test-harness/aas_fixture.py`), so it carries no data dependency on the first Job.
 6. Assert the Realtime WebSocket upgrade through the ingress — the same 101-status assertion the
    Compose job already makes, for the same reason (a healthy container behind a misconfigured
    gateway passes every other check). Make this one go through the **ingress**, not a

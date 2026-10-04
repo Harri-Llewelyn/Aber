@@ -769,9 +769,10 @@ kubectl -n aber logs job/aber-e2e-validate
 - **`validate.py`** — the same 20 checks `npm run dev:test` runs from the host. In-cluster it needs
   **no host or port overrides at all**: the Service names *are* the correct configuration.
 - **`test_aas_export.py`** — starts automatically once the first Job completes, ordered by an
-  initContainer inside the Job rather than by the order you run things. Its subject, `Sim_CNC_Mill_01`,
-  is **seeded** — registered by migration `0002` and given its schema and IDTA nameplate by `0020` —
-  so it needs no simulator to have published and no operator to have approved anything. The ordering
+  initContainer inside the Job rather than by the order you run things. Its subject,
+  `AAS_Conformance_Device`, is **provisioned by the suite** at pinned ids
+  (`test-harness/aas_fixture.py`), so it needs no simulator to have published and no operator to
+  have approved anything. The ordering
   is now only to avoid running a conformance suite against a stack whose conformance run failed.
   Note its live checks **skip themselves and report success** when the device is absent, which is
   why CI asserts on the absence of the skip line rather than on the Job's exit status.
