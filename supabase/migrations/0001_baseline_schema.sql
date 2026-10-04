@@ -385,7 +385,6 @@ BEGIN
         UPDATE public.devices
            SET name              = v_merged.name,
                description       = v_merged.description,
-               asset_type        = v_merged.asset_type,
                connection_method = v_merged.connection_method,
                cell_id           = v_merged.cell_id,
                area_id           = v_merged.area_id,
@@ -6026,7 +6025,7 @@ CREATE OR REPLACE FUNCTION public.proposable_columns(p_entity_type text) RETURNS
     -- `area_id` joins `cell_id` and `location_scope`: the three together say where an asset sits,
     -- and the table's CHECKs decide whether the triple is sayable, so one proposal can relocate.
     WHEN 'devices' THEN ARRAY[
-      'name', 'description', 'asset_type', 'connection_method',
+      'name', 'description', 'connection_method',
       'cell_id', 'area_id', 'location_scope', 'model_3d_path'
     ]
     WHEN 'device_nameplate' THEN ARRAY[
@@ -10822,7 +10821,6 @@ CREATE TABLE IF NOT EXISTS public.devices (
     is_archived boolean DEFAULT false,
     archived_at timestamp with time zone,
     auto_delete_at timestamp with time zone,
-    asset_type text,
     connection_method text,
     first_dbirth_at timestamp with time zone,
     schema_id uuid,
@@ -10864,7 +10862,6 @@ ALTER TABLE public.devices
     ADD COLUMN IF NOT EXISTS is_archived boolean DEFAULT false,
     ADD COLUMN IF NOT EXISTS archived_at timestamp with time zone,
     ADD COLUMN IF NOT EXISTS auto_delete_at timestamp with time zone,
-    ADD COLUMN IF NOT EXISTS asset_type text,
     ADD COLUMN IF NOT EXISTS connection_method text,
     ADD COLUMN IF NOT EXISTS first_dbirth_at timestamp with time zone,
     ADD COLUMN IF NOT EXISTS schema_id uuid,
@@ -10892,7 +10889,6 @@ ALTER TABLE public.devices
     ALTER COLUMN is_archived SET DEFAULT false,
     ALTER COLUMN archived_at DROP DEFAULT,
     ALTER COLUMN auto_delete_at DROP DEFAULT,
-    ALTER COLUMN asset_type DROP DEFAULT,
     ALTER COLUMN connection_method DROP DEFAULT,
     ALTER COLUMN first_dbirth_at DROP DEFAULT,
     ALTER COLUMN schema_id DROP DEFAULT,

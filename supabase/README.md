@@ -2148,9 +2148,9 @@ the more informative lane is silently unreachable. `device_locations` computes i
 `utils/cellResolution.js` mirrors it, with `check-mirror-drift.mjs` pinning the label list literally
 — adding a lane is a deliberate two-file change with a check that fails until both sides agree.
 
-**Neither lane is a row in `cells`.** A magic cell would put semantics in a free-text `name` — the
-trap `devices.asset_type` was retired for — and would make the lane a row anyone holding the cell
-permission can rename or delete, taking every host-run gateway out of its lane with it
+**Neither lane is a row in `cells`.** A magic cell would put semantics in a free-text `name` and
+would make the lane a row anyone holding the cell permission can rename or delete, taking every
+host-run gateway out of its lane with it
 (`gateways.cell_id` is `ON DELETE SET NULL` since `0112`; before that it deleted them outright).
 `unassigned` is already never stored; it is the `ELSE` arm, and these join it as labels rather than
 as data.

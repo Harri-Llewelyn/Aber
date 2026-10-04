@@ -93,7 +93,7 @@ const NOISE_FIELDS = new Set(['updated_at', 'last_heartbeat', 'last_seen'])
  * operational one. `asset_config` names the concept even though it is its own, unaudited, table.
  */
 const GOVERNANCE_FIELDS = new Set([
-  'schema_id', 'asset_config', 'asset_type', 'connection_method', 'grafana_url', 'access_url'
+  'schema_id', 'asset_config', 'connection_method', 'grafana_url', 'access_url'
 ])
 /* `identity_source` is deliberately absent: a device's first DBIRTH updates it alongside `status`,
    and it is provenance written by ingestion rather than operator configuration. `name` and `icon`

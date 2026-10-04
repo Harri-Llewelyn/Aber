@@ -137,7 +137,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [catalog, setCatalog] = useState([])
   // { device, metricNames } while the telemetry CSV export dialog is open.
   const [exportTelemetry, setExportTelemetry] = useState(null)
-  // No asset_type: classification is derived from the schema's metric groups (utils/deviceTags.js).
+  // A device's type is derived from its schema's metric groups (utils/deviceTags.js).
   // `cell_id` starts empty, meaning inherit from the gateway.
   const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_id: '', cell_id: '', area_id: '', location_scope: SCOPE_CELL })
   const [areas, setAreas]       = useState([])
@@ -328,8 +328,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
 
   const save = async () => {
     try {
-      // asset_type is deliberately not sent: omitting it leaves any legacy value intact
-      // (api.js only patches keys present in the body) rather than nulling it on every edit.
       const payload = {
         asset_name: form.asset_name,
         description: form.description || '',
@@ -948,7 +946,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                             const schema = schemasForDevice(a, schemas)
                             const tags = deviceTagList(a, schema, latestFor(a), catalog)
                             const extra = unmodelledMetrics(a, schema)
-                            if (tags.length === 0 && !a.asset_type) return '—'
+                            if (tags.length === 0) return '—'
 
                             // Collapsed past four: a tri-standard schema yields six or more tags.
                             // `priority` keeps Unmodelled visible, since deviceTagList() appends it
@@ -965,17 +963,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                               title: `This device's schema models ${tag}.* metrics`,
                               content: tag
                             })
-
-                            // Free-text classification from before types were derived. Shown so
-                            // the value is not silently lost, but nothing writes it now.
-                            if (a.asset_type) {
-                              entries.push({
-                                key: a.asset_type,
-                                className: 'cell-meta cell-legacy',
-                                title: 'Legacy free-text classification. Assign a schema to derive this instead.',
-                                content: a.asset_type
-                              })
-                            }
 
                             return <TagList limit={4} tags={entries}/>
                           })()}

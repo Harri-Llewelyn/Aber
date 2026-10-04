@@ -4026,14 +4026,6 @@ components:
             An object KEY in the `asset-3d-models` bucket, never a URL. A stored URL bakes in the
             origin of whichever stack uploaded it. The public URL is composed at read time from
             AAS_MODEL_PUBLIC_BASE. CHECK-constrained on the file extension.
-        asset_type:
-          type: string
-          nullable: true
-          deprecated: true
-          example: CNC
-          description: >-
-            Legacy free-text classification, no longer written. A device's type is derived from the
-            metric groups its attached schemas model. Existing values still display, marked legacy.
         connection_method: { type: string, nullable: true, example: Sparkplug B }
         shadow_of:
           type: string
@@ -4081,7 +4073,6 @@ components:
         schema_id: { type: string, format: uuid, nullable: true }
         model_3d_path: { type: string, nullable: true }
         connection_method: { type: string, nullable: true }
-        asset_type: { type: string, nullable: true, deprecated: true, description: Still accepted; the dashboard no longer sends it. }
         is_archived: { type: boolean }
 
     DeviceLocation:
