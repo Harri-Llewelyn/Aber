@@ -957,25 +957,12 @@ is that check, and *Verify what you are about to install* under **Install** is t
 
 Three consequences worth knowing before the first signed release:
 
-- **The transparency log is public and names this repository and this file**, whatever the
-  repository's visibility. A release signed while the repository is private publishes that it exists.
+- **The transparency log is public and names this repository and this file.**
 - **The GHCR package page shows an `unknown/unknown` platform** beside `linux/amd64`. That is the
   attestation manifest in the index, not a broken build.
 - **`ingestion` and `test-runner` are one `docker buildx bake` of [`docker-bake.hcl`](../../docker-bake.hcl)**:
   the second is `FROM` the first, and Bake's `target:` context hands one build's result to the other
   without a registry round-trip, on the driver the attestations need.
-
-### One-time: make the repository public
-
-Before the first public release, in this order:
-
-1. Scan a mirror clone of every ref for secrets, as
-   [`docs/static-analysis.md`](../../docs/static-analysis.md#before-the-repository-goes-public)
-   shows. Anything not already reviewed stops here until it is rotated.
-2. *Settings → General → Danger Zone → Change visibility → Public.*
-3. Turn on CodeQL default setup, Dependabot alerts (alerts only) and secret scanning with push
-   protection; the same page of `static-analysis.md` lists where each switch is and why Dependabot
-   opens no pull requests.
 
 ### One-time: make the packages public
 
@@ -983,7 +970,7 @@ Before the first public release, in this order:
 `GITHUB_TOKEN` cannot change it — package visibility is an account-level setting, not a repository
 one. So the first release publishes eleven packages that nobody else can pull, and the symptom on a
 consumer's machine is an authentication error on a repository that is public. The signatures and
-attestations live inside each image's package, so the flip covers them too.
+attestations live inside each image's package, so making the package public covers them too.
 
 After the first successful release, once per package:
 

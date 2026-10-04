@@ -13,13 +13,12 @@
 # the chart is signed with cosign, keyless: the signature is bound to this workflow's OIDC identity
 # (`id-token: write`), so there is no key to hold or leak, and a consumer verifies against the
 # identity `<repo>/.github/workflows/release.yml@refs/tags/v<version>`. The signing certificate is
-# recorded in Sigstore's public transparency log, which names this repository and this file -- a
-# release signed while the repository is private publishes that it exists. SECURITY.md says what a
-# consumer can check; .github/scripts/sign-and-verify.sh runs those same checks here, so a release
-# cannot report green with an artefact nothing signed or an image nothing attested. Every image is
-# scanned before it is pushed, on the policy image-scan.yml applies to the third-party ones. The
-# SBOMs are also attached to the GitHub Release as files, for the site that asks for one without a
-# registry client.
+# recorded in Sigstore's public transparency log, which names this repository and this file.
+# SECURITY.md says what a consumer can check; .github/scripts/sign-and-verify.sh runs those same
+# checks here, so a release cannot report green with an artefact nothing signed or an image nothing
+# attested. Every image is scanned before it is pushed, on the policy image-scan.yml applies to the
+# third-party ones. The SBOMs are also attached to the GitHub Release as files, for the site that
+# asks for one without a registry client.
 name: Release
 
 on:

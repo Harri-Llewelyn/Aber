@@ -759,11 +759,12 @@ pins, so an "upgrade" would move this stack *off* the tested combination. They
 are grouped into one pull request held for approval, as are all major bumps. Kong 3.0 is why:
 it silently switched off every per-service Prometheus metric while leaving the scrape target green.
 
-**Renovate is self-hosted because this repository is private**, and needs a `RENOVATE_TOKEN` secret
-(a PAT with `repo`, or fine-grained with Contents, Pull requests and Issues read/write). Without it
-the workflow fails on its first step by design — a scheduled job that silently does nothing leaves
-the repository looking as though drift is watched when it is not. `GITHUB_TOKEN` cannot be used:
-pull requests it opens trigger no workflow runs, so every bump would arrive with no CI result.
+**Renovate is self-hosted**, so no third-party app holds write access to the repository, and it
+needs a `RENOVATE_TOKEN` secret (a PAT with `repo`, or fine-grained with Contents, Pull requests and
+Issues read/write). Without it the workflow fails on its first step by design — a scheduled job that
+silently does nothing leaves the repository looking as though drift is watched when it is not.
+`GITHUB_TOKEN` cannot be used: pull requests it opens trigger no workflow runs, so every bump would
+arrive with no CI result.
 
 **The scan reports only *fixable* HIGH and CRITICAL findings.** An unfixed CVE in a base image is
 not something this repository can act on, and failing on it would train everyone to ignore the job.

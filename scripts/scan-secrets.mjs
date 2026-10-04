@@ -8,9 +8,8 @@
  *   node scripts/scan-secrets.mjs                 # history (--all) and uncommitted changes
  *   node scripts/scan-secrets.mjs --git-dir=PATH  # history of another clone, e.g. a mirror
  *
- * BEFORE THE REPOSITORY GOES PUBLIC, scan a mirror clone rather than this checkout: publishing
- * exposes every pull request's head (refs/pull/N/head), including branches deleted after merging,
- * and a normal clone does not fetch them.
+ * A MIRROR CLONE holds every ref GitHub serves, pull request heads (refs/pull/N/head) included,
+ * which a normal clone does not fetch. Scan one to check everything a visitor can fetch.
  *
  *   git clone --mirror https://github.com/Harri-Llewelyn/Aber.git /tmp/aber-mirror.git
  *   node scripts/scan-secrets.mjs --git-dir=/tmp/aber-mirror.git

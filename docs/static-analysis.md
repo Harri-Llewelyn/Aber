@@ -86,26 +86,24 @@ in [`test-harness/README.md`](../test-harness/README.md#what-the-databases-spend
 measured them against `pg_stat_statements` and `index_advisor`, and records which were acted on and
 why the rest stand. Repeat that run after a change to a hot path rather than trusting the INFO list.
 
-## Before the repository goes public
+## GitHub's own scans
 
-Publishing exposes every pull request's head, including branches deleted after they merged, and a
-normal clone does not fetch them. Scan a mirror clone immediately before the flip:
+Three of GitHub's scans cover ground the checks above also cover, continuously. They are set under
+*Settings → Advanced Security*:
+
+| Scan | Covers | Setting |
+| :--- | :--- | :--- |
+| CodeQL | `scan:source`, more deeply, for JavaScript, TypeScript, Python and the workflows | *Code scanning → CodeQL analysis*, default setup |
+| Dependabot alerts | `audit:deps`, continuously from GitHub's advisory database | *Dependabot alerts* on. *Dependabot security updates* and *version updates* are off: Renovate opens the upgrade pull requests, and a second bot would duplicate them |
+| Secret scanning | `scan:secrets`, on every push | *Secret Protection* and *Push protection* on |
+
+The CI jobs above stay. gitleaks reads formats GitHub does not recognise, such as this stack's own
+service tokens and the broker's Dynamic Security passwords.
+
+A normal clone does not fetch every ref GitHub serves. To scan everything a visitor can fetch,
+scan a mirror clone:
 
 ```bash
 git clone --mirror https://github.com/Harri-Llewelyn/Aber.git /tmp/aber-mirror.git
 node scripts/scan-secrets.mjs --git-dir=/tmp/aber-mirror.git
 ```
-
-A finding that is not in `.gitleaksignore` stops the flip until it is rotated.
-
-Three switches become free once the repository is public. Turn each on under *Settings → Code
-security*, straight after the flip:
-
-| Switch | Covers | Setting |
-| :--- | :--- | :--- |
-| CodeQL | `scan:source`, more deeply, for JavaScript, TypeScript and Python | *Code scanning → CodeQL analysis → Default setup* |
-| Dependabot alerts | `audit:deps`, continuously from GitHub's advisory database | *Dependabot alerts* on. Leave *Dependabot security updates* and *version updates* off: Renovate opens the upgrade pull requests, and a second bot would duplicate them |
-| Secret scanning | `scan:secrets`, on every push | *Secret scanning* and *Push protection* on |
-
-The CI jobs above stay. gitleaks reads formats GitHub does not recognise, such as this stack's own
-service tokens and the broker's Dynamic Security passwords.
