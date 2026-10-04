@@ -4,9 +4,11 @@ How far behind the cold archive is (0133).
 WHAT THIS SUITE CAN AND CANNOT SEE, stated first because it decides every assertion below. It runs
 against the Supabase database, and the backlog is computed from two FOREIGN tables on the historian.
 The db lane has no historian behind the FDW -- `0001` defaults the connection and the chain applies
-without one -- so `cold_archive_backlog_state()` here takes its "cannot be computed" path on every
-call. That is not a gap in the suite; it is the single most important state to pin, because it is
-the one the whole platform's alerting was briefly resting on.
+without one -- so with archiving on, `cold_archive_backlog_state()` here takes its "cannot be
+computed" path. That is not a gap in the suite; it is the single most important state to pin,
+because it is the one the whole platform's alerting was briefly resting on. The tests that need it
+turn archiving on inside their own transaction, which tearDown rolls back. With archiving off the
+function answers without reading the historian, and the missing historian is what proves it.
 
 THE REGRESSION THIS EXISTS FOR. `platform_health_rows()` is one UNION and postgres_fdw raises on
 CONNECT, not on scan. The first version of 0133 read the foreign tables directly in a new arm, so an
@@ -69,6 +71,12 @@ class ColdArchiveBacklog(unittest.TestCase):
         self.conn.rollback()
         self.conn.close()
 
+    def _archiving_on(self, cur):
+        cur.execute(
+            "UPDATE public.system_settings SET value = 'true'::jsonb WHERE key = 'archive.enabled';"
+        )
+        self.assertEqual(cur.rowcount, 1, "archive.enabled is not seeded")
+
     # -- the property the health view rests on ---------------------------------------------------
 
     def test_the_health_view_survives_an_unreachable_historian(self):
@@ -81,6 +89,7 @@ class ColdArchiveBacklog(unittest.TestCase):
         zero are among what comes back.
         """
         with self.conn.cursor() as cur:
+            self._archiving_on(cur)
             cur.execute("SELECT DISTINCT condition FROM public.platform_health_rows();")
             conditions = {row[0] for row in cur.fetchall()}
 
@@ -99,6 +108,7 @@ class ColdArchiveBacklog(unittest.TestCase):
         the alert rule would read it as healthy for as long as the historian stayed away.
         """
         with self.conn.cursor() as cur:
+            self._archiving_on(cur)
             cur.execute(
                 "SELECT count(*) FROM public.platform_health_rows() WHERE condition = 'archive_backlog';"
             )
@@ -107,6 +117,20 @@ class ColdArchiveBacklog(unittest.TestCase):
                 "archive_backlog was emitted although the historian is unreachable. With no "
                 "frontier to measure from, any value here is invented.",
             )
+
+    def test_with_archiving_off_the_historian_is_not_read(self):
+        """
+        Every platform_health alert query calls the state function, and the historian read behind
+        it costs a few hundred ms. Off is the default, so off must cost nothing: one row, enabled
+        false, no frontier. A row at all proves it, because this lane has no historian to read.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(f"SELECT enabled, oldest_unexported, overdue_seconds FROM {STATE_FN};")
+            rows = cur.fetchall()
+        self.assertEqual(
+            rows, [(False, None, None)],
+            "with archiving off the state function should answer from the settings alone",
+        )
 
     # -- the shape of the state function ----------------------------------------------------------
 

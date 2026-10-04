@@ -1911,16 +1911,28 @@ CREATE OR REPLACE FUNCTION public.cold_archive_backlog_state() RETURNS TABLE(ena
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO 'public', 'pg_catalog'
     AS $$
+DECLARE
+    v_enabled boolean;
+    v_threshold integer;
 BEGIN
+    SELECT coalesce(
+               (SELECT (s.value #>> '{}')::boolean
+                  FROM public.system_settings s WHERE s.key = 'archive.enabled'), false),
+           coalesce(
+               (SELECT (s.value #>> '{}')::integer
+                  FROM public.system_settings s WHERE s.key = 'archive.tier_after_days'), 90)
+      INTO v_enabled, v_threshold;
+
+    -- With archiving off there is no frontier to report, so the historian is not read: every
+    -- platform_health alert query calls this, and the fallback below costs a few hundred ms.
+    IF NOT v_enabled THEN
+        RETURN QUERY SELECT false, v_threshold, NULL::timestamptz, NULL::numeric, NULL::numeric;
+        RETURN;
+    END IF;
+
     RETURN QUERY
     WITH policy AS (
-        SELECT
-            coalesce(
-                (SELECT (value #>> '{}')::boolean
-                   FROM public.system_settings WHERE key = 'archive.enabled'), false) AS enabled,
-            coalesce(
-                (SELECT (value #>> '{}')::integer
-                   FROM public.system_settings WHERE key = 'archive.tier_after_days'), 90) AS threshold_days
+        SELECT true AS enabled, v_threshold AS threshold_days
     ),
     frontier AS (
         SELECT coalesce(
@@ -1963,7 +1975,7 @@ ALTER FUNCTION public.cold_archive_backlog_state() OWNER TO postgres;
 --
 
 -- FUNCTION cold_archive_backlog_state() :: COMMENT
-COMMENT ON FUNCTION public.cold_archive_backlog_state() IS 'How far the cold archive has fallen behind, measured from the newest verified range_end over the FDW. Internal: EXECUTE is revoked, and the two wrappers gate it for their own audience.';
+COMMENT ON FUNCTION public.cold_archive_backlog_state() IS 'How far the cold archive has fallen behind, measured from the newest verified range_end over the FDW. With archiving off it returns enabled = false and reads nothing from the historian. Internal: EXECUTE is revoked, and the two wrappers gate it for their own audience.';
 
 --
 
@@ -15334,6 +15346,11 @@ CREATE INDEX IF NOT EXISTS idx_devices_name ON public.devices USING btree (name)
 
 -- idx_devices_reported_identity :: INDEX
 CREATE INDEX IF NOT EXISTS idx_devices_reported_identity ON public.devices USING btree (reported_identity) WHERE (reported_identity IS NOT NULL);
+
+--
+
+-- idx_devices_shadow_of :: INDEX
+CREATE INDEX IF NOT EXISTS idx_devices_shadow_of ON public.devices USING btree (shadow_of) WHERE (shadow_of IS NOT NULL);
 
 --
 

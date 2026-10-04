@@ -86,7 +86,9 @@ aber_historian_storage:
   # `public.storage_footprint` is a point-in-time table read that Grafana already draws over
   # postgres_fdw (0027). Scraping it is what turns it into a GROWTH RATE -- the thing an operator
   # would actually alert on and the input `tier_after_days` should be chosen from, neither of which
-  # a table read can give.
+  # a table read can give. The view costs over 100 ms per read and moves over hours, so a
+  # scrape serves the last result for five minutes.
+  cache_seconds: 300
   query: |
     SELECT relation::text          AS relation,
            tier::text              AS tier,
@@ -115,7 +117,8 @@ aber_historian_compression:
   # A SEPARATE QUERY BECAUSE OF THE NULLs. `uncompressed_bytes` and `compressed_bytes` are null for
   # every relation that is not a compressed hypertable, and coalescing them to 0 would assert a
   # compression ratio of zero for a rollup that simply has no columnstore. Filtering instead means
-  # the series is ABSENT where it does not apply, which is the honest encoding.
+  # the series is ABSENT where it does not apply, which is the honest encoding. Cached as above.
+  cache_seconds: 300
   query: |
     SELECT relation::text              AS relation,
            uncompressed_bytes::bigint  AS uncompressed_bytes,
