@@ -121,50 +121,20 @@ class GatewayBindingTest(unittest.TestCase):
             ingestion.verify_gateway_binding(device_bound_to(None), GATEWAY_B["sparkplug_id"])
         )
 
-    def test_a_legacy_name_matched_device_is_still_bound(self):
+    def test_how_a_device_was_resolved_does_not_exempt_it(self):
         """
-        THE SPOOFING CASE AGAIN, BY THE ROUTE THAT USED TO WORK. This was an explicit exemption:
-        a device resolved by legacy `name` skipped the binding check outright.
-
-        The exemption's stated reason was that such a row "may predate any gateway assignment"
-        -- but an unassigned row is caught by the `gateway_id` branch, which returns before the
-        exemption is reached (see test_an_unbound_legacy_device_is_still_not_a_mismatch). So it
-        only ever fired for a device that IS bound, and resolve_device() falls back to a `name`
-        lookup for any wire id that is not a platform-issued `dev` id -- making the topic's
-        device segment, which the broker ACL does not constrain, enough to reach any device on
-        the site and be believed.
+        THE SPOOFING CASE AGAIN, THROUGH A DEVICE'S OWN ID. A device resolved by reported_identity
+        publishes under a free name in the topic's device segment, which the broker's roles do not
+        constrain, so the binding is the only thing that stops another gateway speaking for it.
         """
         self._resolve_returns(GATEWAY_B)
-        device = device_bound_to(GATEWAY_A, identity_source=ingestion.SOURCE_LEGACY_NAME)
+        device = device_bound_to(GATEWAY_A, identity_source=ingestion.SOURCE_REPORTED_IDENTITY)
         reason = ingestion.verify_gateway_binding(device, GATEWAY_B["sparkplug_id"])
         self.assertIsNotNone(
             reason,
             "how a device was resolved must not decide whether its binding is enforced"
         )
         self.assertTrue(reason.startswith(ingestion.REASON_GATEWAY_MISMATCH))
-
-    def test_a_legacy_name_matched_device_on_its_own_gateway_is_accepted(self):
-        """
-        The migration window is not closed by the above: a legacy-addressed device publishing
-        via the gateway it is actually bound to still passes. Only the mismatch is refused.
-        """
-        self._resolve_returns(GATEWAY_A)
-        device = device_bound_to(GATEWAY_A, identity_source=ingestion.SOURCE_LEGACY_NAME)
-        self.assertIsNone(
-            ingestion.verify_gateway_binding(device, GATEWAY_A["sparkplug_id"])
-        )
-
-    def test_an_unbound_legacy_device_is_still_not_a_mismatch(self):
-        """
-        The case the removed exemption claimed to protect, shown to be covered without it: a
-        legacy-addressed row with no gateway assignment is unbound, and unbound is not
-        mis-bound. This is what keeps a pre-0014 fleet ingesting while it is reconfigured.
-        """
-        self._resolve_returns(GATEWAY_B)
-        device = device_bound_to(None, identity_source=ingestion.SOURCE_LEGACY_NAME)
-        self.assertIsNone(
-            ingestion.verify_gateway_binding(device, GATEWAY_B["sparkplug_id"])
-        )
 
     def test_no_device_is_not_a_mismatch(self):
         """An unresolved device is handled by the quarantine path, not by this check."""

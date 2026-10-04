@@ -3992,11 +3992,10 @@ components:
           type: string
           nullable: true
           readOnly: true
-          enum: [sparkplug_id, reported_identity, instance_uuid, legacy_name]
+          enum: [sparkplug_id, reported_identity, instance_uuid]
           description: >-
             How ingestion last resolved this device. `instance_uuid` means it was addressed by its
-            Factory+ Instance_UUID (which is `devices.id`); `legacy_name` marks a gateway still to
-            be reconfigured.
+            Factory+ Instance_UUID (which is `devices.id`).
         gateway_id: { type: string, format: uuid, nullable: true, description: 'Serving gateway — the DATA PATH, not the location.' }
         cell_id:
           type: string

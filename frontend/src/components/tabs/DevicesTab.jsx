@@ -515,14 +515,13 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   )
 
   // A device an operator needs to act on: quarantined, past its provisioning window with no birth
-  // (24h+), still resolved by name, publishing unmodelled metrics, or with a location finding. An
-  // archived cell is still a valid foreign key, so pointing at one is derived rather than enforced.
+  // (24h+), publishing unmodelled metrics, or with a location finding. An archived cell is still a
+  // valid foreign key, so pointing at one is derived rather than enforced.
   const pointsAtArchivedCell = (a) =>
     !!a.effective_cell_id && !!cellById.get(a.effective_cell_id)?.is_archived
 
   const needsAttention = (a) =>
-    a.is_quarantined || isProvisioningOverdue(a) || a.identity_source === 'legacy_name' ||
-    unmodelledFor(a).length > 0 ||
+    a.is_quarantined || isProvisioningOverdue(a) || unmodelledFor(a).length > 0 ||
     // Location findings. Unassigned is the work queue that should drain; a mismatch and an
     // archived cell are both "this resolved to something, but look at it".
     needsCellAssignment(a, gatewayById.get(a.active_gateway_id) || null) ||
@@ -768,7 +767,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           className={`btn btn-sm ${attentionOnly ? 'btn-primary' : 'btn-ghost'}`}
           onClick={() => setAttentionOnly(v => !v)}
           aria-pressed={attentionOnly}
-          title="Show only devices that need action: past their first-birth window, matched by legacy name, publishing unmodelled metrics, with no cell, in a different cell from their gateway, or in an archived cell. Quarantined devices are on the Quarantine tab."
+          title="Show only devices that need action: past their first-birth window, publishing unmodelled metrics, with no cell, in a different cell from their gateway, or in an archived cell. Quarantined devices are on the Quarantine tab."
         >
           <IconAlertTriangle size={13} /> Needs attention ({attentionCount})
         </button>
@@ -902,11 +901,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                         </td>
                         <td>
                           <CopyableId value={a.asset_id} label="Device UUID" onNotify={showToast} />
-                          {a.identity_source === 'legacy_name' && (
-                            <div className="cell-flag cell-flag-warning" title="This device is still matched by name. Reconfigure its gateway to publish the Sparkplug ID; name matching will be removed.">
-                              <IconAlertTriangle size={10} /> Legacy name matching
-                            </div>
-                          )}
                         </td>
                         <td>
                           {a.is_archived ? (

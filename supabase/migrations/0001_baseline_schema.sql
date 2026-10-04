@@ -4586,7 +4586,7 @@ BEGIN
     END IF;
 
     IF p_identity_source IS NULL OR p_identity_source NOT IN
-       ('sparkplug_id', 'reported_identity', 'instance_uuid', 'legacy_name') THEN
+       ('sparkplug_id', 'reported_identity', 'instance_uuid') THEN
         RAISE EXCEPTION 'ingest_register_quarantined_device: % is not a recognised identity source',
             coalesce(p_identity_source, 'NULL')
             USING ERRCODE = 'invalid_parameter_value';
@@ -4696,7 +4696,7 @@ BEGIN
     END IF;
 
     IF p_identity_source IS NOT NULL AND p_identity_source NOT IN
-       ('sparkplug_id', 'reported_identity', 'instance_uuid', 'legacy_name') THEN
+       ('sparkplug_id', 'reported_identity', 'instance_uuid') THEN
         RAISE EXCEPTION 'ingest_set_device_state: % is not a recognised identity source',
             p_identity_source
             USING ERRCODE = 'invalid_parameter_value';
@@ -11058,7 +11058,7 @@ COMMENT ON COLUMN public.devices.quarantine_reason IS 'Why this device is in the
 --
 
 -- COLUMN devices.identity_source :: COMMENT
-COMMENT ON COLUMN public.devices.identity_source IS 'How ingestion last resolved this device: ''sparkplug_id'' (current scheme) or ''legacy_name'' (matched by name during the migration window). Drives the deprecation badge in the UI.';
+COMMENT ON COLUMN public.devices.identity_source IS 'How ingestion last resolved this device: ''sparkplug_id'' (its issued id), ''reported_identity'' (its own id, recorded at discovery) or ''instance_uuid'' (its Factory+ Instance_UUID, which is devices.id).';
 
 --
 
