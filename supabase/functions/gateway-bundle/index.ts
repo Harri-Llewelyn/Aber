@@ -6,7 +6,14 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
 import { brokerPublicHost, platformPublicUrl } from "../_shared/publicAddresses.ts";
 import { BUNDLE_VERSION, newCredentialSecret, renderGatewayEnv } from "../_shared/gatewayEnv.ts";
-import { platformRootPem, spkiPin } from "../_shared/caPin.ts";
+import {
+  CERTIFICATE_UNISSUED,
+  platformRootMissing,
+  noRootReason,
+  platformRootPem,
+  platformRootState,
+  spkiPin,
+} from "../_shared/caPin.ts";
 import { installerTransport } from "../_shared/installer.ts";
 import { zip } from "../_shared/zip.ts";
 import { GATEWAY_PLATFORM_FILES } from "../_shared/gatewayPlatform.generated.ts";
@@ -137,7 +144,7 @@ async function installerAvailability(): Promise<{ available: boolean; reason: st
     return {
       available: false,
       reason: !pin
-        ? "the platform's root is not mounted into the functions (ingress TLS issued after the pod started: restart supabase-functions)"
+        ? noRootReason(platformRootState())
         : "ABER_CA_URL is unset, so an appliance has nowhere to fetch the root from",
       pin,
       caUrl,
@@ -329,6 +336,19 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
+    // Neither form while there is no root an appliance could verify the platform with: the bundle
+    // would carry none and the command no pin, so the first call would fail. Checked before minting.
+    const rootState = platformRootState();
+    if (platformRootMissing(publicUrl, rootState)) {
+      console.error(`the platform has no root to hand an appliance (${rootState}); nothing minted`);
+      return json(503, {
+        error: rootState === "unissued"
+          ? "The platform's certificate has not been issued yet"
+          : "The platform's certificate carries no root an appliance can trust",
+        details: `${rootState === "unissued" ? CERTIFICATE_UNISSUED : noRootReason(rootState)}. No enrolment token was minted.`,
+      });
+    }
+
     // Whether the one-liner can be served, checked BEFORE minting for the same reason as the
     // address above: a refusal must not cost the gateway its live token.
     const installer = format === "command" ? await installerAvailability() : null;
@@ -430,8 +450,8 @@ export default async function handler(req: Request): Promise<Response> {
     }));
 
     // The root that signs this platform's API certificate, which bootstrap's first call trusts
-    // through NODE_EXTRA_CA_CERTS. Empty where none is mounted (a publicly trusted certificate):
-    // Node reads an empty file as no extra roots, where a missing one logs a warning.
+    // through NODE_EXTRA_CA_CERTS. Empty only where ingress TLS is off: Node reads an empty file as
+    // no extra roots, where a missing one logs a warning.
     const root = platformRootPem();
     files[`${folder}/${PLATFORM_ROOT_FILE}`] = strToU8(root ? `${root}\n` : "");
 

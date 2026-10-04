@@ -79,9 +79,9 @@ a healthy stack before this file existed:
 `default_version` is what the image ships; `installed_version` is what the database is running.
 The gap was the defect, and it widened on every bump.
 
-**Why first, and why its own session.** `docs/postgres-17-migration-plan.md` records what the API
-surface can do across a version boundary: compression became columnstore, the entry points became
-procedures requiring `CALL`, and the options changed shape. Verifying an upgrade path over a
+**Why first, and why its own session.** The extension's API surface changes across a version
+boundary: compression became columnstore, the entry points became procedures requiring `CALL`, and
+the options changed shape. Verifying an upgrade path over a
 database carrying the legacy settings assumes the extension updates at all, and that is what this
 file guarantees before any of the others run.
 
@@ -363,7 +363,9 @@ and reporting a failing backup is Historian Backup Stale's job. `physical_backup
 type: full on `fullOn`, or whenever the repository's newest full stopped more than seven days ago,
 so a missed Sunday does not leave differentials building on a full that `retainFull` can never
 expire. Both are SQL rather than shell so `test_physical_backup.py` can ask them about any moment
-in a rolled-back transaction; both are revoked from PUBLIC.
+in a rolled-back transaction; both are revoked from PUBLIC. The Backups page repeats both rules to
+say when the next backup is due (`frontend/src/utils/historianBackupSchedule.js`), and
+`scripts/check-mirror-drift.mjs` runs that copy at each rule's boundary.
 
 **What the Backups page reads.** `physical_backup_schedule` is one row, the `hourUtc` and `fullOn`
 the sidecar started with (`physical_backup_record_schedule()`), so the page can say when the next
@@ -372,7 +374,7 @@ inserts one through `physical_backup_request()` when it claims a requested platf
 waits at a time (a partial unique index), and the sidecar's minute loop claims it
 (`physical_backup_claim_request()`) and takes a differential; the first run recorded after the claim
 is its answer. All three gates are superuser only. The platform maps the three tables as foreign
-tables (migration 0026), and `fdw_reader` may read them, granted in `roles.sql` because this file
+tables (archived migration 0157), and `fdw_reader` may read them, granted in `roles.sql` because this file
 runs before `roles.sql` creates the role on a fresh volume.
 
 ## `roles.sql`
@@ -401,9 +403,10 @@ tables do not become readable either. `test_bi_reader_grants.py` asserts both ha
 A second role rather than a wider `powerbi_reader`: Power BI is an external business tool that
 should see aggregated buckets only, and Grafana is an internal console whose job is the raw
 signal. Still read-only. It reads the rollups, raw telemetry, `telemetry_latest`, `assets`, the
-archive manifest (every FDW session from the platform opens as this role, so without it
-`cold_storage_rows()` fails inside a panel), `telemetry_gapfill()` (how a report-by-exception
-series must be read), the storage footprint and its function, and `pg_monitor` for the I/O panels.
+archive manifest (for a panel on the historian datasource; no FDW session opens as this role, since
+Supabase maps PUBLIC to `fdw_reader` and `postgres` to the historian's superuser, the mapping the
+SECURITY DEFINER `cold_storage_rows()` reads through), `telemetry_gapfill()` (how a
+report-by-exception series must be read), the storage footprint and its function, and `pg_monitor` for the I/O panels.
 The footprint is not granted to `powerbi_reader`, because the size of the telemetry is an
 operations question.
 

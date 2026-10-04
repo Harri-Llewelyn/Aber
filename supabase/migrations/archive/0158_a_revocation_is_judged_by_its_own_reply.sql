@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0028_a_revocation_is_judged_by_its_own_reply.sql
+-- Migration: 0158_a_revocation_is_judged_by_its_own_reply.sql (applied as 0028 until the 1.0 squash)
 -- The revocation retry judges each stamp by the reply to its own request
 -- =============================================================================================
 --

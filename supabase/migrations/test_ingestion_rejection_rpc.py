@@ -405,7 +405,7 @@ class IngestionPrincipalGateTestCase(unittest.TestCase):
 
 class NodeDeathTakesItsDevicesOfflineTestCase(unittest.TestCase):
     """
-    `ingest_mark_gateway_devices_offline()` (0030): an NDEATH sets every non-archived device of the
+    `ingest_mark_gateway_devices_offline()` (0160): an NDEATH sets every non-archived device of the
     gateway OFFLINE in one UPDATE, one audit row per device it moves. Rolled back.
     """
 

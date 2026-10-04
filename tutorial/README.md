@@ -206,7 +206,7 @@ signing dependency to a fire-and-forget notification path.
 
 `NODERED_ADMIN_TOKEN` survives as **break-glass only**: `settings.js` reads it from Node-RED's
 environment and accepts it on the admin API when set, for when Supabase Auth is down and the flows
-still have to be reachable. It is empty by default, and the database keeps no copy of it (`0031`).
+still have to be reachable. It is empty by default, and the database keeps no copy of it (`0161`).
 
 ### Other things that fail in a way that does not look like their cause
 
@@ -400,13 +400,12 @@ which is the honest pair: the broker holds it, and the platform did not issue it
 
 ### There is no shared broker account
 
-The `factoryplus` principal — one credential holding `readwrite spBv1.0/#`, shared by the ingestion
-daemon, the i3X server, this simulator and the E2E validator — **has been deleted**. Any of them
-could publish `DBIRTH` or `DDATA` for *any* machine on the site, and `verify_gateway_binding()`
-cannot catch that: a forged message published under a **correctly bound** device satisfies the
-binding check by construction.
+One credential holding `readwrite spBv1.0/#`, shared by the ingestion daemon, the i3X server, a
+simulator and the E2E validator, would let any of them publish `DBIRTH` or `DDATA` for *any*
+machine on the site, and `verify_gateway_binding()` cannot catch that: a forged message published
+under a **correctly bound** device satisfies the binding check by construction.
 
-Confined principals replace it, each holding a role from
+So each principal is confined, holding a role from
 [`../mosquitto/dynsec-roles.json`](../mosquitto/dynsec-roles.json):
 
 | Principal | May do |

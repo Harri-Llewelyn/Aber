@@ -97,8 +97,10 @@ BEGIN
   EXECUTE format('GRANT SELECT ON public.assets TO %I', v_role);
 
   IF to_regclass('public.telemetry_archive_manifest') IS NOT NULL THEN
-    -- The cold archive catalogue: every FDW session from the platform opens as this role. Guarded
-    -- because a first boot applies cold_archive.sql after this file.
+    -- The cold archive catalogue, for Grafana's historian datasource. No FDW session opens as this
+    -- role: Supabase maps PUBLIC to fdw_reader and `postgres` to the historian's superuser, the
+    -- mapping the SECURITY DEFINER cold_storage_rows() reads through. Guarded because a first boot
+    -- applies cold_archive.sql after this file.
     EXECUTE format('GRANT SELECT ON public.telemetry_archive_manifest TO %I', v_role);
   END IF;
 

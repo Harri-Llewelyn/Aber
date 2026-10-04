@@ -663,10 +663,10 @@ listed there):
 
 - **`/mosquitto/config` is one assembled `emptyDir`, not a ConfigMap mount.** The TLS stanza is
   appended to `mosquitto.conf` when certificates exist, and a ConfigMap mount is read-only.
-- **There is no shared `factoryplus` account any more.** One credential with `readwrite spBv1.0/#`
-  meant anything holding it could forge `DBIRTH`/`DDATA` for any machine on the site — a forgery
+- **There is no shared broker account.** One credential with `readwrite spBv1.0/#` would let
+  anything holding it forge `DBIRTH`/`DDATA` for any machine on the site — a forgery
   `verify_gateway_binding()` cannot detect, since a message published under a correctly bound device
-  satisfies it by construction. Confined principals replace it; a gateway's username MUST be its
+  satisfies it by construction. Each principal is confined instead; a gateway's username MUST be its
   `sparkplug_id` (the chart fails the render otherwise; a friendly name authenticates and is then
   silently dropped by the broker).
 - **The readiness probe is a real authenticated `mosquitto_sub`, not `tcpSocket`.** The broker runs
@@ -1084,17 +1084,20 @@ The resulting behaviour, confirmed against a running `supabase-db`:
 
 ### M4 — `pg_net` egress NetworkPolicy (§10.1)
 
-**Failure:** a default-deny egress policy is the right posture, and it silently kills the
-quarantine webhook. `dispatch_device_quarantine_webhook()` fires outbound HTTP **from inside
-Postgres** via `pg_net`, which is not a shape a service-tier policy anticipates — databases are
-normally egress leaves. pg_net has no retries, ordering or DLQ, so a blocked request is simply
-lost, and nothing surfaces it.
+**Failure:** a default-deny egress policy is the right posture, and it silently drops whatever
+Postgres sends **from inside the database** via `pg_net`, which is not a shape a service-tier
+policy anticipates — databases are normally egress leaves. Two kinds of call leave `supabase-db`:
+`revoke_gateway_credential()` and `sweep_forge()` call edge functions through the gateway, and
+`dispatch_device_quarantine_webhook()` posts to each enabled `device.quarantined` row of
+`webhook_endpoints`. pg_net has no retries, ordering or DLQ, so a blocked request is lost, and the
+only record is a row in `net._http_response`.
 
-**Mitigation:** the policy must explicitly allow egress from `supabase-db` to `supabase-envoy:8000`
-and to the edge runtime, and to Node-RED's webhook receiver. Write these allows **in the same
-change** as the default-deny, never as a follow-up — and add a validation check that fires a
-quarantine event and asserts the webhook arrived, or the gap is invisible until an operator notices
-alerts stopped.
+**Mitigation:** the policy must explicitly allow egress from `supabase-db` to `supabase-envoy:8000`,
+and to `node-red:1880`, where a site serves a webhook with a flow of its own. Write these allows
+**in the same change** as the default-deny, never as a follow-up. No webhook row is seeded, so on a
+fresh install nothing in the database calls Node-RED until a site adds one; a site that does should
+check that its flow receives a quarantine event. A blocked revocation is retried rather than lost:
+the revocation sweep judges each request by its own reply and asks again.
 
 This is also why `webhook_endpoints` has no write RLS policy: a writable endpoint table plus
 database egress is an SSRF primitive. The NetworkPolicy is the second half of that mitigation.
@@ -1151,9 +1154,9 @@ whole design, and it is not stylistic: a hand-written pair of policies lets you 
 and forget ingress on B. The packet is then dropped at the destination, the source sees a timeout,
 and *nothing logs a policy decision* — so it reads as the destination being slow or down. Deriving
 both from one edge makes that class of mistake unrepresentable, and **CI asserts the symmetry holds**
-in the rendered output: 40 pod-to-pod flows, 35 policies, symmetric.
+in the rendered output, with every flow below present.
 
-Two rules matter more than the rest:
+Three rules matter more than the rest:
 
 - **DNS egress for every pod, on UDP *and* TCP 53.** The one most often forgotten, and without it
   nothing resolves — the symptom is "could not translate host name", which reads as a wrong hostname
@@ -1163,9 +1166,13 @@ Two rules matter more than the rest:
 - **`supabase-db → node-red:1880`.** The obvious `pg_net` allow-list is the gateway and the edge runtime,
   and **a webhook to Node-RED goes through neither**: pg_net posts a `webhook_endpoints` row's URL
   directly, and Node-RED is where a site serves one with a flow of its own. None is seeded since
-  `0031` removed the quarantine hook nothing served. pg_net has no retries, no ordering and no DLQ, so
+  `0161` removed the quarantine hook nothing served. pg_net has no retries, no ordering and no DLQ, so
   blocking it drops every notification with no error, no queue and no log — the first sign is an
   operator noticing alerts stopped weeks earlier. CI asserts this flow specifically.
+- **`supabase-db → prometheus:9090`.** `refresh_directory_liveness()` asks Prometheus which targets
+  are up, through `pg_net` from the database. Blocked, the reply never arrives and the probe sets
+  every Directory row to `UNKNOWN` on each run, which reads as nothing being scraped. CI asserts this
+  flow too.
 
 **Two knobs cannot be inferred and are the reason this is opt-in:** which namespace CoreDNS is in,
 and which namespace the ingress controller is in. A wrong value on the second means every route 502s
@@ -1247,8 +1254,9 @@ Four features that came after the first working chart, each with a design note w
 
 - **Internal CA** (`deploy/k8s/internal-ca.yaml`) — a self-signed root booting a `aber-ca`
   `ClusterIssuer`, deliberately outside Helm so `helm uninstall` cannot take the root private key.
-  The chart was already issuer-agnostic, so this needed no template change; ACME remains the option
-  for a genuinely public domain, and cannot work for an internal one.
+  The chart names the issuer rather than creating it, so this needed no template change. It is the
+  only supported issuer: Aber runs on the site's network, and a public one cannot validate a private
+  domain or supply the root Remote enrolment hands each appliance.
 - **MQTTS on 8883** — a conditionally-appended listener, cert-manager `Certificate` with IP SANs, the
   external Service port, `SIGHUP`-based certificate reload with no broker restart, and opt-in TLS for
   the two in-cluster clients with the CA projected `ca.crt`-only.
@@ -1328,16 +1336,14 @@ onto `appVersion`, because they carry couplings: realtime and storage-api migrat
 boot, Studio is Zod-coupled to a postgres-meta version, and Node-RED is what the generated
 `settings.js` depends on. A chart bump must not silently change which Postgres the databases run.
 
-**`aber.primaryHostId` is required with no default; `aber.sparkplugGroup` has one.** Every gateway
+**`aber.primaryHostId` and `aber.sparkplugGroup` are required, with no default.** Every gateway
 on site is configured to watch `spBv1.0/STATE/<id>`, which makes the host id part of the contract
 with equipment this chart has never seen, so it is named once by the deployment and the render
 fails without it rather than the daemon refusing to start naming only an env var. The group id is
 the second segment of every topic and the enterprise segment of the Unified Namespace; it is fixed
 at install, seeded into the `sparkplug.group_id` setting on the first boot, and a later value that
 differs is refused because changing it re-addresses every gateway rather than changing a
-preference. Its default is `Aber`: a stack installed before 1.0 holds the platform's former name,
-and migration `0003` moves it on the first boot under this chart, so rendering the default for it
-is the rename, not a disagreement. Both are validated to one topic level, since a `/`, `+`, `#` or
+preference. Both are validated to one topic level, since a `/`, `+`, `#` or
 whitespace in either addresses a subtree nothing grants, and the broker drops the publish silently
 at QoS 0. The Directory prefix is derived from the group unless named, and the broker's ingestion
 role is granted `<prefix>/#` at reconcile time from the same value; the two could disagree when
@@ -1478,7 +1484,7 @@ reads as a schema fault; `helm test` (M6) queries the foreign table to pin it.
 **Clients project `ca.crt` alone.** The broker's `mosquitto-tls` and each database's Secret are
 `kubernetes.io/tls`, so they hold the server's private key beside the CA; mounting the whole
 Secret into every client pod would hand each of them the key that lets anything impersonate the
-server, when verifying a certificate needs only the public CA. `items` restricts the projection at
+server, when verifying a certificate needs only the CA's certificate. `items` restricts the projection at
 the kubelet, so the key is never written into a client's filesystem. Both databases are issued by
 one issuer, so one CA verifies either, and the client-side helpers render nothing while TLS is off
 so a caller adds them unconditionally. libpq's own variables (`PGSSLMODE`, `PGSSLROOTCERT`) cover

@@ -51,36 +51,6 @@ def get_connection():
     )
 
 
-# The numbered section headers the migration is written in, used to cut one stanza out of it.
-_SECTION = "-- ---------------------------------------------------------------------------------------------"
-
-
-def _retirement_stanza():
-    """
-    The bucket-retirement section, read from the migration itself.
-
-    READ RATHER THAN COPIED so the tests below exercise the statement that actually runs. A copy
-    would keep passing after somebody simplified the guard away in the migration, which is precisely
-    the regression they exist to catch.
-
-    IT MOVED WITH THE THIRD SQUASH. It was archived migration 0132's section 2; the fold archived
-    0132 and the retirement is a subtraction, so it is `0000`'s now -- and `0000` runs BEFORE the
-    baseline, which is what keeps the guard's question ("has `sensitive` arrived yet?") answerable
-    at all. The stanza is the same statement either way, which is why these tests did not change.
-    """
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        "0000_a_database_from_before_the_fold.sql")
-    with open(path, encoding="utf-8") as handle:
-        text = handle.read()
-
-    marker = "4. Two settings rows that are no longer controls"
-    start = text.index(marker)
-    # Past the header's own closing rule, then up to the rule that opens the next section.
-    body = text[text.index(_SECTION, start) + len(_SECTION):]
-    end = body.find(_SECTION)
-    return body if end == -1 else body[:end]
-
-
 def ensure_auth_user(cur, user_id):
     """
     Make `user_id` exist in `auth.users`.
@@ -272,53 +242,6 @@ class ColdArchiveDestination(unittest.TestCase):
             as_user(cur, OPERATOR_ID)
             cur.execute("SELECT public.archive_credential_is_set();")
             self.assertFalse(cur.fetchone()[0])
-
-    # -- the key 0132 retires and 0134 reuses ------------------------------------------------------
-
-    def test_a_replay_does_not_wipe_a_configured_bucket(self):
-        """
-        THE FAILURE THIS EXISTS FOR, and it was measured rather than imagined: a routine
-        `helm upgrade` came back with archiving on and no bucket.
-
-        `archive.bucket` has two unrelated lives. 0132 retires it as the name of a Supabase Storage
-        bucket it deletes; 0134 reintroduces it as the S3 bucket, set from the page. db-init replays
-        EVERY migration on every boot, so 0132's DELETE ran again after 0134 had seeded the new
-        meaning, took the operator's value with it, and left 0134 to re-seed the chart's empty
-        default. Nothing failed: the stack came up with the switch on, the CronJob refusing nightly,
-        and telemetry accumulating past its threshold.
-
-        Executes the migration's own statement rather than a copy, so deleting the guard fails here.
-        """
-        stanza = _retirement_stanza()
-        self.assertIn("information_schema.columns", stanza,
-                      "0132's bucket retirement is unguarded -- a replay will wipe the S3 bucket")
-        with self.conn.cursor() as cur:
-            cur.execute("UPDATE public.system_settings SET value = to_jsonb('plant-history'::text) "
-                        "WHERE key = 'archive.bucket';")
-            cur.execute(stanza)
-            cur.execute("SELECT value #>> '{}' FROM public.system_settings WHERE key='archive.bucket';")
-            row = cur.fetchone()
-        self.assertIsNotNone(row, "the replay deleted the row 0134 owns")
-        self.assertEqual(row[0], "plant-history", "the replay reset the operator's bucket")
-
-    def test_it_still_retires_the_old_bucket_before_0134_has_run(self):
-        """
-        The other half. A guard that refused to delete anything would pass the test above and ship
-        dead, leaving an upgraded stack offering a Storage bucket that no longer exists as though it
-        were an S3 destination.
-
-        `sensitive` is 0134's column, so dropping it here reconstructs the only state in which the
-        old meaning is the live one. CASCADE takes the SELECT policy that reads the column with it;
-        both come back when this transaction rolls away.
-        """
-        with self.conn.cursor() as cur:
-            cur.execute("UPDATE public.system_settings SET value = to_jsonb('telemetry-archive'::text) "
-                        "WHERE key = 'archive.bucket';")
-            cur.execute("ALTER TABLE public.system_settings DROP COLUMN sensitive CASCADE;")
-            cur.execute(_retirement_stanza())
-            cur.execute("SELECT count(*) FROM public.system_settings WHERE key='archive.bucket';")
-            self.assertEqual(cur.fetchone()[0], 0,
-                             "the retired Storage bucket name survives an upgrade from before 0132")
 
     # -- re-pointing a destination that has been written to ----------------------------------------
 

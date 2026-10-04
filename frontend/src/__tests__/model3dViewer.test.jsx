@@ -96,6 +96,8 @@ describe('Model3DViewer', () => {
     expect(self.ModelViewerElement).toMatchObject(DECODER_LOCATIONS)
     expect(DECODER_LOCATIONS.dracoDecoderLocation).toBe('/decoders/draco/')
     expect(DECODER_LOCATIONS.ktx2TranscoderLocation).toBe('/decoders/basis/')
+    // Not served, and never used: a local path so a Lottie texture cannot reach cdn.jsdelivr.net.
+    expect(DECODER_LOCATIONS.lottieLoaderLocation).toMatch(/^\/decoders\//)
   })
 
   it('serves every file three.js fetches from those locations, from the installed three', () => {

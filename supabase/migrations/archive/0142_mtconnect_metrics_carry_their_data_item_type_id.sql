@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0009_mtconnect_metrics_carry_their_data_item_type_id.sql
+-- Migration: 0142_mtconnect_metrics_carry_their_data_item_type_id.sql (applied as 0009 until the 1.0 squash)
 -- An MTConnect metric's semantic id names its data item type, not the metric (#457)
 -- =============================================================================================
 --

@@ -56,6 +56,7 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
 
   (dict "from" "supabase-db"        "to" $gw      "port" 8000 "why" "pg_net: edge functions and REST called from SQL")
   (dict "from" "supabase-db"        "to" "node-red"           "port" 1880 "why" "pg_net: WEBHOOKS to a site's flows, direct, no retries/DLQ")
+  (dict "from" "supabase-db"        "to" "prometheus"         "port" 9090 "why" "pg_net: refresh_directory_liveness() reads the up series")
 
   (dict "from" $gw      "to" "supabase-auth"      "port" 9999 "why" "/auth/v1/")
   (dict "from" $gw      "to" "supabase-rest"      "port" 3000 "why" "/rest/v1/")

@@ -27,11 +27,6 @@ export const PLATFORM_PRINCIPALS = [
   { env: 'VALIDATOR', role: null },
 ];
 
-// The platform principals' usernames before the rename to Aber. The boot reconcile removes a stored
-// client under one of these unless the environment still names it, so an account nothing uses any
-// more cannot log in.
-export const RETIRED_PLATFORM_USERNAMES = ['factoryplus_ingestion', 'factoryplus_i3x', 'factoryplus_monitor'];
-
 // The role the credential service authenticates under.
 export const ADMIN_ROLE = 'admin';
 
@@ -215,10 +210,10 @@ function roleNamesOf(client) {
 // The document the broker should boot on, from the one it has and what the repository declares.
 // Roles: every policy role replaces the stored one of its name, a gateway-<id> role is regenerated
 // for every gateway client, any other stored role is kept. Clients: every managed client replaces
-// the stored one of its name, a retired platform username is removed, every other stored client is
-// kept, a gateway client with the gateway roles ensured. THROWS rather than return a document
-// missing any other client: the stored document is the fleet's credentials, and a boot that lost
-// one would fail silently at the appliance's next reconnect.
+// the stored one of its name, every other stored client is kept, a gateway client with the gateway
+// roles ensured. THROWS rather than return a document missing any other client: the stored document
+// is the fleet's credentials, and a boot that lost one would fail silently at the appliance's next
+// reconnect.
 export function reconcile(existing, policy, managedClients) {
   const stored = existing && typeof existing === 'object' ? existing : emptyConfig();
   if (!Array.isArray(policy?.roles) || policy.roles.length === 0) {
@@ -244,7 +239,7 @@ export function reconcile(existing, policy, managedClients) {
 
   const before = new Set((stored.clients || []).map((c) => c.username));
   const clients = [];
-  const report = { managed: [], kept: [], gateways: [], unmanaged: [], retired: [] };
+  const report = { managed: [], kept: [], gateways: [], unmanaged: [] };
 
   for (const c of managedByName.values()) {
     clients.push(c);
@@ -252,10 +247,6 @@ export function reconcile(existing, policy, managedClients) {
   }
   for (const c of stored.clients || []) {
     if (managedByName.has(c.username)) continue;
-    if (RETIRED_PLATFORM_USERNAMES.includes(c.username)) {
-      report.retired.push(c.username);
-      continue;
-    }
     const client = { ...c, roles: (c.roles || []).map((r) => ({ ...r })) };
     if (isGatewayId(client.username)) {
       const have = new Set(roleNamesOf(client));
@@ -271,7 +262,7 @@ export function reconcile(existing, policy, managedClients) {
   }
 
   const after = new Set(clients.map((c) => c.username));
-  const lost = [...before].filter((u) => !after.has(u) && !report.retired.includes(u));
+  const lost = [...before].filter((u) => !after.has(u));
   if (lost.length) {
     throw new CredentialError(
       `refusing to write a document that would LOSE client(s) ${lost.join(', ')}`, 'merge_would_lose_accounts',

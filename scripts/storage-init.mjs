@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 // Creates the platform's storage buckets through the Storage REST API, idempotently, on every upgrade
-// (the storage-init hook Job), and moves a renamed bucket's objects into its new name. Not a SQL
-// migration: storage.buckets is owned by storage-api, whose
+// (the storage-init hook Job). Not a SQL migration: storage.buckets is owned by storage-api, whose
 // own migrations run after ours, and the image's stub of it cannot mark a bucket public. The RLS
 // policies on the objects are supabase/storage-policies.sql; the two must agree on bucket names, and
 // check-docs-drift holds them and the README's table together. Reasoning: supabase/README.md,
@@ -103,16 +102,6 @@ const BUCKETS = [
   },
 ];
 
-// Buckets that were renamed. Each old bucket's objects move to the new one under the same keys,
-// then the old bucket is deleted: storage-api deletes only an empty bucket, and nothing else in
-// the stack removes one. Once the old bucket is gone this does nothing.
-const RENAMED_BUCKETS = [
-  { from: 'floor-plans', to: 'area-plans' },
-];
-
-// storage-api's list page size; a longer folder is read a page at a time.
-const LIST_PAGE = 100;
-
 const headers = {
   Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
   apikey: SERVICE_ROLE_KEY,
@@ -176,62 +165,6 @@ async function ensureBucket(spec) {
   );
 }
 
-/** Every object key in a bucket. storage-api lists one folder level at a time; a folder has no id. */
-async function listKeys(bucket, prefix = '') {
-  const keys = [];
-  for (let offset = 0; ; offset += LIST_PAGE) {
-    const res = await fetch(`${STORAGE_URL}/object/list/${encodeURIComponent(bucket)}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ prefix, limit: LIST_PAGE, offset, sortBy: { column: 'name', order: 'asc' } }),
-    });
-    if (!res.ok) {
-      const body = await readBody(res);
-      throw new Error(`failed to list "${bucket}/${prefix}" (${res.status}): ${body.message || body}`);
-    }
-    const entries = await res.json();
-    for (const entry of entries) {
-      const key = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.id == null) keys.push(...(await listKeys(bucket, key)));
-      else keys.push(key);
-    }
-    if (entries.length < LIST_PAGE) return keys;
-  }
-}
-
-/**
- * Moves a renamed bucket's objects into its new bucket and deletes the old one. The keys are kept,
- * so a row that names an object by key still finds it. A missing old bucket is the settled state.
- * A failed move throws before the delete, so the old bucket and whatever it still holds survive
- * for the next run.
- */
-async function retireBucket({ from, to }) {
-  if (!(await bucketExists(from))) {
-    console.log(`[storage-init] bucket "${from}" is gone; nothing to move into "${to}".`);
-    return;
-  }
-
-  const keys = await listKeys(from);
-  for (const key of keys) {
-    const res = await fetch(`${STORAGE_URL}/object/move`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ bucketId: from, sourceKey: key, destinationBucket: to, destinationKey: key }),
-    });
-    if (!res.ok) {
-      const body = await readBody(res);
-      throw new Error(`failed to move "${from}/${key}" to "${to}" (${res.status}): ${body.message || body}`);
-    }
-  }
-
-  const del = await fetch(`${STORAGE_URL}/bucket/${encodeURIComponent(from)}`, { method: 'DELETE', headers });
-  if (!del.ok) {
-    const body = await readBody(del);
-    throw new Error(`moved ${keys.length} object(s) but could not delete bucket "${from}" (${del.status}): ${body.message || body}`);
-  }
-  console.log(`[storage-init] moved ${keys.length} object(s) from "${from}" to "${to}" and deleted "${from}".`);
-}
-
 async function main() {
   if (!SERVICE_ROLE_KEY) {
     console.error('[storage-init] SERVICE_ROLE_KEY is empty; cannot authenticate to Storage.');
@@ -242,11 +175,6 @@ async function main() {
   // several with the others in an unknown state.
   for (const spec of BUCKETS) {
     await ensureBucket(spec);
-  }
-
-  // After the creates, so every destination exists before anything moves into it.
-  for (const rename of RENAMED_BUCKETS) {
-    await retireBucket(rename);
   }
 
   console.log(`[storage-init] ${BUCKETS.length} bucket(s) ready.`);

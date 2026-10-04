@@ -474,7 +474,7 @@ class TestMigrationIsIdempotent(AuditGuardTestCase):
 
 class TestMetricCatalogReachesTheTrail(AuditGuardTestCase):
     """
-    0010 (#468). Deprecating is the only way to retire a metric, and `metric_catalog` carried no
+    0143 (#468). Deprecating is the only way to retire a metric, and `metric_catalog` carried no
     trigger, so neither a deprecation nor its reversal said who made it or when. Both are UPDATEs
     on the catalog row, recorded by this file's function like any other.
     """

@@ -1,5 +1,5 @@
 """
-The Directory's Version column (0007), and the Node-RED entry's rename (0024).
+The Directory's Version column, and the name of its Node-RED entry.
 
 `record_directory_images()` writes `directory_services.image` from the chart's component -> image
 map on every db-init run. Four properties, each of which would fail quietly:
@@ -161,69 +161,19 @@ class TestDirectoryImages(unittest.TestCase):
 
 NODE_RED = "f1111111-0000-0000-0000-000000000003"
 NODE_RED_NAME = "Node-RED (Host-Run Gateways)"
-NODE_RED_OLD_NAME = "Node-RED (Virtual Edge Gateway Simulator)"
-RENAME_0024 = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           "0024_node_red_is_listed_for_the_gateways_it_runs.sql")
 
 
-class TestTheNodeRedEntryIsRenamed(unittest.TestCase):
-    """
-    0024 renames the seeded Node-RED row on a database that still holds its simulator-era name,
-    which the seed's ON CONFLICT (id) DO NOTHING cannot. Run here as db-init runs it, inside a
-    transaction the test rolls back.
-    """
+class TestTheNodeRedEntry(unittest.TestCase):
+    """The seeded Node-RED row names what it runs: the host-run gateways, not a simulator."""
 
-    @classmethod
-    def setUpClass(cls):
-        cls.conn = get_connection()
-        cls.conn.autocommit = False
-        with open(RENAME_0024, encoding="utf-8") as handle:
-            cls.rename_sql = handle.read()
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.conn.close()
-
-    def tearDown(self):
-        self.conn.rollback()
-
-    def name_of(self, cur):
-        cur.execute("SELECT service_name FROM public.directory_services WHERE id = %s", (NODE_RED,))
-        return cur.fetchone()[0]
-
-    def test_a_fresh_seed_carries_the_new_name(self):
-        with self.conn.cursor() as cur:
-            self.assertEqual(self.name_of(cur), NODE_RED_NAME)
-
-    def test_the_old_name_is_replaced_once(self):
-        with self.conn.cursor() as cur:
-            cur.execute("UPDATE public.directory_services SET service_name = %s WHERE id = %s",
-                        (NODE_RED_OLD_NAME, NODE_RED))
-            cur.execute(self.rename_sql)
-            self.assertEqual(self.name_of(cur), NODE_RED_NAME)
-            cur.execute(self.rename_sql)
-            self.assertEqual(self.name_of(cur), NODE_RED_NAME)
-
-    def test_a_name_set_by_hand_is_kept(self):
-        with self.conn.cursor() as cur:
-            cur.execute("UPDATE public.directory_services SET service_name = 'Plant Node-RED' WHERE id = %s",
-                        (NODE_RED,))
-            cur.execute(self.rename_sql)
-            self.assertEqual(self.name_of(cur), "Plant Node-RED")
-
-    def test_a_new_name_already_taken_leaves_the_row_and_the_boot_alone(self):
-        with self.conn.cursor() as cur:
-            cur.execute("UPDATE public.directory_services SET service_name = %s WHERE id = %s",
-                        (NODE_RED_OLD_NAME, NODE_RED))
-            cur.execute(
-                """
-                INSERT INTO public.directory_services (id, service_name, service_type, endpoint_url)
-                VALUES ('0d1ec700-0000-4000-8000-000000000024', %s, 'EDGE_NODE', 'http://elsewhere.test')
-                """,
-                (NODE_RED_NAME,),
-            )
-            cur.execute(self.rename_sql)
-            self.assertEqual(self.name_of(cur), NODE_RED_OLD_NAME)
+    def test_the_seed_carries_its_name(self):
+        conn = get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT service_name FROM public.directory_services WHERE id = %s", (NODE_RED,))
+                self.assertEqual(cur.fetchone()[0], NODE_RED_NAME)
+        finally:
+            conn.close()
 
 
 if __name__ == "__main__":

@@ -57,7 +57,7 @@ spec:
   {{- if .Values.ingress.tls.enabled }}
   tls:
     # ONE ENTRY listing every host, against one Secret. With a wildcard certificate for
-    # *.<publicBaseDomain> that is a single ACME challenge and a single renewal; a per-host block
+    # *.<publicBaseDomain> that is a single issuance and a single renewal; a per-host block
     # would mean seven certificates renewing independently.
     - secretName: {{ .Values.ingress.tls.secretName }}
       hosts:

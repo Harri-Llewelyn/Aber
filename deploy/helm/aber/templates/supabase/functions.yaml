@@ -74,9 +74,6 @@ spec:
             # could only ever be wrong about one of them.
             - name: VERIFY_JWT
               value: {{ .Values.supabaseFunctions.verifyJwt | quote }}
-            - name: NODERED_URL
-              value: http://node-red:1880/flows
-            {{- include "aber.secretEnv" (dict "name" "NODERED_ADMIN_TOKEN" "secretName" $secretName "key" "NODERED_ADMIN_TOKEN") | nindent 12 }}
             # --- AAS export ---------------------------------------------------------------
             # Namespaces every globalAssetId and submodel id the shell carries, so it must name
             # the organisation publishing the document. The default is only correct for a local
@@ -219,10 +216,11 @@ spec:
           volumeMounts:
             {{- /* The platform's root, for the one-liner's pin: the CA that signs the API's own
                    certificate, which is the one an appliance must trust to reach this function.
-                   One projected key, never the Secret whole (it also holds tls.key). Optional so
-                   the pod starts before cert-manager has issued; the entrypoint reads the file at
-                   start, so a pod that started before the issue offers no one-liner until it is
-                   restarted, and the dashboard says so. */}}
+                   ca.crt and tls.crt, never the Secret whole (it also holds tls.key); tls.crt
+                   without ca.crt is not from the internal CA, and nothing is minted. Optional so
+                   the pod starts before cert-manager has issued: kubelet fills the volume when the
+                   Secret appears, and main/index.ts reads it at each spawn until it holds a root.
+                   While it is empty, gateway-bundle mints neither a bundle nor a command. */}}
             - name: platform-root
               mountPath: /home/deno/ca
               readOnly: true
@@ -236,5 +234,7 @@ spec:
             items:
               - key: ca.crt
                 path: ca.crt
+              - key: tls.crt
+                path: tls.crt
       {{- end }}
 {{- end }}

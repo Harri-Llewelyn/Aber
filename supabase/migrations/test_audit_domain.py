@@ -174,7 +174,7 @@ class TheClassifier(AuditDomainFixture):
 
     def test_a_metric_is_asset(self):
         """
-        The same exception, made for the same reason by 0010 (#468): deprecating or restoring a
+        The same exception, made for the same reason by 0143 (#468): deprecating or restoring a
         metric is Administrator-only, and `metric_catalog_select_authenticated` is USING (true).
         """
         with self.conn.cursor() as cur:
@@ -410,7 +410,7 @@ class TheLaneIsEnforcedInPostgres(AuditDomainFixture):
             )
 
     def test_a_manager_can_read_a_metric_deprecation(self):
-        """0010 end to end: who deprecated a metric is on the lane the Metric catalog filter reads."""
+        """0143 end to end: who deprecated a metric is on the lane the Metric catalog filter reads."""
         with self.conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO public.metric_catalog (name, datatype)"

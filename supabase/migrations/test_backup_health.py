@@ -1,5 +1,5 @@
 """
-How long since the platform backup last succeeded (0011).
+How long since the platform backup last succeeded (0144).
 
 `backup_health` is what the Grafana rule "Backup Stale" reads. Four properties, each of which
 would fail quietly:
@@ -13,7 +13,7 @@ would fail quietly:
 - anon and authenticated cannot read it. It runs as its owner, past backup_jobs' Administrator-only
   RLS, so a grant to either would publish the backup history to every signed-in user.
 
-And the retention floor (0017): `backup_prunable()` never returns any of the newest three backups,
+And the retention floor (0150): `backup_prunable()` never returns any of the newest three backups,
 pinned or not, so a run of failures longer than the window cannot prune the last good one.
 
 Every write is rolled back. Runs against the Supabase database, not the historian:
@@ -50,7 +50,7 @@ class TestBackupHealth(unittest.TestCase):
         with cls.conn.cursor() as cur:
             cur.execute("SELECT to_regclass(%s)", (VIEW,))
             if cur.fetchone()[0] is None:
-                raise RuntimeError(f"{VIEW} does not exist -- 0011 did not run.")
+                raise RuntimeError(f"{VIEW} does not exist -- 0144 did not run.")
         cls.conn.rollback()
 
     @classmethod
@@ -129,7 +129,7 @@ class TestBackupHealth(unittest.TestCase):
 
 
 class TestRetentionFloor(unittest.TestCase):
-    """backup_prunable() never returns any of the newest three backups (0017)."""
+    """backup_prunable() never returns any of the newest three backups (0150)."""
 
     WINDOW_DAYS = 14
 
@@ -195,7 +195,7 @@ class TestRetentionFloor(unittest.TestCase):
         self.assertEqual(self.prunable(0), [])
 
     def test_each_row_carries_its_off_site_copy(self):
-        # 0018: the prune deletes the copy with the files, so it needs to know where the copy is.
+        # 0151: the prune deletes the copy with the files, so it needs to know where the copy is.
         for i, days in enumerate((20, 21, 22, 23)):
             self.backup(f"2026010{i + 1}T023000Z", days)
         self.cur.execute("UPDATE public.backups SET offsite_state = 'COPIED', "
@@ -210,7 +210,7 @@ class TestRetentionFloor(unittest.TestCase):
 
 
 # -------------------------------------------------------------------------------------------------
-# The off-site copy (0018)
+# The off-site copy (0151)
 # -------------------------------------------------------------------------------------------------
 # Pinned ids that differ early, and from every other suite's.
 OFFSITE_ADMIN_ID = "a0ff5173-0000-4000-8000-0000000ad530"
@@ -255,7 +255,7 @@ class OffsiteFixture(unittest.TestCase):
             with conn.cursor() as cur:
                 cur.execute("SELECT to_regprocedure('public.backup_offsite_destination()')")
                 if cur.fetchone()[0] is None:
-                    raise RuntimeError("backup_offsite_destination() is absent -- 0018 did not run.")
+                    raise RuntimeError("backup_offsite_destination() is absent -- 0151 did not run.")
                 cur.execute("SELECT id, name FROM public.roles WHERE name IN ('Administrator', 'Operator')")
                 by_name = {name: rid for rid, name in cur.fetchall()}
                 for user_id in (OFFSITE_ADMIN_ID, OFFSITE_OPERATOR_ID):
@@ -529,7 +529,7 @@ class TestOffsiteHealth(OffsiteFixture):
 
 
 # -------------------------------------------------------------------------------------------------
-# The historian on the Backups page (0026)
+# The historian on the Backups page (0157)
 # -------------------------------------------------------------------------------------------------
 # Local tables of the same names stand in for the three foreign ones, inside the test's rolled-back
 # transaction, so the read's arithmetic is checked without a historian.

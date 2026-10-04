@@ -3613,7 +3613,7 @@ paths:
         The identities acted on come from `user_roles` and the forge's own lists, never from the
         request, so a caller holding the secret can only make the forge more correct, and sooner.
 
-        **One pass at a time** (migration `0025`). A pass holds a five-minute lease from before it
+        **One pass at a time** (archived migration `0156`). A pass holds a five-minute lease from before it
         reads the forge until it answers; a call that finds the lease held does nothing and answers
         200 with `already_sweeping: true`. The running pass, or the one its release then queues,
         sees whatever that call was asked about.
@@ -3812,7 +3812,7 @@ components:
       enum: [IRI, IRDI]
       description: |
         Which kind of AAS Reference `semantic_id` is: an IRI (a URL or URN) or an IRDI (an ECLASS
-        or IEC CDD code). CHECK-constrained (`0012`); both export as an `ExternalReference`.
+        or IEC CDD code). CHECK-constrained (`0145`); both export as an `ExternalReference`.
         `ModelReference` was withdrawn because the exporter cannot emit one. **Never
         half-populated**: the dashboard writes the pair together, with the type NULL whenever the
         id is.
@@ -4213,7 +4213,7 @@ components:
             reference. A `PROPOSAL_APPLIED` row shares it with the change that approval made, and
             the `PROPOSAL_EXPIRED` rows one expiry run writes share that run's. NULL on rows older
             than the column, and on `PROPOSAL_APPLIED` and `PROPOSAL_EXPIRED` rows written before
-            migration 0021.
+            archived migration 0153.
         audit_domain:
           type: string
           enum: [asset, security]
@@ -4254,7 +4254,7 @@ components:
           example: 'grafana/grafana:13.2.0'
           description: >-
             The image reference (`repository:tag`) the release deploys for the service, recorded by
-            db-init from the chart on every install and upgrade (`0007`). It is the release's pin,
+            db-init from the chart on every install and upgrade (`0140`). It is the release's pin,
             not an observation of the running container. `null` when the chart does not deploy the
             service, or when something other than the chart registered it.
         status: { type: string, example: ACTIVE }

@@ -28,11 +28,12 @@ const rule = (selector) => {
   return APP_CSS.slice(open + 1, APP_CSS.indexOf('}', open))
 }
 
-/** A declaration's first value in px: `padding: 1px 6px` gives 1. */
+/** A declaration's first value in px: `padding: 1px 6px` gives 1, `var(--pin-size, 40px)` its fallback. */
 const px = (body, prop) => {
   const declaration = body.split(/[;{}]/).map(d => d.trim()).find(d => d.startsWith(`${prop}:`))
   if (!declaration) throw new Error(`no ${prop}`)
-  return parseFloat(declaration.slice(prop.length + 1))
+  const value = declaration.slice(prop.length + 1).trim()
+  return parseFloat(value.match(/^var\(--[\w-]+,\s*([\d.]+px)\)/)?.[1] ?? value)
 }
 
 const frame = rule('.area-plan')

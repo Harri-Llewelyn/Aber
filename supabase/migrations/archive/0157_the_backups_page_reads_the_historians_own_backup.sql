@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0026_the_backups_page_reads_the_historians_own_backup.sql
+-- Migration: 0157_the_backups_page_reads_the_historians_own_backup.sql (applied as 0026 until the 1.0 squash)
 -- The historian's physical backup on the Backups page: its runs, its schedule and the backups the
 -- page asked for, read over the FDW behind an Administrator-only function
 -- =============================================================================================

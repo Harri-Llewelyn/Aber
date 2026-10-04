@@ -389,20 +389,10 @@ CREATE POLICY "area_plans_delete_privileged" ON storage.objects
     AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
   );
 
--- The bucket's policies under its old name, floor-plans, and the path check they called. Dropped
--- here because nothing drops a policy this file stops declaring, and the check cannot go before
--- the two write policies that depend on it. storage-init moves the objects across.
-DROP POLICY IF EXISTS "floor_plans_read_authenticated" ON storage.objects;
-DROP POLICY IF EXISTS "floor_plans_insert_privileged" ON storage.objects;
-DROP POLICY IF EXISTS "floor_plans_update_privileged" ON storage.objects;
-DROP POLICY IF EXISTS "floor_plans_delete_privileged" ON storage.objects;
-DROP FUNCTION IF EXISTS public.is_floor_plan_path(text);
-
 DO $$
 DECLARE
   v_policies integer;
   v_unconfined integer;
-  v_retired integer;
 BEGIN
   SELECT count(*) INTO v_policies FROM pg_policies
    WHERE schemaname = 'storage' AND tablename = 'objects'
@@ -420,12 +410,5 @@ BEGIN
     RAISE EXCEPTION 'area-plans: % write policy/policies do not confine the path to an existing area.', v_unconfined;
   END IF;
 
-  SELECT count(*) INTO v_retired FROM pg_policies
-   WHERE schemaname = 'storage' AND tablename = 'objects'
-     AND policyname LIKE 'floor_plans_%';
-  IF v_retired <> 0 OR to_regprocedure('public.is_floor_plan_path(text)') IS NOT NULL THEN
-    RAISE EXCEPTION 'floor-plans: % policy/policies or the old path check survived the rename to area-plans.', v_retired;
-  END IF;
-
-  RAISE NOTICE 'area-plans policies reconciled (4 policies; writes confined to <area_id>/; floor-plans policies gone).';
+  RAISE NOTICE 'area-plans policies reconciled (4 policies; writes confined to <area_id>/).';
 END $$;

@@ -7,6 +7,7 @@
  */
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { platformRootReader } from "../_shared/caPin.ts";
 
 const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" };
 
@@ -27,9 +28,6 @@ const COMMON_ENV = ["SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY"];
 const FUNCTION_REGISTRY: Record<string, string[]> = {
   // Writes to `devices` outside the caller's RLS context after checking the caller's role.
   "approve-quarantine": ["SUPABASE_SERVICE_ROLE_KEY"],
-
-  // Reads the committed flow from the environment and pushes it to Node-RED's admin API.
-  // No service-role key: it makes no privileged database write.
 
   // Mints a host-run gateway's broker credential and reveals it once, authorised by role through a
   // SECURITY DEFINER RPC that checks has_role() itself. No service-role key: it holds the
@@ -94,10 +92,12 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   "gateway-bundle": [
     "SUPABASE_PUBLIC_URL",
     "MQTT_PUBLIC_HOST",
-    // The one-liner: the platform's root (the pin is computed from it), where an appliance fetches
-    // that root over plain HTTP, and the development-only switch that lets the command be minted
-    // for a plain-HTTP platform.
+    // The one-liner: the platform's root (the pin is computed from it) and what its mount holds,
+    // both read from the mount by envForFunction(); where an appliance fetches that root over plain
+    // HTTP; and the development-only switch that lets the command be minted for a plain-HTTP
+    // platform.
     "ABER_CA_PEM",
+    "ABER_CA_STATE",
     "ABER_CA_URL",
     "ABER_INSTALLER_ALLOW_HTTP",
     // The readiness probe reports when the BROKER's root expires, which is a different root and
@@ -204,6 +204,24 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   "fplus-directory": [],
 };
 
+/** The platform root's mount, read at each spawn until it holds a root (_shared/caPin.ts). */
+const platformRoot = platformRootReader();
+
+/**
+ * The platform's root and its state, for a function that declares ABER_CA_PEM. Read from the mount
+ * rather than taken from the entrypoint's read at start, so a pod that started before cert-manager
+ * issued the root pins it once it appears. Null when the mount cannot be read: the entrypoint's
+ * ABER_CA_PEM then stands, and no state is forwarded.
+ */
+function readRoot(): { state: string; pem: string | null } | null {
+  try {
+    return platformRoot();
+  } catch (err) {
+    console.error(`could not read the platform root's mount: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+
 /**
  * Build the environment for one worker: the common set plus that function's declared secrets. A
  * declared variable that is unset is skipped rather than forwarded as an empty string, so a
@@ -211,10 +229,13 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
  */
 function envForFunction(serviceName: string): string[][] {
   const allowed = [...COMMON_ENV, ...(FUNCTION_REGISTRY[serviceName] ?? [])];
+  const root = allowed.includes("ABER_CA_PEM") ? readRoot() : null;
   const env: string[][] = [];
 
   for (const key of allowed) {
-    const value = Deno.env.get(key);
+    const value = key === "ABER_CA_PEM" ? root?.pem ?? Deno.env.get(key)
+      : key === "ABER_CA_STATE" ? root?.state
+      : Deno.env.get(key);
     if (value !== undefined) env.push([key, value]);
   }
 

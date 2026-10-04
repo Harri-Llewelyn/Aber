@@ -19,8 +19,7 @@ const EDITED_ON = new Map([
  * the UI.
  */
 export const PAGE_KEYWORDS = {
-  // 'overview' and 'floor plan' are the page's old names; they stay findable.
-  'site-map':       ['dashboard', 'home', 'shopfloor', 'map', 'site map', 'overview', 'floor plan', 'status'],
+  'site-map':       ['dashboard', 'home', 'shopfloor', 'map', 'site map', 'overview', 'status'],
   // Every word somebody would reach for while holding the thing rather than its name: an
   // operator searches "request" or "ask", an approver searches "approve" or "pending".
   'approvals':      ['proposal', 'proposals', 'approve', 'reject', 'pending', 'queue', 'request',
@@ -40,8 +39,7 @@ export const PAGE_KEYWORDS = {
   'metrics':        ['metric', 'catalog', 'catalogue', 'data point', 'data points', 'tag', 'tags', 'units', 'datatype', 'semantic id', 'deprecate'],
   'vocabulary':     ['standard', 'standards', 'mtconnect', 'iso 22400', 'opc ua', 'ashrae', 'semantic'],
   'directory':      ['services', 'endpoints', 'urls', 'links', 'grafana', 'node-red', 'liveness', 'image versions'],
-  // The page's name before 1.0 stays findable, as the archives' old name does above.
-  'audit-trail':    ['audit', 'history', 'trace', 'provenance', 'events', 'changes', 'who changed', 'digital thread'],
+  'audit-trail':    ['audit', 'history', 'trace', 'provenance', 'events', 'changes', 'who changed'],
   'capture':        ['record', 'recording', 'replay', 'playback', 'shadow'],
   'cold-storage':   ['parquet', 'tiered', 'object storage', 'minio', 'telemetry archive', 's3'],
   'access-control': ['users', 'roles', 'permissions', 'principals', 'credentials', 'rbac', 'identities'],
@@ -51,12 +49,12 @@ export const PAGE_KEYWORDS = {
 
 /**
  * The sections inside each page. One entry per section somebody would type, usually the heading the
- * page renders; the Site Map's lanes have entries of their own. 'floor plan', 'floors' and
- * 'buildings' below are old names, and 'zones' is the old name for a cell. A section that is one tab
+ * page renders; the Site Map's lanes have entries of their own. 'floors' and 'buildings' below are
+ * old names, and 'zones' is the old name for a cell. A section that is one tab
  * of its page carries `section`, that tab's id, and the search opens the page on that tab.
  */
 export const CARDS = [
-  { id: 'site-map',             label: 'Site Map',             tab: 'site-map',       keywords: ['floor plan', 'floors', 'plan', 'pins', 'svg', 'layout', 'areas', 'lanes'] },
+  { id: 'site-map',             label: 'Site Map',             tab: 'site-map',       keywords: ['floors', 'plan', 'pins', 'svg', 'layout', 'areas', 'lanes'] },
   { id: 'site-wide-lane',       label: 'Site-Wide',            tab: 'site-map',       keywords: ['no cell', 'bms', 'agv', 'unassigned lane'] },
   { id: 'simulated-lane',       label: 'Simulated',            tab: 'site-map',       keywords: ['no cell', 'simulator', 'synthetic', 'generated'] },
   { id: 'unassigned-lane',      label: 'Unassigned',           tab: 'site-map',       keywords: ['no cell', 'orphan', 'unplaced'] },
@@ -79,7 +77,7 @@ export const CARDS = [
   { id: 'dir-ingestion',        label: 'Ingestion & Messaging', tab: 'directory', section: 'ingestion', keywords: ['mosquitto', 'broker', 'daemon'] },
   { id: 'dir-infrastructure',   label: 'Data & Backend Infrastructure', tab: 'directory', section: 'infrastructure', keywords: ['postgres', 'timescale', 'gateway', 'envoy', 'storage'] },
 
-  { id: 'trail-timeline',       label: 'Audit Trail',          tab: 'audit-trail',    keywords: ['timeline', 'events', 'digital thread'] },
+  { id: 'trail-timeline',       label: 'Audit Trail',          tab: 'audit-trail',    keywords: ['timeline', 'events'] },
   { id: 'capture-list',         label: 'Capture',              tab: 'capture',        keywords: ['recordings', 'record broker', 'upload capture'] },
   { id: 'playback',             label: 'Playback',             tab: 'capture',        keywords: ['replay', 'shadow devices', 'speed'] },
   { id: 'cold-telemetry',       label: 'Cold telemetry',       tab: 'cold-storage',   keywords: ['parquet', 'objects', 'tiered'] },

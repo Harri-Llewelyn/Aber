@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0010_a_metric_deprecation_reaches_the_thread.sql
+-- Migration: 0143_a_metric_deprecation_reaches_the_thread.sql (applied as 0010 until the 1.0 squash)
 -- Deprecating or restoring a metric is an Audit Trail event (#468)
 -- =============================================================================================
 --

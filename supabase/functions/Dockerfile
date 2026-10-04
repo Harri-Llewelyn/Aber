@@ -50,11 +50,11 @@ RUN rm -f /home/deno/functions/Dockerfile /home/deno/functions/offline-check.sh
 #
 # A user worker has NO FILESYSTEM ACCESS to anything in this image -- edge-runtime sandboxes it,
 # and main/index.ts forwards only environment variables to each worker it spawns. ABER_CA_PEM is
-# the platform's root, read here in the plain container shell before edge-runtime starts, from the
-# ingress TLS Secret the chart mounts at /home/deno/ca when ingress TLS is on: gateway-bundle
-# computes the one-liner's pin from it. Absent on a deployment without ingress TLS, and the
-# dashboard then offers the ZIP bundle alone. Exec form with a literal script, so the quoting
-# survives.
+# the platform's root, from the ingress TLS Secret the chart mounts at /home/deno/ca when ingress
+# TLS is on: gateway-bundle computes the one-liner's pin from it. main/index.ts reads the mount at
+# each spawn until it holds the root, so a pod that started before cert-manager issued it needs no
+# restart; this read at start is the value that stands if main cannot read the mount. Empty on a
+# deployment without ingress TLS. Exec form with a literal script, so the quoting survives.
 ENTRYPOINT ["/bin/sh", "-e", "-c", "export ABER_CA_PEM=\"$(cat /home/deno/ca/ca.crt 2>/dev/null || true)\"; exec edge-runtime start --main-service /home/deno/functions/main"]
 
 FROM runtime AS offline-check

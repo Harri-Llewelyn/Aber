@@ -471,12 +471,9 @@ for (const spec of SPECS) {
  * is left exactly as it is rather than being restated with this file's description.
  */
 const groupUuid = (name) => {
-  // THE SEED STRING KEEPS ITS LEGACY `factoryplus.` PREFIX ON PURPOSE, and was deliberately left
-  // behind by the aber rename. It is not a namespace anyone reads -- it is the salt these
-  // PRIMARY KEYS are derived from. Change it and every metric_groups uuid changes, which orphans
-  // the metric_catalog rows that reference them and rewrites every seeded line. An internal
-  // derivation salt has no branding value and cannot be renamed without a data migration.
-  const hex = createHash('sha256').update(`factoryplus.metric_group.${name}`).digest('hex');
+  // The salt these PRIMARY KEYS are derived from. Changing it changes every id this block seeds,
+  // and an installed database keeps the ids it was seeded with, so it is fixed from 1.0 on.
+  const hex = createHash('sha256').update(`aber.metric_group.${name}`).digest('hex');
   return [
     hex.slice(0, 8), hex.slice(8, 12),
     `4${hex.slice(13, 16)}`,

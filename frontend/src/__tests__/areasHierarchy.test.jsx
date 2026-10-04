@@ -173,7 +173,7 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     await waitFor(() => expect(document.querySelectorAll('.shopfloor-grid').length).toBe(2))
     const single = [...document.querySelectorAll('.shopfloor-grid')][1]
     expect(single.style.getPropertyValue('--map-columns')).toBe('1')
-    expect(single.style.getPropertyValue('--pin-size')).toBe('44px')
+    expect(single.style.getPropertyValue('--pin-size')).toBe('40px')
   })
 
   it('keeps the three site lanes side by side in the Site Map card, each in its own hue, with no area selector', async () => {

@@ -1,7 +1,8 @@
 import React from 'react'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { BackupsTab, BACKUP_STALE_HOURS, historianState, keptBecause, nextHistorianBackup } from '../components/tabs/BackupsTab'
+import { BackupsTab, BACKUP_STALE_HOURS, historianState, keptBecause } from '../components/tabs/BackupsTab'
+import { nextHistorianBackup } from '../utils/historianBackupSchedule'
 import { tabIsVisible, TABS, groupedNav } from '../navigation'
 
 /**

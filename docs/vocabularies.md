@@ -71,7 +71,7 @@ before proposing a change:
   [`supabase/functions/_shared/aas/shell.ts`](../supabase/functions/_shared/aas/shell.ts)) —
   correct AAS V3 for IRIs and IRDIs alike, so IRDIs export with no code change. `semantic_id_type`
   is validation metadata here, not export input, and it is IRI or IRDI only: `ModelReference` was
-  withdrawn by `0012`, because a ModelReference is a typed key chain into a model that one text
+  withdrawn by `0145`, because a ModelReference is a typed key chain into a model that one text
   column cannot hold and the exporter cannot emit. The form infers IRDI for any ISO/IEC 11179-6
   shape, the IEC CDD `0112/2///61987#ABA565#009` and an ECLASS pair joined by `/` included.
   **Each id also gets a `ConceptDescription`** in the

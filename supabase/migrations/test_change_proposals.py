@@ -524,7 +524,7 @@ class TestDeciding(ProposalCase):
         self.assertEqual(self.cur.fetchone(), ("applied", "PROPOSAL_APPLIED"))
 
     def test_the_applied_row_and_the_change_share_a_causation_id(self):
-        # 0021. The drawer groups an event's rows by causation_id, so the approval and the UPDATE
+        # 0153. The drawer groups an event's rows by causation_id, so the approval and the UPDATE
         # it made are one act only if both carry the approving transaction.
         proposal = self.propose({"name": "One Act"})
         as_user(self.cur, MANAGER)
@@ -1208,7 +1208,7 @@ class TestTheTimer(ProposalCase):
         self.assertEqual(domain, "asset")
 
     def test_the_expiry_row_carries_the_runs_causation_id(self):
-        # 0021. One run is one act, so every row it writes carries that run's transaction.
+        # 0153. One run is one act, so every row it writes carries that run's transaction.
         proposal = self.propose({"name": "forgotten"})
         as_owner(self.cur)
         self.cur.execute("SELECT set_config('aber.proposal_transition','on',true);")

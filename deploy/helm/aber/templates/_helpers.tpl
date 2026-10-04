@@ -101,9 +101,9 @@ boot, studio is Zod-coupled to a postgres-meta version, node-red is what setting
 
 {{/*
 The image serving each Directory row, as JSON keyed by component, for db-init to record in
-directory_services.image (migration 0007). Rendered by the same expression as each workload's own
+directory_services.image (archived migration 0140). Rendered by the same expression as each workload's own
 image:, and a component the chart does not deploy is left out so its row is cleared; Alloy only
-when its node_exporter collectors run. check-docs-drift.mjs holds the list equal to 0007's.
+when its node_exporter collectors run. check-docs-drift.mjs holds the list equal to 0140's.
 */}}
 {{- define "aber.directoryImages" -}}
 {{- $v := .Values -}}
@@ -178,8 +178,7 @@ on that one topic from the same value, so the two cannot drift.
 The Sparkplug group id: the second segment of every topic this site publishes, and the enterprise
 segment of its Unified Namespace. Fixed at install: the first boot seeds it into the
 sparkplug.group_id setting and a later value that differs is refused, because changing it
-re-addresses every gateway. Unlike primaryHostId it has a default, Aber; a stack installed before
-1.0 holds the former name, and migration 0003 moves it on the first boot under this chart.
+re-addresses every gateway. Like primaryHostId it has no default: the site names its own.
 */}}
 {{- define "aber.sparkplugGroup" -}}
 {{- $g := .Values.ingestion.sparkplugGroup | default "" -}}

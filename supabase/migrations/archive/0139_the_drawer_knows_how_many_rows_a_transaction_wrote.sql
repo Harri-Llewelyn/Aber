@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0006_the_drawer_knows_how_many_rows_a_transaction_wrote.sql
+-- Migration: 0139_the_drawer_knows_how_many_rows_a_transaction_wrote.sql (applied as 0006 until the 1.0 squash)
 -- Each Audit Trail event says how many rows its transaction wrote (#431)
 -- =============================================================================================
 --

@@ -144,7 +144,7 @@ spec:
               value: {{ include "aber.docsUrl" . | quote }}
             - name: SUPABASE_PUBLIC_URL
               value: {{ include "aber.supabaseUrl" . | quote }}
-            # The image each Directory row's workload runs, recorded by 0007 on every boot.
+            # The image each Directory row's workload runs, recorded by 0140 on every boot.
             - name: DIRECTORY_IMAGES
               value: {{ include "aber.directoryImages" . | quote }}
             - name: NODERED_OAUTH_CALLBACK_URL

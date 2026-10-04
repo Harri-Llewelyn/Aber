@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0022_whoever_decides_a_proposal_can_read_the_machine_that_filed_it.sql
+-- Migration: 0154_whoever_decides_a_proposal_can_read_the_machine_that_filed_it.sql (applied as 0022 until the 1.0 squash)
 -- The Approvals page names a machine proposer to the person deciding its proposal (#535)
 -- =============================================================================================
 --

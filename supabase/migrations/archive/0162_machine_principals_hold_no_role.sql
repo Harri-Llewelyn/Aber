@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0032_machine_principals_hold_no_role.sql
+-- Migration: 0162_machine_principals_hold_no_role.sql (applied as 0032 until the 1.0 squash)
 -- The user_roles comment says machine principals hold no role
 -- =============================================================================================
 --

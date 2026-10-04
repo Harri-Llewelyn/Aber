@@ -802,7 +802,8 @@ mosquitto:
     # one it last saw, and SIGHUPs the broker on a change. The kubelet's own sync period
     # (60-90s) precedes this.
     watchIntervalSeconds: 15
-    # `aber-ca` is what deploy/k8s/internal-ca.yaml creates. An ACME issuer works too.
+    # `aber-ca` is what deploy/k8s/internal-ca.yaml creates, and the supported issuer: Remote
+    # enrolment hands each appliance the root from this Secret's ca.crt, and refuses without one.
     clusterIssuer: aber-ca
     # Set if your issuer is a namespaced Issuer rather than a ClusterIssuer.
     issuerKind: ClusterIssuer
@@ -963,8 +964,7 @@ ingestion:
   # FIXED AT INSTALL. It is seeded into the read-only `sparkplug.group_id` setting on the first
   # boot, shown on the Settings page, and db-init REFUSES a later boot whose value differs --
   # because changing the group re-addresses every gateway, every appliance bundle and every row of
-  # history keyed on the old pair. That is a migration, not a preference. An install from before
-  # 1.0 names the group it already has (`ACS-Cymru` is moved to `Aber` by 0003; docs/upgrades.md).
+  # history keyed on the old pair. That is a migration, not a preference.
   #
   # One topic level: no `/`, `+`, `#` or whitespace.
   sparkplugGroup: ""
@@ -1204,7 +1204,8 @@ ingress:
     # One wildcard certificate for *.<publicBaseDomain>.
     secretName: aber-tls
     certManager:
-      # e.g. letsencrypt-prod. Setting it makes cert-manager issue into `secretName`.
+      # `aber-ca`, the internal CA (deploy/k8s/internal-ca.yaml). Setting it makes cert-manager
+      # issue into `secretName`.
       clusterIssuer: ""
   # Per-route overrides, keyed by the route names in aber.ingressRoutes: frontend,
   # supabase, nodered, grafana, studio, docs, gitea, mqtt.
@@ -1549,9 +1550,8 @@ backup:
   # Also archive the CA behind mosquitto.tls and postgresTls: every appliance pins it, so losing
   # it is a fleet-wide re-enrolment. The Secret lives in the ClusterIssuer's namespace
   # (deploy/k8s/internal-ca.yaml puts aber-ca-key-pair in cert-manager's); the chart gives
-  # the backup service `get` on that one name there and nothing else. Empty name: not archived,
-  # which is right for an ACME issuer, whose CA is nobody's to keep. Read by the backup service
-  # only.
+  # the backup service `get` on that one name there and nothing else. Empty name: not archived.
+  # Read by the backup service only.
   ca:
     secretName: ""
     namespace: cert-manager

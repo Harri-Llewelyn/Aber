@@ -536,14 +536,14 @@ database owner.
 
 ### TLS
 
-The chart is **issuer-agnostic**: it names a cert-manager issuer and never assumes what kind it is.
-An internal CA is the default for an on-premises cluster; ACME is the alternative for a genuinely
-public domain.
+Every certificate comes from the **internal CA** created below, and it is the only supported
+issuer: Aber runs on the site's own network, on a private domain. The chart names that issuer
+rather than creating it, because the root's private key must outlive any release.
 
 #### 0. Install cert-manager — once per cluster
 
 Not bundled as a chart dependency: it installs CRDs and a cluster-wide webhook, which is cluster
-administration rather than something an application release should own — and two Factory+ releases in
+administration rather than something an application release should own — and two Aber releases in
 one cluster would then fight over it.
 
 ```bash
@@ -573,11 +573,10 @@ This deliberately lives **outside Helm**. It holds the deployment's root private
 unverifiable, and re-issuing means redistributing a new root to every machine that trusts this one.
 It is also cluster-scoped and shared, and a 10-year artefact against a chart upgraded monthly.
 
-> **Why not Let's Encrypt.** ACME cannot serve this target. HTTP-01 needs the cluster reachable from
-> the public internet, DNS-01 needs a public zone plus provider API credentials in a Secret, a
-> *wildcard* requires DNS-01 specifically, and an internal-only domain cannot be validated at all.
-> Nothing in the chart is ACME-specific, so swapping `clusterIssuer` for an ACME issuer is the whole
-> change if you do have a public domain.
+> **Public certificates are not supported.** ACME cannot validate a private domain, and Remote
+> enrolment hands each appliance the root from the broker's Secret (`ca.crt`), which a public issuer
+> does not put there: enrolment refuses without it. Reaching the site from outside its network is
+> the operator's to arrange, over a VPN they manage.
 
 #### 2. Turn on ingress TLS and broker TLS
 
@@ -617,7 +616,7 @@ intercepted. This is not cosmetic.
 
 Server-side, the root reaches the broker's clients and the database clients (both below) and
 nothing else: every HTTP hop between services stays on plaintext over in-cluster Service names
-(`token_url`, `api_url`, `NODERED_URL`, and the pg_net webhook all do), so Grafana, Node-RED and
+(`token_url`, `api_url`, and pg_net's calls from the database all do), so Grafana, Node-RED and
 the edge runtime carry no CA bundle for HTTP. That hop is a service mesh's to close, and the
 roadmap records it as answered rather than built.
 
@@ -1219,7 +1218,7 @@ credentials and the age identity outside the cluster: the Vault holding the secr
 every backup. **Under `networkPolicy.enabled` the endpoint needs an egress rule**, listed in
 `backupService.offsiteEgress`, or every copy fails at connect time. The design and the runbook that
 starts from the bucket are in
-[`../../supabase/README.md`](../../supabase/README.md#an-encrypted-copy-off-site-0018).
+[`../../supabase/README.md`](../../supabase/README.md#an-encrypted-copy-off-site-0151).
 
 The CronJob writes to the PVC only. Its `backup.destination: s3` and `backup.s3.*` are retired, and
 a values file that still sets them fails the render: the upload could not run, having no `aws` CLI
@@ -1678,7 +1677,7 @@ the root filesystem is an overlay the exporter excludes, so Root Disk Used is bl
   mapped binary (about 170 MiB) and page cache, which is why the limit is 768Mi.
 - **Mosquitto's metrics are prefixed `broker_`, not `mosquitto_`.** Alerts and dashboards written
   against the latter match nothing and render as empty panels rather than as errors.
-- **Grafana is inside the thing being monitored.** A `supabase-db` failure takes the Factory+
+- **Grafana is inside the thing being monitored.** A `supabase-db` failure takes the platform's
   dashboards down with it, and the alert webhook with them. Send alerts off-cluster, or use the
   external arrangement below.
 
@@ -1859,10 +1858,9 @@ and a `password_file` left by a release from before the plugin, which the initCo
 once — every appliance's password intact — and leaves in place. It is created empty on first
 install and preserved thereafter (`resource-policy: keep` plus a `lookup` through a re-render).
 
-> **There is no shared broker account.** `acs-cymru`, which held `readwrite spBv1.0/#` and was
-> used by ingestion, i3X, Node-RED and the validator alike, has been deleted — it could forge
+> **There is no shared broker account.** One credential holding `readwrite spBv1.0/#` could forge
 > `DBIRTH`/`DDATA` for any machine on the site, which `verify_gateway_binding()` cannot detect for
-> a correctly bound device. The roles in `mosquitto/dynsec-roles.json` now confine
+> a correctly bound device. The roles in `mosquitto/dynsec-roles.json` confine
 > `aber_ingestion` (read plus NCMD only), `aber_i3x` (read only), `aber_monitor`
 > (`$SYS` only), the plugin's admin (`$CONTROL` only) and every gateway (its own edge node, through
 > a role generated for it). **The gateway usernames must be `sparkplug_id`s** — the chart fails the

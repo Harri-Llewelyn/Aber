@@ -12,10 +12,13 @@ import { IconAlertTriangle } from './Icons'
 let modelViewerModule = null
 
 /** Where the viewer fetches its Draco and KTX2 decoders: served by the dashboard itself
- *  (frontend/modelViewerDecoders.js) instead of the viewer's default, www.gstatic.com. */
+ *  (frontend/modelViewerDecoders.js) instead of the viewer's default, www.gstatic.com. The Lottie
+ *  loader is not served: the dashboard creates no Lottie texture, and a local path makes one fail
+ *  here instead of fetching from cdn.jsdelivr.net. */
 export const DECODER_LOCATIONS = {
   dracoDecoderLocation: `${import.meta.env.BASE_URL}decoders/draco/`,
   ktx2TranscoderLocation: `${import.meta.env.BASE_URL}decoders/basis/`,
+  lottieLoaderLocation: `${import.meta.env.BASE_URL}decoders/lottie/LottieLoader.js`,
 }
 
 function loadModelViewer() {

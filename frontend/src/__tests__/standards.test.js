@@ -23,7 +23,7 @@ describe('standards registry', () => {
     expect(values).toContain(STANDARDS.OPCUA)
   })
 
-  it('mirrors the CHECK constraints on semantic_id_type (migration 0012)', () => {
+  it('mirrors the CHECK constraints on semantic_id_type (archived migration 0145)', () => {
     // ModelReference is withdrawn: the exporter emits every id as an ExternalReference, and one
     // text column cannot carry a ModelReference's typed key chain.
     expect(SEMANTIC_ID_TYPES).toEqual(['IRI', 'IRDI'])

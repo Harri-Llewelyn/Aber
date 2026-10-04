@@ -169,7 +169,7 @@ class PurgeCascadeTests(unittest.TestCase):
 
 class DeletedDeviceBirthParameterTests(unittest.TestCase):
     """
-    A deleted device's birth parameters go with it (0029). `asset_config.asset_id` is the device's
+    A deleted device's birth parameters go with it (0159). `asset_config.asset_id` is the device's
     sparkplug_id as text, so no foreign key cascades; a trigger on devices DELETE does. Everything
     here is one transaction, rolled back.
     """

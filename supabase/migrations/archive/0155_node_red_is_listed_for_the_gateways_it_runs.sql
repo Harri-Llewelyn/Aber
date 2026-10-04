@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0024_node_red_is_listed_for_the_gateways_it_runs.sql
+-- Migration: 0155_node_red_is_listed_for_the_gateways_it_runs.sql (applied as 0024 until the 1.0 squash)
 -- The Directory names Node-RED for what it runs now
 -- =============================================================================================
 --

@@ -51,7 +51,7 @@ const STORAGE_PATH = process.env.STORAGE_PATH ?? '/storage';
 const FORGE_PATH = process.env.FORGE_PATH ?? '/forge';
 const BROKER_PATH = process.env.BROKER_PATH ?? '/broker';
 // The CA behind the broker's and the databases' certificates, read from its Secret through the API
-// with the pod's ServiceAccount. Either empty: no CA to keep (an ACME issuer, or no TLS).
+// with the pod's ServiceAccount. Either empty: no CA to keep (TLS is off).
 const CA_SECRET_NAME = process.env.CA_SECRET_NAME || '';
 const CA_SECRET_NAMESPACE = process.env.CA_SECRET_NAMESPACE || '';
 const SA_DIR = '/var/run/secrets/kubernetes.io/serviceaccount';

@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0015_i3x_authenticates_with_a_call_the_planner_cannot_fold.sql
+-- Migration: 0148_i3x_authenticates_with_a_call_the_planner_cannot_fold.sql (applied as 0015 until the 1.0 squash)
 -- i3X's authentication probe is a function whose EXECUTE check runs on every call
 -- =============================================================================================
 --

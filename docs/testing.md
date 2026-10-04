@@ -184,7 +184,7 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=
 # repository gets its appliance and catch-all rules back and main closed again; a key downgraded
 # to read-only is re-registered read-write; an archived gateway's key is removed from both
 # repositories; one sweep publishes the platform playbook, tags it and protects it, and a second
-# publishes nothing; and the database's own sweep_forge() answers true. One pass at a time (0025):
+# publishes nothing; and the database's own sweep_forge() answers true. One pass at a time (0156):
 # each test holds the sweep lease and runs its passes under it, a call meeting a held lease answers
 # already_sweeping at once and pg_net records it as 200, a lapsed lease is taken over, and a second
 # push webhook of ours is removed. FORGE_SWEEP_SECRET is the release Secret's value. Skips without it.
@@ -196,8 +196,8 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=..
 # digests matching the row, a manifest restore-databases.sh reads -- and the trail names who asked
 # and that the service wrote it; a queued request refuses a twin and can be cancelled; a pinned
 # backup is released once; a job that fails is followed by a prune that leaves the newest three
-# backups alone (0017); a backup is copied off site, age-encrypted, to a MinIO the test starts, and a
-# pruned backup's copy goes with it (0018). Takes real backups and removes them afterwards; stops the
+# backups alone (0150); a backup is copied off site, age-encrypted, to a MinIO the test starts, and a
+# pruned backup's copy goes with it (0151). Takes real backups and removes them afterwards; stops the
 # service container for a few seconds for the cancel case, fails one job with a trigger it drops
 # afterwards, and deletes the MinIO's namespace when done.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... python backup-service/test_backup_service.py
@@ -220,8 +220,9 @@ MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credent
 # The broker-credential machinery whose failure is silent, in isolation and with no stack: the
 # boot reconcile that must never lose a client, the control-API protocol, and the filter deciding
 # which accounts the orphan sweep may disable — which is what keeps it from revoking
-# `aber_ingestion` and stopping the stack ingesting. Also node-red-init against a volume from
-# before the rename to Aber, which must keep its flow byte for byte apart from the moved node.
+# `aber_ingestion` and stopping the stack ingesting. Also node-red-init against a seeded volume:
+# one tls-config node shared by every broker, and a broker node with no credential pair stopping
+# the boot.
 npm run test:lib
 
 # THE MIGRATION MODEL'S CENTRAL INVARIANT — needs the stack up, and replays db-init a second
@@ -258,7 +259,7 @@ python supabase/migrations/test_user_roles_rls.py
 # invalid patch aborts its own approval rather than becoming a record of something that did not
 # happen, and that both caps are in the database rather than in a disabled button. An approval's
 # PROPOSAL_APPLIED row and the UPDATE it made share one causation_id, which the drawer's page
-# counts as one act, and an expiry run stamps its own (0021).
+# counts as one act, and an expiry run stamps its own (0153).
 python supabase/migrations/test_change_proposals.py
 # The Administrator / Shopfloor_Manager split (0069), in both halves: the grants diverged, AND the
 # withdrawal reaches Postgres. The second half is the one worth having -- no RLS policy reads
@@ -307,15 +308,15 @@ python supabase/migrations/test_system_settings_rls.py
 # the trigger refuses it -- a read-only control in the browser alone would be a suggestion. Also
 # that gateways.sparkplug_group now defaults to the setting rather than the old literal.
 python supabase/migrations/test_sparkplug_group_setting.py
-# The Directory's Version column (0007). The chart's component -> image map reaches every row it
+# The Directory's Version column (0140). The chart's component -> image map reaches every row it
 # manages, clears a component the chart stops deploying, leaves other registrations alone, and the
 # writer is callable by db-init only.
 python supabase/migrations/test_directory_images.py
-# The Backup Stale rule's clock (0011). No row while no backup job exists; the first job recorded
+# The Backup Stale rule's clock (0144). No row while no backup job exists; the first job recorded
 # until one succeeds, then the start of the last success, which a later failure does not move; and
 # anon and authenticated cannot read a view that runs past backup_jobs' Administrator-only RLS.
-# And the retention floor (0017): backup_prunable() never returns any of the newest three backups.
-# And the off-site copy (0018): the destination is an Administrator's, checked on write, its key
+# And the retention floor (0150): backup_prunable() never returns any of the newest three backups.
+# And the off-site copy (0151): the destination is an Administrator's, checked on write, its key
 # write-only; the service's gates refuse every PostgREST role, hand out the newest backup without a
 # copy and back off a failed one; and Off-site Backup Stale's view counts from the later of the
 # newest backup and the last destination change.
@@ -385,7 +386,7 @@ python supabase/migrations/test_credential_revocation.py
 # are what this pins -- above all the transition guard, without which every ordinary edit to an
 # archived gateway would walk the whole forge. Asserted on the pg_net queue, which the rollback
 # un-queues; the sweep's own half needs a forge and lives in test_forge_sweep.py. Also the sweep
-# lease (0025): one winner of two simultaneous claims, a lapsed lease taken over, only the holder
+# lease (0156): one winner of two simultaneous claims, a lapsed lease taken over, only the holder
 # renewing or releasing, and one follow-up pass queued for any calls refused while it was held.
 python supabase/migrations/test_forge_follows_the_archive.py
 # Service-token revocation (0074): the denylist, and the PostgREST db-pre-request hook that reads
@@ -406,13 +407,13 @@ python supabase/migrations/test_service_principal_revocation.py
 # Administrator and Auditor and for nobody else. describe_machine_principal() (0126) is the one
 # write path after creation: rows that exist only, an unchanged save writes nothing, and every
 # change is a PRINCIPAL_DESCRIBED row carrying what it replaced. Machines propose, people decide
-# (0013): every permission is allowed or refused with its own reason, and each allowed grant is
+# (0146): every permission is allowed or refused with its own reason, and each allowed grant is
 # exercised AS THE MACHINE -- it forks and publishes a schema, files a proposal only a person can
 # decide, reads the asset lane and never the security lane -- and a revoked identity or token is
 # refused before its write runs, the way PostgREST runs auth_pre_request() first. A machine's write
-# is filed as 'service' whatever X-Aber-Actor header it sends (0020), while the ingestion principal
+# is filed as 'service' whatever X-Aber-Actor header it sends (0152), while the ingestion principal
 # and the owner's tokenless session are still believed. Whoever may decide a machine's proposal
-# reads its name through list_proposer_names() (0022); an Operator or Auditor gets nothing.
+# reads its name through list_proposer_names() (0154); an Operator or Auditor gets nothing.
 python supabase/migrations/test_machine_principal_naming.py
 # The anon EXECUTE baseline across the WHOLE schema, not a list somebody remembered to extend.
 # PostgreSQL grants EXECUTE on a new function to PUBLIC, and anon is a member of PUBLIC, so a

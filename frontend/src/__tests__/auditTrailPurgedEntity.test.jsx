@@ -58,7 +58,7 @@ describe('snapshotIdentity', () => {
 
   it('names a setting by its label, which is the wording the Settings page shows', () => {
     const event = {
-      new_data: { key: 'ui.digital_thread_lane_limit', label: 'Lanes drawn before folding' },
+      new_data: { key: 'ui.audit_trail_lane_limit', label: 'Lanes drawn before folding' },
       old_data: null,
     }
     expect(snapshotIdentity(event))

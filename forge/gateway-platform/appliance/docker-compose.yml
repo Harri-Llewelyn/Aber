@@ -31,7 +31,7 @@ services:
     env_file: .env
     environment:
       # The root that signs the platform's API certificate, for enrolment's first call: Node trusts
-      # its bundled roots, not the host's store. Empty when that certificate is publicly trusted,
+      # its bundled roots, not the host's store. Empty only when the platform serves no TLS,
       # which Node reads as no extra roots; a missing file logs a warning and is otherwise the same.
       NODE_EXTRA_CA_CERTS: /bundle/platform-root.pem
     volumes:

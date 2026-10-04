@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0000_a_database_from_before_the_fold.sql
+-- Migration: 0135_a_database_from_before_the_fold.sql (applied as 0000 until the 1.0 squash)
 -- Take away what the baseline no longer describes, before it describes it
 -- =============================================================================================
 --

@@ -713,6 +713,9 @@ jobs:
               # with no retries and no DLQ. Block it and every notification is dropped silently.
               ('supabase-db', 'node-red', 1880, 'pg_net webhooks to Node-RED (no retries/DLQ)'),
               ('supabase-db', 'supabase-envoy', 8000, 'pg_net to edge functions'),
+              # The Directory's liveness probe asks Prometheus from the database. Blocked, every row
+              # reads UNKNOWN and nothing errors.
+              ('supabase-db', 'prometheus', 9090, 'pg_net: the Directory liveness probe'),
               # M2/M6: public.telemetry is a postgres_fdw projection.
               ('supabase-db', 'timescaledb', 5432, 'postgres_fdw'),
               ('ingestion', 'mosquitto', 1883, 'the spBv1.0/# subscription'),

@@ -221,7 +221,7 @@ or a restart; the window is the delay, so there is no `for`. The Backups page sh
 same number, `BACKUP_STALE_HOURS`, and a guard holds the two equal. A site that sets a sparser
 schedule has to change both.
 
-The value is `backup_health.age_seconds` (0011), which is how `grafana_reader` sees `backup_jobs`,
+The value is `backup_health.age_seconds` (0144), which is how `grafana_reader` sees `backup_jobs`,
 a table only an Administrator may read. The clock is the start of the last completed backup, the
 moment its data is as of; before the first success it is the first job recorded. That is what
 covers the case the page's failure line misses: a backup service that is not running records no
@@ -241,7 +241,7 @@ unreachable, a credential that has been revoked or a NetworkPolicy with no egres
 endpoint fails quietly by design. This is where it stops being quiet: an upload that fails silently
 is the failure the copy exists to prevent, because the backups are then on the disk they protect.
 
-The value is `backup_offsite_health.age_seconds` (0018), read as `grafana_reader` through
+The value is `backup_offsite_health.age_seconds` (0151), read as `grafana_reader` through
 `backup_offsite_health_rows()`, which runs as its owner so the reader needs no privilege on
 `backups`, the settings or the Vault. The clock is when the newest backup was taken, or when the
 destination last changed if that is later, and it reads zero once the backup is copied. A copy

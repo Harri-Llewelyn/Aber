@@ -1,12 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
-import { VALID_TABS, RENAMED_TABS } from '../constants'
+import { VALID_TABS } from '../constants'
 
 const pathTab = () => window.location.pathname.replace(/^\/+|\/+$/g, '')
 
 const getTabFromPath = () => {
   const path = pathTab()
-  const tab = RENAMED_TABS[path] || path
-  return VALID_TABS.includes(tab) ? tab : 'site-map'
+  return VALID_TABS.includes(path) ? path : 'site-map'
 }
 
 /**
@@ -55,9 +54,7 @@ export function useAppRouting(setSelectedDeviceFilter, setSelectedGatewayFilter,
     if (window.location.search.includes('code=') || window.location.search.includes('state=')) return
     const path = pathTab()
     if (!VALID_TABS.includes(path)) {
-      // A renamed tab's address is rewritten with its query intact; an unknown one's is not.
-      const search = RENAMED_TABS[path] ? window.location.search : ''
-      window.history.replaceState({}, '', `/${tab}${search}`)
+      window.history.replaceState({}, '', `/${tab}`)
     }
 
     const handlePopState = () => {

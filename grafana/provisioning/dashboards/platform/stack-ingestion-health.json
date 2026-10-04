@@ -608,7 +608,7 @@
       },
       "type": "stat",
       "title": "Audit Trail (never pruned)",
-      "description": "public.audit_trail, the one relation here with no retention policy: append-only, with UPDATE and DELETE blocked since migration 0003, so this number only rises.",
+      "description": "public.audit_trail, the one relation here with no retention policy: append-only, with UPDATE and DELETE blocked since archived migration 0003, so this number only rises.",
       "gridPos": {
         "h": 5,
         "w": 6,

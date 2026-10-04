@@ -1,10 +1,10 @@
 """
 Archiving a gateway asks the forge to follow (0114), and asking is gated where it should be; and
-one forge sweep runs at a time (0025).
+one forge sweep runs at a time (0156).
 
     python supabase/migrations/test_forge_follows_the_archive.py
 
-Requires the Supabase database (54322 by default) and 0114 applied; the lease tests need 0025.
+Requires the Supabase database (54322 by default) and 0114 applied; the lease tests need 0156.
 
 ---------------------------------------------------------------------------------------------
 WHAT IS UNDER TEST, AND WHAT IS NOT. forge-sweep is what archives the repository; this is the
@@ -161,18 +161,15 @@ class ForgeFollowsTheArchive(unittest.TestCase):
         self.assertIsNone(self.cur.fetchone()[0])
 
     def test_the_key_the_ask_carries_is_stored_under_its_current_name(self):
-        # sweep_forge() reads the publishable key from the vault by name, and 0002 rewrites it on
-        # every boot. The retired name must be gone, or a reader of the old name would still work
-        # on this database and fail on a fresh one.
-        self.cur.execute(
-            "SELECT name FROM vault.secrets WHERE name IN ('supabase_publishable_key', 'supabase_anon_key');"
-        )
-        self.assertEqual([r[0] for r in self.cur.fetchall()], ["supabase_publishable_key"])
+        # sweep_forge() reads the publishable key from the vault by this name, and 0002 rewrites it
+        # on every boot.
+        self.cur.execute("SELECT count(*) FROM vault.secrets WHERE name = 'supabase_publishable_key';")
+        self.assertEqual(self.cur.fetchone()[0], 1)
 
 
 class OnePassAtATime(unittest.TestCase):
     """
-    The forge-sweep lease (0025): what a claim, a renewal and a release do to it. What the function
+    The forge-sweep lease (0156): what a claim, a renewal and a release do to it. What the function
     answers while another pass holds it needs the stack, and is test_forge_sweep.py's.
 
     Each test frees the lease inside its own transaction and rolls back, which also un-queues the
@@ -186,7 +183,7 @@ class OnePassAtATime(unittest.TestCase):
         try:
             cur.execute("SELECT to_regprocedure('public.claim_forge_sweep(integer)');")
             if not cur.fetchone()[0]:
-                raise unittest.SkipTest("0025 has not been applied")
+                raise unittest.SkipTest("0156 has not been applied")
         finally:
             conn.rollback()
             conn.close()

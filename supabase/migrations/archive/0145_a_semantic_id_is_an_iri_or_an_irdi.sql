@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0012_a_semantic_id_is_an_iri_or_an_irdi.sql
+-- Migration: 0145_a_semantic_id_is_an_iri_or_an_irdi.sql (applied as 0012 until the 1.0 squash)
 -- A semantic id is an IRI or an IRDI; ModelReference is withdrawn (#479)
 -- =============================================================================================
 --

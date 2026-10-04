@@ -1,6 +1,6 @@
 """
 `gateways.deployment`: the constraints on it, and the view that has to be rebuilt when a gateways
-column moves. `gateways.status`: the CHECK 0014 adds.
+column moves. `gateways.status`: the CHECK 0147 adds.
 
     python supabase/migrations/test_gateway_deployment.py
 
@@ -16,8 +16,8 @@ credential inventory, and revocation never firing for a host-run gateway.
 WHAT THIS SUITE PROTECTED AND NO LONGER HAS TO. The two columns coexisted for several releases and
 a trigger kept them in agreement whichever generation of writer touched a row; the larger half of
 this file asserted that agreement in both directions. `is_virtual` was dropped at the third
-baseline squash and the trigger with it, so that half has gone -- `0000` performs the drop and
-asserts it, and there is no second column left to disagree.
+baseline squash and the trigger with it, so that half has gone: there is no second column left to
+disagree.
 
 EVERY TEST ROLLS BACK. Writes to `gateways` fire the audit-trail trigger, and that table is
 append-only and cannot be pruned.

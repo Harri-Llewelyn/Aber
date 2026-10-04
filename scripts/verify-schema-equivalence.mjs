@@ -77,8 +77,10 @@
  * =================================================================================================
  *
  *   node scripts/verify-schema-equivalence.mjs <dir-a> <dir-b>
+ *   node scripts/verify-schema-equivalence.mjs --dump <dir> <out.sql>
  *
  * Both arguments are directories of `*.sql` applied in glob order, the way db-init applies them.
+ * `--dump` builds one probe and writes the dump a squash's generator reads.
  * Requires Docker (the two probe containers), kubectl, and a running stack to read the auth
  * fixture from. No port-forward: the fixture comes through the API server. Leaves nothing behind
  * -- both probe containers are removed on exit, including on failure.
@@ -88,6 +90,7 @@ import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { MIGRATION_VARS } from './migration-vars.mjs';
 
 const IMAGE = 'supabase/postgres:17.6.1.175';
 // The running stack's Supabase Postgres, which the auth fixture is taken from. A POD, not a
@@ -101,7 +104,9 @@ const LIVE_DB_CONTAINER = 'supabase-db';
 // The psql variables db-init passes. FIXED DUMMIES, and that is safe: every one of them is
 // interpolated into DATA (a vault secret, an OAuth client hash, an FDW user mapping), never into
 // DDL that a --schema-only dump would carry. Verified -- none of these strings appears in a dump.
+// The shared set first, so a variable 0002 starts to require reaches this script too.
 const PSQL_VARS = {
+  ...MIGRATION_VARS,
   ts_host: 'timescaledb', ts_port: '5432', ts_dbname: 'historian',
   ts_user: 'probe', ts_password: 'probe',
   ts_fdw_user: 'probe', ts_fdw_password: 'probe',
@@ -353,14 +358,35 @@ function seedRows(container) {
   return rows;
 }
 
+const A = 'aber-schema-equiv-a';
+const B = 'aber-schema-equiv-b';
+
+// `--dump <dir> <out.sql>`: build one probe from <dir> and write its schema dump, which is step 1 of
+// a squash (supabase/migrations/archive/README.md) under the same preconditions the comparison uses.
+if (process.argv[2] === '--dump') {
+  const [, , , dir, out] = process.argv;
+  if (!dir || !out) {
+    console.error('usage: node scripts/verify-schema-equivalence.mjs --dump <dir> <out.sql>');
+    process.exit(2);
+  }
+  try {
+    buildProbe(A, dir, authFixture());
+    writeFileSync(out, dumpSchema(A).body);
+    note(`schema dump of ${dir} written to ${out}`);
+  } catch (err) {
+    fail(err.message);
+  } finally {
+    docker(['rm', '-f', A]);
+  }
+  process.exit();
+}
+
 const [dirA, dirB] = process.argv.slice(2);
 if (!dirA || !dirB) {
   console.error('usage: node scripts/verify-schema-equivalence.mjs <dir-a> <dir-b>');
+  console.error('       node scripts/verify-schema-equivalence.mjs --dump <dir> <out.sql>');
   process.exit(2);
 }
-
-const A = 'aber-schema-equiv-a';
-const B = 'aber-schema-equiv-b';
 
 try {
   console.log('\n  Schema equivalence\n');

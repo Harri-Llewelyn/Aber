@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0007_the_directory_names_the_image_each_service_runs.sql
+-- Migration: 0140_the_directory_names_the_image_each_service_runs.sql (applied as 0007 until the 1.0 squash)
 -- The Directory shows the version of each service the release deploys
 -- =============================================================================================
 --

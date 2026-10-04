@@ -8,7 +8,7 @@
  *
  *   TABLE        CREATE TABLE IF NOT EXISTS
  *   FUNCTION     CREATE OR REPLACE FUNCTION
- *   VIEW         CREATE OR REPLACE VIEW
+ *   VIEW         CREATE OR REPLACE VIEW, or a call to the function that builds it (REBUILT_BY)
  *   INDEX        CREATE [UNIQUE] INDEX IF NOT EXISTS
  *   TRIGGER      DROP TRIGGER IF EXISTS ... ON ...; CREATE TRIGGER ...
  *   POLICY       DROP POLICY IF EXISTS ... ON ...; CREATE POLICY ...
@@ -64,6 +64,28 @@ function blocks(sql) {
   }
   return out;
 }
+
+/**
+ * Views a function builds from `SELECT t.*`, emitted as a call to that function instead of as
+ * themselves. Postgres freezes the star into a column list at creation, so a stated
+ * `CREATE OR REPLACE VIEW` would, on the replay after a later migration widened the table and
+ * rebuilt the view, try to drop that column and abort the boot ("cannot drop columns from view").
+ */
+const REBUILT_BY = { gateway_status: 'public.ensure_gateway_status_view()' };
+
+/**
+ * Statements emitted around a partition's CREATE. The audit trail's monthly partitions are made
+ * BEFORE its DEFAULT partition, so no write can reach the default while db-init runs: a row there
+ * for a month with no partition stops that month's partition from ever being created ("updated
+ * partition constraint for default partition would be violated"), and every later boot fails. The
+ * default is then secured, since a partition does not take its parent's privileges.
+ */
+const AROUND_PARTITION = {
+  audit_trail_default: {
+    before: 'SELECT public.ensure_audit_trail_partitions(3);',
+    after: "SELECT public.secure_audit_trail_partition('public.audit_trail_default'::regclass);",
+  },
+};
 
 const esc = (s) => s.replace(/'/g, "''");
 const bare = (s) => (s || '').replace(/^public\./, '').replace(/"/g, '');
@@ -236,7 +258,11 @@ function rewrite(b) {
   if (t === 'SCHEMA') return s.replace(/^CREATE SCHEMA /m, 'CREATE SCHEMA IF NOT EXISTS ');
   if (t === 'TABLE' || t === 'FOREIGN TABLE') {
     const p = partitionOf.get(bare(b.name));
-    if (p) return `CREATE TABLE IF NOT EXISTS ${b.schema}.${b.name} PARTITION OF ${p.parent} ${p.bound};`;
+    if (p) {
+      const create = `CREATE TABLE IF NOT EXISTS ${b.schema}.${b.name} PARTITION OF ${p.parent} ${p.bound};`;
+      const around = AROUND_PARTITION[b.name];
+      return around ? `${around.before}\n${create}\n${around.after}` : create;
+    }
     // A CHECK written inline in the table rather than as its own ALTER still went through the
     // dump's BETWEEN expansion.
     s = restoreBetween(s.replace(/^CREATE (TABLE|FOREIGN TABLE) /m, 'CREATE $1 IF NOT EXISTS '));
@@ -247,6 +273,7 @@ function rewrite(b) {
     return s.replace(/^CREATE FUNCTION /m, 'CREATE OR REPLACE FUNCTION ')
             .replace(/^CREATE PROCEDURE /m, 'CREATE OR REPLACE PROCEDURE ');
   }
+  if (t === 'VIEW' && REBUILT_BY[b.name] && b.schema === 'public') return `SELECT ${REBUILT_BY[b.name]};`;
   if (t === 'VIEW') return s.replace(/^CREATE VIEW /m, 'CREATE OR REPLACE VIEW ');
   if (t === 'MATERIALIZED VIEW') return s.replace(/^CREATE MATERIALIZED VIEW /m, 'CREATE MATERIALIZED VIEW IF NOT EXISTS ');
   if (t === 'SEQUENCE') return s.replace(/^CREATE SEQUENCE /m, 'CREATE SEQUENCE IF NOT EXISTS ');

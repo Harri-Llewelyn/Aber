@@ -11,7 +11,7 @@ Node-RED in Docker, enrols itself on first boot, and publishes Sparkplug B over 
   single-use.** If it lapses, generate a new bundle from the gateway's page in the dashboard —
   nothing here needs deleting first.
 - `platform-root.pem` is the root that issued the platform's certificate, which `bootstrap` trusts
-  for its call to the platform. It is empty when that certificate is publicly trusted. Keep it in
+  for its call to the platform. It is empty only when the platform serves no TLS. Keep it in
   this folder.
 
 ## Run it

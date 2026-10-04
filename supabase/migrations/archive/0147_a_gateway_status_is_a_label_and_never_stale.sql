@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0014_a_gateway_status_is_a_label_and_never_stale.sql
+-- Migration: 0147_a_gateway_status_is_a_label_and_never_stale.sql (applied as 0014 until the 1.0 squash)
 -- The table refuses a gateway status that no writer may store
 -- =============================================================================================
 --

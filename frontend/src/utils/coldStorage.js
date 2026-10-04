@@ -183,7 +183,7 @@ export function formatWindow(seconds) {
 }
 
 /**
- * The one sentence the page states about the raw window (`raw_telemetry_window()`, 0005), or null
+ * The one sentence the page states about the raw window (`raw_telemetry_window()`, 0138), or null
  * when the historian could not say. `archiveEnabled` is the page's own setting; `archive_armed` is
  * what the archiver last reported to the historian, which is what the retention job obeys.
  */

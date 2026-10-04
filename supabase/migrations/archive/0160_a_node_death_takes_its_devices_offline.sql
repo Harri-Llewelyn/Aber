@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0030_a_node_death_takes_its_devices_offline.sql
+-- Migration: 0160_a_node_death_takes_its_devices_offline.sql (applied as 0030 until the 1.0 squash)
 -- A node's NDEATH marks every device behind it OFFLINE, as a DDEATH would
 -- =============================================================================================
 --

@@ -1256,7 +1256,7 @@ DDEATH removes the device from tracking outright — an explicit death certifica
 authoritative answer and needs no second opinion.
 
 **A node's NDEATH is the death of every device behind it**, as Sparkplug B says, so it does not wait
-for the watchdog. `ingest_mark_gateway_devices_offline()` (`0030`) sets every non-archived device of
+for the watchdog. `ingest_mark_gateway_devices_offline()` (`0160`) sets every non-archived device of
 the node's gateway OFFLINE in one UPDATE, behind the same `IS DISTINCT FROM 'OFFLINE'` filter, so
 each device it moves gets one `audit_trail` row and an already-OFFLINE one gets none. Those devices,
 and any this process heard through the node, leave tracking as after a DDEATH; the DBIRTHs that

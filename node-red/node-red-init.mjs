@@ -41,9 +41,8 @@ const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
 // Bumped whenever the body of the generated settings.js changes in a way an existing volume
 // needs; without it a settings.js that merely has an adminAuth passes settingsAreCorrect()
 // forever. v2 adminAuth.users; v3 persisted username -> permissions map; v4 constant-time
-// NODERED_ADMIN_TOKEN comparison; v5 editorTheme.tours off; v6 telemetry off; v7 the editor-users
-// map renamed for Aber.
-const SETTINGS_VERSION = 7;
+// NODERED_ADMIN_TOKEN comparison; v5 editorTheme.tours off; v6 telemetry off.
+const SETTINGS_VERSION = 6;
 
 function fail(message) {
   console.error(`[node-red-init] ERROR: ${message}`);
@@ -91,23 +90,8 @@ const runtimeConfigPath = path.join(DATA_DIR, '.config.runtime.json');
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
-// The two files under /data named for Factory+ before the rename to Aber are moved, not re-created:
-// a volume that lost its seed marker would be re-seeded blank over its flows, and one that lost the
-// editor-users map would drop every signed-in Administrator to a read-only editor. A failed move
-// stops the boot rather than risk either.
 const SEED_MARKER_NAME = '.aber-seeded';
 const EDITOR_USERS_NAME = '.aber-editor-users.json';
-for (const [legacy, current] of [
-  ['.factoryplus-seeded', SEED_MARKER_NAME],
-  ['.factoryplus-editor-users.json', EDITOR_USERS_NAME]
-]) {
-  const from = path.join(DATA_DIR, legacy);
-  const to = path.join(DATA_DIR, current);
-  if (fs.existsSync(from) && !fs.existsSync(to)) {
-    fs.renameSync(from, to);
-    console.log(`[node-red-init] moved ${from} to ${to}`);
-  }
-}
 
 // 1. Seed the flow definition: first run only. The guard is a marker file, not `flows.json`
 // existing, because the image ships a placeholder and Docker pre-populates a fresh volume from it.
@@ -154,60 +138,12 @@ if (seededFlow) {
   );
 }
 
-// 1a. The broker's tls-config node was named for Factory+ before the rename to Aber. It is moved
-// in the file's text, so flows.json is otherwise byte-identical: the node's id and every reference
-// to it are the same whole JSON string. Only when the old id is present and the new one is not.
 const TLS_NODE_ID = 'aber-tls-config';
 const TLS_NODE_NAME = 'Aber internal CA';
-const LEGACY_TLS_NODE = { id: 'factoryplus-tls-config', name: 'Factory+ internal CA' };
-if (fs.existsSync(flowsPath)) {
-  const text = fs.readFileSync(flowsPath, 'utf8');
-  let nodes = [];
-  try { nodes = JSON.parse(text); } catch { /* read again below, where an unreadable flow stops the boot */ }
-  const legacy = Array.isArray(nodes) ? nodes.find((n) => n?.id === LEGACY_TLS_NODE.id) : undefined;
-  if (legacy && !nodes.some((n) => n?.id === TLS_NODE_ID)) {
-    const quoted = (s) => JSON.stringify(s);
-    const occurrences = text.split(quoted(LEGACY_TLS_NODE.id)).length - 1;
-    let moved = text.split(quoted(LEGACY_TLS_NODE.id)).join(quoted(TLS_NODE_ID));
-    // The name moves only while it is the one this script wrote and nothing else carries it.
-    if (legacy.name === LEGACY_TLS_NODE.name && moved.split(quoted(LEGACY_TLS_NODE.name)).length === 2) {
-      moved = moved.replace(quoted(LEGACY_TLS_NODE.name), () => quoted(TLS_NODE_NAME));
-    }
-    fs.writeFileSync(flowsPath, moved);
-    console.log(
-      `[node-red-init] moved tls-config node '${LEGACY_TLS_NODE.id}' to '${TLS_NODE_ID}' ` +
-        `(${occurrences - 1} reference(s) with it)`
-    );
-  }
-}
-
-// The broker node property naming its credential pair was named for ACS before the rename to
-// Aber. Moved in the file's text like the tls-config node: a key is the quoted name after `{` or
-// `,` and before `:`, so a string that mentions it (its quotes escaped) is left as it is. Not when
-// a node carries both names, which would leave it two keys of one name.
+// The broker node property naming its credential pair's environment-variable prefix.
 const CREDENTIALS_ENV_KEY = 'aberCredentialsEnv';
-const LEGACY_CREDENTIALS_ENV_KEY = 'acsCredentialsEnv';
-const holds = (key) => (n) => n !== null && typeof n === 'object' && Object.hasOwn(n, key);
-if (fs.existsSync(flowsPath)) {
-  const text = fs.readFileSync(flowsPath, 'utf8');
-  let nodes = [];
-  try { nodes = JSON.parse(text); } catch { /* read again below, where an unreadable flow stops the boot */ }
-  const count = (list, key) => (Array.isArray(list) ? list.filter(holds(key)).length : 0);
-  const legacy = count(nodes, LEGACY_CREDENTIALS_ENV_KEY);
-  const both = (n) => holds(LEGACY_CREDENTIALS_ENV_KEY)(n) && holds(CREDENTIALS_ENV_KEY)(n);
-  if (legacy && !nodes.some(both)) {
-    const key = new RegExp(`([{,]\\s*)"${LEGACY_CREDENTIALS_ENV_KEY}"(\\s*:)`, 'g');
-    const moved = text.replace(key, (_, before, after) => `${before}"${CREDENTIALS_ENV_KEY}"${after}`);
-    const movedNodes = JSON.parse(moved);
-    if (count(movedNodes, LEGACY_CREDENTIALS_ENV_KEY) === 0
-        && count(movedNodes, CREDENTIALS_ENV_KEY) === count(nodes, CREDENTIALS_ENV_KEY) + legacy) {
-      fs.writeFileSync(flowsPath, moved);
-      console.log(`[node-red-init] moved '${LEGACY_CREDENTIALS_ENV_KEY}' to '${CREDENTIALS_ENV_KEY}' on ${legacy} node(s)`);
-    }
-  }
-}
 
-// 1b. Reconcile the broker node's transport settings (host, port, TLS) on every boot: where the
+// 1a. Reconcile the broker node's transport settings (host, port, TLS) on every boot: where the
 // broker is is deployment configuration, not user content. Writes a narrow set of keys, only when
 // they are explicitly configured. Must run before the credential section, which exits early on
 // volumes that hold credentials.
@@ -792,10 +728,7 @@ function brokerCredentialFor(node) {
     fail(
       `broker node '${node.id}' (${node.name || 'unnamed'}) declares no '${CREDENTIALS_ENV_KEY}' and is ` +
         `not the legacy '${BROKER_NODE_ID}'. It would connect with no username, and Mosquitto ` +
-        'refuses that with CONNACK 5 while Node-RED reports only "Connection failed to broker".' +
-        (holds(LEGACY_CREDENTIALS_ENV_KEY)(node)
-          ? `\n  It carries the retired '${LEGACY_CREDENTIALS_ENV_KEY}', which was not moved; rename it.`
-          : '')
+        'refuses that with CONNACK 5 while Node-RED reports only "Connection failed to broker".'
     );
   }
 

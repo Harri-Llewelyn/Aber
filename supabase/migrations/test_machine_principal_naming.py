@@ -1,9 +1,9 @@
 """
-A machine has a name an operator gave it (0125), and holds what a machine may (0013).
+A machine has a name an operator gave it (0125), and holds what a machine may (0146).
 
     python supabase/migrations/test_machine_principal_naming.py
 
-Requires the Supabase database (54322 by default) and 0022 applied; `npm run test:db` gives it a
+Requires the Supabase database (54322 by default) and 0154 applied; `npm run test:db` gives it a
 throwaway one.
 
 ---------------------------------------------------------------------------------------------
@@ -24,15 +24,15 @@ for nobody else. No write policy: the create function is the only write path at 
 `describe_machine_principal()` (0126) the only one after it -- Administrator only, rows that exist
 only, and every change a PRINCIPAL_DESCRIBED row carrying what it replaced.
 
-MACHINES PROPOSE, PEOPLE DECIDE (0013). Every permission is either on the allow-list or refused
+MACHINES PROPOSE, PEOPLE DECIDE (0146). Every permission is either on the allow-list or refused
 with its own reason. What an allowed grant opens is exercised as the machine itself: schema:manage
 forks, publishes and discards; proposal:create files a proposal that only a person can decide;
 audit_trail:read reads the asset lane and never the security lane; archive:manage reads the
 record of deleted assets. A revoked identity or token is refused before its write runs, the way
 PostgREST runs auth_pre_request() ahead of every request.
 
-A machine's write is filed as a service's whatever X-Aber-Actor header it sends (0020), and the
-person deciding its proposal can read its name (0022) without being able to read the name table.
+A machine's write is filed as a service's whatever X-Aber-Actor header it sends (0152), and the
+person deciding its proposal can read its name (0154) without being able to read the name table.
 
 EVERY TEST ROLLS BACK. The fixtures are seeded inside the test's own transaction, and
 `SET LOCAL ROLE` scopes the impersonation to it, so nothing is committed and nothing needs
@@ -260,7 +260,7 @@ class WhatIsRefusedAndWhenNothingExists(NamingBase):
 
 
 class EachRefusalGivesItsReason(NamingBase):
-    """0013: every permission is allowed or refused, and a refusal says which rule refused it."""
+    """0146: every permission is allowed or refused, and a refusal says which rule refused it."""
 
     def _refusal(self, name, permissions):
         self.cur.execute("SAVEPOINT attempt;")
@@ -396,7 +396,7 @@ class AMachineMayVersionASchema(MachineBase):
 
 class AMachineIsFiledAsAServiceWhateverItDeclares(MachineBase):
     """
-    0020: log_audit_trail_event() believes an X-Aber-Actor header only from the caller it
+    0152: log_audit_trail_event() believes an X-Aber-Actor header only from the caller it
     describes. PostgREST exposes the header as the request.headers GUC, which is what is set here.
     """
 
@@ -524,7 +524,7 @@ class AMachineProposesAndAPersonDecides(MachineBase):
 
 class WhoeverDecidesReadsTheMachinesName(MachineBase):
     """
-    0022: list_proposer_names() names the machine behind each proposal the caller may decide, by
+    0154: list_proposer_names() names the machine behind each proposal the caller may decide, by
     may_decide_proposal(). machine_principals itself stays closed to a Shopfloor_Manager.
     """
 

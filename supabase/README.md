@@ -6,8 +6,8 @@ foreign-data-wrapper view.
 
 | Path | Purpose |
 | :--- | :--- |
-| [`migrations/`](migrations) | `0001` schema, `0002` seed data, then nine corrective migrations |
-| [`migrations/archive/`](migrations/archive) | The 99 superseded migrations, preserved for their reasoning. **Never executed** |
+| [`migrations/`](migrations) | `0001` schema and `0002` seed data: the whole applied chain |
+| [`migrations/archive/`](migrations/archive) | The 197 superseded migrations, preserved for their reasoning. **Never executed** |
 | [`functions/`](functions) | Deno edge functions and the worker router |
 | [`envoy.yaml`](envoy.yaml) | API gateway routes, CORS, and the `apikey` check. **A template** |
 | [`seed.sql`](seed.sql) | Demo user accounts |
@@ -16,47 +16,43 @@ foreign-data-wrapper view.
 
 ## Migration Baseline
 
-Squashed **three times**. The pre-beta chain became `0001`/`0002` for the public beta; the 72-file
-chain that grew on top of it was squashed back into the same two files with a tail of nine; and the
-70 files that grew on top of *that* were squashed back into the same two again, with a tail of one.
+Squashed **four times**. The pre-beta chain became `0001`/`0002` for the public beta; the 72-file
+chain that grew on top of it was squashed back into the same two files with a tail of nine; the 70
+files that grew on top of *that* went back into the same two with a tail of one; and before 1.0 the
+28 files after that, the tail included, went back into the same two with **no tail at all**.
 
 | File | Contents |
 | :--- | :--- |
-| `0000_a_database_from_before_the_fold.sql` | The whole corrective tail: every subtraction the baseline cannot express, plus the conversion and the rename it cannot describe |
 | `0001_baseline_schema.sql` | Pure DDL. Tables, views, functions, triggers, policies, grants, the FDW, the Realtime publication |
-| `0002_seed_data.sql` | Pure DML. RBAC, vocabularies, metric catalogue, settings, secrets, cron, the Playback gateway |
+| `0002_seed_data.sql` | Pure DML. RBAC, vocabularies, metric catalogue, settings, secrets, cron, the Playback gateway, the Directory's image map |
 
-### Why the tail is one file, and why it sorts before the baseline
+### The squash before 1.0 has no tail
 
 **A squash can only fold what a fresh install would do anyway.** The baseline states the shape a
 new database is built into, so anything ADDITIVE — a table, a column, a function, a seeded row —
-folds into it and the old file is redundant. What cannot fold is a SUBTRACTION: `CREATE TABLE IF
-NOT EXISTS` does not remove a column that already exists, and a baseline that simply never mentions
-`gateways.ip_address` leaves the column sitting on every database that already has one.
+folds into it and the old file is redundant. A SUBTRACTION cannot fold: `CREATE TABLE IF NOT
+EXISTS` does not remove a column a database already has, so each earlier squash kept its drops,
+deletes and withdrawn grants applied in a tail, and archived migration `0135` (applied as `0000`)
+was the third squash's.
 
-The second squash kept nine files applied for that reason, and it could, because each of those nine
-was a small file whose *only* content was its subtraction. **The third could not.** Its
-subtractions live inside large feature migrations, and a feature migration replayed after the
-baseline **reverts** it: `0108` declares `may_decide_proposal()` as it stood at `0108`, the baseline
-declares it as it stands now, and the chain runs the baseline first. Kept as they were, the seven
-candidate files left nine functions, two comments and a lane list at their older definitions —
-which is exactly what the equivalence check reported the first time it was run against the fold.
+Before 1.0 there was no database for a tail to serve. No site runs a release below 1.0, and none is
+upgraded to it ([`docs/upgrades.md`](../docs/upgrades.md#the-floor-100)), so the fourth squash
+folded the subtractions too, with the one-shot repairs that only ever acted on an older database's
+rows. From 1.0 on, the rules below bind again.
 
-So the subtractions were lifted out into `0000`, which holds nothing else. It sorts **before**
-`0001` rather than after, and has to: it converts the audit table from an ordinary table into a
-partitioned one, and the baseline describes it already partitioned — `CREATE TABLE … PARTITION OF`
-fails against a database that has not been converted. The rename to `audit_trail` is the same case:
-the baseline names the table by its new name only. Once the first block has to run early they
-all may as well, and running early is what makes the `archive.bucket` block correct: it decides by
-asking whether `system_settings.sensitive` exists yet, which is precisely "has the new schema
-arrived", and only `0000` can still ask it.
+### Numbers are never reused
 
-`0000` is not a precedent for a second pre-baseline file. It is a tail like any other, meant to be
-folded away by the next squash.
+The third squash restarted live numbering at `0003`, a number the archive already held, so each
+bare citation of an archived `0003`–`0032` quietly came to name a different, live file as the
+chain grew past it. The fourth archived its 28 files under `0135`–`0162`, after the archive's
+highest, with the old-to-new table in [`migrations/archive/README.md`](migrations/archive/README.md).
+**The next migration is `0163`**, and each later one takes the next number above the highest ever
+issued, so a number names one file for good, whichever squash later archives it. Check 9d of
+`scripts/check-docs-drift.mjs` refuses an applied migration whose number the archive holds.
 
 ### The five rules the next fold carries in
 
-Four were found the hard way across the second and third squashes, and a fold that ignores any of
+Each was found the hard way across the second and third squashes, and a fold that ignores any of
 them rebuilds the thing it was run to remove. The second squash's tail held two examples: `0088`
 dropped and re-added `change_proposals_entity_type_known` with three lanes and `0090` widened it to
 seven two files later, so on a database holding a cells proposal the re-add scanned the rows,
@@ -99,14 +95,16 @@ test caught.
 
 `scripts/verify-schema-equivalence.mjs` is that acceptance test: it builds a database from each of
 two chains and asserts they arrive at the same schema and the same seed rows. Each squash was
-landed on its verdict — 72 files and 11 built the identical schema `623d6f6059e2`; 73 and 3 build
-`f2b23af251f4`, over 19 non-empty seed tables. The 73rd is `gateways.is_virtual` being retired,
-which this fold performs and the chain it replaces did not, so the oracle carries it too.
+landed on its verdict: 72 files and 11 built the identical schema `623d6f6059e2`; 73 and 3 built
+`f2b23af251f4`, over 19 non-empty seed tables; and before 1.0, 30 and 2 build `fefbbb17fce2` with
+the same rows in every seeded table but `audit_trail` (below). `--dump <dir> <out.sql>` writes the
+dump the generator reads, under the same preconditions.
 
-**And a database UPGRADED through the fold reaches the same digest**, which is new: a floor-era
-database given `0000`/`0001`/`0002` dumps identically to a fresh install of them. Neither earlier
-squash could have done that, and the rehearsal that proves it is what found out why — see
-`supabase/migrations/archive/README.md`, "What an upgrade needs that a dump does not contain".
+**The third squash also proved an upgrade through it**: a database built by the chain at
+`223b49d^` and given the fold dumped identically to a fresh install of it. Neither earlier squash
+could have done that, and the rehearsal that proved it is what found out why — see
+`supabase/migrations/archive/README.md`, "What an upgrade needs that a dump does not contain". The
+fourth has no database to bring forward.
 
 **One table is deliberately not compared.** `one_shot_migrations` records which one-shot migrations
 have *run*, not what the schema declares; a one-shot folded into the baseline has no claim left to
@@ -131,9 +129,11 @@ failing run rather than by inspection:
 
 ### Seeding is audited now
 
-The baseline creates every trigger before `0002` runs, so a fresh install records 12 rows in
-`audit_trail` with `actor_source = 'migration'` describing what the seed inserted. The old chain
-recorded 2, because its ordering meant most seeding happened before the triggers existed.
+The baseline creates every trigger before `0002` runs, so a fresh install records an `audit_trail`
+row with `actor_source = 'migration'` for each setting, metric and gateway the seed inserts, and
+for the seed's own updates to them. The chains before each squash recorded fewer, because their
+ordering seeded tables before the triggers on them existed: before 1.0, the metric catalogue's
+trigger arrived in `0143`, after `0002` had seeded it.
 
 They are written **once, on first boot** — every statement is `ON CONFLICT`, so a replay matches no
 rows and adds nothing, and the count holds across restarts. Treat them as a receipt that the seed
@@ -427,12 +427,12 @@ names one data item: `Axes/W/POSITION` could never share a concept with `Axes/X/
 AAS consumer grouping Properties by `semanticId` split them. Every MTConnect row now carries the
 vocabulary's concept id (`…/mtconnect/v2.0/DataItemType/ANGLE`), with the component path, instance
 and subType left to the name and `sub_type`. `0002` seeds that form, `mtconnectSemanticId()` derives
-it, and `0009_mtconnect_metrics_carry_their_data_item_type_id.sql` repoints a database seeded
+it, and `0142_mtconnect_metrics_carry_their_data_item_type_id.sql` repoints a database seeded
 earlier. It is an UPDATE because `semantic_id` is correctable in place. Only a row still holding
 the name-built id is touched, and only when its type is in `mtconnect_vocabulary`; a NOTICE counts
 any left behind. `test_metric_catalog_seed.py` holds every MTConnect row to its type's id.
 
-### A semantic id is an IRI or an IRDI (`0012_a_semantic_id_is_an_iri_or_an_irdi.sql`)
+### A semantic id is an IRI or an IRDI (archived migration 0145)
 
 **ModelReference is withdrawn, because nothing could emit one.** `schemas.semantic_id_type` and
 `metric_catalog.semantic_id_type` allowed `IRI`, `IRDI` and `ModelReference`. `semanticReference()`
@@ -442,18 +442,9 @@ chain into a model that one text column cannot carry. The two forms offered it a
 what it meant, so the first operator to pick it would have published a wrong shell. It can come
 back once something emits it, as a reference to a `ConceptDescription` in the same Environment.
 
-`0012` narrows both CHECKs to IRI and IRDI. It first counts rows still holding `ModelReference`,
-and fails the boot naming the table and the fix (set IRI or IRDI, or clear the pair, as the owner)
-rather than rewriting them: which of the two was meant is the operator's call.
-`idta_submodel_templates` already allowed only the two.
-
-**Replaced on each full boot until the next squash.** `0001` replays first and re-asserts its
-three-value CHECK, so `0012` sees `ModelReference` in the definition and narrows it again. The
-replacement is guarded on that definition, so a replay of `0012` alone changes nothing, and the
-pg_dump digest is the same either way. At the next squash the two-value form folds into `0001` and
-`0012` retires. `test_metric_catalog_seed.py` holds both CHECKs to refusing `ModelReference`, a
-replay to leaving the constraints alone, and a `ModelReference` row to stopping the migration with
-the fix in its HINT.
+`0145` narrowed both CHECKs to IRI and IRDI, and the baseline declares them so.
+`idta_submodel_templates` already allowed only the two. `test_metric_catalog_seed.py` holds both
+CHECKs to refusing `ModelReference`.
 
 **Correcting an id is a dashboard action now.** A catalog metric's semantic id was always mutable
 (`enforce_metric_catalog_immutability()` freezes only `name` and `datatype`); the Metrics page's
@@ -462,29 +453,14 @@ Edit sends the pair to `metric_catalog` and nothing else, gated like Deprecate a
 `fork_schema()` copies from its parent, is edited in the draft editor and saved with the draft.
 `log_audit_trail_event()` already records both as UPDATEs, so neither needed a trigger change.
 
-### A local extension carries no minted id (`0016_a_local_extension_carries_no_minted_id.sql`)
+### A local extension carries no minted id (archived migration 0149)
 
 **No id is minted for a local extension (#516).** `0002` seeded `safety_interlock` and
 `max_temp_threshold` with `https://aber.local/semantics/local/<name>`. Nothing outside the
 installation resolves either IRI, so neither named a concept, and on every fresh stack the schema
 builder marked both as mapped, the AAS export left them out of `unmapped_semantic_ids`, and the
-Metrics page's "—" cell for an unmapped metric never appeared (#547). `0002` now seeds both with
-no id and no type.
-
-`0016` clears a database seeded earlier. `0002`'s catalog inserts are `ON CONFLICT DO NOTHING`, so
-the seed alone cannot. It clears the id and its type together, and only while a metric's id is
-still exactly the one minted for it, so an id an Administrator has set since stays. Its self-check
-asserts that neither metric still holds its minted id, which is its own work; a replay matches
-nothing.
-
-**The clear is on the Audit Trail as the platform's own act.** It is an UPDATE on
-`metric_catalog`, whose audit trigger `0010` attaches earlier in the chain, so each clear is an
-`UPDATE` row in the asset lane with `actor_source = 'migration'`, `changed_by` NULL, and the
-minted id in `old_data`. Nothing else was needed: db-init applies the chain as `postgres`, which
-`log_audit_trail_event()` files as `migration`. `test_metric_catalog_seed.py` puts the minted
-ids back in a rolled-back transaction and holds `0016` to clearing them, recording both clears that
-way, keeping an id an Administrator set, writing nothing on a replay, and naming a metric its
-self-check finds.
+Metrics page's "—" cell for an unmapped metric never appeared (#547). `0002` seeds both with no
+id and no type, and `test_metric_catalog_seed.py` holds it there.
 
 ### Metric name format (archived migration 0007)
 
@@ -541,11 +517,10 @@ from one group to a request from another — precisely the collision this closes
 
 ### The group belongs to the site, and is fixed at install (archived migration 0131)
 
-`gateways.sparkplug_group` defaulted to the literal `ACS-Cymru` — the platform vendor's name — so
-every site published its own machine data under it. The group is the first segment of the namespace
-a plant's data lives in, and it belongs to the plant.
+The group is the first segment of the namespace a plant's data lives in, and it belongs to the
+plant, not to the platform: a literal default would publish every site's machine data under one name.
 
-It is now `ingestion.sparkplugGroup` in the chart, and it has **no default**: the render refuses
+It is `ingestion.sparkplugGroup` in the chart, and it has **no default**: the render refuses
 until the site names one, as it does for `ingestion.primaryHostId`. `0131` seeds it into the
 `sparkplug.group_id` setting on the first boot, and the column defaults to
 `sparkplug_group_default()`, which reads that row and raises if it is absent.
@@ -557,16 +532,9 @@ old one until each is reconfigured. That is a migration, not a preference. So `s
 gained a `read_only` column with a trigger that refuses a value change, and a boot whose chart value
 differs from the stored one **aborts db-init** rather than quietly re-pointing the column.
 
-Passing no `sparkplug_group` is not a mismatch: the migration falls back to the same default the
-chart ships, which is what leaves the throwaway database and the CI lanes unaffected.
-
-**The default moved with the platform's name at 1.0 (`0003`).** A stack installed before then holds
-`ACS-Cymru` in the setting and in every gateway row that took the default. That one pair — stored
-`ACS-Cymru`, chart `Aber` — is the rename rather than a disagreement, so `0002`'s check lets it
-through and `0003` moves the setting and those rows on the same boot, and only those: a site that
-pinned `ingestion.sparkplugGroup: ACS-Cymru` keeps it, and a gateway on some other group keeps that.
-The physical gateways are re-pointed by hand, as the last move (archived `0015`) required, and the
-order of operations is in [`docs/upgrades.md`](../docs/upgrades.md).
+A run that passes no `sparkplug_group` is refused rather than given a default: db-init always
+passes the chart's value, and `scripts/migration-vars.mjs` gives the throwaway database and the CI
+lanes the dev group.
 
 #### Changing it deliberately
 
@@ -632,14 +600,14 @@ timestamp, the most convincing kind. `scripts/check-docs-drift.mjs` asserts ever
 exists in `prometheus.yml`; the issue that requested this named `kong`, which had already become
 `envoy` by the time it was built.
 
-### The Directory names the image each service runs (`0007_the_directory_names_the_image_each_service_runs.sql`)
+### The Directory names the image each service runs (archived migration 0140)
 
 `directory_services.image` is the image reference the release deploys for a row's workload, and
 the Directory's Version column shows its tag. It comes from the chart, not from the cluster:
 
 - `aber.directoryImages` in `_helpers.tpl` renders a JSON map, component to image, using the same
   expression each workload's own `image:` uses. A component the chart does not deploy is left out.
-- db-init passes it to every migration as `directory_images`. `0007` calls
+- db-init passes it to every migration as `directory_images`. `0002` calls
   `record_directory_images()` with it, which writes the sixteen chart-managed rows and clears any
   whose component is absent. Rows registered by anything else are not touched.
 - A runner that passes no map (`npm run test:db`, `verify-schema-equivalence.mjs`) records nothing.
@@ -648,7 +616,8 @@ So the column is the release's pin, recorded at each install and upgrade. It doe
 container that failed to roll out, or a mutable tag that now points at a different image.
 Host Metrics Exporter carries Alloy's image, because node_exporter's collectors run inside Alloy.
 
-The component list is written twice, as the `served_by` rows in `0007` and the helper's lists, and
+The component list is written twice, as the `served_by` rows in `record_directory_images()` and the
+helper's lists, and
 `check-docs-drift.mjs` holds the two equal and checks that each component is one the chart
 renders. Adding a row the chart deploys means adding it to both.
 
@@ -703,7 +672,7 @@ page's single running card into a list — a deliberate change rather than a def
 **Neither job table gets an audit-trail trigger.** That trigger is opt-in per table, and both
 tables carry a progress column the workers update roughly once a second. Adding it would look like
 consistency while writing a row per tick into an append-only table no application role can prune,
-which is `0005`'s heartbeat problem. Both tables *are* in the `supabase_realtime` publication,
+which is `0138`'s heartbeat problem. Both tables *are* in the `supabase_realtime` publication,
 which is how the page follows a running job at all. They are named in the baseline's `intended`
 list, because its absolute `SET TABLE` removes any table not on it, and a docs-drift check fails a
 subscription to a table that list omits.
@@ -901,24 +870,26 @@ one predicate would be fixing the second by reflex.
 
 ### `0001` builds `gateway_status` by calling the function, not inline
 
-`pg_dump` expanded the view into an **explicit column list** when the baseline was squashed, while
-`ensure_gateway_status_view()` selects `g.*`. Those drift apart the moment a later migration adds
-a gateways column: `0008` widened the view, and `0001`'s replay on the next boot tried to recreate
-it from the older, narrower list:
+`pg_dump` records the view with an **explicit column list**, while `ensure_gateway_status_view()`
+selects `g.*`. A stated `CREATE OR REPLACE VIEW` with that list is right on the boot it runs and
+wrong on the boot after a later migration adds a gateways column and rebuilds the view, because the
+replay then tries to recreate it from the older, narrower list:
 
 ```
 ERROR:  cannot drop columns from view
 ```
 
 `db-init` runs with `ON_ERROR_STOP=1`, so that is not a warning — **the stack never comes up
-again**, and it surfaces on the *second* boot rather than the first. `0004` hit the same wall from
-the opposite direction when a column was removed.
+again**, and it surfaces on the *second* boot rather than the first.
 
-`0001` now calls the function, leaving one definition of the view in the repository. The function
-drops and recreates rather than replacing, which is also what re-applies the `COMMENT` and the
-grants — `DROP VIEW` discards both, which is why they live inside it.
+So `0001` never states the view. `generate-baseline-section.mjs` emits a call to the function where
+the dump has the view (`REBUILT_BY`), and a migration that adds a `gateways` column ends with
+`SELECT public.ensure_gateway_status_view();`, which check 10d of `check-docs-drift.mjs` requires
+along with no migration stating the view. The function drops and recreates rather than replacing,
+which is also what re-applies the `COMMENT` and the grants — `DROP VIEW` discards both, which is
+why they live inside it.
 
-### A gateway's status is the fleet's word, within limits (`0014`)
+### A gateway's status is the fleet's word, within limits (`0147`)
 
 `gateways.status` is free text on purpose: a `Gateway_Status` metric names the gateway's own
 operating state, so `MAINTENANCE` or `DEGRADED` is as valid as the `ONLINE` and `OFFLINE` ingestion
@@ -926,16 +897,12 @@ infers from the message type. The platform writes `PENDING_ENROLLMENT` (issuing 
 `AWAITING_BIRTH` (`enroll-gateway`), and the column defaults to `OFFLINE`. `STALE` is derived by
 `gateway_status` at read time and never stored.
 
-`0014` adds `gateways_status_valid`, which refuses only what no writer may store: a blank status,
+`0147` adds `gateways_status_valid`, which refuses only what no writer may store: a blank status,
 one over 32 characters, `STALE` in any case, and the two lifecycle states spelt any way but the
 platform's, which the view, the dashboard and `platform_health` compare exactly. The heartbeat gate,
 `ingest_record_gateway_health()`, already refused the same values from a gateway; the constraint
 holds them for every other writer, a Manager's PATCH included.
 
-**A database that already holds such a status keeps it.** The constraint is not applied, a
-`WARNING` in the `db-init` log names each gateway and what it holds, and the first boot after they
-are corrected applies it. Nothing is rewritten, because which status was meant is the operator's
-call.
 
 ---
 
@@ -978,7 +945,7 @@ Every table has `ENABLE ROW LEVEL SECURITY`. The pattern is uniform and fail-clo
 | :--- | :--- | :--- |
 | `cells`, `gateways`, `devices`, `links`, `asset_config`, `device_submodels`, `directory_services` | `authenticated` | `Administrator`, `Shopfloor_Manager` |
 | `schemas`, `metric_catalog`, `metric_groups` | `authenticated` | `Administrator` — see below (`0069`) |
-| `audit_trail` (`asset` lane) | `Administrator`, `Shopfloor_Manager`, `Auditor`, or a machine holding `audit_trail:read` (`0013`) | **nobody** — see below |
+| `audit_trail` (`asset` lane) | `Administrator`, `Shopfloor_Manager`, `Auditor`, or a machine holding `audit_trail:read` (`0146`) | **nobody** — see below |
 | `audit_trail` (`security` lane) | `Administrator`, `Auditor` | **nobody** — see below (`0070`) |
 | `*_vocabulary` | `authenticated` | **no write policy at all** |
 | `roles`, `permissions`, `role_permissions` | `authenticated` | none |
@@ -1235,7 +1202,7 @@ the meaning of a revocation.
 
 Written by `log_audit_trail_event()`, an `AFTER INSERT OR UPDATE OR DELETE` trigger on `areas`,
 `cells`, `gateways`, `devices`, `device_nameplate`, `system_settings`, `schemas` and
-`metric_catalog` (`0010`); by `log_role_assignment()` on `user_roles`;
+`metric_catalog` (`0143`); by `log_role_assignment()` on `user_roles`;
 and by eight RPCs that record acts which are not row mutations at all.
 
 ### Two lanes, and one of them an engineer cannot read (archived migration 0070)
@@ -1336,11 +1303,11 @@ it is, while `changed_by` still receives the principal. The row improved as well
 an ingestion write records `'ingestion'` **and** names the identity, where it used to record
 `'ingestion'` and `NULL`.
 
-### A header is believed only from the caller it describes (`0020`)
+### A header is believed only from the caller it describes (`0152`)
 
 **The header was a claim anyone could make.** For a caller that is not a person, the trigger took
 `actor_source` from `X-Aber-Actor` and accepted `ingestion`, `service` and `migration` from anyone;
-only `user` was refused. That was harmless while machine identities could not write. `0013` let
+only `user` was refused. That was harmless while machine identities could not write. `0146` let
 them hold `schema:manage` and `proposal:create`, and a machine sending `X-Aber-Actor: migration`
 then had its own `fork_schema()` INSERT filed as a migration. `changed_by` still named it, but the
 trail's lanes and filters read `actor_source`, and a reviewer scanning for machine activity would
@@ -1636,7 +1603,7 @@ precedent `mutation_id` already set for `audit_trail.id`, and each tooltip names
 an id can be carried into a query without guessing.
 
 
-### The drawer knows how many rows a transaction wrote (`0006`)
+### The drawer knows how many rows a transaction wrote (`0139`)
 
 `audit_trail_page()` returns `transaction_rows` with each event: how many rows share its
 `causation_id`, counted over the whole table rather than the page, and `NULL` where there is no
@@ -1665,7 +1632,7 @@ otherwise a reader would be told a row is missing and shown no way to reach it.
 The CSV export carries the number as `transaction_rows` beside `transaction_id`.
 `test_audit_trail_paging.py` covers the field; `auditTrailCausation.test.jsx` the drawer.
 
-### An approval and the change it made are one act (`0021`)
+### An approval and the change it made are one act (`0153`)
 
 **Two of the trail's writers stamped no transaction.** `approve_proposal()` writes a
 `PROPOSAL_APPLIED` row naming both parties, and the target's audit trigger records the `UPDATE`
@@ -1678,9 +1645,9 @@ the `UPDATE` it caused, and a search for the transaction id found only the `UPDA
 Both now stamp `txid_current()` themselves, the way every other multi-row act in the chain links
 its rows: an explicit value in the INSERT, the same one the trigger writes in that transaction. No
 session variable carries it. An expiry run is one act, so the proposals one run closes share its
-id. Rows written before `0021` keep their NULL.
+id. Rows written before `0153` keep their NULL.
 
-`0021` also restates two COMMENTs that described withdrawn lanes: `validate_change_proposal()`'s
+`0153` also restates two COMMENTs that described withdrawn lanes: `validate_change_proposal()`'s
 said it refuses a schema-lane proposal whose target is "not a draft", a check archived migration
 0090 withdrew with the lane, and `approve_proposal()`'s described the link lanes archived migration
 0108 withdrew. `test_change_proposals.py` approves a proposal and finds both rows under one id, and
@@ -1720,7 +1687,7 @@ the role db-init applies the chain as.
 **A self-check must assert only what its own migration changed**, and `0120` shipped asserting more
 than that. Its check counted every row in the table disagreeing with the classifier, not every
 *schema* row — and a database with history has others. The dev stack carried ten `area_floors` rows
-stamped `asset` from before [`0113`](#a-floor-becomes-an-area-0113) retired that table, which the
+stamped `asset` from before [`0113`](#a-cell-has-a-place-on-its-areas-plan-archived-migrations-0098-and-0113) retired that table, which the
 classifier now fail-closes to `security`: rows no migration has ever backfilled, and about which the
 classifier's answer is a default rather than a judgement.
 
@@ -1738,12 +1705,12 @@ entries. Only the JS side is parsed as text; the SQL side is the function itself
 cannot drift into agreeing with a regex instead of with the database.
 
 
-### A metric's deprecation reaches the trail (`0010`)
+### A metric's deprecation reaches the trail (`0143`)
 
 **Deprecating is the only way to retire a metric, and it left no record.** `metric_catalog.name`
 is immutable, so deprecate-and-supersede is the exit the catalog assumes, and the Metrics page's
 Deprecated Metrics card can now undo it with a confirmed Restore (#468). The table carried no audit
-trigger, so neither act said who made it or when. `0010` attaches `log_audit_trail_event()` for
+trigger, so neither act said who made it or when. `0143` attaches `log_audit_trail_event()` for
 INSERT, UPDATE and DELETE, as on `schemas`. Deprecate and restore are UPDATEs whose diff moves
 `deprecated` (and `superseded_by`), the shape archive and restore already have on the asset tables;
 the timeline paints `deprecated` rising as Lifecycle, as it paints `is_archived`. No new action
@@ -1753,16 +1720,7 @@ kind was needed.
 which the authority rule files as security, but `metric_catalog_select_authenticated` is
 `USING (true)`: every authenticated user reads the catalog, so its history is no more secret than
 it is. `audit_domain_for()` is redeclared with `metric_catalog` in the asset arm, the same
-signature and return type, and recorded in `check-docs-drift.mjs`'s `INTENDED_REDECLARATIONS`; the
-baseline's copy is the pre-`0010` form and folds forward at the next squash.
-
-**Re-stamped on every boot, matching nothing on a settled one.** `0001` replays first and restores
-the baseline classifier, which fails `metric_catalog` closed to security, so a row written between
-the two files on one boot (a catalog seed `0002` adds in a later release, once the trigger exists)
-would be stamped into the wrong lane. `0010` moves any such row to `asset`, which is the routing it
-changes rather than a fact about the act, exactly as `0120` did for `schemas`. Its self-check
-asserts the lane, every arm it copied, the trigger, and that no `metric_catalog` row is outside the
-asset lane: its own work, not the table's.
+signature and return type; the baseline holds that form.
 
 A replay writes nothing: `0002`'s catalog inserts are `ON CONFLICT DO NOTHING`, and its unguarded
 `permitted_values` UPDATE writes the value the row holds, which the function's no-op rule drops. A
@@ -1776,9 +1734,8 @@ and does not call a catalog row deleted (the catalog has no DELETE policy).
 ### The trail draws every lane (archived migration 0128)
 
 **The Audit Trail no longer caps its lanes, so the setting that sized the cap has no reader.**
-`ui.digital_thread_lane_limit` folded every lane past the thirtieth behind a "Show all lanes"
-button at the foot of the page. Lanes are ordered busiest-first across the whole page, so the
-hidden ones belonged to every section, and pressing a button at the bottom expanded rows at the
+It folded every lane past the thirtieth behind a "Show all lanes" button at the foot of the page.
+Lanes are ordered busiest-first across the whole page, so the hidden ones belonged to every section, and pressing a button at the bottom expanded rows at the
 top — which is what users reported. The cap was a render guard from when the page grew with its
 content; the timeline now scrolls inside the card, and a page holds at most 200 events, so there is
 nothing left for it to guard.
@@ -1956,9 +1913,8 @@ through those grants. Two things about it are worth knowing before writing a pol
   Use `has_authority()` where a policy would otherwise name a role machine principals happen to
   share — which, since `0080`, means `Operator` and nothing else.
 
-The `user_roles` table comment kept saying all three held `Operator` after the baseline fold.
-`0032` (`supabase/migrations/0032_machine_principals_hold_no_role.sql`) restates it; `0001` keeps
-the old text until the next squash, and `0032`'s comment wins on every boot.
+The `user_roles` table comment kept saying all three held `Operator` after the third squash;
+`0162` corrected it, and the baseline carries the corrected text.
 
 **The change was provably inert when it shipped, which is why it shipped before it was needed.**
 `Operator` is named in exactly three places in `0001` and none of them is an RLS policy, so the role
@@ -1974,7 +1930,7 @@ Same name, different columns, and the chain aborts at file one on the *second* b
 has dropped the FDW server with `CASCADE`. `scripts/check-docs-drift.mjs` asserts against exactly
 that and names the remedy.
 
-### Machines propose, people decide (`0013`)
+### Machines propose, people decide (`0146`)
 
 `create_machine_principal()` allows six permissions and refuses every other one with the reason
 that holds for it. A machine passes `has_authority()` and never `has_role()`, so what a grant opens
@@ -2028,7 +1984,7 @@ are facts, and `may_decide_proposal()`'s three premises. `test_machine_principal
 the machine: it forks and publishes, files a proposal it cannot decide, reads one lane and not the
 other, and is refused before its write once revoked.
 
-### Whoever decides a machine's proposal can read its name (`0022`)
+### Whoever decides a machine's proposal can read its name (`0154`)
 
 **The person deciding saw eight hex characters.** The Approvals page names a proposer by the email
 its token carried, and a machine identity has none. The name an Administrator gave the machine is
@@ -2262,9 +2218,7 @@ other's replay.
   approved proposal writes the same columns.
 - **The plan is an object, never markup.** `areas.plan_path` names an object in the private
   `area-plans` bucket under `<area_id>/`; `is_area_plan_path()` confines the bucket's write
-  policies to an area that exists. The bucket and the check were `floor-plans` and
-  `is_floor_plan_path()` until 1.0 ([Storage buckets](#storage-buckets-and-why-they-differ) has
-  how they moved). `plan_aspect` is read from the SVG at upload, because a place is
+  policies to an area that exists. `plan_aspect` is read from the SVG at upload, because a place is
   a fraction and the aspect is what turns it back into a distance. The dashboard renders a plan
   through an `<img>` fed a blob URL, where an SVG's scripts, foreign objects and external
   references cannot run.
@@ -2747,7 +2701,7 @@ complete, `sync_gateway_deployment()` kept the two columns in agreement in both 
 every writer that still named `is_virtual` went on working and got the new column filled
 correctly.
 
-**`0000` finished it, at the third baseline squash**, which is where `0064` said the column would
+**`0135` finished it, at the third baseline squash**, which is where `0064` said the column would
 go: it survived that long only because two archived migrations named it in a function signature and
 replayed on every boot. `gateway_health_rows()` moves last, because `is_virtual` was in its
 `RETURNS TABLE` signature and a return type cannot be replaced in place — the function and the view
@@ -2853,11 +2807,11 @@ leak for one junk account per gateway ever deleted.
   stack ingesting. The Access Control page lists the same accounts under *Broker accounts*, marked
   *No gateway*.
 
-### The retry judges each revocation by its own reply (`0028`)
+### The retry judges each revocation by its own reply (`0158`)
 
 Archiving stamps `credential_revoked_at` when the revocation is **queued**, because `net.http_post`
 answers only after the transaction commits. `sweep_gateway_credential_revocations()` is what makes
-that optimism eventually correct, and until `0028` it judged a stamp by whether **any** 2xx reached
+that optimism eventually correct, and until `0158` it judged a stamp by whether **any** 2xx reached
 `net._http_response` after it. Since the forge sweep and the directory liveness probe answer 200
 every few minutes, a revocation that failed (a 503 from a functions pod with no revoke secret, a
 502 from the credential service, a timeout) almost always kept its stamp, and the gateway read as
@@ -2871,11 +2825,8 @@ revoked while its broker account still worked.
 - **any other reply, or none five minutes after the request**, clears the stamp, and the same pass
   asks again.
 
-The stamps `0028` found on its first run had been judged the old way, so it cleared them once,
-for every archived gateway that still holds a broker credential, and the next sweep asked each one
-again. The id lives in its own table rather than on `gateways`: an UPDATE of the row being deleted
-would abort the `BEFORE DELETE` trigger that also revokes, and a new `gateways` column breaks the
-replay of `0001`'s `gateway_status` view, whose column list is fixed. The directory liveness probe
+The id lives in its own table rather than on `gateways`, because an UPDATE of the row being
+deleted would abort the `BEFORE DELETE` trigger that also revokes. The directory liveness probe
 already reads its reply by request id, and `sweep_forge()` does not read replies at all.
 
 ### What the inventory still cannot see
@@ -3051,7 +3002,7 @@ no inverse, so those stay refused and a new token must be minted.
 lock them out of PostgREST through a control built for machines — and out of the request that would
 undo it. `is_machine_principal()` is the guard.
 
-#### A call the planner can fold checks nobody (`0015_i3x_authenticates_with_a_call_the_planner_cannot_fold.sql`)
+#### A call the planner can fold checks nobody (`0148_i3x_authenticates_with_a_call_the_planner_cannot_fold.sql`)
 
 i3X authenticates each request by calling one function through PostgREST as the caller, so the
 revocation arms above reach it. PostgreSQL checks EXECUTE on a function when a plan calls it, and
@@ -3062,7 +3013,7 @@ the same connection. Measured on 2026-09-28 by `validate.py` check 12h: `not-a-t
 request in 12 through the gateway. Proved in psql: `PREPARE` as `authenticated`, then `EXECUTE` as
 `anon`, returns 90 although `has_function_privilege('anon', …)` is false.
 
-`0015` adds `i3x_auth_probe()`: plpgsql, which the planner does not inline, and `STABLE`, which it
+`0148` adds `i3x_auth_probe()`: plpgsql, which the planner does not inline, and `STABLE`, which it
 does not fold, granted to `authenticated` and `service_role` only. The call stays in every plan, so
 its EXECUTE check runs on every execution. `service_token_max_days()` keeps its own job, the token
 ceiling, where folding is harmless. Check 32 of `scripts/check-docs-drift.mjs` holds the probe to
@@ -3118,20 +3069,17 @@ Built by `0041`–`0044`, `0074`, `0075`, `supabase/functions/gateway-credential
 > *transition* trigger, not a hook on every write — ingestion stamps `last_heartbeat` constantly,
 > so a blanket hook would emit ~2 HTTP calls/min/gateway of noise.
 
-### The seeded quarantine webhook is retired (`0031`)
+### The seeded quarantine webhook is retired (`0161`)
 
 The triggers post to each enabled `webhook_endpoints` row for `device.quarantined`, and none is
 seeded. `0002` used to seed one for `http://node-red:1880/hooks/quarantine`, a path the retired demo
 flow served; Node-RED's seeded flow is blank now, so every quarantine produced a 404 that pg_net
-recorded in `net._http_response` and nobody read. `0002` no longer seeds it, and `0031` deletes it,
-matched by its id **and** its original URL so a site that re-pointed it at a flow of its own keeps
-the row. Webhooks stay: a row a site adds whose `secret_name` is `nodered_webhook_jwt_secret` is
+recorded in `net._http_response` and nobody read. `0002` no longer seeds it, and `0161` removed it.
+Webhooks stay: a row a site adds whose `secret_name` is `nodered_webhook_jwt_secret` is
 signed with the key Node-RED's `httpNodeAuth` verifies every `http in` request against.
 
 The row's own secret is retired with it. `0002` kept a vault copy of the Node-RED admin token for
-that row and nothing else; it no longer writes one, and `0031` deletes it unless a
-`webhook_endpoints` row still names it, so a row a site added with it keeps working. Node-RED's
-break-glass token is read from its own environment and is unaffected.
+that row and nothing else, and no longer writes one. Node-RED's break-glass token is read from its own environment and is unaffected.
 
 ---
 
@@ -3347,14 +3295,14 @@ It is now one `SECURITY DEFINER` RPC — atomic, granted to `service_role` only,
 authenticated `p_actor_id` explicitly and **re-checking that actor's role against
 `public.user_roles`** so authorisation does not rest solely on the caller's check.
 
-### A deleted device takes its birth parameters with it (`0029`)
+### A deleted device takes its birth parameters with it (`0159`)
 
 `asset_config` holds the parameters each device declared at birth, keyed by `asset_id`, which is the
 device's `sparkplug_id` as text. With no foreign key to cascade through, every deleted device left
 its rows behind: a Permanent Delete, `purge_expired_archives`, and `scripts/load-test.mjs down`. On
 the dev cluster on 2026-09-28 the table held 25,659 rows for 3,250 `sparkplug_id`s no device carried.
 
-`0029` adds `trg_devices_delete_asset_config`, an `AFTER DELETE` trigger on `devices` that removes
+`0159` adds `trg_devices_delete_asset_config`, an `AFTER DELETE` trigger on `devices` that removes
 the device's rows, and deletes the orphans already there. The trigger is `SECURITY DEFINER` so the
 rows go whoever deletes the device: `asset_config` has a DELETE policy of its own, and a DELETE the
 policy filters removes nothing without an error. The quarantine merge re-keys the duplicate's rows onto the
@@ -3916,7 +3864,7 @@ the listener's `ext_authz` step: one call per non-static request, the role read 
 and the person placed in the team that role warrants — `administrators` or `managers` in the
 `gateways` organisation — through the machine account. A login whose role has gone since the
 token was signed is taken out of both teams and refused. What that does not cover is a revoked
-login that never returns, which is what [the sweep on a timer](#the-forge-is-swept-on-a-timer-0099)
+login that never returns, which is what [the sweep on a timer](#what-a-gateways-repository-comes-with-and-how-the-forge-reports-back-archived-migration-0095)
 is for.
 
 **Authorisation stays in Postgres.** `user_roles` and `has_role()` decide who passes the door;
@@ -4007,7 +3955,7 @@ should have been reviewed from the start. A member who is not a dashboard identi
 hand and is left alone. Nothing is created that enrolment would not create, and nothing is deleted.
 An empty secret leaves the sweep inert, and `0002` says so at boot. `test_forge_sweep.py` drives a
 role changed behind the door, a deleted hook and a hand-made repository. One pass runs at a time
-([One pass at a time](#one-pass-at-a-time-0025)).
+([One pass at a time](#one-pass-at-a-time-0156)).
 
 ### The appliance reports on a branch of its own (archived migration 0104)
 
@@ -4121,7 +4069,7 @@ Readable by `authenticated` with no per-row policy, because it carries no metric
 identity: four relation names and four timestamps. Retention is a property of the chunk rather than
 of a device, so there is nothing to filter by either.
 
-### One pass at a time (`0025`)
+### One pass at a time (`0156`)
 
 **Every step of a pass reads the forge and then writes**, so two passes that overlap both write.
 The webhook was the case seen: `ensureWebhook()` lists a repository's hooks and creates ours when
@@ -4267,9 +4215,9 @@ No write policy; the function is the only write path.
 **The two-argument form is dropped, not overloaded.** PostgREST resolves an RPC by the argument
 names in the body, and an overload whose extra arguments default makes every old-shape call
 ambiguous. `0080` recreates its form on every boot and `0125` drops it on every boot, in that
-order, and the self-check asserts exactly one declaration survives. Recorded in
-`check-docs-drift.mjs`'s `INTENDED_REDECLARATIONS`. The first suite to call the function found
-that `0080`'s body never ran: its `ON CONFLICT (principal_id, permission_id)` is ambiguous inside a
+order, and the self-check asserts exactly one declaration survives. It was recorded in
+`check-docs-drift.mjs`'s `INTENDED_REDECLARATIONS` until a squash folded both. The first suite to
+call the function found that `0080`'s body never ran: its `ON CONFLICT (principal_id, permission_id)` is ambiguous inside a
 function whose first output column is also `principal_id`, and PL/pgSQL refuses it at the call.
 `0125` names the constraint instead. Nothing had called it since `0080` shipped.
 
@@ -4285,7 +4233,7 @@ identities on both and an MQTT client is issued a broker account, not a principa
 `serviceIdentities.js` is the keys of `PERMISSION_REACH`, and `check-docs-drift.mjs` (11e)
 asserts it equals `c_allowed` in the last migration that declares the function, so a permission
 added to one side without the other fails the build rather than the click. What each entry
-reaches is held by 11f; see [Machines propose, people decide](#machines-propose-people-decide-0013). Check 11d is
+reaches is held by 11f; see [Machines propose, people decide](#machines-propose-people-decide-0146). Check 11d is
 unchanged: it requires a registry entry for every id a migration pins, and a principal created at
 runtime has no id to write down ahead of time, which is what the table is for. The Audit Trail
 reads the same table to label the *Machine identities* category, so a principal created from the page
@@ -4440,12 +4388,8 @@ needed `**` for the same reach.
 
 **Reconciled, not only created.** `ensureBranchProtection()` adds the context to a repository that
 predates it, keeping whatever else `main` already requires, so the fifteen-minute sweep brings an
-older gateway up without anybody visiting it. It also removes the context's name from before the
-rename to Aber, `acs/flow-shape`: nothing posts that name any more, so a rule that kept requiring it
-beside the new one would refuse every merge. A proposal whose head was checked under the old name
-carries no status under the new one until its next push. `test_forge_events.py` covers the four
-answers and that a proposal moves no column; `test_forge_sweep.py` covers the reconcile and the
-rename.
+older gateway up without anybody visiting it. `test_forge_events.py` covers the four answers and
+that a proposal moves no column; `test_forge_sweep.py` covers the reconcile.
 
 ### A gateway that needs code of its own (archived migration 0106)
 
@@ -4523,14 +4467,16 @@ leaves the token live and refuses what redemption refuses.
 **The pin.** [`_shared/caPin.ts`](functions/_shared/caPin.ts) walks the root's DER to its
 SubjectPublicKeyInfo and hashes it, which is what `openssl x509 -pubkey | openssl pkey -outform
 DER | openssl dgst -sha256` prints on the appliance (measured equal on the dev cluster's root).
-The root reaches the functions as `ABER_CA_PEM`, read at start by the image's entrypoint from the
-ingress TLS Secret's `ca.crt`, which the chart mounts as one projected key when ingress TLS is on:
+The root reaches the functions as `ABER_CA_PEM`, from the ingress TLS Secret's `ca.crt`, which the
+chart mounts beside `tls.crt` (never the key) when ingress TLS is on:
 that is the root that signs the API's own certificate, the one an appliance must trust to reach
 the installer, and not the broker's, which is allowed to differ. The same key is served over plain
 HTTP by the frontend at `/.well-known/aber/ca.pem` (`nginx.conf`, `frontend.yaml`), which is
 where stage 0 fetches it; the chart hands the functions that address as `ABER_CA_URL`. The mount is
-optional so the pods start before cert-manager has issued; a functions pod that started before
-the issue offers no command until it is restarted, and the readiness answer says so. The same
+optional so the pods start before cert-manager has issued, and `main/index.ts` reads it at each
+spawn until it holds a root, so a pod that started first needs no restart. While the mount is empty
+on an HTTPS platform, `gateway-bundle` refuses both the bundle and the command and mints no token,
+as it does when the Secret carries no `ca.crt`: only the internal CA is supported. The same
 root reaches the appliance's `bootstrap` container as `platform-root.pem` beside the compose
 project, which its `NODE_EXTRA_CA_CERTS` names: the installer copies the root stage 0 verified,
 and the ZIP bundle carries `ABER_CA_PEM`, or an empty file when there is none.
@@ -4686,21 +4632,15 @@ skipping. The rename is guarded on the new name being free, so a service an oper
 under it by hand is kept. The anon key's vault description in `0002` no longer names Kong either;
 the seed rewrites the three revocation secrets on every boot, so that needed no migration.
 
-## The Directory names Node-RED for what it runs (`0024`)
+## The Directory names Node-RED for what it runs (`0155`)
 
-The Node-RED row was seeded as *Node-RED (Virtual Edge Gateway Simulator)*, from when the stack
-shipped a demonstration simulator. That simulator is retired and `deployment` replaced
-`is_virtual`; what the platform's Node-RED runs now is the host-run gateways, so `0002` seeds
-*Node-RED (Host-Run Gateways)*. The seed inserts `ON CONFLICT (id) DO NOTHING`, so `0024` renames
-the row on a database that holds the old name, only while it holds exactly that name and only while
-the new one is free. Nothing joins on this name: `directory_liveness_job_map()` does not map
+`0002` seeds the Node-RED row as *Node-RED (Host-Run Gateways)*, because what the platform's
+Node-RED runs is the host-run gateways. Nothing joins on this name: `directory_liveness_job_map()` does not map
 Node-RED, and the public-URL update keys on the row's id.
 
-The same pass renamed the vault secret the revocation and sweep calls pass the gateway's key
-check with, from `supabase_anon_key` to `supabase_publishable_key`, since the legacy anon key is
-retired and the secret holds the publishable key. `0002` rewrites that secret from db-init's
-variable on every boot, so the rename is the old name joining the list it deletes first; there
-is no stored value to carry across and no migration.
+The revocation and sweep calls pass the gateway's key check with the vault secret
+`supabase_publishable_key`, which holds the publishable key. `0002` writes it from db-init's
+variable on every boot.
 
 ## The Directory observes both databases (archived migration 0127)
 
@@ -5007,12 +4947,12 @@ schedule that runs every day, as the stale alerts do; with any other `BACKUP_SCH
 says so at start and catches nothing up, since reading the previous slot from a cron string would
 need a cron evaluator. On a fresh stack this takes the first backup as the service starts.
 
-**The historian on the Backups page (0026).** While `timescaledb.physicalBackup` is on, the
+**The historian on the Backups page (0157).** While `timescaledb.physicalBackup` is on, the
 service's backups skip the historian (`DUMP_TIMESCALE=false`) and pgBackRest backs it up instead,
 so the page shows that backup on a line of its own. The chart tells the page whether to
 (`VITE_HISTORIAN_PHYSICAL_BACKUP`).
 
-- **The read.** `0026` maps three historian tables as foreign tables, as `timescale.telemetry_archive_manifest`
+- **The read.** `0157` maps three historian tables as foreign tables, as `timescale.telemetry_archive_manifest`
   is: `physical_backup_runs`, the sidecar's one-row `physical_backup_schedule` (its `hourUtc` and
   `fullOn`, recorded at start) and `physical_backup_requests`. `historian_backup_state()` reads them
   as one row: the schedule, the last success with its type and label, the newest full, the
@@ -5039,7 +4979,7 @@ than `BACKUP_RETENTION_DAYS`; the files go first and `backup_forget()` removes t
 Administrator releases it on the page (`release_backup()`), because a backup taken before a risky
 change is the one a timer must not delete first. `0` disables pruning.
 
-**The newest three are never pruned (`0017`).** `backup_prunable()` used to select by age alone,
+**The newest three are never pruned (`0150`).** `backup_prunable()` used to select by age alone,
 and the service prunes after every job it claims, a failed one included. So a fortnight of failed
 backups (a `pg_dump` older than a server, or one component down and taking the all-or-nothing
 backup with it) deleted the last good scheduled backup on the day it passed the window, while
@@ -5074,7 +5014,7 @@ stopped service produces, since a service that is not running records no failure
 job row at all has never run the service, and the page shows its empty state and nothing else
 (#474).
 
-**Grafana reads the same clock through `backup_health` (0011).** `grafana_reader` may read views
+**Grafana reads the same clock through `backup_health` (0144).** `grafana_reader` may read views
 and no table, and `backup_jobs` is Administrator-only; the view runs as its owner and exposes one
 row, `last_success_at` and `age_seconds`, and none while no job exists. The *Backup Stale* rule
 fires past 36 hours; its reasoning is in [`grafana/README.md`](../grafana/README.md).
@@ -5181,7 +5121,7 @@ itself up and copy that backup off site
 lists the assertions). The CA is the one component it does not rehearse: the rehearsal installs
 no cert-manager.
 
-### An encrypted copy off site (0018)
+### An encrypted copy off site (0151)
 
 **Every backup was on the disk it protects.** The service wrote each backup onto the backup PVC
 and nowhere else, and on the default storage class that claim is `local-path`: one node, no
@@ -5402,14 +5342,6 @@ tombstone points at the object — removing one is a decision about the record, 
 lives on, and private because a plan is a drawing of the plant and SVG is active content: the
 bucket admits `image/svg+xml` only, and the dashboard never inlines it.
 
-**It was `floor-plans` until 1.0.** The name first outlived the retirement of floors as a modelled
-level, on the grounds that the drawing was still a floor plan; it was renamed with every other
-identifier that still said floor, because after 1.0 a bucket name cannot change without an upgrade
-path. `storage-policies.sql` drops the four `floor_plans_*` policies and then
-`is_floor_plan_path()`, which the two write policies called, and `storage-init.mjs` moves the
-objects (below). `areas.plan_path` holds only the object key, `<area_id>/<file>.svg`, so no row
-changes.
-
 ### How `storage-init.mjs` creates them
 
 **Not a SQL migration.** `storage.buckets` is owned by storage-api, which runs its own migrations
@@ -5436,17 +5368,8 @@ current settings, a changed size limit takes effect on the next boot rather than
 dropped, and for the private buckets `public: false` is re-asserted. The buckets are created
 sequentially, not with `Promise.all`, so a failure part-way through names the bucket that failed.
 
-**A renamed bucket is moved, then deleted.** Nothing else removes a bucket: this script only
-creates and reconciles, and `storage-policies.sql` only replaces what it names, which is why the
-retired `gateway-backups` bucket had to be deleted from the dev cluster by hand. `RENAMED_BUCKETS`
-lists each old name with its new one. After every bucket above exists, the script lists the old
-bucket's objects folder by folder, moves each into the new bucket under the same key
-(`POST /object/move` with `destinationBucket`), and deletes the old bucket, which storage-api
-allows only once it is empty. A move that fails stops the Job before the delete, so the objects
-still unmoved stay where they were and the next upgrade picks them up. An old bucket that no longer
-exists is the settled state: the second run lists nothing, moves nothing and logs that it is gone.
-The only entry is `floor-plans` to `area-plans`. A restored backup that predates the rename brings
-`floor-plans` back, and the next upgrade moves it the same way.
+**Nothing removes a bucket.** This script only creates and reconciles, and `storage-policies.sql`
+only replaces what it names, so a bucket the platform stops declaring is deleted by hand.
 
 **The buckets are a list in code, not parameters.** They differ in the setting that matters most,
 whether they are public, and expressing that as an environment variable would leave "is this

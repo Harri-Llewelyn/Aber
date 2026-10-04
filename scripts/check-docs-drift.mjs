@@ -736,8 +736,7 @@ function edgeFunctionNames() {
     fail(
       'A citation must name an APPLIED migration, or say "archived migration NNNN" for one in\n' +
         '      supabase/migrations/archive/, which never executes. A bare number that is not\n' +
-        '      applied points a reader at nothing, and will point them at the WRONG file once\n' +
-        '      that number is issued for real -- the archive already holds two different 0074s.'
+        '      applied points a reader at nothing; check 9d keeps it from ever naming a live one.'
     );
   } else {
     pass(`every inline migration citation across ${scanned.length} files names an applied migration or is marked archived`);
@@ -767,42 +766,6 @@ function edgeFunctionNames() {
     // a migration added after the fold redeclares something the baseline holds, and each one
     // records WHY that replacement is meant. The README.md note "The archive has no 0017" is the
     // case where an unrecorded one would have regressed audit attribution.
-
-    // 0006 adds `transaction_rows` to each event the page returns, the same signature and return
-    // type, so the last declaration winning is exactly what is wanted. The baseline's copy is
-    // the pre-0006 form and folds forward at the next squash.
-    'public.audit_trail_page': '0006 adds transaction_rows to each event; the baseline holds the pre-0006 form',
-
-    // 0010 files `metric_catalog` in the asset lane (#468), the same signature and return type.
-    // The baseline's copy fails it closed to security and folds forward at the next squash.
-    'public.audit_domain_for': '0010 adds metric_catalog to the asset lane; the baseline holds the pre-0010 form',
-
-    // 0028 records each revocation's pg_net request id and judges the stamp by that request's own
-    // reply, the same signatures and return types. The baseline accepts any 2xx after the stamp.
-    'public.revoke_gateway_credential': '0028 records the request id in gateway_revocation_requests; the baseline records nothing',
-    'public.sweep_gateway_credential_revocations': '0028 judges each stamp by the reply to its own request; the baseline accepts any 2xx pg_net recorded',
-
-    // 0013 widens the allow-list to the six a machine may hold and gives each refusal its own
-    // reason, the same signature and return type. The baseline refuses all but three reads.
-    'public.create_machine_principal': '0013 allows schema:manage, proposal:create and archive:manage and states why each other permission is refused; the baseline holds the pre-0013 form',
-
-    // 0013 keeps all five arms and rewrites the comments on the cell and gateway lanes, which said
-    // they resolve what the tables' own policies resolve.
-    'public.may_decide_proposal': '0013 restates what the cell and gateway lanes check and why no machine reaches them; the baseline holds the pre-0013 comments',
-
-    // 0017 adds the floor, the same signature and return type: the newest three backups are
-    // never prunable. 0018 adds each row's off-site copy to what it returns, so the prune deletes
-    // the copy too. The baseline selects by age alone and folds forward at the next squash.
-    'public.backup_prunable': '0017 never returns the newest three backups and 0018 adds each one\'s off-site copy; the baseline holds the pre-0017 form',
-
-    // 0020 believes each X-Aber-Actor value only from the caller it describes, and files a machine
-    // identity as 'service' whatever it declares. The same signature and return type.
-    'public.log_audit_trail_event': '0020 ties each declared actor_source to its caller; the baseline accepts ingestion, service and migration from anyone',
-
-    // 0021 stamps causation_id = txid_current() on the row each writes, as the audit trigger does
-    // on the target's row. The same signatures and return types.
-    'public.approve_proposal': '0021 stamps the PROPOSAL_APPLIED row with the approval\'s causation_id; the baseline leaves it NULL',
-    'public.expire_open_proposals': '0021 stamps each PROPOSAL_EXPIRED row with the run\'s causation_id; the baseline leaves it NULL',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
@@ -882,6 +845,60 @@ function edgeFunctionNames() {
     );
   } else {
     pass(`${seen.size} function(s) declared across the chain; all ${Object.keys(INTENDED_REDECLARATIONS).length} redeclarations are recorded as intended`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 9d. A migration number is never reused. Every applied migration but the baseline is numbered above
+// the highest in the archive, so a citation of an archived number can never come to name a live
+// file. The squash before this rule restarted at 0003, and every bare citation of the archived
+// 0003-0032 silently re-pointed as the live chain grew past them.
+// -------------------------------------------------------------------------------------------------
+{
+  const dir = 'supabase/migrations';
+  const num = (name) => Number(name.slice(0, 4));
+  const archived = readdirSync(join(REPO, dir, 'archive')).filter((f) => /^\d{4}_.*\.sql$/.test(f)).map(num);
+  const highest = Math.max(...archived);
+  const next = String(highest + 1).padStart(4, '0');
+  // 0001 and 0002 are the baseline, which each squash regenerates in place.
+  const reused = readdirSync(join(REPO, dir))
+    .filter((f) => /^\d{4}_.*\.sql$/.test(f) && !/^000[12]_/.test(f) && num(f) <= highest);
+
+  if (!archived.length) {
+    fail(`${dir}/archive/ holds no four-digit migration, so check 9d compares nothing`);
+  } else if (reused.length) {
+    fail(
+      `${reused.join(', ')} reuse(s) a number the archive already holds (its highest is ${highest}).\n` +
+        `      Number it ${next} or above: every existing citation of that archived number would\n` +
+        '      otherwise name the new file. supabase/migrations/archive/README.md has the rule.'
+    );
+  } else {
+    pass(`no applied migration reuses an archived number; the next is ${next}`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 9e. The baseline makes the audit trail's monthly partitions before its default partition and
+// before any trigger. On a first install the stack writes while db-init is still running; an
+// audited row that reaches the default for a month with no partition stops that partition from
+// ever being created, and every later boot fails.
+// -------------------------------------------------------------------------------------------------
+{
+  const baseline = read('supabase/migrations/0001_baseline_schema.sql');
+  const months = baseline.search(/^SELECT public\.ensure_audit_trail_partitions\(/m);
+  const fallback = baseline.search(/^CREATE TABLE IF NOT EXISTS public\.audit_trail_default PARTITION OF/m);
+  const trigger = baseline.search(/^CREATE TRIGGER /m);
+  if (months < 0 || fallback < 0 || trigger < 0) {
+    fail('check 9e could not find the monthly partitions call, the default partition or a trigger in 0001');
+  } else if (!(months < fallback && fallback < trigger)) {
+    fail(
+      '0001 must call ensure_audit_trail_partitions() before it creates audit_trail_default, and both\n' +
+        '      before its first trigger: an audited write that reaches the default partition first\n' +
+        '      blocks that month\'s partition for good. generate-baseline-section.mjs emits this\n' +
+        '      order (AROUND_PARTITION).'
+    );
+  } else {
+    pass('0001 makes the audit trail\'s monthly partitions before its default partition and its triggers');
   }
 }
 
@@ -986,11 +1003,11 @@ function edgeFunctionNames() {
       'RLS on with no policy and the anon/authenticated grants revoked -- infrastructure, and a ' +
       'writable request-id table would let a caller redirect where the probe reads liveness from',
     gateway_revocation_requests:
-      'the in-flight pg_net request id behind each archived gateway\'s revocation stamp (0028). RLS ' +
+      'the in-flight pg_net request id behind each archived gateway\'s revocation stamp (0158). RLS ' +
       'on with no policy, nothing granted to anon/authenticated, and service_role may only read it: ' +
       'revoke_gateway_credential() writes it and the revocation sweep deletes it',
     forge_sweep_lease:
-      'one row saying which forge-sweep pass may run (0025). RLS on with no policy, nothing granted ' +
+      'one row saying which forge-sweep pass may run (0156). RLS on with no policy, nothing granted ' +
       'to anon/authenticated, and service_role may only read it: it moves through three service_role ' +
       'RPCs that forge-sweep calls, and a browser has no reason to see which pass is running',
     schema_bootstrap:
@@ -1040,12 +1057,12 @@ function edgeFunctionNames() {
       + 'has stopped, and it counts audit rows: a published path would be a way to size the '
       + 'security lane without holding audit_trail:read',
   backup_health:
-      'How long since the platform backup last succeeded (0011), granted to `grafana_reader` alone '
+      'How long since the platform backup last succeeded (0144), granted to `grafana_reader` alone '
       + 'and revoked from anon/authenticated -- the same arrangement as the views above. It reads '
       + 'backup_jobs as its owner so the Backup Stale rule can see it; the Backups page reads the '
       + 'table itself, under the Administrator-only RLS a published path would bypass',
   backup_offsite_health:
-      'How long the newest backup has gone without an off-site copy (0018), granted to '
+      'How long the newest backup has gone without an off-site copy (0151), granted to '
       + '`grafana_reader` alone and revoked from anon/authenticated, like backup_health above. It '
       + 'reads backups, the destination settings and the vault through an owner-run function so '
       + 'the Off-site Backup Stale rule can see a number and nothing behind it',
@@ -1070,11 +1087,9 @@ function edgeFunctionNames() {
     [...spec.matchAll(/^ {2}(\/[^\s:]*):/gm)].map((m) => m[1])
   );
 
-  // Not 0000: it creates nothing that survives under the name it creates it with (its
-  // conversion's scaffolding is renamed or dropped before `0001` runs).
   let migrationSql = '';
   for (const f of readdirSync(join(REPO, 'supabase/migrations'))) {
-    if (f.endsWith('.sql') && !f.startsWith('0000_')) {
+    if (f.endsWith('.sql')) {
       migrationSql += readFileSync(join(REPO, 'supabase/migrations', f), 'utf8') + '\n';
     }
   }
@@ -1244,6 +1259,10 @@ function edgeFunctionNames() {
 // `public.gateway_status` is declared `SELECT g.*`, and Postgres expands the star at creation
 // time into a frozen column list. Replay order makes it permanent: the baseline's own
 // `ensure_gateway_status_view()` call runs before any later ALTER on every boot.
+//
+// And nothing STATES the view. A `CREATE OR REPLACE VIEW public.gateway_status` carries the column
+// list of the day it was written, so on the boot after a later migration has widened the view it
+// tries to drop that column and aborts the chain ("cannot drop columns from view").
 // -------------------------------------------------------------------------------------------------
 {
   const ADDS_COLUMN = /ALTER TABLE (?:ONLY )?public\.gateways\s+ADD COLUMN/i;
@@ -1266,6 +1285,20 @@ function edgeFunctionNames() {
     checked += 1;
     const coveredBy = migrations.slice(i).find(([, sql]) => REBUILDS.test(sql));
     if (!coveredBy) offenders.push(migrations[i][0]);
+  }
+
+  const STATES = /CREATE\s+OR\s+REPLACE\s+VIEW\s+public\.gateway_status\b/i;
+  const stating = migrations.filter(([, sql]) => STATES.test(sql)).map(([f]) => f);
+  if (stating.length) {
+    fail(
+      `${stating.join(', ')} state(s) public.gateway_status with CREATE OR REPLACE VIEW.\n` +
+        '      The stated column list is frozen, so the replay after a migration widens gateways\n' +
+        '      fails with "cannot drop columns from view". Build it with\n' +
+        '        SELECT public.ensure_gateway_status_view();\n' +
+        '      which is what generate-baseline-section.mjs emits for the baseline (REBUILT_BY).'
+    );
+  } else {
+    pass('no migration states public.gateway_status; it is built by ensure_gateway_status_view()');
   }
 
   if (!checked) {
@@ -1535,7 +1568,8 @@ function edgeFunctionNames() {
       py.match(/^MAX_GATEWAY_STATUS_LENGTH = (\d+)$/m)?.[1]],
     ['ingest_record_gateway_health()', words(gate.match(/upper\(p_status\) IN \(([^)]*)\)/)),
       gate.match(/length\(p_status\) > (\d+)/)?.[1]],
-    ['gateways_status_valid', words(check.match(/upper\(status\) NOT IN \(([^)]*)\)/)),
+    // As written (`NOT IN (...)`) or as the baseline's dump renders it (`<> ALL (ARRAY[...])`).
+    ['gateways_status_valid', words(check.match(/upper\(status\) (?:NOT IN \(|<> ALL \(ARRAY\[)([^)\]]*)[)\]]/)),
       check.match(/length\(status\) <= (\d+)/)?.[1]],
   ];
   const unread = places.filter(([, reserved, cap]) => !reserved || !cap).map(([where]) => where);
@@ -1861,7 +1895,8 @@ function edgeFunctionNames() {
 
   // Set by something other than the Deployment's env list, each with what sets it.
   const elsewhere = {
-    ABER_CA_PEM: 'the image entrypoint reads it from the mounted platform root',
+    ABER_CA_PEM: 'main/index.ts reads it from the mounted platform root at spawn, the entrypoint at start',
+    ABER_CA_STATE: 'main/index.ts derives it from what the mounted platform root holds',
     ASSET_EXPORT_MAX_TELEMETRY_ROWS: 'defaulted inside aas-export, deliberately not plumbed',
     ASSET_EXPORT_MAX_TRAIL_ROWS: 'defaulted inside aas-export, deliberately not plumbed',
   };
@@ -1989,8 +2024,8 @@ function edgeFunctionNames() {
 
   if (!allowed) {
     fail(
-      'could not find c_allowed in any migration declaring create_machine_principal(). 0001 and ' +
-        '0013 each spell it `c_allowed CONSTANT text[] := ARRAY[...]` -- if that shape changed, ' +
+      'could not find c_allowed in any migration declaring create_machine_principal(). 0001 ' +
+        'spells it `c_allowed CONSTANT text[] := ARRAY[...]` -- if that shape changed, ' +
         'this check needs to change with it rather than silently passing.'
     );
   } else if (!offered) {
@@ -2346,10 +2381,6 @@ function edgeFunctionNames() {
 // reads the Factory+ payload marker. What is checked is the product naming itself Factory+ in
 // the strings a user reads, scoped to the files that carry product identity with a per-file
 // reason.
-//
-// Deliberately not listed, because renaming it is not cosmetic:
-//   * deploy/k8s/internal-ca.yaml `commonName: Factory+ Internal CA`: changing a cert-manager
-//     commonName re-mints the CA, which takes the whole fleet offline (docs/incidents.md).
 // -------------------------------------------------------------------------------------------------
 {
   /** file -> why this file's prose is product identity rather than a framework reference. */
@@ -2360,6 +2391,8 @@ function edgeFunctionNames() {
       'the OAuth consent screen, which names the identity a user is being asked to share',
     'deploy/helm/aber/values.yaml':
       'supabaseStudio.organizationName is displayed in Studio',
+    'deploy/k8s/internal-ca.yaml':
+      "the root's commonName and organisation are what every trust store in the plant displays",
     'deploy/helm/aber/templates/NOTES.txt':
       'Helm prints it after every install and upgrade, and its first line names the product',
     // Swagger UI renders info.title as the page heading. Whole-file, because every other Factory+
@@ -2457,11 +2490,6 @@ function edgeFunctionNames() {
         file: MIGRATION,
         needle: `interval '${days} days';  -- NO`,
         what: 'the header counter-example showing the predicate that must NOT be used',
-      },
-      {
-        file: 'README.md',
-        needle: `**${days}-day retention window**`,
-        what: 'the migration narrative',
       },
       {
         file: 'supabase/README.md',
@@ -2898,8 +2926,8 @@ function edgeFunctionNames() {
 // carrying "deleted", "retired", "removed", "replaced", "gone", "former" or "proposed" is history
 // rather than a pointer. That is the whole exemption, so a stale citation cannot hide behind a
 // file's reputation. Exempt wholesale: `docs/incidents.md`, where naming the path an incident
-// happened to is the point; `docs/roadmap.md` and `docs/postgres-17-migration-plan.md`, the
-// records of what retired; `supabase/migrations/archive/`, which is never executed; and
+// happened to is the point; `docs/roadmap.md`, the record of what retired;
+// `supabase/migrations/archive/`, which is never executed; and
 // `supabase/config.toml`, the Supabase CLI's stock file.
 //
 // A CITATION IS RESOLVED THE WAY A READER WOULD RESOLVE IT: a leading `../` against the citing
@@ -2910,7 +2938,7 @@ function edgeFunctionNames() {
 // -------------------------------------------------------------------------------------------------
 {
   const PAST = /\b(deleted|retired|removed|replaced|gone|superseded|former|formerly|proposed)\b/i;
-  const EXEMPT = ['docs/incidents.md', 'docs/roadmap.md', 'docs/postgres-17-migration-plan.md', 'supabase/config.toml'];
+  const EXEMPT = ['docs/incidents.md', 'docs/roadmap.md', 'supabase/config.toml'];
   const scanned = allFiles.filter(
     (f) =>
       !EXEMPT.includes(f) &&
@@ -3056,7 +3084,7 @@ function edgeFunctionNames() {
 // `docker compose up` in the remote-gateway runbook is correct. What cannot be true is a SECOND
 // target for the platform, so the phrases below are the ones that assert one.
 //
-// The four documents that carry the comparison as history are exempt, each opening with a note
+// The three documents that carry the comparison as history are exempt, each opening with a note
 // saying so, and this file is exempt because it has to name the phrases to look for them.
 // -------------------------------------------------------------------------------------------------
 {
@@ -3064,7 +3092,6 @@ function edgeFunctionNames() {
     'docs/incidents.md',
     'docs/roadmap.md',
     'docs/kubernetes-architecture.md',
-    'docs/postgres-17-migration-plan.md',
     'scripts/check-docs-drift.mjs',
   ];
   // AN INTERVENING WORD IS THE HOLE THE FIRST PASS LEFT. "both deployment targets" and "one of
@@ -3194,66 +3221,24 @@ function edgeFunctionNames() {
   const STILL_RIGHT = [
     'the scheduling floor and the upgrade floor',
     'A building with two floors is two areas; an overview of the chart',
-    '`factoryplus_payload_uuid`, the Factory+ payload marker, and the Factory+ Internal CA',
+    '`factoryplus_payload_uuid` and the Factory+ payload marker',
     'SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are the tokens the upstream images read',
     'a simulated gateway beside a host-run one, inspired by the AMRC Connectivity Stack (ACS)',
     'supabase-envoy, area-plans, aber-tls-config, aber/flow-shape, dacs-1 and MACS_ADDR',
     'the writer thread, threading.Thread and daemon_threads beside the audit trail and audit_trail',
   ];
 
-  const STORAGE_POLICIES = ['supabase/storage-policies.sql', 'deploy/helm/aber/files/storage-policies/storage-policies.sql'];
   /** [file or directory/, the phrase marking the paragraph kept (null: the whole file), why]. */
   const KEPT = [
     ['supabase/migrations/archive/', null, 'never executed: the record of what each archived migration did'],
     ['docs/incidents.md', null, 'names what each incident happened to'],
-    ['docs/postgres-17-migration-plan.md', null, 'marked Historical'],
     ['.gitleaksignore', null, 'its fingerprints name historical paths and must match them exactly'],
-    ['supabase/migrations/0000_a_database_from_before_the_fold.sql', null, 'moves a database from before the fold, so it names what it moves'],
-    ['supabase/migrations/0003_the_group_answers_to_aber.sql', null, 'moves the old Sparkplug group'],
-    ['supabase/migrations/0004_the_namespace_answers_to_aber.sql', null, 'moves the old semantic-id authority'],
-    ['supabase/migrations/0024_node_red_is_listed_for_the_gateways_it_runs.sql', null, 'renames the old Directory row'],
-    ['supabase/migrations/0031_the_seeded_quarantine_webhook_is_retired.sql', null, 'deletes the retired vault secret'],
-    ['supabase/migrations/0002_seed_data.sql', ['One pair is not a disagreement', 'renamed from `supabase_anon_key`', 'The retired name'],
-      'the group check lets the old default through for 0003, and the vault deletes the old secret name'],
-    [['scripts/storage-init.mjs', 'deploy/helm/aber/files/scripts/storage-init.mjs'], "{ from: 'floor-plans', to: 'area-plans' }", 'RENAMED_BUCKETS moves the old bucket'],
-    [STORAGE_POLICIES, ['under its old name, floor-plans', "policyname LIKE 'floor_plans_%'", 'floor-plans policies gone'],
-      "drops the old bucket's policies and path check, and asserts they are gone"],
-    [['scripts/lib/mosquitto-dynsec.mjs', 'deploy/helm/aber/files/gateway-credential-lib/mosquitto-dynsec.mjs'], 'RETIRED_PLATFORM_USERNAMES =',
-      'the boot reconcile removes the old broker accounts'],
-    ['scripts/lib/mosquitto-dynsec.test.mjs', /factoryplus_/, 'tests that removal'],
-    ['scripts/check-broker-config.mjs', /factoryplus_/, 'plants the old accounts and asserts the broker refuses them'],
-    ['supabase/functions/_shared/forge.ts', 'RETIRED_FLOW_SHAPE_CONTEXTS =', 'the sweep removes the old status context from branch rules'],
-    ['supabase/functions/forge-sweep/test_forge_sweep.py', 'RETIRED_FLOW_SHAPE_CONTEXT =', 'tests that removal'],
-    ['node-red/node-red-init.mjs', ["['.factoryplus-seeded'", 'LEGACY_TLS_NODE =', 'LEGACY_CREDENTIALS_ENV_KEY ='], 'moves the old names on the volume'],
-    ['node-red/node-red-init.test.mjs', /factoryplus-tls-config/, 'plants the old tls-config node and asserts it moves'],
-    ['node-red/node-red-init.test.mjs', /acsCredentialsEnv/, 'plants the old broker-node property and asserts it moves'],
-    ['supabase/migrations/test_sparkplug_group_setting.py', /ACS-Cymru/, "tests 0003's move"],
-    ['supabase/migrations/test_directory_images.py', 'NODE_RED_OLD_NAME =', "tests 0024's rename"],
-    ['supabase/migrations/test_forge_follows_the_archive.py', "'supabase_anon_key'", 'asserts the old vault name is gone'],
-    ['frontend/src/searchIndex.js', /floor plan/, 'search keywords find a page by its old word'],
     ['ingestion/README.md', "ACS's `acs-edge`", 'names the upstream ACS component'],
     ['test-harness/load_generator.py', 'NOT the demonstration simulator', 'says what the load generator is not'],
     ['test-harness/README.md', 'Not the demonstration simulator', 'says what the load generator is not'],
-    ['deploy/helm/aber/values.yaml', ['is moved to `Aber` by 0003', 'The demonstration simulator was removed'], 'history, beside the value it explains'],
-    ['deploy/k8s/README.md', 'There is no shared broker account.', 'the retired shared broker account'],
-    ['docs/upgrades.md', ['| Was | Is | What a site does |', 'the chart was `acs-cymru` until'], 'the 1.0 table: what each rename asks of a site'],
+    ['deploy/helm/aber/values.yaml', 'The demonstration simulator was removed', 'history, beside the value it explains'],
     ['docs/gateway.md', "Envoy kept the Kong Service's name", "the gateway's History"],
-    ['mosquitto/README.md', 'RETIRED_PLATFORM_USERNAMES', 'the removal of the old accounts'],
-    ['README.md', ['The chain is how', 'It used to come up with a four-cell simulated shopfloor'],
-      'the archived chain, and what a fresh install used to hold'],
-    ['supabase/README.md', [
-      'defaulted to the literal `ACS-Cymru`', 'The default moved with the platform', 'The bucket and the check were `floor-plans`',
-      'rename to Aber, `acs/flow-shape`', 'The Node-RED row was seeded as', 'The same pass renamed the vault secret',
-      'It was `floor-plans` until 1.0.', 'The only entry is `floor-plans` to `area-plans`',
-      '`ui.digital_thread_lane_limit` folded every lane',
-    ], 'history: what each name was and how it moved'],
-    ['supabase/migrations/0002_seed_data.sql', '`ui.digital_thread_lane_limit` was declared here', 'the retired setting 0000 deletes'],
-    ['frontend/src/__tests__/auditTrailPurgedEntity.test.jsx', /ui\.digital_thread_lane_limit/, 'an old row on the trail names the retired setting'],
-    ['frontend/src/constants.js', 'export const RENAMED_TABS', 'the old route opens the Audit Trail'],
-    ['frontend/src/__tests__/appRouting.test.jsx', /\/digital-thread/, 'tests the old route'],
-    ['frontend/src/searchIndex.js', /digital thread/, 'search keywords find the Audit Trail by its old name'],
-    [['grafana/provisioning/alerting/alert-rules.yaml', 'deploy/helm/aber/files/grafana-alerting/alert-rules.yaml'],
-      'uid: aber-digital-thread-partitions', 'deleteRules drops the old rule from a Grafana that loaded it'],
+    ['README.md', 'It used to come up with a four-cell simulated shopfloor', 'what a fresh install used to hold'],
   ];
 
   const THIS_FILE = 'scripts/check-docs-drift.mjs';
@@ -3599,15 +3584,17 @@ function edgeFunctionNames() {
 // -------------------------------------------------------------------------------------------------
 // 24. The Directory's image map names the same components in the migration and the chart.
 //
-// `0007`'s `served_by` rows say which component serves each chart-managed Directory row, and the
-// chart's `aber.directoryImages` says which image each component runs. A component named on one
-// side only leaves its row reading "not recorded", with nothing failing. Each must also be a
+// `record_directory_images()`'s `served_by` rows say which component serves each chart-managed
+// Directory row, and the chart's `aber.directoryImages` says which image each component runs. A
+// component named on one side only leaves its row reading "not recorded", with nothing failing. Each must also be a
 // component some template declares, or a rename in the chart has the same effect.
 // -------------------------------------------------------------------------------------------------
 {
-  const MIGRATION = 'supabase/migrations/0007_the_directory_names_the_image_each_service_runs.sql';
+  const MIGRATION = 'supabase/migrations/0001_baseline_schema.sql';
   const HELPERS = 'deploy/helm/aber/templates/_helpers.tpl';
-  const sql = read(MIGRATION);
+  const baseline = read(MIGRATION);
+  const fnAt = baseline.indexOf('FUNCTION public.record_directory_images(');
+  const sql = fnAt === -1 ? '' : baseline.slice(fnAt, baseline.indexOf('$$;', fnAt));
   const tpl = read(HELPERS);
 
   const servedBy = new Set(
@@ -3629,8 +3616,8 @@ function edgeFunctionNames() {
     );
   } else {
     const offences = [
-      ...[...servedBy].filter((c) => !mapped.has(c)).map((c) => `${c} serves a row in 0007 and has no image in aber.directoryImages`),
-      ...[...mapped].filter((c) => !servedBy.has(c)).map((c) => `${c} has an image in aber.directoryImages and serves no row in 0007`),
+      ...[...servedBy].filter((c) => !mapped.has(c)).map((c) => `${c} serves a Directory row and has no image in aber.directoryImages`),
+      ...[...mapped].filter((c) => !servedBy.has(c)).map((c) => `${c} has an image in aber.directoryImages and serves no Directory row`),
       ...[...mapped].filter((c) => !declared.has(c)).map((c) => `${c} is not a component any template declares`),
     ];
     if (offences.length) {
@@ -3638,7 +3625,7 @@ function edgeFunctionNames() {
         'the Directory image map disagrees with itself:\n' + offences.map((o) => `        ${o}`).join('\n')
       );
     } else {
-      pass(`the Directory image map names the same ${mapped.size} chart component(s) in 0007 and the chart`);
+      pass(`the Directory image map names the same ${mapped.size} chart component(s) in the baseline and the chart`);
     }
   }
 }

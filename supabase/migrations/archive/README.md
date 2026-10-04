@@ -1,6 +1,6 @@
 # Archived migrations
 
-The 169 files here are the incremental migrations that built this schema, kept after being
+The 197 files here are the incremental migrations that built this schema, kept after being
 squashed back into `../0001_baseline_schema.sql` (structure) and `../0002_seed_data.sql` (data).
 
 **They are no longer applied.** `supabase/db-init/Dockerfile` copies `migrations/*.sql`, a glob
@@ -19,17 +19,80 @@ Treat this directory as documentation with a `.sql` extension. An applied file t
 them says "archived migration NNNN", which is how to tell a citation from a claim that something
 still runs.
 
-## The three squashes
+## The four squashes
 
 | When | Files folded | Left applied | Postgres |
 |---|---|---|---|
 | Public beta | 38, `20260101000000_init_assets_and_digital_thread` … `20260101000037_schema_versioning` | `0001`, `0002` | 15.6.1.143 |
 | 2026-09-03, `223b49d` | 61, `0003` … `0078` | `0001`, `0002` and a tail of nine | 15.6.1.143 |
-| This one | 70, `0004` … `0134` | `0000`, `0001`, `0002` | 17.6.1.160 |
+| 2026-09-22, `12a050c6` | 70, `0004` … `0134` | `0000`, `0001`, `0002` | 17.6.1.160 |
+| Before 1.0, 2026-10-03 | 28, `0000` … `0032`, archived as `0135` … `0162` | `0001`, `0002` | 17.6.1.175 |
 
-Numbers are not unique across squashes: `0074` names two different migrations, one archived by
-the second squash and one by the third, because the chain reused the number after the first was
-archived. Cite by filename, not by number alone.
+**A number is never issued twice.** Until the fourth squash it was: the third restarted the live
+chain at `0003`, so `0003`–`0032` each named an archived file and a live one, and a bare
+citation of the archived file came to name the live one as the chain grew past it. The fourth
+archived its files under the numbers after the archive's highest, below, and every migration since
+takes the next number never issued: the first after 1.0 is `0163`. Check 9d of
+`scripts/check-docs-drift.mjs` refuses a live number the archive holds. The two `0074`s, one archived
+by the second squash and one by the third, predate the rule; cite either by filename.
+
+Each file's header names its number in the archive and the number it was applied as.
+
+| Applied as | Archived as |
+| :--- | :--- |
+| `0000` | [`0135_a_database_from_before_the_fold`](0135_a_database_from_before_the_fold.sql) |
+| `0003` | [`0136_the_group_answers_to_aber`](0136_the_group_answers_to_aber.sql) |
+| `0004` | [`0137_the_namespace_answers_to_aber`](0137_the_namespace_answers_to_aber.sql) |
+| `0005` | [`0138_raw_telemetry_has_a_stated_window`](0138_raw_telemetry_has_a_stated_window.sql) |
+| `0006` | [`0139_the_drawer_knows_how_many_rows_a_transaction_wrote`](0139_the_drawer_knows_how_many_rows_a_transaction_wrote.sql) |
+| `0007` | [`0140_the_directory_names_the_image_each_service_runs`](0140_the_directory_names_the_image_each_service_runs.sql) |
+| `0008` | [`0141_the_223p_metrics_file_under_bms`](0141_the_223p_metrics_file_under_bms.sql) |
+| `0009` | [`0142_mtconnect_metrics_carry_their_data_item_type_id`](0142_mtconnect_metrics_carry_their_data_item_type_id.sql) |
+| `0010` | [`0143_a_metric_deprecation_reaches_the_thread`](0143_a_metric_deprecation_reaches_the_thread.sql) |
+| `0011` | [`0144_grafana_sees_how_long_since_a_backup_succeeded`](0144_grafana_sees_how_long_since_a_backup_succeeded.sql) |
+| `0012` | [`0145_a_semantic_id_is_an_iri_or_an_irdi`](0145_a_semantic_id_is_an_iri_or_an_irdi.sql) |
+| `0013` | [`0146_machine_identities_may_hold_write_permissions`](0146_machine_identities_may_hold_write_permissions.sql) |
+| `0014` | [`0147_a_gateway_status_is_a_label_and_never_stale`](0147_a_gateway_status_is_a_label_and_never_stale.sql) |
+| `0015` | [`0148_i3x_authenticates_with_a_call_the_planner_cannot_fold`](0148_i3x_authenticates_with_a_call_the_planner_cannot_fold.sql) |
+| `0016` | [`0149_a_local_extension_carries_no_minted_id`](0149_a_local_extension_carries_no_minted_id.sql) |
+| `0017` | [`0150_retention_keeps_the_newest_three_backups`](0150_retention_keeps_the_newest_three_backups.sql) |
+| `0018` | [`0151_every_backup_has_an_encrypted_copy_off_site`](0151_every_backup_has_an_encrypted_copy_off_site.sql) |
+| `0020` | [`0152_the_thread_files_a_machine_as_a_service`](0152_the_thread_files_a_machine_as_a_service.sql) |
+| `0021` | [`0153_an_approval_shares_a_causation_id_with_the_change_it_made`](0153_an_approval_shares_a_causation_id_with_the_change_it_made.sql) |
+| `0022` | [`0154_whoever_decides_a_proposal_can_read_the_machine_that_filed_it`](0154_whoever_decides_a_proposal_can_read_the_machine_that_filed_it.sql) |
+| `0024` | [`0155_node_red_is_listed_for_the_gateways_it_runs`](0155_node_red_is_listed_for_the_gateways_it_runs.sql) |
+| `0025` | [`0156_one_forge_sweep_runs_at_a_time`](0156_one_forge_sweep_runs_at_a_time.sql) |
+| `0026` | [`0157_the_backups_page_reads_the_historians_own_backup`](0157_the_backups_page_reads_the_historians_own_backup.sql) |
+| `0028` | [`0158_a_revocation_is_judged_by_its_own_reply`](0158_a_revocation_is_judged_by_its_own_reply.sql) |
+| `0029` | [`0159_a_deleted_device_takes_its_birth_parameters_with_it`](0159_a_deleted_device_takes_its_birth_parameters_with_it.sql) |
+| `0030` | [`0160_a_node_death_takes_its_devices_offline`](0160_a_node_death_takes_its_devices_offline.sql) |
+| `0031` | [`0161_the_seeded_quarantine_webhook_is_retired`](0161_the_seeded_quarantine_webhook_is_retired.sql) |
+| `0032` | [`0162_machine_principals_hold_no_role`](0162_machine_principals_hold_no_role.sql) |
+
+### What the fourth squash changed about the shape
+
+**It has no tail.** Each earlier squash kept its subtractions applied, because a database built by
+the chain it replaced still held what they removed. Before 1.0 no such database is upgraded
+([`docs/upgrades.md`](../../../docs/upgrades.md#the-floor-100)), so `0000`, the third squash's tail,
+folded away with the rest, and so did the one-shot repairs that only ever touched an older
+database's rows: `0136`'s Sparkplug group move, `0137`'s semantic-id authority, `0155`'s Directory
+rename, `0161`'s webhook deletion. Their tests went with them.
+
+**One statement had to move by hand, and the check could not have found it.** `0140` called
+`record_directory_images()` with the chart's image map on every boot. The map arrives as a psql
+variable the equivalence probes never pass, so a fold that dropped the call would have compared
+clean and left every Directory version blank on a real install. It is in `0002` now. Read every
+folded file for `:'name'` and `:{?name}` before trusting the comparison.
+
+**The audit trail's monthly partitions come before its default** (`AROUND_PARTITION` in the
+generator). The third squash created them in a tail section after every audit trigger existed, so
+on a first install anything audited while db-init was still running landed in the default
+partition. That month's partition could then never be created, and every later boot failed. CI
+found it on this squash's first run.
+
+**`gateway_status` is built by its function** (`REBUILT_BY` in the generator). The baseline used
+to state the view with a dumped column list, so a migration that widened `gateways` and rebuilt
+the view broke the replay after it.
 
 ### What the third squash changed about the shape
 
@@ -55,13 +118,13 @@ Not transcribed by hand. `scripts/generate-baseline-section.mjs` rewrites a `pg_
 squashes did this by hand and left nothing behind — so the form had to be re-derived from the
 previous baseline each time, and the rules below had to be rediscovered each time with it.
 
-1. Build a database from the chain being replaced and dump it:
+1. Build a database from the chain being replaced and dump it, with the same preconditions the real
+   one has (GoTrue's `auth` schema present, `search_path` set to `auth, public, extensions`):
 
-       pg_dump -U postgres -d postgres --schema-only --schema=public --schema=timescale
+       node scripts/verify-schema-equivalence.mjs --dump <old chain dir> dump.sql
 
-   Against a probe with the same preconditions the real one has — GoTrue's `auth` schema present
-   and `search_path` set to `auth, public, extensions`. `scripts/verify-schema-equivalence.mjs`
-   documents both and why each is load-bearing.
+   That is `pg_dump --schema-only --schema=public --schema=timescale` against the same probe the
+   comparison builds; the script's header says why each precondition is load-bearing.
 
 2. `node scripts/generate-baseline-section.mjs <dump.sql> > section4.sql`
 
@@ -71,7 +134,7 @@ previous baseline each time, and the rules below had to be rediscovered each tim
 
 4. Check it: `node scripts/verify-schema-equivalence.mjs <new chain dir> <old chain dir>`. It
    builds both databases and compares a dump of each, plus the seeded rows table by table. The
-   oracle for the third squash was schema digest `1977c6291706`.
+   oracle for the third squash was schema digest `1977c6291706`, and for the fourth `fefbbb17fce2`.
 
 ### What only that check catches
 
@@ -111,7 +174,8 @@ found by reading it.
    addressed directly. The chain created `digital_thread_default` through a helper that withdraws
    everything; a baseline that creates it directly gets the image's default privileges instead,
    which hand `service_role` INSERT, UPDATE, DELETE and TRUNCATE on the default partition of the
-   append-only audit table. Section 4b calls that helper.
+   append-only audit table. The generator calls that helper beside the default partition's
+   `CREATE` (`AROUND_PARTITION`).
 
 7. **`BETWEEN` does not round-trip.** pg_dump expands `x BETWEEN a AND b` into
    `((x >= a) AND (x <= b))`, and re-parsing that flattens the pair into the enclosing `AND` — so
@@ -126,13 +190,9 @@ found by reading it.
 
 ## Adding schema changes from here
 
-Add a new numbered migration (`0003_...`) alongside the baseline. Do not edit `0001`/`0002` to
-change an existing deployment — they are guarded to be no-ops once applied, so an edit reaches a
-fresh database only.
-
-`0000` is not a precedent for a second pre-baseline file. It exists because one subtraction in it
-has to happen before the schema is described, and it is meant to be folded away by the next squash
-like any other tail.
+Add a new numbered migration alongside the baseline, numbered above the archive's highest: the
+first after 1.0 is `0163_...`. Do not edit `0001`/`0002` to change an existing deployment — they
+are guarded to be no-ops once applied, so an edit reaches a fresh database only.
 
 One ordering dependency is worth knowing about: `0001` ends with a reconciliation that forwards any
 device still bound to an archived schema version onto the active one. A later migration that

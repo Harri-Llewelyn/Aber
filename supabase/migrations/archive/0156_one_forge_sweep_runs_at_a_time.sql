@@ -1,5 +1,5 @@
 -- =============================================================================================
--- Migration: 0025_one_forge_sweep_runs_at_a_time.sql
+-- Migration: 0156_one_forge_sweep_runs_at_a_time.sql (applied as 0025 until the 1.0 squash)
 -- One forge sweep runs at a time, and a call refused while one runs is followed up
 -- =============================================================================================
 --

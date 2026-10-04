@@ -87,7 +87,7 @@ holds that function to those grants, and to being plpgsql and not `IMMUTABLE`.
 
 **The probe must be a call the planner keeps.** PostgREST runs prepared statements from their
 generic plan on pooled connections, and PostgreSQL checks EXECUTE on a function when a plan calls
-it. Until `0015` the probe was `service_token_max_days()`, SQL and `IMMUTABLE`, which the planner
+it. Until `0148` the probe was `service_token_max_days()`, SQL and `IMMUTABLE`, which the planner
 folds to the constant 90, so a plan made for an `authenticated` request held no call to check when
 an `anon` request reused it. Found by `validate.py` check 12h on 2026-09-28: `not-a-token` passed 1
 request in 12 through the gateway, and the routes that make no read as the caller then served it.

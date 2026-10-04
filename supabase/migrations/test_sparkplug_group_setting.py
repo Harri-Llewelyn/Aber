@@ -187,23 +187,6 @@ class TestSparkplugGroupSetting(unittest.TestCase):
                 cur.execute(block)
             self.assertIn("sparkplug_group is not set", str(raised.exception))
 
-    def test_nothing_is_left_on_the_former_name_once_the_site_has_moved(self):
-        # 0003 moves the setting off 'ACS-Cymru' and then every gateway that took that default.
-        # Guarded on the site being on 'Aber': an operator who pinned the former name in the chart
-        # keeps it, and their gateways with it -- that is 0003's rule, not a gap in this test.
-        with self.conn.cursor() as cur:
-            cur.execute(
-                "SELECT value #>> '{}' FROM public.system_settings WHERE key = %s",
-                (SETTING_KEY,),
-            )
-            group = cur.fetchone()[0]
-            if group != "Aber":
-                self.skipTest(f"the site is on {group!r}, not the default")
-            cur.execute(
-                "SELECT count(*) FROM public.gateways WHERE sparkplug_group = 'ACS-Cymru'"
-            )
-            self.assertEqual(cur.fetchone()[0], 0)
-
     def test_a_group_with_a_separator_is_still_refused(self):
         for bad in ("a/b", "a+b", "a#b", ""):
             with self.subTest(group=bad):

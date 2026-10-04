@@ -124,13 +124,8 @@ in the credential service's image, and:
   restart; a principal with an empty password gets no account, except the monitoring account and
   the admin, which are required because the health probes and the credential service authenticate
   as them;
-- removes a stored client under a platform username from before the rename to Aber
-  (`factoryplus_ingestion`, `factoryplus_i3x`, `factoryplus_monitor`, `RETIRED_PLATFORM_USERNAMES`)
-  unless the environment still names it. Nothing authenticates as one after the upgrade, and a
-  password nobody rotates should not stay live. The roles it held stay, because the new accounts
-  hold them and nothing here deletes a role; a boot removes a client for this reason only;
 - keeps every other stored client exactly as it is, ensuring a gateway client holds its two roles;
-- refuses to write a document that would lose any other client;
+- refuses to write a document that would lose a stored client;
 - when there is no document yet and a `password_file` exists, imports every entry from it with
   the roles its username implies, then renames the file `password_file.imported`. That is how a
   stack built on the ACL file crosses over with every appliance's password intact.

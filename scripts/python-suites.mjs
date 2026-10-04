@@ -497,7 +497,7 @@ export const SUITES = {
   'supabase/migrations/test_directory_images.py': {
     lanes: ['db'],
     why:
-      "0007's Directory versions. Every chart-managed row is reached by the component map, a " +
+      "0140's Directory versions. Every chart-managed row is reached by the component map, a " +
       'component the chart stops deploying is cleared rather than left showing the last release, a ' +
       'row the chart does not manage is left alone, and no API role can call the writer -- so the ' +
       'versions on the page are the ones db-init recorded and nobody else.',
@@ -505,12 +505,12 @@ export const SUITES = {
   'supabase/migrations/test_backup_health.py': {
     lanes: ['db'],
     why:
-      "0011's clock for the Backup Stale rule. No row while no job exists, or every stack without " +
+      "0144's clock for the Backup Stale rule. No row while no job exists, or every stack without " +
       'the backup service alerts 36 hours after install; the first job recorded until one ' +
       'succeeds, so a service that never ran what it queued is reported; the last success after ' +
       'that, unmoved by later failures; and no browser role reads it, since it runs past the ' +
       'Administrator-only RLS on backup_jobs. And the two things that keep the last good backups: ' +
-      "0017's floor, the newest three never prunable, and 0018's off-site copy, whose destination " +
+      "0150's floor, the newest three never prunable, and 0151's off-site copy, whose destination " +
       'is refused a value the service could not use and whose view counts how long the newest backup ' +
       'has gone without one.',
   },
@@ -612,7 +612,7 @@ export const SUITES = {
       'The one worth a CI job is the TRANSITION guard: `UPDATE OF is_archived` fires on the ' +
       'column appearing in a SET list, not on its value changing, so losing it would make every ' +
       'ordinary edit to an archived gateway walk the whole forge -- an outcome visible only as ' +
-      "somebody else's API rate limit. Also the sweep lease (0025): two simultaneous claims have " +
+      "somebody else's API rate limit. Also the sweep lease (0156): two simultaneous claims have " +
       'one winner, a lapsed lease is taken over, and a pass that outlived its lease cannot end ' +
       "its successor's.",
   },
@@ -789,7 +789,7 @@ export const SUITES = {
       "without the incident template; and the database's sweep_forge() answers true. It also " +
       'covers the two repositories the platform publishes into its own organisation: the playbook, ' +
       'tagged per version, and the custom example, marked as a template and never tagged because ' +
-      'it is copied rather than converged to. One pass at a time (0025): a call meeting a held ' +
+      'it is copied rather than converged to. One pass at a time (0156): a call meeting a held ' +
       'lease does nothing and answers 200, and every test holds the lease so the report it reads ' +
       'is its own pass\'s. Needs the ' +
       'stack, the forge, the seeded personas, the organisation and FORGE_SWEEP_SECRET.',

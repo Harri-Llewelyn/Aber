@@ -2044,8 +2044,3 @@ groups:
               datasource:
                 type: __expr__
                 uid: __expr__
-
-deleteRules:
-  # The partitions rule's uid before the page was renamed; a Grafana that loaded it drops it.
-  - orgId: 1
-    uid: aber-digital-thread-partitions
