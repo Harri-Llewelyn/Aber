@@ -6,10 +6,10 @@
  *
  * The machine account owns an organisation, creates each gateway's repository in it, and
  * `forge-membership` places each login in the team its Postgres role maps to, with `forge-sweep`
- * re-doing both over the forge's own lists every fifteen minutes; it is not a site administrator. Both teams have write; `main` is protected on every gateway repository with pushes
- * disabled and one approval required from `administrators`, which is where gitops:manage is
- * enforced inside the forge. A repository created before the organisation existed is transferred in
- * on re-enrolment, not recreated.
+ * re-doing both over the forge's own lists every fifteen minutes; it is not a site administrator.
+ * Both teams have write; `main` is protected on every gateway repository with pushes disabled and
+ * one approval required from `administrators`, which is what governs deploying a flow to an
+ * appliance.
  *
  * The private key is never seen here: the appliance generates its keypair in bootstrap.mjs and
  * sends the public half, registered read-write on the gateway's own repository and nowhere else.
@@ -231,7 +231,7 @@ async function refused(what: string, response: Response): Promise<Error> {
  * repository in it; `includes_all_repositories` makes a team cover every repository created later.
  * Both teams may create repositories, since a playbook repository exists before any gateway does; a
  * hand-made repository carrying a gateway's name is adopted and protected at enrolment. A found
- * team is patched if its flag disagrees.
+ * team whose `can_create_org_repo` is off is patched back on.
  */
 export async function ensureOrganisation(
   cfg: ForgeConfig,
@@ -285,38 +285,19 @@ export async function ensureOrganisation(
 }
 
 /**
- * Create the gateway's repository in the organisation, or return the one already there,
- * transferring it in first if it was created before the organisation existed. `auto_init` matters:
- * a repository with no default branch gives the appliance nothing to clone, and git reports "remote
- * HEAD refers to a nonexistent ref".
+ * Create the gateway's repository in the organisation, or return the one already there.
+ * `auto_init` matters: a repository with no default branch gives the appliance nothing to clone,
+ * and git reports "remote HEAD refers to a nonexistent ref".
  */
 async function ensureRepository(
   cfg: ForgeConfig,
   name: string,
   gatewayName: string,
 ): Promise<ForgeRepository> {
-  // The organisation first, then the machine account's own namespace, and only then create. A
-  // repository name is unique per owner, so creating in the organisation while the legacy one
-  // exists would make an empty twin and strand the history.
   const existing = await forgeApi(cfg, "GET", `/repos/${FORGE_ORGANISATION}/${name}`);
   if (existing.ok) return await existing.json() as ForgeRepository;
   if (existing.status !== 404) {
     throw await refused(`could not read repository '${name}'`, existing);
-  }
-
-  const legacy = await forgeApi(cfg, "GET", `/repos/${cfg.user}/${name}`);
-  if (legacy.ok) {
-    const transferred = await forgeApi(cfg, "POST", `/repos/${cfg.user}/${name}/transfer`, {
-      new_owner: FORGE_ORGANISATION,
-    });
-    if (!transferred.ok) {
-      throw await refused(`could not transfer '${cfg.user}/${name}' into '${FORGE_ORGANISATION}'`, transferred);
-    }
-    console.log(`forge: transferred '${cfg.user}/${name}' into '${FORGE_ORGANISATION}'`);
-    return await transferred.json() as ForgeRepository;
-  }
-  if (legacy.status !== 404) {
-    throw await refused(`could not read '${cfg.user}/${name}'`, legacy);
   }
 
   const created = await forgeApi(cfg, "POST", `/orgs/${FORGE_ORGANISATION}/repos`, {

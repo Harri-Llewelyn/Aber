@@ -754,7 +754,7 @@ export const SUITES = {
       'Remote gateway enrolment. Signs in as Administrator to mint tokens (issuing is a ' +
       "USER's act, gated on has_role, so the service key cannot do it), then redeems them the way " +
       'an appliance does: the anon key and no user JWT. Stops the credential service to exercise ' +
-      'the 503 rollback path. SKIPS ALL SEVENTEEN CHECKS without a stack, which is why it is not ' +
+      'the 503 rollback path. SKIPS EVERY CHECK without a stack, which is why it is not ' +
       'in the unit lane.',
   },
   'supabase/functions/forge-events/test_forge_events.py': {
