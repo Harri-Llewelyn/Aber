@@ -385,7 +385,6 @@ BEGIN
         UPDATE public.devices
            SET name              = v_merged.name,
                description       = v_merged.description,
-               asset_type        = v_merged.asset_type,
                connection_method = v_merged.connection_method,
                cell_id           = v_merged.cell_id,
                area_id           = v_merged.area_id,
@@ -1912,16 +1911,28 @@ CREATE OR REPLACE FUNCTION public.cold_archive_backlog_state() RETURNS TABLE(ena
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO 'public', 'pg_catalog'
     AS $$
+DECLARE
+    v_enabled boolean;
+    v_threshold integer;
 BEGIN
+    SELECT coalesce(
+               (SELECT (s.value #>> '{}')::boolean
+                  FROM public.system_settings s WHERE s.key = 'archive.enabled'), false),
+           coalesce(
+               (SELECT (s.value #>> '{}')::integer
+                  FROM public.system_settings s WHERE s.key = 'archive.tier_after_days'), 90)
+      INTO v_enabled, v_threshold;
+
+    -- With archiving off there is no frontier to report, so the historian is not read: every
+    -- platform_health alert query calls this, and the fallback below costs a few hundred ms.
+    IF NOT v_enabled THEN
+        RETURN QUERY SELECT false, v_threshold, NULL::timestamptz, NULL::numeric, NULL::numeric;
+        RETURN;
+    END IF;
+
     RETURN QUERY
     WITH policy AS (
-        SELECT
-            coalesce(
-                (SELECT (value #>> '{}')::boolean
-                   FROM public.system_settings WHERE key = 'archive.enabled'), false) AS enabled,
-            coalesce(
-                (SELECT (value #>> '{}')::integer
-                   FROM public.system_settings WHERE key = 'archive.tier_after_days'), 90) AS threshold_days
+        SELECT true AS enabled, v_threshold AS threshold_days
     ),
     frontier AS (
         SELECT coalesce(
@@ -1964,7 +1975,7 @@ ALTER FUNCTION public.cold_archive_backlog_state() OWNER TO postgres;
 --
 
 -- FUNCTION cold_archive_backlog_state() :: COMMENT
-COMMENT ON FUNCTION public.cold_archive_backlog_state() IS 'How far the cold archive has fallen behind, measured from the newest verified range_end over the FDW. Internal: EXECUTE is revoked, and the two wrappers gate it for their own audience.';
+COMMENT ON FUNCTION public.cold_archive_backlog_state() IS 'How far the cold archive has fallen behind, measured from the newest verified range_end over the FDW. With archiving off it returns enabled = false and reads nothing from the historian. Internal: EXECUTE is revoked, and the two wrappers gate it for their own audience.';
 
 --
 
@@ -2001,9 +2012,8 @@ CREATE OR REPLACE FUNCTION public.cold_storage_rows() RETURNS TABLE(chunk_name t
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public', 'pg_catalog'
     AS $$
-    -- Gated on the same three roles the bucket admits (`telemetry_archive_read_privileged` in
-    -- supabase/storage-policies.sql), checked here because a hidden tab is not a gate and this
-    -- function is SECURITY DEFINER.
+    -- Gated on Administrator, Shopfloor_Manager and Auditor, checked here because a hidden tab is
+    -- not a gate and this function is SECURITY DEFINER.
     SELECT m.chunk_name,
            m.range_start,
            m.range_end,
@@ -2159,7 +2169,7 @@ BEGIN
                       'person''s act: machines propose, people decide'
                WHEN r.perm = 'authz:manage'
                  THEN 'access control stays with people'
-               WHEN r.perm IN ('link:manage', 'gitops:manage')
+               WHEN r.perm = 'link:manage'
                  THEN 'no check a machine passes consults it, so the grant would do nothing'
                ELSE 'nobody has decided that a machine may hold it'
              END), '; ' ORDER BY r.first_at)
@@ -2237,7 +2247,7 @@ ALTER FUNCTION public.create_machine_principal(p_name text, p_permissions text[]
 --
 
 -- FUNCTION create_machine_principal(p_name text, p_permissions text[], p_purpose text) :: COMMENT
-COMMENT ON FUNCTION public.create_machine_principal(p_name text, p_permissions text[], p_purpose text) IS 'Create a machine identity that cannot sign in, holding permissions of its own and a name the Access Control page lists it by. Administrator only. Machines propose, people decide: allows telemetry:read, quarantine:view, audit_trail:read, archive:manage, proposal:create and schema:manage, and refuses every other permission with its reason -- device writes, quarantine decisions, deciding proposals and access control are made by people, and no check a machine passes consults link:manage or gitops:manage. revoke_service_token() and revoke_service_principal() withdraw what it creates at PostgREST, where every check those grants open is reached. The name is unique ignoring case. One form only: an overload whose extra arguments default makes every RPC call ambiguous.';
+COMMENT ON FUNCTION public.create_machine_principal(p_name text, p_permissions text[], p_purpose text) IS 'Create a machine identity that cannot sign in, holding permissions of its own and a name the Access Control page lists it by. Administrator only. Machines propose, people decide: allows telemetry:read, quarantine:view, audit_trail:read, archive:manage, proposal:create and schema:manage, and refuses every other permission with its reason -- device writes, quarantine decisions, deciding proposals and access control are made by people, and no check a machine passes consults link:manage. revoke_service_token() and revoke_service_principal() withdraw what it creates at PostgREST, where every check those grants open is reached. The name is unique ignoring case. One form only: an overload whose extra arguments default makes every RPC call ambiguous.';
 
 --
 
@@ -2475,11 +2485,13 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    -- Counted BEFORE the delete, because the CASCADE is what removes them and it reports nothing.
-    -- A draft can be attached to a machine to try it out -- publish_schema_version() relies on
-    -- that being possible -- so this is a real number rather than always zero.
+    -- Counted BEFORE the delete, because the CASCADE and the SET NULL are what detach them and
+    -- neither reports anything. A draft can be attached to a machine to try it out, through either
+    -- arm, so this is a real number rather than always zero. A device on both arms counts once.
     SELECT count(*) INTO v_detached
-      FROM public.device_submodels WHERE schema_id = p_schema_id;
+      FROM (SELECT d.id FROM public.devices d WHERE d.schema_id = p_schema_id
+            UNION
+            SELECT ds.device_id FROM public.device_submodels ds WHERE ds.schema_id = p_schema_id) attached;
 
     -- Attributes the audit row this DELETE fires to the person who asked for it. SET LOCAL, so it
     -- is discarded at COMMIT and cannot bleed into the connection's next user.
@@ -2503,7 +2515,7 @@ ALTER FUNCTION public.discard_schema_draft(p_schema_id uuid) OWNER TO postgres;
 --
 
 -- FUNCTION discard_schema_draft(p_schema_id uuid) :: COMMENT
-COMMENT ON FUNCTION public.discard_schema_draft(p_schema_id uuid) IS 'Delete a draft schema version, returning it to the state before the fork. Refuses anything that is not a draft: devices.schema_id is ON DELETE SET NULL and device_submodels.schema_id is ON DELETE CASCADE, so deleting an active schema would silently detach every device bound to it. Returns the count of draft attachments the cascade removed.';
+COMMENT ON FUNCTION public.discard_schema_draft(p_schema_id uuid) IS 'Delete a draft schema version, returning it to the state before the fork. Refuses anything that is not a draft: devices.schema_id is ON DELETE SET NULL and device_submodels.schema_id is ON DELETE CASCADE, so deleting an active schema would silently detach every device bound to it. Returns the number of devices attached to the draft through either arm, each detached by the delete.';
 
 --
 
@@ -4587,7 +4599,7 @@ BEGIN
     END IF;
 
     IF p_identity_source IS NULL OR p_identity_source NOT IN
-       ('sparkplug_id', 'reported_identity', 'instance_uuid', 'legacy_name') THEN
+       ('sparkplug_id', 'reported_identity', 'instance_uuid') THEN
         RAISE EXCEPTION 'ingest_register_quarantined_device: % is not a recognised identity source',
             coalesce(p_identity_source, 'NULL')
             USING ERRCODE = 'invalid_parameter_value';
@@ -4697,7 +4709,7 @@ BEGIN
     END IF;
 
     IF p_identity_source IS NOT NULL AND p_identity_source NOT IN
-       ('sparkplug_id', 'reported_identity', 'instance_uuid', 'legacy_name') THEN
+       ('sparkplug_id', 'reported_identity', 'instance_uuid') THEN
         RAISE EXCEPTION 'ingest_set_device_state: % is not a recognised identity source',
             p_identity_source
             USING ERRCODE = 'invalid_parameter_value';
@@ -6025,7 +6037,7 @@ CREATE OR REPLACE FUNCTION public.proposable_columns(p_entity_type text) RETURNS
     -- `area_id` joins `cell_id` and `location_scope`: the three together say where an asset sits,
     -- and the table's CHECKs decide whether the triple is sayable, so one proposal can relocate.
     WHEN 'devices' THEN ARRAY[
-      'name', 'description', 'asset_type', 'connection_method',
+      'name', 'description', 'connection_method',
       'cell_id', 'area_id', 'location_scope', 'model_3d_path'
     ]
     WHEN 'device_nameplate' THEN ARRAY[
@@ -6216,7 +6228,7 @@ DECLARE
   parent           public.schemas%ROWTYPE;
   published        public.schemas%ROWTYPE;
   v_submodels      INTEGER := 0;
-  v_legacy         INTEGER := 0;
+  v_schema_ids     INTEGER := 0;
   v_merged         INTEGER := 0;
 BEGIN
   -- NARROWED BY 0087. This admitted the pair while the RLS write policies it is the transactional
@@ -6259,11 +6271,11 @@ BEGIN
     UPDATE public.device_submodels SET schema_id = draft.id WHERE schema_id = parent.id;
     GET DIAGNOSTICS v_submodels = ROW_COUNT;
 
-    -- The legacy 1:1 pointer moves too: `devices.schema_id` is the fallback arm of the
+    -- The dashboard's attachment moves too: `devices.schema_id` is the other arm of the
     -- `device_schemas` view. This UPDATE fires `log_audit_trail_event()`, so the rebinding lands in
     -- the audit trail per device.
     UPDATE public.devices SET schema_id = draft.id WHERE schema_id = parent.id;
-    GET DIAGNOSTICS v_legacy = ROW_COUNT;
+    GET DIAGNOSTICS v_schema_ids = ROW_COUNT;
 
     IF parent.status = 'active' THEN
       UPDATE public.schemas SET status = 'archived' WHERE id = parent.id;
@@ -6276,9 +6288,9 @@ BEGIN
     'schema', to_jsonb(published),
     'archived_schema_id', parent.id,
     'archived_schema_name', parent.schema_name,
-    'devices_rebound', v_submodels + v_legacy,
+    'devices_rebound', v_submodels + v_schema_ids,
     'submodels_rebound', v_submodels,
-    'legacy_pointers_rebound', v_legacy,
+    'schema_ids_rebound', v_schema_ids,
     'duplicate_submodels_removed', v_merged
   );
 END;
@@ -6290,7 +6302,7 @@ ALTER FUNCTION public.publish_schema_version(draft_schema_id uuid) OWNER TO post
 --
 
 -- FUNCTION publish_schema_version(draft_schema_id uuid) :: COMMENT
-COMMENT ON FUNCTION public.publish_schema_version(draft_schema_id uuid) IS 'Activates a draft version, archives its parent, and atomically repoints every device_submodels row and legacy devices.schema_id from the parent to it.';
+COMMENT ON FUNCTION public.publish_schema_version(draft_schema_id uuid) IS 'Activates a draft version, archives its parent, and atomically repoints every device_submodels row and devices.schema_id from the parent to it.';
 
 --
 
@@ -10821,7 +10833,6 @@ CREATE TABLE IF NOT EXISTS public.devices (
     is_archived boolean DEFAULT false,
     archived_at timestamp with time zone,
     auto_delete_at timestamp with time zone,
-    asset_type text,
     connection_method text,
     first_dbirth_at timestamp with time zone,
     schema_id uuid,
@@ -10863,7 +10874,6 @@ ALTER TABLE public.devices
     ADD COLUMN IF NOT EXISTS is_archived boolean DEFAULT false,
     ADD COLUMN IF NOT EXISTS archived_at timestamp with time zone,
     ADD COLUMN IF NOT EXISTS auto_delete_at timestamp with time zone,
-    ADD COLUMN IF NOT EXISTS asset_type text,
     ADD COLUMN IF NOT EXISTS connection_method text,
     ADD COLUMN IF NOT EXISTS first_dbirth_at timestamp with time zone,
     ADD COLUMN IF NOT EXISTS schema_id uuid,
@@ -10891,7 +10901,6 @@ ALTER TABLE public.devices
     ALTER COLUMN is_archived SET DEFAULT false,
     ALTER COLUMN archived_at DROP DEFAULT,
     ALTER COLUMN auto_delete_at DROP DEFAULT,
-    ALTER COLUMN asset_type DROP DEFAULT,
     ALTER COLUMN connection_method DROP DEFAULT,
     ALTER COLUMN first_dbirth_at DROP DEFAULT,
     ALTER COLUMN schema_id DROP DEFAULT,
@@ -11059,7 +11068,7 @@ COMMENT ON COLUMN public.devices.quarantine_reason IS 'Why this device is in the
 --
 
 -- COLUMN devices.identity_source :: COMMENT
-COMMENT ON COLUMN public.devices.identity_source IS 'How ingestion last resolved this device: ''sparkplug_id'' (current scheme) or ''legacy_name'' (matched by name during the migration window). Drives the deprecation badge in the UI.';
+COMMENT ON COLUMN public.devices.identity_source IS 'How ingestion last resolved this device: ''sparkplug_id'' (its issued id), ''reported_identity'' (its own id, recorded at discovery) or ''instance_uuid'' (its Factory+ Instance_UUID, which is devices.id).';
 
 --
 
@@ -11294,7 +11303,7 @@ END $c$;
 --
 
 -- TABLE device_submodels :: COMMENT
-COMMENT ON TABLE public.device_submodels IS 'Schemas attached to a device, one AAS Submodel each. Supersedes the 1:1 devices.schema_id, which is retained as a fallback for devices with no rows here.';
+COMMENT ON TABLE public.device_submodels IS 'Submodel attachments written through the API, one AAS Submodel each. The dashboard attaches its one schema through devices.schema_id; device_schemas reads both.';
 
 --
 
@@ -11321,7 +11330,7 @@ ALTER VIEW public.device_schemas OWNER TO postgres;
 --
 
 -- VIEW device_schemas :: COMMENT
-COMMENT ON VIEW public.device_schemas IS 'Every schema attached to a device: device_submodels rows, plus the legacy devices.schema_id for devices that have none.';
+COMMENT ON VIEW public.device_schemas IS 'Every schema attached to a device: its device_submodels rows, or devices.schema_id (the dashboard''s attachment) for a device that has none.';
 
 --
 
@@ -15337,6 +15346,11 @@ CREATE INDEX IF NOT EXISTS idx_devices_name ON public.devices USING btree (name)
 
 -- idx_devices_reported_identity :: INDEX
 CREATE INDEX IF NOT EXISTS idx_devices_reported_identity ON public.devices USING btree (reported_identity) WHERE (reported_identity IS NOT NULL);
+
+--
+
+-- idx_devices_shadow_of :: INDEX
+CREATE INDEX IF NOT EXISTS idx_devices_shadow_of ON public.devices USING btree (shadow_of) WHERE (shadow_of IS NOT NULL);
 
 --
 

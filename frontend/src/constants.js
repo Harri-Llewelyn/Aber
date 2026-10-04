@@ -21,9 +21,6 @@ export const PERMISSION_UUIDS = {
   LINK_MANAGE:        'a012b345-6789-4c1d-8706-933e08544e38',
   AUTHZ_MANAGE:       'e012c345-6789-4c1d-8706-933e08544e39',
   SCHEMA_MANAGE:      'f123d456-7890-4c1d-8706-933e08544e40',
-  // Retired: GitOps edge sync is gone and no check consults `gitops:manage`; the row remains in the
-  // database.
-  GITOPS_MANAGE:      'c234e567-8901-4c1d-8706-933e08544e41',
   AUDIT_TRAIL_READ: 'd345e678-9012-4c1d-8706-933e08544e42',
   // The first write grant Operator holds, and it is a write to a queue rather than to an entity:
   // the entity write policies are unchanged.

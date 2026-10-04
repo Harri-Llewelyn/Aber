@@ -351,7 +351,7 @@ def _read_address_space(pg: PostgrestClient) -> dict:
                    "change_description"},
     )
     # Every schema attached to a device, as the dashboard, the AAS exporter and ingestion read it:
-    # device_submodels rows, else the legacy devices.schema_id.
+    # device_submodels rows, else devices.schema_id, the dashboard's attachment.
     attached = _read_relation(pg, "device_schemas", {"select": "device_id,schema_id"})
     # A metric's catalog row is its type on every device that carries it.
     catalog = _read_relation(
@@ -1472,8 +1472,11 @@ def _require_client_id(body: dict) -> str:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = f"aber-i3x/{SERVER_VERSION}"
     protocol_version = "HTTP/1.1"
+
+    def version_string(self):
+        """The Server header names the service and no versions; GET /info carries serverVersion."""
+        return "aber-i3x"
 
     # -- plumbing ----------------------------------------------------------------------------
     def log_message(self, fmt, *args):

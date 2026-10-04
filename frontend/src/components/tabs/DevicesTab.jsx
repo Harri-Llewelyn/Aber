@@ -137,7 +137,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [catalog, setCatalog] = useState([])
   // { device, metricNames } while the telemetry CSV export dialog is open.
   const [exportTelemetry, setExportTelemetry] = useState(null)
-  // No asset_type: classification is derived from the schema's metric groups (utils/deviceTags.js).
+  // A device's type is derived from its schema's metric groups (utils/deviceTags.js).
   // `cell_id` starts empty, meaning inherit from the gateway.
   const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_id: '', cell_id: '', area_id: '', location_scope: SCOPE_CELL })
   const [areas, setAreas]       = useState([])
@@ -328,8 +328,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
 
   const save = async () => {
     try {
-      // asset_type is deliberately not sent: omitting it leaves any legacy value intact
-      // (api.js only patches keys present in the body) rather than nulling it on every edit.
       const payload = {
         asset_name: form.asset_name,
         description: form.description || '',
@@ -515,14 +513,13 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   )
 
   // A device an operator needs to act on: quarantined, past its provisioning window with no birth
-  // (24h+), still resolved by name, publishing unmodelled metrics, or with a location finding. An
-  // archived cell is still a valid foreign key, so pointing at one is derived rather than enforced.
+  // (24h+), publishing unmodelled metrics, or with a location finding. An archived cell is still a
+  // valid foreign key, so pointing at one is derived rather than enforced.
   const pointsAtArchivedCell = (a) =>
     !!a.effective_cell_id && !!cellById.get(a.effective_cell_id)?.is_archived
 
   const needsAttention = (a) =>
-    a.is_quarantined || isProvisioningOverdue(a) || a.identity_source === 'legacy_name' ||
-    unmodelledFor(a).length > 0 ||
+    a.is_quarantined || isProvisioningOverdue(a) || unmodelledFor(a).length > 0 ||
     // Location findings. Unassigned is the work queue that should drain; a mismatch and an
     // archived cell are both "this resolved to something, but look at it".
     needsCellAssignment(a, gatewayById.get(a.active_gateway_id) || null) ||
@@ -543,7 +540,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
 
     if (filterMode === 'active'   && a.is_archived) return false
     if (filterMode === 'archived' && !a.is_archived) return false
-    // Matches either the legacy 1:1 column or any attached submodel, so a device filtered by
+    // Matches either `devices.schema_id` or any attached submodel, so a device filtered by
     // schema is found however it was provisioned.
     if (schemaFilter && !schemasForDevice(a, schemas).some(s => s.schema_uuid === schemaFilter)) return false
     if (tagFilter && !deviceHasTag(a, schemasForDevice(a, schemas), tagFilter, latestFor(a), catalog)) return false
@@ -768,7 +765,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           className={`btn btn-sm ${attentionOnly ? 'btn-primary' : 'btn-ghost'}`}
           onClick={() => setAttentionOnly(v => !v)}
           aria-pressed={attentionOnly}
-          title="Show only devices that need action: past their first-birth window, matched by legacy name, publishing unmodelled metrics, with no cell, in a different cell from their gateway, or in an archived cell. Quarantined devices are on the Quarantine tab."
+          title="Show only devices that need action: past their first-birth window, publishing unmodelled metrics, with no cell, in a different cell from their gateway, or in an archived cell. Quarantined devices are on the Quarantine tab."
         >
           <IconAlertTriangle size={13} /> Needs attention ({attentionCount})
         </button>
@@ -902,11 +899,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                         </td>
                         <td>
                           <CopyableId value={a.asset_id} label="Device UUID" onNotify={showToast} />
-                          {a.identity_source === 'legacy_name' && (
-                            <div className="cell-flag cell-flag-warning" title="This device is still matched by name. Reconfigure its gateway to publish the Sparkplug ID; name matching will be removed.">
-                              <IconAlertTriangle size={10} /> Legacy name matching
-                            </div>
-                          )}
                         </td>
                         <td>
                           {a.is_archived ? (
@@ -954,7 +946,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                             const schema = schemasForDevice(a, schemas)
                             const tags = deviceTagList(a, schema, latestFor(a), catalog)
                             const extra = unmodelledMetrics(a, schema)
-                            if (tags.length === 0 && !a.asset_type) return '—'
+                            if (tags.length === 0) return '—'
 
                             // Collapsed past four: a tri-standard schema yields six or more tags.
                             // `priority` keeps Unmodelled visible, since deviceTagList() appends it
@@ -971,17 +963,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                               title: `This device's schema models ${tag}.* metrics`,
                               content: tag
                             })
-
-                            // Free-text classification from before types were derived. Shown so
-                            // the value is not silently lost, but nothing writes it now.
-                            if (a.asset_type) {
-                              entries.push({
-                                key: a.asset_type,
-                                className: 'cell-meta cell-legacy',
-                                title: 'Legacy free-text classification. Assign a schema to derive this instead.',
-                                content: a.asset_type
-                              })
-                            }
 
                             return <TagList limit={4} tags={entries}/>
                           })()}
@@ -1499,7 +1480,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           },
           {
             // Resolved through schemasForDevice, not `selectedDevice.schema_id`: a schema arrives
-            // by either the 1:1 column or a `device_submodels` row (`submodel_schema_ids`). All of
+            // by either `devices.schema_id` or a `device_submodels` row (`submodel_schema_ids`). All of
             // them, since a device may carry several.
             label: 'Schema',
             value: (() => {

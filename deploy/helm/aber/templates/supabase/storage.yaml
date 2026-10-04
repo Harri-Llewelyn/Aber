@@ -119,10 +119,6 @@ spec:
               # opens at start, which then connects in plaintext and is refused. node-postgres
               # reads `sslrootcert` from the URL for every client, the queue included.
               value: "postgres://supabase_storage_admin:$(POSTGRES_PASSWORD)@{{ include "aber.supabaseDb.host" . }}:{{ include "aber.supabaseDb.port" . }}/postgres?{{ include "aber.dsnSslParams" . }}"
-            # Storage evaluates RLS on storage.objects by impersonating the caller's role, so it
-            # needs the same PostgREST the rest of the stack uses to resolve the JWT's claims.
-            - name: POSTGREST_URL
-              value: http://supabase-rest:3000
             {{- /*
               `int64` BEFORE `quote`, AND IT IS LOAD-BEARING. Helm parses a bare 52428800 in
               values.yaml as a FLOAT, so `quote` alone renders "5.24288e+07" -- which storage-api

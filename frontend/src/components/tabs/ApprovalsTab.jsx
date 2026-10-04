@@ -49,7 +49,6 @@ const KIND_BY_ID = new Map(KINDS.map(l => [l.id, l]))
 const KEY_LABELS = {
   name: 'Name',
   description: 'Description',
-  asset_type: 'Asset type',
   connection_method: 'Connection method',
   cell_id: 'Cell',
   area_id: 'Area',

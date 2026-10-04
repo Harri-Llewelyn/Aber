@@ -272,35 +272,6 @@ BEGIN
     'confined to the object of its running job, and never deleting).';
 END $$;
 
--- telemetry-archive, RETIRED: cold telemetry goes to a configured S3 endpoint, somewhere a site
--- loss does not reach. Dropped explicitly, because a policy this file no longer mentions survives
--- every boot on a database that has it. The bucket itself is deleted by nobody: an Administrator
--- empties it once satisfied its objects are at the remote endpoint (cold_archive audit).
-DROP POLICY IF EXISTS "telemetry_archive_read_privileged" ON storage.objects;
-DROP POLICY IF EXISTS "telemetry_archive_insert_daemon" ON storage.objects;
-DROP POLICY IF EXISTS "telemetry_archive_update_daemon" ON storage.objects;
-DROP POLICY IF EXISTS "telemetry_archive_delete_admin" ON storage.objects;
-
-DO $$
-DECLARE
-  v_left int;
-BEGIN
-  SELECT count(*) INTO v_left
-    FROM pg_policies
-   WHERE schemaname = 'storage' AND tablename = 'objects'
-     AND policyname LIKE 'telemetry_archive_%';
-
-  IF v_left > 0 THEN
-    RAISE EXCEPTION
-      'telemetry-archive: % policy/policies survived the four DROPs above. A policy named '
-      'telemetry_archive_* that this file does not name is one nothing maintains.', v_left;
-  END IF;
-
-  RAISE NOTICE
-    'telemetry-archive policies retired (0 policies; cold telemetry goes to the configured S3 '
-    'endpoint, ingestion/cold_archive.py).';
-END $$;
-
 -- asset-exports: written by the aas-export function as service_role, so no browser role writes,
 -- and that is the point: an object here is evidence of an export a row records. Read is the
 -- Archives set; DELETE is Administrator alone, since the row's tombstone points at the object.

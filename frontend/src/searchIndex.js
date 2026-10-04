@@ -24,9 +24,9 @@ export const PAGE_KEYWORDS = {
   // operator searches "request" or "ask", an approver searches "approve" or "pending".
   'approvals':      ['proposal', 'proposals', 'approve', 'reject', 'pending', 'queue', 'request',
                      'change', 'review', 'publish'],
-  // 'building' and 'floor' are the old names for an area.
+  // 'building' and 'floor' are what many sites call an area: ordinary shopfloor words for one.
   'areas':          ['building', 'buildings', 'floor', 'isa-95', 'isa95', 'site', 'hierarchy', 'uns'],
-  // 'zone' is the old name for a cell.
+  // 'zone' is what many sites call a cell.
   'cells':          ['zone', 'work center', 'work centre', 'shopfloor', 'location'],
   'gateways':       ['edge', 'node', 'edge node', 'mqtt', 'sparkplug', 'broker', 'bundle', 'enrolment', 'enrollment'],
   'devices':        ['asset', 'machine', 'equipment', 'work unit', 'sensor', 'robot', 'quarantine', 'nameplate'],
@@ -49,9 +49,9 @@ export const PAGE_KEYWORDS = {
 
 /**
  * The sections inside each page. One entry per section somebody would type, usually the heading the
- * page renders; the Site Map's lanes have entries of their own. 'floors' and 'buildings' below are
- * old names, and 'zones' is the old name for a cell. A section that is one tab
- * of its page carries `section`, that tab's id, and the search opens the page on that tab.
+ * page renders; the Site Map's lanes have entries of their own. 'floors', 'buildings' and 'zones'
+ * below are what many sites call an area or a cell. A section that is one tab of its page carries
+ * `section`, that tab's id, and the search opens the page on that tab.
  */
 export const CARDS = [
   { id: 'site-map',             label: 'Site Map',             tab: 'site-map',       keywords: ['floors', 'plan', 'pins', 'svg', 'layout', 'areas', 'lanes'] },

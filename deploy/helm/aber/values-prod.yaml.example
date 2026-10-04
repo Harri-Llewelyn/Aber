@@ -39,7 +39,11 @@ secrets:
   #   SUPABASE_PUBLISHABLE_KEY     SUPABASE_SECRET_KEY
   #   POSTGRES_PASSWORD            DB_PASSWORD                PG_META_CRYPTO_KEY
   #   REALTIME_DB_ENC_KEY          REALTIME_SECRET_KEY_BASE
-  #   MQTT_USER                    MQTT_PASSWORD
+  #   MQTT_INGESTION_USER          MQTT_INGESTION_PASSWORD
+  #   MQTT_I3X_USER                MQTT_I3X_PASSWORD
+  #   MQTT_MONITOR_USER            MQTT_MONITOR_PASSWORD
+  #   MQTT_VALIDATOR_USER          MQTT_VALIDATOR_PASSWORD    (the password may be empty)
+  #   MQTT_DYNSEC_ADMIN_USER       MQTT_DYNSEC_ADMIN_PASSWORD MQTT_CREDENTIAL_SERVICE_TOKEN
   #   GRAFANA_ADMIN_USER           GRAFANA_ADMIN_PASSWORD     GRAFANA_OAUTH_CLIENT_SECRET
   #   NODERED_CREDENTIAL_SECRET    NODERED_OAUTH_CLIENT_SECRET
   #   NODERED_WEBHOOK_JWT_SECRET   NODERED_ADMIN_TOKEN
@@ -261,7 +265,7 @@ networkPolicy:
   # actually encrypts the fleet's credentials in flight; this is defence in depth behind it.
   mqttAllowedCidrs:
     - 10.0.0.0/8
-  # Your service CIDR, so the e2e Job's kubectl call is not permitted to reach the whole internet.
+  # Your service CIDR, so the e2e Job's API server call is not permitted to reach the whole internet.
   apiServerCidr: 10.43.0.0/16
   # Flows the chart cannot express: an SMTP relay for GoTrue, the ESO webhook, an S3 endpoint for
   # backups, a corporate proxy.

@@ -11,7 +11,7 @@ allowed to be heard at all.
 | [`ingestion.py`](ingestion.py) | The daemon. Identity resolution, quarantine gating, telemetry mapping, the historian writer |
 | [`conformance.py`](conformance.py) | The constraint engine: what a device sent, judged against its bound schemas. Pure logic; the daemon decides the policy |
 | [`registry.py`](registry.py) | The Prometheus metric objects, built from the declarations in `metrics.py` |
-| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 80 outcomes |
+| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 79 outcomes |
 | [`logging_config.py`](logging_config.py) | The logger used by both — human-readable lines, or one JSON object per line under `LOG_FORMAT=json` |
 | [`test_gateway_binding.py`](test_gateway_binding.py) | Gateway↔device binding, telemetry sanity window, append-only historian |
 | [`test_declared_metrics.py`](test_declared_metrics.py) | Birth-metric observation, change-only writes, alias resolution, rebirth rate limit, device watchdog, a device that publishes again |
@@ -33,7 +33,7 @@ Sparkplug B device
       ▼  subscribe spBv1.0/#
   ingestion.py
       ├── resolve_wire_identity()     the TOPIC is authoritative
-      ├── resolve_device()            sparkplug_id → reported_identity → legacy name
+      ├── resolve_device()            sparkplug_id → reported_identity → Instance_UUID
       ├── verify_gateway_binding()    is this publisher allowed to speak for this device?
       │
       ├──► Supabase        devices, asset_config, gateways.last_heartbeat
@@ -62,8 +62,11 @@ column derived from the row's UUID primary key, so it cannot drift.
 1. **`sparkplug_id`** — the platform-issued id, the current scheme.
 2. **`reported_identity`** — a third-party device's own factory-preset id, recorded when it was
    discovered. Such a device cannot be made to publish an issued id, so its own must keep resolving.
-3. **`name`** — legacy, pre-`sparkplug_id` devices. Warns, and flags the row `identity_source =
-   'legacy_name'`. **This arm goes away once every gateway has been reconfigured.**
+3. **`id`** — the Factory+ `Instance_UUID`, tried only for a UUID-shaped wire id.
+
+A name in the topic's device position is a device's own id: it is quarantined on first sight with
+`reported_identity` set to it, and resolves through that column once approved. `devices.name` is
+never consulted.
 
 Any failure resolves to `None`, which callers treat as quarantined — the fail-closed answer.
 
@@ -124,12 +127,11 @@ The broker's roles ([`../mosquitto/README.md`](../mosquitto/README.md)) close th
 the broker cannot know which device belongs to which gateway (that lives in Supabase), and the
 daemon cannot stop a forged message being delivered to other subscribers.
 
-### Three cases are deliberately not a mismatch
+### Two cases are deliberately not a mismatch
 
 | Case | Why |
 | :--- | :--- |
 | Device with no `gateway_id` | Binding is established by an operator at approval, not by ingestion. An unbound device is unbound, not mis-bound |
-| Device resolved by legacy `name` | Its row may predate any gateway assignment; enforcing here would break the deployments the fallback exists to carry |
 | Node-level message (`NBIRTH`/`NDATA`/`NDEATH`) | Carries no device segment; handled by `process_node_message()` |
 
 On **DBIRTH** a binding fault re-quarantines the device with a `GATEWAY_MISMATCH` reason.

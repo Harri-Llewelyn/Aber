@@ -64,7 +64,7 @@ spec:
           Waits on storage-api, not on the database. The database has been up since db-init; what
           this Job needs is the TABLE, and only storage-api creates that.
         */}}
-        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-storage" "image" "curlimages/curl:8.10.1" "command" "curl -sf http://supabase-storage:5000/status >/dev/null 2>&1" "describe" "supabase-storage (it creates storage.objects in its own migrations)") | nindent 8 }}
+        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-storage" "image" (include "aber.curlImage" $) "command" "curl -sf http://supabase-storage:5000/status >/dev/null 2>&1" "describe" "supabase-storage (it creates storage.objects in its own migrations)") | nindent 8 }}
       containers:
         - name: storage-policies
           # The supabase/postgres image, for its psql -- the same reason db-roles-init uses it.

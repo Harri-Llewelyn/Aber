@@ -569,23 +569,30 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 8b. image-scan.yml excludes this repository's own images because release.yml scans them; this
-// holds each build job to a scan on the same policy, placed BEFORE its push, or the scan reports on
-// an artefact the world can already pull. Textual, not a YAML parse: it runs before `npm install`.
+// 8b. The monthly scan (image-scan.yml, running scripts/scan-images.mjs) excludes this repository's
+// own images because release.yml scans them; this holds each build job to a scan on the same
+// policy, placed BEFORE its push, or the scan reports on an artefact the world can already pull.
+// Textual, not a YAML parse: it runs before `npm install`.
 // -------------------------------------------------------------------------------------------------
 {
-  const scan = read('.github/workflows/image-scan.yml');
+  const workflow = read('.github/workflows/image-scan.yml');
+  const scan = read('scripts/scan-images.mjs');
   const release = read('.github/workflows/release.yml');
 
   // The exclusion is what creates the obligation. If the monthly job ever scans the published
   // images itself, this check should be revisited rather than satisfied.
-  const excludes = /grep\s+-v\s+'\^ghcr\\\.io\/harri-llewelyn\//.test(scan);
+  const excludes = /node scripts\/scan-images\.mjs/.test(workflow) &&
+    /const OWN = 'ghcr\.io\/harri-llewelyn\/'/.test(scan) && /startsWith\(OWN\)/.test(scan);
+  const monthlyPolicy = ["'--severity', 'HIGH,CRITICAL'", "'--ignore-unfixed'"].filter((f) => !scan.includes(f));
   if (!excludes) {
     fail(
-      'image-scan.yml no longer excludes this repository\'s own images from the monthly scan. ' +
-      'Check 8b exists to hold release.yml to that exclusion; decide which job owns them and ' +
-      'update both this check and the comments in image-scan.yml.'
+      'image-scan.yml no longer runs scripts/scan-images.mjs, or that script no longer excludes ' +
+      'this repository\'s own images from the monthly scan. Check 8b exists to hold release.yml to ' +
+      'that exclusion; decide which job owns them and update both this check and the comments in ' +
+      'image-scan.yml.'
     );
+  } else if (monthlyPolicy.length) {
+    fail(`scripts/scan-images.mjs no longer passes ${monthlyPolicy.join(' and ')}, the policy release.yml is held to`);
   } else {
     // The policy the monthly job applies, which the release scan must match: a stricter release
     // gate would fail on findings the monthly job teaches everyone to ignore, and a looser one
@@ -631,23 +638,28 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 8c. The Trivy that CI installs is the release scan:config runs locally, so a finding reproduces
-// on a laptop. Renovate bumps the local image; the CI pin and its checksum are refreshed by hand.
+// 8c. The Trivy that CI installs is the release scan:config and scan:images run locally, so a
+// finding reproduces on a laptop. Renovate bumps the local image; the CI pin and its checksum are
+// refreshed by hand.
 // -------------------------------------------------------------------------------------------------
 {
   const action = read('.github/actions/install-trivy/action.yml');
   const local = read('scripts/scan-config.mjs');
   const ci = action.match(/TRIVY_VERSION:\s*([0-9.]+)/)?.[1];
   const pinned = local.match(/aquasec\/trivy:([0-9.]+)@/)?.[1];
-  if (!ci || !pinned) {
-    fail('check 8c cannot find the Trivy version in install-trivy/action.yml or scan-config.mjs');
+  const configImage = local.match(/aquasec\/trivy:[^'\s]+/)?.[0];
+  const imagesImage = read('scripts/scan-images.mjs').match(/aquasec\/trivy:[^'\s]+/)?.[0];
+  if (!ci || !pinned || !imagesImage) {
+    fail('check 8c cannot find the Trivy version in install-trivy/action.yml, scan-config.mjs or scan-images.mjs');
+  } else if (imagesImage !== configImage) {
+    fail(`scan:config runs ${configImage} and scan:images runs ${imagesImage}; pin both to the same image`);
   } else if (ci !== pinned) {
     fail(
       `CI installs Trivy ${ci} and scan:config runs ${pinned}. Move install-trivy to ${pinned} ` +
       'and replace TRIVY_SHA256 from that release\'s checksums file.'
     );
   } else {
-    pass(`CI and scan:config run the same Trivy release (${ci})`);
+    pass(`CI, scan:config and scan:images run the same Trivy release (${ci})`);
   }
 }
 
@@ -2057,8 +2069,8 @@ function edgeFunctionNames() {
 // each read is open to all, and no has_authority() consults the permission. Gating one later
 // moves its entry to `gates`.
 //
-// Two refusal reasons are facts and are held here too: nothing consults link:manage or
-// gitops:manage through has_authority(), and cell:manage and gateway:manage are consulted only
+// Two refusal reasons are facts and are held here too: nothing consults link:manage through
+// has_authority(), and cell:manage and gateway:manage are consulted only
 // where a proposal is decided. So is may_decide_proposal()'s answer: its cell and gateway lanes
 // consult the permission, those tables' write policies name a role pair, that pair are the only
 // roles granted the permission, and no machine may hold it -- so the lane agrees with the table
@@ -2221,7 +2233,7 @@ function edgeFunctionNames() {
     }
 
     // The refusal reasons that are facts.
-    for (const perm of ['link:manage', 'gitops:manage']) {
+    for (const perm of ['link:manage']) {
       const by = consultedBy(perm);
       if (by.length) bad(`create_machine_principal() refuses ${perm} because no check a machine passes consults it, and ${by.join(', ')} now does; decide whether a machine may hold it, and restate the reason`);
     }
@@ -3015,6 +3027,9 @@ function edgeFunctionNames() {
 // -------------------------------------------------------------------------------------------------
 {
   const dockerfiles = allFiles.filter((f) => f.endsWith('Dockerfile') && !f.startsWith('frontend/dist/'));
+  // `node` is a runtime, not a peer: the storage-init Job runs one script on it, and nothing built
+  // FROM node exchanges a format or a protocol with that Job.
+  const UNCOUPLED = new Set(['node']);
   const offences = [];
   let coupled = 0;
   for (const file of dockerfiles) {
@@ -3027,7 +3042,7 @@ function edgeFunctionNames() {
       if (colon === -1) continue;
       const repo = bare.slice(0, colon);
       const tag = bare.slice(colon + 1);
-      if (!chartPins.has(repo)) continue;
+      if (!chartPins.has(repo) || UNCOUPLED.has(repo)) continue;
       coupled += 1;
       if (chartPins.get(repo) !== tag) {
         offences.push(

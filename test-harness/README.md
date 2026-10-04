@@ -359,6 +359,37 @@ interval is now sized to the fleet (#394) and the raw window is 14 days (#401), 
 [`deploy/k8s/README.md`](../deploy/k8s/README.md), *What grows*, carries the current arithmetic
 with the rollups beside it.
 
+#### What the databases spend their time on
+
+Measured 2026-10-04 on the same cluster with a fresh install: `pg_stat_statements` on both
+databases after the install's conformance run (validate.py and the AAS and i3X suites), and again
+across a 250 and a 500 msg/s step of this fleet, both sustained (write mean 6.7 and 10.0 ms).
+
+**Ingestion barely touches the Supabase database.** Its work per message lands in the historian.
+On the Supabase side the daemon's device-status and identity calls averaged about 1 ms each.
+
+**Monitoring cost more than the load did.** Three readers, each changed:
+
+| What | Measured | Now |
+| :--- | :--- | :--- |
+| Every `platform_health` alert query computed every condition, including the archive backlog's read of the historian's `storage_footprint`, and then kept its own | About 400 ms a query: 1,255 s of database time in the 10.5 hours after the install, more than every other statement together | `cold_archive_backlog_state()` answers `enabled = false` without reading the historian when archiving is off. With it on, it reads the manifest's newest verified range (about 20 ms) and falls back to `storage_footprint` only before the first verified export |
+| PostgREST's probes requested `/`, which builds the OpenAPI document as `anon` | Three catalog queries, about 12 ms, on every 10- and 15-second probe | The probes ask the admin listener's `/ready` and `/live` |
+| The historian exporter read `storage_footprint` twice on every 15-second scrape | About 130 ms each | `cache_seconds: 300` on both queries |
+
+**Indexes.** After the conformance run and the load, 14 non-unique indexes had never been scanned.
+Each is on a table of 8-16 kB, which the planner scans whole whatever indexes exist, so on a
+development stack "unused" measures the table's size rather than the index's worth, and none was
+dropped. Of the 25 foreign keys with no covering index, one matters at fleet size:
+`devices.shadow_of`, which every device delete, archive and restore searches twice (the foreign-key
+check and `shadow_follows_its_original()`). It has a partial index now. The others reference small
+tables or serve rare administrative deletes. The largest, `audit_trail.changed_by`, would put an
+index on the most-written table to speed a user deletion that its foreign key refuses anyway once
+the user has audit rows. `index_advisor` proposed nothing for the 15 busiest application
+statements; most are RPCs, whose bodies it cannot see.
+
+**Left as it is.** Realtime's change poll (`realtime.list_changes`, about 4 ms, several times a
+second) is upstream's price for the dashboard's live updates, over a seven-table publication.
+
 #### Not measured
 
 * **Metric counts other than 10 and 2**, and the 2-metric shape on anything but the minimum

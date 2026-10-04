@@ -165,34 +165,6 @@ export function clientFromHash(entry, username, roles) {
   return clientFromPasswordEntry(assertEntry(entry, username), roles);
 }
 
-// Every account in a password file, with roles assigned by name; anything unrecognised takes none
-// and is reported so an operator can decide. Malformed lines are reported, never silently dropped.
-export function importPasswordFile(text, platformRoles = new Map()) {
-  const clients = [];
-  const unassigned = [];
-  const malformed = [];
-  for (const raw of String(text || '').split('\n')) {
-    const line = raw.trim();
-    if (!line) continue;
-    let client;
-    try {
-      client = clientFromPasswordEntry(line);
-    } catch {
-      malformed.push(line.split(':')[0]);
-      continue;
-    }
-    if (platformRoles.has(client.username)) {
-      client.roles = rolesFor(platformRoles.get(client.username), client.username);
-    } else if (isGatewayId(client.username)) {
-      client.roles = gatewayRoleNames(client.username).map((rolename) => ({ rolename }));
-    } else {
-      unassigned.push(client.username);
-    }
-    clients.push(client);
-  }
-  return { clients, unassigned, malformed };
-}
-
 // The role list a platform principal holds: its named role, or the gateway pair.
 export function rolesFor(role, username) {
   const names = role ? [role] : gatewayRoleNames(username);

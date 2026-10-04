@@ -372,8 +372,8 @@ export async function loadDeviceRecord(
   if (!device) return null;
 
   // asset_config is keyed by sparkplug_id, written by ingestion from the DBIRTH payload.
-  // `device_schemas` is the union of the device_submodels join and the legacy 1:1
-  // devices.schema_id, so this resolves for a device provisioned by either path.
+  // `device_schemas` reads the device_submodels join and devices.schema_id, the dashboard's
+  // attachment, so this resolves for a device attached by either path.
   const [
     { data: configRows },
     { data: linkRows },

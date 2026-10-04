@@ -272,7 +272,7 @@ export default async function handler(req: Request): Promise<Response> {
  * filter, unlike the collection: the most useful case is an archived schema with devices still
  * attached, a migration that has not finished, so the status is returned instead. Devices as full
  * entries, as `/v1/address` returns them. Through the `device_schemas` view, which includes devices
- * provisioned through the legacy 1:1 `devices.schema_id`.
+ * the dashboard attached through `devices.schema_id`.
  */
 async function schemaMembers(
   supabase: SupabaseClient,

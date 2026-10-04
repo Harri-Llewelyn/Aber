@@ -130,9 +130,8 @@ spec:
 {{- end }}
 ---
 {{/*
-The Secret the credential service patches: the playback delivery file (0078), which playback reads
-through its own projection, and a `password_file` key from a release predating the Dynamic Security
-plugin, imported into the plugin's document on first start.
+The Secret the credential service patches: the playback delivery file, which playback reads
+through its own projection.
 
 CREATED EMPTY AND NEVER OVERWRITTEN. `helm upgrade` re-renders this document, so preserving the
 current contents through the `lookup` below is what stops it being reset -- `resource-policy: keep`
@@ -152,8 +151,6 @@ metadata:
     "helm.sh/resource-policy": keep
 type: Opaque
 stringData:
-  password_file: |
-{{ if $existing }}{{ (index $existing.data "password_file" | default "" | b64dec) | indent 4 }}{{ end }}
   playback_credentials.json: |
 {{ if $existing }}{{ (index $existing.data "playback_credentials.json" | default "" | b64dec) | indent 4 }}{{ end }}
 ---
@@ -420,8 +417,6 @@ spec:
             */}}
             - name: DIRECTORY_MQTT_TOPIC_PREFIX
               value: {{ include "aber.directoryTopicPrefix" . | quote }}
-            - name: LEGACY_PASSWORD_FILE
-              value: /passwd-src/password_file
             # The validator is a fixture: a production install leaves its password empty and gets
             # no account. The monitor is always required by the script itself.
             - name: DYNSEC_REQUIRED_PRINCIPALS
@@ -468,10 +463,7 @@ spec:
               {{- end }}
               echo "Assembled broker config."
 
-              # The plugin's document. An empty legacy key is not a file to import.
-              if [ -f /passwd-src/password_file ] && [ ! -s /passwd-src/password_file ]; then
-                unset LEGACY_PASSWORD_FILE
-              fi
+              # The plugin's document.
               exec node /scripts/mosquitto-dynsec-init.mjs
           volumeMounts:
             - name: policy
@@ -479,9 +471,6 @@ spec:
               readOnly: true
             - name: scripts
               mountPath: /scripts
-              readOnly: true
-            - name: passwd-src
-              mountPath: /passwd-src
               readOnly: true
             - name: config
               mountPath: /mosquitto/config
@@ -767,12 +756,6 @@ spec:
         - name: policy
           configMap:
             name: {{ printf "%s-mosquitto-policy" $fullname }}
-        # A release from before the plugin left a `password_file` here; the initContainer imports
-        # it once. Optional, because a fresh install has no such Secret until the first delivery.
-        - name: passwd-src
-          secret:
-            secretName: {{ .Values.mosquitto.credentials.secretName }}
-            optional: true
         {{/*
           `items` WITH AN EXPLICIT PATH, not a bare configMap mount. The scripts do
           `import ... from './lib/<name>.mjs'`, and a ConfigMap key cannot contain a slash -- so

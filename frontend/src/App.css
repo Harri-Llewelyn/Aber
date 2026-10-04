@@ -5142,9 +5142,6 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 .cell-flag-warning { color: var(--warning-text); }
 .cell-flag-danger { color: var(--danger-text); }
 
-/* A legacy free-text classification in the Type column. */
-.cell-legacy { font-style: italic; color: var(--text-dim); }
-
 /* A form note that is a finding rather than a definition. */
 .form-hint.hint-warning { color: var(--warning-text); }
 .form-hint.hint-danger { color: var(--danger-text); }

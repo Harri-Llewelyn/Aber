@@ -76,6 +76,8 @@
   "formatted-sql-query timescaledb/test_bi_reader_grants.py c79eff3b992a": "Test SQL composed from the test's own constants (table and view names, fixture ids); no input reaches it.",
   "formatted-sql-query timescaledb/test_historian_role_grants.py d6f4e49eae90": "Test SQL composed from the test's own constants (table and view names, fixture ids); no input reaches it.",
   "gha-curl-pipe-shell .github/workflows/ci.yml beaf5c197ce9": "curl output is read as data by python3 (a JSON response parsed, or a query result checked); nothing downloaded is executed. The rule matches a curl and a python3 in the same step.",
+  "header-redefinition frontend/nginx.conf 5d97ccd3289d": "add_header_inherit merge at the server level (nginx 1.29.3 and later; the image runs 1.31) makes a location's add_header append to the inherited headers rather than replace them, which is what this rule warns about.",
+  "header-redefinition frontend/nginx.conf 87eda9c26126": "add_header_inherit merge at the server level (nginx 1.29.3 and later; the image runs 1.31) makes a location's add_header append to the inherited headers rather than replace them, which is what this rule warns about.",
   "insecure-urlopen gateway-credential/test_gateway_credential.py 5905b67d48f6": "A test probe of a loopback health endpoint; there is no TLS to use.",
   "js-open-redirect frontend/src/pages/OAuthConsent.jsx 05800c6a05f5": "redirect_url is GoTrue's answer for this OAuth authorization, which it has already checked against the client's registered redirect URIs.",
   "last-user-is-root backup-service/Dockerfile afa9c1eeee8b": "The image runs as root. A USER in every Dockerfile, matched by the chart's runAsUser, is #419.",

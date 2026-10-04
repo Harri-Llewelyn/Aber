@@ -647,8 +647,7 @@ listed there):
   runs `scripts/mosquitto-dynsec-init.mjs` on every start: the roles from the ConfigMap replace the
   stored ones, the platform principals and the plugin's admin are re-hashed from `secrets.mqtt*`
   with the broker's own `mosquitto_passwd`, every gateway client is kept as stored, and a document
-  that would lose a client is refused. A `password_file` in the `mosquitto-passwords` Secret from
-  a release before the plugin is imported on the first start, hashes transplanted intact.
+  that would lose a client is refused.
 - The credential service is a sidecar dialling loopback, sending one plugin command per
   `mosquitto_rr` request as an admin whose role reaches `$CONTROL/dynamic-security/#` only. Three
   verbs: issue, disable, list. Its Role on the API server is `get`/`patch` on one Secret, for the
@@ -854,8 +853,8 @@ Verified in the rendered output, both clients matching exactly:
 | Node-RED | `settings.js` callbackURL = `http://nodered.<domain>/auth/strategy/callback` | the identical string |
 
 And the split holds: `auth_url`, `API_EXTERNAL_URL`, `GOTRUE_SITE_URL` and `SUPABASE_PUBLIC_URL` are
-ingress hosts; `token_url`, `NODERED_USERINFO_URL`, Studio's `SUPABASE_URL` / `STUDIO_PG_META_URL`
-and Storage's `POSTGREST_URL` are in-cluster Service names.
+ingress hosts; `token_url`, `NODERED_USERINFO_URL` and Studio's `SUPABASE_URL` / `STUDIO_PG_META_URL`
+are in-cluster Service names.
 
 **A CI check now asserts all of it** — the two redirect-URI equalities, that each browser-facing URL
 resolves to a real ingress host, and that no in-cluster URL contains a dot (i.e. is not a domain).
@@ -940,8 +939,8 @@ Both targets must stay green.
 5. Run `ingestion/validate.py` **as a Job in the namespace** (§2.5), then
    `supabase/functions/aas-export/test_aas_export.py` the same way — ordered after `validate.py` so
    that a failed conformance run stops the export suite rather than being reported twice. Its
-   subject, `Sim_CNC_Mill_01`, is seeded by the migrations (`0002`, then `0020` for its schema and
-   IDTA nameplate), so it carries no data dependency on the first Job.
+   subject, `AAS_Conformance_Device`, is provisioned by the suite at pinned ids
+   (`test-harness/aas_fixture.py`), so it carries no data dependency on the first Job.
 6. Assert the Realtime WebSocket upgrade through the ingress — the same 101-status assertion the
    Compose job already makes, for the same reason (a healthy container behind a misconfigured
    gateway passes every other check). Make this one go through the **ingress**, not a
@@ -1226,10 +1225,9 @@ historian*).
   an append-only audit trail cannot be reconstructed at all.
 - **A zero-byte dump is asserted against**, not just a non-zero exit. A backup that looks like one is
   worse than none.
-- **Off site is the backup service's job, not the CronJob's.** The CronJob's `destination: s3`
-  could never run (its image has no `aws` CLI) and is retired; a values file that still sets it
-  fails the render. The backup service copies every backup, age-encrypted, to an S3 destination set
-  on the Backups page (`supabase/README.md`, "An encrypted copy off site").
+- **Off site is the backup service's job, not the CronJob's.** The CronJob writes the backup PVC
+  only. The backup service copies every backup, age-encrypted, to an S3 destination set on the
+  Backups page (`supabase/README.md`, "An encrypted copy off site").
 - **The dump is logical, not PITR.** It recovers to the last nightly run and no finer; this is the
   floor, said plainly so nobody mistakes it for the ceiling. The historian's physical backup, when
   on, restores to any moment inside the retained backups; the platform database has no such path.

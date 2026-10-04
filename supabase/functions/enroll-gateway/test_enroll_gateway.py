@@ -559,13 +559,10 @@ class TestForgeProvisioning(EnrollGatewayBase):
 
     @classmethod
     def delete_repo(cls):
-        # Both namespaces: the organisation, and the machine account's own, where the transfer test
-        # plants a legacy repository and where every repository lived before the organisation.
-        for owner in (cls.organisation, cls.machine_user):
-            try:
-                cls.forge(f"/api/v1/repos/{owner}/{cls.repo_name()}", method="DELETE")
-            except urllib.error.HTTPError:
-                pass  # Never created, which is the ordinary state before the first test.
+        try:
+            cls.forge(f"/api/v1/repos/{cls.organisation}/{cls.repo_name()}", method="DELETE")
+        except urllib.error.HTTPError:
+            pass  # Never created, which is the ordinary state before the first test.
 
     @classmethod
     def tearDownClass(cls):
@@ -732,8 +729,8 @@ class TestForgeProvisioning(EnrollGatewayBase):
         An administrator opened "New repository", and the organisation was not offered as an owner:
         the teams were made with `can_create_org_repo` off. The design has repositories that exist
         before a gateway does, and people make those. Asserted on the teams enrolment finds or
-        makes -- and a team made BEFORE this decision is patched rather than left, which is what the
-        first half of this test forces by switching the flag off again.
+        makes -- and a team whose flag has been switched off in the forge is patched back, which
+        the second half of this test forces.
         """
         token = self.issue_token()
         status, payload = enroll(token, ssh_public_key=self.public_key)
@@ -743,41 +740,13 @@ class TestForgeProvisioning(EnrollGatewayBase):
         for name in ("administrators", "managers"):
             self.assertTrue(teams[name]["can_create_org_repo"], f"'{name}' cannot create repositories")
 
-        # A forge from before the decision: the flag is off, and the next enrolment must fix it.
+        # The flag switched off by hand: the next enrolment must put it back.
         self.forge(f"/api/v1/teams/{teams['managers']['id']}", method="PATCH", body={"can_create_org_repo": False})
         self.delete_repo()
         status, payload = enroll(self.issue_token(), ssh_public_key=self.public_key)
         self.assertEqual(status, 200, payload)
         teams = {t["name"]: t for t in self.forge(f"/api/v1/orgs/{self.organisation}/teams?limit=50")}
-        self.assertTrue(teams["managers"]["can_create_org_repo"], "an older team was not reconciled")
-
-    def test_a_repository_from_before_the_organisation_is_transferred_in(self):
-        """
-        Repositories created before the organisation existed live under the machine account, where
-        no login can see them. Re-enrolling such a gateway must MOVE that repository -- history,
-        keys and all -- rather than create an empty twin beside it, which would be a gateway whose
-        flow history quietly became unreachable on the day the forge got a door.
-        """
-        legacy = self.forge(
-            "/api/v1/user/repos", method="POST",
-            body={"name": self.repo_name(), "private": True, "auto_init": True, "default_branch": "main"},
-        )
-        self.assertEqual(legacy["owner"]["login"], self.machine_user)
-
-        token = self.issue_token()
-        status, payload = enroll(token, ssh_public_key=self.public_key)
-        self.assertEqual(status, 200, payload)
-        self.assertIsNotNone(payload.get("repository"), payload)
-
-        moved = self.forge(f"/api/v1/repos/{self.organisation}/{self.repo_name()}")
-        self.assertEqual(moved["owner"]["login"], self.organisation)
-        self.assertEqual(moved["id"], legacy["id"], "the legacy repository was copied, not moved")
-        # THE OLD PATH STILL ANSWERS, AND THAT IS GITEA'S DOING RATHER THAN A COPY LEFT BEHIND: a
-        # transfer leaves a redirect from the old owner, so an appliance holding the old clone URL
-        # keeps working. What matters is that it answers with the MOVED repository, not a twin.
-        redirected = self.forge(f"/api/v1/repos/{self.machine_user}/{self.repo_name()}")
-        self.assertEqual(redirected["id"], legacy["id"])
-        self.assertEqual(redirected["owner"]["login"], self.organisation)
+        self.assertTrue(teams["managers"]["can_create_org_repo"], "a drifted team was not reconciled")
 
     def test_a_gateway_without_a_key_still_enrols(self):
         """

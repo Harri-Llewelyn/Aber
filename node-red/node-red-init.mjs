@@ -30,19 +30,14 @@ const RUNTIME_DIR =
   process.env.NODE_RED_RUNTIME_DIR || '/usr/src/node-red/node_modules';
 
 const credentialSecret = process.env.NODERED_CREDENTIAL_SECRET;
-// A gateway credential, not a shared platform account: the broker's roles confine each client to
-// `spBv1.0/+/+/<sparkplug_id>/#`, so the username must be the gateway's `sparkplug_id`. This pair is the
-// legacy fallback for a `mqtt-broker-config` node (see brokerCredentialFor()); current flows
-// name their own pair per broker node through `aberCredentialsEnv`.
-const mqttUser = process.env.MQTT_USER || 'gwy100000000000400080000';
-const mqttPassword = process.env.MQTT_PASSWORD;
 const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
 
 // Bumped whenever the body of the generated settings.js changes in a way an existing volume
 // needs; without it a settings.js that merely has an adminAuth passes settingsAreCorrect()
 // forever. v2 adminAuth.users; v3 persisted username -> permissions map; v4 constant-time
-// NODERED_ADMIN_TOKEN comparison; v5 editorTheme.tours off; v6 telemetry off.
-const SETTINGS_VERSION = 6;
+// NODERED_ADMIN_TOKEN comparison; v5 editorTheme.tours off; v6 telemetry off; v7 the editor's
+// response headers.
+const SETTINGS_VERSION = 7;
 
 function fail(message) {
   console.error(`[node-red-init] ERROR: ${message}`);
@@ -147,7 +142,6 @@ const CREDENTIALS_ENV_KEY = 'aberCredentialsEnv';
 // broker is is deployment configuration, not user content. Writes a narrow set of keys, only when
 // they are explicitly configured. Must run before the credential section, which exits early on
 // volumes that hold credentials.
-const BROKER_NODE_ID = 'mqtt-broker-config';
 
 const mqttTlsEnabled = /^(1|true|yes|on)$/i.test((process.env.MQTT_TLS_ENABLED || '').trim());
 const mqttTlsCaFile = (process.env.MQTT_TLS_CA_FILE || '').trim();
@@ -224,7 +218,7 @@ if (mqttTlsEnabled || mqttPortEnv || mqttHostEnv) {
     let tlsNode = flow.find((n) => n.id === TLS_NODE_ID);
     if (!tlsNode) {
       tlsNode = { id: TLS_NODE_ID, type: 'tls-config' };
-      // Config nodes sit at the top level with no `z`, like mqtt-broker-config itself.
+      // Config nodes sit at the top level with no `z`, like the broker node itself.
       flow.push(tlsNode);
       changes.push(`added tls-config node '${TLS_NODE_ID}'`);
     }
@@ -303,6 +297,7 @@ function settingsAreCorrect() {
       // adminAuth.default re-opens the anonymous path wholesale. Treat its presence as a
       // broken file rather than as a preference to preserve.
       loaded?.adminAuth?.default === undefined &&
+      typeof loaded?.httpAdminMiddleware === 'function' &&
       typeof loaded?.httpNodeAuth === 'function'
     );
   } catch (err) {
@@ -479,6 +474,17 @@ module.exports = {
   telemetry: {
     enabled: false,
     updateNotification: false
+  },
+
+  // The editor's and the admin API's response headers. Nothing frames the editor from another
+  // origin, and it uses no camera, microphone or location.
+  httpAdminMiddleware: function (req, res, next) {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    next();
   },
 
   adminAuth: {
@@ -679,7 +685,7 @@ function credentialsWorthKeeping() {
  * The broker username currently stored in flows_cred.json, or null if it cannot be read. A file
  * we cannot decrypt is not ours to judge, so it reads as null and is left untouched.
  */
-function storedBrokerCredential(nodeId = BROKER_NODE_ID) {
+function storedBrokerCredential(nodeId) {
   if (!fs.existsSync(credentialsPath)) return null;
   try {
     const existing = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
@@ -701,34 +707,15 @@ function storedBrokerCredential(nodeId = BROKER_NODE_ID) {
  * One connection per gateway, because the broker's roles pin the edge-node segment to the username.
  * The env prefix is declared on the node in `aberCredentialsEnv`, not derived from its id: a
  * convention is invisible when it breaks, and the only symptom is "Connection failed to broker".
- * The credential tooling emits exactly these variable names. The legacy node keeps reading
- * MQTT_USER / MQTT_PASSWORD with no declaration.
+ * The credential tooling emits exactly these variable names.
  */
 function brokerCredentialFor(node) {
   const prefix = node[CREDENTIALS_ENV_KEY];
 
   if (!prefix) {
-    if (node.id === BROKER_NODE_ID) {
-      // Checked here, not at start-up, so a stack whose flow has no legacy node boots without the
-      // legacy pair. A flow that contains this node still refuses to be seeded without a password:
-      // seeding an empty one produces a CONNACK 5 the editor reports with no cause.
-      if (!mqttPassword) {
-        fail(
-          `this volume's flow carries the legacy '${BROKER_NODE_ID}' node, but MQTT_PASSWORD is not set.
-  That node predates the per-cell consolidation and reads MQTT_USER / MQTT_PASSWORD
-  which are empty by default because the account they
-  name was retired by archived migration 0020.
-
-  Either set MQTT_PASSWORD and re-provision that account, or reseed the flow
-  with NODE_RED_FORCE_SEED=true to drop the legacy node entirely.`
-        );
-      }
-      return { user: mqttUser, password: mqttPassword };
-    }
     fail(
-      `broker node '${node.id}' (${node.name || 'unnamed'}) declares no '${CREDENTIALS_ENV_KEY}' and is ` +
-        `not the legacy '${BROKER_NODE_ID}'. It would connect with no username, and Mosquitto ` +
-        'refuses that with CONNACK 5 while Node-RED reports only "Connection failed to broker".'
+      `broker node '${node.id}' (${node.name || 'unnamed'}) declares no '${CREDENTIALS_ENV_KEY}'. ` +
+        'It would connect with no username, which Mosquitto refuses with CONNACK 5.'
     );
   }
 

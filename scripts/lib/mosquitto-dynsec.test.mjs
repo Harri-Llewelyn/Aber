@@ -5,7 +5,7 @@
  *
  * The reconcile is the part whose failure is silent: a boot that dropped a gateway client produces
  * a valid document and a fleet that falls off the broker one reconnect at a time. It is tested
- * here without a broker, as the password-file merge it replaces was.
+ * here without a broker.
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,7 +23,6 @@ import {
   gatewayRole,
   gatewayRoleName,
   gatewayRoleNames,
-  importPasswordFile,
   isGatewayRoleName,
   issueCommands,
   parseControlResponse,
@@ -110,23 +109,6 @@ describe('clientFromPasswordEntry', () => {
 
   test('refuses an unhashed entry', () => {
     assert.throws(() => clientFromPasswordEntry(`${GW_A}:hunter2`), CredentialError);
-  });
-});
-
-describe('importPasswordFile', () => {
-  test('assigns roles by username and reports what it could not place', () => {
-    const text = [
-      entry('aber_ingestion'), entry(GW_A), entry('probe'), '', 'garbage-line', entry('gwy110000000000400080000'),
-    ].join('\n');
-    const platform = new Map([['aber_ingestion', 'ingestion'], ['gwy110000000000400080000', null]]);
-    const { clients, unassigned, malformed } = importPasswordFile(text, platform);
-    const byName = Object.fromEntries(clients.map((c) => [c.username, c]));
-    assert.deepEqual(byName.aber_ingestion.roles, [{ rolename: 'ingestion' }]);
-    assert.deepEqual(byName[GW_A].roles.map((r) => r.rolename), gatewayRoleNames(GW_A));
-    assert.deepEqual(byName.gwy110000000000400080000.roles.map((r) => r.rolename), gatewayRoleNames('gwy110000000000400080000'));
-    assert.deepEqual(byName.probe.roles, []);
-    assert.deepEqual(unassigned, ['probe']);
-    assert.deepEqual(malformed, ['garbage-line']);
   });
 });
 

@@ -14,8 +14,7 @@ spec:
     {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
   ports:
     - name: http
-      # storage-api reaches this as POSTGREST_URL=http://supabase-rest:3000, and the gateway routes
-      # /rest/v1/ to it on the same address.
+      # The gateway routes /rest/v1/ here.
       port: 3000
       targetPort: http
       protocol: TCP
@@ -75,8 +74,8 @@ spec:
                   key: POSTGRES_PASSWORD
             - name: PGRST_DB_URI
               value: "postgres://authenticator:$(POSTGRES_PASSWORD)@{{ include "aber.supabaseDb.host" . }}:{{ include "aber.supabaseDb.port" . }}/postgres?{{ include "aber.dsnSslParams" . }}"
-            # `storage` is exposed because storage-api resolves the caller's claims through
-            # PostgREST; `graphql_public` because the Supabase client expects it to exist.
+            # The schemas upstream's compose exposes; the Supabase client expects `graphql_public`
+            # to exist.
             - name: PGRST_DB_SCHEMAS
               value: public,storage,graphql_public
             - name: PGRST_DB_ANON_ROLE
@@ -101,39 +100,32 @@ spec:
               value: pgrst
             - name: PGRST_SERVER_PORT
               value: "3000"
-            # The admin listener, which is the only place PostgREST serves /metrics. Off unless
-            # this is set -- no admin server is bound at all by default, which is why the metrics
-            # gap existed rather than being a missing ServiceMonitor.
-            #
-            # NEW WITH v14.12. On v12.2.0 this port served /ready and /live and nothing else.
-            #
-            # NOT in the Ingress and NOT routed by the gateway. The admin server has NO AUTHENTICATION,
-            # and its readiness endpoints describe the database connection -- so it is a
-            # ClusterIP-only port for Prometheus, in the same shape as the ingestion daemon's.
+            # The admin listener: /live and /ready for the probes, /metrics for Prometheus. Nothing
+            # is bound unless this is set. It has NO AUTHENTICATION and describes the database
+            # connection, so it is a ClusterIP-only port, not in the Ingress or the gateway.
             - name: PGRST_ADMIN_SERVER_PORT
               value: "3001"
-            # An unauthenticated liveness probe needs SOMETHING to answer. The OpenAPI root is
-            # served to `anon` and is the cheapest endpoint that proves the schema cache is loaded.
-            - name: PGRST_OPENAPI_MODE
-              value: follow-privileges
+          # The probes ask the admin listener, which answers from PostgREST's own state. The API
+          # root would build the OpenAPI document as `anon` on every probe: three catalog queries,
+          # about 12 ms of database time each, every few seconds.
           startupProbe:
             httpGet:
-              path: /
-              port: http
+              path: /ready
+              port: admin
             periodSeconds: 5
             timeoutSeconds: 5
             failureThreshold: 24
           readinessProbe:
             httpGet:
-              path: /
-              port: http
+              path: /ready
+              port: admin
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
           livenessProbe:
             httpGet:
-              path: /
-              port: http
+              path: /live
+              port: admin
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 4

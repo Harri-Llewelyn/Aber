@@ -94,12 +94,11 @@ re-run.
   is a playback problem and not a fleet one.
 - A `$7$` hash written by `mosquitto_passwd` authenticates when transplanted into a client's
   `password`, `salt` and `iterations` fields. The boot reconcile relies on this for the platform
-  principals and for importing a password file.
+  principals.
 - **`deleteRole` on a role a client still holds took the broker down.** Nothing in this repository
   deletes a role; a gateway's role outlives its client and is regenerated at boot.
 - The plugin coexists with `password_file`: an account in the file alone still authenticates. Not
-  used, because the import above makes it unnecessary, and one authority is easier to reason
-  about than two.
+  used: one authority is easier to reason about than two.
 - **`mosquitto_rr -s` and `-f` deliver a payload the plugin rejects** ("Payload not valid JSON");
   the same bytes through `-m` are accepted. Every caller therefore puts the command on argv,
   where a password is visible to the container's own process list for the request's duration,
@@ -125,10 +124,7 @@ in the credential service's image, and:
   the admin, which are required because the health probes and the credential service authenticate
   as them;
 - keeps every other stored client exactly as it is, ensuring a gateway client holds its two roles;
-- refuses to write a document that would lose a stored client;
-- when there is no document yet and a `password_file` exists, imports every entry from it with
-  the roles its username implies, then renames the file `password_file.imported`. That is how a
-  stack built on the ACL file crosses over with every appliance's password intact.
+- refuses to write a document that would lose a stored client.
 
 **A renamed principal rolls every pod that uses it.** The usernames reach the broker's
 initContainer, the ingestion daemon and the i3X server as environment from the Secret, which a

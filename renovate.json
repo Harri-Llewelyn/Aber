@@ -6,7 +6,7 @@
 
     "This exists because the audit that produced it was a one-off: a person wondered how far behind the stack was, checked seventeen images by hand, and found swagger-ui two years old and PostgREST two majors back. Nothing would have raised either again. The point of this file is that the CHECK happens on a schedule. Deciding what to merge stays a human job, and several rules below exist to keep it that way.",
 
-    "WHAT A NAIVE CONFIGURATION WOULD GET WRONG HERE, and why packageRules is the long half: the Supabase components are a COORDINATED SET that upstream tests together. Measured against Docker Hub, gotrue v2.189.0 and postgres-meta v0.96.6 look outdated. They are in fact the exact versions upstream pins, and bumping them would move this stack OFF the tested combination. Renovate cannot read upstream's compose file, so it must not be trusted to propose those individually.",
+    "WHAT A NAIVE CONFIGURATION WOULD GET WRONG HERE, and why packageRules is the long half: the Supabase components are a COORDINATED SET that upstream tests together. Measured against Docker Hub, a member of the set can look outdated when it is exactly the version upstream pins, and bumping it alone would move this stack OFF the tested combination. Renovate cannot read upstream's compose file, so it must not be trusted to propose those individually.",
 
     "THE DASHBOARD IS THE DELIVERABLE, more than the PRs are. It is one issue listing every available update including the ones deliberately held back, which is exactly the artefact the manual audit produced and then threw away.",
 

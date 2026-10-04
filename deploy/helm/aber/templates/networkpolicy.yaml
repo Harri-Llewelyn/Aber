@@ -68,7 +68,6 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "supabase-functions" "to" "gitea"              "port" 3000 "why" "enroll-gateway creates a gateway's repository and registers its deploy key and branch rules through the forge's API -- which IGNORES the identity header (ENABLE_REVERSE_PROXY_AUTHENTICATION_API is off; basic auth wins over a forged header, measured), so this is a path to a basic-auth API and not a second door")
   (dict "from" "gitea"              "to" "supabase-functions" "port" 9000 "why" "the push webhook (0095): Gitea delivers a signed push event to forge-events directly, not through the gateway, so the only thing that can reach that function from outside the gateway is the forge -- and the HMAC on every delivery is what makes even that a proof of origin rather than a trust in the network")
 
-  (dict "from" "supabase-storage"   "to" "supabase-rest"      "port" 3000 "why" "resolves the caller's claims through PostgREST")
   (dict "from" "supabase-studio"    "to" "supabase-meta"      "port" 8080 "why" "the Database pages")
   (dict "from" "supabase-studio"    "to" $gw      "port" 8000 "why" "server-side API calls")
   (dict "from" "supabase-functions" "to" $gw      "port" 8000 "why" "functions call back through the gateway")
@@ -421,7 +420,7 @@ The Kubernetes API server, for the pods that talk to it.
 
 `alloy` discovers pods and tails their logs through it: under default-deny it collects nothing and
 the dashboards' log panel is simply empty. `e2e-aas-export`'s wait-for-validate step reads a Job's
-status with kubectl; dropped, it times out blaming a Job that had already completed.
+status from it; dropped, it times out blaming a Job that had already completed.
 
 THE ADDRESS IS ENVIRONMENT-SPECIFIC AND CANNOT BE SELECTED: NetworkPolicy has no selector for the
 API server, so this is an ipBlock. Default 0.0.0.0/0 on the API ports only; set

@@ -63,47 +63,51 @@ spec:
       {{- end }}
       initContainers:
         - name: wait-for-validate
-          # `bitnami/kubectl:1.31.1` UNTIL BITNAMI WITHDREW ITS TAGGED DOCKER HUB CATALOGUE. That
-          # repository publishes only `latest` and digests now, so every semver tag 404s and the pin
-          # stopped resolving without anything here changing. `bitnamilegacy` is where the archived
-          # builds went -- byte-for-byte the same image, same shell, same uid 1001, same kubectl.
-          #
-          # A STOPGAP, and the namespace name says so: frozen, and not rebuilt for CVEs. The right
-          # fix is to drop the dependency rather than re-pin it -- this initContainer only polls one
-          # Job's status, which `curlimages/curl` (already pinned here, has a shell) can do against
-          # the API server with the token this pod already carries.
-          #
-          # The alternatives: `rancher/kubectl` is distroless with no /bin/sh, which the wait loop
-          # needs; `alpine/k8s` has one but is 1.19 GB against 432 MB, pulled on every e2e run.
-          image: bitnamilegacy/kubectl:1.31.1
-          imagePullPolicy: IfNotPresent
+          # The suite's own image: its Python reads the Job's status from the API server with this
+          # pod's ServiceAccount token, which the Role below confines to reading Jobs.
+          image: {{ include "aber.image" (dict "image" .Values.e2e.image "ctx" $) | quote }}
+          imagePullPolicy: {{ .Values.e2e.image.pullPolicy }}
+          env:
+            - name: JOB
+              value: {{ printf "%s-e2e-validate" $fullname | quote }}
+            - name: WAIT_TIMEOUT
+              value: {{ .Values.e2e.waitTimeout | quote }}
           command:
-            - /bin/sh
+            - python
             - -c
             - |
-              # `kubectl wait --for=condition=complete` returns immediately if the Job has ALREADY
-              # FAILED, so failure is checked first and explicitly -- otherwise this would hang for
-              # the full timeout waiting for a condition that can never arrive, and the resulting
-              # timeout message would blame this Job rather than the one that actually failed.
-              JOB={{ printf "%s-e2e-validate" $fullname }}
-              deadline=$(( $(date +%s) + {{ .Values.e2e.waitTimeout }} ))
-              while :; do
-                if kubectl get job "$JOB" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null | grep -q True; then
-                  echo "$JOB FAILED -- not running the AAS suite against a stack whose conformance run did not pass." >&2
-                  echo "  kubectl logs job/$JOB" >&2
-                  exit 1
-                fi
-                if kubectl get job "$JOB" -o jsonpath='{.status.succeeded}' 2>/dev/null | grep -q 1; then
-                  echo "$JOB completed; the stack passed its conformance run."
-                  break
-                fi
-                if [ "$(date +%s)" -ge "$deadline" ]; then
-                  echo "timed out after {{ .Values.e2e.waitTimeout }}s waiting for $JOB" >&2
-                  exit 1
-                fi
-                echo "waiting for $JOB (its verdict gates this suite) ..."
-                sleep 5
-              done
+              # Failure is checked first: a Job that has already failed never completes, and waiting
+              # for it would time out blaming this Job rather than the one that failed.
+              import json, os, ssl, sys, time, urllib.request
+              SA = "/var/run/secrets/kubernetes.io/serviceaccount"
+              job, timeout = os.environ["JOB"], int(os.environ["WAIT_TIMEOUT"])
+              with open(f"{SA}/namespace") as f:
+                  ns = f.read().strip()
+              url = f"https://kubernetes.default.svc/apis/batch/v1/namespaces/{ns}/jobs/{job}"
+              tls = ssl.create_default_context(cafile=f"{SA}/ca.crt")
+              deadline = time.time() + timeout
+              while True:
+                  status = {}
+                  try:
+                      # Re-read each time: the kubelet rotates the projected token.
+                      with open(f"{SA}/token") as f:
+                          auth = {"Authorization": "Bearer " + f.read().strip()}
+                      with urllib.request.urlopen(urllib.request.Request(url, headers=auth), context=tls, timeout=10) as r:
+                          status = json.load(r).get("status") or {}
+                  except Exception as exc:
+                      print(f"reading {job}: {exc}", flush=True)
+                  if any(c.get("type") == "Failed" and c.get("status") == "True" for c in status.get("conditions") or []):
+                      print(f"{job} FAILED -- not running the AAS suite against a stack whose conformance run did not pass.", file=sys.stderr)
+                      print(f"  kubectl logs job/{job}", file=sys.stderr)
+                      sys.exit(1)
+                  if (status.get("succeeded") or 0) >= 1:
+                      print(f"{job} completed; the stack passed its conformance run.")
+                      break
+                  if time.time() >= deadline:
+                      print(f"timed out after {timeout}s waiting for {job}", file=sys.stderr)
+                      sys.exit(1)
+                  print(f"waiting for {job} (its verdict gates this suite) ...", flush=True)
+                  time.sleep(5)
           resources:
             requests: { cpu: 10m, memory: 32Mi }
             limits: { memory: 128Mi }

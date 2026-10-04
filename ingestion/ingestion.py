@@ -349,7 +349,6 @@ def get_timescaledb_connection():
 # -----------------------------------------------------------------------------
 # Assets are addressed on the wire by the platform-issued `sparkplug_id` (3-char prefix plus 21
 # hex chars, derived from the row's UUID). Names are display labels only.
-GATEWAY_ID_PATTERN = re.compile(r"^gwy[0-9a-f]{21}$")
 DEVICE_ID_PATTERN = re.compile(r"^dev[0-9a-f]{21}$")
 SPARKPLUG_ID_LENGTH = 24
 
@@ -398,7 +397,6 @@ TELEMETRY_MAX_FUTURE_SECONDS = 5 * 60      # 5 minutes ahead of now
 SOURCE_SPARKPLUG_ID = "sparkplug_id"
 SOURCE_REPORTED_IDENTITY = "reported_identity"
 SOURCE_INSTANCE_UUID = "instance_uuid"
-SOURCE_LEGACY_NAME = "legacy_name"
 
 # Statuses a gateway may not assert about itself. PENDING_ENROLLMENT and AWAITING_BIRTH are
 # enrolment lifecycle; STALE is derived at read time by public.gateway_status. All three
@@ -504,9 +502,9 @@ NODE_MESSAGE_TYPES = ("NBIRTH", "NDATA", "NDEATH")
 _unknown_gateway_warned = {}
 UNKNOWN_GATEWAY_WARN_INTERVAL_SECONDS = 300
 
-# Throttle for legacy name-based identity deprecation warnings, keyed by the id on the wire.
-_legacy_identity_warned = {}
-LEGACY_IDENTITY_WARN_INTERVAL_SECONDS = 300
+# Throttle for "edge node matched under another group" warnings, keyed by edge node id.
+_group_mismatch_warned = {}
+GROUP_MISMATCH_WARN_INTERVAL_SECONDS = 300
 
 # Throttle for refused self-reported gateway statuses, keyed by edge node id. A node that reports
 # one reports it on every heartbeat -- 119 an hour -- so the refusal has to be legible without
@@ -588,15 +586,15 @@ def diagnose_device_identity(wire_id: str):
     """
     Explain how `wire_id` fails the wire-identity contract, or return None if it is acceptable.
 
-    A bare legacy name is not an error during the migration window; only a malformed attempt at a
-    platform-issued id (right prefix, wrong shape) is.
+    A bare name is a device's own id, which resolves through reported_identity once approved; only
+    a malformed attempt at a platform-issued id (right prefix, wrong shape) is an error.
     """
     if DEVICE_ID_PATTERN.match(wire_id):
         return None
 
     lowered = wire_id.lower()
     if not lowered.startswith(("dev", "gwy")):
-        return None  # A legacy name. Handled by the deprecation path, not the quarantine path.
+        return None  # A device's own id, not a malformed platform id.
 
     if lowered.startswith("gwy"):
         return (
@@ -1122,7 +1120,6 @@ def _resolve_device_row(wire_id: str, use_cache: bool = True):
       1. sparkplug_id      -- the platform-issued id.
       2. reported_identity -- a third-party device's own factory-preset id.
       3. id                -- the Factory+ `Instance_UUID`; tried only for a UUID-shaped wire id.
-      4. name              -- legacy devices. Warns.
 
     Returns the row (with `_identity_source` attached) or None if unregistered. Raises
     DirectoryUnavailable when the directory cannot be reached.
@@ -1140,15 +1137,12 @@ def _resolve_device_row(wire_id: str, use_cache: bool = True):
             # an unregistered device must not cost a directory round trip per message.
             return row
 
-    # A well-formed platform id is never also a legacy name, so skip that round-trip.
     lookups = [("sparkplug_id", SOURCE_SPARKPLUG_ID), ("reported_identity", SOURCE_REPORTED_IDENTITY)]
     if UUID_PATTERN.match(wire_id):
         # Factory+ Instance_UUID. Guarded on the shape because `devices.id` is a uuid column:
         # PostgREST rejects a non-UUID comparison with a 400, so an unguarded arm would turn
         # every ordinary sparkplug_id lookup into a wasted failing round-trip.
         lookups.append(("id", SOURCE_INSTANCE_UUID))
-    if not DEVICE_ID_PATTERN.match(wire_id):
-        lookups.append(("name", SOURCE_LEGACY_NAME))
 
     try:
         for column, source in lookups:
@@ -1168,15 +1162,6 @@ def _resolve_device_row(wire_id: str, use_cache: bool = True):
 
             row = dict(rows[0])
             row["_identity_source"] = source
-            if source == SOURCE_LEGACY_NAME and _throttled(
-                _legacy_identity_warned, wire_id, LEGACY_IDENTITY_WARN_INTERVAL_SECONDS
-            ):
-                logger.warning(
-                    "DEPRECATED IDENTITY: device '%s' was matched by name. Reconfigure its gateway to "
-                    "publish sparkplug_id '%s' instead; name-based matching will be removed.",
-                    wire_id, row.get("sparkplug_id")
-                )
-
             _device_cache.set(wire_id, row)
             return row
 
@@ -1231,8 +1216,7 @@ def _resolve_gateway_row(wire_id: str, group_id: str = None):
     The address is (group, node), as Factory+ addresses an edge node. Resolution order:
 
       1. (sparkplug_group, sparkplug_id) -- the current scheme.
-      2. sparkplug_id alone              -- group-agnostic migration path. Warns, throttled.
-      3. name                            -- legacy. Warns.
+      2. sparkplug_id alone              -- group-agnostic. Warns, throttled.
 
     Gateways are never auto-created: an unregistered edge node is logged and dropped.
     """
@@ -1265,47 +1249,31 @@ def _resolve_gateway_row(wire_id: str, group_id: str = None):
                 _gateway_cache.set(cache_key, row)
                 return row
 
-        # 2/3. Group-agnostic fallback, then the legacy name arm.
-        lookups = ["sparkplug_id"] if GATEWAY_ID_PATTERN.match(wire_id) else ["sparkplug_id", "name"]
-        for column in lookups:
-            res = supabase_client.table("gateways").select(columns).eq(column, wire_id).execute()
-            rows = res.data if res else []
-            if not rows:
-                continue
+        # 2. Group-agnostic fallback.
+        res = supabase_client.table("gateways").select(columns).eq("sparkplug_id", wire_id).execute()
+        rows = res.data if res else []
+        if not rows:
+            _gateway_cache.set(cache_key, None)
+            return None
 
-            row = dict(rows[0])
-            row["_identity_source"] = (
-                SOURCE_SPARKPLUG_ID if column == "sparkplug_id" else SOURCE_LEGACY_NAME
-            )
+        row = dict(rows[0])
+        row["_identity_source"] = SOURCE_SPARKPLUG_ID
+        if group_id and row.get("sparkplug_group") != group_id:
+            # Resolved, but under the wrong group. NOT a refusal: a fleet is reconfigured one
+            # gateway at a time, and refusing here would strand every device behind a node
+            # whose group had not been corrected yet.
+            if _throttled(_group_mismatch_warned, wire_id, GROUP_MISMATCH_WARN_INTERVAL_SECONDS):
+                logger.warning(
+                    "DEPRECATED IDENTITY: edge node '%s' published under Sparkplug group '%s' but "
+                    "is registered under '%s'. Matched group-agnostically. Set gateways."
+                    "sparkplug_group to '%s', or reconfigure the gateway to publish under '%s'; "
+                    "group-agnostic matching will be removed.",
+                    wire_id, group_id, row.get("sparkplug_group"),
+                    group_id, row.get("sparkplug_group") or DEFAULT_SPARKPLUG_GROUP
+                )
 
-            if column == "name":
-                if _throttled(_legacy_identity_warned, wire_id, LEGACY_IDENTITY_WARN_INTERVAL_SECONDS):
-                    logger.warning(
-                        "DEPRECATED IDENTITY: edge node '%s' was matched by name. Reconfigure it to "
-                        "publish sparkplug_id '%s' instead; name-based matching will be removed.",
-                        wire_id, row.get("sparkplug_id")
-                    )
-            elif group_id and row.get("sparkplug_group") != group_id:
-                # Resolved, but under the wrong group. NOT a refusal: a fleet is reconfigured one
-                # gateway at a time, and refusing here would strand every device behind a node
-                # whose group had not been corrected yet.
-                if _throttled(
-                    _legacy_identity_warned, "group:%s" % wire_id, LEGACY_IDENTITY_WARN_INTERVAL_SECONDS
-                ):
-                    logger.warning(
-                        "DEPRECATED IDENTITY: edge node '%s' published under Sparkplug group '%s' but "
-                        "is registered under '%s'. Matched group-agnostically. Set gateways."
-                        "sparkplug_group to '%s', or reconfigure the gateway to publish under '%s'; "
-                        "group-agnostic matching will be removed.",
-                        wire_id, group_id, row.get("sparkplug_group"),
-                        group_id, row.get("sparkplug_group") or DEFAULT_SPARKPLUG_GROUP
-                    )
-
-            _gateway_cache.set(cache_key, row)
-            return row
-
-        _gateway_cache.set(cache_key, None)
-        return None
+        _gateway_cache.set(cache_key, row)
+        return row
     except Exception as e:
         # Raised, not returned: an unreachable directory must not read as "not registered", which
         # verify_gateway_binding() would turn into a quarantine reason.
@@ -3103,35 +3071,26 @@ def resolve_wire_identity(parts, payload):
     identity at all.
 
     The topic is authoritative; the Asset_ID metric is a cross-check, absent from alias-encoded
-    DDATA. The strict contract applies only to devices publishing a platform-issued id; a legacy
-    device keeps "payload metric wins" so gateways can be reconfigured one at a time.
+    DDATA. A message with no device segment carries no device identity.
     See ingestion/README.md -> "Asset Identity on the Wire".
     """
     topic_id = parts[4] if len(parts) >= 5 else None
-    claimed_id = extract_claimed_asset_id(payload)
-
     if not topic_id:
-        # Pre-0014 flows that put identity solely in the payload metric.
-        return claimed_id, None
-
-    if DEVICE_ID_PATTERN.match(topic_id):
-        if claimed_id and claimed_id != topic_id:
-            logger.warning(
-                "IDENTITY MISMATCH: topic says device '%s' but the Asset_ID metric claims '%s'. "
-                "Trusting the topic and quarantining.", topic_id, claimed_id
-            )
-            return topic_id, "%s: topic device id '%s' contradicts the Asset_ID metric '%s'" % (
-                REASON_IDENTITY_MISMATCH, topic_id, claimed_id
-            )
-        return topic_id, None
+        return None, None
 
     detail = diagnose_device_identity(topic_id)
     if detail:
         return topic_id, "%s: %s" % (REASON_MALFORMED_IDENTITY, detail)
 
-    # A legacy name in the topic. Preserve the historical precedence during the window.
+    claimed_id = extract_claimed_asset_id(payload)
     if claimed_id and claimed_id != topic_id:
-        return claimed_id, None
+        logger.warning(
+            "IDENTITY MISMATCH: topic says device '%s' but the Asset_ID metric claims '%s'. "
+            "Trusting the topic and quarantining.", topic_id, claimed_id
+        )
+        return topic_id, "%s: topic device id '%s' contradicts the Asset_ID metric '%s'" % (
+            REASON_IDENTITY_MISMATCH, topic_id, claimed_id
+        )
     return topic_id, None
 
 def on_message(client, userdata, msg):

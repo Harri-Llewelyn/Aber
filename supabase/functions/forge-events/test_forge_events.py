@@ -644,7 +644,8 @@ class TestTheApplianceItself(ForgeEventsBase):
             self.commit("Widen myself", cwd=platform_clone)
             code, out = self.git("push", "--quiet", "origin", "HEAD:main", cwd=platform_clone)
             self.assertNotEqual(code, 0, "the deploy key wrote the platform repository")
-            self.assertIn("not authorized to write", out)
+            # Gitea's wording for a read-only key's refused push, as of 28.
+            self.assertIn("User permission denied for writing", out)
 
         # A rewritten appliance branch: append-only means a force-push is refused.
         self.assertEqual(self.git("checkout", "--quiet", "appliance")[0], 0)

@@ -12,7 +12,7 @@ component is idle -- a monitoring stack lying about the thing it was installed t
 So each entry was verified against the pinned image before it was written:
 
   grafana         NATIVE, on its normal HTTP port at /metrics, unauthenticated.
-                  (grafana 13.2.0: 499 metric families.) Nothing to enable.
+                  (grafana 13.2.3: 491 metric families in a bare container.) Nothing to enable.
 
   supabase-envoy  ON ITS ADMIN LISTENER at /stats/prometheus, the port that also answers the
                   readiness probe. The `envoy_http_downstream_rq_xx` family covers the HTTP tier
@@ -21,7 +21,7 @@ So each entry was verified against the pinned image before it was written:
   mosquitto       HAS NO HTTP METRICS SURFACE AT ALL and cannot be given one; it publishes to
                   `$SYS/broker/#` MQTT topics. `mosquitto.metrics.enabled` runs an exporter
                   sidecar that subscribes and re-serves them.
-                  (sapcc/mosquitto-exporter 0.8.0: 48 series, prefixed `broker_`, not
+                  (jryberg/mosquitto-exporter v0.7.9: 48 series, prefixed `broker_`, not
                   `mosquitto_` -- alerts written against the latter match nothing, silently.)
 
   supabase-rest   ON THE ADMIN SERVER at /metrics, as of v14.12; 12.2.0 served /ready and /live

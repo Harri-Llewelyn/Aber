@@ -766,12 +766,13 @@ kubectl -n aber wait --for=condition=complete \
 kubectl -n aber logs job/aber-e2e-validate
 ```
 
-- **`validate.py`** — the same 20 checks `npm run dev:test` runs from the host. In-cluster it needs
+- **`validate.py`** — the same checks `npm run dev:test` runs from the host. In-cluster it needs
   **no host or port overrides at all**: the Service names *are* the correct configuration.
 - **`test_aas_export.py`** — starts automatically once the first Job completes, ordered by an
-  initContainer inside the Job rather than by the order you run things. Its subject, `Sim_CNC_Mill_01`,
-  is **seeded** — registered by migration `0002` and given its schema and IDTA nameplate by `0020` —
-  so it needs no simulator to have published and no operator to have approved anything. The ordering
+  initContainer inside the Job rather than by the order you run things. Its subject,
+  `AAS_Conformance_Device`, is **provisioned by the suite** at pinned ids
+  (`test-harness/aas_fixture.py`), so it needs no simulator to have published and no operator to
+  have approved anything. The ordering
   is now only to avoid running a conformance suite against a stack whose conformance run failed.
   Note its live checks **skip themselves and report success** when the device is absent, which is
   why CI asserts on the absence of the skip line rather than on the Job's exit status.
@@ -963,6 +964,18 @@ Three consequences worth knowing before the first signed release:
 - **`ingestion` and `test-runner` are one `docker buildx bake` of [`docker-bake.hcl`](../../docker-bake.hcl)**:
   the second is `FROM` the first, and Bake's `target:` context hands one build's result to the other
   without a registry round-trip, on the driver the attestations need.
+
+### One-time: make the repository public
+
+Before the first public release, in this order:
+
+1. Scan a mirror clone of every ref for secrets, as
+   [`docs/static-analysis.md`](../../docs/static-analysis.md#before-the-repository-goes-public)
+   shows. Anything not already reviewed stops here until it is rotated.
+2. *Settings → General → Danger Zone → Change visibility → Public.*
+3. Turn on CodeQL default setup, Dependabot alerts (alerts only) and secret scanning with push
+   protection; the same page of `static-analysis.md` lists where each switch is and why Dependabot
+   opens no pull requests.
 
 ### One-time: make the packages public
 
@@ -1220,9 +1233,7 @@ every backup. **Under `networkPolicy.enabled` the endpoint needs an egress rule*
 starts from the bucket are in
 [`../../supabase/README.md`](../../supabase/README.md#an-encrypted-copy-off-site-0151).
 
-The CronJob writes to the PVC only. Its `backup.destination: s3` and `backup.s3.*` are retired, and
-a values file that still sets them fails the render: the upload could not run, having no `aws` CLI
-in its image, and it left the storage archive behind and pruned nothing in the bucket.
+The CronJob writes to the PVC only.
 
 Ad hoc, without waiting for the schedule:
 
@@ -1853,10 +1864,9 @@ from the ConfigMap, re-hashes the platform principals and the plugin's admin fro
 (so rotating one in values reaches the broker on the next restart), keeps every gateway client
 exactly as stored, and refuses to write a document that would lose one.
 
-`mosquitto-passwords` is still a Secret, for two things only: the playback delivery file (`0078`),
-and a `password_file` left by a release from before the plugin, which the initContainer imports
-once — every appliance's password intact — and leaves in place. It is created empty on first
-install and preserved thereafter (`resource-policy: keep` plus a `lookup` through a re-render).
+`mosquitto-passwords` is still a Secret, for one thing only: the playback delivery file. It is
+created empty on first install and preserved thereafter (`resource-policy: keep` plus a `lookup`
+through a re-render).
 
 > **There is no shared broker account.** One credential holding `readwrite spBv1.0/#` could forge
 > `DBIRTH`/`DDATA` for any machine on the site, which `verify_gateway_binding()` cannot detect for

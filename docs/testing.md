@@ -710,7 +710,7 @@ schedule, not on this repository's.
 | Workflow | Job | Asks |
 | :--- | :--- | :--- |
 | [`renovate.yml`](../.github/workflows/renovate.yml) | **renovate** | *Is there a newer version?* — routine PRs monthly, security PRs immediately |
-| [`image-scan.yml`](../.github/workflows/image-scan.yml) | **scan** | *Does what we run have a known, **fixed** vulnerability?* — monthly, third-party images only; every image built here is gated at release |
+| [`image-scan.yml`](../.github/workflows/image-scan.yml) | **scan** | *Does what we run have a known, **fixed** vulnerability?* — monthly, third-party images only, by `npm run scan:images`; every image built here is gated at release |
 | [`restore-rehearsal.yml`](../.github/workflows/restore-rehearsal.yml) | **rehearse** | *Would a restore actually work today?* — weekly |
 
 ### The restore rehearsal is the odd one out
@@ -754,8 +754,8 @@ is the answer when something specific needs checking sooner.
 
 **[`renovate.json`](../renovate.json) exists mostly to stop good automation doing the wrong thing
 here.** The Supabase components are a coordinated set that upstream tests together — measured
-against Docker Hub, `gotrue` and `postgres-meta` look outdated when they are in fact the exact
-versions upstream pins, so an "upgrade" would move this stack *off* the tested combination. They
+against Docker Hub, a member of the set can look outdated when it is exactly the version upstream
+pins, so an "upgrade" would move this stack *off* the tested combination. They
 are grouped into one pull request held for approval, as are all major bumps. Kong 3.0 is why:
 it silently switched off every per-service Prometheus metric while leaving the scrape target green.
 
@@ -770,6 +770,16 @@ not something this repository can act on, and failing on it would train everyone
 Its image list is rendered out of the chart (`helm template`) rather than written in the workflow, and it
 refuses to run if it finds fewer than ten — "found nothing to scan" must not look like "found
 nothing wrong".
+
+**The workflow runs [`scripts/scan-images.mjs`](../scripts/scan-images.mjs), which is `npm run
+scan:images` on a laptop**: the same images, Trivy in the pinned container `scan:config` uses
+(CI installs the same release), and the cache in the `trivy-cache` volume. A fixable finding the
+stack cannot take yet, because the newest release still carries it or the vulnerable package is
+never run, is accepted in [`scripts/lint/image-allowlist.json`](../scripts/lint/image-allowlist.json):
+one group per image repository, with a reason a reviewer can check, an `expires` date and the
+`<vulnerability id> <package>` keys it accepts. The scan fails on any other finding, on a group on
+or after its expiry date, and on a key that matches nothing, so each acceptance is read again at
+the first scan after it expires and goes once the bump that clears it lands.
 
 ## Releases
 

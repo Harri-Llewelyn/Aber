@@ -19,10 +19,10 @@ disagree, both endpoints go on reporting success: a client integrating against a
 subscribe to a set of addresses that the devices themselves do not claim to publish. The suite
 asserts the round trip rather than either half.
 
-Two members are provisioned, not one, and the second is the point: `device_schemas` unions
-`device_submodels` with the legacy 1:1 `devices.schema_id`, and a reverse lookup written against
-the join table alone would pass every other check in this file while silently omitting every device
-provisioned the older way.
+Two members are provisioned, not one, and the second is the point: `device_schemas` reads
+`device_submodels` and `devices.schema_id`, the dashboard's attachment, and a reverse lookup written
+against the join table alone would pass every other check in this file while silently omitting every
+device the dashboard attached.
 
 Run:  python supabase/functions/fplus-directory/test_fplus_directory.py
 """
@@ -61,8 +61,8 @@ DIRECTORY_BASE = SUPABASE_URL
 # 21 hex characters of a UUID reach the wire. An id that differs from another only in its last
 # block -- the obvious way to write a second pinned fixture -- is a distinct primary key that
 # generates an IDENTICAL sparkplug_id, and the insert fails on an index nobody was thinking about.
-LEGACY_DEVICE_UUID = "2af00000-0000-4000-8000-000000000001"
-LEGACY_DEVICE_NAME = "Directory_Legacy_Schema_Device"
+DASHBOARD_DEVICE_UUID = "2af00000-0000-4000-8000-000000000001"
+DASHBOARD_DEVICE_NAME = "Directory_Dashboard_Schema_Device"
 
 # Nothing has this id. Used to assert 404 rather than 500 for an identifier that is well formed and
 # simply not here -- the shape a client gets after a schema is deleted underneath it.
@@ -120,7 +120,7 @@ def rest(method: str, path: str, token: str, payload=None, headers=None):
 
 def provision(token):
     """
-    The fixture subject plus one legacy-attached device. Returns (schema_id, expected_device_ids).
+    The fixture subject plus one device attached through `devices.schema_id`. Returns (schema_id, expected_device_ids).
 
     THE FIXTURE IS SHARED with the two AAS suites deliberately -- it already provisions a schema
     with a `device_submodels` member at pinned ids, and a second conformance subject would be a
@@ -142,11 +142,11 @@ def provision(token):
         return None, []
     schema_id = rows[0]["id"]
 
-    # The legacy arm. `devices.schema_id` and NO device_submodels row, which is the only way the
+    # The dashboard's arm. `devices.schema_id` and NO device_submodels row, which is the only way the
     # view's second branch is reachable: it requires NOT EXISTS on the join table.
     status, detail = rest("POST", "/devices?on_conflict=id", token, {
-        "id": LEGACY_DEVICE_UUID,
-        "name": LEGACY_DEVICE_NAME,
+        "id": DASHBOARD_DEVICE_UUID,
+        "name": DASHBOARD_DEVICE_NAME,
         "gateway_id": aas_fixture.GATEWAY_UUID,
         "schema_id": schema_id,
         # OFFLINE: devices_online_implies_born (0119) refuses ONLINE without a first_dbirth_at.
@@ -157,16 +157,16 @@ def provision(token):
     if status not in (200, 201):
         # The body, not just the code: PostgREST answers 409 for a unique violation and for a
         # foreign-key one alike, and the two mean opposite things about what went wrong.
-        print(f"[test_fplus_directory] could not provision the legacy-attached device: "
+        print(f"[test_fplus_directory] could not provision the dashboard-attached device: "
               f"{status} {detail}")
         return schema_id, [device["id"]]
 
-    return schema_id, [device["id"], LEGACY_DEVICE_UUID]
+    return schema_id, [device["id"], DASHBOARD_DEVICE_UUID]
 
 
 def teardown(token):
-    """Best effort, and the legacy device first: it references the fixture's gateway and schema."""
-    rest("DELETE", f"/devices?id=eq.{LEGACY_DEVICE_UUID}", token)
+    """Best effort, and the dashboard-attached device first: it references the fixture's gateway and schema."""
+    rest("DELETE", f"/devices?id=eq.{DASHBOARD_DEVICE_UUID}", token)
     aas_fixture.teardown(SUPABASE_URL, token, PUBLISHABLE_KEY)
 
 
@@ -226,8 +226,8 @@ class TestTheSourceKeepsItsShape(unittest.TestCase):
         self.assertLess(auth, self.source.index('path === "/v1/schema"'))
 
     def test_the_reverse_lookup_reads_the_view_not_the_join_table(self):
-        # device_schemas unions the join table with the legacy devices.schema_id. Reading
-        # device_submodels alone omits every device provisioned the older way, and reports success.
+        # device_schemas reads the join table and devices.schema_id. Reading device_submodels
+        # alone omits every device the dashboard attached, and reports success.
         self.assertIn('.from("device_schemas")', self.members)
         self.assertNotIn('.from("device_submodels")', self.members)
 
@@ -309,12 +309,12 @@ class TestReverseLookup(unittest.TestCase):
         _, body = get(f"/v1/schema/{SCHEMA_ID}", TOKEN)
         self.assertIn(EXPECTED_DEVICE_IDS[0], [d["uuid"] for d in body["devices"]])
 
-    @unittest.skipUnless(len(EXPECTED_DEVICE_IDS) > 1, "the legacy-attached device was not provisioned")
-    def test_it_finds_a_device_attached_through_the_legacy_column(self):
+    @unittest.skipUnless(len(EXPECTED_DEVICE_IDS) > 1, "the dashboard-attached device was not provisioned")
+    def test_it_finds_a_device_attached_through_devices_schema_id(self):
         # The specific omission a reverse lookup written against device_submodels would make, and
         # the one no other assertion in this file would notice.
         _, body = get(f"/v1/schema/{SCHEMA_ID}", TOKEN)
-        self.assertIn(LEGACY_DEVICE_UUID, [d["uuid"] for d in body["devices"]])
+        self.assertIn(DASHBOARD_DEVICE_UUID, [d["uuid"] for d in body["devices"]])
 
     def test_each_member_carries_a_resolvable_sparkplug_address(self):
         # The reason a client asked: it holds a Schema_UUID and wants the addresses publishing to

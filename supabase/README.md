@@ -929,7 +929,7 @@ holds them for every other writer, a Manager's PATCH included.
 | :--- | :--- |
 | `gateway_status` | `gateways` plus read-time `live_status` / `is_stale` (90 s threshold) |
 | `device_locations` | A device's effective cell: `COALESCE(device.cell_id, gateway.cell_id)` |
-| `device_schemas` | Union of `device_submodels` join rows, falling back to `devices.schema_id` |
+| `device_schemas` | A device's `device_submodels` rows, or its `devices.schema_id` (the dashboard's attachment) when it has none |
 | `telemetry` | `security_invoker` view over `timescale.telemetry`, a `postgres_fdw` foreign table |
 
 > The raw foreign table lives in its own `timescale` schema, deliberately kept out of
@@ -964,13 +964,12 @@ The database had already started separating them by hand — `system_settings` f
 write, `list_machine_principals()` and `create_machine_principal()` check `Administrator` alone
 (as their predecessors `list_service_principals()` and `create_service_principal()` did before
 `0080` renamed them), against dozens of sites that check the pair. `0069` makes the permission table agree with that
-direction. Three permissions moved:
+direction. Two permissions moved:
 
 | Withdrawn from `Shopfloor_Manager` | What it decides | Where it is enforced |
 | :--- | :--- | :--- |
 | `authz:manage` | who has access | **nowhere yet** — see below |
 | `schema:manage` | what contract ingestion validates against | the write policies on `schemas`, `metric_catalog` and `metric_groups`, **and since `0087` the two schema RPCs** |
-| `gitops:manage` | what gets deployed to the edge | `PERMISSION_MAP` in [`nodered-userinfo`](functions/nodered-userinfo/index.ts) |
 
 A manager keeps devices, cells, gateways, links, quarantine approval, telemetry, archives and the
 audit trail, and goes on **reading** every table above: publishing a schema is a platform act,
@@ -985,16 +984,12 @@ policies moved in the same migration as the grant, and
 [`test_role_permission_split.py`](migrations/test_role_permission_split.py) presents a real manager
 session to each of the three tables rather than asserting the grant table twice.
 
-**`gitops:manage` needed two doors closed, not one — and there is only one door now.** The Directory
-page's Sync button went through `deploy-nodered`, which pushed the flow committed to the repository;
-the Node-RED editor deploys directly, and `nodered-userinfo` is what tells Node-RED which permission
-tier a session gets. Narrowing only the first would have produced a manager who cannot press the
-button and can still deploy — worse than leaving both open, because it reads as a control.
-
-**`deploy-nodered` has since been retired with the demonstrator**, because the flow it deployed was
-the demonstrator's and a blank install commits none. So `nodered-userinfo` is now the sole enforcement
-point for this permission. A manager keeps `read` there: the editor still opens and the running flow
-is still inspectable, which is most of what that page is for when the shopfloor is misbehaving.
+**Deploying a flow is Administrator's, and no permission row decides it.** On the platform's
+Node-RED, `PERMISSION_MAP` in [`nodered-userinfo`](functions/nodered-userinfo/index.ts) maps
+Administrator to `*` and every other role to `read`: the editor still opens and the running flow is
+still inspectable, which is most of what that page is for when the shopfloor is misbehaving. On an
+appliance, `main` on each gateway repository is protected in the forge with one approval required
+from the `administrators` team, which `forge-membership` fills from the Postgres role.
 
 **`authz:manage` gates nothing today, and that is the point of doing this first.** `user_roles` and
 `role_permissions` carry a SELECT policy each and no other, so **no authenticated caller —
@@ -1027,7 +1022,7 @@ SELECT status FROM public.schemas WHERE id=parent  →  'archived'
 
 The direct write was refused and the RPC performed it. **This is not a cosmetic status flip**:
 publishing activates a draft, archives its predecessor and repoints every `device_submodels` row
-and the legacy `devices.schema_id` onto the new version, so it changes what ingestion judges every
+and `devices.schema_id` onto the new version, so it changes what ingestion judges every
 attached device against.
 
 **`fork_schema()` carried the same gate**, under a comment claiming *"Same allow-list as the RLS
@@ -1951,7 +1946,7 @@ for it is whatever consults that permission through `has_authority()`:
 | `quarantine:approve`, `quarantine:reject` | Quarantine decisions are made by people |
 | `cell:manage`, `gateway:manage` | For a machine they would only decide proposals, through `may_decide_proposal()`, and deciding is a person's act |
 | `authz:manage` | Access control stays with people |
-| `link:manage`, `gitops:manage` | No check a machine passes consults them, so the grant would do nothing |
+| `link:manage` | No check a machine passes consults it, so the grant would do nothing |
 
 **The old refusal rested on a premise that stopped being true.** It said a token signed for a
 principal cannot be revoked, so any write would be an unrevocable write credential.
@@ -2148,9 +2143,9 @@ the more informative lane is silently unreachable. `device_locations` computes i
 `utils/cellResolution.js` mirrors it, with `check-mirror-drift.mjs` pinning the label list literally
 — adding a lane is a deliberate two-file change with a check that fails until both sides agree.
 
-**Neither lane is a row in `cells`.** A magic cell would put semantics in a free-text `name` — the
-trap `devices.asset_type` was retired for — and would make the lane a row anyone holding the cell
-permission can rename or delete, taking every host-run gateway out of its lane with it
+**Neither lane is a row in `cells`.** A magic cell would put semantics in a free-text `name` and
+would make the lane a row anyone holding the cell permission can rename or delete, taking every
+host-run gateway out of its lane with it
 (`gateways.cell_id` is `ON DELETE SET NULL` since `0112`; before that it deleted them outright).
 `unassigned` is already never stored; it is the `ELSE` arm, and these join it as labels rather than
 as data.
@@ -2483,12 +2478,8 @@ path, and checking one thing more than that read-back could.
 
 #### What happened to the old bucket
 
-Nothing deletes a bucket, and this does not either. `telemetry-archive` is dropped from
-`scripts/storage-init.mjs` so no new install creates it, and `supabase/storage-policies.sql` drops
-its four policies explicitly — a policy the file no longer mentions is one nothing maintains, and
-it would otherwise survive every boot guarding a bucket nothing writes to. On an existing install
-the bucket is left with whatever it holds, for an Administrator to check against the remote
-endpoint and then empty from Studio.
+There is none. The local `telemetry-archive` bucket went before 1.0, so `scripts/storage-init.mjs`
+creates no such bucket and `supabase/storage-policies.sql` declares no policy for one.
 
 **AAS export bundles did not follow it.** They were stored under `assets/` in the same bucket while
 both were local, and they now have their own: `asset-exports`, with its own policies. They are not
@@ -3092,7 +3083,7 @@ All fail closed: missing or unrecognised role ⇒ `403`.
 | [`approve-quarantine`](functions/approve-quarantine) | `Administrator`, `Shopfloor_Manager` | Calls the atomic approval RPC |
 | [`aas-export`](functions/aas-export) | + `Operator`, `Auditor` | Export is a read. `format=bundle` also needs `audit_trail:read`, because it carries the trail |
 | [`grafana-userinfo`](functions/grafana-userinfo) | any mapped role | OIDC userinfo for Grafana SSO |
-| [`nodered-userinfo`](functions/nodered-userinfo) | any mapped role | The same lookup in Node-RED's permission vocabulary. Only `Administrator` maps to `*`; since `deploy-nodered` was retired this is the sole enforcement point for `gitops:manage` |
+| [`nodered-userinfo`](functions/nodered-userinfo) | any mapped role | The same lookup in Node-RED's permission vocabulary. Only `Administrator` maps to `*`, which makes it the only gate on deploying a flow from the platform's Node-RED |
 | [`fplus-directory`](functions/fplus-directory) | any authenticated user | Factory+ Directory adapter — see below |
 | [`forge-membership`](functions/forge-membership) | `Administrator`, `Shopfloor_Manager` | The forge listener's `ext_authz` step: places the caller in the team their role warrants, refuses a role removed since the token was signed (`0094`) |
 | [`forge-signout`](functions/forge-signout) | the caller | Gitea's own sign-out link: ends every GoTrue session the caller holds, then the door's sign-out |
@@ -3184,8 +3175,8 @@ holds, and the most useful case it answers is the one a filter would hide — an
 with devices still attached to it, which is a migration that has not finished. Answering `404`
 there would report "no such schema" about a schema whose members are the answer, so the row's
 `status` is returned instead and the caller decides. Members are read through the `device_schemas`
-**view**, not `device_submodels`, so a device provisioned through the legacy 1:1 `devices.schema_id`
-is not silently omitted — and those are exactly the devices an old schema still holds. A schema
+**view**, not `device_submodels`, so a device the dashboard attached through `devices.schema_id`
+is not silently omitted. A schema
 nothing implements is a `200` with an empty list.
 
 **What it does not claim.** Schema and service identifiers are this deployment's own UUIDs, and the
@@ -3426,7 +3417,7 @@ able to refuse a schema publication could block an Administrator-only decision i
 operator would read that refusal as the platform's answer.
 
 **The lane proposes an act, not a column edit.** Publishing activates the draft, archives its
-parent, repoints every `device_submodels` row and the legacy `devices.schema_id`, and drops the
+parent, repoints every `device_submodels` row and `devices.schema_id`, and drops the
 duplicate links that would collide — one transaction. A patch of `{"status": "active"}` would name
 one column write while the apply path did six other things, so the patch is `{"publish": true}` and
 `proposable_columns()` returns `publish` for this lane. Its contract is *the keys a patch may name*:
@@ -3539,8 +3530,8 @@ admitted an Administrator since the baseline, and that is precisely the problem:
 `devices.schema_id` is `ON DELETE SET NULL` and `device_submodels.schema_id` is `ON DELETE CASCADE`,
 so deleting an **active** schema silently detaches every device bound to it — no error, no warning,
 and the next conformance run reports every metric as unmodelled. `discard_schema_draft()` refuses
-anything whose status is not `draft`, and returns the number of device attachments the cascade
-removed rather than letting them disappear out of sight. The policy is unchanged; what the UI calls
+anything whose status is not `draft`, and returns the number of devices attached to the draft
+through either column rather than letting them disappear out of sight. The policy is unchanged; what the UI calls
 is now a door that cannot make that mistake.
 
 **A draft may legitimately have devices attached** — `publish_schema_version()` depends on that
@@ -3570,9 +3561,9 @@ would freeze. So `reject_archived_schema_assignment()` returns early on an `UPDA
 `schema_id` unchanged, and on a detach to `NULL`. What it refuses is an `INSERT` or an `UPDATE` that
 *arrives at* an archived schema.
 
-**Both arms, because a guard on one column is not a guard.** `device_schemas` unions
-`device_submodels` with the legacy 1:1 `devices.schema_id`; the trigger is on both tables, one
-function body switching on `TG_TABLE_NAME`.
+**Both arms, because a guard on one column is not a guard.** `device_schemas` reads
+`device_submodels` and `devices.schema_id`, the dashboard's attachment; the trigger is on both
+tables, one function body switching on `TG_TABLE_NAME`.
 
 **A draft is still assignable**, deliberately — attaching a draft to a real machine is how a version
 is tried before publishing, and `publish_schema_version()` already merges that state rather than
@@ -3871,7 +3862,7 @@ is for.
 Gitea's teams decide what they may do inside, and the team is a function of the verified role,
 never of anything the person chose. `main` is protected on every gateway repository with one
 approval required from `administrators` ([`_shared/forge.ts`](functions/_shared/forge.ts)), which
-is where `gitops:manage` being Administrator-only is enforced inside the forge. Gitea's own
+is what makes deploying a flow to an appliance Administrator's. Gitea's own
 sign-out link is routed to `forge-signout`, which ends every GoTrue session the caller holds,
 because under reverse-proxy authentication Gitea's own sign-out is a no-op.
 
@@ -3910,8 +3901,10 @@ when, and the SHA-256 of `flows.json` at that commit, read through the machine a
 shows it as **Committed**, so a merge is visible at once rather than on the appliance's next tick.
 Pushes to other branches, repositories that are not a gateway's, deleted branches and unknown
 gateways are answered 200 with `ignored`, because a non-2xx is a failed delivery on the hook's page.
-Gitea's `webhook.ALLOWED_HOST_LIST` defaults to public addresses only and refuses every in-stack
-target; it is `private` here. `0095` ends with `ensure_gateway_status_view()`, and the baseline's
+Gitea's outbound calls are `[security] EGRESS_MODE = strict` with `ALLOWED_HOST_LIST = private:9000`,
+which admits this one target; the deprecated `[webhook] ALLOWED_HOST_LIST` is set blank, because
+Gitea reads it first and an upgraded `app.ini` still holds a portless `private` that would refuse
+port 9000. `0095` ends with `ensure_gateway_status_view()`, and the baseline's
 dumped copy of that view became a call to the same function, because `CREATE OR REPLACE VIEW`
 cannot narrow a view the function has just widened and every boot after the first was failing in
 `0001`.
@@ -5535,14 +5528,8 @@ object of its running job, that it never deletes, and that the playback worker a
 alone. Each exception says what the missing arm looks like from outside, which is a job that
 failed for no stated reason.
 
-**Retired policies are dropped explicitly.** Cold telemetry once had a bucket here and now goes
-to a configured S3 endpoint, somewhere a site loss does not reach. Deleting the block would not
-remove the policies: this file drops each policy it is about to create, so a policy it no longer
-mentions survives every boot on a database that already has it, guarding a bucket nothing writes
-to. The four `telemetry_archive_*` policies are therefore dropped by name and asserted gone. The
-bucket itself is deleted by nobody: it is left with whatever it holds, for an Administrator to
-empty and remove from Studio once satisfied the objects in it are also at the remote endpoint,
-which `cold_archive audit` answers for the manifest's rows.
+**A retired policy needs an explicit DROP.** This file drops each policy it is about to create,
+so deleting a policy's block leaves the policy on every database that already has it.
 
 ## Adding a vocabulary
 

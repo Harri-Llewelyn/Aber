@@ -100,7 +100,7 @@ spec:
           service-role bearer, which holds SELECT on `devices`. Measured -- no key 401, the
           publishable key alone 401, the secret key 200.
         */}}
-        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-gateway" "image" "curlimages/curl:8.10.1" "command" (printf "curl -sf -o /dev/null -H \"apikey: $SUPABASE_SECRET_KEY\" '%s/rest/v1/devices?limit=1'" (include "aber.supabase.internalUrl" .)) "describe" "the gateway routing to PostgREST with a live schema" "env" (include "aber.secretEnv" (dict "name" "SUPABASE_SECRET_KEY" "secretName" $secretName "key" "SUPABASE_SECRET_KEY"))) | nindent 8 }}
+        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-gateway" "image" (include "aber.curlImage" $) "command" (printf "curl -sf -o /dev/null -H \"apikey: $SUPABASE_SECRET_KEY\" '%s/rest/v1/devices?limit=1'" (include "aber.supabase.internalUrl" .)) "describe" "the gateway routing to PostgREST with a live schema" "env" (include "aber.secretEnv" (dict "name" "SUPABASE_SECRET_KEY" "secretName" $secretName "key" "SUPABASE_SECRET_KEY"))) | nindent 8 }}
         {{/*
           NODE-RED AND i3X TOO, because validate.py asserts against them directly: checks 7/7b
           drive a real editor sign-in and 12-12f exercise the i3X address space.
@@ -118,10 +118,10 @@ spec:
           specification, so `-f` is right there.
         */}}
         {{- if .Values.nodeRed.enabled }}
-        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-node-red" "image" "curlimages/curl:8.10.1" "command" "curl -s -o /dev/null http://node-red:1880/" "describe" "node-red (checks 7/7b sign in to the editor)") | nindent 8 }}
+        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-node-red" "image" (include "aber.curlImage" $) "command" "curl -s -o /dev/null http://node-red:1880/" "describe" "node-red (checks 7/7b sign in to the editor)") | nindent 8 }}
         {{- end }}
         {{- if .Values.i3xService.enabled }}
-        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-i3x" "image" "curlimages/curl:8.10.1" "command" "curl -sf -o /dev/null http://i3x-service:8090/v1/info" "describe" "i3x-service (checks 12-12f read its address space)") | nindent 8 }}
+        {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-i3x" "image" (include "aber.curlImage" $) "command" "curl -sf -o /dev/null http://i3x-service:8090/v1/info" "describe" "i3x-service (checks 12-12f read its address space)") | nindent 8 }}
         {{- end }}
         {{/*
           AND THE INGESTION DAEMON LAST, ON ITS OWN METRIC RATHER THAN ON ITS POD.

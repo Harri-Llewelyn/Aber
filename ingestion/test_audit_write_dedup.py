@@ -223,10 +223,10 @@ class TestDBirthWriteDeduplication(DBirthDedupTestCase):
 
     def test_identity_source_change_writes_even_when_status_matches(self):
         """
-        Both fields are compared, not just status. A device that moves from legacy name matching
+        Both fields are compared, not just status. A device that moves from its own reported id
         onto its issued sparkplug_id has changed something worth recording.
         """
-        self.device = registered_device(identity_source=ingestion.SOURCE_LEGACY_NAME)
+        self.device = registered_device(identity_source=ingestion.SOURCE_REPORTED_IDENTITY)
         self.device["_identity_source"] = ingestion.SOURCE_SPARKPLUG_ID
         self.birth()
 
@@ -300,7 +300,7 @@ class TestCachedRowIsUpdatedInPlace(DBirthDedupTestCase):
         self.assertEqual(self.device["status"], "ONLINE")
 
     def test_identity_source_is_reflected_on_the_row_after_a_write(self):
-        self.device = registered_device(identity_source=ingestion.SOURCE_LEGACY_NAME)
+        self.device = registered_device(identity_source=ingestion.SOURCE_REPORTED_IDENTITY)
         self.device["_identity_source"] = ingestion.SOURCE_SPARKPLUG_ID
         self.birth()
         self.assertEqual(self.device["identity_source"], ingestion.SOURCE_SPARKPLUG_ID)

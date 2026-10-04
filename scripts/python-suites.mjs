@@ -724,10 +724,10 @@ export const SUITES = {
       'THE REST NEED THE STACK, and two of them are the reason the suite exists: /v1/device and ' +
       '/v1/schema/{uuid} answer the same question from opposite ends, composed by different ' +
       'queries, and a disagreement is a 200 at both endpoints. The live layer also provisions a ' +
-      'device attached through the legacy `devices.schema_id` beside the join-table ' +
-      '`device_submodels` one, because a reverse lookup written against the join table alone ' +
-      'passes every other assertion in the file while omitting every device provisioned the ' +
-      'older way.',
+      'device attached through `devices.schema_id`, as the dashboard attaches, beside the ' +
+      'join-table `device_submodels` one, because a reverse lookup written against the join ' +
+      'table alone passes every other assertion in the file while omitting every device the ' +
+      'dashboard attached.',
   },
   'supabase/migrations/test_gateway_enrollment.py': {
     // STACK ONLY, AND IT WAS BRIEFLY `db` TOO -- WRONGLY, BY THIS FILE'S OWN RULE. Every one of
@@ -754,7 +754,7 @@ export const SUITES = {
       'Remote gateway enrolment. Signs in as Administrator to mint tokens (issuing is a ' +
       "USER's act, gated on has_role, so the service key cannot do it), then redeems them the way " +
       'an appliance does: the anon key and no user JWT. Stops the credential service to exercise ' +
-      'the 503 rollback path. SKIPS ALL SEVENTEEN CHECKS without a stack, which is why it is not ' +
+      'the 503 rollback path. SKIPS EVERY CHECK without a stack, which is why it is not ' +
       'in the unit lane.',
   },
   'supabase/functions/forge-events/test_forge_events.py': {

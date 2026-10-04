@@ -68,7 +68,6 @@ NODERED_BASE_URL = os.getenv("NODERED_BASE_URL", "http://localhost:1880")
 VAL_CELL_NAME = "VALIDATE Cell 1"
 VAL_GW_NAME = "VALIDATE_Gateway_01"
 VAL_KNOWN_DEVICE = "VALIDATE_Device_001"
-VAL_LEGACY_DEVICE = "VALIDATE_Legacy_Device_001"
 VAL_MISMATCH_DEVICE = "VALIDATE_Mismatch_Device_001"
 VAL_QUARANTINE_DEVICE = "VALIDATE_Quarantine_Device_001"
 VAL_MALFORMED_DEVICE = "VALIDATE_Malformed_Device_001"
@@ -180,7 +179,6 @@ SEEDED_TABLES = {
     "gateway": "gateways",
     "area_gateway": "gateways",
     "known": "devices",
-    "legacy": "devices",
     "mismatch": "devices",
     "alias": "devices",
     "plant_a": "devices",
@@ -778,7 +776,6 @@ def seed_supabase():
     # its cell itself; every other device inherits its gateway's.
     for label, key, placement in (
         (VAL_KNOWN_DEVICE, "known", {}),
-        (VAL_LEGACY_DEVICE, "legacy", {}),
         (VAL_MISMATCH_DEVICE, "mismatch", {}),
         (VAL_ALIAS_DEVICE, "alias", {}),
         (VAL_PLANT_A_DEVICE, "plant_a", {}),
@@ -836,8 +833,8 @@ def seed_supabase():
     SEEDED["kpi_schema_uuid"] = k_res.data[0]["id"] if k_res.data else None
 
     if SEEDED.get("schema_uuid") and SEEDED.get("known_uuid"):
-        # devices.schema_id is still written: it is the fallback arm archived migration 0034 deliberately
-        # retains, and leaving it unset would mean the join table were the only thing under test.
+        # devices.schema_id is written as the dashboard writes it; leaving it unset would mean the
+        # join table were the only thing under test.
         supabase_client.table("devices").update(
             {"schema_id": SEEDED["schema_uuid"]}
         ).eq("id", SEEDED["known_uuid"]).execute()
@@ -1046,13 +1043,6 @@ def run_simulation():
     #    quarantined, rather than the metric silently deciding which asset this is.
     print(f"\n--- DDATA with contradictory Asset_ID: {VAL_MISMATCH_DEVICE} ---")
     publish("DBIRTH", SEEDED["mismatch_id"], {"firmware": "v1.0.0"}, asset_id=UNKNOWN_DEVICE_ID)
-
-    # 6. Legacy device still publishing its name: resolved by name during the migration window and
-    # flagged identity_source = 'legacy_name'. The birth records how the device was resolved, so it
-    # is sent before the DDATA.
-    print(f"\n--- DBIRTH/DDATA from a legacy name-addressed device: {VAL_LEGACY_DEVICE} ---")
-    publish("DBIRTH", VAL_LEGACY_DEVICE, {"firmware": "v0.9.0"})
-    publish("DDATA", VAL_LEGACY_DEVICE, {"Systems/TEMPERATURE": 30.0, "Controller/EXECUTION": "ACTIVE"})
 
     # 7. DBIRTH for the registered device declaring one metric its schema does not model. Published
     # twice, identically: the daemon must record the declared set the first time and write nothing
@@ -2638,20 +2628,6 @@ def verify_results():
             print(f"❌ 1e. IDENTITY MISMATCH ERROR: {e}")
             passed = False
 
-        # 1f. Legacy name matching must still work during the migration window, and be flagged.
-        try:
-            res = supabase_client.table("devices").select("*").eq("id", SEEDED.get("legacy_uuid")).execute()
-            rows = res.data if res else []
-            if rows and rows[0].get("identity_source") == "legacy_name":
-                print("✅ 1f. LEGACY FALLBACK: name-addressed device resolved and flagged 'legacy_name'.")
-            else:
-                src = rows[0].get("identity_source") if rows else None
-                print(f"❌ 1f. LEGACY FALLBACK FAIL: expected identity_source 'legacy_name', got '{src}'.")
-                passed = False
-        except Exception as e:
-            print(f"❌ 1f. LEGACY FALLBACK ERROR: {e}")
-            passed = False
-
         # 5. asset_config must be populated from the birth certificate. The regression guard for a
         # store_birth_parameters() that raised on every DBIRTH, swallowed by process_dbirth's
         # except.
@@ -2780,8 +2756,8 @@ def verify_results():
         # performs the first two.
         try:
             run_entity_ids = [
-                SEEDED[key] for key in ("cell_uuid", "gateway_uuid", "known_uuid", "legacy_uuid",
-                                        "mismatch_uuid", "alias_uuid")
+                SEEDED[key] for key in ("cell_uuid", "gateway_uuid", "known_uuid", "mismatch_uuid",
+                                        "alias_uuid")
                 if SEEDED.get(key)
             ]
             if not run_entity_ids:

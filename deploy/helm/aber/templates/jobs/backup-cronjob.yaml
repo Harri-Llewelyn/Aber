@@ -9,9 +9,6 @@
        unschedulable. */ -}}
 {{- $includeStorage := and .Values.backup.includeStorage .Values.supabaseStorage.enabled
       .Values.supabaseStorage.persistence.enabled (eq .Values.supabaseStorage.backend "file") -}}
-{{- if or (and .Values.backup.destination (ne (toString .Values.backup.destination) "pvc")) .Values.backup.s3 }}
-{{- fail "\n\naber: backup.destination and backup.s3 are retired.\n\nThe CronJob writes to the backup PVC only: the s3 upload it offered could not run, since its image has\nno aws CLI. The off-site copy is the backup service's. Enable backupService and set the destination\non the Backups page (supabase/README.md, \"An encrypted copy off site\"), and remove both values.\n" }}
-{{- end }}
 {{/*
 =================================================================================================
 Scheduled logical backups -- AND THE ONLY RECOVERY PATH THIS STACK HAS.

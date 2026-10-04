@@ -1848,8 +1848,8 @@ const apiMethods = {
       ]);
       if (error) throw error;
 
-      // The schemas attached through device_submodels, read from the `device_schemas` view so the
-      // fallback to the legacy 1:1 devices.schema_id is applied once, in SQL. Non-fatal:
+      // The schemas attached to each device, read from the `device_schemas` view so the choice
+      // between device_submodels rows and devices.schema_id is made once, in SQL. Non-fatal:
       // schemasForDevice() falls back to schema_id.
       const { data: links } = await supabase.from('device_schemas').select('device_id, schema_id');
       const schemasByDevice = new Map();
@@ -2262,7 +2262,7 @@ const apiMethods = {
       const deviceIds = idsOf('devices', 'device_nameplate');
       const [devices, nameplates, schemas, areas, cells, gateways, proposersRes] = await Promise.all([
         readByIds('devices',
-          'id,name,description,asset_type,connection_method,cell_id,area_id,location_scope,model_3d_path,is_archived',
+          'id,name,description,connection_method,cell_id,area_id,location_scope,model_3d_path,is_archived',
           'id', deviceIds),
         readByIds('device_nameplate', '*', 'device_id', deviceIds),
         readByIds('schemas', 'id,schema_name,version,status,parent_schema_id', 'id', idsOf('schemas')),
@@ -2465,7 +2465,6 @@ const apiMethods = {
         name: body.asset_name,
         description: emptyToNull(body.description),
         gateway_id: gatewayIdFrom(body),
-        asset_type: emptyToNull(body.asset_type),
         connection_method: emptyToNull(body.connection_method),
         schema_id: emptyToNull(body.schema_id),
         // NO `status`. It is observed, never asserted: ingestion writes ONLINE on a DBIRTH, and the
