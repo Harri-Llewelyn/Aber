@@ -17,8 +17,6 @@ Report it privately through GitHub's
 — the **Security** tab, then **Report a vulnerability**. That opens a draft advisory visible only to
 the maintainers.
 
-<!-- TODO: add a contact address here as a fallback for reporters who cannot use GitHub. -->
-
 Please include the version or commit you are running, the Kubernetes distribution you deploy to,
 and enough detail to reproduce. You will get an acknowledgement, and a decision on
 whether it is in scope, as soon as is practical — this is a small project without a staffed
@@ -52,6 +50,9 @@ together. All three come from the release workflow itself, with no key to manage
   this repository's release workflow build what I pulled?"
 - **SLSA provenance** naming the commit, the Dockerfile, every build argument and every base image
   by digest.
+
+Verifying a signature needs **cosign 3 or later**. A release stores its signature bundles as OCI 1.1
+referrers, which cosign 2 does not read: it answers "no signatures found".
 
 ```bash
 # The image signature, bound to this repository's release workflow at the tag it released from.
