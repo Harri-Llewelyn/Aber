@@ -2483,12 +2483,8 @@ path, and checking one thing more than that read-back could.
 
 #### What happened to the old bucket
 
-Nothing deletes a bucket, and this does not either. `telemetry-archive` is dropped from
-`scripts/storage-init.mjs` so no new install creates it, and `supabase/storage-policies.sql` drops
-its four policies explicitly — a policy the file no longer mentions is one nothing maintains, and
-it would otherwise survive every boot guarding a bucket nothing writes to. On an existing install
-the bucket is left with whatever it holds, for an Administrator to check against the remote
-endpoint and then empty from Studio.
+There is none. The local `telemetry-archive` bucket went before 1.0, so `scripts/storage-init.mjs`
+creates no such bucket and `supabase/storage-policies.sql` declares no policy for one.
 
 **AAS export bundles did not follow it.** They were stored under `assets/` in the same bucket while
 both were local, and they now have their own: `asset-exports`, with its own policies. They are not
@@ -5535,14 +5531,8 @@ object of its running job, that it never deletes, and that the playback worker a
 alone. Each exception says what the missing arm looks like from outside, which is a job that
 failed for no stated reason.
 
-**Retired policies are dropped explicitly.** Cold telemetry once had a bucket here and now goes
-to a configured S3 endpoint, somewhere a site loss does not reach. Deleting the block would not
-remove the policies: this file drops each policy it is about to create, so a policy it no longer
-mentions survives every boot on a database that already has it, guarding a bucket nothing writes
-to. The four `telemetry_archive_*` policies are therefore dropped by name and asserted gone. The
-bucket itself is deleted by nobody: it is left with whatever it holds, for an Administrator to
-empty and remove from Studio once satisfied the objects in it are also at the remote endpoint,
-which `cold_archive audit` answers for the manifest's rows.
+**A retired policy needs an explicit DROP.** This file drops each policy it is about to create,
+so deleting a policy's block leaves the policy on every database that already has it.
 
 ## Adding a vocabulary
 

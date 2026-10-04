@@ -2001,9 +2001,8 @@ CREATE OR REPLACE FUNCTION public.cold_storage_rows() RETURNS TABLE(chunk_name t
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public', 'pg_catalog'
     AS $$
-    -- Gated on the same three roles the bucket admits (`telemetry_archive_read_privileged` in
-    -- supabase/storage-policies.sql), checked here because a hidden tab is not a gate and this
-    -- function is SECURITY DEFINER.
+    -- Gated on Administrator, Shopfloor_Manager and Auditor, checked here because a hidden tab is
+    -- not a gate and this function is SECURITY DEFINER.
     SELECT m.chunk_name,
            m.range_start,
            m.range_end,
