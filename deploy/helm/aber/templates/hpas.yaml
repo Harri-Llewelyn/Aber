@@ -46,7 +46,7 @@ Values lookups cannot be derived from names -- `.Values.supabaseRest.enabled` is
 its component -- so the mapping is written out and then ASSERTED.
 
 THE ASSERTION COMPARES NAMES AND CANNOT SEE A DEAD VALUES PATH. Kong's workload sat here until
-b7989a0 deleted Kong and its values block; both sides still agreed, so the check passed and the
+5223398 deleted Kong and its values block; both sides still agreed, so the check passed and the
 render died a line earlier on a nil pointer -- and only under `autoscaling.enabled`, which is
 values-prod.yaml.example alone. A name removed from one side belongs removed from the other AND
 checked against a production render.

@@ -40,7 +40,7 @@
 -- WHAT THIS FILE DOES NOT DO. It does not add anything. Widening an existing table -- a column,
 -- an inline constraint, a default that moved -- is `0001`'s, because a description can be made to
 -- state those idempotently and this file is only for what a description cannot say at all. The
--- floor the two of them serve together is the chain as it stood at 223b49d^, which is every
+-- floor the two of them serve together is the chain as it stood at 31c1527^, which is every
 -- database the previous squash's own tail served; a database given that chain and then this one
 -- dumps identically to a fresh install, and scripts/verify-schema-equivalence.mjs is run the
 -- other way to keep it so. Anything older than the floor is brought back by restoring a backup.

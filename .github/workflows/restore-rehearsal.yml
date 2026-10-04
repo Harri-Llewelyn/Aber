@@ -2,7 +2,7 @@
 # Backup and restore rehearsal against a disposable cluster.
 #
 # THE SPECIFIC RISK IS NOT THAT THE SCRIPTS ARE WRONG TODAY. `scripts/restore-databases.sh` was
-# rehearsed by hand once and the defects that rehearsal found (3bc6400) are the argument for doing
+# rehearsed by hand once and the defects that rehearsal found (d51b4e6) are the argument for doing
 # it on a schedule. The risk is that the restore path depends on the shape of two databases, the
 # Supabase role set, the pgsodium root key and the migration chain -- ALL OF WHICH CHANGE. A
 # restore that worked in August fails in November, and the current design guarantees nobody finds

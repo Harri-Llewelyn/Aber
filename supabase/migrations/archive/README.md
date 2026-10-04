@@ -24,8 +24,8 @@ still runs.
 | When | Files folded | Left applied | Postgres |
 |---|---|---|---|
 | Public beta | 38, `20260101000000_init_assets_and_digital_thread` … `20260101000037_schema_versioning` | `0001`, `0002` | 15.6.1.143 |
-| 2026-09-03, `223b49d` | 61, `0003` … `0078` | `0001`, `0002` and a tail of nine | 15.6.1.143 |
-| 2026-09-22, `12a050c6` | 70, `0004` … `0134` | `0000`, `0001`, `0002` | 17.6.1.160 |
+| 2026-09-03, `31c1527` | 61, `0003` … `0078` | `0001`, `0002` and a tail of nine | 15.6.1.143 |
+| 2026-09-22, `e74c30e0` | 70, `0004` … `0134` | `0000`, `0001`, `0002` | 17.6.1.160 |
 | Before 1.0, 2026-10-03 | 28, `0000` … `0032`, archived as `0135` … `0162` | `0001`, `0002` | 17.6.1.175 |
 
 **A number is never issued twice.** Until the fourth squash it was: the third restarted the live
@@ -206,7 +206,7 @@ database that already exists and every `IF NOT EXISTS` is satisfied by something
 **Both earlier squashes shipped with that hole** — an upgrade through them stops at the first
 object naming something the old database never got, and there was no rehearsal to find out.
 
-There is one now: build a database from the chain at `223b49d^`, apply the fold to it, and compare
+There is one now: build a database from the chain at `31c1527^`, apply the fold to it, and compare
 it against a fresh install of the fold. It takes five faults to converge, each found by the run
 before it, and all five are the same shape — a `CREATE` that a dump cannot express as a change:
 

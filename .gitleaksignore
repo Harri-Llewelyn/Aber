@@ -3,51 +3,51 @@
 
 # Development JWTs signed with the development JWT secret committed beside them. Valid only on a
 # stack that runs with that secret; npm run setup mints a site's own.
-06512fea4a1bdecffcbddd1b9bc4587b8675be1d:frontend/src/test/setup.js:jwt:7
-323275cef643f19c0bfb271004d6e90b23ddcdf9:.github/workflows/ci.yml:jwt:51
-46b00a0bcc57c978291e5a663d63d0b8d8206403:deploy/helm/factoryplus/values-dev.yaml:jwt:26
-46b00a0bcc57c978291e5a663d63d0b8d8206403:deploy/helm/factoryplus/values-dev.yaml:jwt:27
-5b1690253983daee9bd86f9702cd04fe488ed11c:.env.example:jwt:63
-90d913b10172586b8f34f07fea174e3c5998f247:deploy/helm/acs-cymru/values-dev.yaml:jwt:51
-90d913b10172586b8f34f07fea174e3c5998f247:deploy/helm/acs-cymru/values-dev.yaml:jwt:52
-9d8f13ff1f7d8e82b8fd200896c3cc8cd2416d5b:.github/workflows/restore-rehearsal.yml:jwt:84
-e7d9b143c9bac382f2f09129f4c302d2f717a8c3:.env.example:jwt:13
-e7d9b143c9bac382f2f09129f4c302d2f717a8c3:.env.example:jwt:14
-e7d9b143c9bac382f2f09129f4c302d2f717a8c3:ingestion/validate.py:jwt:21
-f8c1df237be26f6abb5d3d7bcb08d93d625999e4:.env.example:jwt:53
+0b8a7067f454df02fad759ac4169d8ad81bb9fb0:frontend/src/test/setup.js:jwt:7
+efa37607f98ea74fcc73528f5d114470cd68f295:.github/workflows/ci.yml:jwt:51
+e04e7bc33eb762d4235b7019d9aba3d74958a094:deploy/helm/factoryplus/values-dev.yaml:jwt:26
+e04e7bc33eb762d4235b7019d9aba3d74958a094:deploy/helm/factoryplus/values-dev.yaml:jwt:27
+35fc5e0d3e26bbfe2ea43a227d25fcfcad64c764:.env.example:jwt:63
+269c6b6a4d5ac354986d5a114f7698522a4ec7c9:deploy/helm/acs-cymru/values-dev.yaml:jwt:51
+269c6b6a4d5ac354986d5a114f7698522a4ec7c9:deploy/helm/acs-cymru/values-dev.yaml:jwt:52
+9e62541f96d7fc65718e87c88367b56b3b146cb0:.github/workflows/restore-rehearsal.yml:jwt:84
+ed536e848210b79e570097efbacc4932a6943538:.env.example:jwt:13
+ed536e848210b79e570097efbacc4932a6943538:.env.example:jwt:14
+ed536e848210b79e570097efbacc4932a6943538:ingestion/validate.py:jwt:21
+5247108772f54470856bce12771d4fc471de513e:.env.example:jwt:53
 
 # Supabase anon and service_role keys first committed in the initial commit, for a local
 # throwaway instance that no longer exists (confirmed by the maintainer, 2026-09-23). Signed with
 # a secret that is in neither this history nor Supabase's published defaults.
-9da7500009da6a2e8f832c5343fe3136547ff2fb:.env.example:jwt:10
-9da7500009da6a2e8f832c5343fe3136547ff2fb:.env.example:jwt:11
-9da7500009da6a2e8f832c5343fe3136547ff2fb:frontend/src/lib/supabaseClient.js:jwt:4
-9da7500009da6a2e8f832c5343fe3136547ff2fb:ingestion/validate.py:jwt:21
-9da7500009da6a2e8f832c5343fe3136547ff2fb:validate.py:jwt:21
+a72c2e080cba8d9b0e479a4b2f3799d4954d156f:.env.example:jwt:10
+a72c2e080cba8d9b0e479a4b2f3799d4954d156f:.env.example:jwt:11
+a72c2e080cba8d9b0e479a4b2f3799d4954d156f:frontend/src/lib/supabaseClient.js:jwt:4
+a72c2e080cba8d9b0e479a4b2f3799d4954d156f:ingestion/validate.py:jwt:21
+a72c2e080cba8d9b0e479a4b2f3799d4954d156f:validate.py:jwt:21
 
 # The development Realtime SECRET_KEY_BASE, committed as the dev default.
-46b00a0bcc57c978291e5a663d63d0b8d8206403:deploy/helm/factoryplus/values-dev.yaml:generic-api-key:33
-5e75790ca022e5f376997a1d9cc0e397ebfbbc43:.env.example:generic-api-key:37
+e04e7bc33eb762d4235b7019d9aba3d74958a094:deploy/helm/factoryplus/values-dev.yaml:generic-api-key:33
+4d2fddcf37fda47dbb7feaba38d287b5e24c5928:.env.example:generic-api-key:37
 
 # The RFC 6455 sample Sec-WebSocket-Key nonce, used by a CI probe.
-46b00a0bcc57c978291e5a663d63d0b8d8206403:.github/workflows/ci.yml:generic-api-key:1072
-5e75790ca022e5f376997a1d9cc0e397ebfbbc43:.github/workflows/ci.yml:generic-api-key:262
+e04e7bc33eb762d4235b7019d9aba3d74958a094:.github/workflows/ci.yml:generic-api-key:1072
+4d2fddcf37fda47dbb7feaba38d287b5e24c5928:.github/workflows/ci.yml:generic-api-key:262
 
 # The documented example cold-archive site key.
-02ec11403211bb10f6be351896bec2a439fff08e:supabase/README.md:generic-api-key:2048
-dd22ff94908f8f92280868a3e067373f3e3b55b5:deploy/helm/acs-cymru/values.yaml:generic-api-key:789
-dd22ff94908f8f92280868a3e067373f3e3b55b5:supabase/README.md:generic-api-key:2030
+2cc19746981b5783588af3f2a1bcb98e5070dd09:supabase/README.md:generic-api-key:2048
+7fe928b96447200ae960b0dc04025dd0a2da27f3:deploy/helm/acs-cymru/values.yaml:generic-api-key:789
+7fe928b96447200ae960b0dc04025dd0a2da27f3:supabase/README.md:generic-api-key:2030
 
 # A comment in the spell-checker configuration.
-6943e913d671f87ad13e5b20a5cf5afb9c62d6eb:cspell.json:generic-api-key:100
+bf008e0b56abde6836b626b3d7a1ae24b4fcf264:cspell.json:generic-api-key:100
 
 # A mocked broker credential in a unit test.
-1d64c7042127d64796f807c09b3f7705f2aaf0fd:frontend/src/__tests__/gatewayCredentialModal.test.jsx:generic-api-key:22
+43d122036fb12d6835c66f3cf6112367174e09b4:frontend/src/__tests__/gatewayCredentialModal.test.jsx:generic-api-key:22
 
 # A SHA-256 pin inside a curl | openssl command in a unit test, not an auth header.
-61ad5b24aed3f92dd397bc1848dbf90a826d96e1:frontend/src/__tests__/gatewayBundleModal.test.jsx:curl-auth-header:453
-99e48ba798063704a03f9724477e6743e99df397:frontend/src/__tests__/gatewayBundleModal.test.jsx:curl-auth-header:453
+4f421b1638c7871057b161cf59b41fde551e75e8:frontend/src/__tests__/gatewayBundleModal.test.jsx:curl-auth-header:453
+53b67bae4bbfef341906ecebdd439c1fbf7fb128:frontend/src/__tests__/gatewayBundleModal.test.jsx:curl-auth-header:453
 
 # A made-up site key in a unit test. archive.site_key is the plain prefix archived objects are
 # filed under, not a credential.
-09a3cf3886312e452056242c9bf9633a94d76b24:frontend/src/__tests__/coldStorageDestinationModal.test.jsx:generic-api-key:25
+22eb02c6a97ed7d4d29884de187baf54ab087d25:frontend/src/__tests__/coldStorageDestinationModal.test.jsx:generic-api-key:25

@@ -38,7 +38,7 @@ ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
 -- THE DOCUMENTED FAILURE MODE, and the reason this is seeded rather than borrowed. Vault is
 -- encrypted with a pgsodium root key that lives OUTSIDE the dump, so a restore into a database
 -- whose key differs produces rows that are present, well-formed, and undecryptable -- and nothing
--- about the restore reports it. Commit 4ee344e exists because that was found late once already.
+-- about the restore reports it. Commit 8559b29 exists because that was found late once already.
 --
 -- Its own secret, so the assertion does not rest on which of the platform's secrets this stack
 -- was given: one never supplied leaves nothing to decrypt, and the check would pass by being

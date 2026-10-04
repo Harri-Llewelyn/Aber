@@ -311,7 +311,7 @@ chown the data directory before dropping privileges, so fsGroup is decorative fo
 `k3d image import` writes a tarball into the cluster image volume and `ctr import`s it inside the node. When
 the node cannot see the tarball the import fails per node, and k3d prints the error, then "Successfully
 imported 8 image(s)", then exits 0. The next lines removed the host copies on the strength of that exit code,
-so the only surviving copy was destroyed. Seen on `main` at fc3ac34 on a tree byte-identical to one that had
+so the only surviving copy was destroyed. Seen on `main` at 7d705aa on a tree byte-identical to one that had
 passed ten minutes earlier; the tell was duration (eight seconds and one gigabyte instead of minutes and ten).
 The node's own image list is the check, not the exit code.
 
@@ -351,7 +351,7 @@ it selects from.
 **Symptom:** a fresh install failed at the `timescaledb-maintenance` post-install hook with
 `relation "telemetry_1m" does not exist`. Every upgrade of an existing stack passed.
 
-`telemetry_horizons` reads the three rollups. It was added on 2026-09-16 (`28e6694`) as section
+`telemetry_horizons` reads the three rollups. It was added on 2026-09-16 (`fb4bf7e`) as section
 1b, beside `telemetry_latest`, because both are views evaluated on the historian for
 postgres_fdw's sake and the grouping read naturally. The file runs top to bottom on every boot,
 and on a historian that has never booted the rollups are created by section 2, after it.

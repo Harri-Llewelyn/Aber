@@ -101,7 +101,7 @@ the same rows in every seeded table but `audit_trail` (below). `--dump <dir> <ou
 dump the generator reads, under the same preconditions.
 
 **The third squash also proved an upgrade through it**: a database built by the chain at
-`223b49d^` and given the fold dumped identically to a fresh install of it. Neither earlier squash
+`31c1527^` and given the fold dumped identically to a fresh install of it. Neither earlier squash
 could have done that, and the rehearsal that proved it is what found out why — see
 `supabase/migrations/archive/README.md`, "What an upgrade needs that a dump does not contain". The
 fourth has no database to bring forward.
