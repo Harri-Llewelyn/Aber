@@ -965,6 +965,18 @@ Three consequences worth knowing before the first signed release:
   the second is `FROM` the first, and Bake's `target:` context hands one build's result to the other
   without a registry round-trip, on the driver the attestations need.
 
+### One-time: make the repository public
+
+Before the first public release, in this order:
+
+1. Scan a mirror clone of every ref for secrets, as
+   [`docs/static-analysis.md`](../../docs/static-analysis.md#before-the-repository-goes-public)
+   shows. Anything not already reviewed stops here until it is rotated.
+2. *Settings → General → Danger Zone → Change visibility → Public.*
+3. Turn on CodeQL default setup, Dependabot alerts (alerts only) and secret scanning with push
+   protection; the same page of `static-analysis.md` lists where each switch is and why Dependabot
+   opens no pull requests.
+
 ### One-time: make the packages public
 
 **GHCR creates every new package private, whatever the repository's visibility**, and

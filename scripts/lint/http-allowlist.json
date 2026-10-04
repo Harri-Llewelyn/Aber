@@ -1,0 +1,34 @@
+{
+  "hosts": {
+    "mqtt": "MQTT over WebSocket (mosquitto:9001): nothing for an HTTP spider to read."
+  },
+  "findings": {
+    "app 10038-1": "No Content-Security-Policy: its connect-src is the install's API origin, which config.js supplies at runtime, so the image's nginx cannot spell it. #679.",
+    "app 90003": "The Google Fonts stylesheet has no integrity attribute because Google serves it per browser; the fonts leave with #438.",
+    "app 90004-2": "No Cross-Origin-Embedder-Policy: nothing here needs cross-origin isolation, and require-corp would refuse the Google Fonts (#438).",
+    "docs 10021": "Swagger UI's nginx sets no nosniff. The host serves public specifications with no session or cookie.",
+    "docs 10055-13": "Swagger UI's image sends a CSP of frame-ancestors 'none' alone, to refuse framing; ZAP reads the missing directives as wildcards. Public documentation with no session.",
+    "docs 10055-4": "As docs 10055-13: the frame-ancestors-only policy, read as a wildcard.",
+    "docs 10055-5": "As docs 10055-13: the frame-ancestors-only policy, read as allowing inline script.",
+    "docs 10055-6": "As docs 10055-13: the frame-ancestors-only policy, read as allowing inline style.",
+    "docs 10063-1": "Swagger UI's nginx sets no Permissions-Policy. The host serves public specifications with no session or cookie.",
+    "docs 10096": "False positive: a number in swagger-ui-standalone-preset.js that ZAP reads as a Unix time.",
+    "docs 90004-2": "No Cross-Origin-Embedder-Policy: public documentation needs no cross-origin isolation.",
+    "docs 90004-3": "No Cross-Origin-Opener-Policy from Swagger UI's nginx. The host holds no session for an opener to reach.",
+    "git 10038-1": "The sign-in redirect lands on the dashboard's login page: app 10038-1, #679.",
+    "git 90003": "The sign-in redirect lands on the dashboard's login page: app 90003, #438.",
+    "git 90004-2": "The sign-in redirect lands on the dashboard's login page: app 90004-2.",
+    "grafana 10021": "Grafana omits nosniff only on static images and browserconfig.xml under /public; its pages carry it, and it has no setting for the rest.",
+    "grafana 10038-1": "Grafana's content_security_policy is off by default and needs testing against the provisioned dashboards and plugins first. #679.",
+    "grafana 10063-1": "Grafana writes its own response headers and has no setting for Permissions-Policy.",
+    "grafana 10096": "False positive: a number in Grafana's login page that ZAP reads as a Unix time.",
+    "grafana 90004-1": "Grafana writes its own response headers and has no setting for Cross-Origin-Resource-Policy.",
+    "grafana 90004-2": "Grafana writes its own response headers and has no setting for Cross-Origin-Embedder-Policy; nothing needs cross-origin isolation.",
+    "grafana 90004-3": "Grafana writes its own response headers and has no setting for Cross-Origin-Opener-Policy.",
+    "nodered 10038-1": "The editor is built on inline scripts and handlers, so its policy needs a report-only run first. #679.",
+    "nodered 90004-2": "No Cross-Origin-Embedder-Policy: the editor needs no cross-origin isolation.",
+    "studio 10038-1": "The sign-in redirect lands on the dashboard's login page: app 10038-1, #679.",
+    "studio 90003": "The sign-in redirect lands on the dashboard's login page: app 90003, #438.",
+    "studio 90004-2": "The sign-in redirect lands on the dashboard's login page: app 90004-2."
+  }
+}

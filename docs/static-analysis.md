@@ -61,16 +61,51 @@ Each key is chosen to survive unrelated edits:
 - **trivy** keys name the check and the resource (the container of a workload, or the Dockerfile),
   never a line number.
 
+## Against a running stack
+
+Two scans read what the stack serves rather than its source, so neither is part of `npm run lint`:
+
+- **`npm run scan:http`** runs OWASP ZAP's baseline scan (2.17.0) against every host the release's
+  Ingress routes: response headers, cookies and CORS, as a browser meets them, through the real
+  Host header and the sign-in redirects between hosts. It needs the development cluster up
+  (`npm run dev:up`) and reaches it on the k3d network. Its allow-list is
+  `scripts/lint/http-allowlist.json`, keyed by host label and ZAP alert reference (`app 10038-1`),
+  with a `hosts` map for a host it skips.
+- **`npm run scan:images`** scans the third-party images the chart runs; see
+  [`testing.md`](testing.md#keeping-the-pinned-versions-current).
+
+`check-gateway-surface.mjs` proves each route sits behind the authentication it should have.
+`scan:http` asks the same surface what it tells a browser. Run it after a change to a route, a
+proxy or an image that serves pages, and before a release.
+
+## Query performance
+
+`lint:db` gates splinter's WARN and ERROR findings. Its INFO findings, unused indexes and foreign
+keys with no covering index, depend on a workload, and a throwaway database has none. The load run
+in [`test-harness/README.md`](../test-harness/README.md#what-the-databases-spend-their-time-on)
+measured them against `pg_stat_statements` and `index_advisor`, and records which were acted on and
+why the rest stand. Repeat that run after a change to a hot path rather than trusting the INFO list.
+
 ## Before the repository goes public
 
 Publishing exposes every pull request's head, including branches deleted after they merged, and a
-normal clone does not fetch them. Scan a mirror clone before the flip:
+normal clone does not fetch them. Scan a mirror clone immediately before the flip:
 
 ```bash
 git clone --mirror https://github.com/Harri-Llewelyn/Aber.git /tmp/aber-mirror.git
 node scripts/scan-secrets.mjs --git-dir=/tmp/aber-mirror.git
 ```
 
-Once the repository is public, CodeQL, Dependabot alerts and secret scanning are free on GitHub and
-cover `scan:source`, `audit:deps` and `scan:secrets`. Until then the two CI jobs above are the only
-coverage.
+A finding that is not in `.gitleaksignore` stops the flip until it is rotated.
+
+Three switches become free once the repository is public. Turn each on under *Settings → Code
+security*, straight after the flip:
+
+| Switch | Covers | Setting |
+| :--- | :--- | :--- |
+| CodeQL | `scan:source`, more deeply, for JavaScript, TypeScript and Python | *Code scanning → CodeQL analysis → Default setup* |
+| Dependabot alerts | `audit:deps`, continuously from GitHub's advisory database | *Dependabot alerts* on. Leave *Dependabot security updates* and *version updates* off: Renovate opens the upgrade pull requests, and a second bot would duplicate them |
+| Secret scanning | `scan:secrets`, on every push | *Secret scanning* and *Push protection* on |
+
+The CI jobs above stay. gitleaks reads formats GitHub does not recognise, such as this stack's own
+service tokens and the broker's Dynamic Security passwords.

@@ -436,6 +436,16 @@ static_resources:
                         # default is seven days. 3600s matches GOTRUE_JWT_EXP, and scoping it to this door rather than
                         # stack-wide keeps the wall-mounted dashboards signed in.
                         default_refresh_token_expires_in: 3600s
+                        # SameSite=Lax: the callback is a top-level GET, which Lax admits; a cross-site subrequest
+                        # carries none of these cookies.
+                        cookie_configs:
+                          bearer_token_cookie_config: { same_site: LAX }
+                          oauth_hmac_cookie_config: { same_site: LAX }
+                          oauth_expires_cookie_config: { same_site: LAX }
+                          id_token_cookie_config: { same_site: LAX }
+                          refresh_token_cookie_config: { same_site: LAX }
+                          oauth_nonce_cookie_config: { same_site: LAX }
+                          code_verifier_cookie_config: { same_site: LAX }
                         credentials:
                           client_id: c0ffee00-0000-4000-8000-000000000003
                           # Two files, one secret each: a path config source carrying two resources is accepted at boot and
@@ -619,6 +629,15 @@ static_resources:
                         forward_bearer_token: true
                         use_refresh_token: true
                         default_refresh_token_expires_in: 3600s
+                        # SameSite=Lax, as Studio's.
+                        cookie_configs:
+                          bearer_token_cookie_config: { same_site: LAX }
+                          oauth_hmac_cookie_config: { same_site: LAX }
+                          oauth_expires_cookie_config: { same_site: LAX }
+                          id_token_cookie_config: { same_site: LAX }
+                          refresh_token_cookie_config: { same_site: LAX }
+                          oauth_nonce_cookie_config: { same_site: LAX }
+                          code_verifier_cookie_config: { same_site: LAX }
                         credentials:
                           client_id: c0ffee00-0000-4000-8000-000000000004
                           token_secret:

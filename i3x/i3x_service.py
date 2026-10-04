@@ -1472,8 +1472,11 @@ def _require_client_id(body: dict) -> str:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = f"aber-i3x/{SERVER_VERSION}"
     protocol_version = "HTTP/1.1"
+
+    def version_string(self):
+        """The Server header names the service and no versions; GET /info carries serverVersion."""
+        return "aber-i3x"
 
     # -- plumbing ----------------------------------------------------------------------------
     def log_message(self, fmt, *args):

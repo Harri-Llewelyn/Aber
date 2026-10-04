@@ -79,6 +79,10 @@ spec:
             # spec's URL. `none` is Swagger UI's own spelling for disabled.
             - name: VALIDATOR_URL
               value: none
+            # Off: no other origin reads these files. "Try it out" calls the gateway, whose CORS is
+            # its own; this only stops the image adding Access-Control-Allow-Origin: * here.
+            - name: CORS
+              value: "false"
           readinessProbe:
             httpGet:
               path: /
