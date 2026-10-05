@@ -274,13 +274,13 @@ The chart and the eleven images this repository builds are published to GHCR as 
 speaks OCI natively — there is no `helm repo add`, and no index to go stale.
 
 ```bash
-# What versions exist?
-helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 0.1.0
+# Is the version published? The repository's Releases page lists every one.
+helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 1.0.0
 
 # my-values.yaml must name ingestion.primaryHostId and ingestion.sparkplugGroup: both are fixed
 # for the life of the site, neither has a default, and the render refuses without them.
 helm install aber oci://ghcr.io/harri-llewelyn/aber/aber \
-  --version 0.1.0 \
+  --version 1.0.0 \
   --namespace aber --create-namespace \
   --values my-values.yaml \
   --timeout 15m
@@ -326,7 +326,7 @@ Put it under a domain your organisation controls, as `values-prod.yaml.example` 
 default, `https://aber.local/ids/asset/`, belongs to nobody.
 
 The ten built images resolve automatically to the chart's `appVersion`, which the release stamps
-equal to the chart version. Chart 0.1.0 can only pull images 0.1.0; there is nothing to line up by
+equal to the chart version. Chart 1.0.0 can only pull images 1.0.0; there is nothing to line up by
 hand and no `latest` tag to drift onto.
 
 #### Verify what you are about to install
@@ -338,7 +338,7 @@ in its registry index; [`SECURITY.md`](../../SECURITY.md#what-a-release-carries-
 says what each is and how to read it.
 
 ```bash
-V=0.1.0
+V=1.0.0
 ID="https://github.com/Harri-Llewelyn/Aber/.github/workflows/release.yml@refs/tags/v$V"
 ISSUER=https://token.actions.githubusercontent.com
 
@@ -429,7 +429,7 @@ the `appVersion` default:
 ingestion:
   image:
     repository: registry.internal/aber/ingestion
-    tag: "0.1.0-hotfix.2"
+    tag: "1.0.0-hotfix.2"
 ```
 
 Do this for a hotfix, a bisect or an air-gapped mirror. Do not do it as a way to run one component
@@ -918,7 +918,7 @@ done
 then the chart, to GHCR over OCI, on a `v*` tag.
 
 ```bash
-git tag v0.2.0 && git push origin v0.2.0
+git tag v1.0.1 && git push origin v1.0.1
 ```
 
 That tag is the only place the version is written. It stamps the ten image tags, the chart
@@ -941,7 +941,7 @@ attached — every image's SBOM and provenance, and a `DIGESTS` file naming what
 notes and publish it:
 
 ```bash
-gh release edit v0.2.0 --draft=false --notes-file notes.md
+gh release edit v1.0.1 --draft=false --notes-file notes.md
 ```
 
 ### What the release signs and attests

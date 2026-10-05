@@ -169,7 +169,7 @@ with (up to 70 days on a stack older than the sized raw chunks) and is compresse
 ### Migrations are forward-only
 
 There are no down-migrations, and this is the honest limit of §2. **The images can be rolled back;
-the schema cannot.** Deploying `v0.2.0` after `v0.3.0` gives you old code against a newer schema —
+the schema cannot.** Deploying `v1.1.0` after `v1.2.0` gives you old code against a newer schema —
 which mostly works, because every migration so far has been additive, and mostly is not a guarantee.
 
 If a rollback is a real possibility for your deployment, **take a backup before upgrading**.

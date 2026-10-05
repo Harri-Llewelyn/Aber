@@ -287,7 +287,7 @@ not. `VITE_RELEASE_VERSION` states what **the release** is, `Chart.AppVersion` a
 same ConfigMap as everything else.
 
 `utils/releaseVersion.js` compares them and the account menu shows a line under the version when
-they disagree: *Update available — 0.2.0*.
+they disagree: *Update available — 1.0.1*.
 
 **A pod is self-consistent**, so this is not a rollout progress indicator: `config.js` is mounted
 with `subPath` and never updates in place, and the chart's `checksum/config` annotation rolls the pod

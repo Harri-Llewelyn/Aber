@@ -134,7 +134,7 @@ Full runbook in [`deploy/k8s/README.md`](deploy/k8s/README.md). The short versio
 # appVersion, and the chart pulls them under exactly these names: a local build that is
 # tagged any other way is ignored. deploy/k8s/README.md says what each one is for.
 NS=ghcr.io/harri-llewelyn/aber
-V=0.1.0                                       # appVersion in deploy/helm/aber/Chart.yaml
+V=1.0.0                                       # appVersion in deploy/helm/aber/Chart.yaml
 docker build -f supabase/functions/Dockerfile   -t $NS/edge-runtime:$V .
 docker build -f ingestion/Dockerfile            -t $NS/ingestion:$V .
 docker build -f node-red/Dockerfile             -t $NS/node-red:$V node-red
