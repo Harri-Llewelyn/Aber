@@ -63,8 +63,9 @@ COMMENT ON FUNCTION public.keep_gateway_credential(uuid, text) IS
   'gateway, replacing any earlier one, so show_gateway_credential() can show it again. Administrator '
   'or Shopfloor_Manager, the roles that may issue it.';
 
--- Administrator only. NO_DATA_FOUND (404 through PostgREST) when no copy is kept: a credential issued
--- before 0164, or one whose copy could not be written.
+-- Administrator only. NO_DATA_FOUND when no copy is kept: a credential issued before 0164, or one
+-- whose copy could not be written. PostgREST answers it 500, as it does every no_data_found here; the
+-- dashboard shows the message.
 CREATE OR REPLACE FUNCTION public.show_gateway_credential(p_gateway_id uuid)
 RETURNS TABLE(mqtt_username text, password text, issued_at timestamptz)
 LANGUAGE plpgsql
