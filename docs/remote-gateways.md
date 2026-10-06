@@ -145,6 +145,8 @@ bundle-installed appliance until somebody runs the platform playbook on it once 
   to anything in-stack (§7).
 * A route to the broker on **8883**. Remote gateways use MQTTS exclusively; 1883 is published only
   for gateways not yet moved, and is not used here.
+* A route to the forge's SSH on **22**, where the puller fetches the gateway's flow and
+  convergence fetches the platform playbook (§11, §12).
 * The broker's hostname must resolve. It also has to be in the certificate's SAN — see §7.
 
 ---

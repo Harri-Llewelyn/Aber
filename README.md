@@ -134,7 +134,8 @@ server's broker over MQTTS on 8883. It needs no Kubernetes. Create each one in t
 - **A bundle**: a folder to copy to any machine that already has Docker and the Compose plugin,
   where `docker compose up -d --build` starts it.
 
-Either way the gateway needs a route to the server's API and to its broker on 8883. Its image is
+Either way the gateway needs a route to the server's API, to its broker on 8883 and to the forge's
+SSH on 22, where it pulls its flow and its platform playbook. Its image is
 built on the gateway itself, which is how an arm64 Pi runs it. The runbook is
 [`docs/remote-gateways.md`](docs/remote-gateways.md), and the bundle's contents are in
 [`forge/gateway-platform/appliance/`](forge/gateway-platform/appliance). *Host* and *Simulated*
@@ -167,7 +168,54 @@ The full runbook is [`deploy/k8s/README.md`](deploy/k8s/README.md).
 
 ### Run it on a site
 
-Needs a k3s node, `kubectl`, Helm 3, Node.js, and DNS that resolves `*.<domain>` to the node. The
+#### Prepare the machine
+
+The server is one Linux machine on amd64, sized as above, with a fixed address on the site network.
+These commands assume Ubuntu 22.04 or 24.04 and a user with `sudo`.
+
+**Move the machine's own SSH off port 22 first.** Gateways reach the forge over SSH on 22, and
+k3s's ServiceLB gives the forge that port on the machine's address: once Aber is installed, a new
+SSH connection to port 22 reaches the forge, not the machine. Connections already open survive.
+
+```bash
+echo 'Port 2222' | sudo tee /etc/ssh/sshd_config.d/port.conf
+if systemctl is-active --quiet ssh.socket; then      # 24.04 starts sshd from a socket
+  sudo systemctl daemon-reload && sudo systemctl restart ssh.socket
+else
+  sudo systemctl restart ssh
+fi
+# Check `ssh -p 2222` from another terminal before closing this one.
+```
+
+Then k3s, which brings `kubectl` with it, Helm, and Node.js, which runs only `npm run setup` and
+needs no `npm install`:
+
+```bash
+curl -sfL https://get.k3s.io | sh -
+
+# k3s's kubeconfig is root's alone, and its kubectl reads a copy only when KUBECONFIG names it.
+mkdir -p ~/.kube
+sudo k3s kubectl config view --raw > ~/.kube/config
+chmod 600 ~/.kube/config
+echo 'export KUBECONFIG=~/.kube/config' >> ~/.bashrc && export KUBECONFIG=~/.kube/config
+kubectl get nodes        # one node, Ready
+
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
+sudo apt-get install -y nodejs git
+```
+
+Outside the machine:
+
+- **DNS.** A wildcard record on the site's DNS server, `*.<domain>` to the machine's address. Every
+  interface is a host under it (*Where everything is*, below), and every browser and gateway on the
+  site has to resolve it.
+- **Ports**, reachable from the site network: 80 and 443 for browsers and the API, 8883 for
+  gateways' MQTTS, and 22 for gateways' git over SSH to the forge.
+
+#### Install Aber
+
+Run the rest on the machine, as your own user rather than root. The
 clone is only for the setup script and two cluster manifests; the chart and Aber's own images are
 pulled from GHCR at 1.0.0.
 
