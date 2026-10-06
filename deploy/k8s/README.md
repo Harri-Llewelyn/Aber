@@ -289,8 +289,9 @@ kubectl -n cert-manager wait --for=condition=Available deployment --all --timeou
 kubectl apply -f deploy/k8s/internal-ca.yaml
 kubectl -n cert-manager wait --for=condition=Ready certificate/aber-ca --timeout=120s
 
-# Credentials minted for this site, written to deploy/helm/aber/values-local.yaml (gitignored).
-npm run setup -- --domain=aber.plant.example
+# Credentials minted for this site, and its first administrator's password, written to
+# deploy/helm/aber/values-local.yaml (gitignored). The password is also printed.
+npm run setup -- --domain=aber.plant.example --admin-email=you@plant.example
 
 # What only the site can say; each value is explained below.
 cat > site.yaml <<'EOF'
@@ -328,7 +329,16 @@ done
 helm test aber -n aber
 ```
 
-Then, before anyone signs in, distribute the root certificate (*TLS*, step 3).
+Then, before anyone signs in, distribute the root certificate (*TLS*, step 3), and sign in at
+`https://app.<domain>` as the first administrator: the email given to `npm run setup` and the
+password it printed.
+
+**The first administrator is the only account a site starts with.** db-init (migration `0163`)
+creates `supabaseAuth.firstAdministrator.email` with `secrets.firstAdministratorPassword`, holding
+`Administrator`, when no account has that address, and changes nothing once one does: a password or
+role the site changes stays changed. The demo accounts are for a laptop only
+(`supabaseAuth.demoAccounts`, set by `values-dev.yaml`). With an external Secret, the password is
+its optional `FIRST_ADMINISTRATOR_PASSWORD` key; without an email, NOTES says nobody can sign in.
 
 > **Do not add `--wait` to the first install — it deadlocks.** Helm's order is *create resources →
 > (with `--wait`) block until every workload is Ready → run post-install hooks*. This chart's

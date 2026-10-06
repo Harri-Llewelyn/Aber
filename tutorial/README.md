@@ -31,12 +31,12 @@ somebody else's plant in it. What that floor knew is in this file instead.
 
 ### 1. Sign in, and start with the dashboard
 
-Sign in to the dashboard as `admin@aber.local`, password `aber123` (seeded by
-[`../supabase/seed.sql`](../supabase/seed.sql)).
-**Do this before opening Node-RED or Grafana**: both federate to Supabase Auth, and GoTrue ships no consent UI, so the
-dashboard serves one at `/oauth/consent` and needs a session of its own first. Open all three at
-the hostnames in the table above, not at `npm run dev:forward`'s ports: each sign-in returns to the
-hostname it is registered with.
+Sign in to the dashboard: on a laptop as `admin@aber.local`, password `aber123`, the demo account
+`values-dev.yaml` turns on; on a site as the first administrator `npm run setup` created.
+**Do this before opening Node-RED or Grafana**: both federate to Supabase Auth, and GoTrue ships no
+consent UI, so the dashboard serves one at `/oauth/consent` and needs a session of its own first.
+Open all three at the hostnames in the table above, not at `npm run dev:forward`'s ports: each
+sign-in returns to the hostname it is registered with.
 
 Creating assets needs **Administrator** or **Shopfloor_Manager**. Operator and Auditor get read-only
 views — worth knowing before you wonder why a button is missing rather than broken.

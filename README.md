@@ -155,8 +155,8 @@ onto k3s, and gateways are added afterwards from the dashboard (*Gateways: Docke
 
 **`npm run dev:up` is the k3d route, not an alternative to it.** k3d runs k3s inside Docker, and the
 script creates the k3d cluster `aber`, builds every image from your checkout, imports them and
-installs the chart with `values-dev.yaml`. Those demo credentials are committed to git, so never use
-this route for a stack anyone else can reach.
+installs the chart with `values-dev.yaml`, whose credentials and four demo accounts are committed to
+git, so never use this route for a stack anyone else can reach.
 
 > **One node with 4 vCPU, 8 GiB and 100 GiB of disk is the measured minimum**; 8 vCPU and 16 GiB is
 > comfortable. Under it the stack does not run slowly, it fails to schedule — the chart reserves
@@ -182,8 +182,9 @@ kubectl -n cert-manager wait --for=condition=Available deployment --all --timeou
 kubectl apply -f deploy/k8s/internal-ca.yaml
 kubectl -n cert-manager wait --for=condition=Ready certificate/aber-ca --timeout=120s
 
-# Credentials minted for this site, written to deploy/helm/aber/values-local.yaml (gitignored).
-npm run setup -- --domain=aber.plant.example
+# Credentials minted for this site, and its first administrator's password, written to
+# deploy/helm/aber/values-local.yaml (gitignored). The password is also printed.
+npm run setup -- --domain=aber.plant.example --admin-email=you@plant.example
 
 # What only the site can say.
 cat > site.yaml <<'EOF'
@@ -219,8 +220,11 @@ helm test aber -n aber
 ```
 
 Before anyone signs in, install the root certificate in every browser and gateway that will use the
-stack (runbook, *TLS → 3*). To keep the credentials in a secret store rather than a values file,
-start from `values-prod.yaml.example` and set `secrets.existingSecret`.
+stack (runbook, *TLS → 3*). Then sign in at `https://app.<domain>` with the email you gave
+`npm run setup` and the password it printed. db-init creates that account once, as an
+`Administrator`; after that it is the site's, and no install or upgrade changes it. To keep the
+credentials in a secret store rather than a values file, start from `values-prod.yaml.example` and
+set `secrets.existingSecret`.
 
 **The chart validates its own values and fails the render, not the pod**, and the message names the
 fix. A missing ingestion id, the forge's route on plain HTTP, broker TLS with no address for
@@ -270,7 +274,8 @@ permissions and every other role to `read`). An appliance deploys the flow on th
 its gateway repository in the forge, where pushes are disabled and a merge needs one approval from
 the `administrators` team, which `forge-membership` fills from each person's Postgres role.
 
-**Demo accounts** — seeded by [`supabase/seed.sql`](supabase/seed.sql), password `aber123`:
+**Demo accounts, on a laptop only** — seeded by [`supabase/seed.sql`](supabase/seed.sql) while
+`supabaseAuth.demoAccounts` is on, which `values-dev.yaml` alone sets, password `aber123`:
 
 | Email | Role | Access |
 | :--- | :--- | :--- |
@@ -279,8 +284,11 @@ the `administrators` team, which `forge-membership` fills from each person's Pos
 | `operator@aber.local` | `Operator` | Read-only + telemetry |
 | `auditor@aber.local` | `Auditor` | Audit Trail read-only |
 
-Self-registered accounts get read-only `Operator` via the `handle_new_user` trigger; an
-`Administrator` must promote them.
+**Further people** are added outside the dashboard for now
+([#705](https://github.com/Harri-Llewelyn/Aber/issues/705)): sign-up is closed
+(`supabaseAuth.disableSignup`), so an account is created with GoTrue's admin API or in Studio, and
+its role is a row in `public.user_roles`. Where sign-up is opened, a self-registered account gets
+read-only `Operator` from the `handle_new_user` trigger, and an `Administrator` must promote it.
 
 **Forgotten passwords** are reset from the sign-in card (*Forgot your password?*), which asks
 GoTrue to email a link to `/reset-password`. The link is sent over SMTP, so set
