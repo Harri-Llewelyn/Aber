@@ -1,5 +1,9 @@
 # Web Dashboard
 
+**In short:** how the dashboard is built: its layout, how it reads and updates data, and the
+conventions its pages share. Read this if you are changing the dashboard. To learn how to use it,
+open the help panel on any of its pages.
+
 React 18 SPA served by NGINX. Talks to Supabase directly via PostgREST, subscribes to a Realtime
 change feed, and invokes edge functions for privileged operations.
 

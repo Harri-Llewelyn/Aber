@@ -1,5 +1,10 @@
 # Kubernetes deployment — runbook
 
+**In short:** every step and setting for installing and running Aber's server on Kubernetes, with
+the reason for each. Installing for the first time? Start with
+[`docs/install.md`](../../docs/install.md), which walks through the usual path, and come here for
+anything it does not cover.
+
 The chart is `deploy/helm/aber`. The design and its reasoning are in
 [`docs/kubernetes-architecture.md`](../../docs/kubernetes-architecture.md); this file is the
 operational half.

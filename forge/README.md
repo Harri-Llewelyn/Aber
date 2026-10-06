@@ -1,5 +1,9 @@
 # The forge's repositories
 
+**In short:** the forge is Aber's built-in git server (Gitea). This folder holds the repositories
+Aber publishes into it itself, such as the playbook every Remote gateway follows. Read this before
+changing what gateways install or run.
+
 Everything under this directory is published into the forge (the platform's Gitea) as a
 repository, by the platform itself, never by a person pushing to it. The forge is where appliances
 read from; this directory is where what they read is written and reviewed.

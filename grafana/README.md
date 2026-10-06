@@ -1,5 +1,8 @@
 # Grafana provisioning
 
+**In short:** Aber's dashboards, data sources and alert rules in Grafana, as Grafana loads them when
+it starts. Read this to change a dashboard or an alert rule, or to understand an alert that fired.
+
 Everything Grafana loads at start lives here and is mirrored into the chart by
 `scripts/sync-helm-chart-files.mjs`: the platform dashboards under
 [`provisioning/dashboards/platform/`](provisioning/dashboards/platform/), and under

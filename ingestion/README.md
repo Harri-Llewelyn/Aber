@@ -1,5 +1,9 @@
 # Ingestion Engine
 
+**In short:** the service that receives every message from the gateways, checks it and stores it:
+changes to equipment in Supabase, and readings in TimescaleDB. Read this to find out what happens to
+a reading, why one might be dropped or quarantined, or to change the service.
+
 The Python daemon that consumes Sparkplug B traffic from Mosquitto and routes it to two different
 stores: **asset metadata to Supabase**, **time-series telemetry to TimescaleDB**.
 
