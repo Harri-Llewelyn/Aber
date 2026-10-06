@@ -426,6 +426,13 @@ export const SUITES = {
     lanes: ['db'],
     why: "The role table's RLS -- who may read and who may grant.",
   },
+  'supabase/migrations/test_first_administrator.py': {
+    lanes: ['db'],
+    why:
+      "0163's first administrator: created once, as a person holding Administrator, and never " +
+      'touched by a later run, so a password or role the site changed stays changed; and ' +
+      'executable by no API role, since it writes a password.',
+  },
   'supabase/migrations/test_schema_versioning.py': {
     lanes: ['db'],
     why:

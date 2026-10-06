@@ -104,6 +104,17 @@ if these are missing the PVC must be destroyed, not the pod restarted):
 
   kubectl -n {{ .Release.Namespace }} exec -it statefulset/timescaledb -- \
     psql -U {{ .Values.timescaledb.username }} -d {{ .Values.timescaledb.database }} -c '\dt'
+{{- if .Values.supabaseAuth.demoAccounts }}
+
+  ⚠  supabaseAuth.demoAccounts is on: admin@aber.local and three other demo accounts, with the
+     password published in the README, are applied on every install and upgrade. For a
+     development stack only.
+{{- else if not (dig "firstAdministrator" "email" "" .Values.supabaseAuth) }}
+
+  ⚠  No account is created for anyone to sign in with: supabaseAuth.firstAdministrator.email is
+     unset. `npm run setup` sets it with a password of its own; or set it and
+     secrets.firstAdministratorPassword, then upgrade. An existing administrator is unaffected.
+{{- end }}
 {{- if not .Values.secrets.existingSecret }}
 
   ⚠  This release rendered its own Secret from values. Right for local k3s, wrong for anything

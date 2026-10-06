@@ -6,8 +6,8 @@
  * from it accepts published credentials at its edge. This writes
  * deploy/helm/aber/values-local.yaml (gitignored) with every secret minted here:
  *
- *   npm run setup                        # asks one question on a terminal
- *   npm run setup -- --domain=aber.example.com
+ *   npm run setup                        # asks two questions on a terminal
+ *   npm run setup -- --domain=aber.example.com --admin-email=ops@example.com
  *   helm upgrade --install aber deploy/helm/aber -n aber \
  *     -f deploy/helm/aber/values-local.yaml
  *
@@ -15,9 +15,11 @@
  * rotating the secret without re-minting both yields a stack that comes up healthy and rejects
  * every request. Node's built-in `crypto` does HMAC-SHA256, so this stays a zero-install script.
  *
- * One question is asked, on a terminal only: the domain every host is published under, which is
- * what a browser and a Remote gateway both dial. `--domain=<base>` answers it from a script;
- * without a terminal it is left at the chart's default, and the file says what that withholds.
+ * Two questions are asked, on a terminal only. The domain every host is published under, which is
+ * what a browser and a Remote gateway both dial: `--domain=<base>` answers it from a script, and
+ * without a terminal it is left at the chart's default. And the first administrator's email:
+ * `--admin-email=<address>` answers it, and db-init creates that account with the password minted
+ * here (migration 0163). Without one, nobody can sign in until it is set.
  *
  * For anything another person can reach, an externally managed Secret (`secrets.existingSecret`,
  * values-prod.yaml.example) is the intended home for these values; this file is the laptop and
@@ -169,6 +171,44 @@ async function resolveDomain() {
 
 const domain = await resolveDomain();
 
+const EMAIL_SHAPE = /^[^@\s]+@[^@\s]+$/;
+
+/** From `--admin-email=`, else asked on a terminal, else blank. */
+async function resolveAdminEmail() {
+  const flag = process.argv.find((a) => a.startsWith('--admin-email='));
+  if (flag) {
+    const email = flag.slice('--admin-email='.length).trim().toLowerCase();
+    if (!EMAIL_SHAPE.test(email)) { console.error(`❌ --admin-email: '${email}' is not an email address.`); process.exit(1); }
+    return email;
+  }
+  if (!process.stdin.isTTY) return '';
+  console.log('');
+  console.log('👤 The first administrator signs in with this email and the password printed at the end.');
+  console.log('   db-init creates the account once; after that it is yours to change. Leave it blank and');
+  console.log('   nobody can sign in until supabaseAuth.firstAdministrator is set.');
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    for (;;) {
+      const answer = (await rl.question('   Email [blank = none]: ')).trim().toLowerCase();
+      if (!answer || EMAIL_SHAPE.test(answer)) return answer;
+      console.log(`   '${answer}' is not an email address.`);
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+/** A password a person types once: 24 characters from an alphabet with no look-alikes, about 119
+ *  bits, in groups of six. */
+function typeablePassword() {
+  const alphabet = '23456789abcdefghjkmnpqrstuvwxyz';
+  const chars = Array.from({ length: 24 }, () => alphabet[crypto.randomInt(alphabet.length)]);
+  return [0, 6, 12, 18].map((i) => chars.slice(i, i + 6).join('')).join('-');
+}
+
+const adminEmail = await resolveAdminEmail();
+if (adminEmail) secrets.firstAdministratorPassword = typeablePassword();
+
 /** Hand-written YAML: every value is hex, a JWT or a domain, none needs quoting beyond the quotes. */
 const yamlLines = [
   '# Written by `npm run setup` on ' + new Date().toISOString().slice(0, 10) + '. Not in git (deploy/helm/**/values-local.yaml is',
@@ -183,6 +223,9 @@ const yamlLines = [
 ];
 if (domain) {
   yamlLines.push('global:', `  publicBaseDomain: "${domain}"`, '');
+}
+if (adminEmail) {
+  yamlLines.push('supabaseAuth:', '  firstAdministrator:', `    email: "${adminEmail}"`, '');
 }
 yamlLines.push('secrets:');
 for (const [key, value] of Object.entries(secrets)) yamlLines.push(`  ${key}: "${value}"`);
@@ -212,8 +255,14 @@ if (domain) {
   console.log('   REMOTE GATEWAYS CANNOT BE ENROLLED. Set global.publicBaseDomain in the file later.');
 }
 console.log('');
-console.log('⚠️  Demo LOGINS are separate and unchanged: admin@aber.local / aber123 and the');
-console.log('   other three accounts are seeded by supabase/seed.sql. Change them before anyone else');
-console.log('   can reach this stack.');
+if (adminEmail) {
+  console.log(`👤 The first administrator: ${adminEmail}`);
+  console.log(`   password ${secrets.firstAdministratorPassword}`);
+  console.log('   Created by db-init on the install; also in the file above. Sign in at app.<domain>.');
+} else {
+  console.log('⚠️  No first administrator was given, so NOBODY CAN SIGN IN. Run again with');
+  console.log('   --admin-email=<address> (delete the file first), or set supabaseAuth.firstAdministrator.email');
+  console.log('   and secrets.firstAdministratorPassword (12+ characters) in it.');
+}
 console.log('');
 console.log(`🎉 helm upgrade --install aber deploy/helm/aber -n aber -f ${rel}`);

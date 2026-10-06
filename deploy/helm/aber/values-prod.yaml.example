@@ -47,6 +47,7 @@ secrets:
   #   GRAFANA_ADMIN_USER           GRAFANA_ADMIN_PASSWORD     GRAFANA_OAUTH_CLIENT_SECRET
   #   NODERED_CREDENTIAL_SECRET    NODERED_OAUTH_CLIENT_SECRET
   #   NODERED_WEBHOOK_JWT_SECRET   NODERED_ADMIN_TOKEN
+  #   FIRST_ADMINISTRATOR_PASSWORD (read only when supabaseAuth.firstAdministrator is created)
   #
   # STILL A SET. SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are HS256 JWTs signed by
   # SUPABASE_JWT_SECRET, and SUPABASE_PUBLISHABLE_KEY / SUPABASE_SECRET_KEY are the keys callers
@@ -189,6 +190,20 @@ secrets:
   noderedWebhookJwtSecret: ""
   # LEAVE EMPTY. Break-glass static token that bypasses Supabase Auth entirely.
   noderedAdminToken: ""
+
+  # The first administrator's password, 12+ characters, used once: when db-init creates the
+  # account named by supabaseAuth.firstAdministrator.email below.
+  firstAdministratorPassword: ""
+
+# ---------------------------------------------------------------------------------------------
+# Who can sign in on day one.
+# ---------------------------------------------------------------------------------------------
+supabaseAuth:
+  # The site's first administrator. db-init creates this account, holding Administrator, when no
+  # account has the address, and never changes it afterwards. Without it nobody can sign in: the
+  # demo accounts are for development (values-dev.yaml) and sign-up is closed.
+  firstAdministrator:
+    email: ""
 
 # ---------------------------------------------------------------------------------------------
 # The two identities a site names once, and cannot comfortably change afterwards.
