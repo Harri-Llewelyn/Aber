@@ -1,352 +1,255 @@
-# Building your first machine
+# Build your first machine
 
-**This stack installs blank.** No cells, no gateways, no devices, no schemas, an empty Node-RED
-editor, and Grafana dashboards that describe the platform rather than a shopfloor. The only gateway
-on a fresh install is the **Playback gateway**, which exists because a recorded capture has nowhere
-else to publish from, and which you can ignore until you record one.
+In about twenty minutes you connect one machine to Aber and watch its readings arrive. You create a
+[cell](../docs/glossary.md#cell), a [gateway](../docs/glossary.md#gateway), a
+[schema](../docs/glossary.md#schema) and a [device](../docs/glossary.md#device), then build a small
+[Node-RED](../docs/glossary.md#node-red) flow that sends the device's readings. Every step is one you
+would repeat for real hardware.
 
-This directory is the walkthrough for filling that in: one cell, one gateway, one device, one
-schema, and a Node-RED flow that publishes as it. It is most of the product in about twenty minutes,
-and every step is one you would repeat for real hardware.
+**You need** Aber running ([`docs/install.md`](../docs/install.md)) and an account that is an
+`Administrator` or a `Shopfloor_Manager`. On a laptop, use the demo account `admin@aber.local` with
+the password `aber123`. On a site, use the first administrator that `npm run setup` created.
 
-**There used to be a demonstration floor here** — four cells, four gateways, six devices, and a
-simulator flow that came up publishing on every start. It was retired because it answered the wrong
-question: a reader could watch it work without ever learning how any of it was made, and a
-participant at a demonstration asked, fairly, why a stack they had just installed already had
-somebody else's plant in it. What that floor knew is in this file instead.
+**A new install is empty.** It has no cells, gateways, devices or schemas, Node-RED opens on an empty
+editor, and Grafana's dashboards describe the platform rather than a shopfloor. The one gateway
+listed is the **Playback gateway**, which replays recorded data. You can ignore it until you record
+something.
 
-| You will use | Where |
-| :--- | :--- |
-| The dashboard | http://app.localhost on a laptop, `https://app.<domain>` on a site |
-| The Node-RED editor | http://nodered.localhost, or `https://nodered.<domain>` |
-| Grafana | http://grafana.localhost, or `https://grafana.<domain>` |
-| Broker config and roles | [`../mosquitto/mosquitto.conf`](../mosquitto/mosquitto.conf), [`../mosquitto/dynsec-roles.json`](../mosquitto/dynsec-roles.json), [`../mosquitto/README.md`](../mosquitto/README.md) |
-| Node-RED provisioning | [`../node-red/node-red-init.mjs`](../node-red/node-red-init.mjs) |
-| Remote gateways (the pasted command, the bundle, the forge, the playbook) | [`../docs/remote-gateways.md`](../docs/remote-gateways.md) |
-| Break-glass credential rotation | [`../scripts/mosquitto-provision-gateway.mjs`](../scripts/mosquitto-provision-gateway.mjs) |
+| You will use | On a laptop | On a site |
+| :--- | :--- | :--- |
+| The dashboard | http://app.localhost | `https://app.<domain>` |
+| The Node-RED editor | http://nodered.localhost | `https://nodered.<domain>` |
+| Grafana | http://grafana.localhost | `https://grafana.<domain>` |
 
 ---
 
-## The walkthrough
+## The steps
 
-### 1. Sign in, and start with the dashboard
+### 1. Sign in to the dashboard
 
-Sign in to the dashboard: on a laptop as `admin@aber.local`, password `aber123`, the demo account
-`values-dev.yaml` turns on; on a site as the first administrator `npm run setup` created.
-**Do this before opening Node-RED or Grafana**: both federate to Supabase Auth, and GoTrue ships no
-consent UI, so the dashboard serves one at `/oauth/consent` and needs a session of its own first.
-Open all three at the hostnames in the table above, not at `npm run dev:forward`'s ports: each
-sign-in returns to the hostname it is registered with.
+Sign in to the dashboard **before** you open Node-RED or Grafana. Both use your dashboard sign-in, so
+they need it to exist first. Open all three at the addresses in the table above, not at
+`npm run dev:forward`'s ports: each sign-in returns to the address it was set up for.
 
-Creating assets needs **Administrator** or **Shopfloor_Manager**. Operator and Auditor get read-only
-views — worth knowing before you wonder why a button is missing rather than broken.
+Creating things needs `Administrator` or `Shopfloor_Manager`. `Operator` and `Auditor` see read-only
+pages, so a missing button means your role, not a fault.
 
 ### 2. Create a cell
 
-**Cells** tab, then new cell. A cell is a location and nothing more: it groups assets for filtering
-and for the floor view. Name it after somewhere real.
+Open **Cells** and choose **New Cell**. A cell is a place on your shopfloor, such as a line or a
+bay, and it is how the dashboard groups and filters equipment. Name it after somewhere real.
 
-You can skip this and attach the device to no cell at all. `location_scope = 'site_wide'` is a
-legitimate state for a device that genuinely has no single one — a BMS sensor, an AGV — and it is a
-deliberate assertion rather than missing data.
+You can skip this step. A device that has no single place, such as a building sensor or an AGV, can
+be site-wide instead (`location_scope = 'site_wide'`). That is a deliberate choice, not missing data.
 
 ### 3. Create a gateway
 
-**Gateways** tab, then new gateway. Set **Type** to **Host** if this is going to be Node-RED on
-the host running the stack rather than an appliance out on the plant.
+Open **Gateways** and choose **New Gateway**. Set **Type** to **Host**: this gateway runs in Aber's
+own Node-RED rather than on a computer of its own.
 
-**Copy the Sparkplug ID it issues.** You do not get to choose it: `sparkplug_id` is a generated
-column — `gwy` plus 21 hex characters of the row's UUID — and the broker ACL matches it exactly.
-This is the identity everything downstream keys on.
+**Copy the Sparkplug ID it shows.** You don't choose it: it is `gwy` followed by 21 characters made
+from the gateway's database id, and the broker accepts this gateway's messages only under that exact
+id. Everything downstream keys on it.
 
-**Gateways are never auto-created.** Publish an `NBIRTH` under an id with no gateway row and
-ingestion logs *"unregistered edge node"* on a throttle and discards the message. That is correct
-behaviour, and it is quiet by design — so if nothing shows up later, check this first.
+**Aber never creates gateways by itself.** A message from a gateway it does not know is dropped, with
+an *"unregistered edge node"* line in the ingestion log and nothing on screen. If nothing shows up
+later, check this first.
 
-### 4. Mint its broker credential
+### 4. Issue the gateway's broker password
 
-Open the gateway's drawer (click its row), choose **Generate Broker Credential**, type the
-gateway's name and **Issue Credential**. The password is **revealed once** and cannot be read back
-afterwards, because the broker stores only a hash.
+Open the gateway's drawer by clicking its row, then choose **Generate Broker Credential**. Type the
+gateway's name and choose **Issue Credential**. Copy the username and password it shows: you enter
+them in Node-RED in step 7. If you lose them, an `Administrator` can show them again from the same
+drawer (**Show Broker Credential**).
 
-This is the step that used to require a shell on the host. It goes through the same
-credential service an appliance's enrolment uses, authorised by role rather than by a single-use
-token, because you are holding a session and an appliance is not.
+The order of steps 3 and 4 matters. The broker account's username is the gateway's Sparkplug ID, so
+the gateway has to exist before its password can be issued.
 
-**A Remote gateway takes the other path.** Its row is created with **Type** set to *Remote*, and the
-dashboard hands you a command to paste on a fresh Ubuntu machine (or a bundle to copy to one that
-already has Docker). Either carries a single-use claim, never a credential: the appliance installs
-itself, enrols, mints its own broker account, and from then on pulls its flow from its own
-repository in the forge and converges its operating system to a tagged platform playbook. A Host
-gateway is refused outright, since there would be no appliance to install on. See
-[`../docs/remote-gateways.md`](../docs/remote-gateways.md).
+**A Remote gateway works differently.** It runs on its own computer beside the machines. Its drawer
+offers an install command to paste on a fresh Ubuntu machine, or a bundle for one that already has
+Docker. That computer then sets itself up and gets its own password, which never passes through a
+browser. [`docs/remote-gateways.md`](../docs/remote-gateways.md) covers it.
 
-### 5. Author a schema
+### 5. Create a schema
 
-**Schemas** tab, then **Build Schema from Catalog**. A schema is the contract you are holding the
-machine to: a JSON Schema whose `properties` name metrics from `metric_catalog`, which is what gives
-each one a datatype, a unit and a published semantic id.
+Open **Schemas** and choose **Build Schema from Catalog**. A schema says what a kind of device
+sends: which [metrics](../docs/glossary.md#metric), of which type, meaning what. Each metric comes
+from the catalog, which gives it a datatype, a unit and a standard identifier.
 
-Do this before the device rather than after, for three reasons the platform will not raise at the
-time:
+Create the schema before the device. Without one:
 
-- A device with no schema is **never** flagged as publishing outside its model. "Publishes beyond
-  its model" and "has no model" are different findings and the platform will not conflate them, so
-  unmodelled detection is simply inert until a schema exists.
-- The AAS export composes one Submodel per attached schema. With none, a device exports a shell
-  carrying its nameplate and nothing else.
-- The Configuration Parameters modal reads the schema's properties, so with none there is nothing
-  for an operator to see.
+- Aber cannot tell you when the device sends something its model does not include.
+- An [AAS](../docs/glossary.md#asset-administration-shell-aas) export of the device carries its
+  nameplate and nothing else.
+- The device's **Configuration Parameters** panel has nothing to show.
 
-A property naming a metric the catalog does not carry renders as a bare string and exports with no
-`semanticId`. Check the metric vocabulary before inventing a name.
+Pick metric names from the catalog rather than inventing them. A name the catalog does not have is
+shown as plain text and exported without a standard identifier.
 
 ### 6. Create the device
 
-**Devices** tab, then new device: bound to the gateway from step 3, in the cell from step 2, with
-the schema from step 5 attached. Copy the **Sparkplug ID** it issues — `dev` plus 21 hex characters,
-the same rule as the gateway.
+Open **Devices** and choose **New Device**. Choose the gateway from step 3, the cell from step 2 and
+the schema from step 5. **Copy the Sparkplug ID it shows**: `dev` followed by 21 characters, made the
+same way as the gateway's.
 
-**Or skip this step entirely**, publish under a well-formed `dev`-prefixed id you invent, and let
-the device arrive in the quarantine queue for approval. That is the zero-touch onboarding path, and
-it is the more realistic one for hardware somebody else configured; see
-[Approving a Quarantined Device](#approving-a-quarantined-device) below.
+You can skip this step too. Send messages under any well-formed `dev` id you make up, and the device
+waits in [quarantine](../docs/glossary.md#quarantine) for you to approve it. See
+[*Let a device arrive on its own*](#let-a-device-arrive-on-its-own), below.
 
-### 7. Build the flow
+### 7. Build the flow in Node-RED
 
-The Node-RED editor opens empty. What you need is one broker connection and enough of the Sparkplug
-B lifecycle to be recognised:
+Open the Node-RED editor. It starts empty. You need one connection to the broker, and enough
+[Sparkplug B](../docs/glossary.md#sparkplug-b) messages for Aber to recognise the gateway and device:
 
-1. Add an **mqtt-broker** config node pointing at `mosquitto:1883`. With broker TLS on, the chart
-   moves every broker node to 8883 with the CA on the next start, so leave the port as the chart
-   sets it.
-2. On its **Security** tab, enter the username and password from step 4, then **Update** and
-   **Deploy**. Node-RED stores them encrypted in `flows_cred.json`, and they survive restarts.
-3. Publish an **NBIRTH** on `spBv1.0/<group>/NBIRTH/<gateway sparkplug_id>`.
-4. Publish a **DBIRTH** on `spBv1.0/<group>/DBIRTH/<gateway>/<device>` carrying the metrics your
-   schema declares.
-5. Publish **DDATA** on that topic when a value changes, and an **NDATA** heartbeat every 30 s.
+1. Add an **mqtt-broker** node with Server `mosquitto` and Port `1883`.
+2. On its **Security** tab, enter the username and password from step 4. Choose **Update**, then
+   **Deploy**. Node-RED stores them encrypted, and they survive restarts.
+3. Send an **NBIRTH** on `spBv1.0/<group>/NBIRTH/<gateway's Sparkplug ID>`.
+4. Send a **DBIRTH** on `spBv1.0/<group>/DBIRTH/<gateway>/<device>`, carrying the metrics your schema
+   lists.
+5. Send a **DDATA** on that topic when a value changes, and an **NDATA** heartbeat every 30 seconds.
 
-[Topic Structure & Lifecycle](#topic-structure--lifecycle) below is the reference for the payload
-shape, and [Broker Topic Authorisation](#broker-topic-authorisation) explains why the topic's
-edge-node segment must be the connecting username and nothing else.
+[*Messages and topics*](#messages-and-topics), below, shows each message.
 
-**Transport is reconciled at init rather than at runtime.** `node-red-init` writes host, port and
-TLS into `flows.json` before Node-RED reads it, so a flow authored against one broker and deployed
-against another is corrected on the next start instead of failing at connect time.
+If your site runs the broker with TLS, Node-RED moves the broker node onto TLS by itself the next time
+it starts, so leave the server and port as they are. The broker accepts a gateway's messages only on
+its own Sparkplug ID ([`mosquitto/README.md`](../mosquitto/README.md#broker-topic-authorisation)
+says why).
 
-### What you should see
+### 8. Check that it worked
 
-The gateway goes `ONLINE` on the Gateways tab within a heartbeat. The device appears on Devices with
-telemetry flowing into TimescaleDB. The Audit Trail records every step you just took — which is
-the argument for doing it by hand: on a fresh stack that log is your own work and nothing else.
+- On **Gateways**, the gateway turns `ONLINE` within one heartbeat.
+- On **Devices**, the device appears with its readings arriving.
+- The **Audit Trail** lists every step you just took. On a new install, that log is your own work
+  and nothing else.
 
 ---
 
-## Node-RED Authentication
+## Add more devices
 
-Before this existed, `settings.js` declared only `flowFile` and `credentialSecret` — so the
-editor, the `/flows` admin API **and** `POST /hooks/quarantine` were open to anyone who could
-reach port 1880. A `function` node runs arbitrary JavaScript in a container holding the MQTT
-credential and reaching Mosquitto, Supabase and TimescaleDB, so that was remote code execution on
-the edge host.
+A second device on a flow that already works is steps 6 and 7 again:
 
-The generated `settings.js` now declares **three independent auth surfaces**, separate because
-Node-RED mounts them separately — `adminAuth` guards `httpAdminRoot`, `httpNodeAuth` guards
-`httpNodeRoot`:
+1. Create the device on **Devices**, and copy its **Sparkplug ID**.
+2. Put that id at the end of the device's topics **and** in the `Asset_ID` metric of its `DBIRTH`
+   and `DDATA`. The two must match, and the topic is what the broker checks.
+3. Set `Asset_Name` to whatever you want the device called. It is a label, and nothing keys on it.
+4. Give it the metrics its schema lists (`name`, `datatype` and the value field).
+5. Deploy.
 
-| Surface | Who | How |
-| :--- | :--- | :--- |
-| `adminAuth.strategy` | humans | `passport-oauth2` against GoTrue (**not** `passport-openidconnect`) |
-| `adminAuth.tokens` | services | the caller's own Supabase access token, verified HS256 then resolved through `nodered-userinfo` |
-| `httpNodeAuth` | `http in` nodes | a **function**, not `{user, pass}` — Express middleware, which is what allows a bearer check |
+Or skip step 1 and make up a well-formed id: the device waits in the quarantine queue for approval.
 
-### `adminAuth.users` is required, and its absence breaks nothing at login
+### If you mistype the ID
 
-`bearerStrategy` runs `Tokens.get(token) → Users.get(token.user)` on **every** editor request.
-With no `users` function Node-RED falls back to an internal map populated only from a static
-`users` *array*, finds nothing, and 401s. The OAuth handshake still completes and `/auth/token`
-still returns a session, so the symptom is **an editor that signs in and then fails everything
-with no error shown**.
+An id of the right *shape* that Aber does not know is treated as a new device. An id of the wrong
+shape (cut short, padded, or containing characters that are not hexadecimal) is quarantined with a
+message saying exactly what is wrong:
 
-The machine path is untouched, because `adminAuth.tokens` never goes through `Users.get` — which
-is why a token-based test suite passes while the editor is unusable. Probe `GET /settings` with an
-*editor session token*, not just `/flows` with a Supabase token.
+> `MALFORMED_IDENTITY: device id 'devfffffffffffffffffff' is 23 characters; expected 24 ('dev'
+> followed by 21 hex characters). The id is most likely truncated or padded in the gateway
+> configuration — copy it again from the device's page in the dashboard.`
 
-### It must return `permissions`, and the map behind it must be persisted
-
-`runtime/lib/api/settings.js` copies `permissions` off that object into the settings the editor
-reads, and the editor draws a **padlock on Deploy** when it is absent. Sessions persist to
-`/data/.sessions.json` and survive a restart; an in-memory map does not — so every
-a restart silently turned a live Administrator into a read-only editor while the
-API would still have accepted the deploy. It is not a logout, which would at least be visible.
-
-The last-resort branch returns a bare `{username}` for a session in neither the map nor the file.
-It keeps that session alive rather than logging everyone out, and it is safe because the
-permissions Node-RED *enforces* come from the token's stored scope (`needsPermission()` reads
-`{scope: token.scope}`), not from this object. Such a session renders read-only until the next
-sign-in — which is why `sessionExpiryTime` is 8h rather than Node-RED's 7-day default.
-
-> **Asserting HTTP status is not enough anywhere in this file.** Both editor defects answered
-> `200` on the calls a status-only probe makes. `validate.py` check 7b therefore signs in for real
-> and asserts the `permissions` **value**.
-
-### The webhook token is a capability, not the admin credential
-
-`dispatch_device_quarantine_webhook()` (migration `0006`) mints a fresh **60-second** HS256 JWT per
-event (`aud=node-red-hooks`), signed with a Vault key held only for signing.
-
-A flow author can read `msg.req.headers`. Sharing the admin token with the webhook would therefore
-hand **every flow** the admin API — the same RCE described above. So the webhook gets its own key,
-Node-RED holds the same key to *verify*, and what a flow can read out of a request header is a
-token that expires in a minute and authorises nothing but posting another quarantine notice.
-
-HS256 because pgjwt implements only the HS family. The consequence — Node-RED can mint tokens it
-would itself accept — is bounded by that same scope, and is the trade for not adding an asymmetric
-signing dependency to a fire-and-forget notification path.
-
-`NODERED_ADMIN_TOKEN` survives as **break-glass only**: `settings.js` reads it from Node-RED's
-environment and accepts it on the admin API when set, for when Supabase Auth is down and the flows
-still have to be reachable. It is empty by default, and the database keeps no copy of it (`0161`).
-
-### Other things that fail in a way that does not look like their cause
-
-- **`adminAuth.default` must stay absent.** `needsPermission()` runs
-  `passport.authenticate(['bearer','tokens','anon'])`; with no default the `anon` arm has nothing
-  to return. Setting it reopens the hole wholesale, so `settingsAreCorrect()` treats its presence
-  as a broken file rather than a preference to preserve.
-- **`passport-openidconnect` cannot be used.** It always requests `openid` and requires an
-  `id_token` GoTrue refuses to sign under HS256; its discovery document also reports `issuer: ""`
-  with relative paths.
-- **The client is registered `client_secret_post`**, unlike Grafana's `client_secret_basic` — that
-  is what `passport-oauth2` sends by default, and GoTrue enforces whichever is registered exactly.
-  `publicUrls.nodered` (by default `<scheme>://nodered.<domain>`) feeds both the `redirect_uris`
-  db-init registers and the strategy's `callbackURL` (`NODERED_OAUTH_CALLBACK_URL`), so the two
-  cannot drift; a mismatch is `invalid redirect_uri`.
-- **The role is resolved in the strategy's `verify` and must ride through `authenticate`**, or it
-  is lost between login and the session Node-RED mints. `authenticate` is variadic because the same
-  hook backs the password grant on `POST /auth/token`, which is refused outright.
+That is why the id has a fixed length: a mistyped one can be diagnosed. Either way, the device
+appears in the queue. It is never dropped silently.
 
 ---
 
-## Broker Connection
+## Let a device arrive on its own
 
-| Field | Value |
-| :--- | :--- |
-| Server | `mosquitto` (the Service name, from inside the cluster), or `localhost` from the host with `npm run dev:forward` |
-| Port | `1883` (TCP) / `9001` (WebSocket); `8883` with TLS, which the chart sets on every broker node when broker TLS is on |
-| Client ID | blank, so Node-RED generates one, or unique per broker node: two connections with one id disconnect each other |
-| Protocol | MQTT 5, which `node-red-init` sets on every broker node |
-| Auth | Username/password — `allow_anonymous false` |
+The first time a `DBIRTH` arrives for a Sparkplug ID Aber does not know, Aber adds the device as
+quarantined and drops its `DDATA` until someone approves it. This is how a new device announces
+itself, not an error.
 
-### Diagnose from the client side, not from Mosquitto's log
+1. Open **Devices**.
+2. Find the **Quarantine queue**, the first card on the page. The device is listed with the id it
+   used and why it was held.
+3. As an `Administrator` or a `Shopfloor_Manager`, choose **Approve & Onboard** and pick its
+   gateway, and optionally its cell. Or reject it.
+4. Its next `DDATA` is stored.
 
-Node-RED logs only a generic `Connection failed to broker: <clientId>@<url>` — note that is the
-*client id*, not the username. And Mosquitto's stdout is **not a reliable witness**: a connection
-refused with CONNACK 5 has been observed with no corresponding `not authorised` line, so its
-absence proves nothing.
-
-Settle it from inside the Node-RED container:
-
-```bash
-kubectl -n aber exec deploy/node-red -c node-red -- node -e "
-  const mqtt=require('/usr/src/node-red/node_modules/mqtt');
-  const c=mqtt.connect('mqtt://mosquitto:1883',{reconnectPeriod:0});
-  c.on('connect',()=>{console.log('CONNECTED');c.end()});
-  c.on('error',e=>{console.log('ERROR code='+e.code,e.message);c.end()});"
-```
-
-`code=5 Not authorized` means the credentials never reached the node — look at `settings.js`,
-`_credentialSecret` and `flows_cred.json`, in that order. A connect failure with no code at all is
-a network or DNS problem instead.
+The device keeps using the id it announced: Aber records that id rather than asking for the device
+to be changed. Approval is a single database transaction (`public.approve_quarantined_device()`), so
+it cannot half-complete, and the Audit Trail records who approved it.
 
 ---
 
-## Topic Structure & Lifecycle
+## Messages and topics
+
+Every message goes to a topic of this shape:
 
 ```text
 spBv1.0/{GroupID}/{MessageType}/{EdgeNodeID}[/{DeviceID}]
 ```
 
-`{EdgeNodeID}` and `{DeviceID}` are **Sparkplug IDs, not names**: a 3-character type prefix (`gwy`
-for gateways, `dev` for devices) followed by 21 hex characters, 24 in total. The platform issues
-one to every gateway and device, derived from its database id, and shows it on that asset's page —
-click it to copy. It never changes, so an asset can be renamed freely without breaking anything.
+`{EdgeNodeID}` and `{DeviceID}` are **Sparkplug IDs, not names**: `gwy` for a gateway or `dev` for a
+device, followed by 21 hex characters, 24 in all. Aber issues one to every gateway and device and
+shows it on that item's page, where you can click it to copy it. It never changes, so you can rename
+anything without breaking it.
 
-**Nothing seeds these ids.** A fresh install has no gateways and no devices, so the pair you publish
-under is the pair the dashboard issued you in steps 3 and 6 — that is the whole reason those steps
-come first. [`0040_retire_demonstration_seed.sql`](../supabase/migrations/archive/0040_retire_demonstration_seed.sql)
-and [`0073_the_shopfloor_ships_empty.sql`](../supabase/migrations/archive/0073_the_shopfloor_ships_empty.sql)
-between them removed the last of the seeded assets and schemas from databases that still had them.
+Nothing on a new install has an id yet, so the pair you send under is the pair the dashboard issued
+in steps 3 and 6. That is why those steps come first.
 
-The examples below use `gwy120000000000400080000` and `dev220000000000400080000` as stand-ins for
-the two ids you copied. Substitute your own throughout — they will not match, and nothing here
-depends on the literal values.
+The examples use `gwy120000000000400080000` and `dev220000000000400080000` in place of your two ids.
+Use your own throughout.
 
-| Order | Type | Topic | Purpose |
+| Order | Type | Topic | What it is for |
 | :-- | :--- | :--- | :--- |
-| 1 | `NBIRTH` | `spBv1.0/Aber/NBIRTH/gwy1200…` | The edge node's own birth certificate, once at startup, before any device birth |
-| 2 | `DBIRTH` | `spBv1.0/Aber/DBIRTH/gwy1200…/dev2200…` | The metric names, types and config the device will report, before its first `DDATA` |
-| 3 | `DDATA` | `spBv1.0/Aber/DDATA/gwy1200…/dev2200…` | Telemetry, **report by exception**: only the metrics that moved |
+| 1 | `NBIRTH` | `spBv1.0/Aber/NBIRTH/gwy1200…` | The gateway announcing itself, once at startup and before any device does |
+| 2 | `DBIRTH` | `spBv1.0/Aber/DBIRTH/gwy1200…/dev2200…` | The metric names, types and settings the device will report, before its first `DDATA` |
+| 3 | `DDATA` | `spBv1.0/Aber/DDATA/gwy1200…/dev2200…` | Readings, sent **by exception**: only the metrics that changed |
 | 4 | `DDEATH` | `spBv1.0/Aber/DDEATH/gwy1200…/dev2200…` | Marks the device offline |
-| 5 | `NDATA` | `spBv1.0/Aber/NDATA/gwy1200…` | Gateway heartbeat, at least every 30 s; a gateway silent for 90 s reads STALE |
+| 5 | `NDATA` | `spBv1.0/Aber/NDATA/gwy1200…` | The gateway's heartbeat, at least every 30 s. A gateway silent for 90 s shows as STALE |
 
-`Aber` is the Sparkplug group the development stack is installed with (`values-dev.yaml`). A site
-names its own with `ingestion.sparkplugGroup` at install, where it has no default; every topic above
-then carries that word instead, and the gateway's own row is what says which.
+`Aber` is the [Sparkplug group](../docs/glossary.md#sparkplug-group) the development stack is
+installed with (`values-dev.yaml`). A site chooses its own at install, as `ingestion.sparkplugGroup`,
+and every topic above then carries that word instead.
 
-### Report by exception
+### Send only what changed
 
-**`DDATA` means "these metrics changed".** A flow reads its machine as often as it needs to and
-*publishes* only what moved. A fixed-interval payload carrying every metric whether it moved or not
-is not DDATA — it is polling with extra steps, and it writes a row per metric per tick into the
-historian for readings nobody took.
+**`DDATA` means "these metrics changed".** A flow reads its machine as often as it needs to, and
+*sends* only what moved. Sending every metric on a timer, whether it moved or not, is not `DDATA`: it
+writes a row per metric per tick for readings nobody took.
 
-A metric qualifies as an exception when it is analogue and has moved by at least its **deadband**,
-when it is discrete and changed at all, or when it has no cached value yet — the first reading after
-a birth. A `DBIRTH` that carries the device's *live* readings seeds that cache, so the birth
-certificate is the baseline rather than a set of nominal placeholders the first `DDATA` would then
-have to correct.
+A metric counts as changed when it is analogue and has moved by at least its **deadband**, when it is
+discrete and changed at all, or when it has no previous value yet (the first reading after a birth).
+A `DBIRTH` that carries the device's *live* readings sets those previous values, so the birth
+certificate is the starting point rather than placeholders the first `DDATA` has to correct.
 
-**A deadband is only meaningful above the instrument's noise floor.** Noise larger than the
-deadband trips the change test on its own and suppresses nothing.
+**Set a deadband above the instrument's noise.** Noise bigger than the deadband counts as change on
+its own, and nothing is held back.
 
-**A periodic refresh is the keepalive, and it is not a betrayal of RBE — it is what makes RBE safe
-to consume.** A value that is genuinely constant is indistinguishable, from the consumer's side,
-from a device that died silently, and every staleness check downstream reads absence as failure:
-ingestion marks a device OFFLINE after 300 s with no data (`DEVICE_OFFLINE_TIMEOUT_SECONDS`), so
-republish every metric at its last value well inside that. The appliance's sample flow is the
-pattern to copy: its `publish by exception` node does all of the above and refreshes every 120 s
+**Still re-send every metric now and then.** A value that never changes looks the same as a device
+that died quietly, and Aber marks a device OFFLINE after 300 s with no data
+(`DEVICE_OFFLINE_TIMEOUT_SECONDS`). So re-send every metric at its last value well inside that. The
+appliance's sample flow is the pattern to copy: its `publish by exception` node does all of the
+above and re-sends every 120 s
 ([`appliance/README.md`](../forge/gateway-platform/appliance/README.md#the-sample-flow)).
 
-Because an unchanged metric publishes nothing, **a missing bucket downstream means *unchanged*, not
-*unknown*.** Read these series through `telemetry_gapfill()` (see
-[`../timescaledb/aggregates.sql`](../timescaledb/aggregates.sql)), which carries the last
-observation forward; charting a rollup directly renders steady operation as a hole.
+Because an unchanged metric sends nothing, **a gap in a chart means *unchanged*, not *unknown*.**
+Read these series through `telemetry_gapfill()` (see
+[`../timescaledb/aggregates.sql`](../timescaledb/aggregates.sql)), which carries the last value
+forward. Charting a rollup directly shows steady running as a hole.
 
-### Payload
+### What a message carries
 
-A `DDATA` payload carries **only the metrics that changed** — often just one. `seq` increments by
-one per message, wrapping 255 → 0, and is what lets `ingestion.py` detect that a message went
-missing; under RBE that is the only way it can find out, because a metric that stopped arriving
-looks exactly like a metric that stopped changing.
+A `DDATA` payload carries **only the metrics that changed**, often just one. `seq` goes up by one per
+message and wraps from 255 to 0. It is how Aber notices a lost message: a metric that stopped
+arriving otherwise looks exactly like one that stopped changing.
 
-**`seq` belongs to the EDGE NODE, not to the device**, and every publisher under one gateway shares
-it — each of its devices, and the gateway's own heartbeat. An `NBIRTH` restarts the run at zero; a
-`DBIRTH` does not, and consumes a number like any other message.
+**`seq` belongs to the gateway, not to the device.** Every publisher under one gateway shares it:
+each of its devices, and the gateway's own heartbeat. An `NBIRTH` starts it again at zero. A
+`DBIRTH` does not, and uses up a number like any other message.
 
-> **Keep one counter per edge node, in a scope every publisher reaches.** `context` is the node's
-> own, and inside a subflow `flow` is the instance's own, so a subflow per device publishes
-> independent sequences into one edge node's stream. The daemon reads that as lost messages and
-> asks for a rebirth, several hundred times an hour on a healthy fleet. Keep the counter in `flow`
-> when every publisher sits on one tab, as the appliance's sample flow does, or in `global` under
-> `seq_<edge node>` when subflows publish.
+> **Keep one counter per gateway, where every publisher can reach it.** In Node-RED, `context` belongs
+> to one node, and inside a subflow `flow` belongs to that instance. So a subflow per device sends
+> separate counters into one gateway's stream, which Aber reads as lost messages, asking for a rebirth
+> several hundred times an hour. Keep the counter in `flow` when every publisher is on one tab, as the
+> appliance's sample flow does, or in `global` under `seq_<gateway id>` when subflows publish.
 
-`Asset_ID` and `Asset_Name` are **not** in `DDATA`. They are immutable, declared in `DBIRTH`, and
-discarded by the daemon's identity-metric filter before reaching the historian — the topic is what
-identifies the device. (`DBIRTH` still carries `Asset_ID` as a cross-check: if it disagrees with
-the topic the device is quarantined rather than one silently winning. An alias-encoded `DDATA` from
-a real gateway carries no `Asset_ID` either, which is why the topic has to be authoritative.)
+`Asset_ID` and `Asset_Name` are **not** sent in `DDATA`. They are fixed, declared in `DBIRTH`, and
+dropped before the readings are stored: the topic is what identifies the device. `DBIRTH` still
+carries `Asset_ID` as a cross-check. If it disagrees with the topic, the device is quarantined rather
+than one of them silently winning. (A real gateway's `DDATA` that uses metric aliases carries no
+`Asset_ID` either, which is why the topic has to be the authority.)
 
 ```json
 {
@@ -358,168 +261,73 @@ a real gateway carries no `Asset_ID` either, which is why the topic has to be au
 }
 ```
 
-> These examples use JSON-encoded payloads for simplicity. `ingestion/ingestion.py` tries real
-> Sparkplug B protobuf decoding first and falls back to this encoding, so a JSON message is handled
-> identically to a protobuf one once parsed. For **production binary encoding**, install the
-> `node-red-contrib-sparkplug-b` palette and replace the MQTT out node with a Sparkplug B encoder.
+> These examples use JSON payloads to keep them readable. Aber decodes real Sparkplug B (protobuf)
+> first and falls back to JSON, so a JSON message is handled the same once read. For **production**,
+> install the `node-red-contrib-sparkplug-b` palette and replace the MQTT out node with its Sparkplug
+> B encoder.
 
 ---
 
-## Broker Topic Authorisation
+## When it doesn't work
 
-The broker's Dynamic Security plugin confines each gateway to its own edge-node subtree through a
-role generated for it when its credential is issued ([`../mosquitto/README.md`](../mosquitto/README.md)):
+**The gateway never turns `ONLINE`.** Check that the gateway exists on **Gateways** and that the
+flow sends under its Sparkplug ID. Messages from an unknown gateway are dropped, with only an
+*"unregistered edge node"* line in the ingestion log. A registered device is also refused when its
+messages arrive through a different gateway from the one it belongs to.
 
-```
-gateway-<sparkplug_id>:  publish and receive  spBv1.0/+/+/<sparkplug_id>/#
-gateway (shared):        subscribe            spBv1.0/#       receive spBv1.0/STATE/#
-```
+**Node-RED cannot connect to the broker.** These are the broker node's settings:
 
-So a gateway provisioned with **username == its `sparkplug_id`** can publish only beneath its own
-segment and to no other. Verified by delivery in `scripts/check-broker-config.mjs`: a publish to
-another gateway's subtree is dropped by the broker.
+| Field | Value |
+| :--- | :--- |
+| Server | `mosquitto` (its name inside the cluster), or `localhost` from your own machine with `npm run dev:forward` |
+| Port | `1883` (TCP) or `9001` (WebSocket); `8883` with TLS, which Node-RED switches to by itself when the broker uses TLS |
+| Client ID | blank, so Node-RED makes one up, or a different one for each broker node: two connections with one id disconnect each other |
+| Protocol | MQTT 5, which Node-RED is set to when it starts |
+| Security | the username and password from step 4; the broker refuses anonymous connections |
 
-The dashboard and the enrolment bundle are the ordinary ways to issue a credential. The break-glass
-one, for a stack whose credential service is down or whose Administrator cannot sign in:
+Node-RED logs only a general `Connection failed to broker: <clientId>@<url>`, which names the
+*client id*, not the username. Mosquitto's own log is not a reliable witness either: a connection
+refused for a bad password has been seen with no matching line. So test from inside Node-RED's
+container:
 
 ```bash
-node scripts/mosquitto-provision-gateway.mjs gwy120000000000400080000
+kubectl -n aber exec deploy/node-red -c node-red -- node -e "
+  const mqtt=require('/usr/src/node-red/node_modules/mqtt');
+  const c=mqtt.connect('mqtt://mosquitto:1883',{reconnectPeriod:0});
+  c.on('connect',()=>{console.log('CONNECTED');c.end()});
+  c.on('error',e=>{console.log('ERROR code='+e.code,e.message);c.end()});"
 ```
 
-The password is printed **once** — the broker stores only a hash.
+`code=5 Not authorized` means the username or password is wrong or missing: check the broker node's
+Security tab, or issue a new password in step 4. If the Security tab is right and the broker still
+refuses it, Node-RED may not be able to decrypt what it stored: check `settings.js`,
+`_credentialSecret` and `flows_cred.json` on its data volume, in that order. A failure with no code
+at all is a network or DNS problem instead.
 
-**It sends the plugin commands the credential service sends**, so the role reasoning above lives
-in one place, through `kubectl exec` into the broker pod (namespace `aber`, or `ABER_NAMESPACE`),
-and the broker applies them to itself at once: nothing is reloaded, nothing is signalled,
-and the account works before the command returns. Re-issuing an existing gateway **replaces** its
-password and re-enables the account; it never adds a second one.
-
-A gateway issued this way reads *No platform record* beside *Active* on the Access Control page,
-which is the honest pair: the broker holds it, and the platform did not issue it.
-
-### There is no shared broker account
-
-One credential holding `readwrite spBv1.0/#`, shared by the ingestion daemon, the i3X server, a
-simulator and the E2E validator, would let any of them publish `DBIRTH` or `DDATA` for *any*
-machine on the site, and `verify_gateway_binding()` cannot catch that: a forged message published
-under a **correctly bound** device satisfies the binding check by construction.
-
-So each principal is confined, holding a role from
-[`../mosquitto/dynsec-roles.json`](../mosquitto/dynsec-roles.json):
-
-| Principal | May do |
-| :--- | :--- |
-| `aber_ingestion` | read `spBv1.0/#`; publish **only** `spBv1.0/+/NCMD/+` (rebirth), its own `spBv1.0/STATE/<primaryHostId>`, the Directory and the Unified Namespace |
-| `aber_i3x` | read `spBv1.0/#` and the Directory. Publish nothing — it refuses writes in code (405), and this is that stance where the broker can enforce it |
-| any `gwy…` account | one per gateway, each confined to its own edge node by a role generated for it. Issued against a row that already exists — from the dashboard for a host-run gateway, by the enrolment bundle for an appliance |
-| `gwy110000000000400080000` | `validate.py`'s own gateway, a fixture it seeds itself |
-| `aber_monitor` | read `$SYS/#` only — the health probes and the metrics exporter. Publishes nothing |
-| `dynsec-admin` | the credential service's account: the plugin's control topic and nothing else |
-
-**The gateway usernames are `sparkplug_id`s and cannot be friendly names.** The gateway's role
-confines it to its own edge-node segment, and that segment must equal the gateway row's *generated*
-`sparkplug_id` or ingestion rejects the message. Both rows therefore have **pinned UUIDs**, which is
-the only reason a credential can be issued before the row exists — that is what let the validator,
-which creates its gateway at runtime, move off the wildcard account at all. Only its *gateway* is
-pinned; its devices are still allocated dynamically, so the onboarding and quarantine checks still
-exercise genuinely unknown device ids.
-
-`scripts/check-broker-config.mjs` asserts all of this against the pinned broker image by whether a
-message is **delivered**, not by exit status — a denied publish at QoS 0 exits 0 and tells the
-client nothing.
-
-**MQTT 5 does not lift that**, and it was proposed for exactly that reason. The `Not authorized`
-reason code rides on `PUBACK`, and QoS 0 has no `PUBACK` under either protocol version — while
-Sparkplug B *requires* QoS 0 and retain false for every message type on this wire, delegating loss
-detection to the `seq` counter and the rebirth request instead. So the silence is a property of the
-protocol combination Sparkplug mandates, not a setting anyone left unset, and delivery remains the
-only honest way to assert the ACL.
+**The editor signs in, then nothing works, or Deploy shows a padlock.** See
+[`node-red/README.md`](../node-red/README.md#authentication), which explains how Node-RED's sign-in
+is put together and what each part needs.
 
 ---
 
-## Onboarding Your Own Device
+## Going to production
 
-Adding a **second** device to a flow that already works is step 6 and step 7 again, and only three
-things have to agree:
-
-1. Register the device in the **Devices** tab and copy its issued **Sparkplug ID**.
-2. Put that id in the topic's last path segment **and** in the `Asset_ID` metric of the nodes that
-   build its `DBIRTH` and its `DDATA`. Those two must match, and the topic is what the broker
-   authorises against.
-3. Set `Asset_Name` to whatever you want it called — it is a label and nothing keys on it.
-4. Give it the metrics its schema declares (`name` / `datatype` / value field).
-5. Deploy.
-
-You can skip step 1 and invent a well-formed id: the device lands in the quarantine queue for
-approval, which is the zero-touch path.
-
-### If you mistype the ID
-
-A device id of the right *shape* but unknown is treated as a new discovery. One of the **wrong**
-shape — truncated, padded, or containing non-hex characters — is quarantined with a message saying
-exactly what is wrong:
-
-> `MALFORMED_IDENTITY: device id 'devfffffffffffffffffff' is 23 characters; expected 24 ('dev'
-> followed by 21 hex characters). The id is most likely truncated or padded in the gateway
-> configuration — copy it again from the device's page in the dashboard.`
-
-That distinction is why the format is fixed-width: a misconfigured gateway is diagnosable rather
-than anonymous. Either way it appears in the queue — it is never silently dropped.
-
----
-
-## Approving a Quarantined Device
-
-The first time a `DBIRTH` arrives for an unrecognised Sparkplug ID, ingestion auto-inserts it with
-`is_quarantined = true`, and its `DDATA` is dropped until approved. This is the zero-touch
-onboarding flow, not an error.
-
-1. Open the **Devices** tab.
-2. Find the **Quarantine queue** card, the first card on the page — the device is listed with the id
-   it published under and why it was held.
-3. As **Administrator** or **Shopfloor_Manager**, use **Approve & Onboard** (assigning a gateway,
-   and optionally a cell) or reject it.
-4. Subsequent `DDATA` starts flowing into TimescaleDB.
-
-The device keeps publishing under the id it announced; the platform records that on the row rather
-than demanding the device be reconfigured. Approval runs through the atomic
-`public.approve_quarantined_device()` RPC, so a merge cannot half-complete, and the approving
-operator is recorded in the Audit Trail.
-
----
-
-## Registering the Gateway
-
-**Gateways are never auto-created.** Create one in the **Gateways** tab, copy its issued Sparkplug
-ID, and publish `NBIRTH`/`NDATA` under it as `{EdgeNodeID}`. Otherwise heartbeats are logged as
-"unregistered edge node" and dropped, and the gateway never shows `ONLINE`.
-
-This matters more than it used to: a **registered device bound to a gateway** now has its messages
-rejected when they arrive via a different (or unregistered) edge node. Registering the gateway is
-what makes that binding resolvable.
-
-There is no script that creates gateways for you any more, and that is deliberate rather than a gap:
-a gateway row is useless without the Mosquitto account that goes with it, the account's username is
-the row's GENERATED `sparkplug_id`, and so the row has to exist before the credential can be minted.
-Step 3 and step 4 above are that order, and it is the same order for an appliance — enrolment just
-performs the second on the appliance's behalf, against the row the operator created.
-
----
-
-## Production Checklist
-
-| Item | Recommendation |
+| Item | What to do |
 | :--- | :--- |
 | Binary Sparkplug B encoding | Install `node-red-contrib-sparkplug-b` |
-| Per-gateway MQTT credentials | Minted by the dashboard for a host-run gateway (step 4) and by enrolment for an appliance; `node scripts/mosquitto-provision-gateway.mjs <sparkplug_id>` only to rotate one by hand |
-| Appliance operating systems | Converge to the platform playbook at the tag each gateway's `platform.yml` names; bump the tag by pull request in the gateway's repository, one gateway first |
-| Node-RED admin auth | Configured by default (Supabase Auth SSO). Set `global.publicBaseDomain`, or `publicUrls.nodered`, to the address browsers actually use, or `/oauth/authorize` answers `invalid redirect_uri` |
-| Broker credentials | Rotate the `secrets.mqtt*Password` values; ingestion refuses to start without `secrets.mqttIngestionPassword` |
-| Real OPC-UA / Modbus devices | Use `node-red-contrib-opcua` or `node-red-contrib-modbus` in place of the Function nodes |
+| Broker passwords for gateways | Issued by the dashboard for a Host gateway (step 4), and by enrolment for a Remote one. `node scripts/mosquitto-provision-gateway.mjs <sparkplug_id>` only to reissue one by hand, for example when the credential service is down ([`mosquitto/README.md`](../mosquitto/README.md#broker-topic-authorisation)) |
+| Remote gateways' operating systems | They follow the platform playbook at the tag each gateway's `platform.yml` names. Move the tag by pull request in the gateway's repository, one gateway first |
+| Node-RED sign-in | Set up by default, through the dashboard's sign-in. Set `global.publicBaseDomain`, or `publicUrls.nodered`, to the address browsers actually use, or `/oauth/authorize` answers `invalid redirect_uri` |
+| Platform broker passwords | Rotate the `secrets.mqtt*Password` values. Ingestion refuses to start without `secrets.mqttIngestionPassword` |
+| Real OPC UA or Modbus devices | Use `node-red-contrib-opcua` or `node-red-contrib-modbus` in place of Function nodes |
 
 ---
 
 ## Related
 
-- [`../ingestion/README.md`](../ingestion/README.md) — how these messages are parsed and gated
-- [`../supabase/README.md`](../supabase/README.md) — quarantine approval and the audit trail
+- [`../docs/glossary.md`](../docs/glossary.md): the terms used here
+- [`../docs/remote-gateways.md`](../docs/remote-gateways.md): gateways on their own hardware (the install command, the bundle, the forge, the playbook)
+- [`../node-red/README.md`](../node-red/README.md): how Node-RED's editor and APIs are protected; [`../node-red/node-red-init.mjs`](../node-red/node-red-init.mjs) prepares it at every start
+- [`../mosquitto/README.md`](../mosquitto/README.md): the broker's policy, its roles ([`dynsec-roles.json`](../mosquitto/dynsec-roles.json)) and which topics each gateway may use
+- [`../ingestion/README.md`](../ingestion/README.md): how these messages are read and checked
+- [`../supabase/README.md`](../supabase/README.md): quarantine approval and the Audit Trail
