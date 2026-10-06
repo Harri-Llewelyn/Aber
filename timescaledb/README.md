@@ -1,10 +1,11 @@
 # The historian's maintenance
 
-The SQL in this directory is applied to the historian on every boot by the chart's maintenance
-hook Job (`deploy/helm/aber/templates/jobs/timescaledb-maintenance.yaml`), from a mirror the sync
-script keeps byte-identical to these files. [`init/`](init/) holds the one script the postgres
-entrypoint runs, on an empty data directory only. The tests beside the SQL (`test_*.py`) assert
-the roles' reach and the extension version against a running stack.
+The SQL in this directory is applied to the historian on every `helm install` and `helm upgrade`
+(each a *boot* below; a restart of the historian pod alone does not run it) by the chart's
+maintenance hook Job (`deploy/helm/aber/templates/jobs/timescaledb-maintenance.yaml`), from a
+mirror the sync script keeps byte-identical to these files. [`init/`](init/) holds the one script
+the postgres entrypoint runs, on an empty data directory only. The tests beside the SQL
+(`test_*.py`) assert the roles' reach and the extension version against a running stack.
 
 Each file states what it does. This document holds the reasoning: why the files run in the order
 they do, the conventions they share, and the argument and evidence behind each decision. A line in
@@ -143,7 +144,7 @@ TimescaleDB policy is removed on every boot so an upgraded stack converges.
 **Parse first, act second.** A typo in either interval must stop the boot with a message naming
 the setting, not leave the stack running with one policy applied and the other silently absent.
 Several spellings of "no policy" are accepted (`never`, `off`, `disabled`, `none`, `false`, `0`)
-because the value is typed into a `.env` file by hand, and a rejected synonym would take the boot
+because the value is typed into a values file by hand, and a rejected synonym would take the boot
 down.
 
 **Chunk interval.** Compression never touches the open chunk, so its span plus `compress_after`
