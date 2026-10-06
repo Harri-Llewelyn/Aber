@@ -154,6 +154,7 @@ k3d cluster create aber \
   --agents 0 \
   --port "80:80@loadbalancer" \
   --port "1883:1883@loadbalancer" \
+  --port "8883:8883@loadbalancer" \
   --k3s-arg "--disable=metrics-server@server:0" \
   --wait
 ```
@@ -164,8 +165,9 @@ exercised through its real path rather than by port-forwarding straight to a Ser
 Teardown is `k3d cluster delete aber` — it takes the PVCs with it, which is exactly what you
 want for a throwaway cluster and never what you want on k3s.
 
-`--port 1883:1883@loadbalancer` does the same for the `mosquitto-external` LoadBalancer, so a gateway
-on the LAN, or a simulator on the host, reaches the broker at the host address.
+`--port 1883:1883@loadbalancer` and `8883:8883@loadbalancer` do the same for the
+`mosquitto-external` LoadBalancer, so a gateway on the LAN (MQTTS on 8883), or a simulator on the
+host, reaches the broker at the host address.
 
 On Windows, k3d may write the API endpoint into the kubeconfig as `host.docker.internal:<port>`,
 which some adapters resolve to an unreachable address; `kubectl` then times out against a healthy
@@ -211,8 +213,8 @@ first install has no older pods, and creates its Jobs running.
 
 The port-forwards carry the port numbers every host-side script and suite defaults to (`5433` for the historian,
 `54322` and `54321` for Supabase, `1880`, `3002`, `9090`, `3100` and the rest), so every host-side
-tool keeps its defaults. `test` builds the suites' environment from `.env.example` for the
-non-secret settings and from the release's own Secret for every credential. The suites that reach
+tool keeps its defaults. `test` takes every credential from the release's own Secret; the suites
+carry their own defaults for the non-secret settings. The suites that reach
 into a container (`test-harness/stack_exec.py`) run `kubectl exec` against the workload, choosing
 the release with `KUBE_NAMESPACE` and `HELM_RELEASE`.
 
@@ -220,6 +222,7 @@ the release with `KUBE_NAMESPACE` and `HELM_RELEASE`.
 
 Two paths, and they are for genuinely different situations. **From the registry** if you want to
 run this stack; **from a checkout** if you are changing it. Both start with one change to Traefik.
+`npm run dev:up` (*The development loop* above) is the second path on k3d, as one command.
 
 ### First: Traefik keeps each client's address
 
@@ -255,8 +258,8 @@ to end.
 
 **On more than one node,** ServiceLB then lists only the nodes running a ready Traefik pod as the
 Service's addresses, and a node without one drops traffic sent to it rather than forwarding it:
-point DNS at the listed addresses. **If outside traffic reaches the nodes through NAT** (a public
-cloud's addresses, for example), do not set k3s's `node-external-ip` on any node: k3s documents
+point DNS at the listed addresses. **If outside traffic reaches the nodes through NAT** (a NAT
+router or firewall in front of the site network, for example), do not set k3s's `node-external-ip` on any node: k3s documents
 that `Local` does not work with it.
 
 **Where the address cannot be kept,** set `supabaseAuth.rateLimitHeader: ""`. That turns GoTrue's
@@ -268,28 +271,64 @@ address to Traefik's trusted senders in the same `valuesContent`, under
 proxy *replace* any `X-Forwarded-For` a client sent rather than append to it: GoTrue takes the
 first address, and an appended header leaves that one in the client's hands.
 
-### A. From the published chart (no checkout, no image builds)
+### A. From the published chart (no image builds)
 
 The chart and the eleven images this repository builds are published to GHCR as OCI artefacts. Helm
-speaks OCI natively — there is no `helm repo add`, and no index to go stale.
+speaks OCI natively — there is no `helm repo add`, and no index to go stale. Nothing is built: a
+clone of the release tag supplies only `npm run setup` and the manifests in this directory.
 
 ```bash
+git clone --branch v1.0.0 https://github.com/Harri-Llewelyn/Aber.git && cd Aber
+
 # Is the version published? The repository's Releases page lists every one.
 helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 1.0.0
 
-# my-values.yaml must name ingestion.primaryHostId and ingestion.sparkplugGroup: both are fixed
-# for the life of the site, neither has a default, and the render refuses without them.
+# Once per cluster: cert-manager and the internal CA (TLS, steps 0 and 1, below).
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
+kubectl -n cert-manager wait --for=condition=Available deployment --all --timeout=300s
+kubectl apply -f deploy/k8s/internal-ca.yaml
+kubectl -n cert-manager wait --for=condition=Ready certificate/aber-ca --timeout=120s
+
+# Credentials minted for this site, written to deploy/helm/aber/values-local.yaml (gitignored).
+npm run setup -- --domain=aber.plant.example
+
+# What only the site can say; each value is explained below.
+cat > site.yaml <<'EOF'
+global:
+  scheme: https
+ingestion:
+  primaryHostId: plant1
+  sparkplugGroup: plant1
+supabaseFunctions:
+  aas:
+    baseIri: https://plant.example/ids/asset/
+ingress:
+  tls:
+    enabled: true
+    certManager:
+      clusterIssuer: aber-ca
+mosquitto:
+  tls:
+    enabled: true
+    clusterIssuer: aber-ca
+    extraIpSans: [10.20.0.50]
+EOF
+
 helm install aber oci://ghcr.io/harri-llewelyn/aber/aber \
   --version 1.0.0 \
   --namespace aber --create-namespace \
-  --values my-values.yaml \
+  --values deploy/helm/aber/values-local.yaml \
+  --values site.yaml \
   --timeout 15m
 
 # `helm install` returns once the init hooks have finished. Readiness is a separate question:
 for w in $(kubectl -n aber get statefulset,deploy -o name); do
   kubectl -n aber rollout status "$w" --timeout=10m
 done
+helm test aber -n aber
 ```
+
+Then, before anyone signs in, distribute the root certificate (*TLS*, step 3).
 
 > **Do not add `--wait` to the first install — it deadlocks.** Helm's order is *create resources →
 > (with `--wait`) block until every workload is Ready → run post-install hooks*. This chart's
@@ -310,13 +349,24 @@ done
 makes the command mean something different next month and gives you no way to reproduce today's
 install. Pin it, in the command and in whatever runs the command.
 
-**There is no `-f values-dev.yaml` on this path** — that file is in the repository, not in your
-hands. But the chart *refuses to render* without credentials rather than generating them (see
-`aber.validateSecrets`), so an install with no values fails with a message naming the four
-it needs. Either write a `my-values.yaml` from
-[`values-prod.yaml.example`](../helm/aber/values-prod.yaml.example) — which travels **inside
-the package**, so `helm pull --untar` gives you a copy — or, for a throwaway cluster, pull the
-demo credentials out of `.env.example`.
+**There is no `-f values-dev.yaml` on this path.** Its credentials are published in git, and it
+belongs to the development loop. The chart *refuses to render* without credentials rather than
+generating them, and the message names every one that is missing (`aber.validateSecrets`).
+`npm run setup` mints a complete, matching set. To keep them in a secret store instead, start from
+[`values-prod.yaml.example`](../helm/aber/values-prod.yaml.example), which also travels inside the
+package (`helm pull --untar`), and set `secrets.existingSecret`.
+
+**`site.yaml` is what the chart cannot choose for you**, and the render refuses without most of it:
+
+- `ingestion.primaryHostId` and `ingestion.sparkplugGroup` name this site in the configuration of
+  every gateway on it. Neither has a default, and both are fixed for the life of the site.
+- `global.scheme`, `ingress.tls` and `mosquitto.tls` are *TLS* step 2, given at install rather than
+  as an upgrade. On any domain but `localhost` the render refuses the forge's route over plain
+  HTTP, because its sign-in cookies are `Secure`; and Remote gateways enrol only against a broker
+  certificate from the internal CA.
+- `mosquitto.tls.extraIpSans` is the address gateways dial the broker at. On k3s's ServiceLB that
+  is the node's own address. The render refuses broker TLS without it (*MQTTS on 8883* below).
+- `supabaseFunctions.aas.baseIri`, below.
 
 **Set the AAS base IRI before the first export: it is permanent from then on.** Every
 `globalAssetId` and submodel id an exported Asset Administration Shell carries is
@@ -325,7 +375,7 @@ whoever imported it holds those identifiers, and changing the IRI gives every as
 Put it under a domain your organisation controls, as `values-prod.yaml.example` shows; the
 default, `https://aber.local/ids/asset/`, belongs to nobody.
 
-The ten built images resolve automatically to the chart's `appVersion`, which the release stamps
+The eleven built images resolve automatically to the chart's `appVersion`, which the release stamps
 equal to the chart version. Chart 1.0.0 can only pull images 1.0.0; there is nothing to line up by
 hand and no `latest` tag to drift onto.
 
@@ -344,7 +394,7 @@ ISSUER=https://token.actions.githubusercontent.com
 
 # The chart you are about to install, then every image it will pull.
 cosign verify ghcr.io/harri-llewelyn/aber/aber:$V --certificate-identity "$ID" --certificate-oidc-issuer "$ISSUER"
-for i in edge-runtime ingestion node-red frontend i3x-service gateway-credential backup-service db-init swagger-ui test-runner; do
+for i in edge-runtime ingestion node-red frontend i3x-service gateway-credential backup-service timescaledb db-init swagger-ui test-runner; do
   cosign verify ghcr.io/harri-llewelyn/aber/$i:$V --certificate-identity "$ID" --certificate-oidc-issuer "$ISSUER"
 done
 ```
@@ -410,14 +460,14 @@ done
 
 No `--wait` here either, for the reason given above — it is exactly what CI does.
 
-This still **pulls** the nine built images from GHCR at the `appVersion` in `Chart.yaml` — a
+This still **pulls** the eleven built images from GHCR at the `appVersion` in `Chart.yaml` — a
 checkout does not imply a local build. To run your own, build them under the reference the chart
 asks for and make them available to the cluster (`k3d image import`, or a push to your own
 registry). `pullPolicy` is `IfNotPresent`, so a locally-present image of that exact name and tag
 wins over the published one. The commands are under *Images you must build*.
 
-`values-dev.yaml` carries the published demo credentials from `.env.example`. **They are in git.**
-For anything another person can reach, start from `values-prod.yaml.example` and set
+`values-dev.yaml` carries demo credentials. **They are in git.** For anything another person can
+reach, mint your own with `npm run setup`, or start from `values-prod.yaml.example` and set
 `secrets.existingSecret` to a Secret managed outside the chart.
 
 ### Overriding an image
@@ -433,7 +483,7 @@ ingestion:
 ```
 
 Do this for a hotfix, a bisect or an air-gapped mirror. Do not do it as a way to run one component
-a release ahead of the rest: the nine are built and tested together, and the failures from mixing
+a release ahead of the rest: the eleven are built and tested together, and the failures from mixing
 them are the asymmetric kind that surface days later on whichever component was *not* changed.
 
 ## Verify
@@ -450,7 +500,7 @@ migrations have finished. Check them explicitly:
 ```bash
 kubectl -n aber logs job/aber-db-roles-init   # scoped role passwords
 kubectl -n aber logs job/aber-db-init         # migrations + seed
-kubectl -n aber logs job/aber-storage-init    # the asset-3d-models bucket
+kubectl -n aber logs job/aber-storage-init    # the platform's four storage buckets
 
 # Schema actually applied?
 kubectl -n aber exec -it statefulset/supabase-db -- \
@@ -476,7 +526,7 @@ kubectl -n aber delete pvc data-timescaledb-0
 
 ## Reaching the stack
 
-Eight subdomains, all on one Ingress, all derived from `global.publicBaseDomain`:
+Nine subdomains, all on one Ingress, all derived from `global.publicBaseDomain`:
 
 | Host | Backend |
 |---|---|
@@ -486,10 +536,11 @@ Eight subdomains, all on one Ingress, all derived from `global.publicBaseDomain`
 | `grafana.<domain>` | `grafana:3000` |
 | `studio.<domain>` | `supabase-envoy:8001` (the gateway's studio listener — **off by default**) |
 | `docs.<domain>` | `swagger-ui:8080` |
+| `i3x.<domain>` | `i3x-service:8090` |
 | `git.<domain>` | `supabase-envoy:8002` (the gateway's forge listener; never `gitea:3000`) |
 | `mqtt.<domain>` | `mosquitto:9001` (WebSockets) |
-| — | `mosquitto-external:1883` (LoadBalancer) |
-| — | `<release>-ingress-gitea-ssh:22` (LoadBalancer; `gitea.ssh.external`) |
+| — | `mosquitto-external:1883`, and `:8883` with `mosquitto.tls.enabled` (LoadBalancer) |
+| — | `gitea-external:22` (LoadBalancer; `gitea.ssh.external`) |
 
 **Raw MQTT on 1883 is not on the Ingress** and cannot be — it is TCP, not HTTP. That is the
 `mosquitto-external` Service's job.
@@ -527,7 +578,7 @@ helm upgrade ... \
 
 Both secrets are required and the **render fails naming them** if they are missing — publishing a
 door whose flow has no registered client would present as a broken proxy rather than as two empty
-values. Rotating `studioOAuthClientSecret` needs `db-init` to re-run, since `0081` stores its hash;
+values. Rotating `studioOAuthClientSecret` needs `db-init` to re-run, since the seed (`0002`) stores its hash;
 rotating `studioProxyHmacSecret` signs everyone out and grants nobody anything.
 
 What this does **not** do is give Studio a second factor or a per-user audit trail of what was run
@@ -580,6 +631,8 @@ It is also cluster-scoped and shared, and a 10-year artefact against a chart upg
 
 #### 2. Turn on ingress TLS and broker TLS
 
+An install from *A* has these already, from `site.yaml`. On a stack installed without them:
+
 ```bash
 helm upgrade ... \
   --set global.scheme=https \
@@ -595,7 +648,7 @@ and therefore every OAuth `redirect_uri` db-init registers — is composed from 
 TLS on and sign-in breaks with `invalid redirect_uri` while every pod reports healthy.
 
 One wildcard certificate for `*.<domain>` is the intended arrangement: nine subdomains otherwise
-means seven certificates renewing independently.
+mean nine certificates renewing independently.
 
 #### 3. Distribute the root certificate
 
@@ -758,16 +811,19 @@ layers away from the cause.
 Off by default, because they seed and delete fixtures, drive real MQTT traffic and take minutes:
 
 ```bash
-helm upgrade aber deploy/helm/aber -n aber \
-  -f deploy/helm/aber/values-dev.yaml --set e2e.enabled=true
+# On the dev loop, `npm run dev:up -- --e2e` does all of this.
+kubectl -n aber delete job aber-e2e-validate aber-e2e-aas-export --ignore-not-found   # a finished run blocks the upgrade
+helm upgrade aber deploy/helm/aber -n aber --reuse-values --set e2e.enabled=true \
+  --set e2e.ingressIp="$(kubectl -n kube-system get svc traefik -o jsonpath='{.spec.clusterIP}')"   # only on the domain localhost
 
 kubectl -n aber wait --for=condition=complete \
   job/aber-e2e-validate --timeout=20m
 kubectl -n aber logs job/aber-e2e-validate
 ```
 
-- **`validate.py`** — the same checks `npm run dev:test` runs from the host. In-cluster it needs
-  **no host or port overrides at all**: the Service names *are* the correct configuration.
+- **`validate.py`** — the same checks `npm run dev:test` runs from the host. In-cluster the Job
+  points it at the Service names (`timescaledb`, `supabase-db`, `mosquitto`, `supabase-envoy`),
+  since its own defaults are the dev loop's `localhost` forwards. Nothing needs port-forwarding.
 - **`test_aas_export.py`** — starts automatically once the first Job completes, ordered by an
   initContainer inside the Job rather than by the order you run things. Its subject,
   `AAS_Conformance_Device`, is **provisioned by the suite** at pinned ids
@@ -812,18 +868,21 @@ kubectl -n aber get pvc          # delete deliberately, never as cleanup habit
 | `realtime-dev` Service + `supabase-realtime` Deployment | deployed |
 | `supabase-storage`, `supabase-functions` | deployed |
 | `supabase-meta`, `supabase-studio`, `swagger-ui` | deployed |
-| `db-roles-init`, `db-init`, `storage-init` hooks | deployed |
+| `db-roles-init`, `db-init`, `storage-policies`, `storage-init`, `timescaledb-maintenance` hooks | deployed |
 | `mosquitto` + `mosquitto-external`, `ingestion` | deployed |
 | `node-red`, `frontend` | deployed |
 | `i3x-service` | deployed |
-| `grafana`, `Ingress` (7 subdomain routes) | deployed |
-| `helm test` FDW gate, in-cluster E2E Jobs, k3d CI | deployed |
+| `gitea` + `gitea-external` | deployed |
+| `prometheus`, `loki`, `alloy`, the `cold-archive` CronJob | deployed |
+| `grafana`, `Ingress` (9 subdomain routes) | deployed |
+| `helm test` FDW gate, k3d CI | deployed |
+| In-cluster E2E Jobs, `playback`, the backup service, historian physical backup, database TLS | **available, off by default** |
 | NetworkPolicies, PDBs, HPAs, backup CronJob | **available, off by default** |
 | MQTTS on 8883, internal CA, ServiceMonitors | **available, off by default** |
 
 ### Images you must build
 
-Ten images are built from this repository rather than pulled from a vendor. **They are published**
+Eleven images are built from this repository rather than pulled from a vendor. **They are published**
 to `ghcr.io/harri-llewelyn/aber/`, so an ordinary install needs none of this — the chart pulls
 them at its own `appVersion`.
 
@@ -921,19 +980,20 @@ then the chart, to GHCR over OCI, on a `v*` tag.
 git tag v1.0.1 && git push origin v1.0.1
 ```
 
-That tag is the only place the version is written. It stamps the ten image tags, the chart
+That tag is the only place the version is written. It stamps the eleven image tags, the chart
 `version` and the chart `appVersion` in one run — **nothing is bumped in a commit first**, which is
 the usual way a chart ends up published under a version naming a different build. `Chart.yaml`'s
 committed values are for the untagged path only (a checkout, `helm lint`, `helm template`).
 
 **Rehearse it first.** Actions → Release → *Run workflow*, with `dry_run` left ticked: everything
 builds, the chart packages, every check runs, and nothing is pushed. The ingestion chain's
-attestations are checked on a dry run too, from the OCI archives it builds into; the other eight
+attestations are checked on a dry run too, from the OCI archives it builds into; the other nine
 produce theirs only when pushing.
 
 **Images publish before the chart, and the chart job `needs` them.** A chart published ahead of its
-images does not fail — `helm install` succeeds, the databases and broker come up healthy, and ten
-workloads sit in `ImagePullBackOff` with no failed release to point at.
+images fails late and misleadingly: the historian and the broker never start, every workload on a
+built image sits in `ImagePullBackOff`, and `helm install` times out on the `db-init` hook, naming
+the timeout rather than the missing image.
 
 **Then the GitHub Release.** The workflow opens it as a draft from
 [`RELEASE_TEMPLATE.md`](../../.github/RELEASE_TEMPLATE.md) with `aber-<version>-sbom.tar.gz`
@@ -999,7 +1059,7 @@ gateway's `sparkplug_id`. The dashboard and the enrolment bundle are the ordinar
 break-glass one:
 
 ```bash
-node scripts/mosquitto-provision-gateway.mjs --target=k8s gwy0123456789abcdef01234
+node scripts/mosquitto-provision-gateway.mjs gwy0123456789abcdef01234
 ```
 
 It sends the same Dynamic Security commands the credential service sends, through `kubectl exec`
@@ -1048,7 +1108,7 @@ kubectl -n aber exec deploy/ingestion -- python -c "import socket; socket.create
 
 **If everything goes unready the moment you enable it**, your CNI does not exempt kubelet probes from
 ingress policy. k3s's controller, Calico and Cilium all do; if yours does not, add an ingress allow
-from the node CIDR via `networkPolicy.extraEgress`.
+from the node CIDR via `networkPolicy.extraIngress`.
 
 **Two rules are load-bearing and easy to miss:** DNS egress on **both** UDP and TCP 53 (a response
 over 512 bytes falls back to TCP, so a UDP-only rule fails *intermittently*), and
@@ -1179,8 +1239,8 @@ kubectl -n aber create job --from=cronjob/aber-backup backup-now   # run one now
 `pg_dump -Fc` of both databases, nightly, onto a PVC that **survives `helm uninstall`** — deleting the
 release is exactly when the backups are most wanted.
 
-**Or the backup service, from the dashboard.** With `backupService.enabled=true` (and the
-`backup-service` image built, above) the CronJob yields to a Deployment that takes the same backup
+**Or the backup service, from the dashboard.** With `backupService.enabled=true` the
+CronJob yields to a Deployment that takes the same backup
 when an Administrator asks on the **Backups** page, and on `backup.schedule` through pg_cron, one
 directory per backup on the same PVC, with pgsodium's root key (without which every Vault row
 restores as unreadable ciphertext), the storage objects (`backup.includeStorage`), the forge's
@@ -1211,7 +1271,7 @@ Ad hoc, without waiting for the schedule:
 
 ```bash
 kubectl -n aber exec -i statefulset/supabase-db -- \
-  env PGPASSWORD="$PGPASSWORD" pg_dump -Fc -U postgres -d postgres > supabase-db.dump
+  env PGPASSWORD="$PGPASSWORD" pg_dump -Fc -U supabase_admin -d postgres > supabase-db.dump
 kubectl -n aber exec -i statefulset/timescaledb -- \
   env PGPASSWORD="$PGPASSWORD" pg_dump -Fc -U postgres -d postgres > timescaledb.dump
 ```
@@ -1224,8 +1284,8 @@ Restore:
 
 ```bash
 kubectl -n aber scale deploy/supabase-realtime --replicas=0
-kubectl -n aber exec -it statefulset/supabase-db -- \
-  pg_restore -U supabase_admin -d postgres --clean --if-exists /backups/supabase-db-<stamp>.dump
+kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- \
+  pg_restore -U supabase_admin -d postgres --clean --if-exists < supabase-db.dump
 kubectl -n aber scale deploy/supabase-realtime --replicas=1
 ```
 
@@ -1466,7 +1526,7 @@ Tier 1 does not recover a dead node. Two routes, depending on what the cluster r
 | :--- | :--- |
 | Cluster with a CSI snapshotter | A `VolumeSnapshotClass` plus scheduled `VolumeSnapshot` objects per PVC. Needs no chart setting |
 | Cluster with Velero | Namespace-scoped backups; annotate the storage pod (see *Storage durability*) |
-| **k3s on a Proxmox VM** — the on-prem edge appliance case | **Proxmox VE + Proxmox Backup Server**, snapshotting the whole guest |
+| **k3s on a Proxmox VM** — the usual on-prem server | **Proxmox VE + Proxmox Backup Server**, snapshotting the whole guest |
 
 > **`qemu-guest-agent` must be running in the guest, and this is the whole invariant.** Proxmox
 > issues `fs-freeze` through the agent before snapshotting, which quiesces the filesystem so both
@@ -1482,7 +1542,7 @@ Tier 1 does not recover a dead node. Two routes, depending on what the cluster r
 > success.
 
 PBS gives deduplicated, incremental, verifiable snapshots with their own retention policy, which is
-the closest thing to a real RPO this stack has — but it recovers the *appliance*, not a table. Keep
+the closest thing to a real RPO this stack has — but it recovers the *machine*, not a table. Keep
 tier 1 running underneath it.
 
 ### Secrets in production
@@ -1507,7 +1567,7 @@ Both halves of an OAuth secret must move together, or the handshake fails with `
 
 `local-path` is node-local with no replication: lose the node and the volume is gone, with no
 degraded mode in between. Set `global.storageClass` to a replicated class (Longhorn is the usual
-choice for on-prem k3s; Rook/Ceph or a cloud block class otherwise). Whatever you pick must support
+choice for on-prem k3s; Rook/Ceph where there is already Ceph). Whatever you pick must support
 **ReadWriteOnce and fsGroup remapping** — every PVC here is RWO by design and each pod's `fsGroup`
 is set to its image's uid, so a class that ignores fsGroup gives "permission denied" on a volume
 that mounts perfectly.
@@ -1539,7 +1599,7 @@ enabled.
 
 ### Trimming the Audit Trail
 
-`public.audit_trail` is range-partitioned by month on `recorded_at` (`0079`), so history is
+`public.audit_trail` is range-partitioned by month on `recorded_at` (archived migration `0079`), so history is
 retired by **detaching a partition**, not by deleting rows. That distinction is the whole point:
 `DELETE` over a large audit table is fully logged, bloats the heap and needs a `VACUUM` afterwards,
 while `DETACH` is instant, writes almost nothing, and leaves the data queryable as a standalone
@@ -1548,7 +1608,7 @@ table you can inspect before it is destroyed.
 **A pg_cron job keeps three months of partitions ahead of the writes** (`audit_trail_partitions`,
 daily at 03:20). Nothing routine is required of you. There is also a DEFAULT partition, so a lapsed
 job cannot refuse an audit write — which matters more than it sounds, because the audit INSERT is a
-trigger on `cells`, `gateways` and `devices`: a refused audit row fails **the asset write that
+trigger on `areas`, `cells`, `gateways`, `devices` and the other configuration tables: a refused audit row fails **the asset write that
 caused it**, and the operator sees "cannot create device" with the audit table named in the error.
 
 Check the state before doing anything:
@@ -1598,11 +1658,11 @@ kubectl -n aber exec statefulset/supabase-db -- psql -U postgres -d postgres -c 
 > and a detached partition is invisible to `SELECT ... FROM audit_trail`, so it is easy to
 > believe the space was recovered.
 
-**Clearing audit rows requires an owner connection, and that is deliberate.** `0003`'s append-only
-trigger exempts `postgres` and `supabase_admin` and nobody else, on the stated grounds that a
+**Clearing audit rows requires an owner connection, and that is deliberate.** The append-only
+trigger (`0001`) exempts `postgres` and `supabase_admin` and nobody else, on the stated grounds that a
 trigger cannot constrain a role that can issue DDL — so retiring history should require the same
-authority as dropping a table. `service_role` cannot do any of the above, and since `0079` it
-cannot reach the partitions directly either.
+authority as dropping a table. `service_role` cannot do any of the above, and since archived migration `0079`
+it cannot reach the partitions directly either.
 
 **Keep the online window generous.** Twenty-four months costs little on any realistic volume, and
 the rarer this procedure is, the more likely it is to be performed carefully.
@@ -1742,7 +1802,6 @@ Options, in rough order of how often they suit this stack:
 | :--- | :--- |
 | `longhorn` | Replicated block storage running on the cluster itself — the usual on-prem k3s choice, and what `values-prod.yaml.example` names |
 | `rook-ceph-block` | Heavier; worth it when there is already Ceph |
-| `ebs-sc` / `managed-csi` / `pd-balanced` | Managed clusters |
 
 > **Whatever you choose must support `ReadWriteOnce` and fsGroup ownership remapping.** Every PVC
 > here is RWO by design, and each pod's `podSecurityContext.fsGroup` is its image's uid. An NFS
@@ -1772,7 +1831,7 @@ kubectl -n aber rollout restart deployment/supabase-envoy
 
 `db-init` replays **every** migration on every upgrade. That is not a risk to be managed — it is
 the contract `0001`/`0002` are built around, since there is no applied-migrations ledger anywhere.
-Anyone adding a `0006_…` must keep it idempotent.
+Anyone adding a `0163_…` must keep it idempotent.
 
 It is also what makes changing an ingress hostname safe (M3): the OAuth `redirect_uris` for
 Grafana and Node-RED are re-registered from the current values in the same `helm upgrade`.
@@ -1828,7 +1887,7 @@ is set only with `tls.enabled`, for the `certificate-reload` sidecar.
 
 ### The plugin's document is the broker's one volume, and an upgrade never touches it
 
-The document — every issued gateway account, as hashes — lives on the `mosquitto-data` PVC
+The document — every issued gateway account, as hashes — lives on the `aber-mosquitto-data` PVC
 (`mosquitto.persistence`), with `resource-policy: keep` so an uninstall does not disconnect the
 fleet. It is the only copy: deleting the claim means re-issuing every gateway. The `assemble-config`
 initContainer runs `scripts/mosquitto-dynsec-init.mjs` on every start, which replaces the roles
@@ -1870,7 +1929,7 @@ The two browser-facing URLs are set with `GF_*` environment variables rather tha
 file are in-cluster (`http://supabase-envoy:8000`) and are correct untouched.
 
 Its datasource is rendered by an initContainer, same as the gateway's config and for the same reason — with
-`existingSecret` the chart cannot see the password, and Helm would substitute an empty string. That
+`existingSecret` the chart cannot see the password, and Helm would substitute an empty string. That keeps the substitution out of the main container,
 so Grafana runs its stock `/run.sh`.
 
 `fsGroup` is **472**, not 1000. The wrong value presents as "GF_PATHS_DATA is not writable" on a
@@ -1903,7 +1962,7 @@ survives a restart, what does not, what causes one and how often to expect it �
 customer-facing [`docs/i3x-openapi.yaml`](../../docs/i3x-openapi.yaml), because a client integrating
 against this endpoint has to build the re-create-on-404 path that the i3X lifecycle already requires.
 
-**All nine single-writer workloads are enumerated once**, in `aber.singleWriterWorkloads` in
+**All twelve single-writer workloads are enumerated once**, in `aber.singleWriterWorkloads` in
 `_helpers.tpl`. The autoscaling guard derives its refusal set from that block and CI parses the same
 block for its replica/strategy check, so neither keeps a copy that can fall behind it.
 
@@ -1933,9 +1992,11 @@ node scripts/sync-helm-chart-files.mjs           # update the copies
 node scripts/sync-helm-chart-files.mjs --check   # fail if stale (what CI runs)
 ```
 
-Mirrored: the TimescaleDB init and maintenance SQL, the Supabase migrations and seed, the gateway
-template, `storage-init.mjs`, `docs/openapi.yaml`, the Mosquitto config and ACL, the Node-RED flow
-and init script, and Grafana's `grafana.ini`, datasource template, dashboards and alerting rules.
+Mirrored: the TimescaleDB SQL and pgBackRest script, the Supabase seed and storage policies, the
+gateway config, `storage-init.mjs`, the Mosquitto config and Dynamic Security roles, the broker and
+credential-service scripts, the Gitea and backup-service scripts, Loki's config, and Grafana's
+`grafana.ini`, datasource template, dashboards and alerting rules. The migrations and the API specs
+are not mirrored: they are baked into the `db-init` and `swagger-ui` images.
 `scripts/sync-helm-chart-files.mjs` is the authoritative list.
 
 ---
