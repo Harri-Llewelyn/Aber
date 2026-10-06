@@ -830,8 +830,8 @@ opening a shell:
 
 | Row | Reads | Means |
 | :--- | :--- | :--- |
-| **Platform** | `v1.0.0 · converged 40 minutes ago` | the playbook version this appliance is actually on. Different tags across the fleet is a rollout in progress, which is what the per-gateway pointer is for |
-| **Platform** | `v1.0.0 · failed` | `ansible-pull` did not complete. The timer retries within the hour; the appliance's journal says why |
+| **Platform** | `v1.0.1 · converged 40 minutes ago` | the playbook version this appliance is actually on. Different tags across the fleet is a rollout in progress, which is what the per-gateway pointer is for |
+| **Platform** | `v1.0.1 · failed` | `ansible-pull` did not complete. The timer retries within the hour; the appliance's journal says why |
 | **Custom** | *(empty)* | this gateway's repository carries no playbook of its own. The ordinary case |
 | **Custom** | `converged at a1b2c3d` | its adapter is running, from that commit |
 | **Custom** | `failed at a1b2c3d` | its adapter is **not** running |

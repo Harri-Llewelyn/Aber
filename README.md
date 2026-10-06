@@ -169,10 +169,10 @@ The full runbook is [`deploy/k8s/README.md`](deploy/k8s/README.md).
 
 Needs a k3s node, `kubectl`, Helm 3, Node.js, and DNS that resolves `*.<domain>` to the node. The
 clone is only for the setup script and two cluster manifests; the chart and Aber's own images are
-pulled from GHCR at 1.0.0.
+pulled from GHCR at 1.0.1.
 
 ```bash
-git clone --branch v1.0.0 https://github.com/Harri-Llewelyn/Aber.git && cd Aber
+git clone --branch v1.0.1 https://github.com/Harri-Llewelyn/Aber.git && cd Aber
 
 # Once per cluster: Traefik keeps each client's address, and cert-manager runs the internal CA
 # that issues every certificate (deploy/k8s/README.md, "Install" and "TLS").
@@ -208,7 +208,7 @@ mosquitto:
     extraIpSans: [10.20.0.50]    # the node's address, which gateways dial
 EOF
 
-helm install aber oci://ghcr.io/harri-llewelyn/aber/aber --version 1.0.0 \
+helm install aber oci://ghcr.io/harri-llewelyn/aber/aber --version 1.0.1 \
   -n aber --create-namespace \
   -f deploy/helm/aber/values-local.yaml -f site.yaml --timeout 15m
 

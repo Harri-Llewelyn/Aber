@@ -11,7 +11,7 @@ type: application
 # aber` straight from a checkout, and `helm lint`/`helm template` in CI, neither of which
 # has a tag to read. Keep them at the last released version so a working tree renders as the
 # release it descends from rather than as something newer that does not exist.
-version: 1.0.0
+version: 1.0.1
 
 # The platform release this chart deploys, and -- because `image.tag` is empty for every image
 # this repository builds -- the tag those five images are pulled at. That coupling is the point:
@@ -22,7 +22,7 @@ version: 1.0.0
 #
 # Quoted because Helm requires a string here and an unquoted 0.1.0 is fine but 1.0 would become
 # a float.
-appVersion: "1.0.0"
+appVersion: "1.0.1"
 
 kubeVersion: ">=1.25.0-0"
 
