@@ -278,10 +278,10 @@ speaks OCI natively — there is no `helm repo add`, and no index to go stale. N
 clone of the release tag supplies only `npm run setup` and the manifests in this directory.
 
 ```bash
-git clone --branch v1.0.0 https://github.com/Harri-Llewelyn/Aber.git && cd Aber
+git clone --branch v1.0.1 https://github.com/Harri-Llewelyn/Aber.git && cd Aber
 
 # Is the version published? The repository's Releases page lists every one.
-helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 1.0.0
+helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 1.0.1
 
 # Once per cluster: cert-manager and the internal CA (TLS, steps 0 and 1, below).
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
@@ -316,7 +316,7 @@ mosquitto:
 EOF
 
 helm install aber oci://ghcr.io/harri-llewelyn/aber/aber \
-  --version 1.0.0 \
+  --version 1.0.1 \
   --namespace aber --create-namespace \
   --values deploy/helm/aber/values-local.yaml \
   --values site.yaml \
@@ -386,7 +386,7 @@ Put it under a domain your organisation controls, as `values-prod.yaml.example` 
 default, `https://aber.local/ids/asset/`, belongs to nobody.
 
 The eleven built images resolve automatically to the chart's `appVersion`, which the release stamps
-equal to the chart version. Chart 1.0.0 can only pull images 1.0.0; there is nothing to line up by
+equal to the chart version. Chart 1.0.1 can only pull images 1.0.1; there is nothing to line up by
 hand and no `latest` tag to drift onto.
 
 #### Verify what you are about to install
@@ -398,7 +398,7 @@ in its registry index; [`SECURITY.md`](../../SECURITY.md#what-a-release-carries-
 says what each is and how to read it.
 
 ```bash
-V=1.0.0
+V=1.0.1
 ID="https://github.com/Harri-Llewelyn/Aber/.github/workflows/release.yml@refs/tags/v$V"
 ISSUER=https://token.actions.githubusercontent.com
 
@@ -489,7 +489,7 @@ the `appVersion` default:
 ingestion:
   image:
     repository: registry.internal/aber/ingestion
-    tag: "1.0.0-hotfix.2"
+    tag: "1.0.1-hotfix.2"
 ```
 
 Do this for a hotfix, a bisect or an air-gapped mirror. Do not do it as a way to run one component
@@ -987,7 +987,7 @@ done
 then the chart, to GHCR over OCI, on a `v*` tag.
 
 ```bash
-git tag v1.0.1 && git push origin v1.0.1
+git tag v1.0.2 && git push origin v1.0.2
 ```
 
 That tag is the only place the version is written. It stamps the eleven image tags, the chart
@@ -1011,7 +1011,7 @@ attached — every image's SBOM and provenance, and a `DIGESTS` file naming what
 notes and publish it:
 
 ```bash
-gh release edit v1.0.1 --draft=false --notes-file notes.md
+gh release edit v1.0.2 --draft=false --notes-file notes.md
 ```
 
 ### What the release signs and attests
@@ -1044,7 +1044,7 @@ inside each image's package, so they are public with it.
 Verify from somewhere with no credentials at all:
 
 ```bash
-helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 1.0.0
+helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 1.0.1
 ```
 
 ### What the release does not do
