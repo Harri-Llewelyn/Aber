@@ -70,8 +70,7 @@ const gitignored = (path) => IGNORED.some((p) => p.test(path));
       if (fence) continue;
       const heading = line.match(/^#{1,6}\s+(.*?)\s*$/);
       if (heading) {
-        const slug = heading[1].toLowerCase().replace(/<[^>]+>/g, '')
-          .replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/\s/g, '-');
+        const slug = heading[1].toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/\s/g, '-');
         const n = seen.get(slug) || 0;
         seen.set(slug, n + 1);
         anchors.add(n ? `${slug}-${n}` : slug);
