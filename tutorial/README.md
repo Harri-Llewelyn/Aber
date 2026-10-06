@@ -243,7 +243,7 @@ each of its devices, and the gateway's own heartbeat. An `NBIRTH` starts it agai
 > to one node, and inside a subflow `flow` belongs to that instance. So a subflow per device sends
 > separate counters into one gateway's stream, which Aber reads as lost messages, asking for a rebirth
 > several hundred times an hour. Keep the counter in `flow` when every publisher is on one tab, as the
-> appliance's sample flow does, or in `global` under `seq_<gateway id>` when subflows publish.
+> appliance's sample flow does, or in `global` under `seq_<edge node>` (the gateway's Sparkplug ID) when subflows publish.
 
 `Asset_ID` and `Asset_Name` are **not** sent in `DDATA`. They are fixed, declared in `DBIRTH`, and
 dropped before the readings are stored: the topic is what identifies the device. `DBIRTH` still
@@ -328,6 +328,6 @@ is put together and what each part needs.
 - [`../docs/glossary.md`](../docs/glossary.md): the terms used here
 - [`../docs/remote-gateways.md`](../docs/remote-gateways.md): gateways on their own hardware (the install command, the bundle, the forge, the playbook)
 - [`../node-red/README.md`](../node-red/README.md): how Node-RED's editor and APIs are protected; [`../node-red/node-red-init.mjs`](../node-red/node-red-init.mjs) prepares it at every start
-- [`../mosquitto/README.md`](../mosquitto/README.md): the broker's policy, its roles ([`dynsec-roles.json`](../mosquitto/dynsec-roles.json)) and which topics each gateway may use
+- [`../mosquitto/README.md`](../mosquitto/README.md): the broker's policy, its configuration ([`mosquitto.conf`](../mosquitto/mosquitto.conf)) and roles ([`dynsec-roles.json`](../mosquitto/dynsec-roles.json)), and which topics each gateway may use
 - [`../ingestion/README.md`](../ingestion/README.md): how these messages are read and checked
 - [`../supabase/README.md`](../supabase/README.md): quarantine approval and the Audit Trail
