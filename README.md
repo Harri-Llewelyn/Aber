@@ -20,7 +20,7 @@ inspired by the **AMRC Connectivity Stack (ACS)**; [how far that goes](#relation
 > Where ACS ships bespoke microservices, Aber uses Supabase, TimescaleDB, Grafana and
 > Node-RED. The custom surface is one Python ingestion service — a daemon and the modules beside it:
 > the constraint engine, the metrics registry, capture and playback, the Directory and UNS publishers,
-> cold archival — sixteen edge functions, an i3X server and a React dashboard.
+> cold archival — eighteen edge functions, an i3X server and a React dashboard.
 
 ## Relationship to ACS
 
@@ -109,80 +109,184 @@ the dashboard reads PostgREST and subscribes to Realtime.
 
 ## Deployment
 
-**Kubernetes is the deployment target.** The Helm chart in
-[`deploy/helm/aber`](deploy/helm/aber) deploys the whole platform onto k3s, or onto k3d
-for development; the runbook is [`deploy/k8s/README.md`](deploy/k8s/README.md) and the design
-record is [`docs/kubernetes-architecture.md`](docs/kubernetes-architecture.md). The one thing that
-runs on Docker Compose is the gateway appliance: a Raspberry Pi runs the bundle the dashboard hands
-it ([`forge/gateway-platform/appliance/`](forge/gateway-platform/appliance)).
+An Aber site has two parts, and they are installed differently: **the server needs Kubernetes, and
+each gateway needs Docker.**
+
+### The server: Kubernetes
+
+The server is the platform itself: the dashboard, the databases, the broker, ingestion, Node-RED,
+Grafana and the forge. It runs on **k3s**, from the Helm chart in
+[`deploy/helm/aber`](deploy/helm/aber); for development the same chart runs on k3d, which is k3s
+inside Docker. *Quick start* below covers both. The runbook is
+[`deploy/k8s/README.md`](deploy/k8s/README.md) and the design record is
+[`docs/kubernetes-architecture.md`](docs/kubernetes-architecture.md). The server's images are built
+for `linux/amd64` only, so it cannot run on a Raspberry Pi.
+
+### Gateways: Docker
+
+A gateway connects a machine's devices to the server. It runs Node-RED under Docker Compose on its
+own hardware (a Raspberry Pi, an industrial PC or a spare server) and publishes Sparkplug B to the
+server's broker over MQTTS on 8883. It needs no Kubernetes. Create each one in the dashboard
+(**Gateways → New Gateway**, **Type** *Remote*), which offers two ways to install it:
+
+- **A command to paste** on a fresh Ubuntu machine, amd64 or arm64. It installs Docker itself, then
+  enrols. It is offered only when the server's API has TLS.
+- **A bundle**: a folder to copy to any machine that already has Docker and the Compose plugin,
+  where `docker compose up -d --build` starts it.
+
+Either way the gateway needs a route to the server's API and to its broker on 8883. Its image is
+built on the gateway itself, which is how an arm64 Pi runs it. The runbook is
+[`docs/remote-gateways.md`](docs/remote-gateways.md), and the bundle's contents are in
+[`forge/gateway-platform/appliance/`](forge/gateway-platform/appliance). *Host* and *Simulated*
+gateways run inside the server and need nothing installed.
 
 ---
 
 ## Quick start
 
-Full runbook in [`deploy/k8s/README.md`](deploy/k8s/README.md). The short version:
+There are two routes to a running server, for two different jobs. Both install the same Helm chart
+onto k3s, and gateways are added afterwards from the dashboard (*Gateways: Docker* above;
+[`tutorial/README.md`](tutorial/README.md) walks through the first one).
+
+| You want to | Route | Images you build |
+| :--- | :--- | :--- |
+| **Run Aber** on a site | the published chart from GHCR, onto a k3s node | none |
+| **Change Aber** on a laptop | `npm run dev:up` from a checkout, onto a k3d cluster | all eleven |
+
+**`npm run dev:up` is the k3d route, not an alternative to it.** k3d runs k3s inside Docker, and the
+script creates the k3d cluster `aber`, builds every image from your checkout, imports them and
+installs the chart with `values-dev.yaml`. Those demo credentials are committed to git, so never use
+this route for a stack anyone else can reach.
 
 > **One node with 4 vCPU, 8 GiB and 100 GiB of disk is the measured minimum**; 8 vCPU and 16 GiB is
 > comfortable. Under it the stack does not run slowly, it fails to schedule — the chart reserves
 > 1.6 vCPU and 3.7 GiB, and pods below that sit `Pending`. Sizing and what grows:
 > [`deploy/k8s/README.md`](deploy/k8s/README.md), *Prerequisites → Hardware*.
 
+The full runbook is [`deploy/k8s/README.md`](deploy/k8s/README.md).
+
+### Run it on a site
+
+Needs a k3s node, `kubectl`, Helm 3, Node.js, and DNS that resolves `*.<domain>` to the node. The
+clone is only for the setup script and two cluster manifests; the chart and Aber's own images are
+pulled from GHCR at 1.0.0.
+
 ```bash
-# Everything below in one command, plus the waits and helm test: npm run dev:up
-#   (deploy/k8s/README.md, "The development loop"). Step by step:
-# Ten images are built from this repository. They are published to GHCR at the chart's
-# appVersion, and the chart pulls them under exactly these names: a local build that is
-# tagged any other way is ignored. deploy/k8s/README.md says what each one is for.
-NS=ghcr.io/harri-llewelyn/aber
-V=1.0.0                                       # appVersion in deploy/helm/aber/Chart.yaml
-docker build -f supabase/functions/Dockerfile   -t $NS/edge-runtime:$V .
-docker build -f ingestion/Dockerfile            -t $NS/ingestion:$V .
-docker build -f node-red/Dockerfile             -t $NS/node-red:$V node-red
-docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true -t $NS/frontend:$V frontend
-docker build -f i3x/Dockerfile                  -t $NS/i3x-service:$V .
-docker build -f gateway-credential/Dockerfile   -t $NS/gateway-credential:$V gateway-credential
-docker build -f backup-service/Dockerfile       -t $NS/backup-service:$V backup-service
-docker build -f timescaledb/Dockerfile          -t $NS/timescaledb:$V timescaledb
-docker build -f supabase/db-init/Dockerfile      -t $NS/db-init:$V supabase
-docker build -f swagger-ui/Dockerfile           -t $NS/swagger-ui:$V .
-docker build -f test-harness/Dockerfile --build-arg INGESTION_IMAGE=$NS/ingestion:$V -t $NS/test-runner:$V .
+git clone --branch v1.0.0 https://github.com/Harri-Llewelyn/Aber.git && cd Aber
 
-# A local cluster: k3d is k3s in Docker, with the Traefik, ServiceLB and local-path that
-# production has. Port 80 is the Ingress; 1883 is the broker for gateways on the LAN.
-k3d cluster create aber --agents 0 --port "80:80@loadbalancer" --port "1883:1883@loadbalancer" \
-  --k3s-arg "--disable=metrics-server@server:0" --wait
-k3d image import $(for i in edge-runtime ingestion node-red frontend i3x-service \
-  gateway-credential backup-service timescaledb db-init swagger-ui test-runner; do echo $NS/$i:$V; done) -c aber
+# Once per cluster: Traefik keeps each client's address, and cert-manager runs the internal CA
+# that issues every certificate (deploy/k8s/README.md, "Install" and "TLS").
+kubectl apply -f deploy/k8s/traefik-config.yaml
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
+kubectl -n cert-manager wait --for=condition=Available deployment --all --timeout=300s
+kubectl apply -f deploy/k8s/internal-ca.yaml
+kubectl -n cert-manager wait --for=condition=Ready certificate/aber-ca --timeout=120s
 
-node scripts/sync-helm-chart-files.mjs        # mirror repo config into the chart
+# Credentials minted for this site, written to deploy/helm/aber/values-local.yaml (gitignored).
+npm run setup -- --domain=aber.plant.example
 
-kubectl create namespace aber
-helm install aber deploy/helm/aber -n aber \
-  -f deploy/helm/aber/values-dev.yaml --timeout 15m
+# What only the site can say.
+cat > site.yaml <<'EOF'
+global:
+  scheme: https
+ingestion:
+  primaryHostId: plant1          # both fixed for the life of the site; neither has a default
+  sparkplugGroup: plant1
+supabaseFunctions:
+  aas:
+    baseIri: https://plant.example/ids/asset/   # permanent once a shell is exported
+ingress:
+  tls:
+    enabled: true
+    certManager:
+      clusterIssuer: aber-ca
+mosquitto:
+  tls:
+    enabled: true
+    clusterIssuer: aber-ca
+    extraIpSans: [10.20.0.50]    # the node's address, which gateways dial
+EOF
 
-# NOT `--wait` — it deadlocks the first install. See deploy/k8s/README.md.
+helm install aber oci://ghcr.io/harri-llewelyn/aber/aber --version 1.0.0 \
+  -n aber --create-namespace \
+  -f deploy/helm/aber/values-local.yaml -f site.yaml --timeout 15m
+
+# NOT `--wait`: it deadlocks the first install (deploy/k8s/README.md says why).
 for w in $(kubectl -n aber get statefulset,deploy -o name); do
   kubectl -n aber rollout status "$w" --timeout=10m
 done
-
-helm test aber -n aber          # the postgres_fdw gate
+helm test aber -n aber
 ```
 
-Serves nine subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, `studio.`, `docs.`,
-`i3x.`, `git.`, `mqtt.`) plus a LoadBalancer for **raw MQTT on 1883** and a second for **git over SSH**,
-neither of which is HTTP and so neither of which can ride an Ingress.
+Before anyone signs in, install the root certificate in every browser and gateway that will use the
+stack (runbook, *TLS → 3*). To keep the credentials in a secret store rather than a values file,
+start from `values-prod.yaml.example` and set `secrets.existingSecret`.
 
-- **`values-dev.yaml` carries published demo credentials, and they are in git.** `npm run setup`
-  writes `deploy/helm/aber/values-local.yaml` (gitignored) with credentials minted for this
-  install; for anything another person can reach, start from `values-prod.yaml.example` and point
-  `secrets.existingSecret` at an externally managed Secret.
-- **`npm run dev:reset` is the way back to a blank stack**: it uninstalls, drops every claim and
-  reinstalls on the same cluster and images. `audit_trail` is append-only to every application
-  role, so dropping the volume is the only way to an empty audit trail.
-- **The chart validates its own values and fails the render, not the pod** — a partial credential
-  set, a wrong-length Realtime key, a renamed Realtime Service, TLS with `scheme: http`, or an HPA
-  on a single-writer workload each otherwise produce a stack that reports healthy and refuses every
-  request.
+**The chart validates its own values and fails the render, not the pod**, and the message names the
+fix. A missing ingestion id, the forge's route on plain HTTP, broker TLS with no address for
+gateways to verify, a partial credential set, a wrong-length Realtime key or an HPA on a
+single-writer workload would each otherwise produce a stack that reports healthy and refuses every
+request.
+
+### Develop on a laptop
+
+Needs Docker, k3d, `kubectl`, Helm 3 and Node.js. From a checkout:
+
+```bash
+npm run dev:up        # cluster if absent, images built and imported, chart installed, helm test
+npm run dev:test      # validate.py and the stack lane, against that cluster
+npm run dev:forward   # the in-cluster ports on localhost, held until Ctrl+C
+npm run dev:reset     # uninstall, drop every volume claim, reinstall: a blank stack
+npm run dev:down      # delete the cluster
+```
+
+`dev:reset` is the only way back to an empty audit trail, because `audit_trail` is append-only to
+every application role. Each step `dev:up` takes is in the runbook, under *Local cluster with k3d*
+and *The development loop*.
+
+### Where everything is
+
+On a site every host is under the domain given to `npm run setup`. With `dev:up` it is `localhost`,
+which browsers resolve to this machine without a hosts file.
+
+| Interface | Site | Laptop |
+| :--- | :--- | :--- |
+| Dashboard | `https://app.<domain>` | http://app.localhost |
+| API | `https://api.<domain>` | http://api.localhost |
+| Node-RED | `https://nodered.<domain>` | http://nodered.localhost |
+| Grafana | `https://grafana.<domain>` | http://grafana.localhost |
+| Forge (Gitea) | `https://git.<domain>` | http://git.localhost |
+| API reference (Swagger UI) | `https://docs.<domain>` | http://docs.localhost |
+| i3X | `https://i3x.<domain>` | http://i3x.localhost |
+| Supabase Studio, `Administrator` only | off by default; runbook, *Reaching the stack* | http://studio.localhost |
+| MQTT broker | the node's address: 8883 (TLS), which gateways use, and 1883 | `localhost`: 8883 and 1883 |
+| Prometheus | `kubectl -n aber port-forward svc/prometheus 9090` | `npm run dev:forward`, then http://localhost:9090 |
+
+**Sign in to the React dashboard first.** Node-RED and Grafana both federate to Supabase Auth, and
+the consent step needs your dashboard session — going straight to either shows a "sign in required"
+prompt rather than a login form. In Node-RED, click **Sign in with Aber**; Administrator can
+deploy, every other role gets a read-only editor (`nodered-userinfo` maps Administrator to full
+permissions and every other role to `read`). An appliance deploys the flow on the `main` branch of
+its gateway repository in the forge, where pushes are disabled and a merge needs one approval from
+the `administrators` team, which `forge-membership` fills from each person's Postgres role.
+
+**Demo accounts** — seeded by [`supabase/seed.sql`](supabase/seed.sql), password `aber123`:
+
+| Email | Role | Access |
+| :--- | :--- | :--- |
+| `admin@aber.local` | `Administrator` | Full CRUD |
+| `manager@aber.local` | `Shopfloor_Manager` | Full CRUD |
+| `operator@aber.local` | `Operator` | Read-only + telemetry |
+| `auditor@aber.local` | `Auditor` | Audit Trail read-only |
+
+Self-registered accounts get read-only `Operator` via the `handle_new_user` trigger; an
+`Administrator` must promote them.
+
+**Forgotten passwords** are reset from the sign-in card (*Forgot your password?*), which asks
+GoTrue to email a link to `/reset-password`. The link is sent over SMTP, so set
+`supabaseAuth.smtp` and `secrets.smtpPassword` in values. With no relay configured the request
+fails and the card tells the user to ask an administrator, who can set a password through the Auth
+API or Studio instead.
 
 ---
 
@@ -210,43 +314,6 @@ made. The demo user accounts are seeded separately, by `supabase/seed.sql`.
 > `check-docs-drift.mjs` can verify a redeclaration was *intended* and cannot verify it was
 > *complete*.
 
-| Interface | URL |
-| :--- | :--- |
-| React Dashboard | http://localhost:3000 |
-| Supabase Studio | http://127.0.0.1:54323 (sign in as an `Administrator`) |
-| Swagger UI | http://localhost:8088 |
-| Node-RED | http://localhost:1880 |
-| Grafana | http://localhost:3002 |
-| Prometheus | http://localhost:9090 (loopback only — SSH-tunnel from another host) |
-
-**Sign in to the React dashboard first.** Node-RED and Grafana both federate to Supabase Auth, and
-the consent step needs your dashboard session — going straight to either shows a "sign in required"
-prompt rather than a login form. In Node-RED, click **Sign in with Aber**; Administrator can
-deploy, every other role gets a read-only editor (`nodered-userinfo` maps Administrator to full
-permissions and every other role to `read`). An appliance deploys the flow on the `main` branch of
-its gateway repository in the forge, where pushes are disabled and a merge needs one approval from
-the `administrators` team, which `forge-membership` fills from each person's Postgres role.
-
-**Demo accounts** — seeded by [`supabase/seed.sql`](supabase/seed.sql), password `aber123`:
-
-| Email | Role | Access |
-| :--- | :--- | :--- |
-| `admin@aber.local` | `Administrator` | Full CRUD |
-| `manager@aber.local` | `Shopfloor_Manager` | Full CRUD |
-| `operator@aber.local` | `Operator` | Read-only + telemetry |
-| `auditor@aber.local` | `Auditor` | Audit Trail read-only |
-
-Self-registered accounts get read-only `Operator` via the `handle_new_user` trigger; an
-`Administrator` must promote them.
-
-**Forgotten passwords** are reset from the sign-in card (*Forgot your password?*), which asks
-GoTrue to email a link to `/reset-password`. The link is sent over SMTP, so set `SMTP_HOST`,
-`SMTP_FROM` and the credentials (`supabaseAuth.smtp` and `secrets.smtpPassword` in values). With no relay configured the request fails and the card tells the user to ask an
-administrator, who can set a password through the Auth API or Studio instead.
-
-> **`values-dev.yaml` contains working development secrets** — the standard Supabase demo values, also
-> the gateway's registered API keys. **`npm run setup` mints fresh ones for any shared or hosted environment.**
-
 ---
 
 ## Repository map
@@ -265,7 +332,7 @@ administrator, who can set a password through the Auth API or Studio instead.
 | [`docs/upgrades.md`](docs/upgrades.md) | What survives an upgrade and why nothing needs reconfiguring — plus the four places that is not the whole truth, and the floor it holds from |
 | [`docs/releases.md`](docs/releases.md) | What a release promises: the supported window, what makes a version major, deprecation, and how a site learns a release matters to it |
 | [`docs/openapi.yaml`](docs/openapi.yaml) · [`docs/i3x-openapi.yaml`](docs/i3x-openapi.yaml) | REST and i3X specifications, rendered by Swagger UI |
-| [`supabase/migrations/archive/`](supabase/migrations/archive) | The 99 superseded migrations, preserved for their reasoning. Never executed |
+| [`supabase/migrations/archive/`](supabase/migrations/archive) | The 197 superseded migrations, preserved for their reasoning. Never executed |
 | [`grafana/`](grafana) · [`timescaledb/`](timescaledb) | Provisioning; hypertable schema, retention and rollup reconciliation, the read-only BI role |
 | [`scripts/`](scripts) | Setup, the dev loop, vocabulary generation, chart-file sync, drift guards, database backup/restore, gateway provisioning, AAS push |
 | **[`test-harness/`](test-harness/README.md)** | The test-runner image, the synthetic load generator and the scale envelope, the stack-only suites, the vendored IDTA AAS schema |
@@ -337,13 +404,13 @@ unrecognised role produces `403`.
 | Layer | Control |
 | :--- | :--- |
 | **Broker** | `allow_anonymous false`; the Dynamic Security plugin's roles ([`mosquitto/dynsec-roles.json`](mosquitto/dynsec-roles.json), [`mosquitto/README.md`](mosquitto/README.md)) confine each gateway to `spBv1.0/+/+/<own-id>/#`, and revocation drops a live session |
-| **Ingestion** | Gateway↔device binding; quarantine gating; append-only historian writes — a **grant**, not a promise, once `INGEST_WRITER_PASSWORD` and `INGEST_DB_USER` are set: `ingest_writer` may INSERT and cannot UPDATE, DELETE or TRUNCATE. Unset, the daemon keeps the admin credential and the guarantee is the Python's again — see [Historian roles](#historian-roles) |
+| **Ingestion** | Gateway↔device binding; quarantine gating; append-only historian writes — a **grant**, not a promise: the daemon connects as `ingest_writer` (`ingestion.dbUser`, with `secrets.ingestWriterPassword`), which may INSERT and cannot UPDATE, DELETE or TRUNCATE, and it refuses to run as the historian superuser — see [Historian roles](#historian-roles) |
 | **Gateway** | Envoy's `apikey` check on `/rest`, `/realtime`, `/storage`, `/functions` — with **four** documented exemptions ([`supabase/README.md`](supabase/README.md)) |
 | **API** | PostgREST JWT verification plus RLS on every table |
 | **Database** | `has_role()` reads `user_roles` directly, so revocation is immediate; `audit_trail` is append-only against `service_role` too |
 | **Edge functions** | Explicit router allow-list; per-function secret scoping; role resolved from the database, never a stale JWT claim |
 | **Edge automation** | Node-RED's editor, admin API and webhook receiver each authenticate separately |
-| **Supabase Studio** | Behind the gateway's `studio` listener: an OAuth login against this stack's GoTrue and an `Administrator` check (`0081`). Off the Ingress by default on Kubernetes |
+| **Supabase Studio** | Behind the gateway's `studio` listener: an OAuth login against this stack's GoTrue and an `Administrator` check (`0081`). Off the Ingress by default |
 | **The forge** | Behind the gateway's `forge` listener: the same login, admitting `Administrator` and `Shopfloor_Manager` (`0094`). Gitea's own HTTP port is reachable only from the gateway and the edge runtime |
 
 ### Historian roles
@@ -415,10 +482,10 @@ Three things follow, and none of them is obvious:
   generated by `node scripts/setup.mjs`. Without them the stack runs normally and Studio answers a
   login nobody can complete — including on an existing stack upgraded before the variables exist.
 
-**On Kubernetes the same door can be published, and is not by default.** `ingress.routes.studio`
-stays `false`, but the reason has changed: the route now points at the gateway's studio listener
-rather than at Studio itself, so what is left is a decision about *exposure* rather than about
-authentication — a console on a public hostname is reachable by anyone who can reach the ingress.
+**The same door can be published, and is not by default.** `ingress.routes.studio` stays `false`.
+The route points at the gateway's studio listener rather than at Studio itself, so leaving it off is
+a decision about *exposure* rather than about authentication — a console on a hostname is reachable
+by anyone who can reach the ingress.
 Turning it on requires `secrets.studioOAuthClientSecret` and `secrets.studioProxyHmacSecret`, and
 the render fails naming them rather than publishing a login nobody can complete. Without the route,
 reaching it is a port-forward:
@@ -446,7 +513,8 @@ Two consequences worth stating on the front page; both are detailed in
 Five identities here are held by software rather than people, and each is narrow by construction:
 `Service_Ingestor`, `Service_Playback` and the MCP reader hold `telemetry:read` **as a grant of their
 own** rather than a person's role (`0080`), `aber_i3x` reads the broker namespace and
-publishes nothing, and `gateway-credential-service` can add one broker account and do nothing else.
+publishes nothing, and `gateway-credential-service` can issue, re-issue and disable gateway broker
+accounts, list them and serve the broker's root, and nothing else.
 The three database identities are `auth.users` rows with no email, no password and no identity
 provider, so none can sign in — and a trigger on `user_roles` refuses any of them a role, so widening
 `Operator` for the people who hold it cannot widen them by accident. An Administrator can create a
@@ -630,7 +698,7 @@ offering this stack as a hosted service.**
 
 ## Testing
 
-Every suite, what each one needs, the five CI jobs and the release workflow are in
+Every suite, what each one needs, the seven CI jobs and the release workflow are in
 **[`docs/testing.md`](docs/testing.md)**. The short version:
 
 ```bash
@@ -652,14 +720,15 @@ port-forwards**, and the two agreeing is the wiring check.
   with it `auth.sessions`. The dashboard clears the stale tokens and returns to the login screen.
 - **Swagger UI's "Example Value" is documentation, not data.** Press **Execute** and read the
   **Response body** panel.
-- **A fresh install has no cells, no gateways, no devices and no schemas, and Node-RED opens on an
-  empty editor.** It used to come up with a four-cell simulated shopfloor seeded by `0002` and a
-  Node-RED publishing under four gateway identities, which meant every install began with assets
+- **A fresh install has no cells, no devices and no schemas, one gateway (the seeded Playback
+  gateway, which publishes recorded captures), and Node-RED opens on an empty editor.**
+  It used to come up with a four-cell simulated shopfloor seeded by `0002` and a Node-RED publishing
+  under four gateway identities, which meant every install began with assets
   nobody had asked for and an Audit Trail already describing them. All of it is gone rather than
   opt-in: the demonstration floor, the simulator flow, the provisioning script and the seeded
   schemas. [`tutorial/README.md`](tutorial/README.md) walks through building one machine by hand
-  instead, which is the same knowledge without the plant. `0040` and `0073` retire the assets and
-  the schemas from databases that already have them.
+  instead, which is the same knowledge without the plant. Archived `0040` and `0073` retired the
+  assets and the schemas from databases that already had them.
 - **Node-RED's editor is empty, and that is the seeded state rather than a failed mount.** It
   declares no broker nodes, so nothing connects and nothing publishes; `node-red-init` writes a
   marker into `/data` recording that it seeded a blank flow, which is what tells the two cases
@@ -678,11 +747,9 @@ port-forwards**, and the two agreeing is the wiring check.
 
 ## Roadmap & Future Extensions
 
-**The roadmap is the [1.0 milestone](https://github.com/Harri-Llewelyn/Aber/milestone/1)**, and none of
-it is speculative: every issue on it names the code it would build on, so a reader can tell how far
-away each is. A thing that is not built and that 1.0 does not need competes for
-[2.0](https://github.com/Harri-Llewelyn/Aber/milestone/2) rather than sitting in the release's critical
-path.
+**The roadmap is the [2.0 milestone](https://github.com/Harri-Llewelyn/Aber/milestone/2).** 1.0.0
+shipped on 2026-10-04, and its [milestone](https://github.com/Harri-Llewelyn/Aber/milestone/1) is
+closed.
 
 **[`docs/roadmap.md`](docs/roadmap.md) is what the roadmap left behind:** every entry that has
 retired and the documentation its substance moved into. Work does not stay on a list once it ships
@@ -705,14 +772,14 @@ enforce it, why `metric_catalog.name` is immutable, and why every migration must
 are in **[`CONTRIBUTING.md`](CONTRIBUTING.md)**.
 
 > **Handing this to someone else?** `git status` clean is not the same as safe to hand over. The
-> credentials this repository generates are untracked, including the Mosquitto CA **private key**,
-> so a clean tree says nothing about them. [`docs/handover.md`](docs/handover.md) lists what to
-> purge first.
+> credentials this repository generates are untracked, and the internal CA's **private key** lives
+> in the cluster, so a clean tree says nothing about either. [`docs/handover.md`](docs/handover.md)
+> lists what to purge first.
 
 | Document | Covers |
 | :--- | :--- |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Working rules, and what to run before opening a pull request |
-| [`docs/testing.md`](docs/testing.md) | Every suite and what it needs, the six CI jobs, the release workflow |
+| [`docs/testing.md`](docs/testing.md) | Every suite and what it needs, the seven CI jobs, the release workflow |
 | [`docs/static-analysis.md`](docs/static-analysis.md) | The lints and scans, what each judges, and how a finding is accepted |
 | [`docs/handover.md`](docs/handover.md) | Packaging a hand-off — what to purge before transferring a tree |
 | [`docs/releases.md`](docs/releases.md) | What a release promises — the supported window, the version policy and the deprecation path |
