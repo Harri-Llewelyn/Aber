@@ -87,8 +87,8 @@ topic is `spBv1.0/<group>/<TYPE>/<sparkplug_id>[/<device>]`, and an upgrade has 
 the id with. So **a gateway that was publishing before an upgrade is publishing after it, having done
 nothing.** It does not re-enrol, re-register or re-announce itself.
 
-**The group in the topic is fixed too.** It comes from `ingestion.sparkplugGroup`, which is stored as
-a read-only setting on the first boot. If a later install's value differs, `db-init` stops rather
+**The group in the topic is fixed too.** It comes from `ingestion.sparkplugGroup`, which migration `0131`
+stores as a read-only setting on the first boot. If a later install's value differs, `db-init` stops rather
 than quietly moving every gateway to new topics. Changing the group on purpose is a written procedure,
 in [`supabase/README.md`](../supabase/README.md#changing-it-deliberately), not a setting.
 
@@ -192,15 +192,16 @@ does not, compare their bundle versions yourself.
 ### Turning statement statistics on or off restarts the historian
 
 `databaseMetrics.statementStats` adds `pg_stat_statements` to the historian's
-`shared_preload_libraries`. PostgreSQL reads that setting only at start, so switching the flag either
-way restarts `timescaledb-0`, once, on the upgrade that changes it.
+`shared_preload_libraries`. PostgreSQL reads that setting only at start, and `-c` on the command line
+is the only way to set it, so switching the flag either way restarts `timescaledb-0`, once, on the
+upgrade that changes it.
 
 It is separate from `databaseMetrics.enabled` for that reason: the exporter needs no restart, so you
 can have the metrics without restarting the database you are watching. `supabase-db` is not affected
 either way, because its image already loads the library.
 
-The historian's image loads `timescaledb` on its own, and the setting **replaces** that list rather
-than adding to it, so the chart names both libraries, `timescaledb` first. Without it, the server
+The historian's image loads `timescaledb` on its own, and `-c` **replaces** that list rather than
+adding to it, so the chart names both libraries, `timescaledb` first. Without it, the server
 would not know what a hypertable is.
 
 ### Turning the historian's physical backup on or off restarts it
