@@ -482,8 +482,12 @@ function edgeFunctionNames() {
     thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
     seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
   };
-  const claimed = readme.match(/daemon, (\w+) edge functions/);
-  if (claimed) {
+  // The count in the design-ethos sentence ("... eighteen edge functions, an i3X server and a React
+  // dashboard"). A README the pattern no longer matches fails rather than skipping the check.
+  const claimed = readme.match(/(\w+) edge functions, an i3X server/);
+  if (!claimed) {
+    fail('README.md states no "<n> edge functions, an i3X server"; check 5 cannot verify the count');
+  } else {
     const n = WORDS[claimed[1].toLowerCase()] ?? Number(claimed[1]);
     if (n !== fns.length) fail(`README.md claims "${claimed[1]} edge functions"; ${fns.length} exist: ${fns.join(', ')}`);
   }
