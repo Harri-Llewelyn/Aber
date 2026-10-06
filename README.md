@@ -13,6 +13,8 @@ them on dashboards, and records who changed what and when. It runs on your own n
 
 *Aber* is Welsh for a river mouth, where many streams meet and flow out as one.
 
+![The Site Map: a plant's three areas, each drawn as its plan, with its cells pinned and coloured by the state of their devices. One device waits in quarantine under Unassigned.](docs/assets/site-map.png)
+
 ## What it does
 
 - **Collects live data.** Gateways send machine readings to Aber using
