@@ -87,7 +87,7 @@ holds that function to those grants, and to being plpgsql and not `IMMUTABLE`.
 
 **The probe must be a call the planner keeps.** PostgREST runs prepared statements from their
 generic plan on pooled connections, and PostgreSQL checks EXECUTE on a function when a plan calls
-it. Until `0148` the probe was `service_token_max_days()`, SQL and `IMMUTABLE`, which the planner
+it. Until archived migration `0148` the probe was `service_token_max_days()`, SQL and `IMMUTABLE`, which the planner
 folds to the constant 90, so a plan made for an `authenticated` request held no call to check when
 an `anon` request reused it. Found by `validate.py` check 12h on 2026-09-28: `not-a-token` passed 1
 request in 12 through the gateway, and the routes that make no read as the caller then served it.
@@ -469,7 +469,9 @@ the Sparkplug/NCMD command path, where they are audited.
 ## Connecting a client
 
 Two rules decide whether any i3X client works against this server, and both fail in ways that
-do not name the cause.
+do not name the cause. The addresses below are the dev cluster's, with `npm run dev:forward`
+running: the API on `http://127.0.0.1:54321` and i3X on `http://localhost:8090/v1`. On a
+deployment they are `https://api.<domain>` and `https://i3x.<domain>/v1`.
 
 **1. The base URL includes `/v1`.** Clients are given a base URL and append the spec's paths to
 it; this server answers **404 for anything outside `/v1`**, including `/info`. A client pointed
@@ -615,7 +617,7 @@ The MCP client inherits exactly the RLS scope of whoever its token names, becaus
 passes the bearer straight to PostgREST. With an operator's token, a model asking about the
 shopfloor sees what an operator can see.
 
-**A token copied out of a browser session expires in an hour** (`GOTRUE_JWT_EXP: 3600`) — the same
+**A token copied out of a browser session expires in an hour** (`supabaseAuth.jwtExpiry`, 3600 seconds) — the same
 trap the Explorer note above describes. A host config is a *file*, so the token in it is stale by
 the next session, and the symptom is `401`s on a server that was working.
 
@@ -634,23 +636,23 @@ the next session, and the symptom is `401`s on a server that was working.
 
 Both record the issue in the Audit Trail before they reveal the token, and both sign a JWT with
 the HS256 secret the rest of the stack shares, so PostgREST validates it exactly as it validates a
-GoTrue token and there is no second trust path. `GOTRUE_JWT_EXP` governs what GoTrue *issues* and
+GoTrue token and there is no second trust path. `supabaseAuth.jwtExpiry` governs what GoTrue *issues* and
 does not apply. The script's default principal is `b0000000-0000-4000-8000-000000000001`, the
 read-only MCP principal seeded by archived migration 0034. The ceiling is
 `service_token_max_days()`, which the database enforces as well as both issuers.
 
 **The principal holds `telemetry:read` and nothing else, and the narrowness is deliberate.** Every
-write policy in this schema names `Administrator`, alone or with `Shopfloor_Manager` — `0069`
+write policy in this schema names `Administrator`, alone or with `Shopfloor_Manager` — archived `0069`
 narrowed the schema and metric-catalog policies to the former — so it writes nothing. What it must
 also not have is `audit_trail:read`: the difference the old choice of `Operator` **over**
 `Auditor` was making is the audit trail's read policy, which admits an Auditor. This client has
 no surface for the Audit Trail and deliberately never will, so that grant would leave a capability
 sitting on a long-lived credential that nothing can use and someone might later find.
 
-**It used to hold `Operator` itself, and `0080` ended that** — a person's role widening whenever
+**It used to hold `Operator` itself, and archived migration `0080` ended that** — a person's role widening whenever
 somebody asked for a shopfloor user to see one more thing is not a thing a machine credential should
-inherit. `0080`'s self-check re-asserts `0034`'s property against the new mechanism on every boot:
-this principal must not hold `audit_trail:read`.
+inherit. It moved the grant to `principal_permissions`, and the live seed (`0002_seed_data.sql`)
+grants this principal `telemetry:read` alone.
 
 **It is not `service_role`**, which would be the one-line answer and would bypass the RLS scoping
 that makes the paragraph above true.
@@ -669,7 +671,7 @@ consults; withdrawing the principal refuses every token that names it. What that
 
 So the expiry still bounds those four, which is why `--days` is a real decision: a token revoked
 after a laptop left the building still reaches them until it expires. **Do not rotate
-`SUPABASE_JWT_SECRET` to withdraw one token**: that invalidates every token in the stack, including
+`secrets.jwtSecret` to withdraw one token**: that invalidates every token in the stack, including
 the stack's own keys.
 
 **The script's closing lines print both halves on purpose.** Until archived migration 0074 made a
@@ -697,7 +699,7 @@ Three suites, and none substitutes for another.
 
 ```bash
 # The arbiter: CESMII's own 60 tests. CI runs this against the k3d stack over a port-forward.
-git clone https://github.com/cesmii/i3X.git && cd i3X/conformance-tests
+git clone https://github.com/cesmii/i3X.git && git -C i3X checkout 3eae7ea4 && cd i3X/conformance-tests
 node bin/i3x-test.js run http://localhost:8090/v1 --token "$TOKEN"
 
 # Ours: the cases a live run cannot reach.
@@ -789,24 +791,28 @@ cleanup deletes by those keys. Expected values come from the Directory or from w
 
 ## Configuration
 
-| Variable | Default | Notes |
-| :--- | :--- | :--- |
-| `I3X_PORT` | `8090` | |
-| `I3X_SERVER_VERSION` | `dev` | `GET /info` `serverVersion`. The chart sets it to its `appVersion` |
-| `SUPABASE_URL` | `http://supabase-envoy:8000` | |
-| `SUPABASE_PUBLISHABLE_KEY` | — | For the gateway's key check. **Not** the secret key |
-| `MQTT_HOST` / `MQTT_PORT` | `mosquitto` / `1883` | |
-| `MQTT_TLS_ENABLED` / `MQTT_TLS_CA_FILE` | off | Fails closed: a missing CA stops startup |
-| `I3X_SUBSCRIPTION_TTL_SECONDS` | `300` | Spec MUST — abandoned subscriptions are deleted |
-| `I3X_SUBSCRIPTION_QUEUE_LIMIT` | `500` | Batches per subscription before 206. A count, not bytes: see [What causes a restart](#what-causes-a-restart-and-how-often-to-expect-one) |
-| `I3X_MAX_SUBSCRIPTIONS_PER_PRINCIPAL` | `20` | Per token `sub`; past it, create answers 429 |
-| `I3X_MAX_SUBSCRIPTIONS` | `500` | On the server; past it, create answers 429 |
-| `I3X_MAX_STREAMS` | `50` | Open SSE streams; past it, stream answers 429 |
-| `I3X_HISTORY_MAX_ROWS` | `1000` | Rows one history series reads, and values it returns (a device's map of N metrics counts N); past it, 206 |
-| `I3X_MAX_COMPONENTS` | `10000` | Components one value or history request returns, summed over its elementIds; past it, 206 |
-| `I3X_ADDRESS_SPACE_TTL_SECONDS` | `2` | Address-space cache lifetime. `0` disables it |
-| `I3X_ADDRESS_SPACE_CACHE_MAX` | `64` | Cached address spaces retained, evicted LRU |
-| `SUPABASE_SECRET_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | **must be absent** | Either one is a startup refusal |
+On Kubernetes each setting comes from the chart: the tunables from `i3xService.*` in
+`deploy/helm/aber/values.yaml`, the rest from the release. The defaults are the service's own.
+
+| Variable | Chart value | Default | Notes |
+| :--- | :--- | :--- | :--- |
+| `I3X_PORT` | not exposed | `8090` | |
+| `I3X_SERVER_NAME` | `i3xService.serverName` | `aber-i3x` | `GET /info` `serverName` |
+| `I3X_SERVER_VERSION` | the chart's `appVersion` | `dev` | `GET /info` `serverVersion` |
+| `SUPABASE_URL` | set by the chart | `http://supabase-envoy:8000` | |
+| `SUPABASE_PUBLISHABLE_KEY` | the release Secret | — | For the gateway's key check. **Not** the secret key |
+| `MQTT_HOST` / `MQTT_PORT` | set by the chart | `mosquitto` / `1883` | |
+| `MQTT_TLS_ENABLED` / `MQTT_TLS_CA_FILE` | `mosquitto.tls` | off | Fails closed: a missing CA stops startup |
+| `I3X_SUBSCRIPTION_TTL_SECONDS` | `i3xService.subscriptionTtlSeconds` | `300` | Spec MUST — abandoned subscriptions are deleted |
+| `I3X_SUBSCRIPTION_QUEUE_LIMIT` | `i3xService.subscriptionQueueLimit` | `500` | Batches per subscription before 206. A count, not bytes: see [What causes a restart](#what-causes-a-restart-and-how-often-to-expect-one) |
+| `I3X_MAX_SUBSCRIPTIONS_PER_PRINCIPAL` | `i3xService.maxSubscriptionsPerPrincipal` | `20` | Per token `sub`; past it, create answers 429 |
+| `I3X_MAX_SUBSCRIPTIONS` | `i3xService.maxSubscriptions` | `500` | On the server; past it, create answers 429 |
+| `I3X_MAX_STREAMS` | `i3xService.maxStreams` | `50` | Open SSE streams; past it, stream answers 429 |
+| `I3X_HISTORY_MAX_ROWS` | `i3xService.historyMaxRows` | `1000` | Rows one history series reads, and values it returns (a device's map of N metrics counts N); past it, 206 |
+| `I3X_MAX_COMPONENTS` | `i3xService.maxComponents` | `10000` | Components one value or history request returns, summed over its elementIds; past it, 206 |
+| `I3X_ADDRESS_SPACE_TTL_SECONDS` | not exposed | `2` | Address-space cache lifetime. `0` disables it |
+| `I3X_ADDRESS_SPACE_CACHE_MAX` | not exposed | `64` | Cached address spaces retained, evicted LRU |
+| `SUPABASE_SECRET_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | never set | **must be absent** | Either one is a startup refusal |
 
 ## Availability
 
@@ -845,7 +851,7 @@ because a subscription that lies about its continuity is worse than one that adm
 | Chart upgrade that changes the pod spec | Every release that moves `appVersion` — the image tag is the chart's own, so in practice **once per release** | Immediate; bounded by image pull and the 10s readiness period |
 | Liveness probe failure on `/v1/info` | Unplanned, and rare enough that one is worth investigating | Up to **3 minutes** to detect — `periodSeconds: 30` × `failureThreshold: 6`, set deliberately high because a restart costs every open stream |
 | Node drain, eviction or loss | Cluster-operational, not application-driven | Reschedule time, which is the cluster's property rather than this service's |
-| OOM kill at `resources.limits.memory` (512Mi) | Not expected at the shipped defaults; possible once `maxSubscriptions` or `subscriptionQueueLimit` is raised without the limit | Immediate restart by the kubelet. Every client loses its subscriptions and streams, not only the one whose queue filled |
+| OOM kill at `i3xService.resources.limits.memory` (512Mi) | Not expected at the shipped defaults; possible once `i3xService.maxSubscriptions` or `i3xService.subscriptionQueueLimit` is raised without the limit | Immediate restart by the kubelet. Every client loses its subscriptions and streams, not only the one whose queue filled |
 
 **The queues are bounded by count, not by memory.** A subscription holds up to
 `subscriptionQueueLimit` batches, dropping the oldest past it, whatever they weigh. At about 0.5 KB

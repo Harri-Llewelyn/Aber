@@ -6,11 +6,18 @@ change feed, and invokes edge functions for privileged operations.
 ```bash
 cd frontend
 npm install
-npm run dev        # Vite dev server on :3000
 npm test           # Vitest
 npm run test:cov   # with coverage
 npm run build      # production bundle
 ```
+
+**To see a change running**, rebuild the image into the dev cluster from the repository root with
+`npm run dev:up -- --only=frontend`, then open http://app.localhost.
+
+**`npm run dev` (Vite on :3000) needs a stack that admits its origin.** The dashboard throws at
+load until `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` are set (on the dev cluster,
+`http://api.localhost` and the `publishableKey` in `values-dev.yaml`), and the gateway answers only
+the origins the chart derives, so `http://localhost:3000` must also be in `global.corsExtraOrigins`.
 
 ---
 
@@ -144,7 +151,7 @@ the same component four times over, each conditional branch reachable from exact
 `modelledMetrics()` answers "which metrics does this schema model?" and exists four times, in three
 languages, because it runs in four processes that cannot import one another:
 `utils/deviceTags.js`, `ingestion/validate.py`, `i3x/i3x_service.py` and
-`supabase/functions/aas-export/index.ts`.
+`supabase/functions/_shared/aas/shell.ts`.
 
 `typeof [] === 'object'`, so a schema with `properties: ['Temp','Pressure']` reached `Object.keys`
 and came back modelling two metrics named **`'0'` and `'1'`**. The dashboard judged the device
@@ -211,13 +218,13 @@ trail are unchanged. The secret key field starts empty and an empty field keeps 
 
 ## Realtime
 
-`supabase-realtime` publishes `cells`, `gateways`, `devices` and `audit_trail`. Tabs subscribe
-through `hooks/useRealtimeTable.js`.
+`supabase-realtime` publishes `cells`, `gateways`, `devices`, `areas`, `platform_alerts`,
+`capture_jobs` and `playback_jobs`, and deliberately not `audit_trail`. Tabs subscribe through `hooks/useRealtimeTable.js`.
 
 - **`telemetry` is unpublishable, not merely unpublished.** It is a `postgres_fdw` foreign table
   whose rows enter TimescaleDB's WAL, never Supabase's. Adding it to the publication does not
-  error — it silently emits nothing, which is the worse failure. **Do not "fix" the Telemetry tab
-  by subscribing it.**
+  error — it silently emits nothing, which is the worse failure. **Do not "fix" the telemetry
+  inspector (`modals/TelemetryModal.jsx`) by subscribing it.**
 - **Never delete `usePolling`.** Realtime has no replay: a dropped socket loses every change in the
   gap and the client is not told. The 60 s poll is also the only path carrying the 401 stop and
   exponential backoff.
@@ -305,7 +312,7 @@ Three things it is not:
   this stack was told to run. Checking GHCR would need an egress allowance the chart does not grant,
   and would fail closed on a plant network with no route out.
 - **It compares `MAJOR.MINOR.PATCH` only.** A development bundle names itself with `git describe`
-  (`v0.1.0-752-g04374f9-dirty`), so anything stricter would warn on every dev cluster permanently.
+  (`v1.0.0-12-g04374f9-dirty`), so anything stricter would warn on every dev cluster permanently.
 - **It is a statement, not a button.** Nothing in a browser can upgrade the stack; the upgrade is
   [`docs/upgrades.md`](../docs/upgrades.md).
 
@@ -350,7 +357,6 @@ line keeps search, status and the key toggle and moves the rest into `common/Fil
 | `GatewaysTab` | Every action is in the details drawer, with one primary listed first; **Restore replaces Edit** on an archived gateway. The seeded Playback gateway is listed like any other, and reads Playing back or Idle rather than Offline |
 | `DevicesTab` | One card, tabs **Registered** and **Quarantine**. Quarantined devices render **on the Quarantine tab only** — `filteredAssets` excludes them before every other filter, so no filter combination can list one twice. The panel's **Export…** opens `modals/DeviceExportModal.jsx` (AAS JSON, AASX or Bundle), which Archived Entities opens too |
 | `SchemasTab` | The schema registry: each schema, its versions and the devices on it. **Building from the catalog is the only way to create a schema**; changing one is versioning, not editing |
-| `TelemetryTab` | Time-series viewer over the FDW view. A time window is required whenever a tag filter is active |
 | `AuditTrailTab` | Audit trail. The log records what was true when each row was written, and the UI says so |
 | `DirectoryTab` | The read-only registry of the services this deployment runs, a tab per group, with each one's version, address and reach |
 | `ArchivesTab` | One card, a tab for each stage of one lifecycle. **Archived**: areas, cells, gateways and devices taken out of commission, with Restore, Permanent Delete (the one typed-name gate in the application) and, on a device, Export Bundle, which downloads the AASX with its history (`/api/v1/devices/asset-export`). **Retired**: the tombstones `retired_entities` holds for rows that were archived and then deleted, each linking to what survives it: the Audit Trail page with deleted entities shown, a gateway's forge repository, and any bundle taken while it was alive (`api.assetExportDownloadUrl`) |
@@ -464,12 +470,12 @@ properties that placement was chosen for are unaffected: these are markdown in t
 reviewed in the pull request that changes the behaviour they describe, and checked by a guard. They
 are also still free in CI, which is not a `docs/` property either — `ci.yml` classifies a diff with
 `*.md|docs/*`, and a `case` glob's `*` spans directory separators, so a `.md` file anywhere skips
-the two end-to-end stacks.
+the end-to-end stack (`k8s-validation`).
 
 ### A restricted renderer, on purpose
 
 `HelpMarkdown.jsx` renders headings, lists, paragraphs, bold, inline code and **absolute** links.
-That is the whole subset. It exists rather than a markdown dependency because the corpus is thirteen
+That is the whole subset. It exists rather than a markdown dependency because the corpus is seventeen
 files this repository writes and ships in its own bundle — it is not untrusted input and does not
 need CommonMark — and because every branch of it builds React elements, so there is no
 `dangerouslySetInnerHTML` anywhere in the app for the next thing to be piped into.
