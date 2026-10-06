@@ -2847,7 +2847,7 @@ hard anything tried. They are bounded at 90 days now; see
 The Access Control page **states its coverage on its face** rather than rendering an empty list that
 reads as "nothing outstanding". An inventory whose coverage is unstated is one an operator will
 over-trust, and this inventory is the compensating control
-[Accepted risks](../README.md#accepted-risks) names by name.
+[Accepted risks](../docs/security-model.md#accepted-risks) names by name.
 
 ### Expiry, and where revocation does not reach
 
@@ -3994,7 +3994,7 @@ repository; measured), which is what the platform repository will use.
 
 **One thing no rule covers.** A writable deploy key can push to the repository's wiki (measured:
 a clone of `<repo>.wiki.git` with the key and a push to it succeed). The wiki therefore stops
-being a place only people wrote; [Accepted risks](../README.md#accepted-risks) records the
+being a place only people wrote; [Accepted risks](../docs/security-model.md#an-appliances-deploy-key-can-write-its-repositorys-wiki) records the
 decision to keep it there.
 
 **The webhook records both heads.** Its branch filter, `*`, covers both; the sweep patches a hook

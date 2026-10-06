@@ -47,8 +47,8 @@ __pycache__/
 # values-prod.yaml.example is the only place the optional hardening features are turned on together
 # with the reasoning for each, and `helm show values` renders values.yaml alone. That case stands
 # for someone who pulled the chart from a registry with no repository beside it -- and it loses to
-# the ceiling, because a chart that cannot be upgraded documents nothing. The README and
-# deploy/k8s/README.md both link them in the repository.
+# the ceiling, because a chart that cannot be upgraded documents nothing. docs/install.md and
+# deploy/k8s/README.md both name them in the repository.
 #
 # This paragraph used to argue the opposite immediately above the two lines that ignore them, so
 # the file could not say which was true. It is the ignore.

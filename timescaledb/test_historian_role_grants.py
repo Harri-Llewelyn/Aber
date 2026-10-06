@@ -17,12 +17,12 @@ WHAT THESE PROTECT
 
 The ingestion daemon connected to this database as `postgres`. It is, in this repository's own
 words, "the process most exposed to the plant network", and it held superuser: it could DROP the
-hypertable and rewrite any observation. Meanwhile the README's security model listed "append-only
+hypertable and rewrite any observation. Meanwhile the security model listed "append-only
 historian writes" as an ingestion-layer control, enforced entirely by the Python.
 
 THE NEGATIVE HALF IS THE POINT, and it is worth saying why the positive half is not filler. A role
 that cannot write is a fleet with no telemetry: loud, immediate, fixed in minutes. A role that can
-still DELETE is a security claim the README makes and the database does not keep, and nothing
+still DELETE is a security claim docs/security-model.md makes and the database does not keep, and nothing
 surfaces that until someone audits it. Both are asserted; only one of them would be noticed on its
 own.
 
@@ -155,7 +155,7 @@ class IngestWriterTestCase(unittest.TestCase):
     def test_cannot_delete_telemetry(self):
         """
         The one that makes "append-only historian writes" true. Until this role existed, that claim
-        in the README's security model was enforced by the Python and by nothing else.
+        in docs/security-model.md was enforced by the Python and by nothing else.
         """
         with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
             self.cur.execute("DELETE FROM telemetry WHERE metric_name = %s", (PROBE_METRIC,))
