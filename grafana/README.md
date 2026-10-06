@@ -17,7 +17,9 @@ looks wrong should be checked here before it is changed there.
 `deleteRules:` block, so retiring a rule means adding its uid to one rather than deleting its
 block. The uids are stable for that reason.
 
-**Provisioned rules are read-only in the UI** (the "Provisioned" badge). Edit the file and restart.
+**Provisioned rules are read-only in the UI** (the "Provisioned" badge). Edit the file, mirror it
+into the chart (`node scripts/sync-helm-chart-files.mjs`) and `helm upgrade`; `npm run dev:up` does
+both. A checksum on the pod template rolls Grafana.
 
 **The rule file is a static file, not a template.** It is provisioned whatever the chart's values
 say, which is why several groups below are `noDataState: OK` throughout: their exporters can be
@@ -39,7 +41,7 @@ and needs a metric that exists in `metric_catalog`, which `check-docs-drift.mjs`
 
 **Datasources.** The `supabase` datasource connects as `grafana_reader`, which may `SELECT` the
 views the rules name (`platform_health`, `gateway_health`, `audit_trail_partition_health`,
-`storage_footprint`, `backup_health`) and no base table, so a browser-SSO-fronted service never holds the plant's
+`storage_footprint`, `backup_health`, `backup_offsite_health`) and no base table, so a browser-SSO-fronted service never holds the plant's
 inventory; a rule that queried `public.devices` fails as `permission denied` and sits in error
 health. `asset_config` lives in Supabase and `postgres_fdw` runs Supabase → TimescaleDB only, so a
 per-device limit travels as a published metric. The `prometheus` datasource exists only where the
@@ -87,8 +89,9 @@ entirely and can rewrite `audit_trail`, and this stack has already corrected exa
 once: Grafana used to connect to the historian as the `postgres` superuser, a service fronted by
 browser SSO holding the credential that owns the database, and the fix was the read-only
 `grafana_reader` role. Handing it `service_role` would be strictly worse than the credential that
-was removed, and on Kubernetes the provisioning file is mounted from a Secret precisely so this one
-is not readable by anything with namespace read. So Grafana holds a narrow bearer secret that
+was removed, and on Kubernetes the secret reaches the provisioning file only inside the pod: an
+initContainer reads it from the release Secret and renders the contact point into an emptyDir, so
+the ConfigMap holds only the placeholder and nothing with namespace read sees the secret. So Grafana holds a narrow bearer secret that
 authorises one thing, recording an alert. The edge function checks it and then uses its own
 service-role client internally, the same shape `nodered_webhook_jwt_secret` gives the quarantine
 webhook.
@@ -148,7 +151,7 @@ that never fired.
 ## Platform Conditions
 
 The stack's own health, not the machines'. Every rule reads one row per condition from
-`public.platform_health` (or `gateway_health`, or `backup_health`) through the `supabase`
+`public.platform_health` (or `gateway_health`, `backup_health` or `backup_offsite_health`) through the `supabase`
 datasource.
 
 ### Gateway Stale (`aber-gateway-stale`)
@@ -221,7 +224,7 @@ or a restart; the window is the delay, so there is no `for`. The Backups page sh
 same number, `BACKUP_STALE_HOURS`, and a guard holds the two equal. A site that sets a sparser
 schedule has to change both.
 
-The value is `backup_health.age_seconds` (0144), which is how `grafana_reader` sees `backup_jobs`,
+The value is `backup_health.age_seconds` (archived migration 0144), which is how `grafana_reader` sees `backup_jobs`,
 a table only an Administrator may read. The clock is the start of the last completed backup, the
 moment its data is as of; before the first success it is the first job recorded. That is what
 covers the case the page's failure line misses: a backup service that is not running records no
@@ -241,7 +244,7 @@ unreachable, a credential that has been revoked or a NetworkPolicy with no egres
 endpoint fails quietly by design. This is where it stops being quiet: an upload that fails silently
 is the failure the copy exists to prevent, because the backups are then on the disk they protect.
 
-The value is `backup_offsite_health.age_seconds` (0151), read as `grafana_reader` through
+The value is `backup_offsite_health.age_seconds` (archived migration 0151), read as `grafana_reader` through
 `backup_offsite_health_rows()`, which runs as its owner so the reader needs no privilege on
 `backups`, the settings or the Vault. The clock is when the newest backup was taken, or when the
 destination last changed if that is later, and it reads zero once the backup is copied. A copy
@@ -393,8 +396,8 @@ critical: no telemetry is lost, only the record, and only for as long as this la
 
 Warning, `for: 15m`. Fifteen minutes because this stack logs about itself (the ingestion daemon
 writes a STATS line every 60s), so a silent quarter-hour is a fault. A rate rather than an absence:
-`lt 0.001` distinguishes nothing from very little. What usually fails here is discovery, when the
-socket proxy refuses an API path.
+`lt 0.001` distinguishes nothing from very little. What usually fails here is discovery or the log read,
+when Alloy's ClusterRole does not grant `pods` or `pods/log`.
 
 ### Log Store Refusing Lines (`aber-log-store-refusing`)
 

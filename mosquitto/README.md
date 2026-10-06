@@ -36,8 +36,8 @@ request and not another node's.
 **There is no wildcard-write principal.** The ingestion daemon reads `spBv1.0/#` and writes two
 things inside Sparkplug — the rebirth request `spBv1.0/+/NCMD/+`, and its own primary-host STATE
 on one literal topic (below); it is the only writer of the
-Directory (`Aber/Directory/#`) and the Unified Namespace (`uns/#`). The i3X server reads
-`spBv1.0/#` and publishes nothing; it reads the Directory from the database, not from here. The
+Directory (`<group>/Directory/v1/#` by default) and the Unified Namespace (`uns/#`). The i3X server
+reads `spBv1.0/#` and publishes nothing; it reads the Directory from the database, not from here. The
 monitoring account reads `$SYS/#` and publishes nothing. No gateway reads the Directory or the
 UNS: either is the whole plant behind one credential, and reading is silent.
 
@@ -120,9 +120,10 @@ in the credential service's image, and:
   `gateway-<id>` for every gateway client; any other stored role is kept;
 - replaces the admin client and each platform principal (`MQTT_*_USER` / `MQTT_*_PASSWORD`) with
   a client hashed from the environment, so a rotated password reaches the broker on the next
-  restart; a principal with an empty password gets no account, except the monitoring account and
-  the admin, which are required because the health probes and the credential service authenticate
-  as them;
+  restart; a principal with an empty password gets no account, except the admin, the monitoring
+  account and those the chart lists in `DYNSEC_REQUIRED_PRINCIPALS` (ingestion and i3X), whose
+  empty password stops the boot: the credential service and the health probes authenticate as the
+  first two;
 - keeps every other stored client exactly as it is, ensuring a gateway client holds its two roles;
 - refuses to write a document that would lose a stored client.
 
@@ -138,7 +139,7 @@ are restarted by hand after a rename.
 `disableClient` to revoke, `listClients` and `listRoles` for the Access Control page. It speaks
 `mosquitto_rr` from the broker's own image, so the protocol and the binary match the broker. The
 operator CLI (`scripts/mosquitto-provision-gateway.mjs`) and the orphan sweep send the same
-commands through `docker exec` or `kubectl exec`.
+commands through `kubectl exec` into the broker pod.
 
 ## The credential service and the boot reconcile
 
@@ -241,8 +242,12 @@ overwritten, since it is the fleet's credentials.
 
 ## Adding a principal
 
-A new platform consumer (a BI reader of `uns/#`, say) is a role in `dynsec-roles.json`, an env
-pair `MQTT_<NAME>_USER` / `MQTT_<NAME>_PASSWORD` in the chart's values, an entry in
-`PLATFORM_PRINCIPALS` in `scripts/lib/mosquitto-dynsec.mjs`, a purpose line in
-`frontend/src/utils/serviceIdentities.js`, and an assertion in `scripts/check-broker-config.mjs`.
+A new platform consumer (a BI reader of `uns/#`, say) is a role in `dynsec-roles.json`; a
+`secrets.mqtt<Name>User` / `secrets.mqtt<Name>Password` pair in the chart's values, rendered as
+`MQTT_<NAME>_USER` / `MQTT_<NAME>_PASSWORD` by the chart's `templates/secret.yaml`; the name in
+`aber.mqttPrincipals` (`templates/_helpers.tpl`), which hands the pair to the reconcile, and in
+`checksum/principals` (`templates/messaging/mosquitto.yaml`); an entry in `PLATFORM_PRINCIPALS` in
+`scripts/lib/mosquitto-dynsec.mjs`, which nothing checks against `aber.mqttPrincipals`; a purpose
+line in `frontend/src/utils/serviceIdentities.js`; and an assertion in
+`scripts/check-broker-config.mjs`.
 `scripts/check-docs-drift.mjs` holds the roles file and the page's list to each other.

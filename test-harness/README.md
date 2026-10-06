@@ -11,7 +11,7 @@ Fixtures and suites that need the assembled stack rather than a module.
 | [`aas_fixture.py`](aas_fixture.py) | The device both AAS suites provision and assert against |
 | [`stack_exec.py`](stack_exec.py) | Reaching into the stack's own processes — `kubectl exec`, a Service taken off the network |
 | [`restore-rehearsal/`](restore-rehearsal) | The SQL a restore rehearsal seeds, snapshots and asserts |
-| [`fixtures/`](fixtures) | `modelled-metrics.json`, the one rule four implementations answer in three languages |
+| [`fixtures/`](fixtures) | `modelled-metrics.json`, the one rule four implementations answer in three languages; `sparkplug-json-values.json`, how a JSON-encoded Sparkplug metric reads in ingestion and i3X |
 | [`auth-bootstrap.sql`](auth-bootstrap.sql) | The GoTrue-shaped fixture a stackless Postgres needs before the migrations apply |
 | [`schemas/`](schemas) | The vendored IDTA AAS metamodel schema |
 
@@ -83,7 +83,7 @@ give way.
 | Reported | Derived from |
 | :--- | :--- |
 | published/s | the generator's own count of `publish()` calls that returned success |
-| received/s | `aber_ingestion_messages_total{msg_type="DDATA"}` — what reached the daemon |
+| received/s | `aber_ingestion_messages_total{msg_type="ddata"}` — what reached the daemon |
 | written/s | `aber_ingestion_messages_written_total` — what the historian committed |
 | rows/s | `aber_ingestion_metrics_written_total`, which is `written/s × metrics per message` |
 | queue end | `aber_ingestion_write_queue_depth`, the gauge that answers the whole exercise |

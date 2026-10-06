@@ -17,9 +17,9 @@ somebody else's plant in it. What that floor knew is in this file instead.
 
 | You will use | Where |
 | :--- | :--- |
-| The dashboard | `http://localhost:3000` |
-| The Node-RED editor | `http://localhost:1880` |
-| Grafana | `http://localhost:3002` |
+| The dashboard | http://app.localhost on a laptop, `https://app.<domain>` on a site |
+| The Node-RED editor | http://nodered.localhost, or `https://nodered.<domain>` |
+| Grafana | http://grafana.localhost, or `https://grafana.<domain>` |
 | Broker config and roles | [`../mosquitto/mosquitto.conf`](../mosquitto/mosquitto.conf), [`../mosquitto/dynsec-roles.json`](../mosquitto/dynsec-roles.json), [`../mosquitto/README.md`](../mosquitto/README.md) |
 | Node-RED provisioning | [`../node-red/node-red-init.mjs`](../node-red/node-red-init.mjs) |
 | Remote gateways (the pasted command, the bundle, the forge, the playbook) | [`../docs/remote-gateways.md`](../docs/remote-gateways.md) |
@@ -31,10 +31,12 @@ somebody else's plant in it. What that floor knew is in this file instead.
 
 ### 1. Sign in, and start with the dashboard
 
-Sign in at `http://localhost:3000` as `admin@aber.local` (password `aber123` on a seeded
-development stack). **Do this before opening Node-RED or Grafana**: both federate to Supabase Auth,
-and GoTrue ships no consent UI, so the dashboard serves one at `/oauth/consent` and needs a session
-of its own first.
+Sign in to the dashboard as `admin@aber.local`, password `aber123` (seeded by
+[`../supabase/seed.sql`](../supabase/seed.sql)).
+**Do this before opening Node-RED or Grafana**: both federate to Supabase Auth, and GoTrue ships no consent UI, so the
+dashboard serves one at `/oauth/consent` and needs a session of its own first. Open all three at
+the hostnames in the table above, not at `npm run dev:forward`'s ports: each sign-in returns to the
+hostname it is registered with.
 
 Creating assets needs **Administrator** or **Shopfloor_Manager**. Operator and Auditor get read-only
 views — worth knowing before you wonder why a button is missing rather than broken.
@@ -63,10 +65,11 @@ behaviour, and it is quiet by design — so if nothing shows up later, check thi
 
 ### 4. Mint its broker credential
 
-Still on the gateway's row: **Generate broker credential**. The password is **revealed once** and
-cannot be read back afterwards, because the broker stores only a hash.
+Open the gateway's drawer (click its row), choose **Generate Broker Credential**, type the
+gateway's name and **Issue Credential**. The password is **revealed once** and cannot be read back
+afterwards, because the broker stores only a hash.
 
-This is the step that used to require a shell on the host. It goes through the same one-verb
+This is the step that used to require a shell on the host. It goes through the same
 credential service an appliance's enrolment uses, authorised by role rather than by a single-use
 token, because you are holding a session and an appliance is not.
 
@@ -80,9 +83,9 @@ gateway is refused outright, since there would be no appliance to install on. Se
 
 ### 5. Author a schema
 
-**Schemas** tab, then new schema. A schema is the contract you are holding the machine to: a JSON
-Schema whose `properties` name metrics from `metric_catalog`, which is what gives each one a
-datatype, a unit and a published semantic id.
+**Schemas** tab, then **Build Schema from Catalog**. A schema is the contract you are holding the
+machine to: a JSON Schema whose `properties` name metrics from `metric_catalog`, which is what gives
+each one a datatype, a unit and a published semantic id.
 
 Do this before the device rather than after, for three reasons the platform will not raise at the
 time:
@@ -117,10 +120,13 @@ B lifecycle to be recognised:
 1. Add an **mqtt-broker** config node pointing at `mosquitto:1883`. With broker TLS on, the chart
    moves every broker node to 8883 with the CA on the next start, so leave the port as the chart
    sets it.
-2. Give it the username and password from step 4. Set them as an env pair on the Node-RED pod and
-   name that pair in the broker node's `aberCredentialsEnv` property — `node-red-init` reconciles env
-   pairs onto broker nodes at init, which is what keeps the secret out of the flow file and out of
-   git.
+2. Give it the username and password from step 4. `node-red-init` writes them onto the node at
+   init from an env pair, `<PREFIX>_USER` and `<PREFIX>_PASSWORD`, where `<PREFIX>` is the node's
+   `aberCredentialsEnv` property; that keeps the secret out of the flow file and out of git. **The
+   chart does not yet pass such a pair to Node-RED**
+   ([#692](https://github.com/Harri-Llewelyn/Aber/issues/692)), and `node-red-init`
+   keeps the pod from starting while any broker node lacks `aberCredentialsEnv` or its pair, so a
+   broker node deployed today takes Node-RED down at its next restart.
 3. Publish an **NBIRTH** on `spBv1.0/<group>/NBIRTH/<gateway sparkplug_id>`.
 4. Publish a **DBIRTH** on `spBv1.0/<group>/DBIRTH/<gateway>/<device>` carrying the metrics your
    schema declares.
@@ -219,8 +225,9 @@ still have to be reachable. It is empty by default, and the database keeps no co
   with relative paths.
 - **The client is registered `client_secret_post`**, unlike Grafana's `client_secret_basic` — that
   is what `passport-oauth2` sends by default, and GoTrue enforces whichever is registered exactly.
-  `NODERED_PUBLIC_URL` feeds both the registered `redirect_uris` and the strategy's `callbackURL`,
-  so the two cannot drift; a mismatch is `invalid redirect_uri`.
+  `publicUrls.nodered` (by default `<scheme>://nodered.<domain>`) feeds both the `redirect_uris`
+  db-init registers and the strategy's `callbackURL` (`NODERED_OAUTH_CALLBACK_URL`), so the two
+  cannot drift; a mismatch is `invalid redirect_uri`.
 - **The role is resolved in the strategy's `verify` and must ride through `authenticate`**, or it
   is lost between login and the session Node-RED mints. `authenticate` is variadic because the same
   hook backs the password grant on `POST /auth/token`, which is refused outright.
@@ -233,8 +240,8 @@ still have to be reachable. It is empty by default, and the database keeps no co
 | :--- | :--- |
 | Server | `mosquitto` (the Service name, from inside the cluster), or `localhost` from the host with `npm run dev:forward` |
 | Port | `1883` (TCP) / `9001` (WebSocket); `8883` with TLS, which the chart sets on every broker node when broker TLS is on |
-| Client ID | `node-red-simulator` |
-| Protocol | MQTT v3.1.1 |
+| Client ID | blank, so Node-RED generates one, or unique per broker node: two connections with one id disconnect each other |
+| Protocol | MQTT 5, which `node-red-init` sets on every broker node |
 | Auth | Username/password — `allow_anonymous false` |
 
 ### Diagnose from the client side, not from Mosquitto's log
@@ -247,7 +254,7 @@ absence proves nothing.
 Settle it from inside the Node-RED container:
 
 ```bash
-docker exec aber_node_red node -e "
+kubectl -n aber exec deploy/node-red -c node-red -- node -e "
   const mqtt=require('/usr/src/node-red/node_modules/mqtt');
   const c=mqtt.connect('mqtt://mosquitto:1883',{reconnectPeriod:0});
   c.on('connect',()=>{console.log('CONNECTED');c.end()});
@@ -284,10 +291,10 @@ depends on the literal values.
 | Order | Type | Topic | Purpose |
 | :-- | :--- | :--- | :--- |
 | 1 | `NBIRTH` | `spBv1.0/Aber/NBIRTH/gwy1200…` | The edge node's own birth certificate, once at startup, before any device birth |
-| 2 | `DBIRTH` | `spBv1.0/Aber/DBIRTH/gwy1200…/dev2200…` | The metric names, types and config the device will report. Re-sent every 60 s |
-| 3 | `DDATA` | `spBv1.0/Aber/DDATA/gwy1200…/dev2200…` | Telemetry, **report by exception** — scanned every 5 s, published only when a metric moves |
-| 4 | `DDEATH` | `spBv1.0/Aber/DDEATH/gwy1200…/dev2200…` | Manually triggered — marks the device offline |
-| 5 | `NDATA` | `spBv1.0/Aber/NDATA/gwy1200…` | Gateway heartbeat, every 30 s |
+| 2 | `DBIRTH` | `spBv1.0/Aber/DBIRTH/gwy1200…/dev2200…` | The metric names, types and config the device will report, before its first `DDATA` |
+| 3 | `DDATA` | `spBv1.0/Aber/DDATA/gwy1200…/dev2200…` | Telemetry, **report by exception**: only the metrics that moved |
+| 4 | `DDEATH` | `spBv1.0/Aber/DDEATH/gwy1200…/dev2200…` | Marks the device offline |
+| 5 | `NDATA` | `spBv1.0/Aber/NDATA/gwy1200…` | Gateway heartbeat, at least every 30 s; a gateway silent for 90 s reads STALE |
 
 `Aber` is the Sparkplug group the development stack is installed with (`values-dev.yaml`). A site
 names its own with `ingestion.sparkplugGroup` at install, where it has no default; every topic above
@@ -295,26 +302,27 @@ then carries that word instead, and the gateway's own row is what says which.
 
 ### Report by exception
 
-**`DDATA` means "these metrics changed".** The flow is *scanned* every 5 seconds; it *publishes*
-only what moved. A fixed-interval payload carrying every metric whether it moved or not is not
-DDATA — it is polling with extra steps, and it writes a row per metric per tick into the historian
-for readings nobody took.
+**`DDATA` means "these metrics changed".** A flow reads its machine as often as it needs to and
+*publishes* only what moved. A fixed-interval payload carrying every metric whether it moved or not
+is not DDATA — it is polling with extra steps, and it writes a row per metric per tick into the
+historian for readings nobody took.
 
-A metric qualifies as an exception when it is analogue and has moved by at least its **deadband**
-(0.5 °C on temperature, 0.05 mm on displacement), when it is discrete and changed at all, or when
-it has no cached value yet — the first scan after a birth. `DBIRTH` publishes the device's *live*
-readings and seeds that cache, so the birth certificate is the baseline rather than a set of
-nominal placeholders the first `DDATA` would then have to correct.
+A metric qualifies as an exception when it is analogue and has moved by at least its **deadband**,
+when it is discrete and changed at all, or when it has no cached value yet — the first reading after
+a birth. A `DBIRTH` that carries the device's *live* readings seeds that cache, so the birth
+certificate is the baseline rather than a set of nominal placeholders the first `DDATA` would then
+have to correct.
 
-**A deadband is only meaningful above the instrument's noise floor.** The simulated sensor noise
-is ±0.15 °C, deliberately below the 0.5 °C band — noise larger than the deadband trips the change
-test on its own and suppresses nothing.
+**A deadband is only meaningful above the instrument's noise floor.** Noise larger than the
+deadband trips the change test on its own and suppresses nothing.
 
-**`MAX_SILENCE_MS` (5 minutes) is the keepalive, and it is not a betrayal of RBE — it is what makes
-RBE safe to consume.** A value that is genuinely constant is indistinguishable, from the consumer's
-side, from a device that died silently, and every staleness check downstream reads absence as
-failure. Republishing an unchanged metric every five minutes bounds that ambiguity while still
-cutting wire and historian volume by roughly 9× against a full 5-second payload.
+**A periodic refresh is the keepalive, and it is not a betrayal of RBE — it is what makes RBE safe
+to consume.** A value that is genuinely constant is indistinguishable, from the consumer's side,
+from a device that died silently, and every staleness check downstream reads absence as failure:
+ingestion marks a device OFFLINE after 300 s with no data (`DEVICE_OFFLINE_TIMEOUT_SECONDS`), so
+republish every metric at its last value well inside that. The appliance's sample flow is the
+pattern to copy: its `publish by exception` node does all of the above and refreshes every 120 s
+([`appliance/README.md`](../forge/gateway-platform/appliance/README.md#the-sample-flow)).
 
 Because an unchanged metric publishes nothing, **a missing bucket downstream means *unchanged*, not
 *unknown*.** Read these series through `telemetry_gapfill()` (see
@@ -329,16 +337,15 @@ missing; under RBE that is the only way it can find out, because a metric that s
 looks exactly like a metric that stopped changing.
 
 **`seq` belongs to the EDGE NODE, not to the device**, and every publisher under one gateway shares
-it — the three Cell 1 devices, and that gateway's own heartbeat. An `NBIRTH` restarts the run at
-zero; a `DBIRTH` does not, and consumes a number like any other message.
+it — each of its devices, and the gateway's own heartbeat. An `NBIRTH` restarts the run at zero; a
+`DBIRTH` does not, and consumes a number like any other message.
 
-> **This was wrong until it was measured.** Each device subflow kept its own counter in `context`,
-> which Node-RED scopes to the *subflow instance* — so Cell 1 published four independent sequences
-> into one edge node's stream. The daemon did exactly what it should with that: concluded messages
-> were lost and asked for a rebirth, several hundred times an hour on a healthy fleet. The counter
-> now lives in `global` under `seq_<edge node>`, which is the only scope a subflow instance and a
-> node on the tab can both reach — `flow` is no more shared than `context` was, because inside a
-> subflow it is the instance's own scope.
+> **Keep one counter per edge node, in a scope every publisher reaches.** `context` is the node's
+> own, and inside a subflow `flow` is the instance's own, so a subflow per device publishes
+> independent sequences into one edge node's stream. The daemon reads that as lost messages and
+> asks for a rebirth, several hundred times an hour on a healthy fleet. Keep the counter in `flow`
+> when every publisher sits on one tab, as the appliance's sample flow does, or in `global` under
+> `seq_<edge node>` when subflows publish.
 
 `Asset_ID` and `Asset_Name` are **not** in `DDATA`. They are immutable, declared in `DBIRTH`, and
 discarded by the daemon's identity-metric filter before reaching the historian — the topic is what
@@ -356,9 +363,9 @@ a real gateway carries no `Asset_ID` either, which is why the topic has to be au
 }
 ```
 
-> This flow uses JSON-encoded payloads for simplicity. `ingestion/ingestion.py` tries real Sparkplug
-> B protobuf decoding first and falls back to this encoding, so the simulator's messages are handled
-> identically to a real device's once parsed. For **production binary encoding**, install the
+> These examples use JSON-encoded payloads for simplicity. `ingestion/ingestion.py` tries real
+> Sparkplug B protobuf decoding first and falls back to this encoding, so a JSON message is handled
+> identically to a protobuf one once parsed. For **production binary encoding**, install the
 > `node-red-contrib-sparkplug-b` palette and replace the MQTT out node with a Sparkplug B encoder.
 
 ---
@@ -382,16 +389,13 @@ one, for a stack whose credential service is down or whose Administrator cannot 
 
 ```bash
 node scripts/mosquitto-provision-gateway.mjs gwy120000000000400080000
-
-# On Kubernetes — same script, different backend:
-node scripts/mosquitto-provision-gateway.mjs --target=k8s gwy120000000000400080000
 ```
 
 The password is printed **once** — the broker stores only a hash.
 
-**One script, two backends**, so the role reasoning above lives in one place. Both send the same
-plugin commands the credential service sends, through `docker exec` or `kubectl exec` into the
-broker, and the broker applies them to itself at once: nothing is reloaded, nothing is signalled,
+**It sends the plugin commands the credential service sends**, so the role reasoning above lives
+in one place, through `kubectl exec` into the broker pod (namespace `aber`, or `ABER_NAMESPACE`),
+and the broker applies them to itself at once: nothing is reloaded, nothing is signalled,
 and the account works before the command returns. Re-issuing an existing gateway **replaces** its
 password and re-enables the account; it never adds a second one.
 
@@ -410,7 +414,7 @@ So each principal is confined, holding a role from
 
 | Principal | May do |
 | :--- | :--- |
-| `aber_ingestion` | read `spBv1.0/#`; publish **only** `spBv1.0/+/NCMD/+` (rebirth), the Directory and the Unified Namespace |
+| `aber_ingestion` | read `spBv1.0/#`; publish **only** `spBv1.0/+/NCMD/+` (rebirth), its own `spBv1.0/STATE/<primaryHostId>`, the Directory and the Unified Namespace |
 | `aber_i3x` | read `spBv1.0/#` and the Directory. Publish nothing — it refuses writes in code (405), and this is that stance where the broker can enforce it |
 | any `gwy…` account | one per gateway, each confined to its own edge node by a role generated for it. Issued against a row that already exists — from the dashboard for a host-run gateway, by the enrolment bundle for an appliance |
 | `gwy110000000000400080000` | `validate.py`'s own gateway, a fixture it seeds itself |
@@ -514,9 +518,8 @@ performs the second on the appliance's behalf, against the row the operator crea
 | Binary Sparkplug B encoding | Install `node-red-contrib-sparkplug-b` |
 | Per-gateway MQTT credentials | Minted by the dashboard for a host-run gateway (step 4) and by enrolment for an appliance; `node scripts/mosquitto-provision-gateway.mjs <sparkplug_id>` only to rotate one by hand |
 | Appliance operating systems | Converge to the platform playbook at the tag each gateway's `platform.yml` names; bump the tag by pull request in the gateway's repository, one gateway first |
-| Node-RED admin auth | Configured by default (Supabase Auth SSO). Set `NODERED_PUBLIC_URL` to the address browsers actually use, or `/oauth/authorize` answers `invalid redirect_uri` |
-| Broker credentials | Rotate `MQTT_PASSWORD`; ingestion refuses to start without it |
-| Poll interval | Adjust the Inject node repeat interval to match your scan rate |
+| Node-RED admin auth | Configured by default (Supabase Auth SSO). Set `global.publicBaseDomain`, or `publicUrls.nodered`, to the address browsers actually use, or `/oauth/authorize` answers `invalid redirect_uri` |
+| Broker credentials | Rotate the `secrets.mqtt*Password` values; ingestion refuses to start without `secrets.mqttIngestionPassword` |
 | Real OPC-UA / Modbus devices | Use `node-red-contrib-opcua` or `node-red-contrib-modbus` in place of the Function nodes |
 
 ---

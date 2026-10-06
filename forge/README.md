@@ -38,7 +38,7 @@ folded into that map would be installed on every appliance in the fleet.
 ## Provisioning the server
 
 [`scripts/gitea-init.sh`](../scripts/gitea-init.sh) runs in the chart's initContainer before the
-Gitea server starts, from a mirror the sync script keeps identical to the file in `scripts/`. It
+Gitea server starts, from a mirror `scripts/sync-helm-chart-files.mjs` keeps identical to it. It
 is provisioning policy, which accounts exist and what they may do, and policy that lives in two
 hand-copied shell blocks drifts; the same arrangement `node-red-init.mjs` has, for the same reason.
 

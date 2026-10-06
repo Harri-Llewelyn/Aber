@@ -4,12 +4,12 @@ Supabase Edge Function for approving quarantined industrial devices and optional
 
 ## Authorization & Security Policy
 
-This function enforces **fail-closed** authorization. Requests are evaluated strictly against user claims in `app_metadata.role` (which can only be set server-side via the Supabase Admin API or a service-role client):
+This function enforces **fail-closed** authorization. The caller's role is read from their row in `public.user_roles`, through a client bound to their own token so RLS applies. The JWT's `app_metadata.role` claim is never consulted, so deleting the row revokes the role at once:
 
 * **`Administrator`**: Allowed (`200 OK`)
 * **`Shopfloor_Manager`**: Allowed (`200 OK`)
 * **`Operator`**: Denied (`403 Forbidden`)
-* **Missing / Null Role Claim**: Denied (`403 Forbidden`)
+* **No `user_roles` row**: Denied (`403 Forbidden`)
 
 ---
 
@@ -19,13 +19,16 @@ The body may carry `cell_id`, `area_id` and `location_scope` (`cell`, `area_wide
 
 ## Smoke Testing with Curl
 
-### 1. Test User with No Role Claim (Expected: `403 Forbidden`)
+The gateway refuses a request that does not carry the publishable key (`sb_publishable_…`, `secrets.publishableKey` in the values) as `apikey`, before the function runs, with `401 {"message":"No API key found in request"}`. With `npm run dev:forward` open, the gateway is `http://localhost:54321`.
+
+### 1. Test User with No `user_roles` Row (Expected: `403 Forbidden`)
 
 ```bash
 curl -i -X POST "http://localhost:54321/functions/v1/approve-quarantine" \
-  -H "Authorization: Bearer <JWT_WITHOUT_ROLE_CLAIM>" \
+  -H "apikey: <PUBLISHABLE_KEY>" \
+  -H "Authorization: Bearer <JWT_OF_USER_WITHOUT_ROLE>" \
   -H "Content-Type: application/json" \
-  -d '{"device_id": "VAL_Quarantine_Device_001"}'
+  -d '{"device_id": "<device-uuid>"}'
 ```
 
 **Expected Response**:
@@ -38,9 +41,10 @@ HTTP/1.1 403 Forbidden
 
 ```bash
 curl -i -X POST "http://localhost:54321/functions/v1/approve-quarantine" \
+  -H "apikey: <PUBLISHABLE_KEY>" \
   -H "Authorization: Bearer <JWT_OPERATOR_ROLE>" \
   -H "Content-Type: application/json" \
-  -d '{"device_id": "VAL_Quarantine_Device_001"}'
+  -d '{"device_id": "<device-uuid>"}'
 ```
 
 **Expected Response**:
@@ -53,13 +57,14 @@ HTTP/1.1 403 Forbidden
 
 ```bash
 curl -i -X POST "http://localhost:54321/functions/v1/approve-quarantine" \
+  -H "apikey: <PUBLISHABLE_KEY>" \
   -H "Authorization: Bearer <JWT_ADMINISTRATOR_ROLE>" \
   -H "Content-Type: application/json" \
-  -d '{"device_id": "VAL_Quarantine_Device_001", "gateway_id": "gateway-uuid-here"}'
+  -d '{"device_id": "<device-uuid>", "gateway_id": "<gateway-uuid>"}'
 ```
 
 **Expected Response**:
 ```json
 HTTP/1.1 200 OK
-{"success":true,"data":[...]}
+{"success":true,"data":{"merged":false,"device":{...}}}
 ```

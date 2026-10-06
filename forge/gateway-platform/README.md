@@ -77,7 +77,7 @@ enrolment. The runbook is in `docs/remote-gateways.md`.
 
 ```json
 {
-  "outcome": "converged", "tag": "v0.1.0", "detail": "ansible-pull succeeded",
+  "outcome": "converged", "tag": "v1.0.0", "detail": "ansible-pull succeeded",
   "converged_at": "2026-09-14T11:00:07Z",
   "custom": { "outcome": "failed", "revision": "…", "detail": "custom.yml exited 2", "ran_at": "…" },
   "trust": { "outcome": "installed", "spki_sha256": "…", "not_after": "…", "changed": false, "detail": "…", "checked_at": "…" }
@@ -137,10 +137,12 @@ is what was approved either way.
 
 ## Running it by hand
 
-On an appliance that already holds an enrolment (the bundle's `/data`, or the installer's):
+On an appliance the installer set up, run what the timer runs. It reads the tag from
+`platform.yml`, pulls over SSH with the appliance's deploy key and the forge's pinned host key, and
+records the outcome in `converged.json`:
 
 ```bash
-sudo ansible-pull -U ssh://git@<forge>/platform/gateway-platform.git -C v0.1.0 site.yml
+sudo aber-gateway-converge
 ```
 
 Elsewhere, to check the playbook parses (what CI runs):

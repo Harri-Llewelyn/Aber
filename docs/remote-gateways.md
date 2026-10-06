@@ -373,11 +373,12 @@ is what this stack did until the topic had a publisher.
 | The broker's `gateway` role | Grants every enrolled gateway **read** of `spBv1.0/STATE/#`. |
 | The broker's `ingestion` role | Granted **write** on that one literal topic, and nothing wider — so no gateway, and no other service, can forge a birth certificate saying the historian is alive when it is not. |
 
-`MQTT_PUBLIC_HOST` is also folded into the broker certificate's SAN. Change it and the leaf is
-reissued on the next boot of `mosquitto-tls-init` — **the root is untouched, so no appliance has to be
-re-enrolled.** A certificate that does not name the address gateways dial fails verification at every
-appliance while in-cluster clients verify perfectly, so the stack reports itself healthy and the fleet
-is silently off.
+The broker certificate must name that same address. cert-manager issues it for `mqtt.<domain>`,
+`mosquitto.external.loadBalancerIP` and whatever `mosquitto.tls.extraIpSans` / `extraDnsSans` list;
+change those and the leaf is reissued — **the root is untouched, so no appliance has to be
+re-enrolled.** A certificate that does not name the address gateways dial fails verification at
+every appliance while in-cluster clients verify perfectly, so the stack reports itself healthy and
+the fleet is silently off.
 
 ---
 
@@ -615,7 +616,7 @@ The trade is that the password is per-appliance and cannot be centrally revoked.
 **generated** (never defaulted), shown once, and re-issued rather than recovered:
 
 ```bash
-docker compose run --rm bootstrap node /bundle/bootstrap.mjs --reset-admin-password
+docker compose run --rm bootstrap /bundle/bootstrap.mjs --reset-admin-password
 ```
 
 The **data path is unaffected.** Editor login is a human question; telemetry authenticates to
@@ -648,9 +649,10 @@ telemetry.
 The appliance's flow lives on a Docker volume on hardware in a plant. It is the only copy, and
 `docker compose down -v` or a failed SD card takes the plant's edge logic with it.
 
-**Gateways → select the gateway → Propose a flow.** Export `flows.json` from the appliance's editor
-(*menu → Export → all flows*) and drop it there. It is committed to a branch in **this gateway's own
-repository** in the forge and opened as a pull request; **nothing is deployed by proposing**.
+**A pull request in the gateway's own repository.** Export `flows.json` from the appliance's editor
+(*menu → Export → all flows*), commit it on a branch of **this gateway's own repository** in the
+forge (the gateway's drawer links it: **Open in the forge**) and open a pull request there;
+**nothing is deployed by proposing**.
 
 Once somebody approves and merges it, the appliance's own `flow-sync` service pulls it — within five
 minutes by default — and reloads Node-RED. The appliance is what reaches out; the platform never
@@ -828,8 +830,8 @@ opening a shell:
 
 | Row | Reads | Means |
 | :--- | :--- | :--- |
-| **Platform** | `v0.1.0 · converged 40 minutes ago` | the playbook version this appliance is actually on. Different tags across the fleet is a rollout in progress, which is what the per-gateway pointer is for |
-| **Platform** | `v0.1.0 · failed` | `ansible-pull` did not complete. The timer retries within the hour; the appliance's journal says why |
+| **Platform** | `v1.0.0 · converged 40 minutes ago` | the playbook version this appliance is actually on. Different tags across the fleet is a rollout in progress, which is what the per-gateway pointer is for |
+| **Platform** | `v1.0.0 · failed` | `ansible-pull` did not complete. The timer retries within the hour; the appliance's journal says why |
 | **Custom** | *(empty)* | this gateway's repository carries no playbook of its own. The ordinary case |
 | **Custom** | `converged at a1b2c3d` | its adapter is running, from that commit |
 | **Custom** | `failed at a1b2c3d` | its adapter is **not** running |
@@ -867,8 +869,6 @@ The appliance holds a credential but is not publishing. Check `docker compose lo
 * `Connection failed to broker` — the broker is unreachable on 8883, or the certificate does not
   name the address being dialled (§7). This message is the same one a wrong password produces and
   never mentions certificates.
-* `applied_to_running_broker: false` in the bootstrap output — the credential is stored but the
-  running broker has not reloaded it yet (up to ~90s on Kubernetes). Node-RED retries on its own.
 
 **Nothing at all in the dashboard, and bootstrap never ran.**
 `docker compose ps` — if `bootstrap` exited non-zero, `node-red` will not have started at all

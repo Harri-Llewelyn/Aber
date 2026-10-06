@@ -260,6 +260,12 @@ It answers three things this stack could not otherwise do: verify a dashboard ag
 that was on site for two hours, reproduce a fault by editing a value by hand, and load test at a
 chosen multiple of real time against a fleet whose measured rate is 0.95 msg/s.
 
+Run it from `ingestion/` after `npm run proto`, which generates the Sparkplug binding it imports
+(`sparkplug_b_pb2`, not committed). On the dev cluster the broker is on `localhost:1883`. `record`
+authenticates as the ingestion principal, `MQTT_INGESTION_USER` / `MQTT_INGESTION_PASSWORD` from
+the `aber-secrets` Secret unless `MQTT_CAPTURE_*` is set; `play` as the gateway it replays,
+`MQTT_PLAYBACK_USER` / `MQTT_PLAYBACK_PASSWORD`.
+
 ```bash
 python capture.py record --out morning-shift.json --seconds 300
 python capture.py inspect morning-shift.json
@@ -421,9 +427,10 @@ already enumerate the fleet through the directory — but it is why nobody below
 
 ### Recording from the dashboard
 
-`capture.py record` opens an MQTT subscription; a browser cannot. Mosquitto listens on **1883 TCP**
-with no WebSocket listener, and the recording principal's password is a server-side secret a bundle
-would publish. So the **Capture** page is a page in front of new behaviour in the ingestion daemon,
+`capture.py record` opens an MQTT subscription. A browser could open one only through the broker's
+WebSocket listener (9001, `mqtt.<domain>` on the Ingress), and only with the recording principal's
+password, a server-side secret a bundle would publish. So the **Capture** page is a page in
+front of new behaviour in the ingestion daemon,
 and [`capture_worker.py`](capture_worker.py) is that behaviour:
 [`0055`](../supabase/migrations/archive/0055_capture_orchestration.sql) holds the tables and every gate.
 
@@ -445,12 +452,13 @@ places and wrongly in one.
 | cap | value | why |
 | :--- | :--- | :--- |
 | duration | 2 hours | |
-| messages | 100,000 | ≈29 h at the fleet's 0.95 msg/s; ≈7 min at the measured 240 msg/s ceiling |
+| messages | 100,000 | ≈29 h at the fleet's 0.95 msg/s; ≈100 s at the 1,000 msg/s the stack sustains |
 | size | 50 MiB | the smallest cap that lets the message cap bind first, under a 100 MiB bucket |
 
-The buffer is held in the daemon's memory and the chart declares no memory limit for `ingestion`, so
-an oversized cap is not refused — it is bounded by node pressure, and the process is killed taking
-ingestion for the whole fleet with it. That is the argument for the smaller number, ahead of the
+The buffer is held in the daemon's memory, which the chart limits to 512Mi
+(`ingestion.resources.limits.memory`), so an oversized cap would not be refused at run time — it
+would meet that limit, and the container would be OOM-killed taking ingestion for the whole fleet
+with it. That is the argument for the smaller number, ahead of the
 storage one.
 
 **A capture opens by asking its edge node to rebirth**, because birth certificates cannot be
@@ -594,7 +602,7 @@ legitimately `OFFLINE`, because nothing publishes as it until a playback runs.
 **The worker reports what it holds, on a heartbeat**
 ([`0057`](../supabase/migrations/archive/0057_playback_worker_reports_its_reach.sql)), because the database
 knows whether the *platform* issued a credential and cannot know whether the *worker* was given the
-password — minting shows it once and an operator pastes it into the worker's environment. The
+password — delivery reaches the worker through a projected Secret, on the kubelet's schedule. The
 timestamp is the part that earns its place: an empty list with a recent report means the worker is
 running and holds nothing, while no recent report means the worker is down. A stale report never
 blocks a playback; the list is then unknown rather than empty, and the gate and the worker still
@@ -647,12 +655,13 @@ gate for a migration-replay reason that cost this stack an outage — see
 
 **The path is one string in four places** — the writer
 ([`mosquitto-credentials.mjs`](../scripts/lib/mosquitto-credentials.mjs)), the reader
-([`playback_worker.py`](playback_worker.py)), and a mount on each deployment target. Python and
-JavaScript cannot share a constant, and a mismatch is silent at *both* ends: the write succeeds and
-the read finds nothing, so the worker correctly reports "no credentials issued".
+([`playback_worker.py`](playback_worker.py)), and in the chart the mount and the Secret item
+projected into it. Python and JavaScript cannot share a constant, and a mismatch is silent at
+*both* ends: the write succeeds and the read finds nothing, so the worker correctly reports "no
+credentials issued".
 `scripts/check-docs-drift.mjs` asserts all four agree.
 
-On Kubernetes the delivery is a **second key in the broker's existing credential Secret**, not a
+The delivery is a **second key in the broker's existing credential Secret**, not a
 second Secret: `gateway-credential`'s Role grants `patch` on exactly one Secret by name, and a new
 one would widen the authority of the component that mints broker credentials. The playback pod
 mounts that one key via `items:`, so it never receives anything else the Secret holds.
@@ -730,12 +739,13 @@ physical object, so a copy would make the AAS Part 5 export emit two Asset Admin
 asserting the same asset identity. A shadow is not a product and has no manufacturer; links are
 resolved through `shadow_of` rather than duplicated, for the ordinary reason that a copy goes stale.
 
-**The Playback gateway needs its own broker credential**, minted on the Access Control page like any
-host-run gateway's and then placed in `MQTT_PLAYBACK_CREDENTIALS`. The migration's `NOTICE` says so
-with the `sparkplug_id` already filled in.
+**The Playback gateway needs its own broker credential**, issued from the dashboard like any
+host-run gateway's. It is `is_simulated`, so the issue also delivers the password to the worker
+([above](#issuing-a-playback-credential-delivers-it-0078)); `MQTT_PLAYBACK_CREDENTIALS`
+(`secrets.mqttPlaybackCredentials`) is a manual fallback, and a delivered password overrides it.
 
-**Re-minting it means recreating the playback container**, and until it does the worker is holding
-the previous password. That used to fail silently and is now caught: `connect()` returns after the
+**A re-issue reaches the worker within about a minute**, and until then the worker holds the
+previous password. That used to fail silently and is now caught: `connect()` returns after the
 TCP handshake and the CONNACK arrives later on the network loop, so a *wrong* password connected at
 the socket level, was refused with `rc=5`, and every QoS 0 publish after it was dropped locally with
 no error anywhere — the job ran to completion, reported the full message count, and moved nothing.
@@ -843,8 +853,8 @@ is a different feature with a different argument, and is not this one.
 
 **No in-browser payload editor.** The capture file is JSON *specifically* so it can be hand-edited,
 and playback re-encodes to whatever encoding each message arrived in. A text editor already does
-everything a hex or protobuf UI would, and `--override-metric` is the same operation with more
-surface.
+everything a hex or protobuf UI would, and a metric-override flag on `play` would be the same
+operation with more surface.
 
 ### Configuration
 
@@ -857,9 +867,11 @@ surface.
 | `CAPTURE_BUCKET` | `storage-init`, the dashboard, both workers | `broker-captures` |
 | `CAPTURE_FILE_SIZE_LIMIT` | `storage-init` | `104857600` (100 MiB) |
 
-Renaming the bucket means changing `supabase/storage-policies.sql` too. A bucket with no policies is
-invisible to every browser-facing role and a policy naming a bucket that does not exist is dead text
-— neither errors.
+The chart's setting is `supabaseStorage.captureBucket`, which reaches `storage-init`, the dashboard
+and the playback worker. The ingestion Deployment does not pass `CAPTURE_BUCKET`, so the capture
+worker writes to `broker-captures` whatever the setting says. Renaming the bucket also means
+changing `supabase/storage-policies.sql`. A bucket with no policies is invisible to every
+browser-facing role and a policy naming a bucket that does not exist is dead text — neither errors.
 
 `record` defaults to the ingestion principal because recording is a read: its role grants it read
 of `spBv1.0/#` and no asset write at all, so a mistyped subcommand cannot publish. `play` has no
@@ -1085,9 +1097,10 @@ and reads nothing back.
 | `<prefix>/schema` | Locally minted schema identifiers |
 | `<prefix>/service` | Stack service endpoints |
 
-**It is off by default.** `DIRECTORY_MQTT_ENABLED` is unset in the chart, and the daemon logs
-which state it is in at startup rather than staying silent — an unconfigured deployment should be
-able to tell that the tree is empty on purpose.
+**It is off by default.** The chart passes `DIRECTORY_MQTT_ENABLED` from
+`ingestion.directoryMqttEnabled`, `false`, and the daemon logs which state it is in at startup
+rather than staying silent — an unconfigured deployment should be able to tell that the tree is
+empty on purpose.
 
 **The reason it is off is the one property the REST half has that a topic cannot keep.**
 `fplus-directory` queries **as the caller**, so RLS decides what each caller sees, and that is what
@@ -1116,7 +1129,8 @@ never exercises (issue #297).
 edge node and nothing else — so it cannot enumerate the site today, and a read is silent. Granting
 it here would undo that confinement through the back door.
 `scripts/check-broker-config.mjs` asserts all three by delivery: that ingestion may publish
-`Aber/Directory/v1/device`, and that neither a gateway nor the i3X principal may read it.
+`Check-Site/Directory/v1/device` (a non-default group), and that neither a gateway nor the i3X
+principal may read it.
 
 **The source is the enrolment record, never a birth.** This is the point on which
 [issue #64](https://github.com/Harri-Llewelyn/Aber/issues/64)'s design was refused. A registry
@@ -1225,7 +1239,7 @@ moves a device's topic within that window.
 | Variable | Default | |
 | :--- | :--- | :--- |
 | `UNS_MQTT_ENABLED` | unset (off) | `1`/`true`/`yes`/`on` turns it on |
-| `UNS_MQTT_TOPIC_ROOT` | `uns` | Must stay inside the ACL's `topic write uns/#` rule, or publishes are dropped silently at QoS 0 |
+| `UNS_MQTT_TOPIC_ROOT` | `uns` | Must stay inside the `ingestion` role's `uns/#` grant in `mosquitto/dynsec-roles.json`, or publishes are dropped silently at QoS 0 |
 | `UNS_CONTEXT_TTL_SECONDS` | `60` | How long a device's location and the site name are believed |
 
 ## Device Liveness Watchdog
@@ -1384,10 +1398,11 @@ published default is a silent security downgrade, and the failure mode is silenc
 | :--- | :--- | :--- |
 | `MQTT_HOST` / `MQTT_PORT` | `mosquitto` / `1883` | The in-cluster Service name |
 | `MQTT_USER` / `MQTT_PASSWORD` | `aber_ingestion` / **required** | Its own principal. There is no shared broker account any more — see `mosquitto/README.md` |
-| `DB_HOST` / `DB_PORT` | `timescaledb` / `5432` | Port defaults to `5433` when `DB_HOST` is unset, i.e. running from the host |
+| `DB_HOST` / `DB_PORT` | `timescaledb` / `5433` when `DB_HOST` is unset, else `5432` | The chart sets `timescaledb` / `5432`. From the host set both: `localhost` / `5433`, the dev loop's forward |
+| `DB_USER` | `postgres` | The chart sets `ingest_writer` (`ingestion.dbUser`). The daemon refuses a superuser unless `ALLOW_HISTORIAN_SUPERUSER=true` |
 | `DB_PASSWORD` | **required** | Unless `TIMESCALEDB_URL` is set |
 | `SUPABASE_URL` | `http://127.0.0.1:54321` | |
-| `SUPABASE_SERVICE_ROLE_KEY` | **required** | Without it the daemon exits rather than running fail-open |
+| `SUPABASE_PUBLISHABLE_KEY` / `SUPABASE_INGESTION_KEY` | **required** | The gateway's `apikey` and the `Service_Ingestor` bearer (`secrets.ingestionKey`). Without either the daemon exits rather than running fail-open; it never holds the service-role key |
 | `DEVICE_OFFLINE_TIMEOUT_SECONDS` | `300` | Silence after which a device is marked OFFLINE. `0` disables the watchdog |
 | `DEVICE_WATCHDOG_INTERVAL_SECONDS` | `30` | Sweep interval |
 | `REBIRTH_REQUEST_INTERVAL_SECONDS` | `300` | Minimum gap between rebirth requests to one edge node |
@@ -1404,9 +1419,12 @@ published default is a silent security downgrade, and the failure mode is silenc
 | `LOG_LEVEL` | `INFO` | Any level name; an unrecognised one falls back to `INFO` |
 | `LOG_FORMAT` | `text` in code, **`json` in the chart** | `json` emits one object per line with the drop fields promoted to top level — see [Log fields](#log-fields). An unrecognised value is `text` |
 
-The first three are the chart's `ingestion.*` values —
-`validate.py`'s watchdog check reads them from its own environment to decide whether the window is
-short enough to wait for, and it runs against the deployed stack.
+`DEVICE_OFFLINE_TIMEOUT_SECONDS`, `DEVICE_WATCHDOG_INTERVAL_SECONDS` and
+`REBIRTH_REQUEST_INTERVAL_SECONDS` are the chart's `ingestion.deviceOfflineTimeoutSeconds`,
+`ingestion.deviceWatchdogIntervalSeconds` and `ingestion.rebirthRequestIntervalSeconds`.
+`validate.py`'s watchdog check reads the same names from its own environment to decide whether the
+window is short enough to wait for. Neither `npm run dev:test` nor the e2e Job passes them, so it
+assumes 300 and 30 and skips checks 10 and 10b unless they are set by hand to match the daemon.
 
 ### Log fields
 
@@ -1437,7 +1455,7 @@ published. `device` belongs on the authenticated half and must not migrate onto 
 
 **Both formats carry the same fields.** `text` appends them as `[reason=… device=…]` before any
 traceback; `json` promotes them to top level. If the two disagreed, a developer reading
-`docker logs` would be looking at a different record from the one a store kept.
+`kubectl logs` would be looking at a different record from the one a store kept.
 
 **The code default is `text`; the chart sets `json`** on `ingestion`, `playback` and the cold
 archiver. The code default serves the case neither covers: running
@@ -1455,11 +1473,11 @@ Health* links straight to that query, filtered to whichever reason you clicked.
 | `MQTT_TLS_ENABLED` | `false` | Does **not** change how the daemon authenticates — the username and password still identify it |
 | `MQTT_TLS_CA_FILE` | empty | Required with an internal CA. Empty means verification fails outright |
 
-**Why it is off by default.** The daemon reaches the broker over the pod network (or Docker's
-bridge), which leaves neither the host nor the cluster. Requiring TLS there would make a CA bundle a
-hard dependency of a workload that gains little from it, and the certificate's SANs would have to
-cover the in-cluster name on every deployment. The exposure that matters is **gateways crossing the
-plant network**, which is what `mosquitto.tls.enabled` addresses instead.
+**Off in code; on with the broker's TLS in the chart.** With `mosquitto.tls.enabled` and
+`mosquitto.tls.internalClients` (the default), the chart gives the daemon `MQTT_PORT=8883`,
+`MQTT_TLS_ENABLED=true` and `MQTT_TLS_CA_FILE=/etc/aber/broker-ca/ca.crt`, as it does every
+in-cluster client (`aber.brokerClientEnv`). `internalClients: false` keeps the daemon on 1883 over
+the pod network, which leaves neither the cluster nor the host.
 
 **There is deliberately no "skip verification" setting.** Encryption without verification is
 indistinguishable on the wire from a successful interception, and a daemon that accepted any
@@ -1498,7 +1516,7 @@ the fleet publishes, so they cannot be declared in advance.
 
 The `STATS` log line remains, and still reports by the **flat** names the call sites use
 (`dropped_gateway_binding=+3(12)`). The two answer different questions: this endpoint is for a
-Prometheus, the log line is for whoever is reading `docker logs` at 3am with no Prometheus to hand.
+Prometheus, the log line is for whoever is reading `kubectl logs` at 3am with no Prometheus to hand.
 `registry.counter_snapshot()` reverses the declaration to produce it, rather than keeping a second
 tally — so there is still exactly one place a counter lives. Counters reading zero are omitted from
 the line, so a drop counter appearing there at all is still the signal.
@@ -1538,8 +1556,9 @@ directory-unavailable reasons below.
 discards messages for it before they are delivered, and no `reason` ever counts them. The broker's
 own record is `broker_publish_messages_dropped` on the Mosquitto exporter (port 9234): broker-wide,
 not per subscriber, and zero in steady state. The daemon infers the same loss from Sparkplug `seq`
-(`aber_ingestion_sequence_gaps_total`, below). The Ingestion dashboard's *Messages Lost* panel
-shows all three; the `Broker Shedding Messages` alert fires on any increase. Measured in
+(`aber_ingestion_sequence_gaps_total`, below). The *Messages Lost: Refused, Shed, Missed* panel on
+*Stack & Ingestion Health* shows all three; the `Broker Shedding Messages` alert fires on any
+increase. Measured in
 [`test-harness/README.md`](../test-harness/README.md) *Results*: a 20-minute soak at 1,250 msg/s
 lost 27,299 messages this way while every drop reason read zero.
 
@@ -1610,7 +1629,7 @@ looks wrong.
 | Binding rejections rising | `rate(aber_ingestion_messages_dropped_total{reason="gateway_binding"}[15m]) > 0` | 15m | **Not a health metric.** It is the signal that something published telemetry for a device it does not own. Worth its own rule at its own severity. |
 | Historian unreachable | `aber_ingestion_db_connected == 0` | 2m | Telemetry is being dropped now. Short `for`, because the daemon already retries internally. |
 | Broker shedding messages | `sum(increase(broker_publish_messages_dropped[5m])) > 0` | 1m | **Zero is the steady state.** A shed message never reached the daemon, so the drop rule cannot see it. Broker-wide: Message loss rising beside it places the loss on the historian path. |
-| Message loss | `increase(aber_ingestion_sequence_gaps_total[15m]) > 0` | — | Any increase is worth a warning: it is evidence a change was never recorded. A *sustained* rate — say `> 0.1/s` for 15m — is a page. |
+| Message loss | `rate(aber_ingestion_sequence_gaps_total[15m]) > 0` | 15m | Any increase is worth a warning: it is evidence a change was never recorded. A *sustained* rate — say `> 0.1/s` for 15m — is a page. |
 | Historian writer saturating | `sum(rate(aber_ingestion_write_seconds_sum[5m])) > 0.5` | 10m | The writer thread's occupancy, read straight off the histogram. Half is the warning: the daemon keeps up, and a burst or a slower historian takes it the rest of the way. Queue depth is deliberately not the trigger — it moves only once the writer is already behind, and a full queue's drops reach the drop rule anyway. |
 | Gateway clock skew | `abs(aber_ingestion_gateway_clock_offset_seconds) > 60`, gated on the measurement being under 300s old | 15m | **Well inside the sanity window on purpose.** Past +5m the telemetry is discarded; this fires while it is still being accepted and silently misfiled, which is the failure worth catching. The staleness gate is what stops a powered-down appliance alerting forever on the clock it had when it left. |
 
@@ -1622,10 +1641,11 @@ Queue Depth — read *state* out of Supabase through `public.platform_health`, a
 **On Kubernetes they evaluate out of the box.** The ingestion pod carries the `prometheus.io`
 scrape annotations, the chart’s Alloy DaemonSet scrapes this endpoint and remote-writes to the
 chart’s Prometheus, and the datasource points there. A cluster that runs its own Prometheus
-(`observability.enabled=false`) gets a `ServiceMonitor` instead, which needs the Prometheus
-Operator CRDs, and must set `grafana.prometheusUrl` — the render refuses an empty one. The URL
-placeholder in `grafana/provisioning/datasources/datasources.template.yml` is substituted per
-deployment target for that reason.
+(`observability.enabled=false`) sets `telemetry.serviceMonitor.enabled=true` instead, with
+`telemetry.serviceMonitor.labels` matching the `serviceMonitorSelector` of that Prometheus (the
+Prometheus Operator CRDs are required), and must set `grafana.prometheusUrl` — the render refuses an
+empty one. The chart writes that URL into the placeholder in
+`grafana/provisioning/datasources/datasources.template.yml`.
 
 ### `aber_ingestion_write_seconds` — the one distribution
 
@@ -1738,26 +1758,29 @@ would expect.
 **From the host, through the dev loop's port-forwards:**
 
 ```bash
+npm run proto             # once per clone: validate.py imports the generated sparkplug_b_pb2
 npm run dev:test          # validate.py, then the stack lane
 ```
 
 > **`validate.py` needs `SUPABASE_SECRET_KEY`**, which `dev:test` reads out of the release
 > Secret. Without it the script seeds nothing and fails most of its checks in a way that reads like a
-> schema fault, with the real cause in its banner: `Secret key   : MISSING`. Its own host and port
-> defaults are the port-forwards' addresses, so nothing else is set.
+> schema fault, with the real cause in its banner: `Secret key   : MISSING`. `dev:test` also sets
+> the forwarded hosts and ports, the validator's broker account, and `PRIMARY_HOST_ID` and
+> `SPARKPLUG_GROUP` as the running daemon has them; a run by hand needs the same.
 
-**In-cluster, as a Job in the namespace:**
+**In-cluster, as a Job in the namespace.** On the dev loop:
 
 ```bash
-helm upgrade aber deploy/helm/aber -n aber \
-  -f deploy/helm/aber/values-dev.yaml --set e2e.enabled=true
-kubectl -n aber logs -f job/aber-e2e-validate
+npm run dev:up -- --e2e   # installs with the e2e Jobs on, waits for them and prints their logs
 ```
 
-**No host or port overrides at all.** `timescaledb`, `mosquitto` and `supabase-envoy` *are* the
-Service names, so the defaults are the configuration —
-there is nothing to rewrite and nothing to port-forward. The Job's environment states the topology
-explicitly all the same, so it reads as a complete description rather than relying on defaults.
+Elsewhere, the runbook's
+[conformance suites](../deploy/k8s/README.md#the-conformance-suites--these-write-to-the-stack)
+section gives the generic form.
+
+**Nothing to port-forward.** The Job sets `DB_HOST=timescaledb`, `SUPABASE_DB_HOST=supabase-db`,
+`MQTT_HOST=mosquitto` and `SUPABASE_URL=http://supabase-envoy:8000`, the in-cluster Service
+names, because `validate.py`'s own defaults are the dev loop's `localhost` forwards.
 
 Two port defaults are conditional on their host being set, and that is what makes both paths work
 from one file: `DB_PORT` defaults to `5433` only when `DB_HOST` is unset (the dev loop's forwarded port),
@@ -1766,26 +1789,10 @@ printed at startup lists every resolved endpoint, because **both ways of misconf
 fail somewhere other than at the cause** — from the host, in-cluster names give "Temporary
 failure in name resolution"; in-cluster, a default host sends the script to its own pod's localhost.
 
-### Liveness heartbeat
-
-`INGESTION_HEALTH_FILE` (unset by default, which is a no-op) makes the daemon touch that file every
-`INGESTION_HEALTH_INTERVAL` seconds **while its MQTT connection is up**. The Kubernetes liveness probe
-reads nothing but the file's age.
-
-This exists for the one failure a restart policy cannot detect: paho's network loop dies, the process
-stays alive, and the daemon silently stops ingesting — nothing crashes, nothing logs, telemetry just
-stops arriving. Gating the write on `client.is_connected()` is what makes the signal mean "my broker
-connection is alive" rather than "my process exists"; a message counter would instead report the
-daemon dead every time the shopfloor was quiet.
-
-The write is deliberately forgiving of IO errors: a read-only or full filesystem should stop the
-heartbeat — which correctly reports unhealthy — rather than crash a daemon that is otherwise fine.
-`test_health_heartbeat.py` pins all of that, including the disconnected case.
-
-It seeds a cell, gateway, devices and schemas, publishes real Sparkplug payloads, and asserts the
-outcomes counted in the table above: quarantine, identity diagnostics, birth observation,
-multi-submodel conformance, audit-trail triggers, telemetry mapping, rename safety, quarantine
-gating, and what the i3X server answers (checks 12 and 17).
+`validate.py` seeds a cell, gateway, devices and schemas, publishes real Sparkplug payloads, and
+asserts the outcomes counted in the file table at the top: quarantine, identity diagnostics, birth
+observation, multi-submodel conformance, audit-trail triggers, telemetry mapping, rename safety,
+quarantine gating, and what the i3X server answers (checks 12 and 17).
 
 **Every assertion is scoped to the run's own entities.** A stack in use holds audit rows, telemetry
 and devices of its own, so a check that queried a whole table and asserted "not empty" would pass
@@ -1806,6 +1813,22 @@ transaction and rolls it back. Connecting proves nothing, because `service_role`
 and is then refused by the trigger — which is the exact situation this connection exists to escape.
 A failed preflight is reported at the top of the log and carried into the exit status; the suite
 still runs, because its assertions are worth reporting either way.
+
+### Liveness heartbeat
+
+`INGESTION_HEALTH_FILE` (unset by default, which is a no-op) makes the daemon touch that file every
+`INGESTION_HEALTH_INTERVAL` seconds **while its MQTT connection is up**. The Kubernetes liveness probe
+reads nothing but the file's age.
+
+This exists for the one failure a restart policy cannot detect: paho's network loop dies, the process
+stays alive, and the daemon silently stops ingesting — nothing crashes, nothing logs, telemetry just
+stops arriving. Gating the write on `client.is_connected()` is what makes the signal mean "my broker
+connection is alive" rather than "my process exists"; a message counter would instead report the
+daemon dead every time the shopfloor was quiet.
+
+The write is deliberately forgiving of IO errors: a read-only or full filesystem should stop the
+heartbeat — which correctly reports unhealthy — rather than crash a daemon that is otherwise fine.
+`test_health_heartbeat.py` pins all of that, including the disconnected case.
 
 ---
 
