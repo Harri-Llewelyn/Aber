@@ -17,7 +17,7 @@ Node-RED in Docker, enrols itself on first boot, and publishes Sparkplug B over 
 ## Run it
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 docker compose logs bootstrap
 ```
 
@@ -150,10 +150,11 @@ message seems to vanish, check the edge-node segment of your topic first.
 
 ## Changing this appliance's flow
 
-Export `flows.json` from the Node-RED editor (**menu → Export → all flows**) and drop it on the
-gateway's page in the dashboard, under **Propose a flow**. That opens a pull request in this
-gateway's own repository. **Nothing reaches this appliance until somebody approves it** — and once
-they do, `flow-sync` pulls it within five minutes and reloads Node-RED. The commit is also the copy
+Export `flows.json` from the Node-RED editor (**menu → Export → all flows**), commit it on a branch
+of this gateway's own repository in the forge and open a pull request there. The gateway's drawer in
+the dashboard links to that repository (**Open in the forge**, for Administrators and Shopfloor
+Managers). **Nothing reaches this appliance until somebody approves it** — and once they do,
+`flow-sync` pulls it within five minutes and reloads Node-RED. The commit is also the copy
 that survives a failed SD card, so there is no separate backup step.
 
 **Export from *this* appliance, and never re-import a flow into an editor that already holds it.**
@@ -186,19 +187,19 @@ in the message, such as `UNABLE_TO_VERIFY_LEAF_SIGNATURE`, means the route works
 certificate is not trusted: `platform-root.pem` must hold the root that issued it
 (`/.well-known/aber/ca.pem` on the dashboard's host).
 
-**Node-RED starts but the broker node stays disconnected** — almost always one of three things:
+**Node-RED starts but the broker node stays disconnected** — almost always one of two things:
 
 - the appliance cannot reach `<broker>:8883` (check a firewall between the shopfloor and the
   platform);
 - the platform's broker certificate does not name the address you are dialling. It must carry that
-  hostname or IP in its SAN, which is set by `MQTT_PUBLIC_HOST` on the platform;
-- the credential was issued but the broker had not reloaded yet. It retries on its own; give it a
-  couple of minutes before assuming otherwise.
+  hostname or IP in its SAN. The certificate names `mqtt.<domain>` and
+  `mosquitto.external.loadBalancerIP`; any other address goes in the platform chart's
+  `mosquitto.tls.extraIpSans` or `mosquitto.tls.extraDnsSans`.
 
 **You lost the editor password**
 
 ```bash
-docker compose run --rm bootstrap node /bundle/bootstrap.mjs --reset-admin-password
+docker compose run --rm bootstrap /bundle/bootstrap.mjs --reset-admin-password
 docker compose restart node-red
 ```
 
