@@ -2027,5 +2027,5 @@ There is no second topology to compare against, so the checks are the ones that 
   leaking into wiring, privileged credentials outside a Secret, an origin list the gateway would start
   with and then block every browser request against, OAuth redirect URIs disagreeing between
   what a service advertises and what db-init registers, and a datasource pointed at nothing.
-- **The README component table** — `scripts/check-docs-drift.mjs` holds it to the chart in both
+- **The component table in `docs/architecture.md`** — `scripts/check-docs-drift.mjs` holds it to the chart in both
   directions, and every image tag in it to the chart's pin.

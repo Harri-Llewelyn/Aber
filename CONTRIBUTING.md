@@ -96,6 +96,37 @@ not see a bullet carrying a table. Test a check by breaking the thing it guards,
   with the same care as any other migration; the rule that new work arrives as a new numbered file
   is about keeping the chain readable, not about the pair being inert.
 
+## Writing documentation
+
+Write for the person reading. There are two kinds of page:
+
+- **Pages for newcomers:** the [README](README.md), [`docs/install.md`](docs/install.md), the
+  [tutorial](tutorial/README.md), the [glossary](docs/glossary.md) and the help inside the
+  dashboard (`frontend/src/help/`). Assume the reader has never seen Aber or Kubernetes.
+- **Reference pages:** the runbook, the component READMEs and the design documents. These can
+  assume more, but each opens with a few plain sentences on what it covers and who it is for.
+
+On every page:
+
+- **Say what something does for the reader first,** and how it works after.
+- **Keep sentences short, with one idea each.** Split a sentence of more than about 25 words.
+- **Put steps before reasons.** The reason goes under the step, or in a section the step links to.
+- **Explain a term the first time a page uses it,** or link it to the glossary. Add new terms there.
+- **Write a warning as what happens and what to do.** The design argument behind it belongs in a
+  reference page.
+- **Keep history out of a page someone is following.** It belongs in
+  [`docs/incidents.md`](docs/incidents.md), or below the steps in a reference page.
+- **Keep the README short.** It says what Aber is and links to the rest. New detail goes in the page
+  it belongs to.
+
+For example:
+
+> *Not this:* "The chart validates its own values and fails the render, not the pod, and the
+> message names the fix."
+>
+> *This:* "If a setting is missing or wrong, the install stops before anything starts, and the
+> error says what to fix."
+
 ## Before you open a pull request
 
 Run the suites that cover what you touched — the full inventory, what each one needs, and which
@@ -128,11 +159,21 @@ sees it.
 about the code is fixed; one that is not goes in the allow-list with a reason a reviewer can check.
 
 Getting started with the stack itself — prerequisites, `npm run setup`, and bringing it up on
-k3d or a cluster — is in the [README](README.md).
+k3d or a cluster — is in [`docs/install.md`](docs/install.md).
 
 ## Related
 
-- [`docs/testing.md`](docs/testing.md) — every suite, the CI jobs, and the release workflow
-- [`docs/handover.md`](docs/handover.md) — what to purge before transferring a working tree
-- [`SECURITY.md`](SECURITY.md) — reporting a vulnerability
-- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
+> **Handing this to someone else?** `git status` clean is not the same as safe to hand over. The
+> credentials this repository generates are untracked, and the internal CA's **private key** lives
+> in the cluster, so a clean tree says nothing about either. [`docs/handover.md`](docs/handover.md)
+> lists what to purge first.
+
+| Document | Covers |
+| :--- | :--- |
+| [`docs/testing.md`](docs/testing.md) | Every suite and what it needs, the seven CI jobs, the release workflow |
+| [`docs/static-analysis.md`](docs/static-analysis.md) | The lints and scans, what each judges, and how a finding is accepted |
+| [`docs/handover.md`](docs/handover.md) | Packaging a hand-off — what to purge before transferring a tree |
+| [`docs/releases.md`](docs/releases.md) | What a release promises — the supported window, the version policy and the deprecation path |
+| [`SECURITY.md`](SECURITY.md) | Reporting a vulnerability privately, and the supported version window |
+| [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | Contributor Covenant 2.1 |
+| [`NOTICE.md`](NOTICE.md) | Third-party licences, and what the MIT grant here does and does not cover |

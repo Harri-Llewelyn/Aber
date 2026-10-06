@@ -17,7 +17,7 @@ documentation of the thing it constrains ([`CONTRIBUTING.md`](../CONTRIBUTING.md
 **What this record covers.** The roadmap's own entries, and nothing else. It is not an index of
 every closed issue — a shipped issue is found through the tracker and the pull request that closed
 it. **Known issues** stay in [GitHub issues](https://github.com/Harri-Llewelyn/Aber/issues);
-**accepted risks** live under [Accepted risks](../README.md#accepted-risks).
+**accepted risks** live under [Accepted risks](security-model.md#accepted-risks).
 
 **The three entries that were still live when the queue moved.** Each kept its text; the
 constraints it had settled moved into the documentation first, so closing the issue cannot lose

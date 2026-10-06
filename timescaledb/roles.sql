@@ -374,7 +374,7 @@ BEGIN
        OR has_table_privilege('ingest_writer', 'public.telemetry', 'TRUNCATE') THEN
       RAISE EXCEPTION
         'roles self-check: ingest_writer can change or remove telemetry. "Append-only historian '
-        'writes" is a claim the README makes in its security model, and this role is what makes it '
+        'writes" is a claim docs/security-model.md makes, and this role is what makes it '
         'a database fact rather than a property of the Python.';
     END IF;
 
