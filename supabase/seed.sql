@@ -1,6 +1,8 @@
--- Local development seed data: the four demo personas. NOT FOR A PRODUCTION DATABASE. Replayed by
--- db-init on every start against a persistent volume, so every statement here is repeatable on a
--- database that already holds these rows. Reasoning: ./README.md, "The development seed".
+-- Local development seed data: the four demo personas. NOT FOR A PRODUCTION DATABASE. Applied by
+-- db-init only with supabaseAuth.demoAccounts on (values-dev.yaml), on every install and upgrade
+-- against a persistent volume, so every statement here is repeatable on a database that already
+-- holds these rows. A site's own first administrator is 0163's. Reasoning: ./README.md, "The
+-- development seed".
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 
 -- GoTrue maps every varchar token column to a Go string, so each must be '' and not NULL:

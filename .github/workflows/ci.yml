@@ -472,6 +472,14 @@ jobs:
           expect_failure "publishableKey empty" "secrets.publishableKey" \
             -f "$DEV" --set secrets.publishableKey=
 
+          # The first administrator is created by the db-init hook, so a bad address or a missing
+          # password would fail the install only after everything else had been created.
+          expect_failure "first administrator email malformed" "is not an email address" \
+            -f "$DEV" --set supabaseAuth.firstAdministrator.email=not-an-address \
+            --set secrets.firstAdministratorPassword=long-enough-password
+          expect_failure "first administrator without a password" "secrets.firstAdministratorPassword" \
+            -f "$DEV" --set supabaseAuth.firstAdministrator.email=ops@plant.example
+
           # Lengths enforced by the supabase/realtime container itself; it refuses to boot.
           expect_failure "realtimeDbEncKey not 16 chars" "EXACTLY 16 characters" \
             -f "$DEV" --set secrets.realtimeDbEncKey=tooshort

@@ -5593,10 +5593,27 @@ Every vocabulary must satisfy all nine, and CI checks five of them:
 
 ## The development seed
 
-[`seed.sql`](seed.sql) creates the four demo personas and nothing else. It is meant for
-development. db-init applies it after the migrations on every install and upgrade, against a
-persistent volume, so every statement in it has to be repeatable on a database that already holds
-these rows.
+[`seed.sql`](seed.sql) creates the four demo personas and nothing else. It is for development:
+db-init applies it only with `supabaseAuth.demoAccounts` on, which `values-dev.yaml` alone sets, so
+the dev loop, CI and `validate.py` have their personas and a site has none. Where it runs, it runs
+after the migrations on every install and upgrade, against a persistent volume, so every statement
+in it has to be repeatable on a database that already holds these rows.
+
+### A site's first administrator (0163)
+
+A site's first account comes from the chart instead. `ensure_first_administrator(email, password)`
+is called by db-init, as `postgres`, while `supabaseAuth.firstAdministrator.email` is set, with
+`secrets.firstAdministratorPassword`. When no account has the address it creates one, with an email
+identity (so `is_machine_principal()` reads it as a person) and the `Administrator` role, and
+returns `created`. When one does, it returns `exists` and changes nothing.
+
+**Nothing it made is ever repaired.** A password changed since, a role changed since, or an account
+with that address made by hand are the site's; a later run that "corrected" them would hand the
+chart's password back to an account somebody had deliberately changed. The password is checked
+only when creating, so a Secret that later drops the key does not fail an upgrade. No API role may
+execute it: it writes a password into `auth.users`, and 0163 asserts that `anon`, `authenticated`
+and `service_role` cannot. `npm run setup -- --admin-email=` writes both values;
+`test_first_administrator.py` holds the contract.
 
 **GoTrue's columns.** Every varchar token column on `auth.users` must be set to the empty string
 rather than NULL: GoTrue maps them to Go `string` fields, and a NULL aborts the row scan with

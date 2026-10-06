@@ -566,8 +566,26 @@ Single entry point, included once from NOTES.txt so every render runs every chec
 deliberate, most fundamental first: a stack with no credentials is told that, not about the
 hostnames it also lacks.
 */}}
+{{/*
+The first administrator. A malformed address, or a password the chart can see is missing or short,
+would otherwise fail the db-init hook after the install had created everything else. With
+existingSecret the password is not the chart's to see, and 0163 refuses an empty one itself.
+*/}}
+{{- define "aber.validateFirstAdministrator" -}}
+{{- $email := dig "firstAdministrator" "email" "" .Values.supabaseAuth -}}
+{{- if $email -}}
+{{- if not (regexMatch "^[^@\\s]+@[^@\\s]+$" $email) -}}
+{{- fail (printf "\n\naber: supabaseAuth.firstAdministrator.email %q is not an email address.\n\nIt is the address the site's first administrator signs in with.\n" $email) -}}
+{{- end -}}
+{{- if and (not .Values.secrets.existingSecret) (lt (len (.Values.secrets.firstAdministratorPassword | default "")) 12) -}}
+{{- fail "\n\naber: supabaseAuth.firstAdministrator.email is set but secrets.firstAdministratorPassword is\nempty or shorter than 12 characters.\n\ndb-init creates that account with this password the first time it runs; without one the install\nfails at the db-init hook, after everything else exists. `npm run setup` mints one.\n" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "aber.validate" -}}
 {{- include "aber.validateSecrets" . -}}
+{{- include "aber.validateFirstAdministrator" . -}}
 {{- include "aber.validateStudioRoute" . -}}
 {{- include "aber.validateMqttPrincipals" . -}}
 {{- include "aber.validateRealtime" . -}}

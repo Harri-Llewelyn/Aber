@@ -14,7 +14,8 @@ bytes twice -- as chart files and again base64-encoded into the rendered ConfigM
 compressible. No size of file satisfies both as the chain grows.
 
 THE SEED STAYS A ConfigMap: one small file, and the one an operator might legitimately replace at
-install time, since demo accounts are a deployment choice and the schema is not.
+install time, since demo accounts are a deployment choice and the schema is not. seed.sql is the
+demo personas, so it is in the ConfigMap only with supabaseAuth.demoAccounts on.
 */}}
 apiVersion: v1
 kind: ConfigMap
@@ -26,10 +27,16 @@ metadata:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "-5"
     "helm.sh/hook-delete-policy": before-hook-creation
-data:
+{{- $seed := dict }}
 {{- range $path, $bytes := .Files.Glob "files/seed/*.sql" }}
-  {{ base $path }}: |
-{{ $.Files.Get $path | indent 4 }}
+{{- if or (ne (base $path) "seed.sql") $.Values.supabaseAuth.demoAccounts }}
+{{- $_ := set $seed (base $path) ($.Files.Get $path) }}
+{{- end }}
+{{- end }}
+data:{{ if not $seed }} {}{{ end }}
+{{- range $name, $body := $seed }}
+  {{ $name }}: |
+{{ $body | indent 4 }}
 {{- end }}
 ---
 apiVersion: batch/v1
@@ -138,6 +145,17 @@ spec:
                   optional: true
             - name: GITEA_PUBLIC_URL
               value: {{ include "aber.giteaUrl" . | quote }}
+            # The site's first administrator (0163). The password is optional so an existing
+            # Secret without the key still runs the chain; 0163 refuses an empty one only when it
+            # would create the account.
+            - name: FIRST_ADMINISTRATOR_EMAIL
+              value: {{ dig "firstAdministrator" "email" "" .Values.supabaseAuth | quote }}
+            - name: FIRST_ADMINISTRATOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: FIRST_ADMINISTRATOR_PASSWORD
+                  optional: true
             # The Directory rows for Swagger UI and the four Supabase services are repointed at
             # these on every boot, as the Grafana, Studio, Node-RED and forge rows are above.
             - name: DOCS_PUBLIC_URL
@@ -321,10 +339,22 @@ spec:
               done
 
               # Runs AFTER the migrations, not before: it inserts GoTrue users and user_roles rows
-              # against tables 0001 creates.
+              # against tables 0001 creates. Present only with supabaseAuth.demoAccounts on.
               if [ -f /seed/seed.sql ]; then
-                echo 'Executing seed.sql...'
+                echo 'Executing seed.sql (supabaseAuth.demoAccounts)...'
                 $PSQL -f /seed/seed.sql
+              fi
+
+              # The site's first administrator, created once by 0163 and never changed after. The
+              # password reaches psql through \getenv, not argv; exported empty when the Secret has
+              # no key, so 0163 names the missing value rather than psql failing on the syntax.
+              if [ -n "$FIRST_ADMINISTRATOR_EMAIL" ]; then
+                export FIRST_ADMINISTRATOR_PASSWORD="${FIRST_ADMINISTRATOR_PASSWORD:-}"
+                echo "Ensuring the first administrator, $FIRST_ADMINISTRATOR_EMAIL..."
+                $PSQL -tA -v first_admin_email="$FIRST_ADMINISTRATOR_EMAIL" <<'SQL'
+              \getenv first_admin_password FIRST_ADMINISTRATOR_PASSWORD
+              SELECT 'First administrator: ' || public.ensure_first_administrator(:'first_admin_email', :'first_admin_password');
+              SQL
               fi
 
               # THE END OF THE CHAIN, RECORDED. A non-null completed_at means every migration

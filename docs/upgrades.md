@@ -302,6 +302,17 @@ This has not happened and the vocabularies are generated from published standard
 is unlikely to. It is listed here because it is the one change that *would* need a data migration
 rather than a schema one.
 
+### 4.6 From 1.0.0, the demo accounts stay until you remove them
+
+1.0.0 applied the four demo accounts (`admin@aber.local` and three others, password `aber123`) on
+every install and upgrade. From 1.0.1 they are applied only where `supabaseAuth.demoAccounts` is
+on, which `values-dev.yaml` alone sets, and a site names its own first administrator instead
+(`supabaseAuth.firstAdministrator`, migration `0163`). The upgrade deletes nothing, so a site that
+signs in as a demo account keeps doing so. Before upgrading, set the first administrator
+(`npm run setup -- --admin-email=` writes both values into a fresh file; copy the two into yours);
+after it, sign in as that account and remove the four demo accounts, in Studio or with GoTrue's
+admin API.
+
 ---
 
 ## 5. What to check after an upgrade

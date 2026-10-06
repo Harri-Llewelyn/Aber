@@ -95,3 +95,16 @@ CREATE TABLE IF NOT EXISTS auth.identities (
 -- row, which is 0048's three-part definition of not-a-machine -- so a read-only grant fails it with
 -- `permission denied for table identities`, one step past where the missing table used to stop it.
 GRANT SELECT, INSERT ON auth.identities TO postgres;
+
+-- The base image's auth.users predates columns GoTrue has, and ensure_first_administrator() (0163)
+-- writes them, as seed.sql does. Added with GoTrue's types; IF NOT EXISTS leaves an image that
+-- already has them untouched.
+ALTER TABLE auth.users
+  ADD COLUMN IF NOT EXISTS email_confirmed_at         timestamptz,
+  ADD COLUMN IF NOT EXISTS is_sso_user                boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS email_change               varchar(255),
+  ADD COLUMN IF NOT EXISTS email_change_token_new     varchar(255),
+  ADD COLUMN IF NOT EXISTS email_change_token_current varchar(255) DEFAULT '',
+  ADD COLUMN IF NOT EXISTS phone_change               text DEFAULT '',
+  ADD COLUMN IF NOT EXISTS phone_change_token         varchar(255) DEFAULT '',
+  ADD COLUMN IF NOT EXISTS reauthentication_token     varchar(255) DEFAULT '';
