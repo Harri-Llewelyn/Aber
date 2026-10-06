@@ -1070,6 +1070,11 @@ nodeRed:
   # Re-seed the flow even though /data is already provisioned. Destructive to editor changes;
   # node-red-init backs the previous flow up to flows.json.pre-seed first.
   forceSeed: false
+  # For flows written outside the editor: <PREFIX>_USER and <PREFIX>_PASSWORD keys, written by
+  # node-red-init onto the broker node whose aberCredentialsEnv is <PREFIX>. A broker node built in
+  # the editor holds its own credential (its Security tab) and needs nothing here. The chart never
+  # creates this Secret, and an absent one means no pairs. Empty turns it off.
+  gatewayCredentialsSecret: node-red-gateway-credentials
   persistence:
     enabled: true
     size: 2Gi

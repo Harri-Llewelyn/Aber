@@ -113,17 +113,17 @@ spec:
             */}}
             {{- include "aber.noderedAuthEnv" . | nindent 12 }}
             {{- /*
-              NO FLOW IS SEEDED AND NO BROKER CREDENTIAL IS PASSED. node-red-init writes a blank
-              flows.json, so a fresh install publishes nothing, declares no broker nodes and needs
-              no credential to exist for a gateway nobody has created.
+              NO FLOW IS SEEDED. node-red-init writes a blank flows.json, so a fresh install
+              publishes nothing, declares no broker nodes and needs no credential to exist for a
+              gateway nobody has created.
 
-              A USER BUILDING A FLOW mints its credential from the dashboard and adds the pair to
-              the chart Secret under the names their broker node's `aberCredentialsEnv` declares.
-              node-red-init reconciles env pairs onto broker nodes at init and FAILS CLOSED when a
-              declared pair is absent -- deliberately, because the alternative is seeding an empty
-              username, which the broker refuses with CONNACK 5 while Node-RED reports only
-              "Connection failed to broker: <clientId>@<url>", naming the client id rather than the
-              username and reading identically to a wrong host.
+              A USER BUILDING A FLOW mints its credential from the dashboard and types it on the
+              broker node's Security tab; Node-RED stores it encrypted and node-red-init keeps it.
+              A flow written outside the editor can instead name an env pair in the node's
+              `aberCredentialsEnv`, supplied from nodeRed.gatewayCredentialsSecret (envFrom below).
+              node-red-init FAILS CLOSED when such a declared pair is absent, because the
+              alternative is an empty username, which the broker refuses with CONNACK 5 while
+              Node-RED reports only "Connection failed to broker: <clientId>@<url>".
             */}}
             {{/*
               The broker's transport, from the same helper the ingestion daemon uses.
@@ -136,6 +136,17 @@ spec:
             {{- include "aber.brokerClientEnv" . | nindent 12 }}
             - name: NODE_RED_FORCE_SEED
               value: {{ .Values.nodeRed.forceSeed | quote }}
+            {{- with .Values.nodeRed.gatewayCredentialsSecret }}
+            {{- /* Named in node-red-init's failure messages, so a missing pair says where it goes. */}}
+            - name: GATEWAY_CREDENTIALS_SECRET
+              value: {{ printf "%s/%s" $.Release.Namespace . | quote }}
+            {{- end }}
+          {{- with .Values.nodeRed.gatewayCredentialsSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ . | quote }}
+                optional: true
+          {{- end }}
           volumeMounts:
             - name: data
               mountPath: /data

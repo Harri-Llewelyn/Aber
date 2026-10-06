@@ -225,8 +225,8 @@ Deno.serve(async (req) => {
     playback_delivered: deliverToPlayback
       ? (credential.playback_delivery?.delivered ?? false)
       : null,
-    // The env-pair names node-red-init reconciles from, so the reveal-once panel can show the two
-    // lines an operator pastes into .env rather than making them derive the naming convention.
+    // The env-pair names node-red-init reconciles a managed broker node from, for a flow written
+    // outside the editor (nodeRed.gatewayCredentialsSecret). The dashboard does not read it.
     env_hint: {
       user_var: "MQTT_GW_<NAME>_USER",
       password_var: "MQTT_GW_<NAME>_PASSWORD",

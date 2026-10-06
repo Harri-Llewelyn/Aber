@@ -120,13 +120,8 @@ B lifecycle to be recognised:
 1. Add an **mqtt-broker** config node pointing at `mosquitto:1883`. With broker TLS on, the chart
    moves every broker node to 8883 with the CA on the next start, so leave the port as the chart
    sets it.
-2. Give it the username and password from step 4. `node-red-init` writes them onto the node at
-   init from an env pair, `<PREFIX>_USER` and `<PREFIX>_PASSWORD`, where `<PREFIX>` is the node's
-   `aberCredentialsEnv` property; that keeps the secret out of the flow file and out of git. **The
-   chart does not yet pass such a pair to Node-RED**
-   ([#692](https://github.com/Harri-Llewelyn/Aber/issues/692)), and `node-red-init`
-   keeps the pod from starting while any broker node lacks `aberCredentialsEnv` or its pair, so a
-   broker node deployed today takes Node-RED down at its next restart.
+2. On its **Security** tab, enter the username and password from step 4, then **Update** and
+   **Deploy**. Node-RED stores them encrypted in `flows_cred.json`, and they survive restarts.
 3. Publish an **NBIRTH** on `spBv1.0/<group>/NBIRTH/<gateway sparkplug_id>`.
 4. Publish a **DBIRTH** on `spBv1.0/<group>/DBIRTH/<gateway>/<device>` carrying the metrics your
    schema declares.

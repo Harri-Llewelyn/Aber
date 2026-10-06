@@ -65,25 +65,18 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
     if (!ok) showToast?.('Could not reach the clipboard — select the value and copy it.', 'error')
   }, [showToast])
 
-  // Two destinations. A host-run gateway's pair goes in the release Secret under the names its
-  // broker node declares in `aberCredentialsEnv`, and node-red-init writes it onto that node. The
-  // playback gateway's goes in `secrets.mqttPlaybackCredentials`, one JSON object keyed by
-  // sparkplug_id.
+  // Two destinations. A host-run gateway's pair is typed on its broker node's Security tab in the
+  // Node-RED editor, which stores it encrypted and keeps it across restarts. The playback gateway's
+  // goes in `secrets.mqttPlaybackCredentials`, one JSON object keyed by sparkplug_id.
   const isPlayback = !!gateway.is_shadow
 
   // What the server did: true (written where the worker reads it), false (delivery failed) or null
   // (not a playback target; absent reads as null).
   const wasDelivered = credential?.playback_delivered === true
   const deliveryFailed = credential?.playback_delivered === false
-  const secretBlock = !credential
-    ? ''
-    : isPlayback
-      ? `{"${credential.mqtt_username}":"${credential.password}"}`
-      : [
-        '# names from the broker node\'s aberCredentialsEnv',
-        `MQTT_GW_<NAME>_USER=${credential.mqtt_username}`,
-        `MQTT_GW_<NAME>_PASSWORD=${credential.password}`,
-      ].join('\n')
+  const secretBlock = credential && isPlayback
+    ? `{"${credential.mqtt_username}":"${credential.password}"}`
+    : ''
 
   let footer
   if (step === 'confirm') {
@@ -224,42 +217,47 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
                 again.
               </div>
             </div>
-          ) : (
+          ) : isPlayback ? (
             <div className="form-group">
-              <label className="form-label">
-                {isPlayback ? 'For secrets.mqttPlaybackCredentials' : 'For the release Secret'}
-              </label>
+              <label className="form-label">For secrets.mqttPlaybackCredentials</label>
               <pre className="mono gateway-code">{secretBlock}</pre>
               <div className="gateway-block-head">
                 <span className="form-hint">
-                  {isPlayback ? (
-                    <>
-                      {deliveryFailed && (
-                        <strong className="gateway-delivery-failed">
-                          Automatic delivery to the playback worker failed, so this has to be
-                          placed by hand:
-                        </strong>
-                      )}
-                      Set <span className="mono">secrets.mqttPlaybackCredentials</span> to this object
-                      and upgrade the release. Already have other targets in there? Add this key to
-                      the existing object rather than replacing it. The playback worker picks the
-                      change up when its Secret refreshes, or at once after{' '}
-                      <span className="mono">kubectl rollout restart deploy/playback</span>.
-                    </>
-                  ) : (
-                    <>
-                      Add both values to the release Secret, replacing <span className="mono">&lt;NAME&gt;</span>{' '}
-                      with the <span className="mono">aberCredentialsEnv</span> value declared on the
-                      broker node in the Node-RED flow (it is not the gateway’s name). Then restart
-                      Node-RED: its init step, <span className="mono">node-red-init</span>, writes the
-                      pair onto that broker node as the pod starts.
-                    </>
+                  {deliveryFailed && (
+                    <strong className="gateway-delivery-failed">
+                      Automatic delivery to the playback worker failed, so this has to be
+                      placed by hand:
+                    </strong>
                   )}
+                  Set <span className="mono">secrets.mqttPlaybackCredentials</span> to this object
+                  and upgrade the release. Already have other targets in there? Add this key to
+                  the existing object rather than replacing it. The playback worker picks the
+                  change up when its Secret refreshes, or at once after{' '}
+                  <span className="mono">kubectl rollout restart deploy/playback</span>.
                 </span>
                 <button className="btn btn-ghost" onClick={() => copy('secret', secretBlock)}>
                   {copied === 'secret' ? <IconCheck size={13} /> : <IconCopy size={13} />} Copy block
                 </button>
               </div>
+            </div>
+          ) : (
+            /* A host-run gateway's flow runs in this stack's Node-RED, and a credential typed in
+               the editor is stored encrypted there and survives restarts. */
+            <div className="form-group">
+              <label className="form-label">Use it in Node-RED</label>
+              <ol className="form-hint gateway-steps">
+                <li>
+                  In the Node-RED editor, open the <strong>mqtt-broker</strong> node this gateway
+                  publishes through, or add one with Server{' '}
+                  <span className="mono">mosquitto</span> and Port <span className="mono">1883</span>.
+                </li>
+                <li>On its <strong>Security</strong> tab, paste the username and password above.</li>
+                <li>
+                  Click <strong>Update</strong>, then <strong>Deploy</strong>. Node-RED stores the
+                  password encrypted and keeps it when it restarts. If the broker uses TLS, Node-RED
+                  moves the node onto it the next time it starts.
+                </li>
+              </ol>
             </div>
           )}
         </>
