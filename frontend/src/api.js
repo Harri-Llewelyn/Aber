@@ -1019,6 +1019,19 @@ const apiMethods = {
    * A raw fetch so both gateway-credential paths read the same way. The password is returned once
    * and is not recoverable: mosquitto_passwd stores a hash, and minting again replaces the account.
    */
+  /**
+   * The kept copy of a Host or Simulated gateway's broker credential (0164). Administrator only, and
+   * every call is a CREDENTIAL_SHOWN row in the Audit Trail. The error carries the RPC's own sentence
+   * ("no copy ... is kept; issue a new one ..."), which is the one an operator can act on.
+   */
+  showGatewayCredential: async (gatewayId) => {
+    const { data, error } = await supabase.rpc('show_gateway_credential', { p_gateway_id: gatewayId });
+    if (error) throw new Error(error.message || 'Could not show the credential');
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row?.password) throw new Error('No copy of this credential is kept; issue a new one.');
+    return row;
+  },
+
   mintGatewayCredential: async (gatewayId) => {
     const { data: { session } } = await supabase.auth.getSession();
     const res = await fetch(`${SUPABASE_URL}/functions/v1/gateway-credential`, {

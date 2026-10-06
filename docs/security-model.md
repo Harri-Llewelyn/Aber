@@ -254,3 +254,21 @@ real flows.
 
 **Revisit if** a second service ever relies on "only these pods can reach me" as a control, or if
 the cluster is shared with anything else.
+
+### Host gateway passwords are kept, and Administrators can see them
+
+A Host or Simulated gateway's broker password is typed into the Node-RED editor by a person. So that
+it is not lost, the platform keeps an encrypted copy in Vault, and an Administrator can show it again
+from the gateway's drawer (`0164`). Anyone who holds `Administrator`, or who holds both a database
+dump and its Vault key, can therefore read every Host gateway's broker password. Before `0164` the
+platform kept no copy at all: the broker stores only a hash.
+
+**Accepted because** the copy is limited to the passwords a person handles anyway. Remote gateways'
+credentials never reach a browser, and the Playback gateway's is delivered to its worker, so neither
+keeps one. Showing a password is Administrator only, each showing is a `CREDENTIAL_SHOWN` row in the
+Audit Trail, and the copy is deleted when the gateway is archived or deleted. An Administrator could
+already issue a new password for any gateway, which gives the same access.
+
+**Revisit if** Host gateways come to publish for machines whose data matters more than the
+platform's own, or if a role other than `Administrator` needs to see a password. At that point,
+issuing a new password instead of keeping a copy is the stricter choice.

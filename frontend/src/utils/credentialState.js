@@ -70,7 +70,8 @@ export function credentialStateExplanation(state, gateway) {
         + 'dropped and its next connection is refused. Issuing a new credential re-enables it.';
     case CREDENTIAL_STATES.ISSUED:
       return gateway?.deployment === 'host'
-        ? 'Issued through the dashboard and shown once. The password is not recoverable.'
+        ? 'Issued through the dashboard. An Administrator can show the password again from the '
+          + 'gateway’s drawer.'
         : 'Issued to the appliance when it enrolled. The password never passes through a browser.';
     case CREDENTIAL_STATES.AWAITING_ENROLMENT:
       return 'An install command or bundle has been issued and not yet used. The credential is '

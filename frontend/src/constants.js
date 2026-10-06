@@ -44,7 +44,9 @@ export const AUDIT_TRAIL_ACTIONS = {
   // Not written by the audit trigger, like SCHEMA_REJECTION above. A broker credential minted for a
   // gateway (archive/0041_virtual_gateway_credential.sql) and a long-lived token signed for a machine
   // identity (archive/0043_record_service_token_issued.sql) each file one: "who was given what, when".
+  // Showing a Host gateway's kept copy again (0164) files CREDENTIAL_SHOWN: "who looked, and when".
   CREDENTIAL_ISSUED: 'Credential issued',
+  CREDENTIAL_SHOWN: 'Credential shown',
   TOKEN_MINTED:      'Token minted',
   // The pair is the question: "who was given what" is only half an answer without "and when was
   // it taken away".

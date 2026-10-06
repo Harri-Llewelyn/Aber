@@ -606,6 +606,12 @@ export const SUITES = {
     lanes: ['db'],
     why: 'That a minted credential is recorded, and recorded once, wherever it was minted from.',
   },
+  'supabase/migrations/test_gateway_credential_shown_again.py': {
+    lanes: ['db'],
+    why:
+      'Who may keep and show a Host gateway\'s credential, that each showing is recorded without ' +
+      'the password, and that the copy goes when the broker account does.',
+  },
   'supabase/migrations/test_credential_revocation.py': {
     lanes: ['db'],
     why:

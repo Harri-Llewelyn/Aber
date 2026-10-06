@@ -128,10 +128,17 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
                 the gateway goes stale on the dashboard within 90 seconds and cannot reconnect until
                 the new password reaches it.
               </div>
-              <div>
-                The password is shown <strong>once</strong> and cannot be recovered: the broker
-                stores only a hash.
-              </div>
+              {gateway.is_shadow ? (
+                <div>
+                  The password is shown <strong>once</strong> and cannot be recovered: the broker
+                  stores only a hash.
+                </div>
+              ) : (
+                <div>
+                  An Administrator can show the password again later from the gateway’s drawer,
+                  and each showing is recorded in the Audit Trail.
+                </div>
+              )}
             </div>
           </div>
 
@@ -155,16 +162,30 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
 
       {step === 'reveal' && credential && (
         <>
-          <div className="callout callout-warning">
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div>
-              <strong>Copy this now — it is not shown again.</strong>
+          {credential.credential_kept ? (
+            <div className="callout callout-info">
+              <IconShieldAlert size={14} className="callout-icon" />
               <div>
-                Closing this dialog discards the password. Nothing in the stack can produce it
-                again; issuing a replacement is the only way back, and that invalidates this one.
+                <strong>Copy this into Node-RED now.</strong>
+                <div>
+                  An Administrator can show it again from the gateway’s drawer (
+                  <strong>Show Broker Credential</strong>), and each showing is recorded in the
+                  Audit Trail.
+                </div>
               </div>
             </div>
-          </div>
+          ) : (
+            <div className="callout callout-warning">
+              <IconShieldAlert size={14} className="callout-icon" />
+              <div>
+                <strong>Copy this now — it is not shown again.</strong>
+                <div>
+                  Closing this dialog discards the password. Nothing in the stack can produce it
+                  again; issuing a replacement is the only way back, and that invalidates this one.
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="form-group">
             <label className="form-label">MQTT username</label>
@@ -241,27 +262,36 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
               </div>
             </div>
           ) : (
-            /* A host-run gateway's flow runs in this stack's Node-RED, and a credential typed in
-               the editor is stored encrypted there and survives restarts. */
-            <div className="form-group">
-              <label className="form-label">Use it in Node-RED</label>
-              <ol className="form-hint gateway-steps">
-                <li>
-                  In the Node-RED editor, open the <strong>mqtt-broker</strong> node this gateway
-                  publishes through, or add one with Server{' '}
-                  <span className="mono">mosquitto</span> and Port <span className="mono">1883</span>.
-                </li>
-                <li>On its <strong>Security</strong> tab, paste the username and password above.</li>
-                <li>
-                  Click <strong>Update</strong>, then <strong>Deploy</strong>. Node-RED stores the
-                  password encrypted and keeps it when it restarts. If the broker uses TLS, Node-RED
-                  moves the node onto it the next time it starts.
-                </li>
-              </ol>
-            </div>
+            <NodeRedCredentialSteps />
           )}
         </>
       )}
     </Modal>
+  )
+}
+
+/**
+ * Where a host-run gateway's credential goes. Its flow runs in this stack's Node-RED, and a
+ * credential typed in the editor is stored encrypted there and survives restarts. Shared with
+ * ShowGatewayCredentialModal, so issuing and showing say the same thing.
+ */
+export function NodeRedCredentialSteps() {
+  return (
+    <div className="form-group">
+      <label className="form-label">Use it in Node-RED</label>
+      <ol className="form-hint gateway-steps">
+        <li>
+          In the Node-RED editor, open the <strong>mqtt-broker</strong> node this gateway
+          publishes through, or add one with Server{' '}
+          <span className="mono">mosquitto</span> and Port <span className="mono">1883</span>.
+        </li>
+        <li>On its <strong>Security</strong> tab, paste the username and password above.</li>
+        <li>
+          Click <strong>Update</strong>, then <strong>Deploy</strong>. Node-RED stores the
+          password encrypted and keeps it when it restarts. If the broker uses TLS, Node-RED
+          moves the node onto it the next time it starts.
+        </li>
+      </ol>
+    </div>
   )
 }

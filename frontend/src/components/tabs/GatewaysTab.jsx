@@ -37,6 +37,7 @@ import { ArchiveModal } from '../modals/ArchiveModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
 import { GatewayBundleModal } from '../modals/GatewayBundleModal'
 import { GatewayCredentialModal } from '../modals/GatewayCredentialModal'
+import { ShowGatewayCredentialModal } from '../modals/ShowGatewayCredentialModal'
 import { GatewayRepositoryPanel } from '../common/GatewayRepositoryPanel'
 import {
   IconRadio,
@@ -51,6 +52,7 @@ import {
   IconAlertTriangle,
   IconLayoutDashboard,
   IconDownload,
+  IconEye,
   IconLock
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
@@ -82,6 +84,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const [bundleForGw, setBundleForGw] = useState(null)
   // The Host and Simulated counterpart to bundleForGw: only this one puts a password on screen.
   const [credentialForGw, setCredentialForGw] = useState(null)
+  const [shownCredentialForGw, setShownCredentialForGw] = useState(null)
   // Whether this deployment can enrol an appliance, from gateway-bundle's GET. null until answered
   // or when the probe failed: an unknown never blocks.
   const [enrolment, setEnrolment] = useState(null)
@@ -318,6 +321,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const selectedPending = !!selected && isGatewayPending(selected)
   const offersSetup = !!selected && !selected.is_archived && selected.deployment === 'remote' && selectedPending && canManage
   const offersCredential = !!selected && !selected.is_archived && selected.deployment === 'host' && canManage
+  // Administrator only, as show_gateway_credential() is; never the Playback gateway, which keeps no copy.
+  const offersShownCredential = offersCredential && !selected.is_shadow && userRole === 'Administrator'
   const primaryAction = !selected ? null
     : offersSetup ? 'setup'
     : offersCredential && selectedPending ? 'credential'
@@ -995,7 +1000,16 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
               sparkplug_id: selected.sparkplug_id,
               is_shadow: selected.is_shadow
             }),
-            title: 'Issue this Host or Simulated gateway a broker account and show the password once. A Remote gateway enrols itself instead, and its credential never passes through a browser.'
+            title: 'Issue this Host or Simulated gateway a broker account and show its password. A Remote gateway enrols itself instead, and its credential never passes through a browser.'
+          },
+          offersShownCredential && {
+            label: 'Show Broker Credential',
+            icon: <IconEye size={13} />,
+            onClick: () => setShownCredentialForGw({
+              gateway_id: selected.gateway_id,
+              gateway_name: selected.gateway_name
+            }),
+            title: 'Show the password last issued to this gateway. Each showing is recorded in the Audit Trail.'
           },
           selected.access_url && {
             label: 'Launch UI', icon: <IconExternalLink size={13} />, href: selected.access_url, primary: primaryAction === 'launch',
@@ -1094,6 +1108,14 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           </div>
         )}
       />
+
+      {shownCredentialForGw && (
+        <ShowGatewayCredentialModal
+          gateway={shownCredentialForGw}
+          onClose={() => setShownCredentialForGw(null)}
+          showToast={showToast}
+        />
+      )}
 
       {credentialForGw && (
         <GatewayCredentialModal

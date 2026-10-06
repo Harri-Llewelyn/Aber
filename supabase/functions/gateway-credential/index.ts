@@ -208,6 +208,19 @@ Deno.serve(async (req) => {
     console.error(`gateway-credential: audit row not written: ${auditError.message}`);
   }
 
+  // 4. The copy an Administrator can show again (0164), kept only for a gateway whose credential a
+  // person types into Node-RED; the database answers which. Like the audit row, a failure is
+  // reported rather than fatal: the password is real either way.
+  let credentialKept = false;
+  const { data: kept, error: keepError } = await supabase
+    .rpc("keep_gateway_credential", { p_gateway_id: gatewayId, p_password: credential.password });
+
+  if (keepError) {
+    console.error(`gateway-credential: copy not kept: ${keepError.message}`);
+  } else {
+    credentialKept = kept === true;
+  }
+
   return json(200, {
     gateway_name: identity.gateway_name,
     sparkplug_id: identity.sparkplug_id,
@@ -218,6 +231,8 @@ Deno.serve(async (req) => {
     password: credential.password,
     applied_to_running_broker: credential.applied_to_running_broker ?? false,
     audit_recorded: auditRecorded,
+    // True when an Administrator can show this password again from the gateway's drawer.
+    credential_kept: credentialKept,
     // Whether the operator still has work to do. Three states the page must not merge: true,
     // delivered and the worker picks it up within its poll interval; false, this is a playback
     // target and delivery failed, so the password must be placed by hand; null, not a playback
