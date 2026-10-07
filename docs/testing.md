@@ -222,7 +222,9 @@ MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credent
 # which accounts the orphan sweep may disable — which is what keeps it from revoking
 # `aber_ingestion` and stopping the stack ingesting. Also node-red-init against a seeded volume:
 # one tls-config node shared by every broker, and a broker node with no credential pair stopping
-# the boot.
+# the boot. And the backup and restore scripts, with the PostgreSQL clients stubbed: a setting the
+# backup cannot use stops it before the first dump, a run leaves a manifest naming every file or
+# leaves nothing, and the restore replays each file that manifest names into its own database.
 npm run test:lib
 
 # THE MIGRATION MODEL'S CENTRAL INVARIANT — needs the stack up, and replays db-init a second

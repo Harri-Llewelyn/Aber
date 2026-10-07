@@ -40,7 +40,6 @@ BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
 #           restorable by the same runbook.
 BACKUP_FORMAT="${BACKUP_FORMAT:-plain}"
 
-SUPABASE_SERVICE="${SUPABASE_SERVICE:-supabase-db}"
 # supabase_admin, NOT postgres. `postgres` is not a superuser in the supabase/postgres image, and
 # the six event triggers (pgrst_ddl_watch, pgrst_drop_watch, issue_pg_cron_access, ...) are owned by
 # supabase_admin. A restore connected as postgres dies on the first of them with
@@ -52,7 +51,6 @@ SUPABASE_DB_HOST="${SUPABASE_DB_HOST:-localhost}"
 SUPABASE_DB_PORT="${SUPABASE_DB_PORT:-54322}"
 SUPABASE_DB_PASSWORD="${POSTGRES_PASSWORD:-postgres}"
 
-TIMESCALE_SERVICE="${TIMESCALE_SERVICE:-timescaledb}"
 # false where pgBackRest backs the historian up (timescaledb.physicalBackup): the manifest records
 # timescaledb=physical and restore-databases.sh leaves the historian to scripts/restore-historian.mjs.
 DUMP_TIMESCALE="${DUMP_TIMESCALE:-true}"
@@ -62,9 +60,8 @@ TIMESCALE_DB_HOST="${TIMESCALE_HOST:-localhost}"
 TIMESCALE_DB_PORT="${TIMESCALE_PORT:-5433}"
 TIMESCALE_DB_PASSWORD="${DB_PASSWORD:-postgres}"
 
-STORAGE_SERVICE="${STORAGE_SERVICE:-supabase-storage}"
-STORAGE_CONTAINER_PATH="${STORAGE_CONTAINER_PATH:-/var/lib/storage}"
-# Set to a host directory to tar it directly instead of reaching into the container.
+# The storage volume's directory on this host, which is tarred. The objects live on a volume, not
+# in a database, so while INCLUDE_STORAGE is true the run does not start without it.
 STORAGE_HOST_PATH="${STORAGE_HOST_PATH:-}"
 INCLUDE_STORAGE="${INCLUDE_STORAGE:-true}"
 
@@ -94,7 +91,42 @@ case "$BACKUP_FORMAT" in
   *) die "BACKUP_FORMAT must be 'plain' or 'custom', got '$BACKUP_FORMAT'" ;;
 esac
 
-mkdir -p "$BACKUP_DIR"
+# -------------------------------------------------------------------------------------------------
+# EVERY PRECONDITION IS CHECKED BEFORE THE FIRST DUMP. restore-databases.sh finds a backup through
+# its manifest, which is written last, so a run that stops part way leaves dumps no restore can
+# use. A run either writes a complete backup or stops having written nothing.
+# -------------------------------------------------------------------------------------------------
+for setting in INCLUDE_STORAGE DUMP_TIMESCALE; do
+  case "${!setting}" in
+    true|false) ;;
+    *) die "$setting must be 'true' or 'false', got '${!setting}'" ;;
+  esac
+done
+# Bounded, because `[ -gt ]` errors on a number past bash's integer range, and inside an `if` that
+# error reads as false.
+[[ "$MIN_DUMP_BYTES" =~ ^[0-9]{1,18}$ ]] \
+  || die "MIN_DUMP_BYTES must be a whole number of at most 18 digits, got '$MIN_DUMP_BYTES'"
+[[ "$BACKUP_RETENTION_DAYS" =~ ^-?[0-9]{1,5}$ ]] \
+  || die "BACKUP_RETENTION_DAYS must be a whole number of at most 5 digits (0 disables pruning), got '$BACKUP_RETENTION_DAYS'"
+
+if [ "$INCLUDE_STORAGE" = "true" ]; then
+  FIXES="Nothing was written. Name the storage volume's directory on this host, or leave the objects out:
+  STORAGE_HOST_PATH=<path> $0
+  INCLUDE_STORAGE=false $0"
+  [ -n "$STORAGE_HOST_PATH" ] \
+    || die "INCLUDE_STORAGE is true and STORAGE_HOST_PATH is empty, so the storage objects cannot be archived. $FIXES"
+  [ -d "$STORAGE_HOST_PATH" ] && [ -r "$STORAGE_HOST_PATH" ] \
+    || die "STORAGE_HOST_PATH '$STORAGE_HOST_PATH' is not a readable directory. $FIXES"
+fi
+
+TOOLS="pg_dump"
+if [ "$INCLUDE_STORAGE" = "true" ]; then TOOLS="$TOOLS tar gzip"; fi
+for tool in $TOOLS; do
+  command -v "$tool" >/dev/null 2>&1 || die "$tool is not on PATH. Nothing was written."
+done
+
+mkdir -p "$BACKUP_DIR" || die "cannot create BACKUP_DIR '$BACKUP_DIR'"
+[ -w "$BACKUP_DIR" ] || die "BACKUP_DIR '$BACKUP_DIR' is not writable. Nothing was written."
 
 # -------------------------------------------------------------------------------------------------
 # NO PIPE INTO gzip, DELIBERATELY. `pg_dump | gzip` reports gzip's exit status, so a pg_dump that
@@ -102,7 +134,7 @@ mkdir -p "$BACKUP_DIR"
 # -Z does the compression, so the process that can fail is also the process whose status is read.
 # -------------------------------------------------------------------------------------------------
 dump_db() {
-  name="$1"; service="$2"; user="$3"; db="$4"; host="$5"; port="$6"; pw="$7"
+  name="$1"; user="$2"; db="$3"; host="$4"; port="$5"; pw="$6"
   out="$BACKUP_DIR/${name}-${STAMP}.${DUMP_EXT}"
 
   log "dumping $name -> $out"
@@ -117,23 +149,32 @@ dump_db() {
 dump_storage() {
   out="$BACKUP_DIR/storage-objects-${STAMP}.tar.gz"
   log "archiving the storage objects (every bucket) -> $out"
-  if [ -n "$STORAGE_HOST_PATH" ]; then
-    [ -d "$STORAGE_HOST_PATH" ] || die "STORAGE_HOST_PATH '$STORAGE_HOST_PATH' is not a directory"
-    tar -czf "$out" -C "$STORAGE_HOST_PATH" .
-  else
-    die "storage backup needs STORAGE_HOST_PATH (the objects live on a volume, not in a database)"
-  fi
+  tar -czf "$out" -C "$STORAGE_HOST_PATH" .
   log "  ok $(wc -c < "$out" | tr -d ' ') bytes"
 }
 
 # -------------------------------------------------------------------------------------------------
 log "backup $STAMP  (format=$BACKUP_FORMAT dir=$BACKUP_DIR)"
 
-dump_db "supabase-db" "$SUPABASE_SERVICE" "$SUPABASE_DB_USER" "$SUPABASE_DB_NAME" \
+# A run that fails from here on (a database unreachable, a short dump, an unreadable object, an
+# interrupt) removes what it wrote: a dump without its manifest is one no restore can find.
+discard_partial() {
+  status=$?
+  [ "$status" -ne 0 ] || return 0
+  rm -f "$BACKUP_DIR"/*-"$STAMP".*
+  printf 'Removed the files this run wrote: a backup without its manifest cannot be restored.\n' >&2
+}
+trap discard_partial EXIT
+# A signal ends the run through `exit`: after an untrapped one, bash runs the EXIT trap with $? 0.
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+dump_db "supabase-db" "$SUPABASE_DB_USER" "$SUPABASE_DB_NAME" \
         "$SUPABASE_DB_HOST" "$SUPABASE_DB_PORT" "$SUPABASE_DB_PASSWORD"
 
 if [ "$DUMP_TIMESCALE" = "true" ]; then
-  dump_db "timescaledb" "$TIMESCALE_SERVICE" "$TIMESCALE_DB_USER" "$TIMESCALE_DB_NAME" \
+  dump_db "timescaledb" "$TIMESCALE_DB_USER" "$TIMESCALE_DB_NAME" \
           "$TIMESCALE_DB_HOST" "$TIMESCALE_DB_PORT" "$TIMESCALE_DB_PASSWORD"
 else
   log "skipping the historian (DUMP_TIMESCALE=false): pgBackRest backs it up"
@@ -157,8 +198,10 @@ MANIFEST="$BACKUP_DIR/manifest-${STAMP}.txt"
   [ "$INCLUDE_STORAGE" = "true" ] && echo "storage=storage-objects-${STAMP}.tar.gz"
   echo "created_by=scripts/backup-databases.sh"
 } > "$MANIFEST"
+# The backup is complete once its manifest exists, so nothing after this may discard it.
+trap - EXIT
 
-if [ "$BACKUP_RETENTION_DAYS" -gt 0 ] 2>/dev/null; then
+if [ "$BACKUP_RETENTION_DAYS" -gt 0 ]; then
   log "pruning artefacts older than ${BACKUP_RETENTION_DAYS} days"
   find "$BACKUP_DIR" -maxdepth 1 -type f \
     \( -name '*.sql.gz' -o -name '*.dump' -o -name '*.tar.gz' -o -name 'manifest-*.txt' \) \

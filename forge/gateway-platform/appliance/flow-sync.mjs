@@ -284,7 +284,7 @@ async function reloadNodeRed() {
     throw new Error(
       `${SYNC_CREDENTIAL} does not exist, so there is no way to ask Node-RED to reload. This `
       + 'appliance was enrolled before flow sync existed; re-issue the credential with:  '
-      + 'docker compose run --rm bootstrap node /bundle/bootstrap.mjs --reset-admin-password',
+      + 'docker compose run --rm bootstrap /bundle/bootstrap.mjs --reset-admin-password',
     );
   }
 

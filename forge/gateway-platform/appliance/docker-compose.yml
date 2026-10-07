@@ -10,7 +10,7 @@
 #
 # `bootstrap` prints the Node-RED editor password once, to its own logs (`docker compose logs
 # bootstrap`). Lost, it is recoverable only by
-# `docker compose run --rm bootstrap node /bundle/bootstrap.mjs --reset-admin-password`.
+# `docker compose run --rm bootstrap /bundle/bootstrap.mjs --reset-admin-password`.
 # =============================================================================================
 
 services:

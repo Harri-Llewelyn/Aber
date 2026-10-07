@@ -35,7 +35,6 @@ export MSYS2_ARG_CONV_EXCL='*'
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 BACKUP_STAMP="${BACKUP_STAMP:-}"
 
-SUPABASE_SERVICE="${SUPABASE_SERVICE:-supabase-db}"
 # supabase_admin, NOT postgres -- see the note in backup-databases.sh. `postgres` is not a superuser
 # in the supabase/postgres image and cannot drop the supabase_admin-owned event triggers that a
 # --clean restore replaces.
@@ -45,15 +44,12 @@ SUPABASE_DB_HOST="${SUPABASE_DB_HOST:-localhost}"
 SUPABASE_DB_PORT="${SUPABASE_DB_PORT:-54322}"
 SUPABASE_DB_PASSWORD="${POSTGRES_PASSWORD:-postgres}"
 
-TIMESCALE_SERVICE="${TIMESCALE_SERVICE:-timescaledb}"
 TIMESCALE_DB_USER="${DB_USER:-postgres}"
 TIMESCALE_DB_NAME="${DB_NAME:-postgres}"
 TIMESCALE_DB_HOST="${TIMESCALE_HOST:-localhost}"
 TIMESCALE_DB_PORT="${TIMESCALE_PORT:-5433}"
 TIMESCALE_DB_PASSWORD="${DB_PASSWORD:-postgres}"
 
-STORAGE_SERVICE="${STORAGE_SERVICE:-supabase-storage}"
-STORAGE_CONTAINER_PATH="${STORAGE_CONTAINER_PATH:-/var/lib/storage}"
 RESTORE_STORAGE="${RESTORE_STORAGE:-true}"
 
 ASSUME_YES="${ASSUME_YES:-false}"
@@ -67,7 +63,6 @@ $(ls -1 "$BACKUP_DIR" 2>/dev/null | sed -n 's/^manifest-\(.*\)\.txt$/  \1/p' || 
 MANIFEST="$BACKUP_DIR/manifest-${BACKUP_STAMP}.txt"
 [ -f "$MANIFEST" ] || die "no manifest at $MANIFEST"
 
-# shellcheck disable=SC1090
 FORMAT=$(sed -n 's/^format=//p' "$MANIFEST")
 SUPABASE_FILE="$BACKUP_DIR/$(sed -n 's/^supabase_db=//p' "$MANIFEST")"
 TIMESCALE_NAME=$(sed -n 's/^timescaledb=//p' "$MANIFEST")
@@ -104,9 +99,11 @@ fi
 # left side of `||`, which the historian below needs -- so a bare `set -e` here would let a failed
 # psql fall through to `log "  ok"` and return 0.
 #
-# `a | b` reports b's status, so psql's ON_ERROR_STOP result is what gets captured.
+# `gunzip | psql` RUNS UNDER pipefail, in a subshell so it covers that pipeline alone. `a | b` on
+# its own reports b's status: psql's ON_ERROR_STOP result, and never gunzip's, so a truncated
+# .sql.gz would replay its valid prefix and report success.
 restore_db() {
-  name="$1"; service="$2"; user="$3"; db="$4"; host="$5"; port="$6"; pw="$7"; file="$8"
+  name="$1"; user="$2"; db="$3"; host="$4"; port="$5"; pw="$6"; file="$7"
   rc=0
 
   log "restoring $name from $(basename "$file")"
@@ -114,11 +111,18 @@ restore_db() {
     PGPASSWORD="$pw" pg_restore -h "$host" -p "$port" -U "$user" -d "$db" \
       --clean --if-exists "$file" || rc=$?
   else
-    gunzip -c "$file" | PGPASSWORD="$pw" psql -v ON_ERROR_STOP=1 \
-      -h "$host" -p "$port" -U "$user" -d "$db" || rc=$?
+    (
+      set -o pipefail
+      gunzip -c "$file" | PGPASSWORD="$pw" psql -v ON_ERROR_STOP=1 \
+        -h "$host" -p "$port" -U "$user" -d "$db"
+    ) || rc=$?
   fi
 
-  [ "$rc" -eq 0 ] || return "$rc"
+  if [ "$rc" -ne 0 ]; then
+    printf 'ERROR: restoring %s from %s failed (exit %s): the lines above say whether the dump could not be read or the replay stopped\n' \
+      "$name" "$file" "$rc" >&2
+    return "$rc"
+  fi
   log "  ok"
 }
 
@@ -256,7 +260,7 @@ END \$\$" >/dev/null
 log "  ok"
 
 # --- 1. Supabase first -----------------------------------------------------------------------
-restore_db "supabase-db" "$SUPABASE_SERVICE" "$SUPABASE_DB_USER" "$SUPABASE_DB_NAME" \
+restore_db "supabase-db" "$SUPABASE_DB_USER" "$SUPABASE_DB_NAME" \
            "$SUPABASE_DB_HOST" "$SUPABASE_DB_PORT" "$SUPABASE_DB_PASSWORD" "$SUPABASE_FILE"
 
 # PostgREST reloads its schema cache from the image's DDL event triggers, and a --clean replay
@@ -287,7 +291,7 @@ else
   ts_query "SELECT timescaledb_pre_restore()" >/dev/null
 
   restore_rc=0
-  restore_db "timescaledb" "$TIMESCALE_SERVICE" "$TIMESCALE_DB_USER" "$TIMESCALE_DB_NAME" \
+  restore_db "timescaledb" "$TIMESCALE_DB_USER" "$TIMESCALE_DB_NAME" \
              "$TIMESCALE_DB_HOST" "$TIMESCALE_DB_PORT" "$TIMESCALE_DB_PASSWORD" "$TIMESCALE_FILE" \
              || restore_rc=$?
 
