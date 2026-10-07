@@ -89,14 +89,14 @@ class ShownAgain(unittest.TestCase):
 
     def keep(self, user_id, gid, password):
         self.as_user(user_id)
-        self.cur.execute(f"SELECT {KEEP.split('(')[0]}(%s, %s);", (gid, password))
+        self.cur.execute("SELECT public.keep_gateway_credential(%s, %s);", (gid, password))
         kept = self.cur.fetchone()[0]
         self.as_owner()
         return kept
 
     def show(self, user_id, gid):
         self.as_user(user_id)
-        self.cur.execute(f"SELECT * FROM {SHOW.split('(')[0]}(%s);", (gid,))
+        self.cur.execute("SELECT * FROM public.show_gateway_credential(%s);", (gid,))
         row = self.cur.fetchone()
         self.as_owner()
         return row
