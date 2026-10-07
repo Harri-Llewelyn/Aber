@@ -94,8 +94,9 @@ in [`supabase/README.md`](../supabase/README.md#changing-it-deliberately), not a
 
 ### The database upgrades itself
 
-`supabase-db-init` applies **every** file in `supabase/migrations/*.sql`, in filename order, every
-time it runs. There is no record of which migrations have run, and no separate upgrade step:
+The db-init Job (`aber-db-init`) applies **every** file in `supabase/migrations/*.sql`, in
+filename order, every time it runs. There is no record of which migrations have run, and no
+separate upgrade step:
 
 ```sh
 for f in /migrations/*.sql; do psql -v ON_ERROR_STOP=1 ... -f "$f"; done
@@ -259,8 +260,8 @@ explains.
 From a machine with a shell, against any Postgres you can reach:
 
 ```bash
-bash scripts/backup-databases.sh          # both databases plus the storage objects
-bash scripts/restore-databases.sh         # the other half
+STORAGE_HOST_PATH=<dir> bash scripts/backup-databases.sh   # both databases plus the storage objects in <dir>
+bash scripts/restore-databases.sh                          # the other half
 ```
 
 **Restoring is a runbook, not a button**: [`supabase/README.md`](../supabase/README.md),
