@@ -1758,9 +1758,12 @@ would expect.
 **From the host, through the dev loop's port-forwards:**
 
 ```bash
-npm run proto             # once per clone: validate.py imports the generated sparkplug_b_pb2
 npm run dev:test          # validate.py, then the stack lane
 ```
+
+`validate.py` imports the generated Sparkplug binding, `ingestion/sparkplug_b_pb2.py`, which is not
+committed. `dev:test` generates it when a clone has none; a run outside `dev:test` needs
+`npm run proto` once per clone.
 
 > **`validate.py` needs `SUPABASE_SECRET_KEY`**, which `dev:test` reads out of the release
 > Secret. Without it the script seeds nothing and fails most of its checks in a way that reads like a

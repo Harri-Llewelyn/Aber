@@ -787,8 +787,18 @@ async function waitForE2e () {
   }
 }
 
+// validate.py and most stack suites import the Sparkplug binding, which is generated and gitignored,
+// so a fresh clone or worktree has none until `npm run proto` writes it.
+function ensureSparkplugBinding () {
+  if (existsSync(path.join(REPO, 'ingestion', 'sparkplug_b_pb2.py'))) return
+  console.log('  ingestion/sparkplug_b_pb2.py is absent; generating it as `npm run proto` does')
+  must(process.execPath, ['scripts/generate-proto.mjs'],
+    'could not generate ingestion/sparkplug_b_pb2.py, which validate.py and the stack suites import')
+}
+
 async function test () {
   preflight(['kubectl', 'helm'])
+  ensureSparkplugBinding()
   const tls = tlsEnabled()
   // The preflight before the forwards, so a machine that cannot run the lane says so without first
   // opening seventeen tunnels `die` would leave behind.
