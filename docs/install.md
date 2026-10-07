@@ -284,11 +284,17 @@ password for each is `aber123`.
 | `operator@aber.local` | `Operator` | Read-only + telemetry |
 | `auditor@aber.local` | `Auditor` | Audit Trail read-only |
 
-**Adding people** happens outside the dashboard for now
-([#705](https://github.com/Harri-Llewelyn/Aber/issues/705)). Sign-up is closed
-(`supabaseAuth.disableSignup`), so create the account with GoTrue's admin API or in Studio, and give
-it a role with a row in `public.user_roles`. If you open sign-up instead, each new account starts as
-a read-only `Operator` (the `handle_new_user` trigger), and an `Administrator` has to promote it.
+**Adding people** is done in the dashboard, by an `Administrator`: open **Access Control**, then
+**People**, then **Add Person**. Give the person's email address and a role.
+
+- With an email relay (`supabaseAuth.smtp` and `secrets.smtpPassword`), the person is sent an
+  invitation. They choose their own password from its link.
+- Without one, the dashboard shows a password once. Give it to the person yourself.
+
+The same tab changes a person's role, and removes or restores their access. Removing access blocks
+the person's sign-in and keeps their account, so the Audit Trail still names them. Sign-up stays
+closed (`supabaseAuth.disableSignup`). If you open it instead, a new account has no role until an
+`Administrator` gives it one on the **People** tab.
 
 **Forgotten passwords** are reset from the sign-in page (*Forgot your password?*), which emails a link
 to `/reset-password`. That needs an email relay: set `supabaseAuth.smtp` and `secrets.smtpPassword`.

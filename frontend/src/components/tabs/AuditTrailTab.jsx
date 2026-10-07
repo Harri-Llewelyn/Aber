@@ -735,6 +735,7 @@ function EventDiff({ event, diff }) {
   // for a prior state that does not exist.
   const oneSided = action === 'INSERT' || action === 'DELETE' || action === 'SCHEMA_REJECTION'
     || action === 'TOKEN_MINTED' || action === 'BACKUP_REQUESTED' || action === 'BACKUP_TAKEN'
+    || action === 'PERSON_ADDED'
 
   return (
     <div className="trail-diff">
@@ -747,6 +748,7 @@ function EventDiff({ event, diff }) {
               : action === 'BACKUP_TAKEN' ? 'Backup written'
               : action === 'BACKUP_PRUNED' ? 'Backup removed'
               : action === 'TOKEN_MINTED' ? 'Token issued'
+              : action === 'PERSON_ADDED' ? 'Person added'
                 // Two-sided, unlike TOKEN_MINTED: a revocation carries the original mint in
                 // `old_data` so the row stays readable after the denylist entry is pruned.
                 : action === 'TOKEN_REVOKED' ? 'Token withdrawn'
@@ -773,6 +775,7 @@ function EventDiff({ event, diff }) {
                     : action === 'BACKUP_TAKEN' ? 'Written'
                     : action === 'BACKUP_PRUNED' ? 'Removed'
                     : action === 'TOKEN_MINTED' ? 'Issued'
+                    : action === 'PERSON_ADDED' ? 'Added'
                       : action === 'TOKEN_REVOKED' ? 'Revoked'
                         : 'New'}</th>
             </tr>
