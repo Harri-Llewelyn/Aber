@@ -4359,7 +4359,7 @@ released version's playbook is immutable. It is a warning and not an error becau
 and no retry clears it: the sweep did what it was asked and declined only the one thing a released
 tag forbids, so `errors` stays what an operator watches for a forge that could not be reached or a
 key that could not be re-registered. Bump the version, or on a development forge delete the
-tag (`DELETE /repos/platform/gateway-platform/tags/v<appVersion>`, `v1.0.0` today, as the machine
+tag (`DELETE /repos/platform/gateway-platform/tags/v<appVersion>` as the machine
 account) and let the next sweep recreate it.
 
 **What enrolment adds.** Before `main` is protected it seeds `platform.yml` beside the incident
