@@ -14,11 +14,12 @@ This page lists every service Aber runs, what each one is for, and how to reach 
 - **Liveness** says whether the service is answering now: **ACTIVE**, **DOWN** or **not observed**. The page reads again every 3 seconds, so it changes without a reload.
 - **ACTIVE** and **DOWN** are observations, written every minute from the metrics store. ACTIVE means the metrics store checked the service and it answered; its tooltip gives the time. DOWN means it was checked and did not answer.
 - **not observed**, in dim text rather than a badge, means nothing in Aber watches that service. That is not the same as healthy.
-- **Reach** says **what can get to that service**, not only where it is. It is easy to miss. A database that answers only on its own machine (the loopback interface) has the same URL as one published to the network. They are not equally exposed, and this column says so rather than leaving you to assume.
-- Reach **network**: published on every interface.
+- **Reach** says **what can get to that service**, not only where it is. It is easy to miss. A service reachable only inside the cluster can look like one published to the network. They are not equally exposed, and this column says so rather than leaving you to assume.
+- Reach **network**: published outside the cluster, through the Ingress or a LoadBalancer port.
 - Reach **host only**: bound to 127.0.0.1, so reachable from the deployment host or through an SSH tunnel.
-- Reach **internal**: no host port, so reachable only from inside the container network.
+- Reach **internal**: not published outside the cluster. You reach it from inside the cluster, or through `kubectl port-forward`.
 - Reach **not recorded**: nothing says where it can be reached from.
+- Reach is recorded from the deployment at each install and upgrade. If an administrator turns a route on or off, the change shows here after the upgrade.
 - The **Endpoint URL** follows from Reach. It is a link where your browser can open it. Where it cannot, it is a copy button, and its tooltip says why.
 
 ## What the states mean
