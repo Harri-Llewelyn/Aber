@@ -391,6 +391,9 @@ python supabase/migrations/test_credential_recorder.py
 # Showing a Host gateway's credential again (0164): who may keep and see the copy, the audit row
 # without the password, and the copy going with the broker account. Every test rolls back.
 python supabase/migrations/test_gateway_credential_shown_again.py
+# "Not found" answers 404 (0165): raise_not_found() raises the body and status PostgREST reads,
+# and no API role may call it. The functions that call it are asserted in their own suites.
+python supabase/migrations/test_not_found_is_a_404.py
 # Revocation reaching a host-run gateway (0063), and still passing over one that holds nothing.
 # Rolls back for a second reason: net.http_post queues inside the transaction, so the revocation
 # requests these tests provoke are un-queued rather than sent.
@@ -806,14 +809,14 @@ never on a branch:
 
 | Job | Covers |
 | :--- | :--- |
-| **prepare-release** | Derives the version from the tag, refuses a non-SemVer one, re-runs the static checks a published artefact must not violate |
-| **build-images** | The eight independent images, in parallel, each built to an OCI archive and **scanned** before it is pushed to GHCR with an SPDX SBOM and SLSA provenance in its index, then signed keyless with cosign and verified back |
+| **prepare-release** | Derives the version from the tag, refuses a non-SemVer one or one `Chart.yaml` does not name, re-runs the static checks a published artefact must not violate |
+| **build-images** | The nine independent images, in parallel, each built to an OCI archive and **scanned** before it is pushed to GHCR with an SPDX SBOM and SLSA provenance in its index, then signed keyless with cosign and verified back |
 | **build-ingestion-chain** | `ingestion`, then `test-runner` `FROM` it, as one `docker buildx bake` of `docker-bake.hcl`; built to OCI archives first so the attestations are asserted and both images **scanned** before (and without) a push, then pushed, signed and verified |
 | **publish-chart** | Lint, render, package at the tag's version, push over OCI, pull it back, sign the pushed digest and verify it |
 | **attach-sboms** | Reads every image's SBOM and provenance back out of the registry and attaches them to the GitHub Release, opening it as a draft from the template if nothing has |
 
-The tag is the single place the version is written — it stamps the ten image tags, the chart
-`version` and `appVersion` in one run. **Images publish before the chart**, because a chart naming
+The tag stamps the eleven image tags, the chart `version` and `appVersion` in one run, and the
+commit it points at already names that version in `Chart.yaml`. **Images publish before the chart**, because a chart naming
 images that do not exist yet does not fail: `helm install` succeeds and the workloads sit in
 `ImagePullBackOff` while everything else comes up healthy. **Nothing publishes unsigned or
 unattested**: [`sign-and-verify.sh`](../.github/scripts/sign-and-verify.sh) runs the consumer's

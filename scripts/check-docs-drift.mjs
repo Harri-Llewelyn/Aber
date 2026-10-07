@@ -815,6 +815,15 @@ function edgeFunctionNames() {
     // a migration added after the fold redeclares something the baseline holds, and each one
     // records WHY that replacement is meant. The docs/architecture.md note "The archive has no 0017" is the
     // case where an unrecorded one would have regressed audit attribution.
+    'public.approve_proposal': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
+    'public.approve_quarantined_device': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
+    'public.discard_schema_draft': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
+    'public.ensure_shadow_devices': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
+    'public.fork_schema': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
+    'public.publish_schema_version': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
+    'public.reject_proposal': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
+    'public.relocate_devices': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
+    'public.withdraw_proposal': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
@@ -2311,9 +2320,10 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 12. Nothing seeds an asset. A migration that inserts a cell, a gateway or a device puts it on
-// every install on the next boot. The Playback gateway is the one exemption: a recorded capture
-// has nowhere else to publish from, it is `is_shadow`, and it cannot be archived away.
+// 12. Nothing seeds an asset or a metric. A migration that inserts a cell, a gateway, a device or a
+// catalog metric puts it on every install on the next boot. The Playback gateway is the one
+// exemption: a recorded capture has nowhere else to publish from, it is `is_shadow`, and it cannot
+// be archived away. Example metrics are supabase/example-metrics.sql, applied only on request.
 // -------------------------------------------------------------------------------------------------
 {
   // The exemption is the gateway's id, not the file it lives in: exempting 0002 by name would
@@ -2326,7 +2336,7 @@ function edgeFunctionNames() {
     // TOP-LEVEL INSERTs ONLY, anchored to the start of a line. A function body that inserts on
     // demand is not a seed -- `relocate_devices()` and the enrolment path both insert, and what
     // they insert is what a user asked for. Those sit indented inside their definitions.
-    for (const m of text.matchAll(/^INSERT INTO (?:public[.])?(cells|gateways|devices)(?![A-Za-z_])/gm)) {
+    for (const m of text.matchAll(/^INSERT INTO (?:public[.])?(cells|gateways|devices|metric_catalog)(?![A-Za-z_])/gm)) {
       // The statement, not the file: an INSERT runs to its terminating semicolon, and the
       // exemption applies only if THIS one names the Playback gateway.
       const stmt = text.slice(m.index, text.indexOf(';', m.index) + 1);
@@ -2338,14 +2348,15 @@ function edgeFunctionNames() {
   if (offenders.length) {
     fail(
       [
-        'a migration seeds shopfloor assets:',
+        'a migration seeds shopfloor assets or catalog metrics:',
         ...offenders.map((o) => `        ${o}`),
-        '      A fresh install has no cells, no gateways and no devices. A seeded row comes back',
-        '      on EVERY boot, on every install, which is what the demonstration floor was retired for.',
+        '      A fresh install has no cells, no gateways, no devices and no metrics. A seeded row comes',
+        '      back on EVERY boot, on every install, which is what the demonstration floor was retired',
+        '      for. Example metrics belong in supabase/example-metrics.sql (dbInit.exampleMetrics).',
       ].join(String.fromCharCode(10))
     );
   } else {
-    pass('no migration seeds a cell, a gateway or a device (the Playback gateway aside)');
+    pass('no migration seeds a cell, a gateway, a device or a metric (the Playback gateway aside)');
   }
 }
 
@@ -2373,9 +2384,9 @@ function edgeFunctionNames() {
   if (named.size === 0) {
     pass('the provisioned alert rules query no metric by name, so there is no catalog agreement to check');
   } else {
-    // The catalog is seeded across 0002 (the generated vocabularies), 0018 and 0019, so the whole
-    // migration directory is the corpus rather than any one file.
-    let catalog = '';
+    // No migration registers a metric (check 12), so the corpus is the example set, the names a
+    // stack registers when asked to, with the migrations kept in case that ever changes.
+    let catalog = read('supabase/example-metrics.sql');
     for (const f of readdirSync(join(REPO, 'supabase/migrations'))) {
       if (f.endsWith('.sql')) catalog += read(`supabase/migrations/${f}`);
     }
@@ -2386,7 +2397,7 @@ function edgeFunctionNames() {
       [...catalog.matchAll(/INSERT INTO public\.metric_catalog VALUES \('[^']*',\s*'([^']+)'/g)]
         .map((m) => m[1])
     );
-    // 0018/0019 use named-column inserts, so pick those up too.
+    // The named-column form, which the example set uses.
     for (const m of catalog.matchAll(/metric_catalog[\s\S]{0,400}?VALUES\s*\(\s*'([^']+)'/g)) {
       registered.add(m[1]);
     }
@@ -3531,6 +3542,58 @@ function edgeFunctionNames() {
     if (!missing.length && !stale.length) {
       pass(`npm run setup writes ${declared.length - Object.keys(OPTIONAL).length} of values.yaml's ${declared.length} secrets; the other ${Object.keys(OPTIONAL).length} may stay empty`);
     }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 40. Every clone, install, image and signing identity the docs give names Chart.yaml's version.
+//
+// The commit a release tag points at carries its version (release.yml refuses one that does not),
+// so a checkout of the tag must name that release wherever a reader copies from. A bump that misses
+// one leaves the tag sending its reader to the release before. An example of the NEXT release
+// (`git tag v1.0.3`) has none of these shapes. Records of the past are skipped, as in check 2d.
+// -------------------------------------------------------------------------------------------------
+{
+  const { CHART_REF, readChartVersion } = await import('./lib/release-chart.mjs');
+  const version = readChartVersion(REPO);
+  const RECORD = /^(?:docs\/incidents\.md$|supabase\/migrations\/archive\/|frontend\/dist\/|deploy\/helm\/aber\/files\/)/;
+  const ref = CHART_REF.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&');
+  const SHAPES = [
+    ['clones the tag', /git clone --branch v(\d+\.\d+\.\d+[^\s]*)/g],
+    ['installs the chart', new RegExp(`${ref}\\b[^\\n]*?--version "?(\\d+\\.\\d+\\.\\d+[^\\s"]*)`, 'g')],
+    ['names an image', /ghcr\.io\/harri-llewelyn\/aber\/[a-z0-9-]+:(\d+\.\d+\.\d+[^\s'"`]*)/g],
+    ['verifies a signature from the tag', /release\.yml@refs\/tags\/v(\d+\.\d+\.\d+[^\s'"`]*)/g],
+  ];
+  const files = [
+    ...MARKDOWN.filter((f) => !RECORD.test(f) && !gitignored(f)),
+    'test-harness/Dockerfile',
+  ];
+  let seen = 0;
+  let wrong = 0;
+  for (const file of files) {
+    // `\` continuations joined, so an install split over lines is one command.
+    const text = read(file).replace(/\\\r?\n\s*/g, ' ');
+    for (const [what, shape] of SHAPES) {
+      for (const m of text.matchAll(shape)) {
+        seen++;
+        if (m[1] !== version) {
+          wrong++;
+          fail(`${file} ${what} at ${m[1]}, and Chart.yaml's version is ${version}. Change ${file}: the commit a ` +
+            'release tag points at names that release everywhere (deploy/k8s/README.md, Publishing a release).');
+        }
+      }
+    }
+  }
+  const example = read('forge/gateway-platform/platform.yml.example');
+  const tag = /^\s*tag: v(\S+)/m.exec(example)?.[1];
+  if (tag !== version) {
+    wrong++;
+    fail(`forge/gateway-platform/platform.yml.example's tag is v${tag}, and Chart.yaml's version is ${version}: set it ` +
+      'to the release, then run node scripts/sync-gateway-platform.mjs');
+  }
+  if (!seen) fail('check 40 found no clone, install, image or signing identity in the docs, so it compares nothing');
+  else if (!wrong) {
+    pass(`all ${seen} clone(s), install(s), image(s) and signing identities in the docs name the chart's version ${version}`);
   }
 }
 

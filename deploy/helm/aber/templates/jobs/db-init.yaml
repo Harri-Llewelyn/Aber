@@ -13,9 +13,10 @@ forced the chain to be gzipped, and Helm's release Secret has the SAME ceiling w
 bytes twice -- as chart files and again base64-encoded into the rendered ConfigMap, neither copy
 compressible. No size of file satisfies both as the chain grows.
 
-THE SEED STAYS A ConfigMap: one small file, and the one an operator might legitimately replace at
-install time, since demo accounts are a deployment choice and the schema is not. seed.sql is the
-demo personas, so it is in the ConfigMap only with supabaseAuth.demoAccounts on.
+THE SEED STAYS A ConfigMap: small files, and ones an operator might legitimately replace at
+install time, since demo content is a deployment choice and the schema is not. Each file is in the
+ConfigMap only with its own value on: seed.sql (the demo personas) with supabaseAuth.demoAccounts,
+example-metrics.sql (the example catalog) with dbInit.exampleMetrics.
 */}}
 apiVersion: v1
 kind: ConfigMap
@@ -28,8 +29,9 @@ metadata:
     "helm.sh/hook-weight": "-5"
     "helm.sh/hook-delete-policy": before-hook-creation
 {{- $seed := dict }}
+{{- $optIn := dict "seed.sql" .Values.supabaseAuth.demoAccounts "example-metrics.sql" .Values.dbInit.exampleMetrics }}
 {{- range $path, $bytes := .Files.Glob "files/seed/*.sql" }}
-{{- if or (ne (base $path) "seed.sql") $.Values.supabaseAuth.demoAccounts }}
+{{- if or (not (hasKey $optIn (base $path))) (get $optIn (base $path)) }}
 {{- $_ := set $seed (base $path) ($.Files.Get $path) }}
 {{- end }}
 {{- end }}
@@ -356,6 +358,12 @@ spec:
                 $PSQL -f /seed/seed.sql
               fi
 
+              # After seed.sql, for the same reason. Present only with dbInit.exampleMetrics on.
+              if [ -f /seed/example-metrics.sql ]; then
+                echo 'Executing example-metrics.sql (dbInit.exampleMetrics)...'
+                $PSQL -f /seed/example-metrics.sql
+              fi
+
               # The site's first administrator, created once by 0163 and never changed after. The
               # password reaches psql through \getenv, not argv; exported empty when the Secret has
               # no key, so 0163 names the missing value rather than psql failing on the syntax.
@@ -369,9 +377,9 @@ spec:
               fi
 
               # THE END OF THE CHAIN, RECORDED. A non-null completed_at means every migration
-              # AND seed.sql succeeded on this boot -- which is what the e2e-validate Job waits for
-              # instead of waiting for 0001's `public.devices` to appear. Deliberately NOT tolerant
-              # of an error: 0072 has certainly run by now, so a failure here is a real one.
+              # AND every seed file succeeded on this boot -- which is what the e2e-validate Job
+              # waits for instead of waiting for 0001's `public.devices` to appear. Deliberately NOT
+              # tolerant of an error: 0072 has certainly run by now, so a failure here is a real one.
               echo 'Marking the schema bootstrap complete...'
               $PSQL -c "INSERT INTO public.schema_bootstrap (id, completed_at) VALUES (true, now()) ON CONFLICT (id) DO UPDATE SET completed_at = excluded.completed_at"
 

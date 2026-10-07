@@ -12,6 +12,7 @@ that archiving or deleting the gateway removes it -- the moment its broker accou
 EVERY TEST ROLLS BACK. The suite writes Audit Trail rows and Vault secrets on purpose, and the audit
 table cannot be pruned, so nothing it does is committed.
 """
+import json
 import os
 import unittest
 import uuid
@@ -175,12 +176,21 @@ class ShownAgain(unittest.TestCase):
             self.assertEqual(self.copies(row[0]), 0)
 
     def test_no_copy_is_not_found_and_says_what_to_do(self):
+        # raise_not_found() (0165): SQLSTATE PGRST, with the body PostgREST answers 404 with.
         gid, _ = self.gateway()
         self.cur.execute("SAVEPOINT missing;")
-        with self.assertRaises(errors.NoDataFound) as raised:
+        with self.assertRaises(psycopg2.Error) as raised:
             self.show(ADMIN_ID, gid)
-        self.assertIn("issue a new one", str(raised.exception))
         self.cur.execute("ROLLBACK TO SAVEPOINT missing;")
+        self.assertEqual(raised.exception.pgcode, "PGRST", str(raised.exception))
+        body = json.loads(raised.exception.diag.message_primary)
+        self.assertEqual(body["code"], "P0002")
+        self.assertEqual(
+            body["message"],
+            f"no copy of gateway Test_Shown_{gid[:8]}'s credential is kept; "
+            "issue a new one to be able to show it again",
+        )
+        self.assertEqual(json.loads(raised.exception.diag.message_detail), {"status": 404, "headers": {}})
 
     # -- the copy goes with the broker account ----------------------------------------------------
 
