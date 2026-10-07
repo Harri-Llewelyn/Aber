@@ -589,9 +589,9 @@ export const SUITES = {
   'supabase/migrations/test_metric_catalog_seed.py': {
     lanes: ['db'],
     why:
-      "The vocabulary seed's PROVENANCE. A metric seeded with a missing or wrong semantic id " +
-      'breaks nothing at runtime -- it asserts an interoperability claim that is simply untrue, ' +
-      'which no other check would notice.',
+      "The example metrics' PROVENANCE, and that db-init replaying them changes nothing. A metric " +
+      'registered with a missing or wrong semantic id breaks nothing at runtime -- it asserts an ' +
+      'interoperability claim that is simply untrue, which no other check would notice.',
   },
   'supabase/migrations/test_anon_privilege_baseline.py': {
     lanes: ['db'],

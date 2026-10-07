@@ -40,7 +40,8 @@ carries `> 0` on a value that cannot be zero.
 labels: the gateway, the edge node, the `reason`, the database `job`, the container. The
 `entity_type` label (`gateway` or `platform`; the webhook defaults to `device`) is what lets the
 dashboard tell an asset alert from a fleet one. A rule about a machine goes in a group of its own
-and needs a metric that exists in `metric_catalog`, which `check-docs-drift.mjs` asserts.
+and names a metric the example set registers (`supabase/example-metrics.sql`), which
+`check-docs-drift.mjs` asserts.
 
 **Datasources.** The `supabase` datasource connects as `grafana_reader`, which may `SELECT` the
 views the rules name (`platform_health`, `gateway_health`, `audit_trail_partition_health`,

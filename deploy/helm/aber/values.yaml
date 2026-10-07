@@ -764,6 +764,9 @@ dbInit:
     repository: ghcr.io/harri-llewelyn/aber/db-init
     tag: ""
     pullPolicy: IfNotPresent
+  # Registers the example metrics in supabase/example-metrics.sql on every boot. Off, the metric
+  # catalog starts empty; turning it off later removes nothing. values-dev.yaml turns it on.
+  exampleMetrics: false
 
 # ---------------------------------------------------------------------------------------------
 # Messaging

@@ -1232,8 +1232,9 @@ paths:
         Eight KPI definitions. Reference data on the same terms as the MTConnect vocabulary.
 
         **ISO 22400-2 calls the second OEE factor *Effectiveness*, not Performance.**
-        `OEE/PERFORMANCE` is deprecated and superseded by `OEE/EFFECTIVENESS`; both carry the
-        same `semantic_id`, which is why the index on it is deliberately not unique.
+        A metric for it is named after the KPI, as the example `OEE/EFFECTIVENESS` is. The index
+        on `metric_catalog.semantic_id` is deliberately not unique: a deprecated metric and its
+        replacement carry the same id.
 
         `kpi_id` is the ISO **symbol**, not a clause number — none are asserted, because the
         standard is paywalled and they could not be checked.
