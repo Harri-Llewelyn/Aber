@@ -614,6 +614,21 @@ function dbTlsEnvironment () {
   return { PGSSLMODE: 'verify-full', PGSSLROOTCERT: file }
 }
 
+// The ingestion container's literal env values, by name: {} when the Deployment cannot be read.
+// READ OFF THE RUNNING DAEMON, not out of a values file, because validate.py asserts against these
+// and a value other than the one the daemon was given would make a check agree with itself:
+//   PRIMARY_HOST_ID   check 15 expects the daemon's STATE on `spBv1.0/STATE/<this>`.
+//   SPARKPLUG_GROUP   the run publishes under it and seeds its gateway row with it; any other value
+//                     would exercise the deprecated single-argument resolution arm and still pass.
+//   the windows       check 10 waits out DEVICE_OFFLINE_TIMEOUT_SECONDS only when it is short
+//                     enough, and check 9 quotes REBIRTH_REQUEST_INTERVAL_SECONDS.
+function ingestionEnv () {
+  const r = kubectl('get', 'deploy/ingestion', '-o', 'json')
+  if (!r.ok) return {}
+  const container = JSON.parse(r.out).spec.template.spec.containers.find(k => k.name === 'ingestion')
+  return Object.fromEntries((container?.env || []).filter(e => 'value' in e).map(e => [e.name, e.value]))
+}
+
 function testEnvironment () {
   // Every credential from the cluster's own Secret, so a cluster installed with other values
   // fails rather than passes with the dev ones; the suites carry their own defaults for the
@@ -623,16 +638,7 @@ function testEnvironment () {
   const domain = releaseValues().global?.publicBaseDomain || 'localhost'
   const modelBase = kubectl('get', 'deploy/supabase-functions', '-o',
     'jsonpath={.spec.template.spec.containers[0].env[?(@.name=="AAS_MODEL_PUBLIC_BASE")].value}').out
-  // READ OFF THE RUNNING DAEMON, not out of a values file. validate.py's check 15 asserts that the
-  // primary host announced itself on `spBv1.0/STATE/<this>`, and asserting against anything other
-  // than the value the daemon was actually given would make the check agree with itself.
-  const primaryHostId = kubectl('get', 'deploy/ingestion', '-o',
-    'jsonpath={.spec.template.spec.containers[0].env[?(@.name=="PRIMARY_HOST_ID")].value}').out
-  // Off the running daemon for the same reason: validate.py publishes under this group and the
-  // gateway row it seeds carries it, so reading anything but what the daemon was given would let
-  // the run exercise the deprecated single-argument resolution arm and still pass.
-  const sparkplugGroup = kubectl('get', 'deploy/ingestion', '-o',
-    'jsonpath={.spec.template.spec.containers[0].env[?(@.name=="SPARKPLUG_GROUP")].value}').out
+  const daemon = ingestionEnv()
   return {
     ...process.env,
     ...secrets,
@@ -651,8 +657,13 @@ function testEnvironment () {
     NODERED_BASE_URL: process.env.NODERED_BASE_URL || `http://nodered.${domain}`,
     // What the exporter embeds, so the suite's loopback judgement is made on the real value.
     AAS_MODEL_PUBLIC_BASE: modelBase,
-    PRIMARY_HOST_ID: primaryHostId,
-    SPARKPLUG_GROUP: sparkplugGroup,
+    PRIMARY_HOST_ID: daemon.PRIMARY_HOST_ID ?? '',
+    SPARKPLUG_GROUP: daemon.SPARKPLUG_GROUP ?? '',
+    // A window the daemon was not given is left unset (spawn drops an undefined value), so
+    // validate.py falls back to its default, which is the daemon's own.
+    DEVICE_OFFLINE_TIMEOUT_SECONDS: daemon.DEVICE_OFFLINE_TIMEOUT_SECONDS,
+    DEVICE_WATCHDOG_INTERVAL_SECONDS: daemon.DEVICE_WATCHDOG_INTERVAL_SECONDS,
+    REBIRTH_REQUEST_INTERVAL_SECONDS: daemon.REBIRTH_REQUEST_INTERVAL_SECONDS,
     // The forge's door is an OAuth flow whose registered callback is the Ingress host.
     GITEA_TEST_URL: process.env.GITEA_TEST_URL || `http://git.${domain}`,
     // Where a suite that acts as an appliance clones and pushes from this host; the clone URL
@@ -776,8 +787,18 @@ async function waitForE2e () {
   }
 }
 
+// validate.py and most stack suites import the Sparkplug binding, which is generated and gitignored,
+// so a fresh clone or worktree has none until `npm run proto` writes it.
+function ensureSparkplugBinding () {
+  if (existsSync(path.join(REPO, 'ingestion', 'sparkplug_b_pb2.py'))) return
+  console.log('  ingestion/sparkplug_b_pb2.py is absent; generating it as `npm run proto` does')
+  must(process.execPath, ['scripts/generate-proto.mjs'],
+    'could not generate ingestion/sparkplug_b_pb2.py, which validate.py and the stack suites import')
+}
+
 async function test () {
   preflight(['kubectl', 'helm'])
+  ensureSparkplugBinding()
   const tls = tlsEnabled()
   // The preflight before the forwards, so a machine that cannot run the lane says so without first
   // opening seventeen tunnels `die` would leave behind.

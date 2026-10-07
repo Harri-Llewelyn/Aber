@@ -178,6 +178,10 @@ spec:
               value: {{ include "aber.supabase.internalUrl" . | quote }}
             {{- include "aber.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
             {{- include "aber.secretEnv" (dict "name" "SUPABASE_INGESTION_KEY" "secretName" $secretName "key" "SUPABASE_INGESTION_KEY") | nindent 12 }}
+            # The bucket the capture worker uploads recordings to: the one storage-init creates and
+            # the dashboard and the playback worker read.
+            - name: CAPTURE_BUCKET
+              value: {{ .Values.supabaseStorage.captureBucket | quote }}
             - name: PYTHONUNBUFFERED
               value: "1"
             # JSON log lines: `reason`, `device` and `edge_node` are top-level keys,
@@ -190,17 +194,8 @@ spec:
               value: {{ .Values.ingestion.healthFile | quote }}
             - name: INGESTION_HEALTH_INTERVAL
               value: {{ .Values.ingestion.healthIntervalSeconds | quote }}
-            {{/*
-              Device liveness and Sparkplug rebirth. validate.py's watchdog check reads these names
-              from its own environment to decide whether the window is short enough to wait for,
-              so the values it sees must be the ones the daemon runs with.
-            */}}
-            - name: DEVICE_OFFLINE_TIMEOUT_SECONDS
-              value: {{ .Values.ingestion.deviceOfflineTimeoutSeconds | quote }}
-            - name: DEVICE_WATCHDOG_INTERVAL_SECONDS
-              value: {{ .Values.ingestion.deviceWatchdogIntervalSeconds | quote }}
-            - name: REBIRTH_REQUEST_INTERVAL_SECONDS
-              value: {{ .Values.ingestion.rebirthRequestIntervalSeconds | quote }}
+            {{- /* Device liveness and Sparkplug rebirth; the e2e validator is given the same block. */}}
+            {{- include "aber.ingestionWindowsEnv" . | nindent 12 }}
             {{/*
               The Sparkplug primary host id. The render already failed above if it is empty, so
               this is never the daemon's own SystemExit in practice -- an operator meets the

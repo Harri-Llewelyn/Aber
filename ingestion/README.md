@@ -871,10 +871,9 @@ operation with more surface.
 | `CAPTURE_BUCKET` | `storage-init`, the dashboard, both workers | `broker-captures` |
 | `CAPTURE_FILE_SIZE_LIMIT` | `storage-init` | `104857600` (100 MiB) |
 
-The chart's setting is `supabaseStorage.captureBucket`, which reaches `storage-init`, the dashboard
-and the playback worker. The ingestion Deployment does not pass `CAPTURE_BUCKET`, so the capture
-worker writes to `broker-captures` whatever the setting says. Renaming the bucket also means
-changing `supabase/storage-policies.sql`. A bucket with no policies is invisible to every
+The chart's setting is `supabaseStorage.captureBucket`, which reaches `storage-init`, the dashboard,
+the capture worker in the ingestion Deployment and the playback worker. Renaming the bucket also
+means changing `supabase/storage-policies.sql`. A bucket with no policies is invisible to every
 browser-facing role and a policy naming a bucket that does not exist is dead text — neither errors.
 
 `record` defaults to the ingestion principal because recording is a read: its role grants it read
@@ -1427,8 +1426,9 @@ published default is a silent security downgrade, and the failure mode is silenc
 `REBIRTH_REQUEST_INTERVAL_SECONDS` are the chart's `ingestion.deviceOfflineTimeoutSeconds`,
 `ingestion.deviceWatchdogIntervalSeconds` and `ingestion.rebirthRequestIntervalSeconds`.
 `validate.py`'s watchdog check reads the same names from its own environment to decide whether the
-window is short enough to wait for. Neither `npm run dev:test` nor the e2e Job passes them, so it
-assumes 300 and 30 and skips checks 10 and 10b unless they are set by hand to match the daemon.
+window is short enough to wait for. Both paths that run it pass the daemon's values:
+`npm run dev:test` reads them off the running Deployment, and the chart gives the e2e Job the block
+it gives the daemon.
 
 ### Log fields
 
@@ -1762,15 +1762,19 @@ would expect.
 **From the host, through the dev loop's port-forwards:**
 
 ```bash
-npm run proto             # once per clone: validate.py imports the generated sparkplug_b_pb2
 npm run dev:test          # validate.py, then the stack lane
 ```
+
+`validate.py` imports the generated Sparkplug binding, `ingestion/sparkplug_b_pb2.py`, which is not
+committed. `dev:test` generates it when a clone has none; a run outside `dev:test` needs
+`npm run proto` once per clone.
 
 > **`validate.py` needs `SUPABASE_SECRET_KEY`**, which `dev:test` reads out of the release
 > Secret. Without it the script seeds nothing and fails most of its checks in a way that reads like a
 > schema fault, with the real cause in its banner: `Secret key   : MISSING`. `dev:test` also sets
-> the forwarded hosts and ports, the validator's broker account, and `PRIMARY_HOST_ID` and
-> `SPARKPLUG_GROUP` as the running daemon has them; a run by hand needs the same.
+> the forwarded hosts and ports, the validator's broker account, and `PRIMARY_HOST_ID`,
+> `SPARKPLUG_GROUP` and the three watchdog and rebirth windows as the running daemon has them; a
+> run by hand needs the same.
 
 **In-cluster, as a Job in the namespace.** On the dev loop:
 

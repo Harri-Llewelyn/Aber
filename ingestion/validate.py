@@ -3031,8 +3031,8 @@ def verify_results():
         print("⚠️  10. DEVICE WATCHDOG: skipped, disabled (DEVICE_OFFLINE_TIMEOUT_SECONDS=0).")
     elif WATCHDOG_TIMEOUT > WATCHDOG_MAX_WAIT_SECONDS:
         print(f"⚠️  10. DEVICE WATCHDOG: skipped. The configured window is {WATCHDOG_TIMEOUT}s and "
-              f"this check will only wait {WATCHDOG_MAX_WAIT_SECONDS}s. To exercise it, restart "
-              "the ingestion service with DEVICE_OFFLINE_TIMEOUT_SECONDS=45 and re-run. The sweep "
+              f"this check will only wait {WATCHDOG_MAX_WAIT_SECONDS}s. To exercise it, upgrade "
+              "the release with ingestion.deviceOfflineTimeoutSeconds=45 and re-run. The sweep "
               "logic itself is covered by ingestion/test_declared_metrics.py.")
     else:
         try:

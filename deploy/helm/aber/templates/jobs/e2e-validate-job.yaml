@@ -205,6 +205,8 @@ spec:
             # validate.py publishes under this group, and the gateway row it seeds carries it.
             - name: SPARKPLUG_GROUP
               value: {{ include "aber.sparkplugGroup" . | quote }}
+            {{- /* The daemon's watchdog and rebirth windows, from the helper its Deployment uses. */}}
+            {{- include "aber.ingestionWindowsEnv" . | nindent 12 }}
             # Check 12m holds i3X's serverVersion to it.
             - name: ABER_PLATFORM_VERSION
               value: {{ .Chart.AppVersion | quote }}

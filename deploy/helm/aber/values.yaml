@@ -97,8 +97,9 @@ secrets:
 
   # The secret half of coldArchive.s3.accessKeyId. A FOREIGN CREDENTIAL, like the SMTP password
   # above: the stack cannot mint, rotate or revoke a key at another provider, so it is given to
-  # the chart rather than issued by the database. Empty is valid -- remote archiving is then
-  # unconfigured and nothing is exported.
+  # the chart rather than issued by the database. A seed, like the rest of coldArchive.s3: db-init
+  # writes it only while the destination has none. Empty is valid -- an Administrator then sets
+  # the destination on the Cold Storage page, and until then nothing is exported.
   #
   # Scope it to PutObject and GetObject on site=<siteKey>/* with NO DeleteObject: the exporter
   # writes and never deletes, and a credential that cannot delete makes that an invariant the

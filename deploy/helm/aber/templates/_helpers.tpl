@@ -1165,6 +1165,20 @@ when read makes the settings look wrong and get rewritten on every boot, silentl
 {{- end -}}
 
 {{/*
+The ingestion daemon's device-liveness and rebirth windows, given to the daemon and to the e2e
+validator from one definition: validate.py's check 10 waits out the watchdog only when its window
+is short enough, and check 9 quotes the rebirth window, so both must see the daemon's values.
+*/}}
+{{- define "aber.ingestionWindowsEnv" -}}
+- name: DEVICE_OFFLINE_TIMEOUT_SECONDS
+  value: {{ .Values.ingestion.deviceOfflineTimeoutSeconds | quote }}
+- name: DEVICE_WATCHDOG_INTERVAL_SECONDS
+  value: {{ .Values.ingestion.deviceWatchdogIntervalSeconds | quote }}
+- name: REBIRTH_REQUEST_INTERVAL_SECONDS
+  value: {{ .Values.ingestion.rebirthRequestIntervalSeconds | quote }}
+{{- end -}}
+
+{{/*
 Kubernetes quantity parsers, which Helm lacks. The capacity guard compares strings from .Values
 ("100m", "256Mi") and the kubelet's status.allocatable ("16", "15890m", "...Ki"); integers,
 millicores and bytes, so the comparison never touches floating point.
