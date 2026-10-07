@@ -833,7 +833,7 @@ def seed_supabase():
     SEEDED["kpi_schema_uuid"] = k_res.data[0]["id"] if k_res.data else None
 
     if SEEDED.get("schema_uuid") and SEEDED.get("known_uuid"):
-        # devices.schema_id is written as the dashboard writes it; leaving it unset would mean the
+        # devices.schema_id is written as a 1.0 dashboard wrote it; leaving it unset would mean the
         # join table were the only thing under test.
         supabase_client.table("devices").update(
             {"schema_id": SEEDED["schema_uuid"]}

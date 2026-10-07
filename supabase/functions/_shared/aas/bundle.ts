@@ -204,8 +204,8 @@ export async function loadTelemetry(
 }
 
 /**
- * The device's own trail: every asset-lane row keyed by its id, which is the devices rows and the
- * nameplate rows (device_nameplate is keyed by device id). Oldest first, so the part reads as a
+ * The device's own trail: every asset-lane row keyed by its id: the devices, nameplate and schema
+ * attachment rows (the last two keyed by device id). Oldest first, so the part reads as a
  * history. Pass the CALLER's client: RLS then decides what the part holds, and the lane filter
  * keeps a security-lane row out even for a role that may read that lane.
  */
