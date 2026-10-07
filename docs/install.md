@@ -291,8 +291,8 @@ would tell you if someone were intercepting your sign-in (runbook, *TLS → 3*).
 
 ### 9. Sign in
 
-Open `https://app.<domain>` and sign in with the email you gave `npm run setup` and the password it
-printed. That account is created once, as an `Administrator`. After that it belongs to the site:
+Open `https://app.<domain>` and sign in with the administrator's email and the password the
+installer or `npm run setup` printed. That account is created once, as an `Administrator`. After that it belongs to the site:
 no install or upgrade changes it.
 
 Next, build your first machine with the [tutorial](../tutorial/README.md), or
