@@ -82,8 +82,8 @@ A metric is one value a device sends, such as a temperature. The device in this 
 4. Set **Units** to **CELSIUS**. Leave **Sparkplug Datatype** on **Double**.
 5. Check that the dialog says devices will publish it as `Systems/TEMPERATURE`, then choose **Add**.
 
-Only an `Administrator` can add a metric. On a laptop the catalog already lists
-`Systems/TEMPERATURE` among its example metrics, so you can skip this step there.
+Only an `Administrator` can add a metric. On a development stack (`npm run dev:up`) the catalog
+already lists `Systems/TEMPERATURE` among its example metrics, so you can skip this step there.
 
 **A metric's name and datatype cannot be changed after you add it.** Check both before you choose
 **Add**: devices are set up against them.
