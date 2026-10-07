@@ -106,6 +106,7 @@ const secrets = {
   // One MQTT password per principal, independently generated: the broker's roles confine each
   // account to a different subtree. The usernames keep the chart's defaults.
   mqttIngestionPassword: hex(24),
+  mqttI3xPassword: hex(24),
   mqttValidatorPassword: hex(24),
   mqttMonitorPassword: hex(24),
   mqttDynsecAdminPassword: hex(24),
