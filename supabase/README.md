@@ -2386,7 +2386,7 @@ and deletes its own pod.
 
 "S3" names a protocol, not a vendor — AWS, Cloudflare R2, Backblaze B2, Wasabi and a MinIO in
 another building all serve it, and the code never knows which. Leave any of it unset and nothing is
-exported: the exporter names every missing variable and stops.
+exported: the exporter names every missing field and stops.
 
 **One requirement of the endpoint beyond the core API:** it must accept `x-amz-checksum-sha256` on
 `PutObject`, which is how the store is made to validate the payload rather than merely receive it.
