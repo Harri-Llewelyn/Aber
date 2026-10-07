@@ -395,20 +395,22 @@ export const SUITES = {
       'so it needs nothing -- and it is the only thing standing between a renamed Grafana field ' +
       'and a pill that silently stops appearing.',
   },
+  'supabase/functions/approve-quarantine/test_approve_quarantine.py': {
+    lanes: ['unit'],
+    why:
+      'The quarantine approval path and the role gate in front of it, read from index.ts and the ' +
+      'baseline migration on disk, so it needs no database.',
+  },
+  'supabase/functions/nodered-userinfo/test_nodered_userinfo.py': {
+    lanes: ['unit'],
+    why:
+      "Node-RED's authorization: an unmapped or revoked role must yield NO `permissions` key, " +
+      "because settings.js keys its refusal on the key's absence. Read from source.",
+  },
 
   // -----------------------------------------------------------------------------------------
   // db -- the migrated Supabase Postgres, no seed
   // -----------------------------------------------------------------------------------------
-  'supabase/functions/approve-quarantine/test_approve_quarantine.py': {
-    lanes: ['db'],
-    why: 'The quarantine approval path and the role gate in front of it.',
-  },
-  'supabase/functions/nodered-userinfo/test_nodered_userinfo.py': {
-    lanes: ['db'],
-    why:
-      "Node-RED's authorization: an unmapped or revoked role must yield NO `permissions` key, " +
-      "because settings.js keys its refusal on the key's absence.",
-  },
   'supabase/migrations/test_change_proposals.py': {
     lanes: ['db'],
     why:
@@ -700,12 +702,12 @@ export const SUITES = {
   // Two lanes: an offline layer that always runs, a live layer that needs the stack
   // -----------------------------------------------------------------------------------------
   'supabase/functions/aas-export/test_aas_export.py': {
-    lanes: ['db', 'stack'],
+    lanes: ['unit', 'stack'],
     why:
-      'In the no-stack job this covers the authorization ladder and the Sparkplug -> XSD mapper ' +
-      'parity guard, and its live export checks skip themselves. In e2e it composes a shell for ' +
-      'the subject it provisions and validates the emitted document against the vendored official ' +
-      'IDTA schema -- which is the half that caught three real metamodel violations that ' +
+      'In the no-stack job this covers the role gate as index.ts states it and the Sparkplug -> ' +
+      'XSD mapper parity guard, and its live export checks skip themselves. In e2e it composes a ' +
+      'shell for the subject it provisions and validates the emitted document against the vendored ' +
+      'official IDTA schema -- which is the half that caught three real metamodel violations that ' +
       'hand-written structural assertions had passed.',
   },
   'supabase/functions/aas-api/test_aas_api.py': {
