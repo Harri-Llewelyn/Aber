@@ -128,7 +128,7 @@ describe('the fields a proposal may not name', () => {
     // conceal that a gateway assignment exists at all.
     const withheld = nonProposableFields('device')
     expect(Object.keys(withheld).sort())
-      .toEqual(['active_gateway_id', 'conformance_policy', 'schema_id'])
+      .toEqual(['active_gateway_id', 'conformance_policy', 'schema_ids'])
     for (const sentence of Object.values(withheld)) {
       expect(sentence.length, sentence).toBeGreaterThan(20)
     }

@@ -221,49 +221,45 @@ describe('the device drawer resolves a schema by either route', () => {
     expect(within(panel()).queryByText(/Modbus TCP/i)).toBeNull()
   })
 
-  it('pre-selects the attached schema when the edit form opens', async () => {
+  /** The edit form's schema checkboxes, named by their schema. */
+  const openEditPicker = async () => {
+    await openRow('Sim_CNC_Mill_01')
+    fireEvent.click(within(panel()).getByRole('button', { name: /Edit Details/i }))
+    return within(await screen.findByRole('group', { name: /Schemas/i }))
+  }
+
+  it('ticks the attached schema when the edit form opens', async () => {
     // Copying schema_id straight into the form read "No schema assigned" for a device the rest of
     // the page showed as schema'd, and any other save confirmed it.
     renderDevices()
-    await openRow('Sim_CNC_Mill_01')
-
-    fireEvent.click(within(panel()).getByRole('button', { name: /Edit Details/i }))
-    await waitFor(() => expect(screen.getByText(/Schema \(optional\)/i)).toBeInTheDocument())
-
-    const select = screen.getByTitle(/Expected metric schema/i)
-    expect(select.value).toBe('sch-machining')
+    const picker = await openEditPicker()
+    expect(picker.getByRole('checkbox', { name: 'Machining_Cell_Schema' }).checked).toBe(true)
   })
 
-  it('does not overrule an explicit schema_id with a submodel', async () => {
-    // The conservative precedence: this control edits `devices.schema_id`, so a device that already
-    // carries a value there has answered the question. Seeding from the submodel would write a
-    // different schema on the next save.
+  it('ticks a schema from either path, the column as well as a submodel', async () => {
+    // A row read without the view still carries both: schemaIdsForDevice() unions them, as the
+    // device_schemas view does.
     const second = { ...SCHEMA, schema_uuid: 'sch-oee', schema_name: 'ISO22400_OEE_Schema' }
     api.get.mockImplementation(routeGet({
       schemas: [SCHEMA, second],
       devices: [{ ...device, schema_id: 'sch-oee', submodel_schema_ids: ['sch-machining'] }]
     }))
     renderDevices()
-    await openRow('Sim_CNC_Mill_01')
-    fireEvent.click(within(panel()).getByRole('button', { name: /Edit Details/i }))
-    await waitFor(() => expect(screen.getByText(/Schema \(optional\)/i)).toBeInTheDocument())
-
-    expect(screen.getByTitle(/Expected metric schema/i).value).toBe('sch-oee')
+    const picker = await openEditPicker()
+    expect(picker.getByRole('checkbox', { name: 'ISO22400_OEE_Schema' }).checked).toBe(true)
+    expect(picker.getByRole('checkbox', { name: 'Machining_Cell_Schema' }).checked).toBe(true)
   })
 
-  it('warns rather than silently dropping the rest when a device has several', async () => {
+  it('offers every attached schema in the picker, with no note about extra submodels', async () => {
     const second = { ...SCHEMA, schema_uuid: 'sch-oee', schema_name: 'ISO22400_OEE_Schema' }
     api.get.mockImplementation(routeGet({
       schemas: [SCHEMA, second],
       devices: [{ ...device, submodel_schema_ids: ['sch-machining', 'sch-oee'] }]
     }))
     renderDevices()
-    await openRow('Sim_CNC_Mill_01')
-    fireEvent.click(within(panel()).getByRole('button', { name: /Edit Details/i }))
-
-    // A single-select cannot represent two submodels. Saying so is the smallest honest version --
-    // pressing Save believing you had seen the whole picture is how the other one gets lost.
-    await waitFor(() => expect(screen.getByText(/2 schemas attached/i)).toBeInTheDocument())
+    const picker = await openEditPicker()
+    expect(picker.getAllByRole('checkbox').filter(cb => cb.checked)).toHaveLength(2)
+    expect(screen.queryByText(/schemas attached/i)).toBeNull()
   })
 })
 

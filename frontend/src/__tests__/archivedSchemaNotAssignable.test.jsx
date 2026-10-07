@@ -9,8 +9,8 @@ import { api } from '../api'
  * An archived schema must not be assignable from Edit Details: publishing v2 archives v1 and
  * repoints every device, and a device set to `enforce` judged against the superseded version has
  * readings dropped. Two assertions: archived versions are filtered out, and the version the device
- * is already on is kept so the select does not fall back to its first entry and reassign on the
- * next save. The database refuses the write as well.
+ * is already on is kept, ticked, so saving does not detach it. The database refuses the write as
+ * well.
  */
 
 vi.mock('../api', async () => {
@@ -75,15 +75,14 @@ const openEdit = () => {
 }
 
 /**
- * The schema picker, found by its "no schema" option rather than by position: the modal holds
- * several selects and the tab holds a schema filter that legitimately lists archived versions.
+ * The schema picker, found by its legend inside the modal: the tab also holds a schema filter that
+ * legitimately lists archived versions.
  */
-const schemaSelect = () =>
-  [...document.querySelectorAll('.modal select')].find(
-    el => within(el).queryByText('— No schema assigned —')
-  )
+const schemaPicker = () =>
+  within(document.querySelector('.modal')).getByRole('group', { name: /Schemas/ })
 
-const optionTexts = () => [...schemaSelect().options].map(o => o.textContent.trim())
+const optionTexts = () =>
+  within(schemaPicker()).getAllByRole('checkbox').map(cb => cb.closest('label').textContent.trim())
 
 beforeEach(() => vi.clearAllMocks())
 
@@ -122,7 +121,7 @@ describe('the Edit Details schema picker', () => {
   it('keeps a device that is already on an archived version showing it, labelled', async () => {
     await show([device({ schema_id: V1 })])
     openEdit()
-    expect(schemaSelect().value).toBe(V1)
+    expect(within(schemaPicker()).getByRole('checkbox', { name: 'Test_Schema · Archived' }).checked).toBe(true)
     expect(optionTexts()).toContain('Test_Schema · Archived')
   })
 
