@@ -4,9 +4,7 @@ import { useTheme } from '../hooks/useTheme'
 import { AuthShell } from '../components/auth/AuthShell'
 import { HoldToReveal } from '../components/common/HoldToReveal'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
-
-/** GoTrue's default minimum; a shorter value is refused server-side with a less helpful message. */
-const MIN_PASSWORD_LENGTH = 6
+import { MIN_PASSWORD_LENGTH } from '../utils/passwords'
 
 /**
  * Where a password-reset link lands. The link carries a recovery token that supabase-js exchanges

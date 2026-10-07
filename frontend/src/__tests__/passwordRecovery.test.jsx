@@ -81,14 +81,14 @@ describe('arriving from a password-reset link', () => {
   })
 
   it('shows the server refusal and clears both fields', async () => {
-    supabase.auth.updateUser.mockResolvedValue({ data: null, error: new Error('Password should be at least 6 characters') })
+    supabase.auth.updateUser.mockResolvedValue({ data: null, error: new Error('New password should be different from the old password.') })
     await arriveFromResetLink()
     const first = screen.getByLabelText('New password')
-    fireEvent.change(first, { target: { value: 'abcdef' } })
-    fireEvent.change(screen.getByLabelText('Confirm new password'), { target: { value: 'abcdef' } })
+    fireEvent.change(first, { target: { value: 'abcdefghijkl' } })
+    fireEvent.change(screen.getByLabelText('Confirm new password'), { target: { value: 'abcdefghijkl' } })
     fireEvent.click(screen.getByText('Set password and continue'))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('at least 6 characters')
+    expect(await screen.findByRole('alert')).toHaveTextContent('different from the old password')
     expect(first).toHaveValue('')
   })
 })
