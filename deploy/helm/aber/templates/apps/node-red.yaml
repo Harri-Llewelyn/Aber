@@ -136,11 +136,6 @@ spec:
             {{- include "aber.brokerClientEnv" . | nindent 12 }}
             - name: NODE_RED_FORCE_SEED
               value: {{ .Values.nodeRed.forceSeed | quote }}
-            {{- with .Values.nodeRed.gatewayCredentialsSecret }}
-            {{- /* Named in node-red-init's failure messages, so a missing pair says where it goes. */}}
-            - name: GATEWAY_CREDENTIALS_SECRET
-              value: {{ printf "%s/%s" $.Release.Namespace . | quote }}
-            {{- end }}
           {{- with .Values.nodeRed.gatewayCredentialsSecret }}
           envFrom:
             - secretRef:

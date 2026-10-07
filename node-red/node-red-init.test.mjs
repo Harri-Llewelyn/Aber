@@ -173,11 +173,10 @@ describe('the broker credential pair', () => {
   it('refuses a declared pair that is not set, naming the Secret it belongs in', () => {
     const result = boot(volume(JSON.stringify(flow())), {
       MQTT_GW_TWO_USER: '', MQTT_GW_TWO_PASSWORD: '',
-      GATEWAY_CREDENTIALS_SECRET: 'aber/node-red-gateway-credentials',
     });
     assert.notEqual(result.status, 0);
     const out = result.stderr + result.stdout;
     assert.match(out, /MQTT_GW_TWO_USER and\/or MQTT_GW_TWO_PASSWORD are not set/);
-    assert.match(out, /the Secret aber\/node-red-gateway-credentials/);
+    assert.match(out, /the Secret that nodeRed\.gatewayCredentialsSecret names/);
   });
 });
