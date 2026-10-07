@@ -3,15 +3,13 @@ name: aber
 description: Aber, the shopfloor data platform — Supabase BaaS, TimescaleDB historian, Sparkplug B ingestion, Node-RED edge automation and Grafana.
 type: application
 
-# The chart's own version. Bump on any template change.
-#
-# BOTH OF THESE ARE OVERWRITTEN AT RELEASE TIME by .github/workflows/release.yml, which derives
-# them from the `v*` tag being built -- the tag is the version, and a value committed here can
-# only disagree with it. What they are for is the untagged path: `helm install ./deploy/helm/
-# aber` straight from a checkout, and `helm lint`/`helm template` in CI, neither of which
-# has a tag to read. Keep them at the last released version so a working tree renders as the
-# release it descends from rather than as something newer that does not exist.
-version: 1.0.1
+# The release this tree is. The commit a `v*` tag points at sets both of these to the tag's
+# version, in the pull request that prepares the release, and release.yml refuses a tag they
+# disagree with. So a checkout of the tag renders, documents and (through `npm run setup`) prints
+# the install of the release it is. Between releases they stay at the last release, so a working
+# tree renders as the release it descends from rather than as one that does not exist yet.
+# release.yml also stamps both from the tag when it packages the chart.
+version: 1.0.2
 
 # The platform release this chart deploys, and -- because `image.tag` is empty for every image
 # this repository builds -- the tag those five images are pulled at. That coupling is the point:
@@ -22,7 +20,7 @@ version: 1.0.1
 #
 # Quoted because Helm requires a string here and an unquoted 0.1.0 is fine but 1.0 would become
 # a float.
-appVersion: "1.0.1"
+appVersion: "1.0.2"
 
 kubeVersion: ">=1.25.0-0"
 
