@@ -614,6 +614,12 @@ export const SUITES = {
       'Who may keep and show a Host gateway\'s credential, that each showing is recorded without ' +
       'the password, and that the copy goes when the broker account does.',
   },
+  'supabase/migrations/test_not_found_is_a_404.py': {
+    lanes: ['db'],
+    why:
+      'raise_not_found() (0165) raises the shape PostgREST answers 404 with, and no API role may ' +
+      'call it. A body PostgREST cannot parse would answer 500, the fault 0165 exists to remove.',
+  },
   'supabase/migrations/test_people_management.py': {
     lanes: ['db'],
     why:
