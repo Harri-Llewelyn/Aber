@@ -31,8 +31,8 @@ function json(body: unknown, status = 200): Response {
 }
 
 /**
- * The request path with the routing prefixes removed. The gateway routes `/v1/...` with
- * `strip_path: false` onto a service URL ending in `/fplus-directory`, so the runtime sees
+ * The request path with the routing prefixes removed. The gateway rewrites `/v1/...` to
+ * `/fplus-directory/v1/...` (Envoy's `prefix_rewrite`), so the runtime sees
  * `/fplus-directory/v1/device`; invoked through `/functions/v1/fplus-directory` the same handler
  * sees nothing after the function name.
  */
