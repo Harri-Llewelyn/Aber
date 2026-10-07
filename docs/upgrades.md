@@ -130,8 +130,9 @@ set. A change applies to chunks created afterwards: the chunk open at the time k
 ### Gateways are never reached into
 
 **Aber never pushes anything to a Remote gateway.** A gateway's Node-RED accepts no incoming
-connections: it connects out to the broker on 8883 and to the forge on 22, and nothing assumes traffic
-the other way. So an upgrade is something that happens to the server, not to the fleet.
+connections: it connects out to the broker on 8883 and to the forge's SSH, and nothing assumes traffic
+the other way. An upgrade never moves the forge's SSH port (`gitea.ssh.external.port`), so each
+gateway keeps the clone URL and host key it enrolled with. So an upgrade is something that happens to the server, not to the fleet.
 
 - **A gateway's flow changes only through a pull request** in its own repository in the forge.
   Nothing is deployed until someone approves and merges it. The gateway's `flow-sync` then fetches it,

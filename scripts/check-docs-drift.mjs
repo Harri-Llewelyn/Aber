@@ -3435,6 +3435,106 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 37. The install `npm run setup` ends with is docs/install.md step 7's.
+//
+// Someone who follows the screen rather than the page runs the printed line, so the two are one
+// instruction. setup.mjs prints installCommand() from scripts/lib/release-chart.mjs at Chart.yaml's
+// `version:`; the page writes the version out, so a release that bumps Chart.yaml fails here until
+// the page follows. Compared with `\` continuations joined and whitespace collapsed.
+// -------------------------------------------------------------------------------------------------
+{
+  const { installCommand, normaliseCommand, readChartVersion } = await import('./lib/release-chart.mjs');
+  const DOC = 'docs/install.md';
+  const STEP = /^###\s+7\.\s+Install Aber\s*$/m;
+  const doc = read(DOC);
+  const setup = read('scripts/setup.mjs');
+  const version = readChartVersion(REPO);
+  const printed = normaliseCommand(installCommand({ version, valuesFile: 'deploy/helm/aber/values-local.yaml' }).join('\n'));
+
+  const step = STEP.exec(doc);
+  const fence = step && /```bash\n([\s\S]*?)```/.exec(doc.slice(step.index));
+  const install = fence && /^helm install\b(?:.*\\\n)*.*$/m.exec(fence[1]);
+  const header = /^ \* {3}(helm install\b(?:.*\\\n \*)*.*)$/m.exec(setup);
+  if (!install) {
+    fail(`check 37 cannot find a \`helm install\` in the first bash block under "### 7. Install Aber" in ${DOC}`);
+  } else if (!/\binstallCommand\(/.test(setup) || !header) {
+    fail('scripts/setup.mjs no longer prints installCommand() or shows it in its header comment, so check 37 compares nothing');
+  } else {
+    const documented = normaliseCommand(install[0]);
+    const commented = normaliseCommand(header[1].replace(/\\\n \*/g, '\\\n'));
+    const docVersion = /--version\s+(\S+)/.exec(documented)?.[1];
+    if (documented !== printed) {
+      fail(
+        docVersion && docVersion !== version
+          ? `${DOC} step 7 installs --version ${docVersion}, and Chart.yaml's version is ${version}. ` +
+            `Change ${DOC}: Chart.yaml is the release this checkout descends from, and npm run setup prints its version.`
+          : `npm run setup prints a different install from ${DOC} step 7:\n` +
+            `        setup prints  ${printed}\n        ${DOC}   ${documented}\n` +
+            `        Change ${DOC} if the install itself changed; change installCommand() in ` +
+            'scripts/lib/release-chart.mjs if what setup prints is behind the page.'
+      );
+    } else if (commented !== printed.replace(`--version ${version}`, '--version <version>')) {
+      fail(
+        `scripts/setup.mjs's header comment gives a different install from the one it prints:\n` +
+          `        comment  ${commented}\n        prints   ${printed}\n` +
+          '        Change the comment (the version is written <version> there).'
+      );
+    } else {
+      pass(`npm run setup ends with ${DOC} step 7's install, at the chart's version ${version}`);
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 38. `npm run setup` generates every secret the chart needs.
+//
+// A `secrets.*` key setup leaves out installs as the chart's default, "". For a required one that
+// is a stack that fails after the install: an empty i3X broker password left mosquitto in
+// Init:Error on every site set up this way. Each key setup does not write is named here with why it
+// may stay empty, so a new key fails until someone decides.
+// -------------------------------------------------------------------------------------------------
+{
+  const OPTIONAL = {
+    existingSecret: 'names an external Secret, the alternative to these values',
+    grafanaAdminUser: 'a username, with a default',
+    mqttDynsecAdminUser: 'a username, with a default',
+    mqttI3xUser: 'a username, with a default',
+    mqttIngestionUser: 'a username, with a default',
+    mqttMonitorUser: 'a username, with a default',
+    mqttValidatorUser: 'a username, with a default',
+    mqttPlaybackCredentials: 'empty is valid: the worker refuses a job for a gateway it holds no credential for',
+    archiveS3SecretAccessKey: 'only for a cold archive in S3, which setup does not configure',
+    smtpPassword: 'only for supabaseAuth.smtp, which setup does not configure',
+  };
+  const values = read('deploy/helm/aber/values.yaml');
+  const block = /^secrets:\n([\s\S]*?)^\S/m.exec(values)?.[1] ?? '';
+  const declared = [...block.matchAll(/^ {2}([A-Za-z0-9]+):/gm)].map((m) => m[1]);
+
+  const setup = read('scripts/setup.mjs');
+  const minted = /^const secrets = \{\n([\s\S]*?)^\};/m.exec(setup)?.[1] ?? '';
+  const written = new Set([
+    ...[...minted.matchAll(/^ {2}([A-Za-z0-9]+)[:,]/gm)].map((m) => m[1]),
+    ...[...setup.matchAll(/\bsecrets\.([A-Za-z0-9]+)\s*=/g)].map((m) => m[1]),
+    ...[...(/deliberatelyEmpty = \[([^\]]*)\]/.exec(setup)?.[1] ?? '').matchAll(/'([A-Za-z0-9]+)'/g)].map((m) => m[1]),
+  ]);
+
+  if (!declared.length || !written.size) {
+    fail('check 38 found no secrets block in values.yaml or no `const secrets = {` in scripts/setup.mjs, so it compares nothing');
+  } else {
+    const missing = declared.filter((k) => !written.has(k) && !(k in OPTIONAL));
+    const stale = Object.keys(OPTIONAL).filter((k) => written.has(k) || !declared.includes(k));
+    for (const k of missing) {
+      fail(`values.yaml declares secrets.${k}, and npm run setup does not write it. Generate it in setup.mjs's ` +
+        '`secrets`, or, if an empty value really is valid, add it to check 38\'s OPTIONAL with the reason.');
+    }
+    for (const k of stale) fail(`check 38's OPTIONAL names secrets.${k}, which setup writes or values.yaml no longer declares: remove it`);
+    if (!missing.length && !stale.length) {
+      pass(`npm run setup writes ${declared.length - Object.keys(OPTIONAL).length} of values.yaml's ${declared.length} secrets; the other ${Object.keys(OPTIONAL).length} may stay empty`);
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 20. The release workflow names every image the chart resolves from `appVersion`, and no other.
 //
 // The chart marks an image it builds here with an empty tag and resolves it to `Chart.AppVersion`

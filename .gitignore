@@ -39,6 +39,7 @@ supabase/.temp/
 # those are mirrored config files a packaged chart must carry, see scripts/sync-helm-chart-files.mjs.
 deploy/helm/**/values-prod.yaml
 deploy/helm/**/values-local.yaml
+deploy/helm/**/values-try.yaml
 deploy/helm/**/charts/
 deploy/helm/**/*.tgz
 

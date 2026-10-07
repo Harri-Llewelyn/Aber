@@ -415,6 +415,17 @@ keep the credentials in a secret store, start from
 chart does not generate missing credentials: it *refuses to render*, and the message names every
 one that is missing (`aber.validateSecrets`).
 
+**The forge's SSH port is 2222 in the values `npm run setup` writes, and 22 anywhere else.**
+Gateways clone from it through `gitea-external`, and k3s's ServiceLB binds that port on the node
+itself. On 22 it takes new SSH connections from the machine's own sshd. The chart's default stays
+22 so that an upgrade never moves it: an enrolled gateway keeps the clone URL and host key it was
+given, and stops pulling if the port changes. So:
+
+- A new site configured from `values-prod.yaml.example` or an external Secret sets
+  `gitea.ssh.external.port: 2222` (the example shows where), or moves the machine's sshd off 22
+  first ([`docs/install.md`](../../docs/install.md#1-move-the-machines-ssh-off-port-22), step 1).
+- A site whose gateways are already enrolled keeps the port it has.
+
 **`site.yaml` is what the chart cannot choose for you**, and the render refuses without most of it:
 
 - `ingestion.primaryHostId` and `ingestion.sparkplugGroup` name this site in the configuration of
@@ -601,7 +612,7 @@ Aber has nine subdomains, all on one Ingress and all derived from `global.public
 | `git.<domain>` | `supabase-envoy:8002` (the gateway's forge listener; never `gitea:3000`) |
 | `mqtt.<domain>` | `mosquitto:9001` (WebSockets) |
 | — | `mosquitto-external:1883`, and `:8883` with `mosquitto.tls.enabled` (LoadBalancer) |
-| — | `gitea-external:22` (LoadBalancer; `gitea.ssh.external`) |
+| — | `gitea-external:2222` where `npm run setup` wrote the values, else `:22` (LoadBalancer; `gitea.ssh.external.port`) |
 
 **Raw MQTT on 1883 is not on the Ingress**, and cannot be, because it is TCP, not HTTP. The
 `mosquitto-external` Service carries it instead.
@@ -1233,7 +1244,9 @@ does not exempt kubelet probes from ingress policy. Add an ingress allow from th
 **The forge's login depends on a policy, so it gets one whether or not you enable this layer.** With
 `gitea.enabled: true`, the chart renders **one** NetworkPolicy even when
 `networkPolicy.enabled: false` (#172). It covers ingress to the Gitea pod only: port 3000 from the
-gateway and `supabase-functions`, and port 22 from `giteaSshAllowedCidrs`.
+gateway and `supabase-functions`, and port 22 from `giteaSshAllowedCidrs`. Port 22 here, and below,
+is the container's: a policy matches the port after the Service has translated it, so it is 22
+whatever `gitea.ssh.external.port` publishes.
 
 Everything else in this section stays opt-in. Turning the layer on replaces this policy with the
 generated pair.
