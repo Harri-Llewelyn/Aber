@@ -783,7 +783,31 @@ async function waitForE2e () {
     }
     run('kubectl', ['-n', NS, 'logs', name, '--all-containers', '--tail=-1'])
     console.log(`  ${job}: ${outcome}`)
-    if (outcome !== 'succeeded') die(`${job} ${outcome}`)
+    if (outcome !== 'succeeded') {
+      printRestartedContainers()
+      die(`${job} ${outcome}`)
+    }
+  }
+}
+
+/**
+ * For every container that restarted: how its previous run ended and that run's last lines.
+ * `kubectl logs` shows the current container, which after a crash is a fresh start. Exit code 137
+ * is SIGKILL, 135 SIGBUS; reason OOMKilled is the memory limit. The same dump as CI's
+ * cluster-diagnostics action.
+ */
+function printRestartedContainers (ns = NS) {
+  const r = capture('kubectl', ['-n', ns, 'get', 'pods', '-o', 'json'])
+  if (!r.ok) return
+  const restarted = JSON.parse(r.out).items.flatMap(pod =>
+    [...(pod.status.initContainerStatuses || []), ...(pod.status.containerStatuses || [])]
+      .filter(s => s.restartCount > 0).map(s => ({ pod: pod.metadata.name, s })))
+  step(`containers that restarted: ${restarted.length || 'none'}`)
+  for (const { pod, s } of restarted) {
+    const t = s.lastState?.terminated || {}
+    console.log(`\n=== pod/${pod} container ${s.name}: ${s.restartCount} restart(s); the last run ended ` +
+      `${t.reason ?? '-'}, exit code ${t.exitCode ?? '-'}, signal ${t.signal ?? '-'}, at ${t.finishedAt ?? '-'}`)
+    run('kubectl', ['-n', ns, 'logs', pod, '-c', s.name, '--previous', '--tail', '80'])
   }
 }
 

@@ -1769,34 +1769,13 @@ jobs:
             | grep -i 'cache-control' | grep -q 'no-store' \
             || { echo "::error::/config.js is not served no-store"; exit 1; }
 
+      # Every pod's log, and for a container that restarted, how its previous run ended and that
+      # run's last lines.
       - name: Diagnostics On Failure
         if: failure()
-        run: |
-          # Disk first, because ephemeral-storage eviction disguises itself as every other failure.
-          # `NodeHasDiskPressure` in the node conditions settles it.
-          echo "=== disk and node pressure"
-          df -h / | tail -1 || true
-          kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .status.conditions[*]}  {.type}={.status} {.message}{"\n"}{end}{end}' || true
-          kubectl -n $NS get events --field-selector reason=Evicted 2>/dev/null | head -5 || true
-          echo
-          kubectl -n $NS get pods -o wide || true
-          kubectl -n $NS get svc,ingress,pvc || true
-          kubectl -n $NS get events --sort-by=.lastTimestamp | tail -40 || true
-          for d in $(kubectl -n $NS get deploy -o name); do
-            echo "=== $d"; kubectl -n $NS describe "$d" | tail -25 || true
-          done
-          for p in $(kubectl -n $NS get pods -o name); do
-            echo "=== $p"; kubectl -n $NS logs "$p" --all-containers --tail 40 || true
-          done
-
-          # The ingestion daemon gets a longer tail: validate.py publishes ~40 messages and the daemon
-          # logs several lines per message, so 40 lines scrolls the evidence off.
-          echo "=== ingestion daemon, extended"
-          kubectl -n $NS logs deploy/ingestion -c ingestion --tail 400 || true
-
-          # The database is not queried here: validate.py cleans up its own rows in a `finally`, so by
-          # this step the evidence is gone and a SELECT would read as "never created". The suite reports
-          # what it found at the moment it looked.
+        uses: ./.github/actions/cluster-diagnostics
+        with:
+          namespace: ${{ env.NS }}
 
       - name: Tear Down
         if: always()
