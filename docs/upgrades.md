@@ -237,6 +237,15 @@ accounts still work afterwards.
 2. **After upgrading**, sign in as that account and remove the four demo accounts, in Studio or with
    GoTrue's admin API.
 
+### Installs from 1.0.1 or earlier keep their 47 metrics
+
+Up to 1.0.1, every install started with 47 metrics in the Metric catalog. Later versions start a new
+install with an empty catalog, and load example metrics only where `dbInit.exampleMetrics` is on,
+which only `values-dev.yaml` sets.
+
+The upgrade deletes nothing, because devices may already publish under those names. To retire one
+you do not use, open it on the **Metrics** page and choose **Deprecate**.
+
 ---
 
 ## Backups

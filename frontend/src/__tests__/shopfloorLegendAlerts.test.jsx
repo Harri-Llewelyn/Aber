@@ -181,16 +181,16 @@ describe('alerting device chip', () => {
     expect(await chip()).toHaveTextContent('ALARM')
   })
 
-  /* Archived wins: the chip is grey by then, and an ALARM flag beside it would contradict its own
-     colour. */
-  it('shows no alert flag on an archived device with an alert firing', async () => {
+  // Archived wins: the device is out of service, so the cell neither lists it nor relays its alert.
+  it('leaves an archived device with an alert firing out of its cell\'s panel', async () => {
     renderMap({
       devices: [device({ is_archived: true })],
       activeAlerts: [alert({ severity: 'critical' })]
     })
 
-    const el = await chip()
-    expect(el).not.toHaveTextContent(/ALARM|WARN/)
+    fireEvent.click(await pin())
+    await waitFor(() => expect(document.querySelector('.context-panel-open')).toBeTruthy())
+    expect(screen.queryByText('Simulated_CNC_01')).toBeNull()
     expect(screen.queryByText(/Alerts firing/)).toBeNull()
   })
 })

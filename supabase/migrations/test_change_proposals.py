@@ -96,6 +96,14 @@ def as_owner(cur):
     cur.execute("SELECT set_config('request.jwt.claims', '', true);")
 
 
+def assert_not_found(case, exc, message):
+    """raise_not_found() (0165): SQLSTATE PGRST, the JSON body PostgREST answers 404 with."""
+    case.assertEqual(exc.pgcode, "PGRST", str(exc))
+    body = json.loads(exc.diag.message_primary)
+    case.assertEqual((body["code"], body["message"]), ("P0002", message))
+    case.assertEqual(json.loads(exc.diag.message_detail), {"status": 404, "headers": {}})
+
+
 class ProposalCase(unittest.TestCase):
     """One connection per test, rolled back at the end unless a test commits deliberately."""
 
@@ -590,6 +598,25 @@ class TestDeciding(ProposalCase):
         as_owner(self.cur)
         self.cur.execute("SELECT status FROM public.change_proposals WHERE id = %s;", (proposal,))
         self.assertEqual(self.cur.fetchone()[0], "withdrawn")
+
+    # An unknown id is "not found", which the API answers 404 rather than 500.
+    def test_approving_an_unknown_proposal_is_not_found(self):
+        as_user(self.cur, MANAGER)
+        with self.assertRaises(psycopg2.Error) as raised:
+            self.cur.execute("SELECT public.approve_proposal(%s);", (ABSENT_UUID,))
+        assert_not_found(self, raised.exception, f"proposal {ABSENT_UUID} not found")
+
+    def test_rejecting_an_unknown_proposal_is_not_found(self):
+        as_user(self.cur, MANAGER)
+        with self.assertRaises(psycopg2.Error) as raised:
+            self.cur.execute("SELECT public.reject_proposal(%s, 'no such proposal');", (ABSENT_UUID,))
+        assert_not_found(self, raised.exception, f"proposal {ABSENT_UUID} not found")
+
+    def test_withdrawing_an_unknown_proposal_is_not_found(self):
+        as_user(self.cur, OPERATOR)
+        with self.assertRaises(psycopg2.Error) as raised:
+            self.cur.execute("SELECT public.withdraw_proposal(%s);", (ABSENT_UUID,))
+        assert_not_found(self, raised.exception, f"proposal {ABSENT_UUID} not found")
 
 
 class TestApprovalRunsTheConstraints(ProposalCase):

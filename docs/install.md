@@ -310,8 +310,8 @@ through the Auth API or in Studio.
 
 ## What is normal on a new install
 
-- **A new install is empty.** It has no cells, devices or schemas, one gateway (the Playback
-  gateway, which replays recorded data), and an empty Node-RED editor. The
+- **A new install is empty.** It has no cells, devices, schemas or metrics, one gateway (the
+  Playback gateway, which replays recorded data), and an empty Node-RED editor. The
   [tutorial](../tutorial/README.md) builds your first machine.
 - **Node-RED's editor is empty because nothing has been built yet, not because something failed to
   load.** It has no broker connection, so nothing connects and nothing is sent. `node-red-init`

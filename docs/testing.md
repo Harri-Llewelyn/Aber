@@ -389,6 +389,9 @@ python supabase/migrations/test_credential_recorder.py
 # Showing a Host gateway's credential again (0164): who may keep and see the copy, the audit row
 # without the password, and the copy going with the broker account. Every test rolls back.
 python supabase/migrations/test_gateway_credential_shown_again.py
+# "Not found" answers 404 (0165): raise_not_found() raises the body and status PostgREST reads,
+# and no API role may call it. The functions that call it are asserted in their own suites.
+python supabase/migrations/test_not_found_is_a_404.py
 # Revocation reaching a host-run gateway (0063), and still passing over one that holds nothing.
 # Rolls back for a second reason: net.http_post queues inside the transaction, so the revocation
 # requests these tests provoke are un-queued rather than sent.

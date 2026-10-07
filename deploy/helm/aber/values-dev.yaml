@@ -28,6 +28,11 @@ supabaseAuth:
   # place they are turned on; validate.py and the stack lane sign in as them.
   demoAccounts: true
 
+dbInit:
+  # The example metric catalog (supabase/example-metrics.sql). validate.py and the AAS conformance
+  # fixture read the catalog rows of the metrics they publish.
+  exampleMetrics: true
+
 secrets:
   jwtSecret: super-secret-jwt-token-with-at-least-32-characters
   anonKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiZXhwIjoyMDAwMDAwMDAwfQ.Z7KTfqo7mvr4j40uB-6K4f_VVT-d-ISkJ7E5VJ41jt0
