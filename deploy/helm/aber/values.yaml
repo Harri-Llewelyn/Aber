@@ -935,9 +935,13 @@ coldArchive:
 ingestion:
   # Which role the daemon connects to the historian as. `ingest_writer` cannot UPDATE, DELETE or
   # TRUNCATE; secrets.ingestWriterPassword is required while this is set. Override to the admin
-  # user only for a recovery (the daemon refuses a superuser unless ALLOW_HISTORIAN_SUPERUSER is
-  # also set).
+  # user only for a recovery (the daemon refuses a superuser unless allowHistorianSuperuser is
+  # also true).
   dbUser: "ingest_writer"
+  # Lets the daemon write the historian as a superuser. A separate decision from dbUser, so a
+  # recovery takes both. Set it for the recovery only, and back to false once it is done; the
+  # release notes warn while it is on.
+  allowHistorianSuperuser: false
   enabled: true
   image:
     # Built from ingestion/Dockerfile with the REPOSITORY ROOT as context (sparkplug_b.proto):

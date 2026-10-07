@@ -1399,7 +1399,7 @@ published default is a silent security downgrade, and the failure mode is silenc
 | `MQTT_HOST` / `MQTT_PORT` | `mosquitto` / `1883` | The in-cluster Service name |
 | `MQTT_USER` / `MQTT_PASSWORD` | `aber_ingestion` / **required** | Its own principal. There is no shared broker account any more — see `mosquitto/README.md` |
 | `DB_HOST` / `DB_PORT` | `timescaledb` / `5433` when `DB_HOST` is unset, else `5432` | The chart sets `timescaledb` / `5432`. From the host set both: `localhost` / `5433`, the dev loop's forward |
-| `DB_USER` | `postgres` | The chart sets `ingest_writer` (`ingestion.dbUser`). The daemon refuses a superuser unless `ALLOW_HISTORIAN_SUPERUSER=true` |
+| `DB_USER` | `postgres` | The chart sets `ingest_writer` (`ingestion.dbUser`). The daemon refuses a superuser unless `ALLOW_HISTORIAN_SUPERUSER=true`, which the chart sets from `ingestion.allowHistorianSuperuser` |
 | `DB_PASSWORD` | **required** | Unless `TIMESCALEDB_URL` is set |
 | `SUPABASE_URL` | `http://127.0.0.1:54321` | |
 | `SUPABASE_PUBLISHABLE_KEY` / `SUPABASE_INGESTION_KEY` | **required** | The gateway's `apikey` and the `Service_Ingestor` bearer (`secrets.ingestionKey`). Without either the daemon exits rather than running fail-open; it never holds the service-role key |

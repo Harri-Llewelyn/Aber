@@ -287,7 +287,8 @@ def _assert_historian_is_least_privilege(conn):
         "the security model would be a claim nothing enforces. Set the chart's ingestion.dbUser to "
         "ingest_writer, with secrets.ingestWriterPassword (npm run setup mints one; "
         "timescaledb/roles.sql creates the role). If admin rights are genuinely needed for a "
-        "recovery, set ALLOW_HISTORIAN_SUPERUSER=true and say so out loud.", user
+        "recovery, also set ingestion.allowHistorianSuperuser=true (ALLOW_HISTORIAN_SUPERUSER), "
+        "say so out loud, and set it back to false afterwards.", user
     )
     raise SystemExit(1)
 
