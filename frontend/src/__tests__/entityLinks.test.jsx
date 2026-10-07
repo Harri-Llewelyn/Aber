@@ -37,7 +37,11 @@ const show = async (rows = [link()], canManage = true) => {
       hasPermission={(p) => canManage && p === PERMISSION_UUIDS.LINK_MANAGE}
     />
   )
-  await waitFor(() => expect(document.querySelector('.modal')).toBeTruthy())
+  // The dialog renders at once and the list only once the read answers, so this waits for the
+  // spinner to go. It is asserted present first, so a renamed spinner fails here rather than
+  // letting the wait pass before anything loaded.
+  expect(screen.getByText(/Loading links/)).toBeInTheDocument()
+  await waitFor(() => expect(screen.queryByText(/Loading links/)).toBeNull())
 }
 
 const modal = () => within(document.querySelector('.modal'))

@@ -14,6 +14,7 @@ Fixtures and suites that need the assembled stack rather than a module.
 | [`test_log_pipeline.py`](test_log_pipeline.py) | A drop is countable in Prometheus *and* readable in Loki, for the same device |
 | [`aas_fixture.py`](aas_fixture.py) | The device both AAS suites provision and assert against |
 | [`stack_exec.py`](stack_exec.py) | Reaching into the stack's own processes — `kubectl exec`, a Service taken off the network |
+| [`test_stack_exec.py`](test_stack_exec.py) | The broker's verdict on a publish: a timeout is retried, and is never read as a refusal |
 | [`restore-rehearsal/`](restore-rehearsal) | The SQL a restore rehearsal seeds, snapshots and asserts |
 | [`fixtures/`](fixtures) | `modelled-metrics.json`, the one rule four implementations answer in three languages; `sparkplug-json-values.json`, how a JSON-encoded Sparkplug metric reads in ingestion and i3X |
 | [`auth-bootstrap.sql`](auth-bootstrap.sql) | The GoTrue-shaped fixture a stackless Postgres needs before the migrations apply |

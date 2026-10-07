@@ -16,6 +16,7 @@ already reaches test_enroll_gateway.py.
 """
 import json
 import os
+import re
 import subprocess
 import time
 
@@ -137,6 +138,48 @@ def start(target):
         _kubectl("rollout", "status", t["workload"], "--timeout=120s")
         return
     raise NotImplementedError(f"start() is not defined for {target}")
+
+
+# What mosquitto_pub prints when the broker answers CONNECT with a refusal: "Connection Refused: not
+# authorised." on MQTT 3.1.1, "Not authorized" or "Bad user name or password" on 5 (measured on
+# 2.0.22). A refused TCP connection prints "Error: Connection refused", which says nothing about
+# the credential, so "connection refused" is deliberately not matched.
+MQTT_REFUSAL = re.compile(r"not authori[sz]ed|bad user name or password", re.IGNORECASE)
+
+ACCEPTED, REFUSED, UNANSWERED = "accepted", "refused", "unanswered"
+
+
+def publish_verdict(result):
+    """
+    The broker's answer to one mosquitto_pub: ACCEPTED, REFUSED, or UNANSWERED, which is any other
+    failure (a timeout, a connection that never opened, an exec that never reached the container)
+    and says nothing about the credential.
+    """
+    if result.returncode == 0:
+        return ACCEPTED
+    if MQTT_REFUSAL.search(f"{result.stdout}\n{result.stderr}"):
+        return REFUSED
+    return UNANSWERED
+
+
+def publish(username, password, topic, retry_for=15.0, interval=3.0, attempt_timeout=10):
+    """
+    Publish one message over MQTTS from inside the broker's container as `username`, and return
+    (verdict, CompletedProcess). An UNANSWERED attempt is retried until `retry_for` seconds have
+    passed; ACCEPTED and REFUSED are the broker's answer and return at once. Each attempt is capped
+    at `attempt_timeout` seconds, because a connect that times out otherwise waits on the kernel.
+    """
+    deadline = time.monotonic() + retry_for
+    while True:
+        result = run(
+            "broker", "timeout", str(attempt_timeout), "mosquitto_pub",
+            "--cafile", "/mosquitto/certs/ca.crt", "-h", broker_host(), "-p", "8883",
+            "-u", username, "-P", password, "-t", topic, "-m", "x",
+        )
+        verdict = publish_verdict(result)
+        if verdict != UNANSWERED or time.monotonic() >= deadline:
+            return verdict, result
+        time.sleep(interval)
 
 
 def wait_until(target, *probe, attempts=30, interval=1.0):

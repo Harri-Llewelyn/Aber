@@ -291,15 +291,12 @@ class TestSuccessfulEnrolment(EnrollGatewayBase):
         token = self.issue_token()
         _, payload = enroll(token)
 
-        publish = stack_exec.run(
-            "broker", "mosquitto_pub",
-            "--cafile", "/mosquitto/certs/ca.crt", "-h", stack_exec.broker_host(), "-p", "8883",
-            "-u", payload["mqtt_username"], "-P", payload["mqtt_password"],
-            "-t", f"spBv1.0/{payload['sparkplug_group']}/DBIRTH/{payload['sparkplug_id']}/probe",
-            "-m", "x",
+        verdict, publish = stack_exec.publish(
+            payload["mqtt_username"], payload["mqtt_password"],
+            f"spBv1.0/{payload['sparkplug_group']}/DBIRTH/{payload['sparkplug_id']}/probe",
         )
-        self.assertEqual(publish.returncode, 0,
-                         f"the enrolled credential was refused: {publish.stderr.strip()}")
+        self.assertEqual(verdict, stack_exec.ACCEPTED,
+                         f"the enrolled credential was {verdict}: {publish.stderr.strip()}")
 
 
     def test_the_ca_returned_verifies_the_broker_certificate(self):
@@ -329,22 +326,31 @@ class TestDecommissioning(EnrollGatewayBase):
         """
         _, payload = enroll(self.issue_token())
 
-        def publish():
-            return stack_exec.run(
-                "broker", "mosquitto_pub",
-                "--cafile", "/mosquitto/certs/ca.crt", "-h", stack_exec.broker_host(), "-p", "8883",
-                "-u", payload["mqtt_username"], "-P", payload["mqtt_password"],
-                "-t", f"spBv1.0/{payload['sparkplug_group']}/NDATA/{payload['sparkplug_id']}", "-m", "x",
+        def publish(retry_for):
+            return stack_exec.publish(
+                payload["mqtt_username"], payload["mqtt_password"],
+                f"spBv1.0/{payload['sparkplug_group']}/NDATA/{payload['sparkplug_id']}",
+                retry_for=retry_for,
             )
 
-        before = publish()
-        self.assertEqual(before.returncode, 0, f"the credential was refused before the archive: {before.stderr.strip()}")
+        # A timeout is retried: it is a slow broker, not an answer about the credential.
+        verdict, before = publish(retry_for=15)
+        self.assertEqual(verdict, stack_exec.ACCEPTED,
+                         f"the credential was {verdict} before the archive: {before.stderr.strip()}")
         rest(f"/gateways?id=eq.{TEST_GW_ID}", method="PATCH", body={"is_archived": True})
-        deadline, after = time.monotonic() + 60, before
-        while after.returncode == 0 and time.monotonic() < deadline:
+        # Only a refusal proves the revocation; an unanswered publish is polled past like an accepted one.
+        deadline = time.monotonic() + 60
+        while True:
+            verdict, after = publish(retry_for=0)
+            if verdict == stack_exec.REFUSED or time.monotonic() >= deadline:
+                break
             time.sleep(2)
-            after = publish()
-        self.assertNotEqual(after.returncode, 0, "an archived gateway's broker credential still publishes after 60s")
+        self.assertEqual(
+            verdict, stack_exec.REFUSED,
+            "an archived gateway's broker credential still publishes after 60s" if verdict == stack_exec.ACCEPTED
+            else f"the broker did not answer within 60s, so nothing shows the credential was revoked: "
+                 f"{after.stderr.strip()}",
+        )
 
 class TestTokenRejection(EnrollGatewayBase):
     def test_unknown_token_is_rejected(self):

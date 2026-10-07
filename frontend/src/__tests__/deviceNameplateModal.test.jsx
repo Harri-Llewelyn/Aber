@@ -35,10 +35,11 @@ describe('DeviceNameplateModal', () => {
   it('renders an empty form for a device with no nameplate row', async () => {
     respond();
     render(<DeviceNameplateModal asset={asset} canManage onClose={vi.fn()} />);
-    await waitFor(() => expect(screen.getByText(/IDTA 02006/)).toBeInTheDocument());
+    // The form, not the header lead: the lead renders while the nameplate is still loading.
+    const serial = await screen.findByLabelText(/^Serial number/);
     // No row is the normal state for a device nobody has filled in, not an error.
     expect(screen.queryByText(/error/i)).not.toBeInTheDocument();
-    expect(fieldFor('Serial number').value).toBe('');
+    expect(serial.value).toBe('');
   });
 
   it('locks a field the device publishes and shows the device value', async () => {
@@ -141,7 +142,9 @@ describe('DeviceNameplateModal', () => {
     // there, while a dead Save sat below -- three pieces of furniture for one fact.
     respond({ stored: { device_id: 'dev-123' } });
     render(<DeviceNameplateModal asset={asset} canManage={false} canPropose onClose={vi.fn()} />);
-    await waitFor(() => expect(screen.getByRole('button', { name: /propose a change/i })).toBeInTheDocument());
+    // The form, not the footer button: the button renders while loading, when the strip is hidden
+    // for every reader.
+    await screen.findByLabelText(/^Serial number/);
 
     expect(screen.queryByText(/you are reading this nameplate/i)).not.toBeInTheDocument();
   });
@@ -172,8 +175,7 @@ describe('DeviceNameplateModal', () => {
     // be disabled and its own Propose button would have nothing to send.
     respond({ stored: { device_id: 'dev-123' } });
     render(<DeviceNameplateModal asset={asset} canManage={false} canPropose onClose={vi.fn()} />);
-    await waitFor(() => expect(screen.getByRole('button', { name: /propose a change/i })).toBeInTheDocument());
-    expect(fieldFor('Serial number')).not.toBeDisabled();
+    expect(await screen.findByLabelText(/^Serial number/)).not.toBeDisabled();
   });
 
   it('explains itself when there is no route to offer at all', async () => {

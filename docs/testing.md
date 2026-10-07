@@ -85,6 +85,9 @@ python supabase/test_auth_rate_limit.py
 # write since the daemon started, and a saturated stack and a generator that cannot push hard
 # enough both show as a shortfall against target.
 python test-harness/test_load_generator.py
+# The broker verdict the stack suites read a credential from: a timeout is retried and is never a
+# refusal, so a slow runner neither fails a working credential nor passes a revocation.
+python test-harness/test_stack_exec.py
 python ingestion/test_entity_cache.py
 python ingestion/test_telemetry_batching.py
 # The historian writer -- several messages become one transaction; one bad message still loses one
@@ -240,7 +243,7 @@ node scripts/check-schema-surface.mjs
 
 node scripts/check-migration-idempotency.mjs
 
-# Database suites — ALL SIXTEEN, against a throwaway Postgres. Needs Docker and nothing else.
+# Database suites — the whole db lane, against a throwaway Postgres. Needs Docker and nothing else.
 #
 # RUN THEM THIS WAY. Every suite below defaults to port 54322, and that is where
 # `npm run dev:forward` publishes the LIVE database -- so the bare `python ...` form points at
@@ -679,9 +682,9 @@ A `NOTICE`, so the chain applies and every schema check passes — and
 rather than an unset secret three thousand lines upstream. The values the runner supplies are fake
 and its functions URL is deliberately unreachable.
 
-**Seven suites run in no CI job.** `edge-function-auth-test` names eight by hand and
-`test_gateway_enrollment.py` runs in **e2e-validation**; the directory holds sixteen. The runner
-*discovers* them rather than listing them, which is the difference that would have caught it.
+**The runner *discovers* the suites rather than listing them**, so a new suite cannot be left out
+of CI. When `edge-function-auth-test` named its suites by hand, seven of the sixteen in the
+directory ran in no CI job.
 
 **The frontend figure is a lower bound rather than a count**, and deliberately: it moved four times
 in one afternoon and each move made both documents wrong until somebody noticed. A bound only ever

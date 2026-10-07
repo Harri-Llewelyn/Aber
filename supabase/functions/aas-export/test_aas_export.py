@@ -4,9 +4,10 @@ Tests for the aas-export Edge Function.
 Two layers, deliberately in one file:
 
   * Offline checks always run. They guard the Sparkplug -> XSD mapping (which is duplicated between
-    Deno and the frontend bundle and would otherwise drift silently), the authorization ladder, and
-    the ConceptDescriptions shell.ts builds for a fixture shell (run in Node, which strips the
-    types). These need no stack, so they run in the edge-function CI job alongside the auth tests.
+    Deno and the frontend bundle and would otherwise drift silently), the role gate as index.ts
+    states it, and the ConceptDescriptions shell.ts builds for a fixture shell (run in Node, which
+    strips the types). These need no stack, so they run in the edge-function CI job alongside the
+    auth tests.
 
   * Live checks invoke the deployed function against a device the suite provisions itself
     (test-harness/aas_fixture.py) and validate the emitted document. They skip when no stack is
@@ -199,7 +200,7 @@ MIGRATIONS_DIR = REPO_ROOT / "supabase" / "migrations"
 
 
 def export_gate() -> tuple[list, str]:
-    """index.ts's ALLOWED_ROLES and BUNDLE_PERMISSION, read from its source so the mirror cannot drift."""
+    """index.ts's ALLOWED_ROLES and BUNDLE_PERMISSION, read from its source."""
     text = TS_INDEX.read_text(encoding="utf-8")
     roles = re.search(r"const ALLOWED_ROLES = \[([^\]]*)\]", text)
     permission = re.search(r'const BUNDLE_PERMISSION = "([^"]+)"', text)
@@ -242,26 +243,6 @@ def roles_a_policy_admits(policy: str) -> set:
     by_permission = {role for role, held in seeded_role_permissions().items()
                      if held & named("has_authority")}
     return named("has_role") | by_permission
-
-
-def evaluate_aas_export_authorization(user: dict | None, auth_header: str | None,
-                                      fmt: str = "json") -> tuple[int, str]:
-    """
-    Python mirror of the authorization ladder in index.ts, same shape as the sibling tests. The
-    role list and the bundle's permission are index.ts's own; who holds the permission is the seed's.
-    """
-    if not auth_header:
-        return 401, "Missing Authorization header"
-    if not user:
-        return 401, "Invalid user token"
-    role = (user.get("app_metadata") or {}).get("role") or None
-    # Wider than approve-quarantine on purpose: an export is a read.
-    allowed, bundle_permission = export_gate()
-    if not role or role not in allowed:
-        return 403, "Forbidden: Insufficient privileges"
-    if fmt == "bundle" and bundle_permission not in seeded_role_permissions().get(role, set()):
-        return 403, "Forbidden: the bundle carries this device's Audit Trail"
-    return 200, "Authorized"
 
 
 class TestSparkplugXsdMapperParity(unittest.TestCase):
@@ -675,44 +656,47 @@ class TestConceptDescriptions(unittest.TestCase):
 
 
 class TestAasExportAuthorization(unittest.TestCase):
-    def test_missing_auth_header_returns_401(self):
-        status, message = evaluate_aas_export_authorization({}, None)
-        self.assertEqual(status, 401)
-        self.assertIn("Missing Authorization header", message)
+    """
+    Asserted against index.ts, because there is no Deno runtime here. What resolveUserRole returns
+    is tested in _shared/roles_test.ts.
+    """
 
-    def test_invalid_token_returns_401(self):
-        status, message = evaluate_aas_export_authorization(None, "Bearer nope")
-        self.assertEqual(status, 401)
-        self.assertIn("Invalid user token", message)
+    @classmethod
+    def setUpClass(cls):
+        cls.source = TS_INDEX.read_text(encoding="utf-8")
+        # Comments are stripped for the negative assertion, so prose explaining why a claim is not
+        # read cannot fail it.
+        without_blocks = re.sub(r"/\*.*?\*/", "", cls.source, flags=re.DOTALL)
+        cls.code = "\n".join(
+            line for line in without_blocks.splitlines() if not line.strip().startswith("//")
+        )
 
-    def test_unmapped_role_returns_403(self):
-        status, message = evaluate_aas_export_authorization({"app_metadata": {}}, "Bearer x")
-        self.assertEqual(status, 403)
+    def test_the_role_is_resolved_from_user_roles_through_the_shared_lookup(self):
+        """The caller-bound client applies RLS to the user_roles read."""
+        self.assertIn('import { resolveUserRole } from "../_shared/roles.ts";', self.code)
+        self.assertRegex(
+            self.code, r"const userRole = await resolveUserRole\(supabaseUser, user\.id\);"
+        )
 
-    def test_unknown_role_returns_403(self):
-        status, _ = evaluate_aas_export_authorization(
-            {"app_metadata": {"role": "Intruder"}}, "Bearer x")
-        self.assertEqual(status, 403)
+    def test_the_role_is_never_read_from_token_claims(self):
+        """Deleting a user's user_roles row revokes the role; a claim would re-grant it."""
+        for claim in ("app_metadata", "user_metadata"):
+            self.assertNotIn(
+                claim,
+                self.code,
+                f"aas-export reads {claim}. public.user_roles, through _shared/roles.ts, is the "
+                "only source of the caller's role.",
+            )
 
-    def test_read_roles_are_allowed(self):
-        for role in ("Administrator", "Shopfloor_Manager", "Operator", "Auditor"):
-            for fmt in ("json", "aasx"):
-                status, _ = evaluate_aas_export_authorization(
-                    {"app_metadata": {"role": role}}, "Bearer x", fmt)
-                self.assertEqual(status, 200, f"{role} should be allowed to export {fmt}")
-
-    def test_the_bundle_refuses_an_operator(self):
-        # The bundle carries the device's trail, which the asset lane's policy closes to Operator.
-        status, message = evaluate_aas_export_authorization(
-            {"app_metadata": {"role": "Operator"}}, "Bearer x", "bundle")
-        self.assertEqual(status, 403)
-        self.assertIn("Audit Trail", message)
-
-    def test_the_bundle_admits_the_roles_that_read_the_trail_and_the_exports(self):
-        for role in ("Administrator", "Shopfloor_Manager", "Auditor"):
-            status, _ = evaluate_aas_export_authorization(
-                {"app_metadata": {"role": role}}, "Bearer x", "bundle")
-            self.assertEqual(status, 200, f"{role} should be allowed to take a bundle")
+    def test_the_gate_admits_the_four_read_roles_and_fails_closed(self):
+        """An export is a read, so Operator and Auditor are admitted; no role, or any other, is a 403."""
+        allowed, _ = export_gate()
+        self.assertEqual(allowed, ["Administrator", "Shopfloor_Manager", "Operator", "Auditor"])
+        self.assertRegex(
+            self.code,
+            r"if \(!userRole \|\| !ALLOWED_ROLES\.includes\(userRole\)\) \{\s*"
+            r'return json\(\{ error: "Forbidden: Insufficient privileges" \}, 403\);',
+        )
 
     def test_the_bundle_permission_is_held_by_the_roles_both_policies_admit(self):
         """
