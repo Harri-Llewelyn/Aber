@@ -2424,6 +2424,7 @@ paths:
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Forbidden: insufficient privileges.' }
         '404': { description: 'No device has that `device_id` or `merge_into_device_id`. The body is `{"error": "Device not found"}`.' }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /functions/v1/gateway-bundle:
     get:
@@ -2457,6 +2458,7 @@ paths:
                           nullable: true
                           description: Why an appliance could not use it, or null.
         '401': { description: Missing or invalid Authorization header. }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
     post:
       tags: [Edge Functions]
       summary: Download a Remote gateway's bootstrap bundle (ZIP)
@@ -2517,6 +2519,7 @@ paths:
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Forbidden: requires Administrator or Shopfloor_Manager.' }
         '404': { description: No such gateway. }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
         '503':
           description: >-
             `SUPABASE_PUBLIC_URL` is unset or names an in-stack address, or the bundle template is
@@ -2607,7 +2610,19 @@ paths:
         '400': { description: '`gateway_id` malformed, absent, or naming a Remote or archived gateway.' }
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Forbidden: requires Administrator or Shopfloor_Manager.' }
-        '500': { description: The credential service is not configured for this deployment. }
+        '500':
+          description: >-
+            The credential service is not configured for this deployment.
+            Otherwise an unexpected failure, as a `FunctionError`.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/FunctionError'
+                  - type: object
+                    description: The configuration error. `details`, when present, names the unset variable.
+                    properties: { error: { type: string }, details: { type: string } }
         '503':
           description: >-
             The broker credential service is unreachable or refused. Nothing was changed — no
@@ -2704,7 +2719,19 @@ paths:
             token is returned even though one was signed.
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Forbidden: requires Administrator.' }
-        '500': { description: '`JWT_SECRET` is not set, so this worker cannot sign.' }
+        '500':
+          description: >-
+            `JWT_SECRET` is not set, so this worker cannot sign.
+            Otherwise an unexpected failure, as a `FunctionError`.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/FunctionError'
+                  - type: object
+                    description: The configuration error. `details`, when present, names the unset variable.
+                    properties: { error: { type: string }, details: { type: string } }
 
   /functions/v1/manage-people:
     post:
@@ -2757,6 +2784,7 @@ paths:
         '403': { description: 'Requires Administrator; or your own access.' }
         '404': { description: No such person. }
         '409': { description: 'The address is already in use, the last Administrator, or access in the other state.' }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
         '502': { description: 'The database act was done but GoTrue did not ban or lift the ban; repeat it.' }
 
   /functions/v1/revoke-gateway-credential:
@@ -2815,6 +2843,7 @@ paths:
             The `x-revoke-secret` header is missing or wrong. No detail about which — a response
             distinguishing the two is a hint.
         '405': { description: Method not allowed. }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
         '502': { description: The credential service refused the revocation. }
         '503':
           description: >-
@@ -2883,7 +2912,19 @@ paths:
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Forbidden: requires Administrator.' }
         '405': { description: Method not allowed. }
-        '500': { description: The credential service is not configured on this deployment. }
+        '500':
+          description: >-
+            The credential service is not configured on this deployment.
+            Otherwise an unexpected failure, as a `FunctionError`.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/FunctionError'
+                  - type: object
+                    description: The configuration error. `details`, when present, names the unset variable.
+                    properties: { error: { type: string }, details: { type: string } }
         '503': { description: The credential service is unreachable, or could not read the broker. }
 
   /functions/v1/enroll-gateway:
@@ -2969,6 +3010,7 @@ paths:
             indistinguishable — reporting which would let an enumerator learn that a token value
             once existed.
         '405': { description: Method not allowed. }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
         '503':
           description: >-
             Enrolment is unconfigured, or the broker credential service could not be reached. Check
@@ -3028,6 +3070,7 @@ paths:
           description: The token is not valid. Unknown, expired, spent and archived are indistinguishable.
         '404':
           description: A `file` this route does not serve.
+        '500': { $ref: '#/components/responses/FunctionFailure' }
         '503':
           description: The installer is not available on this deployment; `details` says why.
 
@@ -3090,7 +3133,7 @@ paths:
           headers:
             X-AAS-Stats:
               schema: { type: string }
-              description: 'JSON counts (submodels, elements, unmapped semantic ids) — the only channel a binary body leaves for them. For `bundle`, a `bundle` object with the row counts of each part, `truncated`, `not_included`, and `stored` with the `bucket`, `object_key`, `sha256` and `export_id` of the copy, or `reason` when it was not stored.'
+              description: 'JSON counts (submodels, elements, unmapped semantic ids) — the only channel a binary body leaves for them. For `bundle`, a `bundle` object with the row counts of each part, `truncated`, `not_included`, and `stored` with the `bucket`, `object_key`, `sha256` and `export_id` of the copy, or, when it was not stored, a fixed `reason` and the `request_id` the error was logged under.'
           content:
             application/json:
               schema:
@@ -3106,6 +3149,7 @@ paths:
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Role is outside the allow-list, or `format=bundle` without `audit_trail:read`; the bundle refusal names the Audit Trail.' }
         '404': { description: No such device. }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /functions/v1/aas-api:
     get:
@@ -3140,6 +3184,7 @@ paths:
                   served: { type: array, items: { type: string } }
                   note: { type: string }
         '401': { description: Missing or invalid Authorization header. }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/aas-api/description:
     get:
@@ -3173,6 +3218,7 @@ paths:
                 type: object
                 properties:
                   profiles: { type: array, items: { type: string } }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/aas-api/shells:
     get:
@@ -3216,6 +3262,7 @@ paths:
                   result: { type: array, items: { type: object } }
         '400': { description: Non-positive `limit`. }
         '401': { description: Missing or invalid Authorization header. }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/aas-api/shells/{aasIdentifier}:
     get:
@@ -3245,6 +3292,7 @@ paths:
         '400': { description: Identifier is not valid base64url. }
         '401': { description: Missing or invalid Authorization header. }
         '404': { description: No such shell. A *submodel* identifier is refused here too, even though it names a device that exists. }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/aas-api/shells/{aasIdentifier}/submodel-refs:
     get:
@@ -3262,6 +3310,7 @@ paths:
             application/json: { schema: { type: object } }
         '401': { description: Missing or invalid Authorization header. }
         '404': { description: No such shell. }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/aas-api/shells/{aasIdentifier}/asset-information:
     get:
@@ -3282,6 +3331,7 @@ paths:
             application/json: { schema: { type: object } }
         '401': { description: Missing or invalid Authorization header. }
         '404': { description: No such shell. }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/aas-api/shells/{aasIdentifier}/submodels/{submodelIdentifier}:
     get:
@@ -3312,6 +3362,7 @@ paths:
         '400': { description: Either identifier is not valid base64url. }
         '401': { description: Missing or invalid Authorization header. }
         '404': { description: No such shell, or that shell does not carry that submodel. }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/aas-api/submodels/{submodelIdentifier}/submodel-elements:
     get:
@@ -3336,6 +3387,7 @@ paths:
         '400': { description: Identifier is not valid base64url. }
         '401': { description: Missing or invalid Authorization header. }
         '404': { description: No such submodel. }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/aas-api/submodels:
     get:
@@ -3361,6 +3413,7 @@ paths:
             application/json: { schema: { type: object } }
         '400': { description: Non-positive `limit`. }
         '401': { description: Missing or invalid Authorization header. }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/aas-api/submodels/{submodelIdentifier}:
     get:
@@ -3390,6 +3443,7 @@ paths:
         '400': { description: Identifier is not valid base64url. }
         '401': { description: Missing or invalid Authorization header. }
         '404': { description: No such submodel. }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/aas-api/submodels/{submodelIdentifier}/submodel-elements/{idShortPath}:
     get:
@@ -3420,6 +3474,7 @@ paths:
             application/json: { schema: { type: object } }
         '401': { description: Missing or invalid Authorization header. }
         '404': { description: No element at that path. }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/fplus-directory:
     get:
@@ -3452,6 +3507,7 @@ paths:
           description: |
             No route. Invoked under `/functions/v1/` the handler still works, but the documented
             entry points are the unprefixed ones.
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /ping:
     get:
@@ -3479,6 +3535,7 @@ paths:
                     type: string
                     example: 11ad7b32-1d32-4c4a-b0c9-fa049208939a
                     description: The Factory+ Sparkplug payload marker this deployment's births carry.
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /v1/device:
     get:
@@ -3500,6 +3557,7 @@ paths:
             application/json:
               schema: { type: array, items: { type: string, format: uuid } }
         '401': { description: 'No bearer token. Enforced by the function, not by the gateway.' }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /v1/device/{instance_uuid}:
     get:
@@ -3522,6 +3580,7 @@ paths:
         '400': { description: Not an RFC4122 UUID. }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { description: No such device. }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /v1/address/{group_id}/{node_id}:
     get:
@@ -3557,6 +3616,7 @@ paths:
         '400': { description: Malformed address. }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { description: No edge node at that address. }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /v1/schema:
     get:
@@ -3588,6 +3648,7 @@ paths:
                         name: { type: string }
                         version: { type: integer }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /v1/schema/{schema_uuid}:
     get:
@@ -3634,6 +3695,7 @@ paths:
         '400': { description: Not an RFC4122 UUID. }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { description: No such schema, or none the caller's policies let it read. }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /v1/service:
     get:
@@ -3663,6 +3725,7 @@ paths:
                         url: { type: string }
                         online: { type: boolean }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /functions/v1/grafana-alert-webhook:
     post:
@@ -3736,6 +3799,7 @@ paths:
         '400': { description: 'Body is not valid JSON.' }
         '401': { description: 'Missing, malformed or incorrect bearer secret.' }
         '405': { description: 'Method other than POST.' }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
         '503': { description: 'GRAFANA_ALERT_WEBHOOK_SECRET is not configured; refusing to accept alerts.' }
 
   /functions/v1/forge-events:
@@ -3777,6 +3841,7 @@ paths:
           description: Recorded (`recorded` names the gateway and the commit) or ignored (`ignored` says why).
         '401':
           description: The signature is missing or does not verify.
+        '500': { $ref: '#/components/responses/FunctionFailure' }
         '503':
           description: GITEA_WEBHOOK_SECRET is not configured; nothing is accepted.
   /functions/v1/forge-membership:
@@ -3805,8 +3870,11 @@ paths:
           description: No bearer token at all.
         '403':
           description: The caller's role does not open the forge. Any team membership they held has been removed.
+        '500': { $ref: '#/components/responses/FunctionFailure' }
         '502':
           description: The forge could not be reached or refused the placement. The listener lets the request through.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
         '503':
           description: This deployment has no forge configured, or the role lookup failed. The listener lets the request through.
   /functions/v1/forge-sweep:
@@ -3869,10 +3937,13 @@ paths:
           description: The secret is missing or wrong.
         '409':
           description: The lease named in `x-sweep-lease` is not held, because it was released or lapsed and was taken over.
+        '500': { $ref: '#/components/responses/FunctionFailure' }
         '502':
           description: >-
             The forge could not be reached or the organisation could not be read, or the lease could
             not be read; nothing further was attempted.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
         '503':
           description: FORGE_SWEEP_SECRET is not configured, or this deployment has no forge.
   /functions/v1/forge-signout:
@@ -3894,6 +3965,7 @@ paths:
       responses:
         '302':
           description: Always. `Location` is the door's `/oauth2/signout`. The caller's sessions have been revoked if a usable token was presented.
+        '500': { $ref: '#/components/responses/FunctionFailure' }
   /functions/v1/grafana-userinfo:
     get:
       tags: [Edge Functions]
@@ -3928,6 +4000,7 @@ paths:
                   name: { type: string }
                   role: { type: string, enum: [Admin, Editor, Viewer], description: Absent when the Supabase role could not be mapped. }
         '401': { description: Missing or invalid Authorization header. }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /functions/v1/nodered-userinfo:
     get:
@@ -3964,6 +4037,7 @@ paths:
                   supabase_role: { type: string, nullable: true, example: Administrator }
                   permissions: { type: string, enum: ['*', read], description: Absent when the role could not be mapped. }
         '401': { description: Missing or invalid Authorization header. }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
 components:
 
@@ -4033,6 +4107,48 @@ components:
               message: { type: string, example: proposal 7fffffff-0000-4000-8000-00000000dead not found }
               details: { type: string, nullable: true }
               hint: { type: string, nullable: true }
+
+    FunctionFailure:
+      description: |
+        The function failed, and nothing the caller sends differently would help. The body is a
+        fixed sentence and a request id, and `X-Request-Id` carries the same id. The error itself is
+        logged under that id (`supabase/functions/README.md`, *Finding the cause*), never returned.
+        Every function answers this way when the router cannot start it, with `error` reading
+        `Failed to invoke '<name>'`.
+      headers:
+        X-Request-Id: { $ref: '#/components/headers/RequestId' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/FunctionError' }
+    AasFailure:
+      description: |
+        The function failed, in the AAS specification's error shape: `text` is a fixed sentence and
+        `correlationId` the request id, which `X-Request-Id` carries too. The error is logged under
+        that id. When the router cannot start the function, the body is a `FunctionError` instead.
+      headers:
+        X-Request-Id: { $ref: '#/components/headers/RequestId' }
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              messages:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    messageType: { type: string, example: Error }
+                    text: { type: string, example: The request failed on the server. }
+                    code: { type: string, example: '500' }
+                    correlationId: { type: string, description: The request id. }
+                    timestamp: { type: string, format: date-time }
+
+  headers:
+    RequestId:
+      description: >-
+        The request id: the one the request carried, when it was 8 to 128 letters, digits, `.`,
+        `_` or `-` (the gateway sends a UUID), otherwise a new UUID.
+      schema: { type: string, example: 3f6c1b52-8a0e-4d6f-9b1e-2c7d5a4e9f10 }
 
   schemas:
 
@@ -4989,6 +5105,22 @@ components:
           type: array
           items: { type: string, format: uuid }
           description: 'Resolved through the `device_schemas` view, so join rows and `devices.schema_id` agree.'
+
+    FunctionError:
+      type: object
+      description: >-
+        What an edge function answers when it fails unexpectedly. Nothing in it is taken from the
+        error, which is logged under `request_id`.
+      required: [error, request_id]
+      properties:
+        error:
+          type: string
+          description: A fixed sentence, `The request failed on the server.` unless the path names what failed.
+          example: Could not generate the bundle
+        request_id:
+          type: string
+          description: The same id as the `X-Request-Id` header. An operator finds the error in the logs by it.
+          example: 3f6c1b52-8a0e-4d6f-9b1e-2c7d5a4e9f10
 
     Link:
       type: object
