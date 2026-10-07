@@ -1422,8 +1422,9 @@ published default is a silent security downgrade, and the failure mode is silenc
 `REBIRTH_REQUEST_INTERVAL_SECONDS` are the chart's `ingestion.deviceOfflineTimeoutSeconds`,
 `ingestion.deviceWatchdogIntervalSeconds` and `ingestion.rebirthRequestIntervalSeconds`.
 `validate.py`'s watchdog check reads the same names from its own environment to decide whether the
-window is short enough to wait for. Neither `npm run dev:test` nor the e2e Job passes them, so it
-assumes 300 and 30 and skips checks 10 and 10b unless they are set by hand to match the daemon.
+window is short enough to wait for. Both paths that run it pass the daemon's values:
+`npm run dev:test` reads them off the running Deployment, and the chart gives the e2e Job the block
+it gives the daemon.
 
 ### Log fields
 
@@ -1764,8 +1765,9 @@ npm run dev:test          # validate.py, then the stack lane
 > **`validate.py` needs `SUPABASE_SECRET_KEY`**, which `dev:test` reads out of the release
 > Secret. Without it the script seeds nothing and fails most of its checks in a way that reads like a
 > schema fault, with the real cause in its banner: `Secret key   : MISSING`. `dev:test` also sets
-> the forwarded hosts and ports, the validator's broker account, and `PRIMARY_HOST_ID` and
-> `SPARKPLUG_GROUP` as the running daemon has them; a run by hand needs the same.
+> the forwarded hosts and ports, the validator's broker account, and `PRIMARY_HOST_ID`,
+> `SPARKPLUG_GROUP` and the three watchdog and rebirth windows as the running daemon has them; a
+> run by hand needs the same.
 
 **In-cluster, as a Job in the namespace.** On the dev loop:
 
