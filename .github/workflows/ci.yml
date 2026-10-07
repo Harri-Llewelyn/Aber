@@ -1442,9 +1442,11 @@ jobs:
 
       # The suites under `scripts/lib/`: the two copies of the flow shape check, the appliance's
       # converge script, the mosquitto credential merge, the orphan sweep's filter and the service
-      # JWT; and node-red-init's move of a volume's flow. Explicit file paths, not the
-      # directory (see `npm run test:lib`). The converge suite needs `jq` on PATH and python3's yaml
-      # module (installed above), which a Windows development box lacks; it skips loudly rather than
+      # JWT; node-red-init's move of a volume's flow; and backup-databases.sh refusing a run it
+      # could not finish, and restore-databases.sh finding a backup's files through its manifest,
+      # with the PostgreSQL clients stubbed. Explicit file paths, not the directory (see
+      # `npm run test:lib`). The converge suite needs `jq` on PATH and python3's yaml module
+      # (installed above), which a Windows development box lacks; it skips loudly rather than
       # silently.
       - name: Run Node Library Suites
         run: npm run test:lib

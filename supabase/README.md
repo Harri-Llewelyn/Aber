@@ -4790,7 +4790,7 @@ port-forwards (`npm run dev:forward`), and the passwords come from `POSTGRES_PAS
 | `BACKUP_FORMAT` | `plain` | `.sql.gz`. Use `custom` for `.dump` — selective `pg_restore`, and what the chart's CronJob writes |
 | `BACKUP_DIR` | `./backups` | |
 | `BACKUP_RETENTION_DAYS` | `14` | `0` disables pruning |
-| `INCLUDE_STORAGE` | `true` | Every bucket's objects, as a tar of `STORAGE_HOST_PATH`: the storage volume's directory on this host. With that unset the script stops after the dumps and writes no manifest, so where the volume is not on this host set `false` |
+| `INCLUDE_STORAGE` | `true` | Every bucket's objects, as a tar of `STORAGE_HOST_PATH`: the storage volume's directory on this host. With that unset the script stops before the first dump and writes nothing, so where the volume is not on this host set `false` |
 | `DUMP_TIMESCALE` | `true` | `false` where pgBackRest backs the historian up (`timescaledb.physicalBackup`); the manifest then reads `timescaledb=physical` and the restore leaves the historian to `scripts/restore-historian.mjs` ([`deploy/k8s/README.md`](../deploy/k8s/README.md), *Backing up the historian*) |
 
 Without a port-forward, `kubectl exec` directly:
