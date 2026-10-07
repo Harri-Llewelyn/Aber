@@ -103,22 +103,23 @@ describe('GatewayCredentialModal', () => {
     expect(api.mintGatewayCredential).toHaveBeenCalledWith(GATEWAY.gateway_id)
   })
 
-  /** The block for the release Secret has to agree with the fields shown above it. */
-  it('builds the release Secret block from the same values it displays', async () => {
+  /**
+   * A host-run gateway's credential is typed on its broker node's Security tab, where Node-RED
+   * keeps it. The editor drops a property a node type does not declare, so the dialog must not
+   * send anyone to aberCredentialsEnv or a Secret.
+   */
+  it('tells a host-run gateway to enter the credential on its broker node in Node-RED', async () => {
     api.mintGatewayCredential.mockResolvedValue(CREDENTIAL)
     renderModal()
     await confirmAndMint()
 
-    await waitFor(() => expect(screen.getByText(/For the release Secret/i)).toBeTruthy())
-    fireEvent.click(screen.getByText(/Copy block/i))
-
-    await waitFor(() => expect(written.length).toBe(1))
-    expect(written[0]).toContain(`MQTT_GW_<NAME>_USER=${CREDENTIAL.mqtt_username}`)
-    expect(written[0]).toContain(`MQTT_GW_<NAME>_PASSWORD=${CREDENTIAL.password}`)
-    // The hint under the block says where to find the name and what reads the pair.
-    expect(screen.getAllByText(/aberCredentialsEnv/).length).toBeGreaterThan(0)
-    expect(screen.getByText(/node-red-init/)).toBeInTheDocument()
-    expect(screen.queryByText(/\.env/)).toBeNull()
+    await waitFor(() => expect(screen.getByText(/Use it in Node-RED/i)).toBeTruthy())
+    expect(screen.getByText('Security')).toBeInTheDocument()
+    expect(screen.getByText('mqtt-broker')).toBeInTheDocument()
+    expect(screen.getByText('mosquitto')).toBeInTheDocument()
+    expect(screen.queryByText(/Copy block/i)).toBeNull()
+    expect(screen.queryAllByText(/aberCredentialsEnv/)).toHaveLength(0)
+    expect(screen.queryAllByText(/release Secret/i)).toHaveLength(0)
   })
 
   /**

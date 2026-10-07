@@ -20,6 +20,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 
 // settings.js is CommonJS and has to be evaluated, not parsed, to see what it actually declares
 // -- see settingsAreCorrect(). This module is ESM, so `require` has to be constructed.
@@ -682,43 +683,39 @@ function credentialsWorthKeeping() {
 }
 
 /**
- * The broker username currently stored in flows_cred.json, or null if it cannot be read. A file
- * we cannot decrypt is not ours to judge, so it reads as null and is left untouched.
+ * Every credential flows_cred.json holds, by node id, or {} if it cannot be read. A file we cannot
+ * decrypt is not ours to judge, so it reads as empty and is left untouched.
  */
-function storedBrokerCredential(nodeId) {
-  if (!fs.existsSync(credentialsPath)) return null;
+function storedCredentials() {
+  if (!fs.existsSync(credentialsPath)) return {};
   try {
     const existing = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
-    if (typeof existing?.$ !== 'string' || existing.$.length === 0) return null;
+    if (typeof existing?.$ !== 'string' || existing.$.length === 0) return {};
     const key = crypto.createHash('sha256').update(credentialSecret).digest();
     const iv = Buffer.from(existing.$.substring(0, 32), 'hex');
     const decipher = crypto.createDecipheriv('aes-256-ctr', key, iv);
     const plain =
       decipher.update(existing.$.substring(32), 'base64', 'utf8') + decipher.final('utf8');
-    return JSON.parse(plain)[nodeId] || null;
+    const decoded = JSON.parse(plain);
+    return decoded && typeof decoded === 'object' ? decoded : {};
   } catch {
-    return null;
+    return {};
   }
 }
 
+/** The broker credential stored for one node, or null. */
+const storedBrokerCredential = (nodeId) => storedCredentials()[nodeId] || null;
+
 /**
- * Which credential each broker node in the flow should carry.
+ * The credential a MANAGED broker node should carry: the env pair its `aberCredentialsEnv` names.
  *
  * One connection per gateway, because the broker's roles pin the edge-node segment to the username.
- * The env prefix is declared on the node in `aberCredentialsEnv`, not derived from its id: a
- * convention is invisible when it breaks, and the only symptom is "Connection failed to broker".
- * The credential tooling emits exactly these variable names.
+ * The env prefix is declared on the node, not derived from its id: a convention is invisible when
+ * it breaks, and the only symptom is "Connection failed to broker". The pairs reach this container
+ * from nodeRed.gatewayCredentialsSecret.
  */
 function brokerCredentialFor(node) {
   const prefix = node[CREDENTIALS_ENV_KEY];
-
-  if (!prefix) {
-    fail(
-      `broker node '${node.id}' (${node.name || 'unnamed'}) declares no '${CREDENTIALS_ENV_KEY}'. ` +
-        'It would connect with no username, which Mosquitto refuses with CONNACK 5.'
-    );
-  }
-
   const user = process.env[`${prefix}_USER`];
   const password = process.env[`${prefix}_PASSWORD`];
 
@@ -729,8 +726,9 @@ function brokerCredentialFor(node) {
     fail(
       `broker node '${node.id}' declares ${CREDENTIALS_ENV_KEY}='${prefix}', but ` +
         `${prefix}_USER and/or ${prefix}_PASSWORD are not set.\n` +
-        '  Mint the credential from the dashboard: Gateways tab, Generate broker credential.\n' +
-        '  Add them to the release Secret and restart node-red-init.'
+        `  Add the pair to the Secret that nodeRed.gatewayCredentialsSecret names\n` +
+        `  (node-red-gateway-credentials by default) and restart Node-RED, or remove\n` +
+        `  ${CREDENTIALS_ENV_KEY} from the node and enter the credential on its Security tab instead.`
     );
   }
 
@@ -744,12 +742,29 @@ function brokerCredentialFor(node) {
  * Only a differing user triggers this: a password an operator changed in the editor is left
  * alone.
  */
-// Read the flow to find every broker node that needs a credential. Done here rather than reusing
-// the copy above, because that block only runs when a transport variable is set.
+// Read the flow to find every broker node. Done here rather than reusing the copy above, because
+// that block only runs when a transport variable is set.
+//
+// TWO KINDS OF BROKER NODE. One that declares `aberCredentialsEnv` is MANAGED: its credential is
+// the env pair it names, written onto it here. One that does not is the EDITOR'S: its credential is
+// what someone typed on its Security tab, and it is left alone. A node built in the editor is always
+// the second kind, because the editor saves only the properties a node type declares and drops
+// `aberCredentialsEnv` on the next deploy. Refusing to start over such a node took every flow down
+// for one gateway's missing password, so it is a warning that names the fix instead.
 const flowForCredentials = JSON.parse(fs.readFileSync(flowsPath, 'utf8'));
 const brokerNodes = flowForCredentials.filter((n) => n.type === 'mqtt-broker');
+for (const node of brokerNodes.filter((n) => !n[CREDENTIALS_ENV_KEY])) {
+  if (!storedBrokerCredential(node.id)?.user) {
+    console.warn(
+      `[node-red-init] broker node '${node.id}' (${node.name || 'unnamed'}) has no username yet, so ` +
+        'the broker will refuse it. Open it in the Node-RED editor and enter the gateway\'s ' +
+        'credential on its Security tab: the dashboard issues one from the gateway\'s drawer ' +
+        '(Generate Broker Credential).'
+    );
+  }
+}
 const brokerCredentials = new Map(
-  brokerNodes.map((node) => [node.id, brokerCredentialFor(node)])
+  brokerNodes.filter((n) => n[CREDENTIALS_ENV_KEY]).map((node) => [node.id, brokerCredentialFor(node)])
 );
 
 // ANY broker whose stored username no longer matches forces the rewrite. Checked across all of
@@ -823,7 +838,8 @@ if (!writeCredentials) {
 
 // 4. Encrypt the credentials via Node-RED's own runtime module.
 const credentials = (
-  await import(`${RUNTIME_DIR}/@node-red/runtime/lib/nodes/credentials.js`)
+  // A file URL, not a path: import() reads a Windows drive letter as a URL scheme.
+  await import(pathToFileURL(path.join(RUNTIME_DIR, '@node-red/runtime/lib/nodes/credentials.js')).href)
 ).default;
 
 const noop = () => {};
@@ -835,15 +851,20 @@ credentials.init({
 });
 
 credentials.setKey(credentialSecret);
-for (const [nodeId, credential] of brokerCredentials) {
+// Every credential the file already holds is kept -- the editor's broker nodes and any other node's
+// -- and the managed pairs are written over them. Writing the managed pairs alone would erase
+// whatever was typed in the editor.
+const kept = Object.entries(storedCredentials()).filter(([nodeId]) => !brokerCredentials.has(nodeId));
+const written = new Map([...kept, ...brokerCredentials]);
+for (const [nodeId, credential] of written) {
   await credentials.add(nodeId, credential);
 }
 // Zero is a legitimate count (a blank flow declares no broker nodes) and is said as such, rather
 // than printed as an empty list that reads like a lookup that returned nothing.
 if (brokerCredentials.size === 0) {
   console.log(
-    '[node-red-init] no broker nodes in the flow, so there are no credentials to seed. ' +
-      'That is the blank flow this stack seeds; add a broker node and its credential pair to change it.'
+    '[node-red-init] no managed broker nodes in the flow, so there are no credential pairs to seed. ' +
+      'A broker node built in the editor carries its own, from its Security tab.'
   );
 } else {
   console.log(
@@ -851,6 +872,7 @@ if (brokerCredentials.size === 0) {
       [...brokerCredentials].map(([id, c]) => `${id}=${c.user}`).join(', ')
   );
 }
+if (kept.length) console.log(`[node-red-init] keeping ${kept.length} stored credential(s) the editor wrote.`);
 
 const exported = await credentials.export();
 
@@ -864,8 +886,8 @@ if (!Object.prototype.hasOwnProperty.call(exported, '$')) {
 }
 
 // 6. Prove Node-RED will be able to read every credential back before committing it to disk.
-// Checked per broker node, not against one hardcoded id: a partial check would pass on the one
-// node it knew about and say nothing about the rest.
+// Checked per node, kept ones included, not against one hardcoded id: a partial check would pass
+// on the one node it knew about and say nothing about the rest.
 try {
   const key = crypto.createHash('sha256').update(credentialSecret).digest();
   const blob = exported.$;
@@ -875,9 +897,9 @@ try {
     decipher.update(blob.substring(32), 'base64', 'utf8') + decipher.final('utf8');
   const decoded = JSON.parse(plain);
 
-  for (const [nodeId, expected] of brokerCredentials) {
+  for (const [nodeId, expected] of written) {
     const roundTripped = decoded[nodeId];
-    if (roundTripped?.user !== expected.user || roundTripped?.password !== expected.password) {
+    if (JSON.stringify(roundTripped) !== JSON.stringify(expected)) {
       fail(
         `credential round-trip mismatch for broker node '${nodeId}'; refusing to write. ` +
           'Node-RED would not have been able to decrypt it, and the gateway would report only ' +

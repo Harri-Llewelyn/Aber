@@ -1,6 +1,7 @@
 /**
  * node-red-init against a seeded volume: the TLS reconcile adds one tls-config node and points
- * every broker at it, and a broker node that names no credential pair stops the boot.
+ * every broker at it; a managed broker node whose pair is missing stops the boot, while one built
+ * in the editor is left alone with what its Security tab holds.
  *
  *   node --test node-red/node-red-init.test.mjs
  *
@@ -104,12 +105,78 @@ describe('the TLS reconcile', () => {
   });
 });
 
+/** What flows_cred.json holds once decrypted, by node id. */
+function decrypted(dir) {
+  const { $: blob } = JSON.parse(fs.readFileSync(path.join(dir, 'flows_cred.json'), 'utf8'));
+  const decipher = crypto.createDecipheriv(
+    'aes-256-ctr', crypto.createHash('sha256').update(SECRET).digest(), Buffer.from(blob.substring(0, 32), 'hex'));
+  return JSON.parse(decipher.update(blob.substring(32), 'base64', 'utf8') + decipher.final('utf8'));
+}
+
+/**
+ * Node-RED's credentials module exists only in the image, so a boot that WRITES credentials gets
+ * this stand-in: the same envelope (aes-256-ctr under sha256(key), iv in hex ahead of it). It
+ * tests what this script hands the module; the module itself is Node-RED's.
+ */
+function fakeCredentialsModule(dir) {
+  const target = path.join(dir, 'no-runtime', '@node-red', 'runtime', 'lib', 'nodes');
+  fs.mkdirSync(target, { recursive: true });
+  fs.writeFileSync(path.join(target, 'credentials.js'), `
+const crypto = require('node:crypto');
+let key; const held = {};
+module.exports = {
+  init() {},
+  setKey(secret) { key = crypto.createHash('sha256').update(secret).digest(); },
+  async add(id, credential) { held[id] = credential; },
+  async export() {
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv('aes-256-ctr', key, iv);
+    return { $: iv.toString('hex') + cipher.update(JSON.stringify(held), 'utf8', 'base64') + cipher.final('base64') };
+  },
+};
+`);
+}
+
+/** A broker node built in the editor: the editor drops aberCredentialsEnv, so it has none. */
+const EDITOR_BROKER = { id: 'ed-broker', type: 'mqtt-broker', name: 'Host gateway', broker: 'mosquitto', port: '1883' };
+const TYPED = { user: 'gwy300000000000400080000', password: 'typed-in-the-editor' };
+
 describe('the broker credential pair', () => {
-  it('refuses a broker node that declares no pair, naming the property', () => {
-    const none = flow();
-    delete none.find((n) => n.id === 'gw-broker-2').aberCredentialsEnv;
-    const result = boot(volume(JSON.stringify(none)));
+  it('starts with a broker node built in the editor that has no credential yet, and says how to fix it', () => {
+    const editorOnly = flow([EDITOR_BROKER]);
+    const result = boot(volume(JSON.stringify(editorOnly)));
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stderr, /broker node 'ed-broker' \(Host gateway\) has no username yet/);
+    assert.match(result.stderr, /Security tab/);
+  });
+
+  it('leaves a credential typed in the editor alone', () => {
+    const dir = volume(JSON.stringify(flow([EDITOR_BROKER])), { 'gw-broker': BROKER, 'gw-broker-2': TWO, 'ed-broker': TYPED });
+    const result = boot(dir);
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stderr, /ed-broker/);
+    assert.deepEqual(decrypted(dir)['ed-broker'], TYPED);
+  });
+
+  it('keeps a credential typed in the editor when it writes a managed pair', () => {
+    // gw-broker-2 has nothing stored, which is what makes this boot write the file.
+    const dir = volume(JSON.stringify(flow([EDITOR_BROKER])), { 'gw-broker': BROKER, 'ed-broker': TYPED });
+    fakeCredentialsModule(dir);
+    const out = run(dir);
+    assert.match(out, /keeping 1 stored credential/);
+    const stored = decrypted(dir);
+    assert.deepEqual(stored['ed-broker'], TYPED);
+    assert.deepEqual(stored['gw-broker-2'], TWO);
+    assert.deepEqual(stored['gw-broker'], BROKER);
+  });
+
+  it('refuses a declared pair that is not set, naming the Secret it belongs in', () => {
+    const result = boot(volume(JSON.stringify(flow())), {
+      MQTT_GW_TWO_USER: '', MQTT_GW_TWO_PASSWORD: '',
+    });
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr + result.stdout, /broker node 'gw-broker-2' \(Cell 2\) declares no 'aberCredentialsEnv'/);
+    const out = result.stderr + result.stdout;
+    assert.match(out, /MQTT_GW_TWO_USER and\/or MQTT_GW_TWO_PASSWORD are not set/);
+    assert.match(out, /the Secret that nodeRed\.gatewayCredentialsSecret names/);
   });
 });

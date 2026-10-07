@@ -2441,7 +2441,9 @@ paths:
                     type: object
                     description: >-
                       The `MQTT_GW_<NAME>_USER` / `_PASSWORD` variable names `node-red-init`
-                      reconciles a broker node's credentials from.
+                      reconciles a managed broker node's credentials from, for a flow written
+                      outside the editor. A broker node built in the editor takes the username
+                      and password on its Security tab instead.
         '400': { description: '`gateway_id` malformed, absent, or naming a Remote or archived gateway.' }
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Forbidden: requires Administrator or Shopfloor_Manager.' }
