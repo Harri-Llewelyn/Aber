@@ -1,84 +1,14 @@
 """
 Unit test suite for the approve-quarantine Supabase Edge Function.
 
-Covers the fail-closed authorization logic (missing or non-privileged role claims) and the
-location patch composition added with archived migration 0036 -- specifically that an unanswered cell is
-omitted rather than defaulted, which is what keeps devices.cell_id's NULL-means-inherit intact.
+Covers the location patch composition, specifically that an unanswered cell is omitted rather than
+defaulted, which is what keeps devices.cell_id's NULL-means-inherit intact; and asserts against
+index.ts that the role gate takes the caller's role from public.user_roles through
+_shared/roles.ts. The lookup itself is tested in _shared/roles_test.ts.
 """
 import os
 import re
 import unittest
-
-def evaluate_approve_quarantine_authorization(user: dict) -> tuple[int, str]:
-    """
-    Python mirror of the authorization logic in supabase/functions/approve-quarantine/index.ts.
-    """
-    if not user:
-        return 401, "Invalid user token"
-
-    app_metadata = user.get("app_metadata", {})
-    user_role = app_metadata.get("role") or None
-    allowed_roles = ["Administrator", "Shopfloor_Manager"]
-
-    if not user_role or user_role not in allowed_roles:
-        return 403, "Forbidden: Insufficient privileges"
-
-    return 200, "Authorized"
-
-class TestApproveQuarantineAuth(unittest.TestCase):
-
-    def test_missing_role_claim_returns_403(self):
-        """User token with no role in app_metadata must fail closed with 403."""
-        user = {
-            "id": "usr-no-role-123",
-            "app_metadata": {},
-            "user_metadata": {}
-        }
-        status, message = evaluate_approve_quarantine_authorization(user)
-        self.assertEqual(status, 403)
-        self.assertIn("Forbidden", message)
-
-    def test_privileged_role_in_user_metadata_only_returns_403(self):
-        """User setting user_metadata.role = 'Administrator' must be rejected with 403."""
-        user = {
-            "id": "usr-attacker-000",
-            "app_metadata": {},
-            "user_metadata": {"role": "Administrator"}
-        }
-        status, message = evaluate_approve_quarantine_authorization(user)
-        self.assertEqual(status, 403)
-        self.assertIn("Forbidden", message)
-
-    def test_operator_role_returns_403(self):
-        """User token with role 'Operator' (non-privileged) must fail closed with 403."""
-        user = {
-            "id": "usr-op-456",
-            "app_metadata": {"role": "Operator"},
-            "user_metadata": {}
-        }
-        status, message = evaluate_approve_quarantine_authorization(user)
-        self.assertEqual(status, 403)
-        self.assertIn("Forbidden", message)
-
-    def test_shopfloor_manager_role_returns_200(self):
-        """User token with role 'Shopfloor_Manager' must succeed authorization."""
-        user = {
-            "id": "usr-mgr-789",
-            "app_metadata": {"role": "Shopfloor_Manager"},
-            "user_metadata": {}
-        }
-        status, message = evaluate_approve_quarantine_authorization(user)
-        self.assertEqual(status, 200)
-
-    def test_administrator_role_returns_200(self):
-        """User token with role 'Administrator' must succeed authorization."""
-        user = {
-            "id": "usr-admin-000",
-            "app_metadata": {"role": "Administrator"},
-            "user_metadata": {}
-        }
-        status, message = evaluate_approve_quarantine_authorization(user)
-        self.assertEqual(status, 200)
 
 
 UUID_RE = re.compile(
@@ -285,6 +215,55 @@ class TestApproveQuarantineMirrorsSource(unittest.TestCase):
         """A raw Postgres message discloses table, column and constraint names."""
         self.assertNotIn("rpcError.message }", self.source)
         self.assertIn("Approval failed", self.source)
+
+
+class TestApproveQuarantineRoleGate(unittest.TestCase):
+    """
+    The role gate, asserted against index.ts because there is no Deno runtime here, the approach
+    test_nodered_userinfo.py takes. What resolveUserRole returns is tested in _shared/roles_test.ts.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "index.ts"), "r", encoding="utf-8") as handle:
+            cls.source = handle.read()
+        # Comments are stripped for the negative assertion, so prose explaining why a claim is not
+        # read cannot fail it.
+        without_blocks = re.sub(r"/\*.*?\*/", "", cls.source, flags=re.DOTALL)
+        cls.code = "\n".join(
+            line for line in without_blocks.splitlines() if not line.strip().startswith("//")
+        )
+
+    def test_the_role_is_resolved_from_user_roles_through_the_shared_lookup(self):
+        """The caller-bound client applies RLS to the user_roles read (README.md)."""
+        self.assertIn('import { resolveUserRole } from "../_shared/roles.ts";', self.code)
+        self.assertRegex(
+            self.code, r"const userRole = await resolveUserRole\(supabaseUser, user\.id\);"
+        )
+
+    def test_the_role_is_never_read_from_token_claims(self):
+        """Deleting a user's user_roles row revokes the role; a claim would re-grant it."""
+        for claim in ("app_metadata", "user_metadata"):
+            self.assertNotIn(
+                claim,
+                self.code,
+                f"approve-quarantine reads {claim}. public.user_roles, through "
+                "_shared/roles.ts, is the only source of the caller's role.",
+            )
+
+    def test_the_gate_admits_the_two_manager_roles_and_fails_closed(self):
+        """No role, or any role but these two (Operator among them), is a 403."""
+        allowed = re.search(r"const ALLOWED_ROLES = \[([^\]]*)\];", self.code)
+        self.assertIsNotNone(allowed, "ALLOWED_ROLES not found in index.ts")
+        self.assertEqual(
+            re.findall(r'"([^"]+)"', allowed.group(1)), ["Administrator", "Shopfloor_Manager"]
+        )
+        self.assertRegex(
+            self.code,
+            r"if \(!userRole \|\| !ALLOWED_ROLES\.includes\(userRole\)\) \{\s*"
+            r'return jsonResponse\(\{ error: "Forbidden: Insufficient privileges" \}, 403\);',
+        )
 
 
 if __name__ == "__main__":
