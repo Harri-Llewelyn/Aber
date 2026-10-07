@@ -31,8 +31,7 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
   }
 
   const isOffline = asset.status === 'OFFLINE'
-  // Every schema attached through device_submodels (archived migration 20260101000034_device_submodels),
-  // or the legacy 1:1 one.
+  // Every schema attached to the device, by device_submodels row or the deprecated schema_id.
   const attachedSchemas = schemasForDevice(asset, schemas)
 
   // Expected-vs-actual: every metric the schema models (present or missing), plus anything the

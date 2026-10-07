@@ -746,10 +746,10 @@ export const SUITES = {
       'THE REST NEED THE STACK, and two of them are the reason the suite exists: /v1/device and ' +
       '/v1/schema/{uuid} answer the same question from opposite ends, composed by different ' +
       'queries, and a disagreement is a 200 at both endpoints. The live layer also provisions a ' +
-      'device attached through `devices.schema_id`, as the dashboard attaches, beside the ' +
-      'join-table `device_submodels` one, because a reverse lookup written against the join ' +
-      'table alone passes every other assertion in the file while omitting every device the ' +
-      'dashboard attached.',
+      'device attached through the deprecated `devices.schema_id` beside the join-table ' +
+      '`device_submodels` one, because a reverse lookup written against the join table alone ' +
+      'passes every other assertion in the file while omitting every device attached through ' +
+      'the column, which a 1.0 dashboard wrote and an API client still may.',
   },
   'supabase/migrations/test_gateway_enrollment.py': {
     // STACK ONLY, AND IT WAS BRIEFLY `db` TOO -- WRONGLY, BY THIS FILE'S OWN RULE. Every one of
