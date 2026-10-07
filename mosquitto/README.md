@@ -1,5 +1,9 @@
 # The broker's policy
 
+**In short:** who may connect to the broker, and which topics each may use. Every gateway has its
+own account, confined to its own topics. Read this to understand a refused connection, or before
+adding an account for a new service.
+
 Mosquitto authenticates and authorises every client through its Dynamic Security plugin. The
 roles are declared in [`dynsec-roles.json`](dynsec-roles.json) and applied at every boot; the
 clients are the platform principals from the environment plus one account per gateway, issued by

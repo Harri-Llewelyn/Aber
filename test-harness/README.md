@@ -1,5 +1,9 @@
 # Test harness
 
+**In short:** the tests that need a whole running Aber rather than one part of it, and the load
+generator that measures how much it can take. Read this to run or add one of those tests.
+[`docs/testing.md`](../docs/testing.md) lists every test.
+
 Fixtures and suites that need the assembled stack rather than a module.
 
 | File | Purpose |

@@ -1,5 +1,9 @@
 # i3X 1.0 server
 
+**In short:** lets other software browse and read Aber's equipment and live data through i3X, an
+open API standard from CESMII. Read this to connect a client, including an AI assistant through MCP,
+or to change the server.
+
 A conformant [i3X](https://github.com/cesmii/i3X) (CESMII Industrial Information Interoperability
 eXchange) server over this stack's existing model.
 

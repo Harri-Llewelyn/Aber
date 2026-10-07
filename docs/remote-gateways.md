@@ -1,5 +1,9 @@
 # Remote gateways — operator runbook
 
+**In short:** how to set up a gateway on its own hardware, keep it running, and fix it when
+something goes wrong. For your first gateway, the dashboard's **Gateways** page walks you through
+setup. This page explains each step, and what to do when one fails.
+
 How a piece of hardware on a shopfloor becomes a gateway this platform trusts, and what to do when
 that goes wrong.
 

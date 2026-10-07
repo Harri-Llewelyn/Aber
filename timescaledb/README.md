@@ -1,5 +1,10 @@
 # The historian's maintenance
 
+**In short:** how Aber looks after the historian, the database that keeps every reading: how long
+readings are kept, the summaries built from them, the cold archive and backups, and who may read
+them. All of it is applied on every install and upgrade. Read this to change how long data is kept,
+or to find out where old readings went.
+
 The SQL in this directory is applied to the historian on every `helm install` and `helm upgrade`
 (each a *boot* below; a restart of the historian pod alone does not run it) by the chart's
 maintenance hook Job (`deploy/helm/aber/templates/jobs/timescaledb-maintenance.yaml`), from a
