@@ -135,7 +135,7 @@ spec:
 
               It connected as the admin user, which is superuser there: the process most exposed to
               the plant network could DROP the hypertable and rewrite any observation, while the
-              README listed "append-only historian writes" as a control at this layer.
+              security model listed "append-only historian writes" as a control at this layer.
               `ingest_writer` (timescaledb/roles.sql) makes that claim a grant.
 
               THE PASSWORD FOLLOWS THE USER rather than being set beside it, so the two cannot

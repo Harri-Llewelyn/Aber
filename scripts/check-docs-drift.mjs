@@ -54,28 +54,60 @@ const IGNORED = read('.gitignore').split('\n').map((l) => l.trim())
 const gitignored = (path) => IGNORED.some((p) => p.test(path));
 
 // -------------------------------------------------------------------------------------------------
-// 1. Every local markdown link resolves.
+// 1. Every local markdown link resolves, and every #anchor names a heading in the file it points
+// at. Moving a section between documents breaks anchors and nothing else, so the anchor is checked
+// too: GitHub's slug rule, a -N suffix for repeated headings, and explicit <a name|id>.
 // -------------------------------------------------------------------------------------------------
 {
+  const anchorCache = new Map();
+  const anchorsOf = (path) => {
+    if (anchorCache.has(path)) return anchorCache.get(path);
+    const anchors = new Set();
+    const seen = new Map();
+    let fence = false;
+    for (const line of readFileSync(path, 'utf8').split('\n')) {
+      if (/^\s*(```|~~~)/.test(line)) { fence = !fence; continue; }
+      if (fence) continue;
+      const heading = line.match(/^#{1,6}\s+(.*?)\s*$/);
+      if (heading) {
+        const slug = heading[1].toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/\s/g, '-');
+        const n = seen.get(slug) || 0;
+        seen.set(slug, n + 1);
+        anchors.add(n ? `${slug}-${n}` : slug);
+      }
+      for (const m of line.matchAll(/<a\s+(?:name|id)="([^"]+)"/g)) anchors.add(m[1]);
+    }
+    anchorCache.set(path, anchors);
+    return anchors;
+  };
+
   const docs = MARKDOWN;
   let broken = 0;
+  let anchored = 0;
   for (const doc of docs) {
     const body = read(doc);
     for (const [, , target] of body.matchAll(/\[([^\]]+)\]\(([^)\s]+)\)/g)) {
-      const clean = target.replace(/#.*$/, '');
-      if (!clean || /^(https?:|mailto:)/.test(clean)) continue;
-      const p = normalize(join(REPO, dirname(doc), clean));
+      if (/^(https?:|mailto:)/.test(target)) continue;
+      const [clean, anchor] = target.split('#');
+      const p = clean ? normalize(join(REPO, dirname(doc), clean)) : join(REPO, doc);
       if (!existsSync(p)) {
         fail(`${doc}: broken link -> ${target}`);
+        broken += 1;
+        continue;
+      }
+      if (!anchor || !p.endsWith('.md')) continue;
+      anchored += 1;
+      if (!anchorsOf(p).has(decodeURIComponent(anchor))) {
+        fail(`${doc}: link -> ${target} names no heading in ${clean || doc}`);
         broken += 1;
       }
     }
   }
-  if (!broken) pass(`all local links resolve across ${docs.length} markdown files`);
+  if (!broken) pass(`all local links resolve across ${docs.length} markdown files, ${anchored} of them to a heading`);
 }
 
 // -------------------------------------------------------------------------------------------------
-// 2. README's component table pins the same image tags the chart does. The chart's values are
+// 2. The component table (docs/architecture.md) pins the same image tags the chart does. The chart's values are
 // parsed by shape: a `repository:` line followed by its `tag:` line, comments between allowed.
 // -------------------------------------------------------------------------------------------------
 const CHART_VALUES = read('deploy/helm/aber/values.yaml');
@@ -94,23 +126,23 @@ const chartPins = new Map();
   }
 }
 {
-  const readme = read('README.md');
+  const readme = read('docs/architecture.md');
   let checked = 0;
   for (const [, repo, tag] of readme.matchAll(/\|\s*`([a-z0-9][a-z0-9./_-]*):([^`|]+)`\s*\|/g)) {
     if (!chartPins.has(repo)) continue;
     checked += 1;
     if (chartPins.get(repo) !== tag) {
-      fail(`README.md image tag drift: ${repo} documented as :${tag}, values.yaml pins :${chartPins.get(repo)}`);
+      fail(`docs/architecture.md image tag drift: ${repo} documented as :${tag}, values.yaml pins :${chartPins.get(repo)}`);
     }
   }
   // An image in the table with NO tag is drift too -- it reads as "unpinned" when it is pinned.
   for (const repo of chartPins.keys()) {
     if (readme.includes(`\`${repo}\``) && !readme.includes(`\`${repo}:`)) {
-      fail(`README.md lists \`${repo}\` with no tag, but values.yaml pins :${chartPins.get(repo)}`);
+      fail(`docs/architecture.md lists \`${repo}\` with no tag, but values.yaml pins :${chartPins.get(repo)}`);
     }
   }
-  if (checked) pass(`README image tags agree with the chart (${checked} checked)`);
-  else fail('README.md names none of the images the chart pins; the component table is missing');
+  if (checked) pass(`component table image tags agree with the chart (${checked} checked)`);
+  else fail('docs/architecture.md names none of the images the chart pins; the component table is missing');
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -131,33 +163,33 @@ const chartPins = new Map();
   };
   walk(join(REPO, 'deploy/helm/aber/templates'));
 
-  const readme = read('README.md');
+  const readme = read('docs/architecture.md');
   const section = readme.slice(readme.indexOf('## Components'));
   const table = section.slice(0, section.indexOf('\n---'));
   const listed = new Set();
   for (const [, name] of table.matchAll(/^\|\s*`([a-z0-9][a-z0-9._-]*)`\s*\|/gm)) listed.add(name);
 
   if (components.size === 0 || listed.size === 0) {
-    fail('component table check could not parse the chart templates or the README table');
+    fail('component table check could not parse the chart templates or the docs/architecture.md table');
   } else {
     const ghosts = [...listed].filter((n) => !components.has(n));
     const missing = [...components].filter((n) => !listed.has(n));
     if (ghosts.length) {
       fail(
-        `README component table names ${ghosts.length} component(s) the chart does not ` +
+        `docs/architecture.md's component table names ${ghosts.length} component(s) the chart does not ` +
         `declare: ${ghosts.join(', ')}. A row naming a dead component still passes the image-tag ` +
         `check whenever the image survives it.`
       );
     }
     if (missing.length) {
       fail(
-        `the chart declares ${missing.length} component(s) the README component table ` +
+        `the chart declares ${missing.length} component(s) docs/architecture.md's component table ` +
         `omits: ${missing.join(', ')}. The table is the answer to "what runs here", so an absent ` +
         `row is a component nobody reading the docs knows about.`
       );
     }
     if (!ghosts.length && !missing.length) {
-      pass(`README component table matches the chart in both directions (${components.size} components)`);
+      pass(`the component table matches the chart in both directions (${components.size} components)`);
     }
   }
 }
@@ -212,7 +244,7 @@ const chartPins = new Map();
 
 // -------------------------------------------------------------------------------------------------
 // 2d. A version this stack says it pins in prose is a version the chart pins. Check 2 holds the
-// README's component table; this holds the same claim wherever it is written as a sentence, which
+// component table; this holds the same claim wherever it is written as a sentence, which
 // is where nothing was holding it (issue #318: a contact-point comment cited the file that
 // disproved it). In scope is a claim whose own line names the stack, the chart, an image or a tag,
 // or one of the repositories the chart pins -- a standard's namespace also "pins" a version and is
@@ -309,8 +341,8 @@ const chartPins = new Map();
 // -------------------------------------------------------------------------------------------------
 // 3. README + docs/testing.md name every job in every workflow, and no job they do not have.
 // Every workflow, including release.yml, which never runs on a branch. The two documents are
-// named, never globbed: README's Testing section is a pointer and the jobs are tabled in
-// docs/testing.md.
+// named, never globbed: the jobs are tabled in docs/testing.md, and README.md, which links to it,
+// is read so that a job it names still counts.
 // -------------------------------------------------------------------------------------------------
 {
   const readme = ['README.md', 'docs/testing.md'].map(read).join('\n');
@@ -470,7 +502,7 @@ function edgeFunctionNames() {
 // -------------------------------------------------------------------------------------------------
 {
   const fns = edgeFunctionNames();
-  const readme = read('README.md');
+  const readme = read('docs/architecture.md');
   // A word not in this map parses as NaN and fails loudly, but reads as a documentation error.
   // Extended past the current count.
   const WORDS = {
@@ -482,18 +514,18 @@ function edgeFunctionNames() {
     thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
     seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
   };
-  // The count in the design-ethos sentence ("... eighteen edge functions, an i3X server and a React
-  // dashboard"). A README the pattern no longer matches fails rather than skipping the check.
+  // The count in docs/architecture.md's design-ethos sentence ("... eighteen edge functions, an i3X
+  // server and a React dashboard"). A page the pattern no longer matches fails rather than skipping.
   const claimed = readme.match(/(\w+) edge functions, an i3X server/);
   if (!claimed) {
-    fail('README.md states no "<n> edge functions, an i3X server"; check 5 cannot verify the count');
+    fail('docs/architecture.md states no "<n> edge functions, an i3X server"; check 5 cannot verify the count');
   } else {
     const n = WORDS[claimed[1].toLowerCase()] ?? Number(claimed[1]);
-    if (n !== fns.length) fail(`README.md claims "${claimed[1]} edge functions"; ${fns.length} exist: ${fns.join(', ')}`);
+    if (n !== fns.length) fail(`docs/architecture.md claims "${claimed[1]} edge functions"; ${fns.length} exist: ${fns.join(', ')}`);
   }
   const unnamed = fns.filter((f) => !readme.includes(f));
-  if (unnamed.length) fail(`README.md never names edge function(s): ${unnamed.join(', ')}`);
-  if (!unnamed.length) pass(`README names all ${fns.length} edge functions`);
+  if (unnamed.length) fail(`docs/architecture.md never names edge function(s): ${unnamed.join(', ')}`);
+  if (!unnamed.length) pass(`docs/architecture.md names all ${fns.length} edge functions`);
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -501,7 +533,8 @@ function edgeFunctionNames() {
 //
 // The document set is named, not globbed: a glob makes the check easier to satisfy the more
 // documentation exists, and `supabase/migrations/archive/README.md` alone mentions enough
-// prefixes to pass it vacuously. supabase/README.md is included because the schema half of a
+// prefixes to pass it vacuously. docs/architecture.md holds *The schema every install applies*, and
+// supabase/README.md is included because the schema half of a
 // retired roadmap entry lands there. `docs/roadmap.md` is NOT: it is the record of what retired
 // and it no longer grows, so a new migration has to be documented where a reader looks for it.
 // Adding to the list is a deliberate act.
@@ -512,7 +545,7 @@ function edgeFunctionNames() {
     .map((f) => f.slice(0, 4))
     .filter((v, i, a) => a.indexOf(v) === i)
     .sort();
-  const DOCS = ['README.md', 'supabase/README.md'];
+  const DOCS = ['docs/architecture.md', 'supabase/README.md'];
   const corpus = DOCS.map(read).join(' ');
   const missing = migs.filter((m) => !corpus.includes(m));
   if (missing.length) fail(`no doc mentions migration(s): ${missing.join(', ')}`);
@@ -780,7 +813,7 @@ function edgeFunctionNames() {
     // Empty just after a squash: the baseline is generated from a dump of the finished database,
     // so every function appears in it exactly once, in its final form. Entries return as soon as
     // a migration added after the fold redeclares something the baseline holds, and each one
-    // records WHY that replacement is meant. The README.md note "The archive has no 0017" is the
+    // records WHY that replacement is meant. The docs/architecture.md note "The archive has no 0017" is the
     // case where an unrecorded one would have regressed audit attribution.
   };
 
@@ -856,7 +889,7 @@ function edgeFunctionNames() {
     fail(
       'Every migration is replayed on every boot in filename order and there is no applied-migrations\n' +
         '      ledger, so the LAST declaration wins -- silently, with no error. A redeclaration is fine when\n' +
-        '      it is meant; record it in INTENDED_REDECLARATIONS with the reason. The README.md note "The\n' +
+        '      it is meant; record it in INTENDED_REDECLARATIONS with the reason. The docs/architecture.md note "The\n' +
         '      archive has no 0017" is the case where an unrecorded one would have regressed audit attribution.'
     );
   } else {
@@ -3174,7 +3207,8 @@ function edgeFunctionNames() {
 // auth plugin are what a reader would act on. docs/gateway.md's History is where Kong's facts live.
 // -------------------------------------------------------------------------------------------------
 {
-  const CURRENT = ['docs/kubernetes-architecture.md', 'deploy/k8s/README.md', 'README.md', 'supabase/README.md'];
+  const CURRENT = ['docs/kubernetes-architecture.md', 'deploy/k8s/README.md', 'README.md', 'docs/install.md',
+    'docs/architecture.md', 'docs/security-model.md', 'supabase/README.md'];
   const ARTEFACTS = [/\bkong\.yml\b/, /\bKONG_[A-Z]/, /checksum\/kong-/, /\bkong_[a-z]/, /(?<![\w-])kong:\d/, /\bkey-auth\b/];
   const offences = [];
   for (const file of CURRENT) {
@@ -3257,7 +3291,7 @@ function edgeFunctionNames() {
     ['test-harness/README.md', 'Not the demonstration simulator', 'says what the load generator is not'],
     ['deploy/helm/aber/values.yaml', 'The demonstration simulator was removed', 'history, beside the value it explains'],
     ['docs/gateway.md', "Envoy kept the Kong Service's name", "the gateway's History"],
-    ['README.md', 'It used to come up with a four-cell simulated shopfloor', 'what a fresh install used to hold'],
+    ['docs/install.md', 'It used to come up with a four-cell simulated shopfloor', 'what a fresh install used to hold'],
   ];
 
   const THIS_FILE = 'scripts/check-docs-drift.mjs';

@@ -20,7 +20,7 @@ import App from '../App'
 
 /**
  * The sign-in form must not carry a credential. The seeded password is public on purpose (seed.sql,
- * the README, every backend suite), so the defect is a login form that offers it, and the fix is
+ * docs/install.md, every backend suite), so the defect is a login form that offers it, and the fix is
  * blank fields rather than a rotation. Two assertions because they fail for different reasons: the
  * rendered one catches the state initialiser, the source one catches a `defaultValue`, a
  * placeholder or a module-scope constant. scripts/check-docs-drift.mjs carries the wider rule that

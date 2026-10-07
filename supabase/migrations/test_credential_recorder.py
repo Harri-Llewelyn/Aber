@@ -15,7 +15,7 @@ The Access Control page then reported `No platform record` for three gateways wh
 at the broker and publishing.
 
 That is not a cosmetic gap. These credentials cannot be revoked in any general sense -- rotating
-`SUPABASE_JWT_SECRET` invalidates every key in the stack -- so README.md's Accepted risks section
+`SUPABASE_JWT_SECRET` invalidates every key in the stack -- so docs/security-model.md's Accepted risks section
 names the inventory as the compensating control. An inventory that under-reports is that control
 not working.
 

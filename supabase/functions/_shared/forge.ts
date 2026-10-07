@@ -17,7 +17,7 @@
  * never DEPLOY: `main` is protected with pushes disabled and deploy keys not whitelisted, the
  * `appliance` branch admits deploy keys alone and blocks force-push, and a `**` rule closes every
  * other branch to them. Measured against gitea/gitea:1.27.3: the key can also push to the wiki,
- * which no rule covers; README.md records that under accepted risks.
+ * which no rule covers; docs/security-model.md records that under accepted risks.
  *
  * Failure here is non-fatal: by the time this runs the token is spent and the broker credential
  * exists, and telemetry needs nothing from the forge. A failure is logged loudly, `repository`
