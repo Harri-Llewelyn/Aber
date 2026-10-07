@@ -77,14 +77,13 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
 // 2. Every metric is typed the way the platform reads a type.
 {
   // json_metric_value() takes the type only from `datatype`: it reads a bare `value` by what the
-  // JSON holds and ignores `type`. The playback recorder does not read a bare `value` at all.
+  // JSON holds and ignores `type`.
   const legacy = [...raw.matchAll(/\{\s*name:\s*'([^']+)',\s*type:\s*'(String|Int64|Int32|Float|Double|Boolean)'/g)];
   if (legacy.length) {
     fail(
       `${legacy.length} metric(s) use the \`{ name, type, value }\` encoding: `
       + `${legacy.map((m) => m[1]).join(', ')}.\n`
-      + '         The daemon ignores `type`, so the metric arrives with no datatype, and the\n'
-      + '         playback recorder does not read a bare `value`, so a recording replays it empty.\n'
+      + '         The daemon ignores `type`, so the metric arrives with no datatype.\n'
       + '         Send `datatype` and the typed field, as the rest of the flow does.'
     );
   } else {

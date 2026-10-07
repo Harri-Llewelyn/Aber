@@ -343,7 +343,9 @@ epoch — a stale reading, a device clock skewed against the recorder's, or a ha
 
 Editing a captured value by hand is half the point, so the file holds the readable form regardless
 of what arrived — and the shape is the one `parse_sparkplug_payload()` already accepts as its
-fallback, so a hand-edit valid in the file is valid to the daemon.
+fallback, so a hand-edit valid in the file is valid to the daemon. Recording and playback read JSON
+through the daemon's own reader, `json_payload()`, so a replayed message carries what the daemon
+stored from the original, metric for metric.
 
 **Playback re-encodes into the encoding each message arrived in.** Both are live traffic here — the
 gateway appliance's flow publishes JSON, a standard Sparkplug B edge node protobuf — and they enter the
@@ -917,7 +919,8 @@ or into `long_value` when the key, a 64-bit datatype (Int64, UInt64, DateTime) o
 bits; a negative one with no datatype is marked Int32 or Int64 so it reads back signed. A
 `float_value` is rounded to 32 bits, as the protobuf field would round it. A value that is not the
 JSON type its key names, or does not fit its field, drops that metric with a warning and the rest
-of the payload lands. i3X reads JSON through a mirrored copy of the function, and both suites
+of the payload lands. The reader is `json_payload()` in `capture.py`, which the playback recorder
+decodes with too. i3X reads JSON through a mirrored copy of `json_metric_value()`, and both suites
 assert `test-harness/fixtures/sparkplug-json-values.json`.
 
 Rows are keyed by **`sparkplug_id`**, never by name, so a rename never breaks a series. The

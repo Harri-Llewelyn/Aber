@@ -2,14 +2,16 @@
   "_comment": [
     "What each JSON-encoded Sparkplug metric reads as, for the two services that decode one.",
     "",
-    "  ingestion/ingestion.py   parse_sparkplug_payload()  -- what the historian stores",
+    "  ingestion/capture.py     json_payload()             -- what the historian stores, and what",
+    "                                                         a playback records and replays",
     "  i3x/i3x_service.py       decode_metrics()           -- what the i3X server serves",
     "",
     "Both read a JSON metric through json_metric_value(), mirrored in each file. Each suite asserts",
-    "every case below through its own parser: ingestion/test_json_payload.py and",
-    "i3x/test_i3x_service.py. `reads` is the Sparkplug value, an integer read through its datatype;",
-    "null means the metric carries no value. `dropped` means that metric is refused and the rest of",
-    "its payload is kept. Names are unique, because i3X keys what it serves by metric name."
+    "every case below through its own parser: ingestion/test_json_payload.py, which also records and",
+    "replays every case, and i3x/test_i3x_service.py. `reads` is the Sparkplug value, an integer read",
+    "through its datatype; null means the metric carries no value. `dropped` means that metric is",
+    "refused and the rest of its payload is kept. Names are unique, because i3X keys what it serves",
+    "by metric name."
   ],
   "cases": [
     {"metric": {"name": "double", "datatype": 10, "double_value": 21.4}, "reads": 21.4},
