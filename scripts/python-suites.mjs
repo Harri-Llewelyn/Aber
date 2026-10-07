@@ -438,16 +438,10 @@ export const SUITES = {
   'supabase/migrations/test_schema_versioning.py': {
     lanes: ['db'],
     why:
-      'Schema versioning (archived migration 0037). Runs its assertions as `authenticated` with ' +
+      'Schema versioning (archived migration 0037), and a device\'s schemas as the union of both ' +
+      'attachment paths (0168). Runs its assertions as `authenticated` with ' +
       'simulated JWT claims, because the immutability guard deliberately exempts the owner -- a ' +
       'suite connecting as `postgres` would pass against a database with the trigger dropped.',
-  },
-  'supabase/migrations/test_device_schemas_union.py': {
-    lanes: ['db'],
-    why:
-      'A device\'s schemas are the union of device_submodels and devices.schema_id (0168): the ' +
-      'view, the SCHEMA_REJECTION snapshot and set_device_schemas() must give one answer, and ' +
-      'a replay of 0168 must keep it.',
   },
   'supabase/migrations/test_gateway_flow_deployed.py': {
     lanes: ['db'],
