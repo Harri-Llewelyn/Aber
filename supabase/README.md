@@ -1275,6 +1275,30 @@ The People tab on Access Control is Administrator only, and has two halves.
 `test_people_management.py` holds the database half; `manage-people/people_test.ts` holds the
 function against a stubbed GoTrue and PostgREST.
 
+### An Administrator sets a new password, and a person changes their own (0167)
+
+Without a relay, a person cannot reset a forgotten password from the sign-in page, so the dashboard
+has two other ways in.
+
+- **Set New Password**, on the People tab, is an Administrator giving someone a new password.
+  `manage-people` mints it as `add` does, with or without a relay, and returns it once.
+  `record_person_password_set()` is called twice in the caller's session: with `p_check_only`
+  true BEFORE GoTrue changes anything, so its rules are decided first (Administrator only, never
+  your own account, never a machine identity, never a person whose access is removed), and with
+  false AFTER, to write `PASSWORD_SET` on `entity_type = 'user_roles'` with the email and the
+  method and no password. One function for both calls means the rules checked before and after are
+  the same. If the record fails after GoTrue changed the password, the function answers 500 and
+  withholds the password, so a password nobody has seen is the only unrecorded one there can be.
+  GoTrue deletes the person's sessions when an administrator sets their password; an access token
+  already issued lasts until it expires.
+- **Change Password**, in the account menu, is a person changing their own. The dashboard checks
+  the current password with a password grant sent straight to GoTrue, not through supabase-js, so
+  the stored session is not replaced, then calls `PUT /auth/v1/user`. GoTrue keeps that session and
+  ends the person's others. The chart leaves
+  `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION` off, which is what lets it work
+  without a relay. Nothing here writes an audit row for it: GoTrue's own audit log
+  (`auth.audit_log_entries`, `user_updated_password`) records it.
+
 ---
 
 ## Audit Trail (`audit_trail`)
@@ -3201,7 +3225,7 @@ refuses a missing or wrong token or secret.
 | [`gateway-credential`](functions/gateway-credential) | `Administrator`, `Shopfloor_Manager` | Mints a host-run gateway's broker credential and shows it once |
 | [`gateway-bundle`](functions/gateway-bundle) | `Administrator`, `Shopfloor_Manager`; `GET`: any signed-in user | The remote-gateway ZIP bundle or the one-liner, minting an enrolment token; `GET` is the readiness probe |
 | [`mint-service-token`](functions/mint-service-token) | `Administrator` | Signs a machine principal's token and shows it once |
-| [`manage-people`](functions/manage-people) | `Administrator` | Adds a person, removes their access or restores it, for the People tab (`0166`) |
+| [`manage-people`](functions/manage-people) | `Administrator` | Adds a person, removes their access, restores it, or sets a new password, for the People tab (`0166`, `0167`) |
 | [`enroll-gateway`](functions/enroll-gateway) | **no Supabase role at all** | An appliance redeeming its single-use enrolment token |
 | [`gateway-install`](functions/gateway-install) | **no Supabase role at all** | What the one-liner fetches, authorised by the enrolment token in `X-Enrolment-Token` |
 | [`revoke-gateway-credential`](functions/revoke-gateway-credential) | **no Supabase role at all** | Called by the database through pg_net; authorised by `GATEWAY_REVOKE_SECRET` in `x-revoke-secret` |

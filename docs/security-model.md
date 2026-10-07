@@ -121,16 +121,18 @@ Two consequences worth stating on the front page; both are detailed in
 
 ## People
 
-**An Administrator adds people, sets their roles and removes their access on the Access Control
-page's People tab** (`0166`). It is the one dashboard path that changes accounts in GoTrue, and it is
-narrow by construction.
+**An Administrator adds people, sets their roles and passwords, and removes their access on the
+Access Control page's People tab** (`0166`, `0167`). It is the one dashboard path that changes other
+people's accounts in GoTrue, and it is narrow by construction.
 
 - **Who can call it.** Administrators only, checked at every server step. The tab is shown only to
   an Administrator. The `manage-people` edge function resolves the caller's role from `user_roles`
   before it makes any admin call. Every database function behind the tab (`list_people()`,
   `set_person_role()`, `record_person_added()`, `remove_person_access()`,
-  `restore_person_access()`) checks `has_role(ARRAY['Administrator'])` again in its own body.
-- **Two rules no Administrator can break.** Nobody changes their own role or access, and no act may
+  `restore_person_access()`, `record_person_password_set()`) checks
+  `has_role(ARRAY['Administrator'])` again in its own body.
+- **Two rules no Administrator can break.** Nobody changes their own role, access or password here,
+  and no act may
   leave the site without an Administrator who can sign in (a banned one does not count). Both are
   checked in SQL under one lock on `user_roles`, so two Administrators cannot demote each other at
   once. The function refuses your own access before calling the database, and calls the database
@@ -151,10 +153,28 @@ narrow by construction.
   GoTrue sends an invitation instead, and no password exists until the person chooses one. If the
   new person cannot be recorded, the account is deleted again, so no account exists that the trail
   does not mention.
+- **A new password, set by an Administrator.** Set New Password mints the same way, with or without
+  a relay, and returns it once. `manage-people` asks `record_person_password_set()` first with
+  `p_check_only`, which refuses your own account, a machine identity and a person whose access is
+  removed, so a refusal never reaches GoTrue. Then GoTrue sets the password, and the same function
+  writes `PASSWORD_SET` (email and method, no password). If that record fails, the answer is a 500
+  that withholds the password: it was changed, nobody has seen it, and setting it again records it.
+  So no password anyone holds was set without a row in the trail.
+- **A person's own password.** Change Password, in the account menu, checks the current password
+  with a password grant sent straight to GoTrue's token endpoint, outside supabase-js, so the
+  dashboard's stored session is not replaced. Then `PUT /auth/v1/user` sets the new one, at least
+  12 characters (the chart's rule for the first administrator; GoTrue's own minimum is 6). It works
+  without a relay because the chart leaves `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION`
+  off. GoTrue keeps the session that made the change and ends the person's others. No Audit Trail
+  row is written: GoTrue records `user_updated_password` in its own audit log
+  (`auth.audit_log_entries`). The current-password check is the dashboard's, not GoTrue's: any
+  valid session can call `PUT /auth/v1/user` without it, as it always could, because
+  `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD` is not set.
 - **Machine identities are never people.** `list_people()` leaves them out, every function refuses
   them, and `refuse_role_for_machine_principal()` still refuses a role at the table.
 
-What a removal does not reach at once is an [accepted risk](#a-removed-person-keeps-what-a-session-already-holds).
+What a removal does not reach at once is an [accepted risk](#a-removed-person-keeps-what-a-session-already-holds),
+and so is what a new password does not reach ([below it](#a-new-password-does-not-end-a-session-at-once)).
 
 ## Machine identities
 
@@ -269,6 +289,21 @@ token window is bounded by the expiry; and Studio is off the Ingress by default.
 Administrator ever has to be immediate everywhere. Studio's and Node-RED's checks would then read
 `user_roles` per request, as the forge's does, and `auth_pre_request()` would refuse a removed
 person's subject.
+
+### A new password does not end a session at once
+
+Set New Password (`0167`) changes a person's password straight away, and GoTrue deletes every
+session they have, so none of their refresh tokens works again. As with a removal, what was already
+issued is not reached: an access token stays valid until its `exp` (at most
+`supabaseAuth.jwtExpiry`), and Node-RED's, Grafana's and Studio's own sessions last until they
+expire. Unlike a removal, the person keeps their role meanwhile.
+
+**Accepted because** Set New Password is how a person who lost their password gets back in, not how
+one is stopped. Remove Access stops one, and is immediate for every role check.
+
+**Revisit if** a compromised password ever has to be shut out everywhere at once. Today the nearest
+is Remove Access before Set New Password, and the removal's own limits are
+[above](#a-removed-person-keeps-what-a-session-already-holds).
 
 ### The broker's internal CA has no revocation list
 

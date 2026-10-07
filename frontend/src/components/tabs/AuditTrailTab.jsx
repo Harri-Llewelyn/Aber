@@ -731,11 +731,11 @@ function CausationGroup({ event, siblings, entityNames, onSelect, onShowTransact
 function EventDiff({ event, diff }) {
   const action = String(event.event_type || event.action || '').toUpperCase()
   // These acts are one-sided (INSERT, DELETE, SCHEMA_REJECTION, TOKEN_MINTED, BACKUP_REQUESTED,
-  // BACKUP_TAKEN): `old_data` is NULL by construction, and a Previous column would invite a search
-  // for a prior state that does not exist.
+  // BACKUP_TAKEN, PERSON_ADDED, PASSWORD_SET): `old_data` is NULL by construction, and a Previous
+  // column would invite a search for a prior state that does not exist.
   const oneSided = action === 'INSERT' || action === 'DELETE' || action === 'SCHEMA_REJECTION'
     || action === 'TOKEN_MINTED' || action === 'BACKUP_REQUESTED' || action === 'BACKUP_TAKEN'
-    || action === 'PERSON_ADDED'
+    || action === 'PERSON_ADDED' || action === 'PASSWORD_SET'
 
   return (
     <div className="trail-diff">
@@ -749,6 +749,7 @@ function EventDiff({ event, diff }) {
               : action === 'BACKUP_PRUNED' ? 'Backup removed'
               : action === 'TOKEN_MINTED' ? 'Token issued'
               : action === 'PERSON_ADDED' ? 'Person added'
+              : action === 'PASSWORD_SET' ? 'Password set'
                 // Two-sided, unlike TOKEN_MINTED: a revocation carries the original mint in
                 // `old_data` so the row stays readable after the denylist entry is pruned.
                 : action === 'TOKEN_REVOKED' ? 'Token withdrawn'
@@ -776,6 +777,7 @@ function EventDiff({ event, diff }) {
                     : action === 'BACKUP_PRUNED' ? 'Removed'
                     : action === 'TOKEN_MINTED' ? 'Issued'
                     : action === 'PERSON_ADDED' ? 'Added'
+                    : action === 'PASSWORD_SET' ? 'Set'
                       : action === 'TOKEN_REVOKED' ? 'Revoked'
                         : 'New'}</th>
             </tr>

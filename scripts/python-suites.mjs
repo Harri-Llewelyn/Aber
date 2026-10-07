@@ -623,9 +623,9 @@ export const SUITES = {
   'supabase/migrations/test_people_management.py': {
     lanes: ['db'],
     why:
-      'Who may add people, set their roles and remove their access (0166): Administrator only, ' +
-      'never a machine identity, never your own, never the last Administrator who can sign in, ' +
-      'one role row per person, and every act attributed in the security lane.',
+      'Who may add people, set their roles and passwords, and remove their access (0166, 0167): ' +
+      'Administrator only, never a machine identity, never your own, never the last Administrator ' +
+      'who can sign in, one role row per person, and every act attributed in the security lane.',
   },
   'supabase/migrations/test_credential_revocation.py': {
     lanes: ['db'],

@@ -5,7 +5,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { AccessControlTab } from '../components/tabs/AccessControlTab'
 import { api } from '../api'
 import { DEFAULT_ROLE_PERMISSIONS_MAP } from '../hooks/usePermissions'
-import { PERSON_ROLES, administratorsWithAccess, removalBlocked, roleChangeBlocked } from '../utils/people'
+import {
+  PERSON_ROLES, administratorsWithAccess, passwordSetBlocked, removalBlocked, roleChangeBlocked,
+} from '../utils/people'
 
 vi.mock('../api', () => ({
   api: {
@@ -14,6 +16,7 @@ vi.mock('../api', () => ({
     addPerson: vi.fn(),
     removePersonAccess: vi.fn(),
     restorePersonAccess: vi.fn(),
+    managePeople: vi.fn(),
     // The rest of the page's reads, answered empty: this suite is about the People tab.
     listGatewayCredentials: vi.fn(),
     listBrokerInventory: vi.fn(),
@@ -236,6 +239,63 @@ describe('adding a person', () => {
   })
 })
 
+describe('setting a new password', () => {
+  const MINTED = 'h3k9qp-x2a7bn-c4d8ef-gm2jk6'
+
+  it('is offered on each row, except your own and a removed person, saying why', async () => {
+    renderPeople()
+    expect(within(await row('operator@site.test')).getByRole('button', { name: 'Set New Password' })).toBeEnabled()
+    expect(within(await row('invited@site.test')).getByRole('button', { name: 'Set New Password' })).toBeEnabled()
+    const mine = within(await row('me@site.test')).getByRole('button', { name: 'Set New Password' })
+    expect(mine).toBeDisabled()
+    expect(mine).toHaveAttribute('title', expect.stringMatching(/Change Password in your account menu/))
+    const removed = within(await row('removed@site.test')).getByRole('button', { name: 'Set New Password' })
+    expect(removed).toBeDisabled()
+    expect(removed).toHaveAttribute('title', expect.stringMatching(/Restore it first/))
+  })
+
+  it('sets one only after it is confirmed, then shows it once', async () => {
+    api.managePeople.mockResolvedValue({ user_id: OPERATOR, password: MINTED })
+    const toast = renderPeople()
+    fireEvent.click(within(await row('operator@site.test')).getByRole('button', { name: 'Set New Password' }))
+
+    const confirm = await screen.findByRole('dialog')
+    expect(confirm).toHaveTextContent('Set a new password for operator@site.test')
+    expect(confirm).toHaveTextContent('current password stops working')
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Cancel' }))
+    expect(api.managePeople).not.toHaveBeenCalled()
+
+    fireEvent.click(within(await row('operator@site.test')).getByRole('button', { name: 'Set New Password' }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Set New Password' }))
+    await waitFor(() =>
+      expect(api.managePeople).toHaveBeenCalledWith({ action: 'set-password', user_id: OPERATOR }))
+
+    const reveal = await screen.findByText('New password for operator@site.test')
+    const dialog = reveal.closest('[role="dialog"]')
+    expect(dialog).toHaveTextContent('it is not shown again')
+    expect(within(dialog).getByLabelText('Password')).toHaveValue(MINTED)
+    expect(within(dialog).getByLabelText('Email')).toHaveValue('operator@site.test')
+    expect(toast).toHaveBeenCalledWith('operator@site.test has a new password', 'success')
+    // Never in a toast.
+    expect(JSON.stringify(toast.mock.calls)).not.toContain(MINTED)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(screen.queryByDisplayValue(MINTED)).toBeNull()
+  })
+
+  it('shows the refusal, and no password dialog, when none was set', async () => {
+    api.managePeople.mockRejectedValue(new Error("this person's access is removed. Restore it first, then set a new password."))
+    const toast = renderPeople()
+    fireEvent.click(within(await row('operator@site.test')).getByRole('button', { name: 'Set New Password' }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Set New Password' }))
+    await waitFor(() => expect(toast).toHaveBeenCalledWith(
+      "this person's access is removed. Restore it first, then set a new password.", 'error'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(screen.queryByLabelText('Password')).toBeNull()
+  })
+})
+
 describe('the people rules', () => {
   it('offers the four roles the database accepts, in the dashboard\'s order', () => {
     expect(PERSON_ROLES.map(r => r.name)).toEqual(Object.keys(DEFAULT_ROLE_PERMISSIONS_MAP))
@@ -253,5 +313,14 @@ describe('the people rules', () => {
     expect(roleChangeBlocked(solo[0], solo, OTHER_ADMIN)).toMatch(/only Administrator who can sign in/)
     expect(removalBlocked(solo[2], solo, ME)).toBeNull()
     expect(removalBlocked(PEOPLE[1], PEOPLE, ME)).toBeNull()
+  })
+
+  it('sets anyone a new password but yourself and a removed person, even the last Administrator', () => {
+    const solo = [person(ME, 'me@site.test', 'Administrator', 'active')]
+    expect(passwordSetBlocked(solo[0], OTHER_ADMIN)).toBeNull()
+    expect(passwordSetBlocked(solo[0], ME)).toMatch(/your own password/)
+    expect(passwordSetBlocked(PEOPLE[4], ME)).toMatch(/Restore it first/)
+    expect(passwordSetBlocked(PEOPLE[5], ME)).toMatch(/Restore it first/)
+    expect(passwordSetBlocked(PEOPLE[3], ME)).toBeNull()
   })
 })

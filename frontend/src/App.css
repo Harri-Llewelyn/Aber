@@ -481,6 +481,8 @@ html, body, #root {
 
 .user-popover-action:hover { background: var(--bg-glass); }
 .user-popover-action:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.user-popover-action:disabled,
+.user-popover-action:disabled:hover { background: none; color: var(--text-muted); cursor: not-allowed; }
 
 /* The destructive item is the only one that goes red on hover, and is separated by a rule as well
    as by colour. */

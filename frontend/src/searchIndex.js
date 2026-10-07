@@ -82,7 +82,7 @@ export const CARDS = [
   { id: 'playback',             label: 'Playback',             tab: 'capture',        keywords: ['replay', 'shadow devices', 'speed'] },
   { id: 'cold-telemetry',       label: 'Cold telemetry',       tab: 'cold-storage',   keywords: ['parquet', 'objects', 'tiered'] },
 
-  { id: 'people',               label: 'People',               tab: 'access-control', section: 'people', keywords: ['users', 'accounts', 'add person', 'invite', 'change role', 'remove access', 'restore access'] },
+  { id: 'people',               label: 'People',               tab: 'access-control', section: 'people', keywords: ['users', 'accounts', 'add person', 'invite', 'change role', 'remove access', 'restore access', 'set new password', 'lost password'] },
   { id: 'broker-credentials',   label: 'Broker credentials',   tab: 'access-control', section: 'credentials', keywords: ['mqtt accounts', 'gateway passwords', 'revoke'] },
   { id: 'machine-identities',   label: 'Machine identities',   tab: 'access-control', section: 'identities', keywords: ['machine accounts', 'non-human', 'service accounts', 'principals', 'tokens', 'withdraw', 'cannot sign in'] },
   { id: 'broker-accounts',      label: 'Broker accounts',      tab: 'access-control', section: 'accounts', keywords: ['mqtt users', 'platform accounts', 'orphaned accounts', 'no gateway'] },

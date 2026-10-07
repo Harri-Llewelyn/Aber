@@ -42,6 +42,7 @@ import {
   IconTag,
   IconRefreshCw,
   IconAlertCircle,
+  IconLock,
   IconLogOut
 } from './components/common/Icons'
 
@@ -59,6 +60,7 @@ import { usePlatformAlerts } from './hooks/usePlatformAlerts'
 import { useNavSignals } from './hooks/useNavSignals'
 import { BugReportModal } from './components/modals/BugReportModal'
 import { ShortcutsModal } from './components/modals/ShortcutsModal'
+import { ChangePasswordModal } from './components/modals/ChangePasswordModal'
 
 // Lazy-load Tab components
 const SiteMapTab       = lazy(() => import('./components/tabs/SiteMapTab').then(m => ({ default: m.SiteMapTab })))
@@ -262,11 +264,11 @@ function AuthScreen({ onLoginSuccess, notice }) {
 
 /**
  * The account control: a round icon button whose head states the address, role and version, and
- * whose rows hold the session-level preferences and escape hatches (theme, Report Bug, Sign Out).
- * Click, not hover: a hover menu holding Sign Out puts an irreversible action one stray movement
- * away.
+ * whose rows hold the session-level preferences and escape hatches (theme, Change Password, Report
+ * Bug, Sign Out). Click, not hover: a hover menu holding Sign Out puts an irreversible action one
+ * stray movement away. `passwordBlocked` is why Change Password is disabled, or null.
  */
-function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReportBug }) {
+function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReportBug, onChangePassword, passwordBlocked = null }) {
   const [open, setOpen] = useState(false)
   const wrapRef = useClickOutside(() => setOpen(false), open)
   useEscapeKey(() => setOpen(false), open)
@@ -335,7 +337,17 @@ function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReport
           </button>
 
           {/* The menu stays open on the theme toggle, whose result is visible behind it, and closes
-              on the other two. */}
+              on the others. */}
+          <button
+            className="user-popover-action"
+            role="menuitem"
+            disabled={!!passwordBlocked}
+            onClick={() => { setOpen(false); onChangePassword() }}
+            title={passwordBlocked || 'Change the password you sign in with'}
+          >
+            <IconLock size={14} /> <span>Change Password</span>
+          </button>
+
           <button
             className="user-popover-action"
             role="menuitem"
@@ -386,6 +398,7 @@ function Dashboard({ session, onSignOut }) {
   const [pendingVocabularyEntry, setPendingVocabularyEntry] = useState(null)
   const [showBugReport, setShowBugReport] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
+  const [showChangePassword, setShowChangePassword] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
   const closeHelp = useCallback(() => setShowHelp(false), [])
 
@@ -501,6 +514,10 @@ function Dashboard({ session, onSignOut }) {
   // the visible tab renders. Quarantine arrivals are handled by useQuarantineAlerts above.
 
   const persona = session?.user?.email || 'Administrator'
+  // A person signs in with an email address and a password. A machine identity has neither.
+  const passwordBlocked = session?.user?.email
+    ? null
+    : 'Machine identities have no password to change. They use tokens instead.'
 
   // Computed once and used twice: the rail draws it and the search palette indexes it. Filtering
   // in both places would let the search offer a page the rail does not.
@@ -597,6 +614,8 @@ function Dashboard({ session, onSignOut }) {
             theme={theme}
             onToggleTheme={toggleTheme}
             onReportBug={() => setShowBugReport(true)}
+            onChangePassword={() => setShowChangePassword(true)}
+            passwordBlocked={passwordBlocked}
           />
         </div>
 
@@ -680,6 +699,13 @@ function Dashboard({ session, onSignOut }) {
       <ToastStack toasts={toasts} onDismiss={dismissToast} onExpire={expireToast} />
       {showBugReport && <BugReportModal onClose={() => setShowBugReport(false)} showToast={showToast} persona={persona} activeTab={tab} />}
       {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
+      {showChangePassword && (
+        <ChangePasswordModal
+          email={session?.user?.email}
+          onClose={() => setShowChangePassword(false)}
+          showToast={showToast}
+        />
+      )}
     </div>
   )
 }

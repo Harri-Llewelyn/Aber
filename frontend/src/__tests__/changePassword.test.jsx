@@ -1,0 +1,178 @@
+/**
+ * Change Password, for the signed-in person: the account-menu item, the dialog's rules, and the
+ * order of the two calls. The current password is checked by a password grant sent straight to
+ * GoTrue, never through supabase-js, so the dashboard's own session is not replaced; only then is
+ * the new one set.
+ */
+import React from 'react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import App from '../App'
+import { ChangePasswordModal } from '../components/modals/ChangePasswordModal'
+import { MIN_PASSWORD_LENGTH, newPasswordProblem } from '../utils/passwords'
+
+vi.mock('../lib/supabaseClient', () => ({
+  SUPABASE_URL: 'https://api.site.test',
+  SUPABASE_GATEWAY_KEY: 'publishable-key',
+  supabase: {
+    auth: {
+      getSession: vi.fn(),
+      getUser: vi.fn(),
+      onAuthStateChange: vi.fn(),
+      signInWithPassword: vi.fn(),
+      signOut: vi.fn(),
+      updateUser: vi.fn(),
+    },
+    channel: vi.fn().mockReturnValue({ on: vi.fn().mockReturnThis(), subscribe: vi.fn().mockReturnThis() }),
+    removeChannel: vi.fn(),
+    from: vi.fn().mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [], error: null }),
+    }),
+  },
+}))
+
+import { supabase } from '../lib/supabaseClient'
+
+const EMAIL = 'operator@site.test'
+const CURRENT = 'the-old-one-12'
+const NEXT = 'a-new-one-of-twenty'
+
+/** GoTrue's token endpoint: 200 for CURRENT, otherwise the 400 a wrong password gets. */
+function gotrue() {
+  return vi.fn(async (url, init) => {
+    const { password } = JSON.parse(init.body)
+    return password === CURRENT
+      ? new Response(JSON.stringify({ access_token: 'unused', refresh_token: 'unused' }), { status: 200 })
+      : new Response(JSON.stringify({ code: 400, error_code: 'invalid_credentials', msg: 'Invalid login credentials' }), { status: 400 })
+  })
+}
+
+let fetchMock
+beforeEach(() => {
+  vi.clearAllMocks()
+  fetchMock = gotrue()
+  vi.stubGlobal('fetch', fetchMock)
+  supabase.auth.updateUser.mockResolvedValue({ data: { user: { email: EMAIL } }, error: null })
+})
+afterEach(() => vi.unstubAllGlobals())
+
+function fill(dialog, { current = CURRENT, next = NEXT, again = next } = {}) {
+  fireEvent.change(within(dialog).getByLabelText('Current password'), { target: { value: current } })
+  fireEvent.change(within(dialog).getByLabelText('New password'), { target: { value: next } })
+  fireEvent.change(within(dialog).getByLabelText('New password again'), { target: { value: again } })
+}
+
+const submit = (dialog) => within(dialog).getByRole('button', { name: 'Change Password' })
+
+describe('the Change Password dialog', () => {
+  function show() {
+    const onClose = vi.fn()
+    const showToast = vi.fn()
+    render(<ChangePasswordModal email={EMAIL} onClose={onClose} showToast={showToast} />)
+    return { dialog: screen.getByRole('dialog'), onClose, showToast }
+  }
+
+  it('checks the current password with GoTrue first, then changes it, keeping this session', async () => {
+    const { dialog, onClose, showToast } = show()
+    fill(dialog)
+    fireEvent.click(submit(dialog))
+
+    await waitFor(() => expect(supabase.auth.updateUser).toHaveBeenCalledWith({ password: NEXT }))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('https://api.site.test/auth/v1/token?grant_type=password')
+    expect(JSON.parse(init.body)).toEqual({ email: EMAIL, password: CURRENT })
+    // Straight to GoTrue, not supabase-js's sign-in, which would replace the stored session.
+    expect(supabase.auth.signInWithPassword).not.toHaveBeenCalled()
+    expect(fetchMock.mock.invocationCallOrder[0]).toBeLessThan(supabase.auth.updateUser.mock.invocationCallOrder[0])
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/password is changed/), 'success')
+  })
+
+  it('changes nothing when the current password is wrong, and says so', async () => {
+    const { dialog, onClose } = show()
+    fill(dialog, { current: 'not-the-current-one' })
+    fireEvent.click(submit(dialog))
+
+    expect(await within(dialog).findByText(/current password is not right/)).toBeInTheDocument()
+    expect(supabase.auth.updateUser).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(within(dialog).getByLabelText('Current password')).toHaveValue('')
+  })
+
+  it('shows GoTrue refusing the new password', async () => {
+    supabase.auth.updateUser.mockResolvedValue({ data: null, error: { message: 'Password is known to be weak' } })
+    const { dialog, onClose } = show()
+    fill(dialog)
+    fireEvent.click(submit(dialog))
+    expect(await within(dialog).findByText('Password is known to be weak')).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('cannot be sent until the new password meets the rules, and says which', () => {
+    const { dialog } = show()
+    expect(submit(dialog)).toBeDisabled()
+
+    fill(dialog, { next: 'short' })
+    expect(submit(dialog)).toBeDisabled()
+    expect(dialog).toHaveTextContent(`at least ${MIN_PASSWORD_LENGTH} characters`)
+
+    fill(dialog, { next: CURRENT })
+    expect(submit(dialog)).toBeDisabled()
+    expect(dialog).toHaveTextContent('different from your current one')
+
+    fill(dialog, { again: `${NEXT}x` })
+    expect(submit(dialog)).toBeDisabled()
+    expect(dialog).toHaveTextContent('do not match')
+
+    fill(dialog)
+    expect(submit(dialog)).toBeEnabled()
+  })
+
+  it('holds the rules: twelve characters, a different password, and two matching copies', () => {
+    expect(MIN_PASSWORD_LENGTH).toBe(12)
+    expect(newPasswordProblem('', NEXT, NEXT)).toMatch(/current password/)
+    expect(newPasswordProblem(CURRENT, 'x'.repeat(11), 'x'.repeat(11))).toMatch(/at least 12/)
+    expect(newPasswordProblem(CURRENT, 'x'.repeat(12), 'x'.repeat(12))).toBeNull()
+    expect(newPasswordProblem(CURRENT, CURRENT, CURRENT)).toMatch(/different/)
+    expect(newPasswordProblem(CURRENT, NEXT, 'other')).toMatch(/do not match/)
+  })
+})
+
+describe('the account menu', () => {
+  function signIn(user) {
+    const session = { access_token: 'token', user }
+    supabase.auth.getSession.mockResolvedValue({ data: { session } })
+    supabase.auth.getUser.mockResolvedValue({ data: { user }, error: null })
+    supabase.auth.onAuthStateChange.mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } })
+  }
+
+  async function openMenu() {
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: /account menu/i }))
+    return screen.getByRole('menu')
+  }
+
+  it('opens Change Password for a person', async () => {
+    window.history.pushState({}, '', '/')
+    signIn({ id: 'user-operator', email: EMAIL, app_metadata: { role: 'Operator' } })
+    const menu = await openMenu()
+    const item = within(menu).getByRole('menuitem', { name: /change password/i })
+    expect(item).toBeEnabled()
+    fireEvent.click(item)
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Change your password')
+  })
+
+  it('is disabled for a machine identity, which has no password, saying why', async () => {
+    window.history.pushState({}, '', '/')
+    signIn({ id: 'machine-1', email: null, app_metadata: {} })
+    const menu = await openMenu()
+    const item = within(menu).getByRole('menuitem', { name: /change password/i })
+    expect(item).toBeDisabled()
+    expect(item).toHaveAttribute('title', expect.stringMatching(/no password/))
+  })
+})

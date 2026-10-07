@@ -1,15 +1,17 @@
 /**
- * Add a person, remove their access, or restore it: the GoTrue half of the People tab. A function
- * and not an RPC because GoTrue's admin API needs the secret key, which is not in the database.
+ * Add a person, remove their access, restore it, or set them a new password: the GoTrue half of the
+ * People tab. A function and not an RPC because GoTrue's admin API needs the secret key, which is
+ * not in the database.
  *
  * Administrator only, checked twice: here, from the caller's session, before any admin call; and by
  * the SECURITY DEFINER function each act calls in the caller's session, which also writes its audit
- * row. Removing and restoring call the database FIRST, so its rules (not your own access, not the
- * last Administrator who can sign in) are decided before GoTrue changes anything. Removing bans the
- * account and never deletes it: the Audit Trail names the person through it.
+ * row. Removing, restoring and setting a password call the database FIRST, so its rules (not your
+ * own account, not the last Administrator who can sign in) are decided before GoTrue changes
+ * anything. Removing bans the account and never deletes it: the Audit Trail names the person
+ * through it.
  *
- * Without a mail relay a new account gets a password minted here and returned once. Nothing stores
- * or logs it; GoTrue keeps only its hash.
+ * A new account without a mail relay, and every new password, is minted here and returned once.
+ * Nothing stores or logs it; GoTrue keeps only its hash.
  */
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -91,16 +93,17 @@ function authRefusal(error: AuthError, what: string): Response {
   });
 }
 
-function targetOf(body: Record<string, unknown>, callerId: string): string | Response {
+function targetOf(
+  body: Record<string, unknown>,
+  callerId: string,
+  ownRefusal = "You cannot change your own access. Ask another Administrator.",
+): string | Response {
   const userId = typeof body.user_id === "string" ? body.user_id.trim() : "";
   if (!isUuid(userId)) {
     return json(400, { error: "Malformed request", details: "`user_id` must be the person's UUID." });
   }
   if (userId === callerId) {
-    return json(403, {
-      error: "Forbidden",
-      details: "You cannot change your own access. Ask another Administrator.",
-    });
+    return json(403, { error: "Forbidden", details: ownRefusal });
   }
   return userId;
 }
@@ -207,6 +210,39 @@ async function restoreAccess(body: Record<string, unknown>, callerId: string, ca
   return json(200, { user_id: userId, access: "active", role: typeof role === "string" ? role : null });
 }
 
+/**
+ * A new password for someone else, minted as `add` mints one, with or without a mail relay. One
+ * function decides and records: called with p_check_only before GoTrue, so a refusal changes
+ * nothing, and again after it to write PASSWORD_SET. If that record fails, the password WAS changed
+ * and nobody has seen it, so the answer withholds it and says to set it again.
+ */
+async function setPassword(body: Record<string, unknown>, callerId: string, caller: Client, admin: Client) {
+  const userId = targetOf(body, callerId,
+    "You cannot set your own password here. Use Change Password in your account menu.");
+  if (userId instanceof Response) return userId;
+
+  const { error } = await caller.rpc("record_person_password_set", { p_user_id: userId, p_check_only: true });
+  if (error) return dbRefusal(error, "The password was not set");
+
+  const password = initialPassword();
+  const { error: authError } = await admin.auth.admin.updateUserById(userId, { password });
+  if (authError) return authRefusal(authError, "The password was not set");
+
+  const { error: recordError } = await caller.rpc("record_person_password_set", {
+    p_user_id: userId,
+    p_check_only: false,
+  });
+  if (recordError) {
+    console.error(`manage-people: password set for ${userId} but not recorded: ${recordError.message}`);
+    return json(500, {
+      error: "The password was changed but not recorded",
+      details: `The sign-in service now holds a new password for this person, which nobody has seen, ` +
+        `but the Audit Trail did not record it: ${recordError.message}. Select Set New Password again.`,
+    });
+  }
+  return json(200, { user_id: userId, password });
+}
+
 export async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -243,7 +279,7 @@ export async function handler(req: Request): Promise<Response> {
     if (await resolveUserRole(caller, user.id) !== "Administrator") {
       return json(403, {
         error: "Forbidden: Insufficient privileges",
-        details: "Only an Administrator may add people or change their access.",
+        details: "Only an Administrator may add people, or change their access or password.",
       });
     }
 
@@ -265,8 +301,13 @@ export async function handler(req: Request): Promise<Response> {
         return await removeAccess(body, user.id, caller, admin);
       case "restore":
         return await restoreAccess(body, user.id, caller, admin);
+      case "set-password":
+        return await setPassword(body, user.id, caller, admin);
       default:
-        return json(400, { error: "Malformed request", details: "`action` must be add, remove or restore." });
+        return json(400, {
+          error: "Malformed request",
+          details: "`action` must be add, remove, restore or set-password.",
+        });
     }
   } catch (err) {
     console.error(`manage-people: ${err instanceof Error ? err.message : String(err)}`);

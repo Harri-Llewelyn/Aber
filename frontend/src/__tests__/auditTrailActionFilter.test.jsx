@@ -55,7 +55,7 @@ const trailUrls = () => api.get.mock.calls.map(c => c[0]).filter(u => u.includes
 describe('the action filter offers every action the database can record', () => {
   /* Several of these are not written by the generic audit trigger. Spelled out rather than derived,
      so adding one is a deliberate edit; the test below proves the list cannot drift from the enum. */
-  it('lists every action, including the twenty-three the generic trigger does not write', async () => {
+  it('lists every action, including the twenty-four the generic trigger does not write', async () => {
     await show()
     const values = [...filter().querySelectorAll('option')].map(o => o.value)
 
@@ -64,7 +64,7 @@ describe('the action filter offers every action the database can record', () => 
       '', 'INSERT', 'UPDATE', 'DELETE', 'SCHEMA_REJECTION', 'CREDENTIAL_ISSUED', 'CREDENTIAL_SHOWN', 'TOKEN_MINTED',
       'TOKEN_REVOKED', 'PRINCIPAL_REVOKED', 'PRINCIPAL_REINSTATED', 'PRINCIPAL_DESCRIBED',
       'PROPOSAL_APPLIED', 'EXPORTED', 'PROPOSAL_EXPIRED', 'ROLE_GRANTED', 'ROLE_REVOKED',
-      'PERSON_ADDED', 'ACCESS_REMOVED', 'ACCESS_RESTORED', 'FLOW_DEPLOYED', 'BACKUP_REQUESTED', 'BACKUP_CANCELLED', 'BACKUP_RELEASED', 'BACKUP_TAKEN',
+      'PERSON_ADDED', 'ACCESS_REMOVED', 'ACCESS_RESTORED', 'PASSWORD_SET', 'FLOW_DEPLOYED', 'BACKUP_REQUESTED', 'BACKUP_CANCELLED', 'BACKUP_RELEASED', 'BACKUP_TAKEN',
       'BACKUP_FAILED', 'BACKUP_PRUNED'
     ])
   })

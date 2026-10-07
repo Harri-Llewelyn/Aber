@@ -11,7 +11,7 @@ People has a row of controls under the tabs, with **Refresh** and **Add Person**
 - **Add Person** asks for an email address and a role. The person signs in with that address.
 - If this site has a mail relay, the person gets an invitation by email. They choose their own password from the link in it.
 - Without a mail relay, Aber makes a password for them and shows it once. Copy it before you close the dialog. Give it to them in person, or by a channel you trust. Nothing in Aber keeps a copy.
-- If that password is lost, it cannot be shown again. Without a mail relay, a new one is set outside the dashboard; the **Accounts** section of the install guide says how.
+- If that password is lost, it cannot be shown again. Select **Set New Password** on their row instead.
 - **Role** is a list on each row. Choosing another role changes it straight away. Their own dashboard catches up when it next reloads. Each person holds one role.
 - **Administrator** can do everything, including this page, backups and settings.
 - **Shopfloor Manager** manages areas, cells, gateways and devices, and decides the quarantine queue.
@@ -19,11 +19,16 @@ People has a row of controls under the tabs, with **Refresh** and **Add Person**
 - **Auditor** reads the Audit Trail, including who was given access.
 - **Remove Access** asks you to confirm. Then it removes the person's role and blocks their sign-in. Their account stays, so the Audit Trail still names them.
 - **Restore Access** lets them sign in again, with the role they had.
-- **You cannot change your own role or remove your own access.** Ask another Administrator. Your own row is marked **YOU**, and its controls are greyed out. Hover over one to see why.
+- **Set New Password** asks you to confirm. Then Aber makes a new password for the person and shows it once, as Add Person does. Their old password stops working straight away.
+- Use it when someone has lost their password, with or without a mail relay. A person whose access is removed needs **Restore Access** first.
+- **You cannot change your own role, remove your own access or set your own password here.** Ask another Administrator. Your own row is marked **YOU**, and its controls are greyed out. Hover over one to see why. To change your own password, use **Change Password** in your account menu, the round button at the top right.
 - **One Administrator who can sign in always remains.** The last one cannot be given another role, or have their access removed. Make someone else an Administrator first.
-- Adding a person, changing a role, removing access and restoring it are each recorded in the Audit Trail. The record names the person and who made the change. It never holds a password.
+- Adding a person, changing a role, removing access, restoring it and setting a new password are each recorded in the Audit Trail. The record names the person and who made the change. It never holds a password.
+- A person changing their own password with **Change Password** is not in the Audit Trail. The sign-in service keeps its own record of it.
 
 **Sessions a removed person already has end on their own, not at once.** Their role goes straight away, so the dashboard refuses anything a role allows. An open dashboard session can still read what any signed-in person can, such as the device list, for up to an hour. Sessions in Node-RED, Grafana and Studio keep what they had until they expire, up to eight hours in Node-RED. They cannot sign in again. If they held Administrator, check Node-RED's flows and the Audit Trail afterwards.
+
+**A new password does not end their sessions at once either.** Their old password stops working straight away. An open dashboard asks them to sign in again within the hour. Sessions in Node-RED, Grafana and Studio last until they expire. They keep their role meanwhile. To stop someone at once, use **Remove Access** instead.
 
 ## The other tabs
 
@@ -72,4 +77,4 @@ A machine identity lives on one of two sides, and nothing holds both. A database
 
 **It does not show who is connected.** It reads the broker's accounts and roles live, but not its sessions. So an account that is Active is one that may connect, not one that has. When the broker cannot be read, the Broker column says **Not read**, and the two broker tabs say so. Only the database half of the page is left.
 
-**It does not change passwords.** A person resets their own with **Forgot your password?** on the sign-in page, which needs a mail relay.
+**It does not change your own password.** Use **Change Password** in your account menu. It asks for your current password, then the new one twice. The new one needs at least 12 characters. Someone who has forgotten theirs can use **Forgot your password?** on the sign-in page, if the site has a mail relay. Otherwise an Administrator gives them a new one here, with **Set New Password**.

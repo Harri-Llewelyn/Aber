@@ -76,6 +76,15 @@ export function roleChangeBlocked(person, people, currentUserId) {
   return null
 }
 
+/** Why this person cannot be given a new password here, or null. */
+export function passwordSetBlocked(person, currentUserId) {
+  if (person.user_id === currentUserId) {
+    return 'You cannot set your own password here. Use Change Password in your account menu.'
+  }
+  if (person.status === 'removed') return 'Their access is removed. Restore it first, then set a new password.'
+  return null
+}
+
 /** Why this person's access cannot be removed here, or null. */
 export function removalBlocked(person, people, currentUserId) {
   if (person.user_id === currentUserId) return 'You cannot remove your own access. Ask another Administrator.'
