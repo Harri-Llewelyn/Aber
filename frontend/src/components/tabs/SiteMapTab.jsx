@@ -158,18 +158,23 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     setScrollToAreaId(null)
   }, [scrollToAreaId])
 
+  // Archived equipment is out of service on purpose, so nothing on the map counts or lists it, as
+  // with an archived cell. The Archived Entities page holds it.
+  const liveGateways = useMemo(() => gwList.filter(g => !g.is_archived), [gwList])
+  const liveAssets = useMemo(() => assets.filter(a => !a.is_archived), [assets])
+
   // Cell membership, resolved from the device list this page already holds.
-  const devicesByCell = useMemo(() => groupDevicesByCell(assets), [assets])
+  const devicesByCell = useMemo(() => groupDevicesByCell(liveAssets), [liveAssets])
   const alerts = useMemo(() => alertIndex(activeAlerts), [activeAlerts])
 
   // The derived lanes that belong to no area. None is a row in `cells`: Unassigned is the absence
   // of a decision, Site-Wide an assertion, Simulated a fact about the gateway. Replay lanes are not
   // here: a replay is not now.
   const laneDevices = useMemo(() => ({
-    [SOURCE_UNASSIGNED]: assets.filter(a => a.location_source === SOURCE_UNASSIGNED),
-    [SOURCE_SITE_WIDE]: assets.filter(a => a.location_source === SOURCE_SITE_WIDE),
-    [SOURCE_SIMULATED]: assets.filter(a => a.location_source === SOURCE_SIMULATED)
-  }), [assets])
+    [SOURCE_UNASSIGNED]: liveAssets.filter(a => a.location_source === SOURCE_UNASSIGNED),
+    [SOURCE_SITE_WIDE]: liveAssets.filter(a => a.location_source === SOURCE_SITE_WIDE),
+    [SOURCE_SIMULATED]: liveAssets.filter(a => a.location_source === SOURCE_SIMULATED)
+  }), [liveAssets])
 
   const STATUS_LABEL = {
     attention: 'Needs attention — a device here is quarantined, waiting to be admitted',
@@ -182,43 +187,41 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
 
   /** The pin state of a set of devices: the connectivity rollup, or alert when Grafana says so. */
   const stateOf = (devices) => {
-    const alert = devices.some(d => !d.is_archived && alertForDevice(alerts, d))
+    const alert = devices.some(d => alertForDevice(alerts, d))
     const status = rollupDeviceStatus(devices)
     return { status, alert, pin: alert ? 'alert' : status }
   }
 
-  const cellGatewaysOf = (cell) => gwList.filter(g => g.cell_id === cell.cell_id)
+  const cellGatewaysOf = (cell) => liveGateways.filter(g => g.cell_id === cell.cell_id)
   const cellDevicesOf = (cell) => devicesByCell.get(cell.cell_id) || []
   const areaWideOf = (area) => ({
-    devices: assets.filter(a => a.location_source === SOURCE_AREA_WIDE && a.effective_area_id === area.area_id),
-    gateways: gwList.filter(g => !g.is_simulated && !g.is_shadow && g.location_scope === SCOPE_AREA_WIDE && g.area_id === area.area_id)
+    devices: liveAssets.filter(a => a.location_source === SOURCE_AREA_WIDE && a.effective_area_id === area.area_id),
+    gateways: liveGateways.filter(g => !g.is_simulated && !g.is_shadow && g.location_scope === SCOPE_AREA_WIDE && g.area_id === area.area_id)
   })
   const cellsOf = (area) => cells.filter(c => c.area_id === area.area_id && !c.is_archived)
 
   const deviceChip = (a) => {
     const status = deviceLifecycleStatus(a)
-    const isArch = a.is_archived
     const alert = alertForDevice(alerts, a)
     return (
       <span
         key={a.asset_id}
         className={`chip ${deviceChipClass(a, alert)}`}
         onClick={() => onSelectDevice?.(a.asset_id)}
-        style={{ cursor: 'pointer', userSelect: 'none', opacity: isArch ? 0.7 : 1 }}
-        title={`${a.asset_name} [${a.asset_id}] — ${isArch ? 'Device Archived' : alert ? `ALERT: ${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''}` : deviceStatusTitle(status)} — Click to view on Devices page`}
+        style={{ cursor: 'pointer', userSelect: 'none' }}
+        title={`${a.asset_name} [${a.asset_id}] — ${alert ? `ALERT: ${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''}` : deviceStatusTitle(status)} — Click to view on Devices page`}
       >
-        {isArch ? <IconArchive size={11} /> : <IconCpu size={11} />}
+        <IconCpu size={11} />
         <span className="chip-name">{a.asset_name}</span>
-        {isArch && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>ARCH</span>}
-        {!isArch && status === DEVICE_STATUS.QUARANTINED && (
+        {status === DEVICE_STATUS.QUARANTINED && (
           <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>QUAR</span>
         )}
-        {!isArch && status === DEVICE_STATUS.OFFLINE && (
+        {status === DEVICE_STATUS.OFFLINE && (
           <span className="chip-flag" style={{ color: 'var(--text-muted)' }}>OFF</span>
         )}
         {/* An alert carries a flag as well as a hue: never colour alone. The glyph and wording are
             DevicesTab's, so a device does not answer to two names on two pages. */}
-        {!isArch && alert && (
+        {alert && (
           <span
             className="chip-flag"
             style={{ color: 'var(--danger-text)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
@@ -234,28 +237,24 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   }
 
   const gatewayChip = (g) => {
-    const isGwArch = g.is_archived
     const gwStatus = gatewayLiveStatus(g)
     return (
       <span
         key={g.gateway_id}
         className="chip chip-gw"
-        title={`Gateway ${g.gateway_name} [${g.gateway_id}] ${g.deployment === 'host' ? '(Host-run gateway)' : ''} ${isGwArch ? '(Archived)' : `(${gwStatus}, heartbeat ${formatHeartbeat(g.last_heartbeat)})`} — ${g.device_count} device(s) — Click to view on Gateways page`}
+        title={`Gateway ${g.gateway_name} [${g.gateway_id}] ${g.deployment === 'host' ? '(Host-run gateway)' : ''} (${gwStatus}, heartbeat ${formatHeartbeat(g.last_heartbeat)}) — ${g.device_count} device(s) — Click to view on Gateways page`}
         onClick={() => onSelectGateway?.(g.gateway_id)}
-        style={{ cursor: 'pointer', borderColor: isGwArch ? 'var(--warning)' : g.deployment === 'host' ? 'var(--accent)' : undefined, opacity: isGwArch ? 0.75 : 1 }}
+        style={{ cursor: 'pointer', borderColor: g.deployment === 'host' ? 'var(--accent)' : undefined }}
       >
         {/* Three outcomes, not two: a red dot on a gateway nobody has installed yet is a fault
             report on an unfinished task. */}
-        {isGwArch
-          ? <IconArchive size={11} style={{ color: 'var(--warning-text)' }} />
-          : <span className={`badge-dot ${
-              gwStatus === 'ONLINE' ? 'badge-online'
-                : gwStatus === 'PENDING_ENROLLMENT' ? 'badge-pending'
-                  : gwStatus === 'AWAITING_BIRTH' ? 'badge-provisioned'
-                    : 'badge-danger'}`} />}
+        <span className={`badge-dot ${
+          gwStatus === 'ONLINE' ? 'badge-online'
+            : gwStatus === 'PENDING_ENROLLMENT' ? 'badge-pending'
+              : gwStatus === 'AWAITING_BIRTH' ? 'badge-provisioned'
+                : 'badge-danger'}`} />
         <span className="chip-name mono">{g.gateway_name}</span>
-        {g.deployment === 'host' && !isGwArch && <span className="chip-flag" style={{ color: 'var(--accent-text)' }} title="Runs on this host"><IconZap size={9} /></span>}
-        {isGwArch && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>ARCH</span>}
+        {g.deployment === 'host' && <span className="chip-flag" style={{ color: 'var(--accent-text)' }} title="Runs on this host"><IconZap size={9} /></span>}
       </span>
     )
   }
@@ -297,7 +296,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
         <span className="badge-dot" style={{ background: deviceDotColor(d, alert) }} />
         <IconCpu size={11} />
         <span className="chip-name">{d.asset_name}</span>
-        {!d.is_archived && alert && (
+        {alert && (
           <span className="chip-flag" style={{ color: 'var(--danger-text)' }}>{alert.severity === 'critical' ? 'ALARM' : 'WARNING'}</span>
         )}
         {areaWide && <span className="chip-flag" style={{ color: 'var(--text-muted)' }}>AREA-WIDE</span>}
@@ -307,7 +306,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
 
   /** The label over a panel's device chips, saying how many of them are online. */
   const devicesLabel = (devices) => devices.length
-    ? `Devices (${devices.filter(a => a.status !== 'OFFLINE' && !a.is_archived).length}/${devices.length} online)`
+    ? `Devices (${devices.filter(a => a.status !== 'OFFLINE').length}/${devices.length} online)`
     : 'Devices'
 
   // Site-Wide first as stable context, Simulated as what not to trust, Unassigned last as the
@@ -349,7 +348,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   const laneViews = LANES.map(lane => ({
     lane,
     devices: laneDevices[lane.key] || [],
-    gateways: gwList.filter(lane.matchGateway)
+    gateways: liveGateways.filter(lane.matchGateway)
   }))
   const openLaneView = laneViews.find(v => v.lane.key === openLane) || null
 
@@ -358,7 +357,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   // groups answer only when the setting cannot be read; several are all named, and the playback
   // gateway is not a member of the plant.
   const enterprise = sparkplugGroup
-    || [...new Set(gwList.filter(g => !g.is_shadow && g.sparkplug_group).map(g => g.sparkplug_group))].join(' / ')
+    || [...new Set(liveGateways.filter(g => !g.is_shadow && g.sparkplug_group).map(g => g.sparkplug_group))].join(' / ')
 
   const unfiledCells = cells.filter(c => !c.area_id && !c.is_archived)
   const columns = COLUMNS_FOR(visibleAreas.length)
@@ -476,12 +475,12 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   const selectedState = selectedCell ? stateOf(cellDevicesOf(selectedCell)) : null
   const selectedCellArea = selectedCell ? areas.find(a => a.area_id === selectedCell.area_id) : null
   const selectedAlerts = selectedCell
-    ? cellDevicesOf(selectedCell).map(d => ({ device: d, alert: alertForDevice(alerts, d) })).filter(x => x.alert && !x.device.is_archived)
+    ? cellDevicesOf(selectedCell).map(d => ({ device: d, alert: alertForDevice(alerts, d) })).filter(x => x.alert)
     : []
 
   /** The status badge of a drawer's subtitle: an alert firing outranks the connectivity rollup. */
   const stateBadge = (state, devices) => {
-    const critical = state.alert && devices.some(d => !d.is_archived && alertForDevice(alerts, d)?.severity === 'critical')
+    const critical = state.alert && devices.some(d => alertForDevice(alerts, d)?.severity === 'critical')
     const tone = state.pin === 'alert' ? (critical ? 'danger' : 'warning') : state.status === 'normal' ? 'success' : 'neutral'
     return <Badge tone={tone} size="sm" title={STATUS_LABEL[state.pin]}>{STATUS_WORD[state.pin]}</Badge>
   }
