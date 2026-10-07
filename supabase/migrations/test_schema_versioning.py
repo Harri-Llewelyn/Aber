@@ -680,8 +680,8 @@ class TestPublish(SchemaVersioningTestCase):
             "the submodel attachment must point at the newly published version",
         )
 
-        # The dashboard's attachment. A device attached only through it would otherwise stay pinned
-        # to an archived version and report the new version's metrics as Unmodelled.
+        # The deprecated column. A device attached only through it would otherwise stay pinned to an
+        # archived version and report the new version's metrics as Unmodelled.
         self.cur.execute("SELECT schema_id::text FROM public.devices WHERE id = %s;", (device_id,))
         self.assertEqual(self.cur.fetchone()[0], v2["id"])
 
@@ -981,7 +981,7 @@ class TestDiscardingADraft(SchemaVersioningTestCase):
 
     def test_every_device_the_discard_detaches_is_counted_once(self):
         """
-        The dashboard attaches through `devices.schema_id` and offers drafts in its picker. That
+        A 1.0 dashboard attached through `devices.schema_id` and offered drafts in its picker. That
         column is ON DELETE SET NULL, so a device attached there is detached by the discard as
         surely as a `device_submodels` row is removed, and the count the page reports includes it.
         A device attached both ways counts once.
@@ -1662,6 +1662,30 @@ class SetDeviceSchemas(DeviceSchemasTestCase):
         self.act_as(ADMIN_USER_ID)
         exc = self.raises(lambda: self.set_schemas(device_id, None))
         self.assertEqual(exc.pgcode, "22004", str(exc))  # null_value_not_allowed
+
+    def test_the_change_reaches_the_audit_trail_under_the_device(self):
+        # The dashboard's schema changes used to be devices UPDATEs, which the trail records. They
+        # are device_submodels writes now, so that table has to be audited for none to be lost.
+        a = self.schema("ONEPATH_AUDIT_A")
+        b = self.schema("ONEPATH_AUDIT_B")
+        device_id = self.device("ONEPATH_DEV_AUDIT", schema_id=a)
+
+        self.act_as(ADMIN_USER_ID)
+        self.set_schemas(device_id, [b])
+        self.act_as_owner()
+
+        self.cur.execute(
+            "SELECT entity_type, action, coalesce(new_data, old_data) ->> 'schema_id', "
+            "       changed_by::text, actor_source, audit_domain "
+            "  FROM public.audit_trail "
+            " WHERE entity_id = %s AND changed_by = %s "
+            " ORDER BY entity_type, action",
+            (device_id, ADMIN_USER_ID),
+        )
+        self.assertEqual(self.cur.fetchall(), [
+            ("device_submodels", "INSERT", b, ADMIN_USER_ID, "user", "asset"),
+            ("devices", "UPDATE", None, ADMIN_USER_ID, "user", "asset"),
+        ])
 
 
 if __name__ == "__main__":

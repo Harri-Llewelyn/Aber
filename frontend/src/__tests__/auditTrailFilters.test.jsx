@@ -741,6 +741,15 @@ describe('Audit Trail event classification', () => {
     }
   })
 
+  it('calls attaching or detaching a device schema governance, not creation or lifecycle', () => {
+    // A device_submodels row is a schema binding, the act a change to `schema_id` is.
+    const row = { device_id: 'dev-1', schema_id: 'sch-1', submodel_key: null }
+    const attach = { event_type: 'INSERT', entity_type: 'device_submodels', new_data: row }
+    const detach = { event_type: 'DELETE', entity_type: 'device_submodels', old_data: row }
+    expect(classifyEvent(attach, diffFields(null, attach.new_data))).toBe('governance')
+    expect(classifyEvent(detach, diffFields(detach.old_data, null))).toBe('governance')
+  })
+
   it('carries a legend, because nothing else in the UI says what amber means', async () => {
     await show()
     const legend = document.querySelector('.trail-legend')

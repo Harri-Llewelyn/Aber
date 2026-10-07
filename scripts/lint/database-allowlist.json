@@ -83,7 +83,7 @@
     "authenticated_security_definer_function_executable_public_start_capture_job_p_subject_kind text, p_subject_id uuid, p_note text, p_max_seconds integer, p_replace boolean": "An RPC endpoint: authenticated calls it on purpose, and it gates its caller in its own body (has_role, has_authority or a require_*_caller check). Add a new one only once that is true.",
     "authenticated_security_definer_function_executable_public_start_playback_job_p_capture_id uuid, p_target_gateway_id uuid, p_device_map jsonb, p_speed numeric": "An RPC endpoint: authenticated calls it on purpose, and it gates its caller in its own body (has_role, has_authority or a require_*_caller check). Add a new one only once that is true.",
     "authenticated_security_definer_function_executable_public_withdraw_proposal_p_proposal_id uuid": "An RPC endpoint: authenticated calls it on purpose, and it gates its caller in its own body (has_role, has_authority or a require_*_caller check). Add a new one only once that is true.",
-    "function_search_path_mutable_public_audit_domain_for_3dfd3598333173f01c06085c935b32dd": "Tracked in #384.",
+    "function_search_path_mutable_public_audit_domain_for_64ad00a79aceacf46cd8ec03784abfbe": "Tracked in #384.",
     "function_search_path_mutable_public_directory_liveness_job_map_a403695b8344df7a8baf877113c04ba9": "Tracked in #384.",
     "function_search_path_mutable_public_enforce_metric_catalog_immutability_941269dd8edd74c7bdc9e75bfa707909": "Tracked in #384.",
     "function_search_path_mutable_public_enforce_metric_group_spelling_52070e5a98d944e3dd7771b3584ab7f4": "Tracked in #384.",

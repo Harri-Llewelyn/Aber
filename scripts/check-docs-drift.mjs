@@ -810,6 +810,7 @@ function edgeFunctionNames() {
    * definition. The check fails on the first unlisted redeclaration.
    */
   const INTENDED_REDECLARATIONS = {
+    'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited',
     'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline copied devices.schema_id alone',
     'public.reject_archived_schema_assignment': '0168 lets a binding move between devices.schema_id and device_submodels, which set_device_schemas() does; the baseline refused the move as a new binding',
     // Empty just after a squash: the baseline is generated from a dump of the finished database,

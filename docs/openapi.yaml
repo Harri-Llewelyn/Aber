@@ -754,9 +754,9 @@ paths:
         `Auditor`, the security lane by `Administrator` and `Auditor`.
 
         `entity_type` names the table an event is about: `areas`, `cells`, `gateways`, `devices`,
-        `device_nameplate`, `schemas`, `metric_catalog` and `change_proposals` in the asset lane,
-        and `user_roles`, `service_principals`, `system_settings`, `backup_jobs` and `backups` in
-        the security lane. A trail older than their retirement also holds `area_floors`,
+        `device_nameplate`, `device_submodels`, `schemas`, `metric_catalog` and `change_proposals` in
+        the asset lane, and `user_roles`, `service_principals`, `system_settings`, `backup_jobs` and
+        `backups` in the security lane. A trail older than their retirement also holds `area_floors`,
         `cell_links`, `gateway_links` and `device_links` rows. Rows key on `entity_id`. To find an
         entity's history after deleting it, collect the ids first.
 
@@ -4245,8 +4245,8 @@ components:
         id: { type: integer, readOnly: true }
         entity_type:
           type: string
-          enum: [areas, cells, gateways, devices, device_nameplate, schemas, metric_catalog, change_proposals,
-                 user_roles, service_principals, system_settings, backup_jobs, backups]
+          enum: [areas, cells, gateways, devices, device_nameplate, device_submodels, schemas, metric_catalog,
+                 change_proposals, user_roles, service_principals, system_settings, backup_jobs, backups]
           description: >-
             The table the event is about: the types the trail records today. A trail older than
             their retirement also holds `area_floors`, `cell_links`, `gateway_links` and

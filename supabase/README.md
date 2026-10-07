@@ -1242,8 +1242,8 @@ the meaning of a revocation.
 ## Audit Trail (`audit_trail`)
 
 Written by `log_audit_trail_event()`, an `AFTER INSERT OR UPDATE OR DELETE` trigger on `areas`,
-`cells`, `gateways`, `devices`, `device_nameplate`, `system_settings`, `schemas` and
-`metric_catalog` (archived migration 0143); by `log_role_assignment()` on `user_roles`; by
+`cells`, `gateways`, `devices`, `device_nameplate`, `device_submodels` (`0168`), `system_settings`,
+`schemas` and `metric_catalog` (archived migration 0143); by `log_role_assignment()` on `user_roles`; by
 `log_asset_export()` on `asset_exports`; and directly by nineteen functions, most of them recording
 acts which are not row mutations at all.
 
@@ -1254,7 +1254,7 @@ the single policy that used to cover the table.
 
 | Lane | Who reads it | What is in it |
 | :--- | :--- | :--- |
-| `asset` | `Administrator`, `Shopfloor_Manager`, `Auditor`, or a machine holding `audit_trail:read` | `areas`, `cells`, `devices`, `gateways`, `links`, `device_nameplate`, `change_proposals`, `schemas`, `metric_catalog` — the shopfloor's own history, **`CREDENTIAL_ISSUED` included** |
+| `asset` | `Administrator`, `Shopfloor_Manager`, `Auditor`, or a machine holding `audit_trail:read` | `areas`, `cells`, `devices`, `gateways`, `links`, `device_nameplate`, `device_submodels`, `change_proposals`, `schemas`, `metric_catalog` — the shopfloor's own history, **`CREDENTIAL_ISSUED` included** |
 | `security` | `Administrator`, `Auditor` | `service_principals`, `user_roles`, `system_settings` |
 
 **`Auditor` stops being a synonym here.** The role holds one permission, `audit_trail:read`, and
@@ -3695,6 +3695,11 @@ version would be refused for the schema it already had.
 `record_ingestion_rejection()` reads them through the view into `schema_ids`. The 1.0 key
 `schema_id` stays, holding the first of them: the column's value where it is set, as before. A
 device attached only through `device_submodels` used to record no schema there.
+
+**`device_submodels` is audited now.** The Devices page's schema changes used to be `devices`
+updates, which the audit trigger records. Without a trigger on the table they moved to, every
+change made from the dashboard would have left no row. Its rows are keyed by the device, as
+`device_nameplate`'s are, filed in the `asset` lane, and drawn as governance in the Audit Trail.
 
 `publish_schema_version()` and `discard_schema_draft()` are unchanged: both already handle both
 arms. `devices_rebound` still counts bindings, so a device on both arms counts twice.

@@ -5,7 +5,8 @@
 -- given a second schema through the API stopped being judged against the first. The view now
 -- returns both, one row per (device, schema). The Devices page writes `device_submodels` through
 -- set_device_schemas() and clears the column; writing `devices.schema_id` is deprecated, and the
--- column is still read so an API client that sets it keeps working.
+-- column is still read so an API client that sets it keeps working. `device_submodels` is audited
+-- now, so moving the dashboard's writes there keeps a schema change in the audit trail.
 
 -- -------------------------------------------------------------------------------------------------
 -- The view: both arms, one row per (device, schema)
@@ -321,3 +322,38 @@ REVOKE ALL ON FUNCTION public.set_device_schemas(p_device_id uuid, p_schema_ids 
 GRANT EXECUTE ON FUNCTION public.set_device_schemas(p_device_id uuid, p_schema_ids uuid[]) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.set_device_schemas(p_device_id uuid, p_schema_ids uuid[]) IS 'Make a device''s schemas exactly p_schema_ids, in one transaction: inserts the missing device_submodels rows, deletes the rest, and clears the deprecated devices.schema_id. An empty array detaches every schema. Unknown device or schema: 404. Authority: Administrator or Shopfloor_Manager.';
+
+-- -------------------------------------------------------------------------------------------------
+-- A device's schema attachments reach the audit trail
+-- -------------------------------------------------------------------------------------------------
+-- The Devices page used to change a device's schema through devices.schema_id, which the devices
+-- trigger records. It now writes device_submodels, so that table is audited too, keyed by its
+-- device as device_nameplate is, and filed in the asset lane.
+DROP TRIGGER IF EXISTS trg_device_submodels_audit_trail ON public.device_submodels;
+CREATE TRIGGER trg_device_submodels_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.device_submodels FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event('device_id');
+
+-- Unchanged from 0001 but for `device_submodels` in the asset list.
+CREATE OR REPLACE FUNCTION public.audit_domain_for(p_entity_type text, p_action text) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    AS $$
+  SELECT CASE
+    -- Identity and authority. Every act on these is Administrator-only to perform AND the table
+    -- itself is Administrator-only to read, which is what makes the lane agree with its contents.
+    WHEN p_entity_type IN ('service_principals', 'user_roles', 'system_settings')
+      THEN 'security'
+
+    -- The asset trail: the shopfloor's own history. CREDENTIAL_ISSUED lands here on `gateways`
+    -- deliberately: a Manager may mint a host-run gateway's broker credential. `schemas` and
+    -- `metric_catalog` are Administrator-only writes to tables every authenticated user reads.
+    WHEN p_entity_type IN ('areas', 'cells', 'devices', 'gateways', 'links',
+                           'schemas', 'device_nameplate', 'device_submodels', 'change_proposals',
+                           'cell_links', 'gateway_links', 'device_links',
+                           'metric_catalog')
+      THEN 'asset'
+
+    -- Fail-closed: a new entity_type nobody classified is restricted rather than exposed.
+    ELSE 'security'
+  END
+$$;
+
+ALTER FUNCTION public.audit_domain_for(p_entity_type text, p_action text) OWNER TO postgres;

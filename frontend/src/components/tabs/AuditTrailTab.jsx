@@ -189,7 +189,8 @@ export function diffFields(oldData, newData) {
  * trigger, so archiving, quarantining and a schema rebinding are derived from the diff.
  * SCHEMA_REJECTION is written by `record_ingestion_rejection()` with no diff, so the action itself
  * decides: governance, not critical. An INSERT is always creation, even of an already-quarantined
- * device.
+ * device, except a `device_submodels` row, which is a schema binding and governance whatever its
+ * verb.
  */
 export function classifyEvent(event, diff) {
   const action = String(event.event_type || event.action || '').toUpperCase()
@@ -206,6 +207,9 @@ export function classifyEvent(event, diff) {
   // The same argument, arriving from `user_roles`. A revocation is not `critical`: that
   // marker is for an entity's lifecycle, and nothing on the shopfloor ended here.
   if (action === 'ROLE_GRANTED' || action === 'ROLE_REVOKED') return 'governance'
+  // A device_submodels row is a schema binding: attaching or detaching one is the governance act
+  // a change to `schema_id` is, not a creation or a deletion of the device.
+  if (String(event.entity_type || '').toLowerCase() === 'device_submodels') return 'governance'
   if (action === 'DELETE') return 'critical'
   if (action === 'INSERT') return 'creation'
 
