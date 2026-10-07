@@ -28,7 +28,7 @@ People has a row of controls under the tabs, with **Refresh** and **Add Person**
 
 **Sessions a removed person already has end on their own, not at once.** Their role goes straight away, so the dashboard refuses anything a role allows. An open dashboard session can still read what any signed-in person can, such as the device list, for up to an hour. Sessions in Node-RED, Grafana and Studio keep what they had until they expire, up to eight hours in Node-RED. They cannot sign in again. If they held Administrator, check Node-RED's flows and the Audit Trail afterwards.
 
-**A new password does not end their sessions at once either.** Their old password stops working straight away. An open dashboard asks them to sign in again within the hour. Sessions in Node-RED, Grafana and Studio last until they expire. They keep their role meanwhile. To stop someone at once, use **Remove Access** instead.
+**A new password does not end their sessions at once either.** Their old password stops working straight away. An open dashboard asks them to sign in again within the hour. Sessions in Node-RED, Grafana and Studio last until they expire. They keep their role meanwhile. To take their role away at once, use **Remove Access** instead.
 
 ## The other tabs
 
