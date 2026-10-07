@@ -8,8 +8,15 @@
  *
  *   npm run setup                        # asks two questions on a terminal
  *   npm run setup -- --domain=aber.example.com --admin-email=ops@example.com
- *   helm upgrade --install aber deploy/helm/aber -n aber \
- *     -f deploy/helm/aber/values-local.yaml
+ *
+ * It ends with the next step docs/install.md gives: write site.yaml (step 6, "Describe your
+ * site"), then install the published chart at Chart.yaml's `version:` (step 7, "Install Aber"):
+ *
+ *   helm install aber oci://ghcr.io/harri-llewelyn/aber/aber --version <version> \
+ *     -n aber --create-namespace \
+ *     -f deploy/helm/aber/values-local.yaml -f site.yaml --timeout 15m
+ *
+ * `--out=<path>` writes the values file elsewhere. An existing file is never overwritten.
  *
  * The JWTs are a set: the anon and service-role keys are HS256 JWTs signed by the JWT secret, and
  * rotating the secret without re-minting both yields a stack that comes up healthy and rejects
@@ -36,11 +43,16 @@ import { fileURLToPath } from 'url';
 import {
   mintJwt, SERVICE_KEY_DEFAULT_DAYS, INFRASTRUCTURE_KEY_DAYS
 } from './lib/service-jwt.mjs';
+import { installCommand, readChartVersion } from './lib/release-chart.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 const outArg = process.argv.find((a) => a.startsWith('--out='));
 const outPath = path.resolve(rootDir, outArg ? outArg.slice('--out='.length) : 'deploy/helm/aber/values-local.yaml');
+/** The values file as the install command names it: relative to the checkout when it is inside it. */
+const outRel = path.relative(rootDir, outPath);
+const valuesFile = (outRel.startsWith('..') || path.isAbsolute(outRel) ? outPath : outRel).replace(/\\/g, '/');
+const nextStep = installCommand({ version: readChartVersion(rootDir), valuesFile });
 
 /** Hex: these values land in connection strings, psql `-v` variables and YAML, and hex needs no
  *  escaping in any of them. */
@@ -94,6 +106,7 @@ const secrets = {
   // One MQTT password per principal, independently generated: the broker's roles confine each
   // account to a different subtree. The usernames keep the chart's defaults.
   mqttIngestionPassword: hex(24),
+  mqttI3xPassword: hex(24),
   mqttValidatorPassword: hex(24),
   mqttMonitorPassword: hex(24),
   mqttDynsecAdminPassword: hex(24),
@@ -211,11 +224,14 @@ if (adminEmail) secrets.firstAdministratorPassword = typeablePassword();
 
 /** Hand-written YAML: every value is hex, a JWT or a domain, none needs quoting beyond the quotes. */
 const yamlLines = [
-  '# Written by `npm run setup` on ' + new Date().toISOString().slice(0, 10) + '. Not in git (deploy/helm/**/values-local.yaml is',
-  '# ignored). Every credential below was generated for this file and is shared with nothing;',
+  '# Written by `npm run setup` on ' + new Date().toISOString().slice(0, 10) + '.' +
+    (/^deploy\/helm\/.+\/values-(local|try)\.yaml$/.test(valuesFile) ? ' Not in git: .gitignore ignores it.' : ''),
+  '# Every credential below was generated for this file and is shared with nothing;',
   '# the anon and service-role JWTs are signed by jwtSecret, so the three are a matching set.',
   '#',
-  '#   helm upgrade --install aber deploy/helm/aber -n aber -f ' + path.relative(rootDir, outPath).replace(/\\/g, '/'),
+  '# Next, write site.yaml (docs/install.md, step 6 "Describe your site"), then install (step 7):',
+  '#',
+  ...nextStep.map((line) => `#   ${line}`),
   '#',
   '# For a stack other people reach, move these into an externally managed Secret and set',
   '# secrets.existingSecret instead (values-prod.yaml.example).',
@@ -235,8 +251,7 @@ yamlLines.push('');
 fs.mkdirSync(path.dirname(outPath), { recursive: true });
 fs.writeFileSync(outPath, yamlLines.join('\n'), { mode: 0o600 });
 
-const rel = path.relative(rootDir, outPath).replace(/\\/g, '/');
-console.log(`✅ Wrote ${rel} with ${Object.keys(secrets).length} freshly generated credentials.`);
+console.log(`✅ Wrote ${valuesFile} with ${Object.keys(secrets).length} freshly generated credentials.`);
 console.log('   The anon and service-role JWTs were signed with the new jwtSecret, so the three are a');
 console.log('   matching set. A publishable/secret key pair was minted too; the gateway accepts both');
 console.log(`   formats. Left empty on purpose: ${deliberatelyEmpty.join(', ')} (break-glass only).`);
@@ -265,4 +280,7 @@ if (adminEmail) {
   console.log('   and secrets.firstAdministratorPassword (12+ characters) in it.');
 }
 console.log('');
-console.log(`🎉 helm upgrade --install aber deploy/helm/aber -n aber -f ${rel}`);
+console.log('🎉 Next, write site.yaml (docs/install.md, step 6 "Describe your site"). Then install');
+console.log('   the release (step 7):');
+console.log('');
+for (const line of nextStep) console.log(`   ${line}`);
