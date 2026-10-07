@@ -45,6 +45,7 @@ Aber has two parts:
 
 | You want to | Start here |
 | :--- | :--- |
+| Try Aber on your own computer | [Try it](docs/install.md#try-it) |
 | Install Aber on a site | [Installing Aber](docs/install.md#run-it-on-a-site) |
 | Work on Aber's code on a laptop | [Develop on a laptop](docs/install.md#develop-on-a-laptop) |
 | Connect your first machine | [The tutorial](tutorial/README.md) |

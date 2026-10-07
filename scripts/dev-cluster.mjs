@@ -54,6 +54,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { INIT_JOBS, apiPort, createClusterArgs, describeMissing, missingTools } from './lib/k3d.mjs'
+
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const CHART = 'deploy/helm/aber'
 const CLUSTER = process.env.ABER_DEV_CLUSTER || 'aber'
@@ -180,11 +182,8 @@ function describeVersion () {
 // The cluster
 // ---------------------------------------------------------------------------------------------
 export function preflight (tools) {
-  for (const t of tools) {
-    if (!capture(t, ['version', '--client'].slice(0, t === 'kubectl' ? 2 : 1)).ok && !capture(t, ['--version']).ok) {
-      die(`${t} is not on PATH. The runbook's prerequisites: docker, k3d, kubectl, helm.`)
-    }
-  }
+  const missing = missingTools(tools)
+  if (missing.length) die(`this needs ${tools.join(', ')}, and these cannot be used:\n${describeMissing(missing)}`)
 }
 
 function clusterExists () {
@@ -199,13 +198,11 @@ function ensureCluster () {
     console.log(`  exists`)
   } else {
     // Port 80 is Traefik; 1883 and 8883 are the broker's LoadBalancer, for appliances on the LAN.
-    must('k3d', ['cluster', 'create', CLUSTER, '--agents', '0',
-      '--port', '80:80@loadbalancer', '--port', '1883:1883@loadbalancer', '--port', '8883:8883@loadbalancer',
-      '--k3s-arg', '--disable=metrics-server@server:0', '--wait'], 'k3d could not create the cluster')
+    must('k3d', createClusterArgs(CLUSTER), 'k3d could not create the cluster')
   }
   // k3d writes the API endpoint as host.docker.internal on Windows and macOS, which some adapters
   // resolve to an address nothing answers on. Loopback always works: the port is published there.
-  const port = capture('docker', ['port', `k3d-${CLUSTER}-serverlb`, '6443']).out.split(':').pop()
+  const port = apiPort(capture('docker', ['port', `k3d-${CLUSTER}-serverlb`, '6443']).out)
   if (port) capture('kubectl', ['config', 'set-cluster', `k3d-${CLUSTER}`, `--server=https://127.0.0.1:${port}`])
   capture('kubectl', ['config', 'use-context', `k3d-${CLUSTER}`])
   const nodes = capture('kubectl', ['get', 'nodes', '-o', 'jsonpath={.items[*].status.conditions[?(@.type=="Ready")].status}'])
@@ -426,7 +423,7 @@ async function installChart ({ tls, e2e, holdE2e = false }) {
 
 async function waitForStack () {
   step('wait for the init hooks')
-  for (const job of ['db-roles-init', 'db-init', 'storage-init']) {
+  for (const job of INIT_JOBS) {
     must('kubectl', ['-n', NS, 'wait', '--for=condition=complete', `job/${RELEASE}-${job}`, '--timeout=10m'],
       `${job} did not complete`)
   }
