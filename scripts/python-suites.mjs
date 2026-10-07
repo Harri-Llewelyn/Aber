@@ -442,6 +442,13 @@ export const SUITES = {
       'simulated JWT claims, because the immutability guard deliberately exempts the owner -- a ' +
       'suite connecting as `postgres` would pass against a database with the trigger dropped.',
   },
+  'supabase/migrations/test_device_schemas_union.py': {
+    lanes: ['db'],
+    why:
+      'A device\'s schemas are the union of device_submodels and devices.schema_id (0168): the ' +
+      'view, the SCHEMA_REJECTION snapshot and set_device_schemas() must give one answer, and ' +
+      'a replay of 0168 must keep it.',
+  },
   'supabase/migrations/test_gateway_flow_deployed.py': {
     lanes: ['db'],
     why:

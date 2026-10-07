@@ -810,6 +810,8 @@ function edgeFunctionNames() {
    * definition. The check fails on the first unlisted redeclaration.
    */
   const INTENDED_REDECLARATIONS = {
+    'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline copied devices.schema_id alone',
+    'public.reject_archived_schema_assignment': '0168 lets a binding move between devices.schema_id and device_submodels, which set_device_schemas() does; the baseline refused the move as a new binding',
     // Empty just after a squash: the baseline is generated from a dump of the finished database,
     // so every function appears in it exactly once, in its final form. Entries return as soon as
     // a migration added after the fold redeclares something the baseline holds, and each one
