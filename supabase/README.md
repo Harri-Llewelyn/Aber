@@ -976,7 +976,7 @@ holds them for every other writer, a Manager's PATCH included.
 | :--- | :--- |
 | `gateway_status` | `gateways` plus read-time `live_status` / `is_stale` (90 s threshold) |
 | `device_locations` | A device's effective cell: `COALESCE(device.cell_id, gateway.cell_id)` |
-| `device_schemas` | A device's `device_submodels` rows, or its `devices.schema_id` (the dashboard's attachment) when it has none |
+| `device_schemas` | Every schema attached to a device, one row per (device, schema): its `device_submodels` rows and its deprecated `devices.schema_id` (`0168`) |
 | `telemetry` | `security_invoker` view over `timescale.telemetry`, a `postgres_fdw` foreign table |
 
 > The raw foreign table lives in its own `timescale` schema, deliberately kept out of
@@ -3253,8 +3253,8 @@ holds, and the most useful case it answers is the one a filter would hide — an
 with devices still attached to it, which is a migration that has not finished. Answering `404`
 there would report "no such schema" about a schema whose members are the answer, so the row's
 `status` is returned instead and the caller decides. Members are read through the `device_schemas`
-**view**, not `device_submodels`, so a device the dashboard attached through `devices.schema_id`
-is not silently omitted. A schema
+**view**, not `device_submodels`, so a device attached through `devices.schema_id` is not
+silently omitted. A schema
 nothing implements is a `200` with an empty list.
 
 **What it does not claim.** Schema and service identifiers are this deployment's own UUIDs, and the
@@ -3640,8 +3640,8 @@ would freeze. So `reject_archived_schema_assignment()` returns early on an `UPDA
 *arrives at* an archived schema.
 
 **Both arms, because a guard on one column is not a guard.** `device_schemas` reads
-`device_submodels` and `devices.schema_id`, the dashboard's attachment; the trigger is on both
-tables, one function body switching on `TG_TABLE_NAME`.
+`device_submodels` and `devices.schema_id`; the trigger is on both tables, one function body
+switching on `TG_TABLE_NAME`.
 
 **A draft is still assignable**, deliberately — attaching a draft to a real machine is how a version
 is tried before publishing, and `publish_schema_version()` already merges that state rather than
@@ -3661,6 +3661,43 @@ reached it picked the wrong row out of a version history and needs to be told wh
 a public write surface, and the approvals queue applies a patch on somebody else's behalf. A `CHECK`
 cannot see another table and an RLS policy is bypassed by every `SECURITY DEFINER` path, which is why
 this is a trigger and why the test suite runs it as the **owner** — this guard exempts nobody.
+
+### A device's schemas are both arms, and the dashboard writes one of them (`0168`)
+
+A schema reaches a device through a `device_submodels` row or through `devices.schema_id`. Until
+`0168`, `device_schemas` read the column only for a device with **no** `device_submodels` row. So a
+device the dashboard attached to schema A, and the API then gave schema B, resolved to B alone.
+Conformance, the AAS export, i3X and the Directory stopped seeing A; the Devices page still showed it.
+
+**The view is now the union**, one row per (device, schema). The column's arm is skipped only when a
+`device_submodels` row names the same schema, so that row and its `submodel_key` win. The columns
+are unchanged, so `CREATE OR REPLACE VIEW` keeps the grants. Every reader already took a list:
+
+- ingestion's conformance check unions the metrics across the rows;
+- the AAS export builds each schema's submodels;
+- i3X synthesises a type for a device with several;
+- the Directory, edge function and MQTT publisher alike, lists them.
+
+**`devices.schema_id` is deprecated for writes.** It is still read, so an API client that sets it
+keeps working, and it is removed no sooner than the next minor release
+([`docs/releases.md`](../docs/releases.md#deprecation)). The Devices page no longer writes it:
+its picker saves through **`set_device_schemas(p_device_id, p_schema_ids)`**, which makes the set
+exact in one transaction. It inserts the missing `device_submodels` rows, deletes the rest, and sets
+the column to `NULL`. A kept row keeps its `submodel_key`. It is `SECURITY DEFINER` so it can answer
+404 through `raise_not_found()`; its `has_role()` check is the pair the table policies name.
+
+**Moving a binding between the arms is not a new binding.** `set_device_schemas()` inserts before it
+clears the column, and `reject_archived_schema_assignment()` now returns early when the device
+already carries the schema through either arm. Without that, saving a device left on an archived
+version would be refused for the schema it already had.
+
+**The `SCHEMA_REJECTION` row names every schema the payload was judged against.**
+`record_ingestion_rejection()` reads them through the view into `schema_ids`. The 1.0 key
+`schema_id` stays, holding the first of them: the column's value where it is set, as before. A
+device attached only through `device_submodels` used to record no schema there.
+
+`publish_schema_version()` and `discard_schema_draft()` are unchanged: both already handle both
+arms. `devices_rebound` still counts bindings, so a device on both arms counts twice.
 
 ### A device behind a gateway that never arrived is not late (archived migration 0092)
 
