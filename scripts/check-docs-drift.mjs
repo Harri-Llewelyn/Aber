@@ -2679,6 +2679,9 @@ function edgeFunctionNames() {
       [/<[a-zA-Z/][^>]*>/, 'raw HTML (it renders as text -- there is no HTML sink in the renderer)'],
       [/(?<!\*)\*(?!\*)[^*\n]+\*(?!\*)/, 'single-asterisk emphasis (use **bold**)'],
       [/^\s*>/m, 'a block quote'],
+      // HelpMarkdown.jsx reads an item only at the start of a line: an indented one joins the
+      // paragraph around it, dash and all, and so does every item after it.
+      [/^[ \t]+([-*]|\d+\.)\s/m, 'an indented (nested) list item; make it a top-level item'],
     ];
 
     const offences = [];
