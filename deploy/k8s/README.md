@@ -251,6 +251,13 @@ workload, choosing the release with `KUBE_NAMESPACE` and `HELM_RELEASE`.
 
 ## Install
 
+**On one Ubuntu machine, the installer does path *A* for you.** [`deploy/install.sh`](../install.sh)
+installs k3s, Helm and Node.js where they are missing, applies Traefik's change, cert-manager and the
+internal CA, and writes the credentials and `site.yaml` to `/etc/aber`. It then installs the
+published chart at the installer's own version, waits for each workload and runs `helm test`.
+[*Run it on a site*](../../docs/install.md#run-it-on-a-site) gives the command. What follows is
+every step by hand, with the reason for each.
+
 There are two ways to install, for two different jobs:
 
 - **From the registry** (*A* below), if you want to run Aber.
