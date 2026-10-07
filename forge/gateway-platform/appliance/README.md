@@ -7,6 +7,8 @@ Node-RED in Docker, enrols itself on first boot, and publishes Sparkplug B over 
 
 - Docker and the Compose plugin on the appliance.
 - A network route from the appliance to the platform (HTTPS) **and** to the broker on **8883**.
+- A route to the forge's SSH, where `flow-sync` fetches approved flows: port **2222** on a platform
+  set up with `npm run setup`, **22** on one that kept the chart's default.
 - **The enrolment token in `.env` expires 30 minutes after the bundle was generated, and is
   single-use.** If it lapses, generate a new bundle from the gateway's page in the dashboard —
   nothing here needs deleting first.

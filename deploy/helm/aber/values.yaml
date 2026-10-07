@@ -1201,7 +1201,11 @@ gitea:
       # NodePort is the fallback where no controller exists; `ssh.domain`/`port` must then
       # advertise the 30000+ port.
       type: LoadBalancer
-      # What clients dial and what Gitea prints. Not the host's sshd.
+      # What gateways dial and what Gitea prints in clone URLs; the container listens on 22
+      # whatever this is. k3s's ServiceLB binds it on the node itself, so on 22 the forge takes
+      # new connections from the machine's own sshd. `npm run setup` writes 2222 for a new site.
+      # The default stays 22 because an enrolled gateway keeps the clone URL and host key it was
+      # given: changing this on a site with gateways stops them pulling until they re-enrol.
       port: 22
       # Only when type is NodePort.
       nodePort: null

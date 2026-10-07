@@ -35,18 +35,27 @@ site, such as `aber.plant.example`, on your site's DNS server.
 
 ### 1. Move the machine's SSH off port 22
 
-Gateways reach Aber's [forge](glossary.md#forge) over SSH on port 22, and k3s gives the forge that
-port on the machine's address. So once Aber is installed, a new SSH connection to port 22 reaches
-the forge, not the machine. Move the machine's own SSH first. Connections already open stay up.
+**Skip this step if you create the site's passwords with `npm run setup` (step 5).** Setup puts
+the [forge](glossary.md#forge)'s SSH on port 2222, so port 22 stays with the machine's own SSH.
+Gateways use 2222 to fetch their flows from the forge.
+
+**If the machine's own SSH is already on 2222, move it back to 22 before you install.** k3s would
+give 2222 to the forge, and new SSH connections to the machine would reach the forge instead.
+
+Do this step only if you configure the site another way, from `values-prod.yaml.example` or an
+external Secret, and keep the forge on port 22. k3s gives the forge that port on the machine's
+address. So once Aber is installed, a new SSH connection to port 22 reaches the forge, not the
+machine. Move the machine's own SSH first, to a port the forge does not use. Connections already
+open stay up.
 
 ```bash
-echo 'Port 2222' | sudo tee /etc/ssh/sshd_config.d/port.conf
+echo 'Port 2022' | sudo tee /etc/ssh/sshd_config.d/port.conf
 if systemctl is-active --quiet ssh.socket; then      # 24.04 starts sshd from a socket
   sudo systemctl daemon-reload && sudo systemctl restart ssh.socket
 else
   sudo systemctl restart ssh
 fi
-# Check `ssh -p 2222` from another terminal before closing this one.
+# Check `ssh -p 2022` from another terminal before closing this one.
 ```
 
 ### 2. Install k3s, Helm and Node.js
@@ -77,7 +86,8 @@ Both are done outside the machine:
   address. Every part of Aber is a host under it (see [*Where everything is*](#where-everything-is)),
   and every browser and gateway on the site has to be able to look it up.
 - **Ports.** Make these reachable from the site network: 80 and 443 for browsers and the API, 8883
-  for gateways' MQTT over TLS, and 22 for gateways' git over SSH to the forge.
+  for gateways' MQTT over TLS, and 2222 for gateways' git over SSH to the forge. If you kept the
+  forge on port 22 (step 1), open 22 instead.
 
 ### 4. Prepare the cluster
 
@@ -231,8 +241,9 @@ A gateway connects a machine's devices to the server. Create each one in the das
     `docker compose up -d --build` starts it.
 
   Either way, the gateway needs to reach the server's API, its broker on 8883, and the forge's SSH on
-  22, where it fetches its flow and its platform playbook. Its image is built on the gateway itself,
-  which is how an arm64 Pi runs it. [`docs/remote-gateways.md`](remote-gateways.md) covers it in
+  2222 (22 on a site that kept it there), where it fetches its flow and its platform playbook. Its
+  image is built on the gateway itself, which is how an arm64 Pi runs it.
+  [`docs/remote-gateways.md`](remote-gateways.md) covers it in
   full, and [`forge/gateway-platform/appliance/`](../forge/gateway-platform/appliance) holds what the
   bundle contains.
 - **A Host or Simulated gateway** runs inside the server, in Aber's own Node-RED, and needs nothing

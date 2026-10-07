@@ -96,8 +96,8 @@ const FORWARDS = [
   { local: 54321, service: 'supabase-envoy', remote: 8000, what: 'Supabase API (the gateway)' },
   { local: 54323, service: 'supabase-envoy', remote: 8001, what: 'Studio, behind the gateway login' },
   { local: 3003, service: 'supabase-envoy', remote: 8002, what: 'the forge, behind the gateway' },
-  // The forge over SSH, which the appliance suites push to with a deploy key: the k3d load
-  // balancer publishes 22 on the cluster network only.
+  // The forge over SSH, which the appliance suites push to with a deploy key. gitea-external (2222
+  // in values-dev.yaml) is not published on the host, so this goes to the in-cluster Service.
   { local: 2222, service: 'gitea', remote: 22, what: 'the forge over SSH' },
   { local: 1880, service: 'node-red', remote: 1880, what: 'Node-RED' },
   { local: 3002, service: 'grafana', remote: 3000, what: 'Grafana' },
