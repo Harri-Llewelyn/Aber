@@ -16,7 +16,8 @@
  * re-enable, with a live session held across the two that drop one. The TLS listener is checked
  * when a certificate can be produced.
  *
- * Requires Docker, and skips with a clear message without it.
+ * The chart's principal list is held to PLATFORM_PRINCIPALS from source, with or without Docker.
+ * Everything else requires Docker, and skips with a clear message without it.
  *
  * Usage: node scripts/check-broker-config.mjs [--verbose]
  */
@@ -31,7 +32,7 @@ import { tmpdir } from 'node:os';
 
 import { hashArgvForUsername } from './lib/mosquitto-credentials.mjs';
 import {
-  assertOk, clientFromPasswordEntry, isRefusal, issueWithControl, summariseInventory,
+  PLATFORM_PRINCIPALS, assertOk, clientFromPasswordEntry, isRefusal, issueWithControl, summariseInventory,
 } from './lib/mosquitto-dynsec.mjs';
 import { controlSender } from './lib/mosquitto-control.mjs';
 
@@ -62,17 +63,97 @@ function docker(args, opts = {}) {
   return spawnSync('docker', args, { encoding: 'utf8', ...opts });
 }
 
-if (docker(['version', '--format', '{{.Server.Version}}']).status !== 0) {
-  console.log('  skip   broker config check: no Docker daemon available');
-  console.log('\nThe broker config was NOT verified. Run this where Docker is available.');
+// -------------------------------------------------------------------------------------------------
+// The chart's principal list and PLATFORM_PRINCIPALS name the same set. `aber.mqttPrincipals`
+// hands each principal's credential pair to the boot reconcile, which creates an account for each
+// PLATFORM_PRINCIPALS entry: a name only in PLATFORM_PRINCIPALS stops the broker's boot
+// ("MQTT_<NAME>_USER is empty"), and a name only in the chart gets no account. Read from source,
+// so it runs without Docker.
+// -------------------------------------------------------------------------------------------------
+const HELPERS = 'deploy/helm/aber/templates/_helpers.tpl';
+const PRINCIPALS_SOURCE = 'scripts/lib/mosquitto-dynsec.mjs';
+
+/**
+ * The names in `aber.mqttPrincipals`, split on single spaces as the chart's `splitList " "` splits
+ * them; null when the define is missing or is not a literal list.
+ */
+function chartPrincipals(tpl) {
+  const m = tpl.match(/\{\{-?\s*define\s+"aber\.mqttPrincipals"\s*-?\}\}([\s\S]*?)\{\{-?\s*end\s*-?\}\}/);
+  return m && !m[1].includes('{{') ? m[1].trim().split(' ') : null;
+}
+
+/** Each principal named on one side only, with the side that names it. */
+function principalMismatch(chart, platform) {
+  return [
+    ...platform.filter((p) => !chart.includes(p)).map((name) => ({ name, only: 'PLATFORM_PRINCIPALS' })),
+    ...chart.filter((p) => !platform.includes(p)).map((name) => ({ name, only: 'aber.mqttPrincipals' })),
+  ];
+}
+
+{
+  // The comparison's controls, one name missing from each side: a comparison that stopped
+  // reporting a mismatch would otherwise pass exactly as two agreeing lists do.
+  const define = (list) => `{{- define "aber.mqttPrincipals" -}}\n${list}\n{{- end -}}`;
+  const controls = JSON.stringify([
+    principalMismatch(chartPrincipals(define('INGESTION I3X')), ['INGESTION', 'I3X', 'MONITOR']),
+    principalMismatch(chartPrincipals(define('INGESTION I3X MONITOR')), ['INGESTION', 'I3X']),
+  ]) === JSON.stringify([
+    [{ name: 'MONITOR', only: 'PLATFORM_PRINCIPALS' }],
+    [{ name: 'MONITOR', only: 'aber.mqttPrincipals' }],
+  ]);
+  const chart = chartPrincipals(readFileSync(join(REPO, HELPERS), 'utf8'));
+  const malformed = (chart || []).filter((p) => !/^[A-Z][A-Z0-9_]*$/.test(p));
+
+  if (!controls) {
+    problems.push('the principal-list comparison no longer reports its own fixtures (one name missing from each side), so it proves nothing');
+  } else if (!chart) {
+    problems.push(`${HELPERS} has no literal \`aber.mqttPrincipals\` define for this check to read`);
+  } else if (malformed.length) {
+    problems.push(
+      `aber.mqttPrincipals (${HELPERS}) holds ${malformed.map((p) => JSON.stringify(p)).join(', ')}; ` +
+        'the chart splits the list on single spaces, so this renders a broken MQTT_<NAME>_USER name'
+    );
+  } else {
+    const mismatch = principalMismatch(chart, PLATFORM_PRINCIPALS.map((p) => p.env));
+    for (const { name, only } of mismatch) {
+      problems.push(
+        only === 'PLATFORM_PRINCIPALS'
+          ? `${name} is in PLATFORM_PRINCIPALS (${PRINCIPALS_SOURCE}) and not in aber.mqttPrincipals ` +
+            `(${HELPERS}): the broker's boot stops with "MQTT_${name}_USER is empty"`
+          : `${name} is in aber.mqttPrincipals (${HELPERS}) and not in PLATFORM_PRINCIPALS ` +
+            `(${PRINCIPALS_SOURCE}): the reconcile creates no broker account for it`
+      );
+    }
+    if (!mismatch.length) {
+      ok.push(`aber.mqttPrincipals and PLATFORM_PRINCIPALS name the same ${chart.length} principals`);
+    }
+  }
+}
+
+/**
+ * Without Docker only the principal-list check has run: its result decides the exit status, and the
+ * broker is reported as not verified.
+ */
+function skipBroker(reason, hint = '') {
+  for (const line of ok) console.log(`  ok   ${line}`);
+  console.log(`  skip   broker config check: ${reason}`);
+  if (problems.length) {
+    console.error('\nBroker configuration is broken:\n');
+    for (const p of problems) console.error(`  ${p}`);
+    process.exit(1);
+  }
+  console.log(`\nThe broker config was NOT verified.${hint}`);
   process.exit(0);
+}
+
+if (docker(['version', '--format', '{{.Server.Version}}']).status !== 0) {
+  skipBroker('no Docker daemon available', ' Run this where Docker is available.');
 }
 
 if (docker(['image', 'inspect', IMAGE]).status !== 0) {
   log(`pulling ${IMAGE}`);
   if (docker(['pull', IMAGE], { stdio: 'inherit' }).status !== 0) {
-    console.log(`  skip   broker config check: could not pull ${IMAGE}`);
-    process.exit(0);
+    skipBroker(`could not pull ${IMAGE}`);
   }
 }
 

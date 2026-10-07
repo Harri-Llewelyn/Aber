@@ -247,7 +247,8 @@ A new platform consumer (a BI reader of `uns/#`, say) is a role in `dynsec-roles
 `MQTT_<NAME>_USER` / `MQTT_<NAME>_PASSWORD` by the chart's `templates/secret.yaml`; the name in
 `aber.mqttPrincipals` (`templates/_helpers.tpl`), which hands the pair to the reconcile, and in
 `checksum/principals` (`templates/messaging/mosquitto.yaml`); an entry in `PLATFORM_PRINCIPALS` in
-`scripts/lib/mosquitto-dynsec.mjs`, which nothing checks against `aber.mqttPrincipals`; a purpose
+`scripts/lib/mosquitto-dynsec.mjs`, which `scripts/check-broker-config.mjs` requires to name the
+same set as `aber.mqttPrincipals`; a purpose
 line in `frontend/src/utils/serviceIdentities.js`; and an assertion in
 `scripts/check-broker-config.mjs`.
 `scripts/check-docs-drift.mjs` holds the roles file and the page's list to each other.
