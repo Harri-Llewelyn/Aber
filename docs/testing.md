@@ -777,9 +777,15 @@ Both end with the same checks:
 
 `upgrade` also signs in before the upgrade, and asserts that the upgrade's own `aber-db-init` Job ran
 the checkout's image and completed: it replays the migration chain onto the last release's database.
+It asserts that every volume claim kept its uid, so no data volume was replaced. A StatefulSet whose
+claim templates changed must have been created again, by the `claim-templates` pre-upgrade hook
+([`upgrades.md`](upgrades.md#from-102-or-earlier-the-two-databases-statefulsets-are-replaced-once)),
+and own its running pod; one whose claim templates did not change must be the same object. The
+hook's log is printed with the result.
 
-Measured on a 16 GB laptop with the image builds cached, `install` took 7½ minutes and `upgrade`
-12½, most of it pulling the published images. CI builds every image from nothing, so it takes longer.
+Measured on a 16 GB laptop with the image builds cached, `install` took 6½ to 7½ minutes and
+`upgrade` 8 to 12½, most of the spread in pulling the published images. CI builds every image
+from nothing, so it takes longer.
 
 **What they do not rehearse** is the rest of
 [#691](https://github.com/Harri-Llewelyn/Aber/issues/691): real hardware, weeks of running, the

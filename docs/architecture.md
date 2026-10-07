@@ -94,6 +94,7 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `alloy` | `grafana/alloy:v1.20.1` | the one collector: logs, metrics and host metrics; `alloy:12345` |
 | `backup` | `supabase/postgres:17.6.1.175` | the nightly CronJob, when the backup service is off |
 | `backup-service` | `ghcr.io/harri-llewelyn/aber/backup-service` | the Backups page's worker (`backupService.enabled`) |
+| `claim-templates` | `ghcr.io/harri-llewelyn/aber/ingestion` | pre-upgrade hook Job: replaces a database StatefulSet whose claim templates a release relabelled ([`upgrades.md`](upgrades.md#from-102-or-earlier-the-two-databases-statefulsets-are-replaced-once)) |
 | `cold-archive` | `ghcr.io/harri-llewelyn/aber/ingestion` | CronJob: exports, verifies and drops cold chunks |
 | `db-init` | `ghcr.io/harri-llewelyn/aber/db-init` | hook Job: the migration chain, on every install and upgrade |
 | `db-roles-init` | `supabase/postgres:17.6.1.175` | hook Job: the Supabase roles and their passwords |

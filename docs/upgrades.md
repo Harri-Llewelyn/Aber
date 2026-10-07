@@ -257,6 +257,38 @@ secrets:
 The upgrade then starts the broker, and the workloads waiting on it follow. A site using
 `secrets.existingSecret` keeps `MQTT_I3X_PASSWORD` in that Secret, as before.
 
+### From 1.0.2 or earlier, the two databases' StatefulSets are replaced once
+
+1.0.0 to 1.0.2 labelled the volume claim templates of `supabase-db` and `timescaledb` with the
+chart's version. Kubernetes never lets a StatefulSet's claim templates change, so Helm alone cannot
+upgrade from those releases. Later releases label them with values that never change, and carry an
+older site across by themselves:
+
+- **A pre-upgrade hook runs first.** The Job `aber-claim-templates` checks each of the two
+  StatefulSets. Where the claim-template labels differ from the new release's, it deletes the
+  StatefulSet with `propagationPolicy: Orphan` and waits until it is gone.
+- **The pods and the data stay.** An orphaning delete removes only the StatefulSet object. The
+  database pod keeps running and its volume claim (`data-supabase-db-0`, `data-timescaledb-0`) is
+  untouched.
+- **Helm then creates the StatefulSet again.** It adopts the running pod and its claim, and restarts
+  the pod on the new image, as any upgrade does.
+- **After this upgrade the hook does nothing.** The labels match, so it leaves both StatefulSets alone.
+- **Its permissions are narrow:** `get` and `delete` on those two StatefulSets, by name. Its
+  ServiceAccount, Role and Job are deleted once it succeeds. A failure stops the upgrade before Helm
+  changes anything, and leaves the Job for `kubectl -n aber logs job/aber-claim-templates`.
+
+**If you upgrade with `--no-hooks`,** or an upgrade from 1.0.2 or earlier has already failed with
+`StatefulSet.apps "supabase-db" is invalid: spec: Forbidden: updates to statefulset spec for fields
+other than ...`, do by hand what the hook does, then run the same `helm upgrade` again:
+
+```bash
+kubectl -n aber delete statefulset supabase-db timescaledb --cascade=orphan
+```
+
+A failed upgrade has already moved the other workloads to the new images, without running the
+migrations. The second `helm upgrade` runs them. **Rolling back to 1.0.2 or earlier** meets the same
+refusal in the other direction, and the same command clears it.
+
 ### Installs from 1.0.1 or earlier keep their 47 metrics
 
 Up to 1.0.1, every install started with 47 metrics in the Metric catalog. Later versions start a new

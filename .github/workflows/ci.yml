@@ -394,6 +394,36 @@ jobs:
           # schemas are per-release, so this pins WHICH API surface the manifests are judged against.
           KUBECONFORM_K8S_VERSION: 1.31.0
 
+      # Kubernetes refuses any change to a StatefulSet's volumeClaimTemplates, so a claim-template
+      # label that moves between releases (the chart version, appVersion, global.commonLabels) fails
+      # every `helm upgrade`. The chart packaged as another release, with a common label set, must
+      # render every claim template exactly as the checkout does.
+      - name: Verify Claim Templates Are The Same In Every Release
+        run: |
+          set -eu
+          helm package deploy/helm/aber --version 99.0.0 --app-version 99.0.0 --destination /tmp/later >/dev/null
+          helm template aber /tmp/later/aber-99.0.0.tgz -f deploy/helm/aber/values-dev.yaml \
+            --set global.commonLabels.release-probe=later > /tmp/rendered-later.yaml
+          python3 - <<'PY'
+          import sys, yaml
+          def claims(path):
+              return {d['metadata']['name']: d['spec']['volumeClaimTemplates']
+                      for d in yaml.safe_load_all(open(path, encoding='utf-8'))
+                      if d and d.get('kind') == 'StatefulSet' and d['spec'].get('volumeClaimTemplates')}
+          now, later = claims('/tmp/rendered.yaml'), claims('/tmp/rendered-later.yaml')
+          if len(now) < 2:
+              print(f"::error::expected the two database StatefulSets' claim templates, found {sorted(now)}")
+              sys.exit(1)
+          bad = [name for name in sorted(now) if now[name] != later.get(name)]
+          for name in bad:
+              print(f"::error::{name}'s claim templates differ between two releases:")
+              print(f"  this one:  {now[name]}")
+              print(f"  a later:   {later.get(name)}")
+          if bad:
+              sys.exit(1)
+          print(f"Claim templates are release-independent: {', '.join(sorted(now))}.")
+          PY
+
       # mosquitto's accepted syntax changes between minor versions and nothing else here reads the
       # broker config. Runs the real config on the pinned tag and asserts an unauthenticated client is
       # refused.

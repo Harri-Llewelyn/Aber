@@ -19,7 +19,9 @@
  * every running pod's built image is the checkout's, the first administrator signs in through
  * Traefik with the password from the values file, and admin@aber.local with aber123 is refused.
  * `upgrade` also asserts the upgrade's db-init Job completed, which replays the migration chain
- * onto the last release's database, and that the administrator signs in before and after.
+ * onto the last release's database; that every volume claim kept its uid, and a StatefulSet whose
+ * claim templates changed was created again and owns its pods; and that the administrator signs in
+ * before and after.
  *
  * The checkout's images are tagged <Chart.yaml version>-ci.<commit>, which no release carries, and
  * the checkout's chart is packaged with that as its version and appVersion, as release.yml packages
@@ -67,7 +69,7 @@ const VALUES = path.join(WORK, 'values-local.yaml')
 const SITE = path.join(WORK, 'site.yaml')
 
 const timings = []
-const forwards = new Set()
+const children = new Set()
 let passed = false
 let worktree = null
 
@@ -269,6 +271,81 @@ function assertRunningImages (version) {
   if (wrong.length) die(`running pods are not on the checkout's images:\n  ${wrong.join('\n  ')}`)
 }
 
+/** Each StatefulSet's uid and claim-template labels, and each claim's uid: what an upgrade must carry. */
+function statefulState () {
+  const get = kind => JSON.parse(capture('kubectl', ['-n', NS, 'get', kind, '-o', 'json']).out).items
+  const sorted = labels => JSON.stringify(Object.fromEntries(Object.entries(labels || {}).sort()))
+  return {
+    sets: new Map(get('statefulset').map(s => [s.metadata.name, {
+      uid: s.metadata.uid,
+      claimLabels: (s.spec.volumeClaimTemplates || []).map(t => sorted(t.metadata.labels)).join(';'),
+    }])),
+    claims: new Map(get('pvc').map(c => [c.metadata.name, c.metadata.uid])),
+  }
+}
+
+/**
+ * The claim-templates pre-upgrade hook's Job, and its log with it, is deleted when it succeeds, so
+ * the log is read while it runs, by a process of its own: helm runs synchronously meanwhile.
+ */
+function followHookLog () {
+  const file = path.join(WORK, 'claim-templates-hook.log')
+  const script = `
+    const { spawnSync } = require('node:child_process')
+    const [ns, out] = process.argv.slice(1)
+    const deadline = Date.now() + 20 * 60_000
+    while (Date.now() < deadline) {
+      const pod = spawnSync('kubectl', ['-n', ns, 'get', 'pods', '-l', 'app.kubernetes.io/component=claim-templates',
+        '-o', 'jsonpath={.items[0].metadata.name}'], { encoding: 'utf8' }).stdout.trim()
+      if (pod) {
+        const r = spawnSync('kubectl', ['-n', ns, 'logs', '-f', pod], { encoding: 'utf8' })
+        if (r.status === 0 && r.stdout) { require('node:fs').writeFileSync(out, r.stdout); process.exit(0) }
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250)
+    }`
+  const child = spawn(process.execPath, ['-e', script, NS, file], { stdio: 'ignore', windowsHide: true })
+  children.add(child)
+  return {
+    read: async () => {
+      for (let i = 0; i < 40 && child.exitCode === null; i++) await sleep(250)
+      child.kill()
+      children.delete(child)
+      return existsSync(file) ? readFileSync(file, 'utf8').trim() : ''
+    },
+  }
+}
+
+/**
+ * Across the upgrade: every claim kept its uid, so no data volume was replaced. A StatefulSet whose
+ * claim-template labels changed was created again (a new uid) and owns its running pods; one whose
+ * labels did not is the same object.
+ */
+function assertStatefulSetsCarried (before, hookLog) {
+  console.log(hookLog ? hookLog.split('\n').map(l => `  hook: ${l}`).join('\n') : '  hook: no log captured')
+  const after = statefulState()
+  const pods = JSON.parse(capture('kubectl', ['-n', NS, 'get', 'pods', '-o', 'json']).out).items
+  for (const [name, was] of before.sets) {
+    const now = after.sets.get(name)
+    if (!now) die(`statefulset/${name} is gone after the upgrade`)
+    const relabelled = now.claimLabels !== was.claimLabels
+    if (relabelled && now.uid === was.uid) die(`statefulset/${name}'s claim templates changed in place, which Kubernetes refuses`)
+    if (!relabelled && now.uid !== was.uid) die(`statefulset/${name} was created again although its claim templates did not change`)
+    if (relabelled) {
+      const owned = pods.filter(p => (p.metadata.ownerReferences || []).some(o => o.kind === 'StatefulSet' && o.name === name))
+      if (!owned.length || owned.some(p => !p.metadata.ownerReferences.some(o => o.uid === now.uid))) {
+        die(`statefulset/${name} was created again but does not own its pods`)
+      }
+      console.log(`  statefulset/${name}: created again with stable claim-template labels; owns ${owned.map(p => p.metadata.name).join(', ')}`)
+    } else {
+      console.log(`  statefulset/${name}: the same object; its claim templates did not change`)
+    }
+  }
+  for (const [name, uid] of before.claims) {
+    if (after.claims.get(name) !== uid) die(`persistentvolumeclaim/${name} was replaced: its data did not survive the upgrade`)
+  }
+  console.log(`  all ${before.claims.size} volume claims kept their uid`)
+}
+
 /** The upgrade's own db-init: the candidate image, completed. Its pod replayed every migration. */
 function assertUpgradeMigrated (version) {
   const r = capture('kubectl', ['-n', NS, 'get', 'job', `${RELEASE}-db-init`, '-o', 'json'])
@@ -288,9 +365,9 @@ async function forwardTraefik () {
   const port = await freePort()
   const child = spawn('kubectl', ['-n', 'kube-system', 'port-forward', 'svc/traefik', `${port}:443`],
     { cwd: REPO, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
-  forwards.add(child)
+  children.add(child)
   if (!(await forwardReady(child))) die('the port-forward to Traefik did not open')
-  return { port, close: () => { child.kill(); forwards.delete(child) } }
+  return { port, close: () => { child.kill(); children.delete(child) } }
 }
 
 function request ({ port, ca, method = 'GET', urlPath, headers = {}, body }) {
@@ -361,6 +438,8 @@ async function checkSignIn () {
 async function rehearse () {
   const candidate = candidateVersion()
   const from = mode === 'upgrade' ? previousRelease() : null
+  let before = null
+  let hookLog = ''
   console.log(from
     ? `Upgrade rehearsal: ${from.tag}, as published, to the checkout as ${candidate}`
     : `Install rehearsal: the checkout as ${candidate}, as a new site`)
@@ -386,12 +465,16 @@ async function rehearse () {
       helm('install', CHART_REF, ['--version', from.version, '--create-namespace']))
     await phase(`${from.tag} rolls out and passes helm test`, () => { rollOut(); helmTest() })
     await phase(`the first administrator signs in to ${from.tag}`, checkSignIn)
+    before = statefulState()
+    const hook = followHookLog()
     await phase(`helm upgrade to ${candidate}, with the same values`, () => helm('upgrade', chart))
+    hookLog = await hook.read()
     await phase('the upgrade\'s db-init replayed the migration chain', () => assertUpgradeMigrated(candidate))
   } else {
     await phase(`helm install ${candidate}`, () => helm('install', chart, ['--create-namespace']))
   }
   await phase('every workload rolls out', rollOut)
+  if (before) await phase('the StatefulSets and their claims came through the upgrade', () => assertStatefulSetsCarried(before, hookLog))
   await phase('helm test', helmTest)
   await phase('every running pod is on the checkout\'s images', () => assertRunningImages(candidate))
   await phase('the first administrator signs in; the demo account is refused', checkSignIn)
@@ -407,7 +490,7 @@ function summary () {
 
 // A failure leaves the cluster for whoever reads it next (CI's diagnostics step, or a person).
 process.on('exit', code => {
-  for (const child of forwards) child.kill()
+  for (const child of children) child.kill()
   removeWorktree()
   summary()
   if (passed && code === 0) {

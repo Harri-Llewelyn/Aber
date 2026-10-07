@@ -1,0 +1,247 @@
+{{- $sets := list -}}
+{{- if .Values.supabaseDb.enabled }}{{- $sets = append $sets "supabase-db" -}}{{- end -}}
+{{- if .Values.timescaledb.enabled }}{{- $sets = append $sets "timescaledb" -}}{{- end -}}
+{{- if $sets }}
+{{- $component := "claim-templates" -}}
+{{- $name := printf "%s-claim-templates" (include "aber.fullname" .) -}}
+{{- $expected := dict -}}
+{{- range $sets }}
+{{- $_ := set $expected . (include "aber.claimTemplateLabels" (dict "ctx" $ "component" .) | fromYaml) -}}
+{{- end }}
+{{/*
+  =================================================================================================
+  BEFORE AN UPGRADE: the two database StatefulSets are replaced, without their pods, when their
+  claim templates carry labels this release no longer renders.
+
+  Kubernetes refuses any change to a StatefulSet's volumeClaimTemplates. 1.0.0 to 1.0.2 labelled
+  them with the chart version, so `helm upgrade` from those releases fails on both StatefulSets
+  after it has already moved every Deployment. This Job runs first: for each StatefulSet whose
+  claim-template labels differ from aber.claimTemplateLabels, it deletes the object with
+  propagationPolicy Orphan and waits until it is gone. The pod and its claims stay; Helm then
+  creates the StatefulSet again, which adopts the running pod and its `data-<name>-0` claim and
+  rolls it. A StatefulSet whose labels already match is left alone, so after the first upgrade this
+  does nothing. Any unexpected API answer fails the Job, and the upgrade stops before Helm patches
+  anything. docs/upgrades.md has the manual command for an upgrade run with --no-hooks.
+
+  Its authority: `get` and `delete` on the two StatefulSets, by name, and nothing else.
+  =================================================================================================
+*/}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    # Named: resourceNames cannot restrict `list`, which is why it is not granted.
+    resourceNames:
+      {{- range $sets }}
+      - {{ . | quote }}
+      {{- end }}
+    verbs: ["get", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- if and .Values.networkPolicy.enabled .Values.networkPolicy.apiServerCidr }}
+---
+{{/*
+  The API server, for this Job alone. A hook resource rather than an entry in networkpolicy.yaml's
+  egress-apiserver policy: a pre-upgrade hook runs while the cluster still holds the previous
+  release's policies, which do not name this component.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.apiServerCidr | quote }}
+      ports:
+        {{- range .Values.networkPolicy.apiServerPorts }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    # After the ServiceAccount, Role, RoleBinding and NetworkPolicy above (-20).
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: false
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        # The ingestion image for its Python: urllib and ssl are all this needs.
+        - name: claim-templates
+          image: {{ include "aber.image" (dict "image" .Values.ingestion.image "ctx" $) | quote }}
+          imagePullPolicy: {{ .Values.ingestion.image.pullPolicy }}
+          env:
+            - name: NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            # Per StatefulSet, the labels this release renders on its claim templates.
+            - name: EXPECTED_CLAIM_LABELS
+              value: {{ $expected | toJson | quote }}
+          command:
+            - python
+            - -c
+            - |
+              import json, os, ssl, sys, time, urllib.error, urllib.request
+
+              SA = '/var/run/secrets/kubernetes.io/serviceaccount'
+              HOST = os.environ.get('KUBERNETES_SERVICE_HOST', 'kubernetes.default.svc')
+              PORT = os.environ.get('KUBERNETES_SERVICE_PORT', '443')
+              HOST = f'[{HOST}]' if ':' in HOST else HOST
+              NS = os.environ['NAMESPACE']
+              EXPECTED = json.loads(os.environ['EXPECTED_CLAIM_LABELS'])
+              TLS = ssl.create_default_context(cafile=f'{SA}/ca.crt')
+
+              def call(method, name, body=None):
+                  # Read per call: the projected token is rotated in place.
+                  with open(f'{SA}/token', encoding='utf-8') as f:
+                      token = f.read().strip()
+                  req = urllib.request.Request(
+                      f'https://{HOST}:{PORT}/apis/apps/v1/namespaces/{NS}/statefulsets/{name}',
+                      method=method, data=json.dumps(body).encode() if body else None,
+                      headers={'Authorization': f'Bearer {token}', 'Accept': 'application/json',
+                               'Content-Type': 'application/json'})
+                  try:
+                      with urllib.request.urlopen(req, context=TLS, timeout=30) as r:
+                          return r.status, json.load(r)
+                  except urllib.error.HTTPError as e:
+                      return e.code, e.read().decode(errors='replace')[:500]
+                  except OSError as e:
+                      sys.exit(f'{name}: {method} reached no API server: {e}')
+
+              for name, want in EXPECTED.items():
+                  status, sts = call('GET', name)
+                  if status == 404:
+                      print(f'{name}: absent; nothing to do')
+                      continue
+                  if status != 200:
+                      sys.exit(f'{name}: GET answered {status}: {sts}')
+                  differ = [t['metadata'].get('name', '?') for t in sts['spec'].get('volumeClaimTemplates') or []
+                            if (t['metadata'].get('labels') or {}) != want]
+                  if not differ:
+                      print(f'{name}: claim-template labels match this release; left alone')
+                      continue
+                  # The uid precondition: delete the object just read, never one created since.
+                  status, body = call('DELETE', name, {
+                      'apiVersion': 'v1', 'kind': 'DeleteOptions', 'propagationPolicy': 'Orphan',
+                      'preconditions': {'uid': sts['metadata']['uid']}})
+                  if status not in (200, 202):
+                      sys.exit(f'{name}: DELETE answered {status}: {body}')
+                  deadline = time.monotonic() + 180
+                  while True:
+                      status, body = call('GET', name)
+                      if status == 404:
+                          break
+                      if status != 200:
+                          sys.exit(f'{name}: GET after the delete answered {status}: {body}')
+                      if time.monotonic() > deadline:
+                          sys.exit(f'{name}: still present 180s after the orphaning delete')
+                      time.sleep(2)
+                  print(f'{name}: claim template(s) {", ".join(differ)} carried labels a release changes; '
+                        'deleted with propagationPolicy Orphan, so the pod and its claims stay and '
+                        'this upgrade creates the StatefulSet again')
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          volumeMounts:
+            - name: api-token
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+      volumes:
+        # Projected rather than automounted, as the chart's other API clients do; 0440 with fsGroup
+        # so the non-root user reads it as group.
+        - name: api-token
+          projected:
+            defaultMode: 0440
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+{{- end }}
