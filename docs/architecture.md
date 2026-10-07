@@ -100,7 +100,7 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `e2e-aas-export` | `ghcr.io/harri-llewelyn/aber/test-runner` | Job (`e2e.enabled`): the AAS conformance suite |
 | `e2e-validate` | `ghcr.io/harri-llewelyn/aber/test-runner` | Job (`e2e.enabled`): `validate.py` in-cluster |
 | `frontend` | `ghcr.io/harri-llewelyn/aber/frontend` | `app.<domain>` |
-| `gitea` | `gitea/gitea:28.0.0` | `git.<domain>` through the gateway's forge listener; SSH on `gitea-external:22` (LoadBalancer) |
+| `gitea` | `gitea/gitea:28.0.0` | `git.<domain>` through the gateway's forge listener; SSH on `gitea-external` (LoadBalancer): 2222 where `npm run setup` wrote the values, else 22 |
 | `grafana` | `grafana/grafana:13.2.3` | `grafana.<domain>` |
 | `i3x-service` | `ghcr.io/harri-llewelyn/aber/i3x-service` | `i3x.<domain>` |
 | `ingestion` | `ghcr.io/harri-llewelyn/aber/ingestion` | no route; `ingestion-metrics:9108` is scraped |

@@ -233,6 +233,31 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(lanes()[2]).toHaveAttribute('aria-label', 'Unassigned: 1 gateway, 0 devices')
   })
 
+  // Archived equipment keeps its scope and cell, but it is out of service on purpose.
+  it('counts no archived gateway or device in a lane, an area card or a pin', async () => {
+    const archivedGw = (id, where) => ({ ...gateway, gateway_id: id, gateway_name: id, is_archived: true, ...where })
+    api.get.mockImplementation(routeGet({
+      gateways: [
+        gateway,
+        archivedGw('Old_Site_Gw', { cell_id: null, location_scope: 'site_wide' }),
+        archivedGw('Old_Area_Gw', { cell_id: null, area_id: 'area-a', location_scope: 'area_wide' }),
+        archivedGw('Old_Cell_Gw', { cell_id: 'cell-1' })
+      ],
+      devices: [
+        device, bms,
+        { ...device, asset_id: 'dev-old', asset_name: 'Old_CNC', is_archived: true },
+        { ...bms, asset_id: 'dev-old-site', asset_name: 'Old_Tracker', area_id: null, location_scope: 'site_wide', location_source: 'site_wide', effective_area_id: null, is_archived: true }
+      ]
+    }))
+    await renderSiteMap()
+    expect(lanes()[0].querySelector('.site-lane-counts').textContent.trim()).toBe('0 Gateways · 0 Devices')
+    expect(areaCards()[0].querySelector('.area-card-counts').textContent.trim()).toBe('2 Cells · 1 Gateway · 2 Devices · 1 Area-Wide')
+    expect(within(areaCards()[0]).getByRole('button', { name: 'Bay 1' })).toHaveAttribute('title', expect.stringContaining('1 gateway(s), 1 device(s)'))
+    fireEvent.click(screen.getByRole('button', { name: /Site-Wide/ }))
+    expect(within(panel()).getByText('No Site-Wide assets.')).toBeInTheDocument()
+    expect(within(panel()).queryByText(/Old_/)).toBeNull()
+  })
+
   it('opens a lane into the details panel listing its assets, one lane at a time', async () => {
     api.get.mockImplementation(routeGet({ devices: [device, bms, { ...device, asset_id: 'dev-2', asset_name: 'Loose_Device', effective_cell_id: null, gateway_cell_id: null, location_source: 'unassigned', effective_area_id: null }] }))
     await renderSiteMap()

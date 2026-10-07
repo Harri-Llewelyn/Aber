@@ -318,10 +318,10 @@ index to go stale. A clone of the release tag supplies only `npm run setup` and 
 this directory.
 
 ```bash
-git clone --branch v1.0.1 https://github.com/Harri-Llewelyn/Aber.git && cd Aber
+git clone --branch v1.0.2 https://github.com/Harri-Llewelyn/Aber.git && cd Aber
 
 # Is the version published? The repository's Releases page lists every one.
-helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 1.0.1
+helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 1.0.2
 
 # Once per cluster: cert-manager and the internal CA (TLS, steps 0 and 1, below).
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
@@ -356,7 +356,7 @@ mosquitto:
 EOF
 
 helm install aber oci://ghcr.io/harri-llewelyn/aber/aber \
-  --version 1.0.1 \
+  --version 1.0.2 \
   --namespace aber --create-namespace \
   --values deploy/helm/aber/values-local.yaml \
   --values site.yaml \
@@ -408,6 +408,17 @@ keep the credentials in a secret store, start from
 chart does not generate missing credentials: it *refuses to render*, and the message names every
 one that is missing (`aber.validateSecrets`).
 
+**The forge's SSH port is 2222 in the values `npm run setup` writes, and 22 anywhere else.**
+Gateways clone from it through `gitea-external`, and k3s's ServiceLB binds that port on the node
+itself. On 22 it takes new SSH connections from the machine's own sshd. The chart's default stays
+22 so that an upgrade never moves it: an enrolled gateway keeps the clone URL and host key it was
+given, and stops pulling if the port changes. So:
+
+- A new site configured from `values-prod.yaml.example` or an external Secret sets
+  `gitea.ssh.external.port: 2222` (the example shows where), or moves the machine's sshd off 22
+  first ([`docs/install.md`](../../docs/install.md#1-move-the-machines-ssh-off-port-22), step 1).
+- A site whose gateways are already enrolled keeps the port it has.
+
 **`site.yaml` is what the chart cannot choose for you**, and the render refuses without most of it:
 
 - `ingestion.primaryHostId` and `ingestion.sparkplugGroup` name this site in the configuration of
@@ -428,7 +439,7 @@ exported Asset Administration Shell is `supabaseFunctions.aas.baseIri` plus the 
 Changing the IRI would then give every asset a new identity.
 
 The eleven built images resolve automatically to the chart's `appVersion`, which the release sets
-equal to the chart version. Chart 1.0.1 can only pull images 1.0.1, so there is nothing to line up
+equal to the chart version. Chart 1.0.2 can only pull images 1.0.2, so there is nothing to line up
 by hand and no `latest` tag to drift onto.
 
 #### Verify what you are about to install
@@ -440,7 +451,7 @@ its registry index. [`SECURITY.md`](../../SECURITY.md#what-a-release-carries-and
 says what each is and how to read it.
 
 ```bash
-V=1.0.1
+V=1.0.2
 ID="https://github.com/Harri-Llewelyn/Aber/.github/workflows/release.yml@refs/tags/v$V"
 ISSUER=https://token.actions.githubusercontent.com
 
@@ -531,7 +542,7 @@ beats the `appVersion` default:
 ingestion:
   image:
     repository: registry.internal/aber/ingestion
-    tag: "1.0.1-hotfix.2"
+    tag: "1.0.2-hotfix.2"
 ```
 
 Do this for a hotfix, a bisect or an air-gapped mirror. Do not use it to run one component a
@@ -594,7 +605,7 @@ Aber has nine subdomains, all on one Ingress and all derived from `global.public
 | `git.<domain>` | `supabase-envoy:8002` (the gateway's forge listener; never `gitea:3000`) |
 | `mqtt.<domain>` | `mosquitto:9001` (WebSockets) |
 | — | `mosquitto-external:1883`, and `:8883` with `mosquitto.tls.enabled` (LoadBalancer) |
-| — | `gitea-external:22` (LoadBalancer; `gitea.ssh.external`) |
+| — | `gitea-external:2222` where `npm run setup` wrote the values, else `:22` (LoadBalancer; `gitea.ssh.external.port`) |
 
 **Raw MQTT on 1883 is not on the Ingress**, and cannot be, because it is TCP, not HTTP. The
 `mosquitto-external` Service carries it instead.
@@ -1066,22 +1077,34 @@ done
 [`.github/workflows/release.yml`](../../.github/workflows/release.yml) runs when you push a `v*`
 tag. It publishes the eleven images and then the chart, to GHCR over OCI.
 
-**Rehearse it first.** Go to Actions → Release → *Run workflow*, and leave `dry_run` ticked.
-Everything builds, the chart is packaged, and every check runs, but nothing is pushed. A dry run
-also checks the ingestion chain's attestations, from the OCI archives it builds into. The other
-nine images produce theirs only when pushing.
+**Set the version first, in a pull request.** It sets `Chart.yaml`'s `version` and `appVersion` to
+the release, and every place that names the current release:
 
-Then push the tag:
+- the clone and install commands in `docs/install.md` and this runbook;
+- the verification examples in `SECURITY.md`;
+- the test-runner's default base in `test-harness/Dockerfile`;
+- the platform examples in `forge/gateway-platform/`, then `node scripts/sync-gateway-platform.mjs`
+  to regenerate what is compiled from them.
+
+`node scripts/check-docs-drift.mjs` fails on any of these that still names the release before. A
+checkout of the tag then documents and renders the release it is, and `npm run setup` prints its
+install.
+
+**Rehearse it.** Go to Actions → Release → *Run workflow* on `main`, give the version, and leave
+`dry_run` ticked. Everything builds, the chart is packaged, and every check runs, but nothing is
+pushed. A dry run also checks the ingestion chain's attestations, from the OCI archives it builds
+into. The other nine images produce theirs only when pushing.
+
+Then tag the commit that merged the pull request, and push the tag:
 
 ```bash
-git tag v1.0.2 && git push origin v1.0.2
+git tag v1.0.3 && git push origin v1.0.3
 ```
 
-The tag is the only place the version is written, and **nothing is bumped in a commit first**. One
-run stamps the version on the eleven image tags, the chart `version` and the chart `appVersion`.
-Bumping the version in a commit first is the usual way a chart ends up published under a version
-naming a different build. `Chart.yaml`'s committed values are for the untagged path only (a
-checkout, `helm lint`, `helm template`).
+**The release refuses a tag that `Chart.yaml` disagrees with**, before anything is built. A dry run
+only warns. One run stamps the tag's version on the eleven image tags, the chart `version` and the
+chart `appVersion`, so what is published carries the tag's version either way. The check is for
+the tree a checkout of the tag gets.
 
 **Images publish before the chart, and the chart job `needs` them.** A chart published ahead of its
 images fails late, and misleadingly. The historian and the broker never start, and every workload on
@@ -1094,7 +1117,7 @@ attached. That archive holds every image's SBOM and provenance, and a `DIGESTS` 
 signed. Write the notes and publish it:
 
 ```bash
-gh release edit v1.0.2 --draft=false --notes-file notes.md
+gh release edit v1.0.3 --draft=false --notes-file notes.md
 ```
 
 ### What the release signs and attests
@@ -1129,7 +1152,7 @@ inside each image's package, so they are public with it.
 To check, run this from somewhere with no credentials at all:
 
 ```bash
-helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 1.0.1
+helm show chart oci://ghcr.io/harri-llewelyn/aber/aber --version 1.0.2
 ```
 
 ### What the release does not do
@@ -1226,7 +1249,9 @@ does not exempt kubelet probes from ingress policy. Add an ingress allow from th
 **The forge's login depends on a policy, so it gets one whether or not you enable this layer.** With
 `gitea.enabled: true`, the chart renders **one** NetworkPolicy even when
 `networkPolicy.enabled: false` (#172). It covers ingress to the Gitea pod only: port 3000 from the
-gateway and `supabase-functions`, and port 22 from `giteaSshAllowedCidrs`.
+gateway and `supabase-functions`, and port 22 from `giteaSshAllowedCidrs`. Port 22 here, and below,
+is the container's: a policy matches the port after the Service has translated it, so it is 22
+whatever `gitea.ssh.external.port` publishes.
 
 Everything else in this section stays opt-in. Turning the layer on replaces this policy with the
 generated pair.

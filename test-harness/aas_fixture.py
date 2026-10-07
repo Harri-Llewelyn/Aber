@@ -12,10 +12,11 @@ UUID and creates its own devices at runtime, which is why CI can say the AAS sui
 dependency on validate.py at all". A conformance suite that provisions its own subject was a solved
 problem in this repository; the AAS one simply had not been moved onto it.
 
-WHAT IT DOES NOT PROVISION, and must not: `metric_catalog`. The metrics below are the platform's
-vocabulary, seeded by 0002 with their semantic ids and their `standard` values, and they
-are what the exporter reads to decide provenance -- an ISO 22400 metric becomes a
-KeyPerformanceIndicators submodel, everything else becomes OperationalTelemetry. Inventing metrics
+WHAT IT DOES NOT PROVISION, and must not: `metric_catalog`. The metrics below are the example
+metrics (`supabase/example-metrics.sql`, which values-dev.yaml loads), registered with their
+semantic ids and their `standard` values, and they are what the exporter reads to decide
+provenance -- an ISO 22400 metric becomes a KeyPerformanceIndicators submodel, everything else
+becomes OperationalTelemetry. Inventing metrics
 here would make the suite assert against a catalogue no device could ever publish against.
 
 IDS ARE PINNED for the reason validate.py pins its gateway: a run that dies before teardown leaves

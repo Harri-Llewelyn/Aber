@@ -383,6 +383,15 @@ mosquitto:
     # match nothing and fail silently.
     enabled: true
 
+# The port gateways clone from the forge over SSH. Left unset, it is 22, which k3s's ServiceLB
+# takes on the node from the machine's own sshd. On a NEW site, uncomment this, as `npm run setup`
+# does, and open 2222 to the gateways. On a site whose gateways are already enrolled, keep 22: each
+# keeps the clone URL and host key it was given at enrolment, and stops pulling if the port moves.
+# gitea:
+#   ssh:
+#     external:
+#       port: 2222
+
 # ---------------------------------------------------------------------------------------------
 # Self-monitoring. NEEDS THE PROMETHEUS OPERATOR CRDs INSTALLED FIRST -- ServiceMonitor is not a
 # core Kubernetes type, so with them absent `helm install` fails with `no matches for kind

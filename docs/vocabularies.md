@@ -20,6 +20,13 @@ Every addition follows the existing **"vocabulary, not catalog"** stance of `mtc
 `iso22400_vocabulary` and `opcua_vocabulary`: reference data describing what a standard *defines*,
 kept separate from `metric_catalog`, which records what a device actually publishes.
 
+**A fresh install seeds the vocabularies and leaves the catalog empty.** Every standard semantic id
+is there when an operator registers a metric on the Metrics page, and nothing is registered until
+they do. A development or demonstration stack can load 44 example metrics drawn from the
+vocabularies by setting `dbInit.exampleMetrics: true` in the chart's values, as `values-dev.yaml`
+does. They are [`supabase/example-metrics.sql`](../supabase/example-metrics.sql), described in
+[`supabase/README.md`](../supabase/README.md#example-metrics).
+
 ### Scope boundaries, already settled
 
 - **ISO 22400 KPIs ARRIVE AS PUBLISHED METRICS. This platform does not compute them, and that is
@@ -27,14 +34,15 @@ kept separate from `metric_catalog`, which records what a device actually publis
   item, and good/scrap disposition. None of those are telemetry, and storing them is what would
   turn this platform into an MES. Do not propose storing schedules, orders or routings.
 
-  **The catalog already says so.** `metric_catalog` registers `OEE/AVAILABILITY`, `OEE/QUALITY`,
-  `OEE/EFFECTIVENESS`, `OEE/PERFORMANCE` and `OEE/OEE` as ISO 22400 metrics with semantic ids and
-  `PERCENT` units — publishable metrics, declared in a DBIRTH by whatever system actually knows the
-  plan, and ingested like any other. A second route that computed the same semantic ids in the
-  historian would mean two ways to produce one identity with no way to tell them apart.
+  **The catalog already says so.** A KPI is registered in `metric_catalog` with its ISO 22400
+  semantic id and unit, as the example metrics register `OEE/AVAILABILITY`, `OEE/EFFECTIVENESS`,
+  `OEE/QUALITY` and `OEE/OEE` — publishable metrics, declared in a DBIRTH by whatever system
+  actually knows the plan, and ingested like any other. A second route that computed the same
+  semantic ids in the historian would mean two ways to produce one identity with no way to tell
+  them apart.
 
   **Checked against the registered formulas rather than argued from principle.** Of the eight KPIs
-  in `iso22400_vocabulary`, NOT ONE is computable from the 47 metrics in the catalog: `A = APT/PBT`
+  in `iso22400_vocabulary`, NOT ONE is computable from the 44 example metrics: `A = APT/PBT`
   has no PBT, `E = (PRI × PQ)/APT` has no PRI, `Q = GQ/PQ` has only a total `Controller/PART_COUNT`
   with no quality disposition, and MTBF/MTTR need maintenance records. Moving the arithmetic to
   Grafana or Node-RED does not help — the inputs are missing there too. The constraint is the data,

@@ -20,6 +20,8 @@ It applies from 1.0.0 onwards. An install older than that is reinstalled rather 
 - **Read the release notes**, especially *Action required before upgrading*.
 - **Upgrading from 1.0.0?** Set up the site's first administrator first: see
   [*From 1.0.0, the demo accounts stay*](#from-100-the-demo-accounts-stay-until-you-remove-them).
+- **Values from `npm run setup` in 1.0.0 or 1.0.1?** Add the i3X broker password first: see
+  [*Values from `npm run setup` before 1.0.2*](#values-from-npm-run-setup-before-102-lack-the-i3x-broker-password).
 
 ### The command
 
@@ -130,8 +132,9 @@ set. A change applies to chunks created afterwards: the chunk open at the time k
 ### Gateways are never reached into
 
 **Aber never pushes anything to a Remote gateway.** A gateway's Node-RED accepts no incoming
-connections: it connects out to the broker on 8883 and to the forge on 22, and nothing assumes traffic
-the other way. So an upgrade is something that happens to the server, not to the fleet.
+connections: it connects out to the broker on 8883 and to the forge's SSH, and nothing assumes traffic
+the other way. An upgrade never moves the forge's SSH port (`gitea.ssh.external.port`), so each
+gateway keeps the clone URL and host key it enrolled with. So an upgrade is something that happens to the server, not to the fleet.
 
 - **A gateway's flow changes only through a pull request** in its own repository in the forge.
   Nothing is deployed until someone approves and merges it. The gateway's `flow-sync` then fetches it,
@@ -236,6 +239,33 @@ accounts still work afterwards.
 2. **After upgrading**, sign in as that account and remove the four demo accounts' access: on
    **Access Control**, **People**, select **Remove Access** on each. Their sign-in is blocked and
    the accounts stay, so the Audit Trail still names them.
+
+### Values from `npm run setup` before 1.0.2 lack the i3X broker password
+
+`npm run setup` in 1.0.0 and 1.0.1 left `secrets.mqttI3xPassword` empty. The broker's init
+container refuses to start without it, so on a site installed from such a file `mosquitto` stays in
+`Init:Error`, and every workload that waits on the broker never starts. From 1.0.2 the chart
+refuses to render without it: `helm upgrade` stops before changing anything, and names the key.
+
+**Before upgrading**, add it to the values file, as a new random value (`openssl rand -hex 24` makes
+one):
+
+```yaml
+secrets:
+  mqttI3xPassword: "<new random value>"
+```
+
+The upgrade then starts the broker, and the workloads waiting on it follow. A site using
+`secrets.existingSecret` keeps `MQTT_I3X_PASSWORD` in that Secret, as before.
+
+### Installs from 1.0.1 or earlier keep their 47 metrics
+
+Up to 1.0.1, every install started with 47 metrics in the Metric catalog. Later versions start a new
+install with an empty catalog, and load example metrics only where `dbInit.exampleMetrics` is on,
+which only `values-dev.yaml` sets.
+
+The upgrade deletes nothing, because devices may already publish under those names. To retire one
+you do not use, open it on the **Metrics** page and choose **Deprecate**.
 
 ---
 

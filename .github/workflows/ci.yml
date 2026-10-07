@@ -590,6 +590,13 @@ jobs:
           expect_failure "broker TLS with no external SAN" "no IP SAN and no DNS SAN" \
             -f "$DEV" --set mosquitto.tls.enabled=true
 
+          # The broker's init container refuses to start without these two accounts' passwords, which
+          # leaves mosquitto in Init:Error and everything waiting on it.
+          expect_failure "ingestion broker password empty" "secrets.mqttIngestionPassword is empty" \
+            -f "$DEV" --set secrets.mqttIngestionPassword=
+          expect_failure "i3X broker password empty" "secrets.mqttI3xPassword is empty" \
+            -f "$DEV" --set secrets.mqttI3xPassword=
+
           # With the chart's own stack off, an empty datasource URL is a Grafana whose every rule reports
           # DatasourceError against a healthy stack. Both URLs are required then; the first is checked.
           expect_failure "observability off with no datasource URL" "grafana.prometheusUrl is empty" \

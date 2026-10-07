@@ -534,11 +534,11 @@ does not satisfy it; an IP SAN or an explicit DNS SAN does.
 {{- end -}}
 
 {{/*
-The gateway MQTT usernames must be well-formed sparkplug_ids, and the monitoring account must have
-a password. A friendly username authenticates and then has every message silently dropped, since
-the role confines it to spBv1.0/+/+/<username>/# and verify_gateway_binding() requires the same
-segment; an empty monitor password leaves the broker permanently NotReady. Skipped under
-existingSecret.
+The gateway MQTT usernames must be well-formed sparkplug_ids, and the monitor, ingestion and i3X
+accounts must have passwords. A friendly username authenticates and then has every message silently
+dropped, since the role confines it to spBv1.0/+/+/<username>/# and verify_gateway_binding()
+requires the same segment; an empty monitor password leaves the broker permanently NotReady, and
+an empty ingestion or i3X password stops its init container. Skipped under existingSecret.
 */}}
 {{- define "aber.validateMqttPrincipals" -}}
 {{- if not .Values.secrets.existingSecret -}}
@@ -550,6 +550,11 @@ existingSecret.
 {{- end -}}
 {{- if not .Values.secrets.mqttMonitorPassword -}}
 {{- fail "\n\naber: secrets.mqttMonitorPassword is empty.\n\nThe broker's startup, readiness and liveness probes authenticate as this account (it can read\n$SYS and publish nothing). Without it mosquitto never becomes Ready, and every workload that\nwaits on it fails to start -- an outage whose events mention neither MQTT nor this setting.\n" -}}
+{{- end -}}
+{{- range $field := list "mqttIngestionPassword" "mqttI3xPassword" -}}
+{{- if not (get $.Values.secrets $field) -}}
+{{- fail (printf "\n\naber: secrets.%s is empty.\n\nThe broker's init container refuses to start without it (DYNSEC_REQUIRED_PRINCIPALS), so mosquitto\nstays in Init:Error and every workload that waits on it never starts. `npm run setup` generates it\nfor a new values file; in an existing one, set it to a new random value (`openssl rand -hex 24`).\n" $field) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

@@ -2324,9 +2324,10 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 12. Nothing seeds an asset. A migration that inserts a cell, a gateway or a device puts it on
-// every install on the next boot. The Playback gateway is the one exemption: a recorded capture
-// has nowhere else to publish from, it is `is_shadow`, and it cannot be archived away.
+// 12. Nothing seeds an asset or a metric. A migration that inserts a cell, a gateway, a device or a
+// catalog metric puts it on every install on the next boot. The Playback gateway is the one
+// exemption: a recorded capture has nowhere else to publish from, it is `is_shadow`, and it cannot
+// be archived away. Example metrics are supabase/example-metrics.sql, applied only on request.
 // -------------------------------------------------------------------------------------------------
 {
   // The exemption is the gateway's id, not the file it lives in: exempting 0002 by name would
@@ -2339,7 +2340,7 @@ function edgeFunctionNames() {
     // TOP-LEVEL INSERTs ONLY, anchored to the start of a line. A function body that inserts on
     // demand is not a seed -- `relocate_devices()` and the enrolment path both insert, and what
     // they insert is what a user asked for. Those sit indented inside their definitions.
-    for (const m of text.matchAll(/^INSERT INTO (?:public[.])?(cells|gateways|devices)(?![A-Za-z_])/gm)) {
+    for (const m of text.matchAll(/^INSERT INTO (?:public[.])?(cells|gateways|devices|metric_catalog)(?![A-Za-z_])/gm)) {
       // The statement, not the file: an INSERT runs to its terminating semicolon, and the
       // exemption applies only if THIS one names the Playback gateway.
       const stmt = text.slice(m.index, text.indexOf(';', m.index) + 1);
@@ -2351,14 +2352,15 @@ function edgeFunctionNames() {
   if (offenders.length) {
     fail(
       [
-        'a migration seeds shopfloor assets:',
+        'a migration seeds shopfloor assets or catalog metrics:',
         ...offenders.map((o) => `        ${o}`),
-        '      A fresh install has no cells, no gateways and no devices. A seeded row comes back',
-        '      on EVERY boot, on every install, which is what the demonstration floor was retired for.',
+        '      A fresh install has no cells, no gateways, no devices and no metrics. A seeded row comes',
+        '      back on EVERY boot, on every install, which is what the demonstration floor was retired',
+        '      for. Example metrics belong in supabase/example-metrics.sql (dbInit.exampleMetrics).',
       ].join(String.fromCharCode(10))
     );
   } else {
-    pass('no migration seeds a cell, a gateway or a device (the Playback gateway aside)');
+    pass('no migration seeds a cell, a gateway, a device or a metric (the Playback gateway aside)');
   }
 }
 
@@ -2386,9 +2388,9 @@ function edgeFunctionNames() {
   if (named.size === 0) {
     pass('the provisioned alert rules query no metric by name, so there is no catalog agreement to check');
   } else {
-    // The catalog is seeded across 0002 (the generated vocabularies), 0018 and 0019, so the whole
-    // migration directory is the corpus rather than any one file.
-    let catalog = '';
+    // No migration registers a metric (check 12), so the corpus is the example set, the names a
+    // stack registers when asked to, with the migrations kept in case that ever changes.
+    let catalog = read('supabase/example-metrics.sql');
     for (const f of readdirSync(join(REPO, 'supabase/migrations'))) {
       if (f.endsWith('.sql')) catalog += read(`supabase/migrations/${f}`);
     }
@@ -2399,7 +2401,7 @@ function edgeFunctionNames() {
       [...catalog.matchAll(/INSERT INTO public\.metric_catalog VALUES \('[^']*',\s*'([^']+)'/g)]
         .map((m) => m[1])
     );
-    // 0018/0019 use named-column inserts, so pick those up too.
+    // The named-column form, which the example set uses.
     for (const m of catalog.matchAll(/metric_catalog[\s\S]{0,400}?VALUES\s*\(\s*'([^']+)'/g)) {
       registered.add(m[1]);
     }
@@ -3444,6 +3446,158 @@ function edgeFunctionNames() {
     );
   } else if (!broken.length) {
     pass(`no retired name is back (${RETIRED.length} names, ${KEPT.length} kept on purpose, ${scanned.length} files scanned)`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 37. The install `npm run setup` ends with is docs/install.md step 7's.
+//
+// Someone who follows the screen rather than the page runs the printed line, so the two are one
+// instruction. setup.mjs prints installCommand() from scripts/lib/release-chart.mjs at Chart.yaml's
+// `version:`; the page writes the version out, so a release that bumps Chart.yaml fails here until
+// the page follows. Compared with `\` continuations joined and whitespace collapsed.
+// -------------------------------------------------------------------------------------------------
+{
+  const { installCommand, normaliseCommand, readChartVersion } = await import('./lib/release-chart.mjs');
+  const DOC = 'docs/install.md';
+  const STEP = /^###\s+7\.\s+Install Aber\s*$/m;
+  const doc = read(DOC);
+  const setup = read('scripts/setup.mjs');
+  const version = readChartVersion(REPO);
+  const printed = normaliseCommand(installCommand({ version, valuesFile: 'deploy/helm/aber/values-local.yaml' }).join('\n'));
+
+  const step = STEP.exec(doc);
+  const fence = step && /```bash\n([\s\S]*?)```/.exec(doc.slice(step.index));
+  const install = fence && /^helm install\b(?:.*\\\n)*.*$/m.exec(fence[1]);
+  const header = /^ \* {3}(helm install\b(?:.*\\\n \*)*.*)$/m.exec(setup);
+  if (!install) {
+    fail(`check 37 cannot find a \`helm install\` in the first bash block under "### 7. Install Aber" in ${DOC}`);
+  } else if (!/\binstallCommand\(/.test(setup) || !header) {
+    fail('scripts/setup.mjs no longer prints installCommand() or shows it in its header comment, so check 37 compares nothing');
+  } else {
+    const documented = normaliseCommand(install[0]);
+    const commented = normaliseCommand(header[1].replace(/\\\n \*/g, '\\\n'));
+    const docVersion = /--version\s+(\S+)/.exec(documented)?.[1];
+    if (documented !== printed) {
+      fail(
+        docVersion && docVersion !== version
+          ? `${DOC} step 7 installs --version ${docVersion}, and Chart.yaml's version is ${version}. ` +
+            `Change ${DOC}: Chart.yaml is the release this checkout descends from, and npm run setup prints its version.`
+          : `npm run setup prints a different install from ${DOC} step 7:\n` +
+            `        setup prints  ${printed}\n        ${DOC}   ${documented}\n` +
+            `        Change ${DOC} if the install itself changed; change installCommand() in ` +
+            'scripts/lib/release-chart.mjs if what setup prints is behind the page.'
+      );
+    } else if (commented !== printed.replace(`--version ${version}`, '--version <version>')) {
+      fail(
+        `scripts/setup.mjs's header comment gives a different install from the one it prints:\n` +
+          `        comment  ${commented}\n        prints   ${printed}\n` +
+          '        Change the comment (the version is written <version> there).'
+      );
+    } else {
+      pass(`npm run setup ends with ${DOC} step 7's install, at the chart's version ${version}`);
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 38. `npm run setup` generates every secret the chart needs.
+//
+// A `secrets.*` key setup leaves out installs as the chart's default, "". For a required one that
+// is a stack that fails after the install: an empty i3X broker password left mosquitto in
+// Init:Error on every site set up this way. Each key setup does not write is named here with why it
+// may stay empty, so a new key fails until someone decides.
+// -------------------------------------------------------------------------------------------------
+{
+  const OPTIONAL = {
+    existingSecret: 'names an external Secret, the alternative to these values',
+    grafanaAdminUser: 'a username, with a default',
+    mqttDynsecAdminUser: 'a username, with a default',
+    mqttI3xUser: 'a username, with a default',
+    mqttIngestionUser: 'a username, with a default',
+    mqttMonitorUser: 'a username, with a default',
+    mqttValidatorUser: 'a username, with a default',
+    mqttPlaybackCredentials: 'empty is valid: the worker refuses a job for a gateway it holds no credential for',
+    archiveS3SecretAccessKey: 'only for a cold archive in S3, which setup does not configure',
+    smtpPassword: 'only for supabaseAuth.smtp, which setup does not configure',
+  };
+  const values = read('deploy/helm/aber/values.yaml');
+  const block = /^secrets:\n([\s\S]*?)^\S/m.exec(values)?.[1] ?? '';
+  const declared = [...block.matchAll(/^ {2}([A-Za-z0-9]+):/gm)].map((m) => m[1]);
+
+  const setup = read('scripts/setup.mjs');
+  const minted = /^const secrets = \{\n([\s\S]*?)^\};/m.exec(setup)?.[1] ?? '';
+  const written = new Set([
+    ...[...minted.matchAll(/^ {2}([A-Za-z0-9]+)[:,]/gm)].map((m) => m[1]),
+    ...[...setup.matchAll(/\bsecrets\.([A-Za-z0-9]+)\s*=/g)].map((m) => m[1]),
+    ...[...(/deliberatelyEmpty = \[([^\]]*)\]/.exec(setup)?.[1] ?? '').matchAll(/'([A-Za-z0-9]+)'/g)].map((m) => m[1]),
+  ]);
+
+  if (!declared.length || !written.size) {
+    fail('check 38 found no secrets block in values.yaml or no `const secrets = {` in scripts/setup.mjs, so it compares nothing');
+  } else {
+    const missing = declared.filter((k) => !written.has(k) && !(k in OPTIONAL));
+    const stale = Object.keys(OPTIONAL).filter((k) => written.has(k) || !declared.includes(k));
+    for (const k of missing) {
+      fail(`values.yaml declares secrets.${k}, and npm run setup does not write it. Generate it in setup.mjs's ` +
+        '`secrets`, or, if an empty value really is valid, add it to check 38\'s OPTIONAL with the reason.');
+    }
+    for (const k of stale) fail(`check 38's OPTIONAL names secrets.${k}, which setup writes or values.yaml no longer declares: remove it`);
+    if (!missing.length && !stale.length) {
+      pass(`npm run setup writes ${declared.length - Object.keys(OPTIONAL).length} of values.yaml's ${declared.length} secrets; the other ${Object.keys(OPTIONAL).length} may stay empty`);
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 40. Every clone, install, image and signing identity the docs give names Chart.yaml's version.
+//
+// The commit a release tag points at carries its version (release.yml refuses one that does not),
+// so a checkout of the tag must name that release wherever a reader copies from. A bump that misses
+// one leaves the tag sending its reader to the release before. An example of the NEXT release
+// (`git tag v1.0.3`) has none of these shapes. Records of the past are skipped, as in check 2d.
+// -------------------------------------------------------------------------------------------------
+{
+  const { CHART_REF, readChartVersion } = await import('./lib/release-chart.mjs');
+  const version = readChartVersion(REPO);
+  const RECORD = /^(?:docs\/incidents\.md$|supabase\/migrations\/archive\/|frontend\/dist\/|deploy\/helm\/aber\/files\/)/;
+  const ref = CHART_REF.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&');
+  const SHAPES = [
+    ['clones the tag', /git clone --branch v(\d+\.\d+\.\d+[^\s]*)/g],
+    ['installs the chart', new RegExp(`${ref}\\b[^\\n]*?--version "?(\\d+\\.\\d+\\.\\d+[^\\s"]*)`, 'g')],
+    ['names an image', /ghcr\.io\/harri-llewelyn\/aber\/[a-z0-9-]+:(\d+\.\d+\.\d+[^\s'"`]*)/g],
+    ['verifies a signature from the tag', /release\.yml@refs\/tags\/v(\d+\.\d+\.\d+[^\s'"`]*)/g],
+  ];
+  const files = [
+    ...MARKDOWN.filter((f) => !RECORD.test(f) && !gitignored(f)),
+    'test-harness/Dockerfile',
+  ];
+  let seen = 0;
+  let wrong = 0;
+  for (const file of files) {
+    // `\` continuations joined, so an install split over lines is one command.
+    const text = read(file).replace(/\\\r?\n\s*/g, ' ');
+    for (const [what, shape] of SHAPES) {
+      for (const m of text.matchAll(shape)) {
+        seen++;
+        if (m[1] !== version) {
+          wrong++;
+          fail(`${file} ${what} at ${m[1]}, and Chart.yaml's version is ${version}. Change ${file}: the commit a ` +
+            'release tag points at names that release everywhere (deploy/k8s/README.md, Publishing a release).');
+        }
+      }
+    }
+  }
+  const example = read('forge/gateway-platform/platform.yml.example');
+  const tag = /^\s*tag: v(\S+)/m.exec(example)?.[1];
+  if (tag !== version) {
+    wrong++;
+    fail(`forge/gateway-platform/platform.yml.example's tag is v${tag}, and Chart.yaml's version is ${version}: set it ` +
+      'to the release, then run node scripts/sync-gateway-platform.mjs');
+  }
+  if (!seen) fail('check 40 found no clone, install, image or signing identity in the docs, so it compares nothing');
+  else if (!wrong) {
+    pass(`all ${seen} clone(s), install(s), image(s) and signing identities in the docs name the chart's version ${version}`);
   }
 }
 

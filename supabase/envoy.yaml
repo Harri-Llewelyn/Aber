@@ -507,7 +507,7 @@ static_resources:
     # listener and the edge runtime can reach Gitea's HTTP port (the NetworkPolicy), the routes overwrite
     # or remove the headers, and the API ignores them. Two paths pass without a session, written in all
     # three filters because they share no matcher: /api/ and /assets/ssh_host_key.pub. Smart-HTTP clone
-    # ends at a redirect by design; clones are SSH on 22.
+    # ends at a redirect by design; clones are SSH, through gitea-external.
     - name: forge
       address:
         socket_address: { address: 0.0.0.0, port_value: 8002 }
@@ -815,7 +815,7 @@ static_resources:
                   address:
                     socket_address: { address: __STUDIO_UPSTREAM_ADDRESS__, port_value: 3000 }
 
-    # For the forge listener only; HTTP only (SSH on 22 never passes through this gateway).
+    # For the forge listener only; HTTP only (git over SSH never passes through this gateway).
     - name: gitea
       type: STRICT_DNS
       connect_timeout: 5s
