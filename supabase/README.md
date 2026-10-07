@@ -263,6 +263,23 @@ down on the second. Every statement uses `CREATE TABLE IF NOT EXISTS`, `CREATE O
 The glob does **not** recurse, so `archive/` is never applied: the db-init image copies only the
 top-level `*.sql`, and `npm run test:db` applies only those.
 
+### Saying "not found" (`0165`)
+
+To say that a row does not exist, call `raise_not_found()` with the message:
+
+```sql
+PERFORM public.raise_not_found(format('proposal %s not found', p_proposal_id));
+```
+
+Do not raise `no_data_found` (SQLSTATE `P0002`). PostgREST answers the whole `P0` class with 500,
+so a mistyped id would look like a server fault. `raise_not_found()` raises PostgREST's custom
+error instead. The API answers **404**, and the body still carries code `P0002` and the message, so
+a supabase-js caller still sees `error.code === 'P0002'`.
+
+A caller that is not PostgREST, such as psql, a db-lane suite or psycopg, sees SQLSTATE `PGRST`.
+The error's message is that JSON body, and its detail is `{"status": 404}`. No API role may
+execute `raise_not_found()`, so only a `SECURITY DEFINER` function owned by `postgres` can call it.
+
 ### Three defects the squash verification caught
 
 The old chain and the baseline were built into separate databases and diffed — statement sets,
@@ -2143,7 +2160,7 @@ a person, and the playback worker's is delivered to it.
 - **How long it lives.** Issuing a new credential replaces the copy. Archiving or deleting the
   gateway deletes it (`trg_gateways_forget_credential`), at the moment its broker account is disabled.
 - **No copy.** A credential issued before `0164`, or one whose copy could not be written, answers
-  `NO_DATA_FOUND`. Issuing a new one is the way back.
+  404 (not found). Issuing a new one is the way back.
 - **Why it is allowed.** Keeping these passwords recoverably is an accepted risk, in
   [`docs/security-model.md`](../docs/security-model.md#host-gateway-passwords-are-kept-and-administrators-can-see-them).
 

@@ -34,6 +34,7 @@ because CI applies the migrations and deliberately never runs seed.sql -- makes 
 trigger's own INSERT violate that key. The failure then surfaces from inside the audit path, as a
 constraint name, and looks nothing like the fixture problem it is.
 """
+import json
 import os
 import unittest
 import psycopg2
@@ -177,7 +178,6 @@ class RelocateDevices(unittest.TestCase):
         fixture standing, so the test can assert the devices are still where they started -- which
         is the actual claim.
         """
-        import json
         self.cur.execute("SAVEPOINT before_relocate;")
         try:
             as_user(self.cur, user)
@@ -297,6 +297,11 @@ class RelocateDevices(unittest.TestCase):
                 self._move(missing, self.cell_b),
             ])
         self.assertIn("not found", str(ctx.exception))
+        # raise_not_found() (0165): SQLSTATE PGRST, with the body PostgREST answers 404 with.
+        self.assertEqual(ctx.exception.pgcode, "PGRST")
+        self.assertEqual(json.loads(ctx.exception.diag.message_primary)["message"],
+                         f"device {missing} not found; no part of this batch was applied")
+        self.assertEqual(json.loads(ctx.exception.diag.message_detail), {"status": 404})
 
         # THE TWO VALID MOVES MUST BE GONE. They were applied -- the loop reached the third
         # element only after updating the first two -- so this is the rollback being read back,
