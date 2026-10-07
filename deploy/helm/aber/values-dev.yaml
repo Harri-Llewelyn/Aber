@@ -177,3 +177,11 @@ playback:
 ingestion:
   primaryHostId: Aber
   sparkplugGroup: Aber
+
+# The forge's SSH port `npm run setup` writes for a new site, so the dev loop and CI enrol gateways
+# the way a new site does: the clone URL carries the port and known_hosts names `[host]:2222`. The
+# container still listens on 22, which is where the dev loop's port-forward goes.
+gitea:
+  ssh:
+    external:
+      port: 2222

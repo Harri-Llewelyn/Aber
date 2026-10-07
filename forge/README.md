@@ -82,8 +82,8 @@ accept whatever key answers on the first connection, trust on first use, which i
 moment an attacker would choose, or be told to skip verification, which this platform refuses
 outright. Neither is acceptable for a machine that will pull unattended for years.
 
-The host key is public by construction: anyone who can open a TCP connection to port 22 is handed
-it during the handshake, which is what `ssh-keyscan` does. Publishing it changes nothing about its
+The host key is public by construction: anyone who can open a TCP connection to the SSH port is
+handed it during the handshake, which is what `ssh-keyscan` does. Publishing it changes nothing about its
 secrecy; it is the private half in the same directory that matters, which is why only the `.pub`
 is copied and why the script refuses to run if the file does not start with the algorithm name,
 since copying a private key into a directory served over unauthenticated HTTP is the one mistake

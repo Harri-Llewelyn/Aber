@@ -141,6 +141,11 @@ const secrets = {
  *  noderedAdminToken is break-glass on the Node-RED admin API and bypasses Supabase entirely. */
 const deliberatelyEmpty = ['noderedAdminToken'];
 
+/** The forge's external SSH port on a site this sets up. k3s's ServiceLB binds a LoadBalancer's
+ *  port on the node itself, and 22 there is the machine's own sshd. The chart's default stays 22,
+ *  because an enrolled gateway keeps the clone URL and host key it was given. */
+const FORGE_SSH_PORT = 2222;
+
 const DOMAIN_SHAPE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
 function parseDomain(answer) {
   const domain = String(answer ?? '').trim().toLowerCase();
@@ -243,6 +248,11 @@ if (domain) {
 if (adminEmail) {
   yamlLines.push('supabaseAuth:', '  firstAdministrator:', `    email: "${adminEmail}"`, '');
 }
+yamlLines.push(
+  `# Gateways clone from the forge over SSH on ${FORGE_SSH_PORT}, leaving port 22 to this machine's own SSH.`,
+  '# Enrolled gateways keep the port they enrolled with: do not change it once one is enrolled.',
+  'gitea:', '  ssh:', '    external:', `      port: ${FORGE_SSH_PORT}`, '',
+);
 yamlLines.push('secrets:');
 for (const [key, value] of Object.entries(secrets)) yamlLines.push(`  ${key}: "${value}"`);
 for (const key of deliberatelyEmpty) yamlLines.push(`  # Break-glass only; left empty on purpose.`, `  ${key}: ""`);
@@ -269,6 +279,8 @@ if (domain) {
   console.log('🌐 No domain was given, so the dev values\' localhost stays: this machine only, and');
   console.log('   REMOTE GATEWAYS CANNOT BE ENROLLED. Set global.publicBaseDomain in the file later.');
 }
+console.log(`   Gateways clone from the forge over SSH on port ${FORGE_SSH_PORT}; port 22 stays with this`);
+console.log('   machine\'s own SSH.');
 console.log('');
 if (adminEmail) {
   console.log(`👤 The first administrator: ${adminEmail}`);

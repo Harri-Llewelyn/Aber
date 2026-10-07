@@ -153,8 +153,10 @@ bundle-installed appliance until somebody runs the platform playbook on it once 
   anything in-stack, meaning an address that only works inside Aber (§7).
 * A route to the broker on **8883**. Remote gateways use MQTTS only. Port 1883 is published only
   for gateways not yet moved, and is not used here.
-* A route to the forge's SSH on **22**. The puller fetches the gateway's flow there, and
-  convergence fetches the platform playbook (§11, §12).
+* A route to the forge's SSH on **2222**, or **22** on a site whose values leave
+  `gitea.ssh.external.port` at the chart's default (one not set up with `npm run setup`). The
+  puller fetches the gateway's flow there, and convergence fetches the platform playbook (§11,
+  §12). The clone URL enrolment hands out carries the port.
 * The broker's hostname must resolve. It must also be in the certificate's SAN (its list of
   names); see §7.
 
@@ -841,11 +843,12 @@ It is outbound only, needs no inventory, heals itself on a timer, and is idempot
 
 ```bash
 sudo apt-get install -y ansible-core
-sudo ansible-pull -U ssh://git@<forge>/platform/gateway-platform.git -C v<version> \
+sudo ansible-pull -U ssh://git@<forge>:<port>/platform/gateway-platform.git -C v<version> \
   -i localhost, site.yml
 ```
 
-That expects an enrolled `/data` under `/var/lib/aber-gateway/data`, and the bundle's `.env` at
+`<forge>:<port>` is the address in `platform_ssh_url`, in
+`/var/lib/aber-gateway/data/gitops/repository.json`. That expects an enrolled `/data` under `/var/lib/aber-gateway/data`, and the bundle's `.env` at
 `/opt/aber-gateway/.env`. Without the `.env`, the playbook sets up the host and reports that the
 compose project was not started.
 
