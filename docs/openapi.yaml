@@ -2790,7 +2790,9 @@ paths:
           until it expires.
 
         Your own access or password is refused (403); you change your own password with
-        `PUT /auth/v1/user`.
+        `PUT /auth/v1/user`. A refusal the caller can act on (4xx) carries the database's or GoTrue's
+        sentence in `details`. A failure that is not one (500, 502) answers a fixed sentence and a
+        request id, and the error goes to the log.
       requestBody:
         required: true
         content:
@@ -2823,7 +2825,13 @@ paths:
         '404': { description: No such person. }
         '409': { description: 'The address is already in use, the last Administrator, or access in the other state.' }
         '500': { $ref: '#/components/responses/FunctionFailure' }
-        '502': { description: 'The database act was done but GoTrue did not ban or lift the ban; repeat it.' }
+        '502':
+          description: >-
+            GoTrue failed or did not answer. For `add` and `set-password` nothing was changed. For
+            `remove` and `restore` the database act was done but the ban was not made or lifted;
+            repeat it. A fixed sentence and a request id, as for a 500.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
 
   /functions/v1/revoke-gateway-credential:
     post:

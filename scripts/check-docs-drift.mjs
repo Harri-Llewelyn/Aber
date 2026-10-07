@@ -3607,11 +3607,14 @@ function edgeFunctionNames() {
 // An unexpected failure answers a fixed sentence and a request id through _shared/failure.ts, and
 // the error's message goes to the log (supabase/functions/README.md). The message can name an
 // internal host, a table or a constraint, so a response that carries it tells any caller who can
-// cause the failure how the platform is built. Two shapes are refused in each function's index.ts:
-// a response built inside a `catch` from the caught error, or from a name assigned from it there;
-// and a 5xx response whose arguments read an error's `.message` or `.stack`. A deliberate 4xx
+// cause the failure how the platform is built. Two shapes are refused in each function's index.ts,
+// and in a module whose handler index.ts passes to Deno.serve (manage-people's people.ts): a
+// response built inside a `catch` from the caught error, or from a name assigned from it there; and
+// a 5xx response whose arguments read an error's `.message` or `.stack`. A status held in a name
+// counts as 5xx when its declaration can give one, unless an `if` comparing that name with a 5xx
+// returns between the two (the branch that answers through serverError()). A deliberate 4xx
 // sentence the caller can act on is neither. Indirect paths (a helper handed the message) are not
-// seen, and a module index.ts delegates to is not read.
+// seen.
 // -------------------------------------------------------------------------------------------------
 {
   /** The source with comments, strings, template text and regex bodies blanked, lengths kept. */
@@ -3672,7 +3675,17 @@ function edgeFunctionNames() {
   const names = (text) => new Set(text.match(/[A-Za-z_$][\w$]*/g));
 
   const offences = [];
-  const files = [...edgeFunctionNames(), 'main'].map((f) => `supabase/functions/${f}/index.ts`).filter((f) => existsSync(join(REPO, f)));
+  const FIVE_XX = /(?<![\w.])5\d\d(?![\w.])/;
+  const entrypoints = [...edgeFunctionNames(), 'main'].map((f) => `supabase/functions/${f}/index.ts`).filter((f) => existsSync(join(REPO, f)));
+  // The module a handler is imported from, when index.ts passes that handler to Deno.serve.
+  const delegates = entrypoints.flatMap((file) => {
+    const src = read(file);
+    const served = [...src.matchAll(/\bDeno\.serve\(\s*([A-Za-z_$][\w$]*)\s*\)/g)].map((m) => m[1]);
+    return [...src.matchAll(/^import\s*\{([^}]*)\}\s*from\s*"\.\/([\w.-]+\.ts)";/gm)]
+      .filter((m) => m[1].split(',').map((n) => n.trim().split(/\s+as\s+/).pop()).some((n) => served.includes(n)))
+      .map((m) => posix.join(posix.dirname(file), m[2]));
+  });
+  const files = [...entrypoints, ...delegates];
   for (const file of files) {
     const code = codeOnly(read(file));
     const blocks = [...code.matchAll(/\bcatch\s*\(\s*(\w+)\s*\)\s*\{/g)].map((m) => {
@@ -3691,8 +3704,20 @@ function edgeFunctionNames() {
       const used = names(args);
       const caught = blocks.filter((b) => m.index > b.at && m.index < b.end).flatMap((b) => b.tainted)
         .find((t) => used.has(t));
+      const readsError = /\.(?:message|stack)\b|\bString\s*\(/.test(args);
+      // A status passed by name: its last declaration above this call, and whether a comparison
+      // with a 5xx between the two sends that case elsewhere.
+      const held = /^\s*([A-Za-z_$][\w$]*)\s*(?:,|$)/.exec(args)?.[1]?.replace(/\$/g, '\\$');
+      const declared = held
+        ? [...code.slice(0, m.index).matchAll(new RegExp(`\\b(?:const|let|var)\\s+${held}\\s*=\\s*([^;]*)`, 'g'))].pop()
+        : undefined;
+      const guard = held && new RegExp(
+        `\\bif\\s*\\(\\s*(?:${held}\\s*(?:===?|>=?)\\s*5\\d\\d|5\\d\\d\\s*(?:===?|<=?)\\s*${held})\\s*\\)\\s*\\{?\\s*return\\b`,
+      );
+      const heldFiveXx = !!declared && FIVE_XX.test(declared[1])
+        && !guard.test(code.slice(declared.index + declared[0].length, m.index));
       if (caught) offences.push(`${file}:${line} answers with \`${caught}\`, the caught error`);
-      else if (/(?<![\w.])5\d\d(?![\w.])/.test(args) && /\.(?:message|stack)\b|\bString\s*\(/.test(args)) {
+      else if ((FIVE_XX.test(args) || heldFiveXx) && readsError) {
         offences.push(`${file}:${line} answers a 5xx carrying an error's message`);
       }
     }
@@ -3702,7 +3727,7 @@ function edgeFunctionNames() {
     fail("an edge function answers with an error's text; use serverError() from _shared/failure.ts:\n" +
       offences.map((o) => `        ${o}`).join('\n'));
   } else {
-    pass(`none of ${files.length} edge function entrypoints answers with an error's text`);
+    pass(`none of ${entrypoints.length} edge function entrypoints, or the ${delegates.length} handler module(s) they delegate to, answers with an error's text`);
   }
 }
 
