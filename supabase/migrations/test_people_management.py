@@ -9,8 +9,8 @@ What is held here: that only an Administrator may list people or change one, tha
 identity is never a person, that an unknown person is a 404, that a person keeps exactly one role
 row however often it is set, that nobody changes their own role, access or password here, that the
 last Administrator who can sign in cannot be demoted or removed, that a removed person's password
-is not set, that the acts serialise on one lock, and that each act is in the Audit Trail's security
-lane, attributed, with no password in it.
+is not set, that the acts serialise on one lock, that each act is in the Audit Trail's security
+lane, attributed, with no password in it, and that nothing gives a self-registered account a role.
 
 EVERY TEST ROLLS BACK. The acts write Audit Trail rows, and the audit table cannot be pruned.
 """
@@ -470,6 +470,24 @@ class PeopleManagement(unittest.TestCase):
         self.restore(ADMIN_ID, MANAGER_ID)
         self.set_password(ADMIN_ID, MANAGER_ID)
         self.assertEqual(len(self.audit(MANAGER_ID, "PASSWORD_SET")), 1)
+
+    # -- sign-up ----------------------------------------------------------------------------------
+
+    def test_nothing_gives_a_self_registered_account_a_role(self):
+        self.cur.execute("SELECT to_regprocedure('public.handle_new_user()');")
+        self.assertIsNone(self.cur.fetchone()[0], "handle_new_user() is back")
+        self.cur.execute("SELECT tgname FROM pg_trigger"
+                         " WHERE tgrelid = 'auth.users'::regclass AND NOT tgisinternal;")
+        self.assertEqual(self.cur.fetchall(), [], "a trigger on auth.users runs for every sign-up")
+        # The row GoTrue's sign-up writes: an address, a password hash, and no role declared.
+        signed_up = str(uuid.uuid4())
+        self.cur.execute(
+            "INSERT INTO auth.users (id, email, encrypted_password, raw_app_meta_data, created_at)"
+            " VALUES (%s, %s, 'not-a-real-hash', '{\"provider\": \"email\"}', now());",
+            (signed_up, f"{signed_up}@people.test"),
+        )
+        self.assertEqual(self.role_rows(signed_up), [])
+        self.assertIsNone(self.people()[signed_up]["role"])
 
 
 if __name__ == "__main__":

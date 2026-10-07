@@ -1,4 +1,4 @@
--- 0167: An Administrator sets a new password for a person.
+-- 0167: An Administrator sets a new password for a person, and sign-up hands out no role.
 --
 -- record_person_password_set() is the database half of Set New Password on the People tab. The
 -- password itself is GoTrue's, changed by the manage-people edge function with the secret key. The
@@ -6,6 +6,10 @@
 -- anything, so the rules are decided first, and with false AFTER, to write PASSWORD_SET. A person
 -- changing their own password goes to GoTrue directly (PUT /auth/v1/user) and is in GoTrue's own
 -- audit log, not here.
+--
+-- handle_new_user() is dropped. It gave every self-registered account the Operator role, and
+-- nothing attaches it; attached, it would give a role to anyone who can reach the sign-up endpoint
+-- while supabaseAuth.disableSignup is false. 0001 still declares it, so it is dropped on every boot.
 
 -- Administrator only. Refuses your own password (Change Password, in the account menu, is how you
 -- change it), a machine identity, and a person whose access is removed. Writes nothing unless
@@ -60,6 +64,10 @@ COMMENT ON FUNCTION public.record_person_password_set(uuid, boolean) IS
   'the caller''s own password, a machine identity, and a person whose access is removed. An unknown '
   'person is a 404.';
 
+-- CASCADE takes with it trg_handle_new_user on auth.users, which a database first built by the
+-- archived migrations, before 0001, may still hold.
+DROP FUNCTION IF EXISTS public.handle_new_user() CASCADE;
+
 DO $$
 BEGIN
   IF has_function_privilege('anon', 'public.record_person_password_set(uuid, boolean)', 'EXECUTE') THEN
@@ -67,6 +75,9 @@ BEGIN
   END IF;
   IF NOT has_function_privilege('authenticated', 'public.record_person_password_set(uuid, boolean)', 'EXECUTE') THEN
     RAISE EXCEPTION '0167: authenticated may not execute record_person_password_set(); manage-people calls it as the caller';
+  END IF;
+  IF to_regprocedure('public.handle_new_user()') IS NOT NULL THEN
+    RAISE EXCEPTION '0167: handle_new_user() still exists';
   END IF;
 END
 $$;

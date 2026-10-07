@@ -1042,7 +1042,8 @@ from the `administrators` team, which `forge-membership` fills from the Postgres
 **`authz:manage` gates nothing today, and that is the point of doing this first.** `user_roles` and
 `role_permissions` carry a SELECT policy each and no other, so **no authenticated caller —
 `Administrator` included — can write either through PostgREST**; role assignment is a migration,
-the seed, or `handle_new_user()`. Anything said about a manager promoting themselves describes a
+the seed, or the People tab's `set_person_role()` (`0166`), which checks `has_role()` and not
+this permission. Anything said about a manager promoting themselves describes a
 control that does not exist yet. The split is therefore a **prerequisite** for building it: the
 first role-assignment surface is where `authz:manage` starts meaning something, and it should arrive
 into a schema where the two roles already differ rather than one where they do not.
@@ -1298,6 +1299,15 @@ has two other ways in.
   `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION` off, which is what lets it work
   without a relay. Nothing here writes an audit row for it: GoTrue's own audit log
   (`auth.audit_log_entries`, `user_updated_password`) records it.
+
+### Sign-up gives no role (0167)
+
+`handle_new_user()` gave every self-registered account the Operator role, but nothing attached it
+to `auth.users`. `0167` drops it, with `CASCADE` for the trigger a database first built by the
+archived migrations may still hold. With `supabaseAuth.disableSignup` false, a new account therefore
+has no role until an Administrator gives it one, and check 42 in `scripts/check-docs-drift.mjs`
+refuses a migration that puts a trigger on `auth.users`. `0001` still declares the function, so
+`0167` drops it again on every boot, until the next squash folds the two together.
 
 ---
 

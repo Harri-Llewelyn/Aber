@@ -194,8 +194,9 @@ paths:
       tags: [Auth]
       summary: Register a new account
       description: |
-        Self-registered accounts are granted the read-only `Operator` role by the
-        `handle_new_user` trigger. An `Administrator` must promote them.
+        Refused while `supabaseAuth.disableSignup` is true, the default. When it is opened, a
+        self-registered account starts with no role: nothing gives one at sign-up (`0167` dropped
+        `handle_new_user()`). An `Administrator` gives it one on the People tab.
       security:
         - apiKeyAuth: []
       requestBody:
