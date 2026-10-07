@@ -643,7 +643,7 @@ ${banner}
     username: admin
     password: ${adminPassword}
 
-  Lost it?  docker compose run --rm bootstrap node /bundle/bootstrap.mjs --reset-admin-password
+  Lost it?  docker compose run --rm bootstrap /bundle/bootstrap.mjs --reset-admin-password
 ${banner}
 `);
 
