@@ -174,12 +174,22 @@ const GATEWAY_A = 'gwy100000000000400080000';
 const GATEWAY_B = 'gwy999999999999999999999';
 const GATEWAY_C = 'gwy2a71a14de1b04971bfbb5';
 const ADMIN = 'dynsec-admin';
+
+/**
+ * The username each PLATFORM_PRINCIPALS entry boots with, so the reconcile below runs on the list
+ * it reads: `aber_<env>` in lower case, or GATEWAY_A for the gateway principal (role: null). The
+ * delivery assertions name these accounts.
+ */
+const PRINCIPAL_USERS = Object.fromEntries(
+  PLATFORM_PRINCIPALS.map(({ env, role }) => [env, role === null ? GATEWAY_A : `aber_${env.toLowerCase()}`])
+);
+if (new Set(Object.values(PRINCIPAL_USERS)).size !== PLATFORM_PRINCIPALS.length) {
+  throw new Error('two PLATFORM_PRINCIPALS entries map to one test account here; give each its own username');
+}
+
 const ACCOUNTS = {
   [ADMIN]: 'admin-secret-for-the-check-0001',
-  aber_ingestion: 'ingestion-secret-0001',
-  aber_i3x: 'i3x-secret-000000001',
-  aber_monitor: 'monitor-secret-000001',
-  [GATEWAY_A]: 'gateway-a-secret-0001',
+  ...Object.fromEntries(Object.values(PRINCIPAL_USERS).map((user) => [user, `${user}-secret-0001`])),
   [GATEWAY_B]: 'gateway-b-secret-0001',
   probe: 'probe-secret-00000001',
 };
@@ -206,17 +216,14 @@ const EXPECTED_CLIENTS = Object.keys(ACCOUNTS).sort();
 const INIT_ENV = {
   DYNSEC_FILE: '/out/dynamic-security.json',
   DYNSEC_POLICY_FILE: '/policy/dynsec-roles.json',
-  DYNSEC_REQUIRED_PRINCIPALS: 'INGESTION I3X VALIDATOR MONITOR',
+  // Every principal is required, so a pair the reconcile cannot use stops this boot.
+  DYNSEC_REQUIRED_PRINCIPALS: Object.keys(PRINCIPAL_USERS).join(' '),
   MQTT_DYNSEC_ADMIN_USER: ADMIN,
   MQTT_DYNSEC_ADMIN_PASSWORD: ACCOUNTS[ADMIN],
-  MQTT_INGESTION_USER: 'aber_ingestion',
-  MQTT_INGESTION_PASSWORD: ACCOUNTS.aber_ingestion,
-  MQTT_I3X_USER: 'aber_i3x',
-  MQTT_I3X_PASSWORD: ACCOUNTS.aber_i3x,
-  MQTT_MONITOR_USER: 'aber_monitor',
-  MQTT_MONITOR_PASSWORD: ACCOUNTS.aber_monitor,
-  MQTT_VALIDATOR_USER: GATEWAY_A,
-  MQTT_VALIDATOR_PASSWORD: ACCOUNTS[GATEWAY_A],
+  ...Object.fromEntries(Object.entries(PRINCIPAL_USERS).flatMap(([env, user]) => [
+    [`MQTT_${env}_USER`, user],
+    [`MQTT_${env}_PASSWORD`, ACCOUNTS[user]],
+  ])),
   // Required by the reconcile, which derives the primary host's write grant from it rather than
   // reading it out of the roles file. A literal here, not the chart's value: the point of the
   // assertions below is that the grant is exactly this one topic.
