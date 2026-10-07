@@ -502,7 +502,7 @@ confirm() {
     "This machine's address" "$ADDRESS" "Base IRI for asset ids" "$BASE_IRI"
   say ""
   say "It installs k3s, Helm and Node.js where they are missing, then Aber. The first install takes"
-  say "10 to 20 minutes, most of it downloading."
+  say "5 to 20 minutes, most of it downloading."
   dc_dns=$(dns_advice)
   if [ -n "$dc_dns" ]; then
     say ""

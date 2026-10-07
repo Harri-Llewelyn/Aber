@@ -102,7 +102,7 @@ five questions:
 | Base IRI for asset ids | A web address under a domain your organisation controls. The installer suggests one. It cannot change once an [asset shell](glossary.md#asset-administration-shell-aas) has been exported |
 
 It shows your answers and asks before it changes anything. Then it installs k3s, Helm and Node.js
-where they are missing, and then Aber. The first install takes 10 to 20 minutes. At the end it
+where they are missing, and then Aber. The first install takes 5 to 20 minutes, most of it downloading. At the end it
 prints:
 
 - the address to sign in at, `https://app.<domain>`, with the administrator's email and password;
