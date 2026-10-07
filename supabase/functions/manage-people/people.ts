@@ -159,8 +159,8 @@ async function addPerson(body: Record<string, unknown>, caller: Client, admin: C
       console.error(`manage-people: unrecorded account ${userId} was not deleted: ${undoError.message}`);
       return json(500, {
         error: "The person was not added",
-        details: `${recordError.message}. The account the sign-in service holds for this address has ` +
-          "no role; remove its access from the People tab.",
+        details: `${recordError.message}. The account the sign-in service holds for this address was ` +
+          "not deleted; check its role and access on the People tab.",
       });
     }
     return dbRefusal(recordError, "The person was not added");
