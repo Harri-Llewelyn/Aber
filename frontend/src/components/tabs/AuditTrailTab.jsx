@@ -63,8 +63,9 @@ const ENTITY_KIND = ENTITY_KIND_BY_TABLE
 /**
  * The kinds a deletion can be told about: this page fetches a lookup covering them, and
  * `audit_trail_page()` can probe a table for their rows. Absence from `entityIdentities` means the
- * row is gone, for these and for nothing else. `NAMEPLATE` qualifies because `device_nameplate` is
- * keyed by the device's id, so the devices lookup names it and the devices probe answers for it.
+ * row is gone, for these and for nothing else. `NAMEPLATE` and `DEVICE SCHEMA` qualify because
+ * their rows are keyed by the device's id, so the devices lookup names them and the devices probe
+ * answers for them.
  *
  * One set serves both the "deleted" flag and the hide filter, so a kind cannot be flagged and
  * never hidden. ACCESS is out, though `list_user_accounts()` names that lane: its subject is an
@@ -72,7 +73,7 @@ const ENTITY_KIND = ENTITY_KIND_BY_TABLE
  * act on. An unnameable person falls back to a shortened id, unflagged.
  */
 const DELETABLE_KINDS = new Set(
-  ['AREA', 'CELL', 'GATEWAY', 'DEVICE', 'SCHEMA', 'NAMEPLATE']
+  ['AREA', 'CELL', 'GATEWAY', 'DEVICE', 'SCHEMA', 'NAMEPLATE', 'DEVICE SCHEMA']
 )
 
 /** Before any lookup lands, nothing is answerable. Hoisted so it is not a new Set every render. */
@@ -80,6 +81,13 @@ const EMPTY_KINDS = new Set()
 
 const entityKind = (t) =>
   ENTITY_KIND[String(t || '').toLowerCase()] || String(t || '').toUpperCase()
+
+/**
+ * The kind filter a hand-over from another page sets. A device's trail includes its nameplate and
+ * schema rows, which carry the device's id as `entity_id`, so a DEVICE hand-over sets none: the id
+ * in the search box then selects every row keyed by that device, and only those.
+ */
+export const handoverKindFilter = (type) => (entityKind(type) === 'DEVICE' ? '' : (type || ''))
 
 /**
  * Columns excluded from every diff: timestamp churn that would otherwise open each diff with a line
@@ -851,7 +859,7 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
   // deleted and hidden. Narrower than the constant whenever a tolerated lookup failed.
   const [loadedKinds, setLoadedKinds] = useState(EMPTY_KINDS)
   const [loading, setLoading]         = useState(true)
-  const [entityTypeFilter, setEntityTypeFilter] = useState(initialEntity?.type || '')
+  const [entityTypeFilter, setEntityTypeFilter] = useState(handoverKindFilter(initialEntity?.type))
   const [nameFilter, setNameFilter]   = useState(initialEntity?.id || '')
   const [actionFilter, setActionFilter] = useState('')
   const [rangePreset, setRangePreset] = useState('all')
@@ -1114,7 +1122,7 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
   // replaces the filter rather than being ignored because state was already initialised.
   useEffect(() => {
     if (!initialEntity?.id) return
-    setEntityTypeFilter(initialEntity.type || '')
+    setEntityTypeFilter(handoverKindFilter(initialEntity.type))
     setNameFilter(initialEntity.id)
     // A handover from a tombstone names an entity the live tables no longer hold; the page would
     // otherwise hide every row of it and read as empty.

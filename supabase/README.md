@@ -3700,6 +3700,10 @@ device attached only through `device_submodels` used to record no schema there.
 updates, which the audit trigger records. Without a trigger on the table they moved to, every
 change made from the dashboard would have left no row. Its rows are keyed by the device, as
 `device_nameplate`'s are, filed in the `asset` lane, and drawn as governance in the Audit Trail.
+`audit_trail_page()` probes them for deletion through `devices`, as it does the nameplate's, so a
+deleted device's schema rows are hidden and counted with it. **View Audit Trail** on a device sets
+no kind filter: the id in the search box selects its `devices`, `device_nameplate` and
+`device_submodels` rows, which is where a schema change made in the dashboard now lives.
 
 `publish_schema_version()` and `discard_schema_draft()` are unchanged: both already handle both
 arms. `devices_rebound` still counts bindings, so a device on both arms counts twice.

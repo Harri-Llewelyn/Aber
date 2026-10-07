@@ -323,6 +323,7 @@ class AuditTrailTotalAndSearch(unittest.TestCase):
         ("user_roles",      {"role": "Ghost_Role_0115"},            "Ghost_Role"),
         ("backups",         {"stamp": "ghost-stamp-0115"},          "ghost-stamp-0115"),
         ("device_nameplate", {"name": "Ghost Nameplate 0117"},      "Ghost Nameplate"),
+        ("device_submodels", {"name": "Ghost Attachment 0168"},     "Ghost Attachment"),
         # 0118. A backup job has no name column, and `origin` is the only identity its payload
         # carries -- a CATEGORY, which the tab draws with the short id appended so two jobs
         # requested in the same minute are still two lanes. Seeded with a value no real job has, so
@@ -330,11 +331,14 @@ class AuditTrailTotalAndSearch(unittest.TestCase):
         ("backup_jobs",     {"origin": "ghostorigin0118"},          "ghostorigin0118"),
     ]
 
-    # The entity types `is_purged` covers (0117): every type this function can probe a table for.
-    # `device_nameplate` is keyed by its device's id, so `devices` answers for it. A seed of any
-    # other type names no readable table to be absent from and is never called deleted, whatever
-    # the reader asks for. Asserted against the function's own list below, so the two are one fact.
-    PURGEABLE = {"areas", "cells", "gateways", "devices", "schemas", "device_nameplate"}
+    # The entity types `is_purged` covers (0117, 0168): every type this function can probe a table
+    # for. `device_nameplate` and `device_submodels` are keyed by their device's id, so `devices`
+    # answers for them. A seed of any other type names no readable table to be absent from and is
+    # never called deleted, whatever the reader asks for. Asserted against the function's own list
+    # below, so the two are one fact.
+    PURGEABLE = {"areas", "cells", "gateways", "devices", "schemas", "device_nameplate",
+                 "device_submodels"}
+    DEVICE_KEYED = {"device_nameplate", "device_submodels"}
 
     @classmethod
     def setUpClass(cls):
@@ -485,6 +489,43 @@ class AuditTrailTotalAndSearch(unittest.TestCase):
         drawn = [e["entity_id"] for e in self.page(include_purged=False)["events"]]
         self.assertNotIn(str(self.by_type["device_nameplate"]), drawn)
 
+    def test_a_schema_attachment_is_gone_when_its_device_is(self):
+        """
+        0168 audits `device_submodels`, keyed by the device's id as the nameplate is. Unlisted, a
+        deleted device's schema rows would be drawn as a live lane of their own and fill the page
+        the tab then hides them from.
+        """
+        drawn = [e["entity_id"] for e in self.page(include_purged=False)["events"]]
+        self.assertNotIn(str(self.by_type["device_submodels"]), drawn)
+
+    def test_a_device_id_finds_every_row_keyed_by_that_device(self):
+        """
+        The hand-over from a device's page: the id in the search box and no kind filter. A
+        device's nameplate and schema rows carry its id as `entity_id`, so they are in its trail,
+        and a row of another entity is not.
+        """
+        self.cur.execute("SELECT gen_random_uuid()")
+        device_id = self.cur.fetchone()[0]
+        for entity_type in ("devices", "device_nameplate", "device_submodels"):
+            self.cur.execute(
+                """
+                INSERT INTO public.audit_trail
+                       (entity_type, entity_id, action, new_data, recorded_at, actor_source)
+                VALUES (%s, %s, 'INSERT', '{}'::jsonb, timestamptz '2026-01-01 00:00:00+00',
+                        'migration')
+                """,
+                (entity_type, device_id),
+            )
+        self.cur.execute(
+            "SELECT public.audit_trail_page(p_include_purged => true, p_search => %s)",
+            (str(device_id),),
+        )
+        events = self.cur.fetchone()[0]["events"]
+        self.assertEqual(
+            sorted((e["entity_type"], e["entity_id"]) for e in events),
+            [(t, str(device_id)) for t in ("device_nameplate", "device_submodels", "devices")],
+        )
+
     def test_the_rule_names_exactly_the_types_it_can_probe(self):
         """
         The function's own list against this suite's, so the two cannot drift -- which is how
@@ -503,9 +544,10 @@ class AuditTrailTotalAndSearch(unittest.TestCase):
             re.search(r"entity_type IN \(([^)]*)\)", body).group(1)))
         self.assertEqual(listed, self.PURGEABLE)
 
-        # Every named type is answered by a probe: its own table, or `devices` for a nameplate.
+        # Every named type is answered by a probe: its own table, or `devices` for the two keyed
+        # by a device.
         probed = set(re.findall(r"FROM public\.([a-z_]+)\s+\w+ WHERE \w+\.id = t\.entity_id", body))
-        self.assertEqual(probed, self.PURGEABLE - {"device_nameplate"})
+        self.assertEqual(probed, self.PURGEABLE - self.DEVICE_KEYED)
 
     # ---------------------------------------------------------------------------------------
     # The search finds what the timeline draws
