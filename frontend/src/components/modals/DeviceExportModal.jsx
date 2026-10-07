@@ -2,6 +2,7 @@ import React, { useId, useState } from 'react'
 import { api } from '../../api'
 import { downloadJSON } from '../../utils/downloadJSON'
 import { downloadBlob } from '../../utils/downloadBlob'
+import { withReference } from '../../utils/edgeFunctionError'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
 import { IconDownload } from '../common/Icons'
@@ -57,7 +58,7 @@ export function DeviceExportModal({ device, initialFormat = 'json', bundleDisabl
     const b = result.stats?.bundle || {}
     const summary = `${b.raw_rows ?? 0} raw and ${b.hourly_rows ?? 0} hourly readings, ${b.trail_rows ?? 0} audit trail rows, ${b.cold_objects ?? 0} cold object${b.cold_objects === 1 ? '' : 's'} named`
     if (b.stored === false) {
-      showToast?.(`Bundle downloaded for '${name}' (${summary}) — it was NOT stored on the platform: ${b.reason || 'unknown reason'}. Keep the file.`, 'warning')
+      showToast?.(withReference(`Bundle downloaded for '${name}' (${summary}) — it was NOT stored on the platform: ${b.reason || 'unknown reason'}. Keep the file.`, b), 'warning')
     } else if (b.truncated) {
       showToast?.(`Bundle exported for '${name}' (${summary}) — a cap was reached; the manifest says what is not included`, 'warning')
     } else {

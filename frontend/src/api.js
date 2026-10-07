@@ -4,7 +4,7 @@ import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId } from './utils/sparkplugId';
 import { resolveDeviceLocation, normaliseScope, SCOPE_CELL, SCOPE_AREA_WIDE } from './utils/cellResolution';
 import { isSvgFile, readSvgPlan, decodeSvgBytes, areaPlanPath, AREA_PLAN_MAX_BYTES } from './utils/areaPlans';
-import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
+import { edgeFunctionErrorMessage, withReference } from './utils/edgeFunctionError';
 import { AUDIT_TRAIL_ACTIONS, ENTITY_TABLE_BY_KIND } from './constants';
 import { metricNameError } from './utils/metricGroup';
 import { readSetting } from './config';
@@ -597,12 +597,13 @@ const apiMethods = {
       // modal shows that instead of a retry that cannot succeed.
       let message = `Bundle generation failed (${res.status})`;
       let details = null;
+      let body = null;
       try {
-        const body = await res.json();
+        body = await res.json();
         message = body?.error || message;
         details = body?.details || null;
       } catch { /* non-JSON body */ }
-      const error = new Error(message);
+      const error = new Error(withReference(message, body));
       error.status = res.status;
       error.details = details;
       throw error;
@@ -636,7 +637,7 @@ const apiMethods = {
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const error = new Error(body?.error || `The install command could not be minted (${res.status})`);
+      const error = new Error(withReference(body?.error || `The install command could not be minted (${res.status})`, body));
       error.status = res.status;
       error.details = body?.details || null;
       throw error;
@@ -667,7 +668,10 @@ const apiMethods = {
         Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`
       }
     });
-    if (!res.ok) throw new Error(`Could not read enrolment readiness (${res.status})`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(withReference(`Could not read enrolment readiness (${res.status})`, body));
+    }
     return res.json();
   },
 
@@ -763,7 +767,7 @@ const apiMethods = {
     try { result = await res.json(); } catch { /* non-JSON body */ }
 
     if (!res.ok) {
-      throw new Error(result?.details || result?.error || `The request failed (${res.status})`);
+      throw new Error(withReference(result?.details || result?.error || `The request failed (${res.status})`, result));
     }
     return result;
   },
@@ -1060,7 +1064,7 @@ const apiMethods = {
     try { body = await res.json(); } catch { /* non-JSON body */ }
 
     if (!res.ok) {
-      throw new Error(body?.details || body?.error || `Could not read the broker (${res.status})`);
+      throw new Error(withReference(body?.details || body?.error || `Could not read the broker (${res.status})`, body));
     }
 
     return body;
@@ -1107,7 +1111,7 @@ const apiMethods = {
       // `details` carries the RPC's own message -- "gateway X is a Remote gateway; use an
       // enrolment bundle", "gateway X is archived" -- which is the sentence an operator can act on.
       // `error` alone would flatten all of them to "Cannot mint a credential".
-      throw new Error(body?.details || body?.error || `Could not mint a credential (${res.status})`);
+      throw new Error(withReference(body?.details || body?.error || `Could not mint a credential (${res.status})`, body));
     }
 
     return body;
@@ -1142,7 +1146,7 @@ const apiMethods = {
     try { body = await res.json(); } catch { /* non-JSON body */ }
 
     if (!res.ok) {
-      throw new Error(body?.details || body?.error || `Could not mint a token (${res.status})`);
+      throw new Error(withReference(body?.details || body?.error || `Could not mint a token (${res.status})`, body));
     }
 
     return body;
@@ -2703,9 +2707,8 @@ const apiMethods = {
       });
 
       if (!res.ok) {
-        let message = `Export failed (${res.status})`;
-        try { message = (await res.json())?.error || message; } catch { /* non-JSON body */ }
-        throw new Error(message);
+        const failed = await res.json().catch(() => null);
+        throw new Error(withReference(failed?.error || `Export failed (${res.status})`, failed));
       }
 
       let stats = {};
@@ -2735,9 +2738,8 @@ const apiMethods = {
         if (!res.ok) {
           // The function reports failures as JSON even on the AASX path, so the real message is
           // recoverable rather than being swallowed as an opaque status.
-          let message = `AAS export failed (${res.status})`;
-          try { message = (await res.json())?.error || message; } catch { /* non-JSON body */ }
-          throw new Error(message);
+          const failed = await res.json().catch(() => null);
+          throw new Error(withReference(failed?.error || `AAS export failed (${res.status})`, failed));
         }
 
         // Counts ride in a header because a binary body has nowhere to carry them.
