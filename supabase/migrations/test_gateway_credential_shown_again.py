@@ -190,7 +190,7 @@ class ShownAgain(unittest.TestCase):
             f"no copy of gateway Test_Shown_{gid[:8]}'s credential is kept; "
             "issue a new one to be able to show it again",
         )
-        self.assertEqual(json.loads(raised.exception.diag.message_detail), {"status": 404})
+        self.assertEqual(json.loads(raised.exception.diag.message_detail), {"status": 404, "headers": {}})
 
     # -- the copy goes with the broker account ----------------------------------------------------
 

@@ -277,7 +277,7 @@ error instead. The API answers **404**, and the body still carries code `P0002` 
 a supabase-js caller still sees `error.code === 'P0002'`.
 
 A caller that is not PostgREST, such as psql, a db-lane suite or psycopg, sees SQLSTATE `PGRST`.
-The error's message is that JSON body, and its detail is `{"status": 404}`. No API role may
+The error's message is that JSON body, and its detail is `{"status": 404, "headers": {}}`. No API role may
 execute `raise_not_found()`, so only a `SECURITY DEFINER` function owned by `postgres` can call it.
 
 ### Three defects the squash verification caught

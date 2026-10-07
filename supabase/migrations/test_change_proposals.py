@@ -101,7 +101,7 @@ def assert_not_found(case, exc, message):
     case.assertEqual(exc.pgcode, "PGRST", str(exc))
     body = json.loads(exc.diag.message_primary)
     case.assertEqual((body["code"], body["message"]), ("P0002", message))
-    case.assertEqual(json.loads(exc.diag.message_detail), {"status": 404})
+    case.assertEqual(json.loads(exc.diag.message_detail), {"status": 404, "headers": {}})
 
 
 class ProposalCase(unittest.TestCase):

@@ -266,7 +266,7 @@ class SchemaVersioningTestCase(unittest.TestCase):
         self.assertEqual(exc.pgcode, "PGRST", str(exc))
         body = json.loads(exc.diag.message_primary)
         self.assertEqual((body["code"], body["message"]), ("P0002", message))
-        self.assertEqual(json.loads(exc.diag.message_detail), {"status": 404})
+        self.assertEqual(json.loads(exc.diag.message_detail), {"status": 404, "headers": {}})
 
 
 class TestImmutability(SchemaVersioningTestCase):

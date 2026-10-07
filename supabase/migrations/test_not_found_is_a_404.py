@@ -6,7 +6,7 @@ A function that finds nothing answers 404 through the API (0165).
 Requires a migrated Supabase database (54322 by default; `npm run test:db` starts a throwaway one).
 
 What is held here: the error raise_not_found() raises is the shape PostgREST turns into a 404 (SQLSTATE
-PGRST, a JSON body with code P0002 as the message, {"status": 404} as the detail), and no API role
+PGRST, a JSON body with code P0002 as the message, {"status": 404, "headers": {}} as the detail), and no API role
 may call it directly. The functions that call it are asserted in their own suites.
 """
 import json
@@ -61,7 +61,7 @@ class RaiseNotFound(unittest.TestCase):
             json.loads(exc.diag.message_primary),
             {"code": "P0002", "message": "proposal 42 not found", "details": None, "hint": None},
         )
-        self.assertEqual(json.loads(exc.diag.message_detail), {"status": 404})
+        self.assertEqual(json.loads(exc.diag.message_detail), {"status": 404, "headers": {}})
 
     def test_quotes_and_percent_signs_survive_as_json(self):
         message = 'gateway "Line 1"\'s copy is 100% gone\\'

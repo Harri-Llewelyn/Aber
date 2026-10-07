@@ -3,7 +3,7 @@
 -- PostgREST answers the whole P0 class 500, no_data_found (P0002) included, so a mistyped id read
 -- as a server fault. raise_not_found() raises PostgREST's custom error instead: the response keeps
 -- the code P0002 and the message, with status 404. Any other caller (psql, a test) sees SQLSTATE
--- PGRST, with that JSON body as the message and {"status": 404} as the detail.
+-- PGRST, with that JSON body as the message and {"status": 404, "headers": {}} as the detail.
 
 CREATE OR REPLACE FUNCTION public.raise_not_found(p_message text)
 RETURNS void
@@ -11,12 +11,13 @@ LANGUAGE plpgsql
 SET search_path TO 'public'
 AS $$
 BEGIN
-  -- PostgREST cannot parse a body whose message is null, and would answer 500.
+  -- PostgREST answers 500 (PGRST121) instead if it cannot parse either part: the message needs a
+  -- non-null `message`, and the detail needs both `status` and `headers`.
   RAISE SQLSTATE 'PGRST'
     USING MESSAGE = json_build_object(
             'code', 'P0002', 'message', coalesce(p_message, 'not found'),
             'details', NULL, 'hint', NULL)::text,
-          DETAIL = '{"status": 404}';
+          DETAIL = '{"status": 404, "headers": {}}';
 END
 $$;
 

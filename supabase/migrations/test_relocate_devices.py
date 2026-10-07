@@ -301,7 +301,7 @@ class RelocateDevices(unittest.TestCase):
         self.assertEqual(ctx.exception.pgcode, "PGRST")
         self.assertEqual(json.loads(ctx.exception.diag.message_primary)["message"],
                          f"device {missing} not found; no part of this batch was applied")
-        self.assertEqual(json.loads(ctx.exception.diag.message_detail), {"status": 404})
+        self.assertEqual(json.loads(ctx.exception.diag.message_detail), {"status": 404, "headers": {}})
 
         # THE TWO VALID MOVES MUST BE GONE. They were applied -- the loop reached the third
         # element only after updating the first two -- so this is the rollback being read back,
