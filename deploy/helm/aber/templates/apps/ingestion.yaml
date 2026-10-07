@@ -178,6 +178,10 @@ spec:
               value: {{ include "aber.supabase.internalUrl" . | quote }}
             {{- include "aber.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 12 }}
             {{- include "aber.secretEnv" (dict "name" "SUPABASE_INGESTION_KEY" "secretName" $secretName "key" "SUPABASE_INGESTION_KEY") | nindent 12 }}
+            # The bucket the capture worker uploads recordings to: the one storage-init creates and
+            # the dashboard and the playback worker read.
+            - name: CAPTURE_BUCKET
+              value: {{ .Values.supabaseStorage.captureBucket | quote }}
             - name: PYTHONUNBUFFERED
               value: "1"
             # JSON log lines: `reason`, `device` and `edge_node` are top-level keys,

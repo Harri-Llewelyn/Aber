@@ -867,10 +867,9 @@ operation with more surface.
 | `CAPTURE_BUCKET` | `storage-init`, the dashboard, both workers | `broker-captures` |
 | `CAPTURE_FILE_SIZE_LIMIT` | `storage-init` | `104857600` (100 MiB) |
 
-The chart's setting is `supabaseStorage.captureBucket`, which reaches `storage-init`, the dashboard
-and the playback worker. The ingestion Deployment does not pass `CAPTURE_BUCKET`, so the capture
-worker writes to `broker-captures` whatever the setting says. Renaming the bucket also means
-changing `supabase/storage-policies.sql`. A bucket with no policies is invisible to every
+The chart's setting is `supabaseStorage.captureBucket`, which reaches `storage-init`, the dashboard,
+the capture worker in the ingestion Deployment and the playback worker. Renaming the bucket also
+means changing `supabase/storage-policies.sql`. A bucket with no policies is invisible to every
 browser-facing role and a policy naming a bucket that does not exist is dead text — neither errors.
 
 `record` defaults to the ingestion principal because recording is a read: its role grants it read
