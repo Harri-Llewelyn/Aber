@@ -52,6 +52,21 @@ def get_connection():
     return conn
 
 
+def provision_device(cur):
+    """
+    A gateway and a device of the test's own, written inside its transaction, so the rollback
+    removes them. A fresh install seeds no devices, so there is none to borrow.
+    """
+    cur.execute("INSERT INTO public.gateways (name) VALUES ('Rejection_Test_Gateway') RETURNING id")
+    gateway_id = cur.fetchone()[0]
+    cur.execute(
+        "INSERT INTO public.devices (name, gateway_id) VALUES ('Rejection_Test_Device', %s) "
+        "RETURNING id, name",
+        (gateway_id,),
+    )
+    return cur.fetchone()
+
+
 class RejectionRpcTestCase(unittest.TestCase):
     """
     Every test runs inside one transaction and rolls back.
@@ -85,11 +100,7 @@ class RejectionRpcTestCase(unittest.TestCase):
     def setUp(self):
         self.conn = get_connection()
         self.cur = self.conn.cursor()
-        self.cur.execute("SELECT id, name FROM public.devices LIMIT 1")
-        row = self.cur.fetchone()
-        if not row:
-            self.skipTest("no devices seeded; 0002 has not run")
-        self.device_id, self.device_name = row
+        self.device_id, self.device_name = provision_device(self.cur)
         self.as_ingestion_principal()
 
     def as_ingestion_principal(self):
@@ -337,11 +348,7 @@ class IngestionPrincipalGateTestCase(unittest.TestCase):
     def setUp(self):
         self.conn = get_connection()
         self.cur = self.conn.cursor()
-        self.cur.execute("SELECT id FROM public.devices LIMIT 1")
-        row = self.cur.fetchone()
-        if not row:
-            self.skipTest("no devices seeded; 0002 has not run")
-        self.device_id = row[0]
+        self.device_id, _ = provision_device(self.cur)
 
     def tearDown(self):
         self.conn.rollback()
