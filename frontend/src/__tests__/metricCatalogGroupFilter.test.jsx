@@ -67,19 +67,26 @@ const selectByLabel = (label) => {
   return el.parentElement.querySelector('select')
 }
 
-/** Open Add Metric and switch the form to the OPC UA vocabulary. */
+const optionsOf = (select) => [...select.querySelectorAll('option')].filter(o => o.value && !o.disabled)
+
+const dataPointOptions = () => optionsOf(selectByLabel('Data Point')).map(o => o.textContent.trim())
+
+/**
+ * Open Add Metric and switch the form to the OPC UA vocabulary. Add Metric and the pickers' labels
+ * render before the groups and the vocabulary are read, so this waits for the options the tests
+ * read.
+ */
 const openOpcuaForm = async () => {
   render(<MetricsTab showToast={vi.fn()} hasPermission={() => true} />)
   await waitFor(() => expect(screen.getByRole('button', { name: /Add Metric/ })).toBeInTheDocument())
   fireEvent.click(screen.getByRole('button', { name: /Add Metric/ }))
   fireEvent.change(selectByLabel('Standard'), { target: { value: 'OPC UA' } })
-  await waitFor(() => expect(screen.getByText('Data Point', { selector: 'label' })).toBeInTheDocument())
+  await waitFor(() => {
+    expect(dataPointOptions()).toHaveLength(OPCUA_VOCABULARY.length)
+    expect(optionsOf(selectByLabel('Group')).map(o => o.value))
+      .toEqual(expect.arrayContaining(['Machine', 'MotionDevice', 'Hydraulic']))
+  })
 }
-
-const dataPointOptions = () =>
-  [...selectByLabel('Data Point').querySelectorAll('option')]
-    .filter(o => o.value && !o.disabled)
-    .map(o => o.textContent.trim())
 
 
 describe('the Data Point picker is scoped to the selected group', () => {
