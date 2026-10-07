@@ -3557,7 +3557,7 @@ function edgeFunctionNames() {
   const { CHART_REF, readChartVersion } = await import('./lib/release-chart.mjs');
   const version = readChartVersion(REPO);
   const RECORD = /^(?:docs\/incidents\.md$|supabase\/migrations\/archive\/|frontend\/dist\/|deploy\/helm\/aber\/files\/)/;
-  const ref = CHART_REF.replace(/[./]/g, '\\$&');
+  const ref = CHART_REF.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&');
   const SHAPES = [
     ['clones the tag', /git clone --branch v(\d+\.\d+\.\d+[^\s]*)/g],
     ['installs the chart', new RegExp(`${ref}\\b[^\\n]*?--version "?(\\d+\\.\\d+\\.\\d+[^\\s"]*)`, 'g')],
