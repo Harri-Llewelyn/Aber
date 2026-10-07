@@ -703,7 +703,7 @@ checks 12 and 17 compare its answers about a seeded plant with the Directory's, 
 subscriptions with what the run publishes, the meaning neither the conformance suite nor the unit
 suite can see.
 
-CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs seven jobs:
+CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs nine jobs:
 
 | Job | Covers |
 | :--- | :--- |
@@ -712,12 +712,79 @@ CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs seven jobs:
 | **helm-chart** | `helm lint`, render, API-schema validation, chart guard rails |
 | **edge-function-auth-test** | Auth ladders and RLS against a real Postgres |
 | **k8s-validation** | k3d cluster through `dev-cluster up --e2e`: `helm test`, `validate.py` in-cluster, the stack lane through port-forwards, the i3X conformance suite, ingress assertions |
+| **site-install-rehearsal** | `site-rehearsal install` on k3d: the checkout installed as a new site, with values from `setup.mjs`, never `values-dev.yaml` (*The install and upgrade rehearsals*, below) |
+| **upgrade-rehearsal** | `site-rehearsal upgrade` on k3d: the last release installed as published, then `helm upgrade` to the checkout with the same values |
 | **secret-scan** | gitleaks over every commit in a full clone and the working tree, on every push |
 | **static-analysis** | The other eight checks of [`docs/static-analysis.md`](static-analysis.md), in pinned containers; skipped with the end-to-end stack on a documentation-only push |
 
 **k8s-validation and static-analysis sit behind the `changes` gate**: most of the workflow's minutes are
 spent there, and a change that touches only documentation cannot alter what they assert. The gate fails
-open, so a diff range it cannot compute runs them anyway. secret-scan runs on every push.
+open, so a diff range it cannot compute runs them anyway. secret-scan runs on every push. **The two
+rehearsals have a gate of their own**: they run when what a site installs changed (the chart, the
+migrations, an image or the sources it is built from, `setup.mjs`, or the rehearsal itself), and on
+every push to main.
+
+The three k3d jobs share their failure dump, [`.github/actions/cluster-diagnostics`](../.github/actions/cluster-diagnostics/action.yml):
+each pod's current log, and for every container that restarted, how its previous run ended (reason,
+exit code, signal) and that run's last 80 lines. A restarted container's current log is its fresh
+start, which says nothing about the crash. `dev-cluster.mjs` prints the same when an e2e Job fails.
+
+## The install and upgrade rehearsals
+
+k8s-validation installs the checkout with `values-dev.yaml`, which sets every password and every
+development switch. A site installs with the values `npm run setup` writes, from the published
+chart, and later upgrades from one release to the next. A fault in that path passes k8s-validation:
+1.0.0 and 1.0.1's `setup.mjs` wrote no `secrets.mqttI3xPassword`, so every site set up with it had
+its broker stuck in `Init:Error` while CI stayed green. Two rehearsals cover that path, both run by
+[`scripts/site-rehearsal.mjs`](../scripts/site-rehearsal.mjs):
+
+```bash
+npm run rehearse:install   # the checkout, installed as a new site
+npm run rehearse:upgrade   # the last release as published, then `helm upgrade` to the checkout
+```
+
+Each creates a k3d cluster for the run (`aber-rehearsal`, or `--cluster=<name>`) and writes its
+kubeconfig to a file of its own (`--kubeconfig=<file>`), so the dev loop's cluster and the default
+kubeconfig are left alone. It publishes no host port. A pass deletes the cluster (`--keep` keeps it);
+a failure leaves it, and prints where its kubeconfig and values are.
+
+- **install** writes the values with the checkout's `scripts/setup.mjs --domain=rehearsal.aber.test
+  --admin-email=…` and a `site.yaml` like the runbook's (*Install → A*): ingress and broker TLS from
+  the internal CA. Before the install it applies the Traefik setting, cert-manager and the internal
+  CA, as the runbook does.
+- **upgrade** starts from the last release: the highest `v*` tag that is not this commit
+  (`--from=<tag>` names another). That tag's own `setup.mjs` writes the values, run from a `git
+  worktree` that is removed straight after. The script installs
+  `oci://ghcr.io/harri-llewelyn/aber/aber` at that version, with its published images, and waits for
+  it to be healthy. Then it runs `helm upgrade` to the checkout with the same two values files, as
+  [`upgrades.md`](upgrades.md) says.
+
+**The checkout's images carry a tag no release has**, `<Chart.yaml version>-ci.<commit>`. The
+checkout's chart is packaged with that as its version and `appVersion`, as `release.yml` packages a
+release. Between releases `Chart.yaml` names the last release, so without this the node would hold a
+built and a published image under one name. Only the built images the site's render names are built:
+the backup service and the test runner are off in a site's values.
+
+Both end with the same checks:
+
+- every StatefulSet, Deployment and DaemonSet rolls out, one `kubectl rollout status` at a time
+  (`helm --wait` deadlocks a first install, see [`deploy/k8s/README.md`](../deploy/k8s/README.md#a-from-the-published-chart-no-image-builds));
+- `helm test` passes;
+- every running pod's built image carries the checkout's tag;
+- the first administrator signs in through Traefik, over HTTPS to `api.rehearsal.aber.test` with a
+  certificate from the internal CA, using the password in the values file;
+- `admin@aber.local` with `aber123` is refused.
+
+`upgrade` also signs in before the upgrade, and asserts that the upgrade's own `aber-db-init` Job ran
+the checkout's image and completed: it replays the migration chain onto the last release's database.
+
+Measured on a 16 GB laptop with the image builds cached, `install` took 7½ minutes and `upgrade`
+12½, most of it pulling the published images. CI builds every image from nothing, so it takes longer.
+
+**What they do not rehearse** is the rest of
+[#691](https://github.com/Harri-Llewelyn/Aber/issues/691): real hardware, weeks of running, the
+hardening that is off by default (NetworkPolicies, both backup tiers, database TLS), real appliances
+and the failure drills.
 
 ## Keeping the pinned versions current
 

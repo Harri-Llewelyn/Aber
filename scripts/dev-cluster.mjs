@@ -38,6 +38,7 @@
  *
  * It is the sequence CI's k8s-validation job runs, made repeatable on a laptop: the stack lane
  * reaches the cluster through port-forwards, and the suites that reach into containers use kubectl.
+ * site-rehearsal.mjs imports the build, import and cluster-preparation steps from here.
  *
  * Node rather than a shell script for the reason stack-reset.mjs gives: on Windows `npm` resolves
  * `bash` to WSL, where Docker is not available by default, and a loop that fails half-way through
@@ -58,14 +59,14 @@ const CHART = 'deploy/helm/aber'
 const CLUSTER = process.env.ABER_DEV_CLUSTER || 'aber'
 const NS = process.env.ABER_DEV_NAMESPACE || 'aber'
 const RELEASE = 'aber'
-const IMG_NS = 'ghcr.io/harri-llewelyn/aber'
+export const IMG_NS = 'ghcr.io/harri-llewelyn/aber'
 // The runbook's pin. cert-manager is cluster administration, installed once, not a chart dependency.
 const CERT_MANAGER_VERSION = 'v1.16.2'
 
 // Every image the chart names, tagged exactly as it pulls them: an empty `image.tag` resolves to
 // Chart.appVersion, and any other name means the pod pulls the published image instead of this
 // tree. Same list, same contexts, as the runbook and ci.yml.
-const IMAGES = [
+export const IMAGES = [
   { name: 'edge-runtime', file: 'supabase/functions/Dockerfile', context: '.' },
   { name: 'ingestion', file: 'ingestion/Dockerfile', context: '.' },
   { name: 'node-red', file: 'node-red/Dockerfile', context: 'node-red' },
@@ -130,7 +131,7 @@ const option = name => {
 // Process helpers. `run` streams, `capture` returns stdout, `must` stops the loop on failure with
 // the command that failed on screen -- which is the only diagnostic most failures need.
 // ---------------------------------------------------------------------------------------------
-function run (cmd, args, opts = {}) {
+export function run (cmd, args, opts = {}) {
   return spawnSync(cmd, args, { cwd: REPO, stdio: 'inherit', ...opts })
 }
 // `run` without blocking the event loop, for a step that runs while this process is relaying
@@ -142,22 +143,22 @@ function runAsync (cmd, args, opts = {}) {
     child.on('exit', (status, signal) => resolve({ status, signal }))
   })
 }
-function capture (cmd, args, opts = {}) {
+export function capture (cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { cwd: REPO, encoding: 'utf8', ...opts })
   return { ok: r.status === 0, out: (r.stdout || '').trim(), err: (r.stderr || '').trim() }
 }
-function must (cmd, args, why, opts = {}) {
+export function must (cmd, args, why, opts = {}) {
   const r = run(cmd, args, opts)
   if (r.status !== 0) die(`${why}\n  ${cmd} ${args.join(' ')} exited ${r.status}`)
 }
-function die (message) {
+export function die (message) {
   console.error(`\n${c.red('FAILED')} ${message}`)
   process.exit(1)
 }
-function step (title) {
+export function step (title) {
   console.log(`\n${c.bold('==')} ${title}`)
 }
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 const kubectl = (...args) => capture('kubectl', ['-n', NS, ...args])
 
 function appVersion () {
@@ -178,7 +179,7 @@ function describeVersion () {
 // ---------------------------------------------------------------------------------------------
 // The cluster
 // ---------------------------------------------------------------------------------------------
-function preflight (tools) {
+export function preflight (tools) {
   for (const t of tools) {
     if (!capture(t, ['version', '--client'].slice(0, t === 'kubectl' ? 2 : 1)).ok && !capture(t, ['--version']).ok) {
       die(`${t} is not on PATH. The runbook's prerequisites: docker, k3d, kubectl, helm.`)
@@ -214,7 +215,7 @@ function ensureCluster () {
 
 // The runbook's Traefik setting, applied the same way, so the dev loop measures the client address
 // a site gets. k3s's helm controller redeploys Traefik with it; the Service changing is the signal.
-async function ensureTraefikConfig () {
+export async function ensureTraefikConfig () {
   step('Traefik keeps the client address')
   const policy = () => capture('kubectl', ['-n', 'kube-system', 'get', 'svc', 'traefik',
     '-o', 'jsonpath={.spec.externalTrafficPolicy}']).out
@@ -230,7 +231,7 @@ function lbPublishes (port) {
   return capture('docker', ['port', `k3d-${CLUSTER}-serverlb`]).out.split('\n').some(l => l.startsWith(`${port}/tcp`))
 }
 
-function ensureCertManager () {
+export function ensureCertManager () {
   step('cert-manager and the internal CA')
   const ready = () => capture('kubectl', ['get', 'clusterissuer', 'aber-ca',
     '-o', 'jsonpath={.status.conditions[?(@.type=="Ready")].status}']).out === 'True'
@@ -254,7 +255,7 @@ function ensureCertManager () {
 // ---------------------------------------------------------------------------------------------
 // Images
 // ---------------------------------------------------------------------------------------------
-function buildImages (version, only) {
+export function buildImages (version, only) {
   const describe = describeVersion()
   step(`build ${only ? only.join(', ') : `the ${IMAGES.length} images`} as ${IMG_NS}/<name>:${version}`)
   for (const img of IMAGES) {
@@ -274,19 +275,19 @@ function buildImages (version, only) {
   }
 }
 
-function imagesInNode () {
-  return capture('docker', ['exec', `k3d-${CLUSTER}-server-0`, 'ctr', '-n', 'k8s.io', 'images', 'ls', '-q']).out
+function imagesInNode (cluster = CLUSTER) {
+  return capture('docker', ['exec', `k3d-${cluster}-server-0`, 'ctr', '-n', 'k8s.io', 'images', 'ls', '-q']).out
 }
 
-function importImages (version, only) {
+export function importImages (version, only, cluster = CLUSTER) {
   const names = IMAGES.map(i => i.name).filter(n => !only || only.includes(n))
   const refs = names.map(n => `${IMG_NS}/${n}:${version}`)
   step(`import ${names.length} image(s) into the cluster`)
   // Verified, not trusted: `k3d image import` can fail per node and still exit 0
   // (docs/incidents.md, "k3d image import reported success it did not achieve").
   for (let attempt = 1; attempt <= 3; attempt++) {
-    run('k3d', ['image', 'import', '-c', CLUSTER, ...refs])
-    const present = imagesInNode()
+    run('k3d', ['image', 'import', '-c', cluster, ...refs])
+    const present = imagesInNode(cluster)
     const missing = refs.filter(r => !present.includes(r))
     if (!missing.length) { console.log(`  all ${refs.length} present in the node`); return }
     console.log(`  not in the node after attempt ${attempt}: ${missing.join(' ')}`)
@@ -468,7 +469,7 @@ function portOpen (port) {
   })
 }
 
-function freePort () {
+export function freePort () {
   return new Promise((resolve, reject) => {
     const s = net.createServer()
     s.on('error', reject)
@@ -483,7 +484,7 @@ function spawnForward (f, local) {
 
 // Resolves true once kubectl reports the listener open, false if it exited or timed out first.
 // Read from its stdout rather than probed: a probe is a connection the Service behind sees.
-function forwardReady (child, ms = 15_000) {
+export function forwardReady (child, ms = 15_000) {
   return new Promise(resolve => {
     let out = ''
     let settled = false
@@ -796,7 +797,7 @@ async function waitForE2e () {
  * is SIGKILL, 135 SIGBUS; reason OOMKilled is the memory limit. The same dump as CI's
  * cluster-diagnostics action.
  */
-function printRestartedContainers (ns = NS) {
+export function printRestartedContainers (ns = NS) {
   const r = capture('kubectl', ['-n', ns, 'get', 'pods', '-o', 'json'])
   if (!r.ok) return
   const restarted = JSON.parse(r.out).items.flatMap(pod =>
@@ -900,7 +901,11 @@ function help () {
     .map(l => l.replace(/^ \* ?/, '')).join('\n'))
 }
 
-if (!existsSync(path.join(REPO, CHART, 'Chart.yaml'))) die('run from the repository checkout')
-const commands = { up, test, forward, reset, down, status, help }
-if (!commands[command]) die(`unknown command ${command}; one of ${Object.keys(commands).join(', ')}`)
-await commands[command]()
+// A command only when run as one; an import takes the helpers above and runs nothing.
+const invoked = path.resolve(process.argv[1] || '').toLowerCase() === fileURLToPath(import.meta.url).toLowerCase()
+if (invoked) {
+  if (!existsSync(path.join(REPO, CHART, 'Chart.yaml'))) die('run from the repository checkout')
+  const commands = { up, test, forward, reset, down, status, help }
+  if (!commands[command]) die(`unknown command ${command}; one of ${Object.keys(commands).join(', ')}`)
+  await commands[command]()
+}

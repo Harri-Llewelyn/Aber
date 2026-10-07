@@ -17,24 +17,24 @@ runs:
         echo "=== disk and node pressure"
         df -h / | tail -1 || true
         kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .status.conditions[*]}  {.type}={.status} {.message}{"\n"}{end}{end}' || true
-        kubectl -n $NS get events --field-selector reason=Evicted 2>/dev/null | head -5 || true
+        kubectl -n "$NS" get events --field-selector reason=Evicted 2>/dev/null | head -5 || true
         echo
-        helm -n $NS history aber 2>/dev/null || true
-        kubectl -n $NS get pods -o wide || true
-        kubectl -n $NS get svc,ingress,pvc || true
-        kubectl -n $NS get events --sort-by=.lastTimestamp | tail -40 || true
-        for d in $(kubectl -n $NS get deploy -o name); do
-          echo "=== $d"; kubectl -n $NS describe "$d" | tail -25 || true
+        helm -n "$NS" history aber 2>/dev/null || true
+        kubectl -n "$NS" get pods -o wide || true
+        kubectl -n "$NS" get svc,ingress,pvc || true
+        kubectl -n "$NS" get events --sort-by=.lastTimestamp | tail -40 || true
+        for d in $(kubectl -n "$NS" get deploy -o name); do
+          echo "=== $d"; kubectl -n "$NS" describe "$d" | tail -25 || true
         done
-        for p in $(kubectl -n $NS get pods -o name); do
-          echo "=== $p"; kubectl -n $NS logs "$p" --all-containers --tail 40 || true
+        for p in $(kubectl -n "$NS" get pods -o name); do
+          echo "=== $p"; kubectl -n "$NS" logs "$p" --all-containers --tail 40 || true
         done
 
         # A restarted container's current log is its fresh start, often empty. How the previous run
         # ended (exit code 137 is SIGKILL, 135 SIGBUS; reason OOMKilled is the memory limit) and its
         # last lines. Init containers included: a failing one is restarted the same way.
         echo "=== containers that restarted"
-        kubectl -n $NS get pods -o json 2>/dev/null | jq -r '
+        kubectl -n "$NS" get pods -o json 2>/dev/null | jq -r '
           .items[] | .metadata.name as $p
           | ((.status.initContainerStatuses // []) + (.status.containerStatuses // []))[]
           | select(.restartCount > 0)
@@ -45,13 +45,13 @@ runs:
         if [ ! -s /tmp/restarted.tsv ]; then echo "(none)"; fi
         while IFS=$'\t' read -r pod ctr count reason code sig at; do
           echo "=== pod/$pod container $ctr: $count restart(s); the last run ended $reason, exit code $code, signal $sig, at $at"
-          kubectl -n $NS logs "$pod" -c "$ctr" --previous --tail 80 || true
+          kubectl -n "$NS" logs "$pod" -c "$ctr" --previous --tail 80 || true
         done < /tmp/restarted.tsv
 
         # The ingestion daemon gets a longer tail: validate.py publishes ~40 messages and the daemon
         # logs several lines per message, so 40 lines scrolls the evidence off.
         echo "=== ingestion daemon, extended"
-        kubectl -n $NS logs deploy/ingestion -c ingestion --tail 400 || true
+        kubectl -n "$NS" logs deploy/ingestion -c ingestion --tail 400 || true
 
         # The database is not queried here: validate.py cleans up its own rows in a `finally`, so by
         # this step the evidence is gone and a SELECT would read as "never created". The suite reports

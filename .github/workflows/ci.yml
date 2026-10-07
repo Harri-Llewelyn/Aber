@@ -21,14 +21,15 @@ permissions:
 
 jobs:
   # Which paths changed. A job-level filter, not `paths-ignore` on the trigger: the cheap jobs run
-  # on everything, only the end-to-end stack is gated. Fails open (a range it cannot compute
-  # runs everything). No third-party action; `git diff` answers this.
+  # on everything, only the end-to-end stack and the two rehearsals are gated. Fails open (a range
+  # it cannot compute runs everything). No third-party action; `git diff` answers this.
   changes:
     name: Which Paths Changed
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.classify.outputs.code }}
       playbook: ${{ steps.classify.outputs.playbook }}
+      install: ${{ steps.classify.outputs.install }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -58,22 +59,19 @@ jobs:
 
           if [ -z "$RANGE" ]; then
             echo "no comparable range (first push, a force-push, or a manual dispatch); running everything"
-            echo "code=true" >> "$GITHUB_OUTPUT"
-            echo "playbook=true" >> "$GITHUB_OUTPUT"
+            { echo "code=true"; echo "playbook=true"; echo "install=true"; } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           if ! FILES=$(git diff --name-only $RANGE 2>/dev/null); then
             echo "could not diff $RANGE; running everything"
-            echo "code=true" >> "$GITHUB_OUTPUT"
-            echo "playbook=true" >> "$GITHUB_OUTPUT"
+            { echo "code=true"; echo "playbook=true"; echo "install=true"; } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           if [ -z "$FILES" ]; then
             echo "empty diff; running everything"
-            echo "code=true" >> "$GITHUB_OUTPUT"
-            echo "playbook=true" >> "$GITHUB_OUTPUT"
+            { echo "code=true"; echo "playbook=true"; echo "install=true"; } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -82,6 +80,7 @@ jobs:
 
           CODE=false
           PLAYBOOK=false
+          INSTALL=false
           for f in $FILES; do
             case "$f" in
               # The platform playbook. Its own documentation is prose: a README that moved has not
@@ -94,12 +93,22 @@ jobs:
               *.md|docs/*) ;;
               *) CODE=true ;;
             esac
-            # Both decided: nothing later in the list can change either answer.
-            if [ "$CODE" = "true" ] && [ "$PLAYBOOK" = "true" ]; then break; fi
+            # What a site installs: the chart and the cluster manifests, the migrations, every image
+            # and the sources it is built from (the two API specs are baked into swagger-ui), the
+            # setup that writes a site's values, and the rehearsals themselves.
+            case "$f" in
+              docs/openapi.yaml|docs/i3x-openapi.yaml) INSTALL=true ;;
+              *.md|docs/*) ;;
+              deploy/*|supabase/*|ingestion/*|i3x/*|node-red/*|frontend/*|gateway-credential/*) INSTALL=true ;;
+              backup-service/*|timescaledb/*|swagger-ui/*|sparkplug_b.proto|docker-bake.hcl) INSTALL=true ;;
+              scripts/setup.mjs|scripts/lib/*|scripts/sync-helm-chart-files.mjs) INSTALL=true ;;
+              scripts/dev-cluster.mjs|scripts/site-rehearsal.mjs|.github/workflows/ci.yml|.github/actions/*) INSTALL=true ;;
+            esac
+            # All decided: nothing later in the list can change any answer.
+            if [ "$CODE" = "true" ] && [ "$PLAYBOOK" = "true" ] && [ "$INSTALL" = "true" ]; then break; fi
           done
 
-          echo "code=$CODE" >> "$GITHUB_OUTPUT"
-          echo "playbook=$PLAYBOOK" >> "$GITHUB_OUTPUT"
+          { echo "code=$CODE"; echo "playbook=$PLAYBOOK"; echo "install=$INSTALL"; } >> "$GITHUB_OUTPUT"
           if [ "$CODE" = "true" ]; then
             echo "non-documentation files changed: the end-to-end stack will run"
           else
@@ -107,6 +116,9 @@ jobs:
           fi
           if [ "$PLAYBOOK" = "true" ]; then
             echo "the platform playbook changed: it will be converged twice in a container"
+          fi
+          if [ "$INSTALL" = "true" ]; then
+            echo "what a site installs changed: the install and upgrade rehearsals will run"
           fi
 
   frontend-build:
@@ -1769,8 +1781,8 @@ jobs:
             | grep -i 'cache-control' | grep -q 'no-store' \
             || { echo "::error::/config.js is not served no-store"; exit 1; }
 
-      # Every pod's log, and for a container that restarted, how its previous run ended and that
-      # run's last lines.
+      # Shared with the two rehearsal jobs below: every pod's log, and for a container that
+      # restarted, how its previous run ended and that run's last lines.
       - name: Diagnostics On Failure
         if: failure()
         uses: ./.github/actions/cluster-diagnostics
@@ -1780,6 +1792,111 @@ jobs:
       - name: Tear Down
         if: always()
         run: k3d cluster delete aber || true
+
+  # =============================================================================================
+  # A site's install and its upgrade, rehearsed. k8s-validation installs the checkout with
+  # values-dev.yaml, which sets every password and every development switch; a site installs with
+  # the values `npm run setup` writes, and later upgrades from one release to the next with the
+  # same values. scripts/site-rehearsal.mjs runs both, here and on a laptop: the checkout's chart,
+  # packaged as a release packages it, with the checkout's images under a tag no release has.
+  # Gated on what a site installs (`changes`), and run on every push to main.
+  # =============================================================================================
+  site-install-rehearsal:
+    needs: changes
+    if: needs.changes.outputs.install == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    name: Site Install Rehearsal (k3d)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      NS: aber
+      # The script's own kubeconfig, which the diagnostics below read too.
+      KUBECONFIG: /tmp/aber-rehearsal.kubeconfig
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.16.3
+
+      # The same reclaim as k8s-validation, for the same reason: the built images, their copies in
+      # the node and the pulled ones do not fit in what the runner starts with.
+      - name: Reclaim Runner Disk Before Creating The Cluster
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/share/swift || true
+          docker image prune -af || true
+          df -h / | tail -1
+
+      - name: Set up k3d
+        uses: ./.github/actions/install-k3d
+
+      # Values from the checkout's `npm run setup`, never values-dev.yaml; cert-manager, the
+      # internal CA and the runbook's site.yaml; then the first administrator signs in through
+      # Traefik and the demo accounts are refused.
+      - name: Install A Site From The Checkout (site-rehearsal install)
+        run: node scripts/site-rehearsal.mjs install --cluster=aber-rehearsal --kubeconfig="$KUBECONFIG"
+
+      - name: Diagnostics On Failure
+        if: failure()
+        uses: ./.github/actions/cluster-diagnostics
+        with:
+          namespace: ${{ env.NS }}
+
+      - name: Tear Down
+        if: always()
+        run: k3d cluster delete aber-rehearsal || true
+
+  # docs/releases.md promises that any 1.x upgrades to any later 1.x with one `helm upgrade`. This
+  # installs the last release as a site would (its own setup.mjs, the published chart and images),
+  # then upgrades it to the checkout with the same values, as docs/upgrades.md says.
+  upgrade-rehearsal:
+    needs: changes
+    if: needs.changes.outputs.install == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    name: Upgrade From The Last Release (k3d)
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      NS: aber
+      KUBECONFIG: /tmp/aber-rehearsal.kubeconfig
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          # Every tag and the commits they name: the last release is the highest `v*` tag that is
+          # not this commit, and its setup.mjs runs from a worktree of that tag.
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.16.3
+
+      - name: Reclaim Runner Disk Before Creating The Cluster
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/share/swift || true
+          docker image prune -af || true
+          df -h / | tail -1
+
+      - name: Set up k3d
+        uses: ./.github/actions/install-k3d
+
+      - name: Upgrade The Last Release To The Checkout (site-rehearsal upgrade)
+        run: node scripts/site-rehearsal.mjs upgrade --cluster=aber-rehearsal --kubeconfig="$KUBECONFIG"
+
+      - name: Diagnostics On Failure
+        if: failure()
+        uses: ./.github/actions/cluster-diagnostics
+        with:
+          namespace: ${{ env.NS }}
+
+      - name: Tear Down
+        if: always()
+        run: k3d cluster delete aber-rehearsal || true
 
   # gitleaks over every commit the checkout holds, and the working tree. Runs on every push,
   # documentation included: a secret pasted into a README is what it exists for. fetch-depth 0,
