@@ -3294,7 +3294,6 @@ function edgeFunctionNames() {
     ['test-harness/README.md', 'Not the demonstration simulator', 'says what the load generator is not'],
     ['deploy/helm/aber/values.yaml', 'The demonstration simulator was removed', 'history, beside the value it explains'],
     ['docs/gateway.md', "Envoy kept the Kong Service's name", "the gateway's History"],
-    ['docs/install.md', 'It used to come up with a four-cell simulated shopfloor', 'what a fresh install used to hold'],
   ];
 
   const THIS_FILE = 'scripts/check-docs-drift.mjs';
