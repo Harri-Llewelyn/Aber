@@ -1,24 +1,27 @@
-## Summary
+## What this page is for
 
-The front page of the stack, one card. The top names the enterprise and the site and holds the three lanes for what belongs to no area. Below them every area in service is drawn as its plan, with its cells pinned where they stand. It is the page to open when the question is "is the plant up", and the page to leave as soon as the answer is no: every lane, pin and chip is a way into the page that can do something about it.
+The front page of Aber, on one card. The top names the enterprise and the site, and holds three lanes for equipment that belongs to no area. Below them, each area in service is drawn as its plan, with its cells pinned where they stand.
+
+Open it to see whether the plant is up. When something is wrong, every lane, pin and chip takes you to the page that can fix it.
 
 ## What the controls do
 
-- **The legend** in the card header names the four states below. Hover an entry for what it means.
-- **Show archived areas** appears beside it while any area is archived, with the number archived. Archived areas are left off the map, and with them the cells filed in them; hover the button for how many cells and devices that is. Turned on, each archived area is drawn muted with its plan and its pins, because its cells are still filed in it and its topics still carry its name. An archived cell is never pinned.
-- **The hierarchy line** names the enterprise, which is the Sparkplug group named when the stack was installed (the `sparkplug.group_id` setting), and the site, which is a setting on the Settings page under Site. The site's name is what the Unified Namespace publishes under, so the line says when it is not set.
-- **The lanes** hold what belongs to no area: **Site-Wide** assets, **Simulated** ones, and **Unassigned**, the devices and gateways nobody has said a location for. Each ends in a chevron because it opens the panel on the right: click one to list its gateways and devices; click a chip there to open that asset on its own page. **Open Devices page** and **Open Gateways page** in the panel are offered only while the lane holds something to file, the first of them as the panel's main action. On a narrow card a lane drops its counts, then its name, down to its icon; hover it for its name and tally.
-- **The area cards** draw each area as its plan, with its cells, gateways and devices counted at the top right (Area-Wide assets are counted in those and broken out again at the end; a narrow card leaves the counts to its panel), and a line under the plan while some of its cells have no place on it. Click a card, which ends in a chevron, or press Enter on it, for the area in the panel on the right: its cells, gateways and devices as chips. A cell chip opens that cell's panel, and one marked NOT PLACED has no place on the plan yet. Assets marked AREA-WIDE serve the whole area rather than any one cell in it. **Open on Areas page** edits the area or uploads its plan. A card goes red while an alert fires against a device in it.
-- **The pins** are the cells, coloured by the state of the devices that resolve to them. Click one for its details; the pin itself shows where it is. From the panel **Open Dashboard** opens its dashboard when it has one, and **Open on Cells page** edits it or moves its pin.
-- **Unfiled cells** sit under the areas until they are filed into one on the Areas page; a cell in no area has no plan to be pinned on.
+- **The legend** in the card header names the four states below. Hover an entry for its meaning.
+- **Show archived areas** appears beside the legend while any area is archived, with the number archived. Archived areas, and the cells in them, are left off the map; hover the button to see how many cells and devices that is. Turned on, each archived area is drawn faded, with its plan and pins, because its cells are still in it and its topics still carry its name. An archived cell is never pinned.
+- **The hierarchy line** names the enterprise and the site. The enterprise is the Sparkplug group chosen at install (the `sparkplug.group_id` setting). The site is set on the Settings page, under Site. The Unified Namespace publishes under the site's name, so the line says when it is not set.
+- **The lanes** hold equipment that belongs to no area: **Site-Wide**, **Simulated**, and **Unassigned** (devices and gateways nobody has given a location). Click a lane to list its gateways and devices in the panel on the right, then click a chip to open that item on its own page. **Open Devices page** and **Open Gateways page** appear in the panel only while the lane holds something to file, and the first is the main action. On a narrow card a lane shrinks to its icon; hover it for its name and counts.
+- **The area cards** draw each area as its plan. Its cells, gateways and devices are counted at the top right. Area-Wide equipment is included in those counts and also shown on its own, and a narrow card leaves the counts to the panel. A line under the plan says when some cells have no place on it.
+- **Click an area card**, or press Enter on it, to open the area in the panel, with its cells, gateways and devices as chips. A cell chip opens that cell's panel; one marked NOT PLACED has no place on the plan yet. Equipment marked AREA-WIDE serves the whole area rather than one cell. **Open on Areas page** edits the area or uploads its plan. A card turns red while an alert fires for a device in it.
+- **The pins** are the cells, coloured by the state of their devices. Click one for its details. From the panel, **Open Dashboard** opens the cell's dashboard if it has one, and **Open on Cells page** edits the cell or moves its pin.
+- **Unfiled cells** are listed under the areas until they are filed on the Areas page. A cell in no area has no plan to be pinned on.
 
 ## What the states mean
 
-- **Online** (green): at least one device here is online. The other devices may be offline; this says the place is talking to the platform.
-- **Needs attention** (amber): a device here is quarantined, waiting to be admitted. It outranks Online.
-- **Nothing live** (grey): no device here is online and none is waiting to be admitted.
-- **Alert firing** (red on a pin, an amber or red badge in the panel): Grafana has an alert firing against a device here. The panel badge is red when the alert is critical and amber otherwise. The map relays Grafana's verdict and evaluates nothing of its own.
+- **Online** (green): at least one device here is online. Others may be offline; this says the place is talking to Aber.
+- **Needs attention** (amber): a device here is quarantined, waiting to be approved. It outranks Online.
+- **Nothing live** (grey): no device here is online, and none is waiting to be approved.
+- **Alert firing** (red on a pin; an amber or red badge in the panel): Grafana has an alert firing for a device here. The badge is red when the alert is critical and amber otherwise. The map shows Grafana's verdict and judges nothing itself.
 
-The sidebar flags the pages that have work waiting, with the reason on the item's tooltip: Devices while a device is held in quarantine, Gateways while a gateway that should be reporting is offline (one still waiting for its bundle is not), and Areas while a cell is filed in no area.
+The sidebar marks the pages that have work waiting, with the reason in the item's tooltip: Devices while a device is in quarantine, Gateways while a gateway that should be reporting is offline (one still being set up does not count), and Areas while a cell is in no area.
 
-Nothing on this page changes anything. Assets are filed on the Devices, Gateways and Cells pages; an area's plan is uploaded on the Areas page; a cell is placed on its plan from the Cells page. The plan in an area's or a cell's panel on those pages opens this map on that area.
+Nothing on this page changes anything. Equipment is filed on the Devices, Gateways and Cells pages, an area's plan is uploaded on the Areas page, and a cell is placed on its plan from the Cells page. The plan in an area's or a cell's panel on those pages opens this map on that area.
