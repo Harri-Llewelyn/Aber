@@ -119,6 +119,43 @@ Two consequences worth stating on the front page; both are detailed in
   listing is not: keys are `<device_uuid>/<file>`, so listing the bucket, like writing to it, is
   gated on `device:manage`, not merely `authenticated`.
 
+## People
+
+**An Administrator adds people, sets their roles and removes their access on the Access Control
+page's People tab** (`0166`). It is the one dashboard path that changes accounts in GoTrue, and it is
+narrow by construction.
+
+- **Who can call it.** Administrators only, checked at every server step. The tab is shown only to
+  an Administrator. The `manage-people` edge function resolves the caller's role from `user_roles`
+  before it makes any admin call. Every database function behind the tab (`list_people()`,
+  `set_person_role()`, `record_person_added()`, `remove_person_access()`,
+  `restore_person_access()`) checks `has_role(ARRAY['Administrator'])` again in its own body.
+- **Two rules no Administrator can break.** Nobody changes their own role or access, and no act may
+  leave the site without an Administrator who can sign in (a banned one does not count). Both are
+  checked in SQL under one lock on `user_roles`, so two Administrators cannot demote each other at
+  once. The function refuses your own access before calling the database, and calls the database
+  before GoTrue, so a refused act never reaches GoTrue.
+- **The secret key stays in the edge function.** GoTrue's admin API needs the service-role key.
+  `manage-people` holds it, granted in `main/index.ts` beside two settings, and uses it for GoTrue
+  alone. Every database act runs in the caller's session, so RLS applies and the Audit Trail names
+  the person who acted.
+- **Ban, never delete.** Removing access deletes the person's `user_roles` row, then GoTrue bans the
+  account (`ban_duration` `876000h`), which refuses sign-in and token refresh. The account stays,
+  because `audit_trail.changed_by` references it and the trail names the person through it.
+  Restoring gives back the role kept in `access_removals` and lifts the ban.
+- **The initial password.** Without a mail relay (`supabaseAuth.smtp.host` empty), `manage-people`
+  mints 24 characters from the alphabet `npm run setup` uses (about 119 bits, by
+  `crypto.getRandomValues`), creates the account with it and `email_confirm`, and returns it once
+  with `Cache-Control: no-store`. Nothing stores or logs it: GoTrue keeps a bcrypt hash, the
+  `PERSON_ADDED` row records only the method, and the dialog holds it until it closes. With a relay,
+  GoTrue sends an invitation instead, and no password exists until the person chooses one. If the
+  new person cannot be recorded, the account is deleted again, so no account exists that the trail
+  does not mention.
+- **Machine identities are never people.** `list_people()` leaves them out, every function refuses
+  them, and `refuse_role_for_machine_principal()` still refuses a role at the table.
+
+What a removal does not reach at once is an [accepted risk](#a-removed-person-keeps-what-a-session-already-holds).
+
 ## Machine identities
 
 Five identities here are held by software rather than people, and each is narrow by construction:
@@ -207,6 +244,31 @@ ceiling bounds the exposure.
 
 **Revisit if** tokens are issued to parties outside the operating organisation, or if a write path
 that bypasses PostgREST is ever added.
+
+### A removed person keeps what a session already holds
+
+Removing a person's access (`0166`) deletes their role at once, and everything that reads
+`user_roles` on each request refuses them from the next one: the API's RLS, the edge functions and
+the forge's door. The GoTrue ban refuses a new sign-in and a token refresh. Four things already
+issued are not reached:
+
+- **An access token** stays valid until its `exp`, at most `supabaseAuth.jwtExpiry` (3600 s by
+  default). With no role it reaches what RLS grants any signed-in account: the registry tables and
+  vocabularies, and nothing a role or permission gates. `auth_pre_request()` refuses tokens by
+  subject only for machine identities.
+- **Studio** admits on the token's `app_metadata.role` claim, so a removed Administrator's open
+  Studio session lasts until that token expires.
+- **Node-RED's editor** keeps the permission it granted at sign-in for its session, up to eight
+  hours (`sessionExpiryTime`).
+- **Grafana** keeps the role it mapped at sign-in for its own session.
+
+**Accepted because** the API, where every write that matters goes, refuses the person at once; the
+token window is bounded by the expiry; and Studio is off the Ingress by default.
+
+**Revisit if** `jwtExpiry` is raised, if Studio is put on the Ingress, or if removing an
+Administrator ever has to be immediate everywhere. Studio's and Node-RED's checks would then read
+`user_roles` per request, as the forge's does, and `auth_pre_request()` would refuse a removed
+person's subject.
 
 ### The broker's internal CA has no revocation list
 

@@ -897,6 +897,150 @@ paths:
                     created_at:   { type: string, format: date-time }
         '403': { description: Role is neither Administrator nor Auditor. }
 
+  /rest/v1/rpc/list_people:
+    post:
+      tags: [Auth]
+      summary: List every person, with their role and whether they can sign in
+      description: |
+        For the People tab on Access Control (`0166`). One row per `auth.users` account that is not
+        a machine principal. Administrator only.
+
+        `status` is `removed` while the person's access is removed (here or by a GoTrue ban),
+        `invited` until they first sign in, and `active` after. `sign_in_blocked` says whether
+        GoTrue bans the account now; `removed` with `false` means the ban still has to be made.
+      responses:
+        '200':
+          description: Every person, by email.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    user_id:         { type: string, format: uuid }
+                    email:           { type: string, nullable: true }
+                    role:            { type: string, nullable: true, enum: [Administrator, Shopfloor_Manager, Operator, Auditor] }
+                    status:          { type: string, enum: [active, invited, removed] }
+                    sign_in_blocked: { type: boolean }
+                    role_on_restore: { type: string, nullable: true, description: The role restoring access gives back. }
+                    invited_at:      { type: string, format: date-time, nullable: true }
+                    last_sign_in_at: { type: string, format: date-time, nullable: true }
+                    created_at:      { type: string, format: date-time, nullable: true }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /rest/v1/rpc/set_person_role:
+    post:
+      tags: [Auth]
+      summary: Give a person one of the four roles
+      description: |
+        Leaves the person exactly one `user_roles` row. `log_role_assignment()` records the change
+        as `ROLE_GRANTED` in the Audit Trail's security lane, naming the caller. Administrator only.
+
+        Refused, with the reason in the message: your own role (403); a machine identity (400);
+        a person whose access is removed, until it is restored (400, `P0001`); and a change that
+        would leave no Administrator who can sign in (400, `P0001`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_user_id, p_role]
+              properties:
+                p_user_id: { type: string, format: uuid }
+                p_role:    { type: string, enum: [Administrator, Shopfloor_Manager, Operator, Auditor] }
+      responses:
+        '200':
+          description: Whether the role changed; `false` when the person already held it.
+          content:
+            application/json:
+              schema: { type: boolean }
+        '400': { description: 'Unknown role, a machine identity, a removed person, or the last Administrator.' }
+        '403': { description: 'Not an Administrator, or your own role.' }
+        '404': { description: 'No such person (`P0002`).' }
+
+  /rest/v1/rpc/record_person_added:
+    post:
+      tags: [Auth]
+      summary: Give a just-created account its role and record who added it
+      description: |
+        Called by `/functions/v1/manage-people` in the caller's session, after GoTrue created or
+        invited the account. Gives the role and writes a `PERSON_ADDED` row (email, role and
+        method, never a password). Refuses an account that has signed in or is more than an hour
+        old. Administrator only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_user_id, p_role, p_invited]
+              properties:
+                p_user_id: { type: string, format: uuid }
+                p_role:    { type: string, enum: [Administrator, Shopfloor_Manager, Operator, Auditor] }
+                p_invited: { type: boolean, description: True for an invitation, false for a password shown once. }
+      responses:
+        '204': { description: Recorded. }
+        '400': { description: 'Unknown role, a machine identity, or not a new account.' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 'No such account (`P0002`).' }
+
+  /rest/v1/rpc/remove_person_access:
+    post:
+      tags: [Auth]
+      summary: Remove a person's role, before their account is banned
+      description: |
+        Called by `/functions/v1/manage-people` in the caller's session, BEFORE it bans the account
+        in GoTrue. Deletes the person's `user_roles` row, so every role check refuses them at once,
+        keeps the role to give back, and writes `ACCESS_REMOVED`. Refuses your own access and the
+        last Administrator who can sign in. Administrator only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_user_id]
+              properties:
+                p_user_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Whether access was removed now; `false` when it already was.
+          content:
+            application/json:
+              schema: { type: boolean }
+        '400': { description: 'A machine identity, or the last Administrator who can sign in.' }
+        '403': { description: 'Not an Administrator, or your own access.' }
+        '404': { description: 'No such person (`P0002`).' }
+
+  /rest/v1/rpc/restore_person_access:
+    post:
+      tags: [Auth]
+      summary: Give back a removed person's role, before the ban is lifted
+      description: |
+        Called by `/functions/v1/manage-people` in the caller's session, BEFORE it lifts the GoTrue
+        ban. Gives back the role kept at removal and writes `ACCESS_RESTORED`. Refuses your own
+        access and a person whose access is not removed. Administrator only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_user_id]
+              properties:
+                p_user_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The role the person holds now, or null.
+          content:
+            application/json:
+              schema: { type: string, nullable: true }
+        '400': { description: 'A machine identity, or access that is not removed.' }
+        '403': { description: 'Not an Administrator, or your own access.' }
+        '404': { description: 'No such person (`P0002`).' }
+
   # ------------------------------------------------------------ Registry ----
   /rest/v1/asset_config:
     get:
@@ -2555,6 +2699,59 @@ paths:
         '403': { description: 'Forbidden: requires Administrator.' }
         '500': { description: '`JWT_SECRET` is not set, so this worker cannot sign.' }
 
+  /functions/v1/manage-people:
+    post:
+      tags: [Edge Functions]
+      summary: Add a person, remove their access, or restore it
+      description: |
+        The GoTrue half of the People tab (`0166`). A function because GoTrue's admin API takes the
+        service-role key, which is not in the database. Requires `Administrator`, checked here
+        before any admin call and again by the database function each act calls in the caller's
+        session, which also writes the audit row.
+
+        - **`add`**: with a mail relay (`supabaseAuth.smtp.host`), GoTrue sends an invitation whose
+          link lands on the form that sets a password. Without one, the account is created with a
+          24-character password minted here, returned once in `password`, and never stored or
+          logged. `record_person_added()` then gives the role; if it refuses, the account is
+          deleted again.
+        - **`remove`**: `remove_person_access()` first, so its rules are decided before GoTrue
+          changes anything, then a ban (`ban_duration` `876000h`). The account is never deleted.
+        - **`restore`**: `restore_person_access()`, then the ban is lifted.
+
+        Your own access is refused (403).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:  { type: string, enum: [add, remove, restore] }
+                email:   { type: string, format: email, description: '`add` only.' }
+                role:    { type: string, enum: [Administrator, Shopfloor_Manager, Operator, Auditor], description: '`add` only.' }
+                user_id: { type: string, format: uuid, description: '`remove` and `restore`.' }
+      responses:
+        '200':
+          description: 'Done. Sent with `Cache-Control: no-store`.'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id:  { type: string, format: uuid }
+                  email:    { type: string, description: '`add`.' }
+                  role:     { type: string, nullable: true, description: '`add`, and the role `restore` gave back.' }
+                  invited:  { type: boolean, description: '`add`: true when an invitation was sent.' }
+                  password: { type: string, description: '`add` without a mail relay only. Shown once; nothing keeps a copy.' }
+                  access:   { type: string, enum: [removed, active], description: '`remove` and `restore`.' }
+        '400': { description: 'Malformed request, an unknown role, or the database refused the person.' }
+        '401': { description: Missing or invalid Authorization header. }
+        '403': { description: 'Requires Administrator; or your own access.' }
+        '404': { description: No such person. }
+        '409': { description: 'The address is already in use, the last Administrator, or access in the other state.' }
+        '502': { description: 'The database act was done but GoTrue did not ban or lift the ban; repeat it.' }
+
   /functions/v1/revoke-gateway-credential:
     post:
       tags: [Edge Functions]
@@ -4195,7 +4392,8 @@ components:
           type: string
           enum: [INSERT, UPDATE, DELETE, SCHEMA_REJECTION, CREDENTIAL_ISSUED, CREDENTIAL_SHOWN, TOKEN_MINTED, TOKEN_REVOKED,
                  PRINCIPAL_REVOKED, PRINCIPAL_REINSTATED, PRINCIPAL_DESCRIBED, PROPOSAL_APPLIED, EXPORTED,
-                 PROPOSAL_EXPIRED, ROLE_GRANTED, ROLE_REVOKED, FLOW_DEPLOYED, BACKUP_REQUESTED,
+                 PROPOSAL_EXPIRED, ROLE_GRANTED, ROLE_REVOKED, PERSON_ADDED, ACCESS_REMOVED, ACCESS_RESTORED,
+                 FLOW_DEPLOYED, BACKUP_REQUESTED,
                  BACKUP_CANCELLED, BACKUP_RELEASED, BACKUP_TAKEN, BACKUP_FAILED, BACKUP_PRUNED]
           description: >-
             What happened. The audit trigger on each audited table writes `INSERT`, `UPDATE` and

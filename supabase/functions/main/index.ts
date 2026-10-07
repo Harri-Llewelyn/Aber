@@ -47,6 +47,12 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // record_service_token_issued() is SECURITY DEFINER and re-checks the actor.
   "mint-service-token": ["JWT_SECRET"],
 
+  // Adds a person, removes their access or restores it, for the People tab: GoTrue's admin API
+  // takes the service-role key. Administrator only, checked here and again by the SECURITY
+  // DEFINER function each act calls as the caller, which also writes the audit row. Whether
+  // GoTrue can send mail decides between an invitation and a password shown once.
+  "manage-people": ["SUPABASE_SERVICE_ROLE_KEY", "AUTH_SMTP_CONFIGURED", "AUTH_INVITE_REDIRECT_URL"],
+
   // Remote gateway enrolment, the only function here with no user: the caller is an appliance
   // holding a single-use token. It holds the service-role key because the token table is reachable
   // by nothing else, and the credential service's bearer token to mint the broker account.

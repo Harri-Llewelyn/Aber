@@ -956,7 +956,8 @@ Every table has `ENABLE ROW LEVEL SECURITY`. The pattern is uniform and fail-clo
 | `audit_trail` (`security` lane) | `Administrator`, `Auditor` | **nobody** — see below (`0070`) |
 | `*_vocabulary` | `authenticated` | **no write policy at all** |
 | `roles`, `permissions`, `role_permissions` | `authenticated` | none |
-| `user_roles` | own row, or `Administrator` / `Shopfloor_Manager` | none |
+| `user_roles` | own row, or `Administrator` / `Shopfloor_Manager` | none — `set_person_role()` and the People functions (`0166`) |
+| `access_removals` | nobody — `list_people()` reads it for an `Administrator` | none — `remove_person_access()` and `restore_person_access()` (`0166`) |
 | `principal_permissions` | own row, or `Administrator` | none — `create_machine_principal()` is the only write path |
 | `machine_principals` | `Administrator`, `Auditor` | none — `create_machine_principal()` writes it with the identity (`0125`); `describe_machine_principal()` (`0126`) is the only path after |
 | `webhook_endpoints` | `Administrator` | **no write policy** |
@@ -1196,6 +1197,43 @@ revocation takes effect on the next query, not on the next token refresh.
 it — but **nothing authorises on that claim**. The edge functions were corrected during pre-beta
 remediation to read the table too, because falling back to the claim when no row was found inverted
 the meaning of a revocation.
+
+### People are added, given roles and removed from the dashboard (0166)
+
+The People tab on Access Control is Administrator only, and has two halves.
+
+- **The database half.** `list_people()` lists every `auth.users` account that is not a machine
+  principal, with its role and status (`active`, `invited` until the first sign-in, `removed`).
+  `set_person_role()` leaves exactly one `user_roles` row, updating the one there is, inserting
+  when there is none, and folding extras into one. `log_role_assignment()` records each change, an
+  update as well as an insert.
+- **The GoTrue half** is [`manage-people`](functions/manage-people), because GoTrue's admin API takes
+  the service-role key. It adds a person by invitation when `supabaseAuth.smtp.host` is set, and
+  otherwise with a 24-character password it mints, returns once, and never stores or logs. It bans
+  an account to remove access and lifts the ban to restore it. Each act calls a function in the
+  caller's session: `record_person_added()` after GoTrue created the account (if it refuses, the
+  account is deleted again), and `remove_person_access()` and `restore_person_access()` BEFORE
+  GoTrue changes anything, so their rules are decided first.
+- **Removing access is immediate for every role check.** `remove_person_access()` deletes the
+  person's `user_roles` row, which `has_role()`, `has_authority()`, the edge functions and the token
+  hook all read, and keeps the role in `access_removals` so restoring gives it back. The ban then
+  refuses sign-in and token refresh. A token issued before the ban stays valid until it expires
+  (`supabaseAuth.jwtExpiry`, 3600 s by default), with no role: it can read what any signed-in
+  account can, such as the registry tables, and nothing a role gates. `auth_pre_request()` does not
+  refuse it; that hook's subject denylist is for machine principals.
+- **Two rules, under one lock.** Every act takes `SHARE ROW EXCLUSIVE` on `user_roles`, then
+  refuses the caller's own role or access, and anything that would leave no Administrator who can
+  sign in (a banned Administrator does not count). The lock is what stops two Administrators
+  demoting each other at once.
+- **The record.** `PERSON_ADDED`, `ACCESS_REMOVED` and `ACCESS_RESTORED` are written on
+  `entity_type = 'user_roles'`, so they land in the person's lane in the security lane, beside the
+  `ROLE_GRANTED` and `ROLE_REVOKED` rows the trigger writes in the same transaction. None holds a
+  password.
+- **Ban, never delete.** `audit_trail.changed_by` references `auth.users`, and the trail names a
+  person through their account, so removing access keeps the account.
+
+`test_people_management.py` holds the database half; `manage-people/people_test.ts` holds the
+function against a stubbed GoTrue and PostgREST.
 
 ---
 
@@ -3124,6 +3162,7 @@ refuses a missing or wrong token or secret.
 | [`gateway-credential`](functions/gateway-credential) | `Administrator`, `Shopfloor_Manager` | Mints a host-run gateway's broker credential and shows it once |
 | [`gateway-bundle`](functions/gateway-bundle) | `Administrator`, `Shopfloor_Manager`; `GET`: any signed-in user | The remote-gateway ZIP bundle or the one-liner, minting an enrolment token; `GET` is the readiness probe |
 | [`mint-service-token`](functions/mint-service-token) | `Administrator` | Signs a machine principal's token and shows it once |
+| [`manage-people`](functions/manage-people) | `Administrator` | Adds a person, removes their access or restores it, for the People tab (`0166`) |
 | [`enroll-gateway`](functions/enroll-gateway) | **no Supabase role at all** | An appliance redeeming its single-use enrolment token |
 | [`gateway-install`](functions/gateway-install) | **no Supabase role at all** | What the one-liner fetches, authorised by the enrolment token in `X-Enrolment-Token` |
 | [`revoke-gateway-credential`](functions/revoke-gateway-credential) | **no Supabase role at all** | Called by the database through pg_net; authorised by `GATEWAY_REVOKE_SECRET` in `x-revoke-secret` |
