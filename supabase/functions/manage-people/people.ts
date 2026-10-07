@@ -83,7 +83,12 @@ function authRefusal(error: AuthError, what: string): Response {
     return json(400, { error: what, details: error.message });
   }
   console.error(`manage-people: GoTrue answered ${error.status ?? "without a status"}: ${error.message}`);
-  return json(502, { error: what, details: "The sign-in service did not answer. Nothing was changed; retry." });
+  return json(502, {
+    error: what,
+    details: error.status
+      ? `The sign-in service refused: ${error.message}. Nothing was changed.`
+      : "The sign-in service did not answer. Nothing was changed; retry.",
+  });
 }
 
 function targetOf(body: Record<string, unknown>, callerId: string): string | Response {
@@ -110,41 +115,52 @@ async function addPerson(body: Record<string, unknown>, caller: Client, admin: C
     return json(400, { error: "Malformed request", details: `\`role\` must be one of ${ROLES.join(", ")}.` });
   }
 
+  // Asked first, because GoTrue's invitation to an address it already holds, unconfirmed, re-sends
+  // to that account instead of refusing, and that account is not this request's to record or undo.
+  const { data: people, error: listError } = await caller.rpc("list_people");
+  if (listError) return dbRefusal(listError, "The person was not added");
+  if (((people ?? []) as { email?: string | null }[]).some((p) => p.email?.toLowerCase() === email)) {
+    return json(409, { error: "The person was not added", details: "An account with this email address already exists." });
+  }
+
   // An invitation when GoTrue can send mail: the person chooses their own password from the link.
   const invited = Deno.env.get("AUTH_SMTP_CONFIGURED") === "true";
   let password: string | null = null;
-  let userId: string | undefined;
+  let created: { id?: string; created_at?: string; last_sign_in_at?: string | null } | null = null;
   if (invited) {
     const redirectTo = Deno.env.get("AUTH_INVITE_REDIRECT_URL") || undefined;
     const { data, error } = await admin.auth.admin.inviteUserByEmail(email, redirectTo ? { redirectTo } : {});
     if (error) return authRefusal(error, "The invitation was not sent");
-    userId = data.user?.id;
+    created = data.user;
   } else {
     password = initialPassword();
     const { data, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true });
     if (error) return authRefusal(error, "The account was not created");
-    userId = data.user?.id;
+    created = data.user;
   }
+  const userId = created?.id;
   if (!userId) {
     console.error("manage-people: GoTrue answered without the new account's id");
     return json(502, { error: "The person was not added", details: "The sign-in service returned no account." });
   }
 
-  // The role and the audit row, as the caller. If they fail, the account is deleted again rather
-  // than left with no role and no record; it has never been used, so nothing is lost.
+  // The role and the audit row, as the caller. If they fail, an account this request created is
+  // deleted again rather than left with no role and no record; it has never been used.
   const { error: recordError } = await caller.rpc("record_person_added", {
     p_user_id: userId,
     p_role: role,
     p_invited: invited,
   });
   if (recordError) {
-    const { error: undoError } = await admin.auth.admin.deleteUser(userId);
+    const fresh = !created?.last_sign_in_at &&
+      Date.now() - Date.parse(created?.created_at ?? "") < 10 * 60_000;
+    const { error: undoError } = fresh ? await admin.auth.admin.deleteUser(userId) : { error: { message: "not new" } };
     if (undoError) {
-      console.error(`manage-people: unrecorded account ${userId} could not be deleted: ${undoError.message}`);
+      console.error(`manage-people: unrecorded account ${userId} was not deleted: ${undoError.message}`);
       return json(500, {
         error: "The person was not added",
-        details: `${recordError.message}. The account the sign-in service created holds no role; ` +
-          "remove its access from the People tab.",
+        details: `${recordError.message}. The account the sign-in service holds for this address has ` +
+          "no role; remove its access from the People tab.",
       });
     }
     return dbRefusal(recordError, "The person was not added");

@@ -20,6 +20,9 @@ const NEW_ID = "cccccccc-0000-4000-8000-000000000003";
 const PASSWORD_SHAPE = /^[2-9a-hjkmnp-z]{6}(-[2-9a-hjkmnp-z]{6}){3}$/;
 
 type Reply = { status: number; body: unknown };
+
+/** What GoTrue answers for an account it has just made. */
+const NEW_USER = { id: NEW_ID, email: "new@site.test", created_at: new Date().toISOString(), last_sign_in_at: null };
 type Call = { method: string; path: string; query: string; body: Record<string, unknown> | null; auth: string | null };
 
 /**
@@ -31,8 +34,9 @@ function stack(replies: Record<string, Reply> = {}, role = "Administrator") {
   const defaults: Record<string, Reply> = {
     "GET /auth/v1/user": { status: 200, body: { id: ADMIN_ID, aud: "authenticated", email: "admin@site.test" } },
     "GET /rest/v1/user_roles": { status: 200, body: [{ roles: { name: role } }] },
-    "POST /auth/v1/admin/users": { status: 200, body: { id: NEW_ID, email: "new@site.test" } },
-    "POST /auth/v1/invite": { status: 200, body: { id: NEW_ID, email: "new@site.test" } },
+    "POST /rest/v1/rpc/list_people": { status: 200, body: [{ user_id: ADMIN_ID, email: "admin@site.test" }] },
+    "POST /auth/v1/admin/users": { status: 200, body: NEW_USER },
+    "POST /auth/v1/invite": { status: 200, body: NEW_USER },
     "POST /rest/v1/rpc/record_person_added": { status: 204, body: null },
     "POST /rest/v1/rpc/remove_person_access": { status: 200, body: true },
     "POST /rest/v1/rpc/restore_person_access": { status: 200, body: "Operator" },
@@ -192,6 +196,34 @@ Deno.test("an unknown role or a malformed address is refused before GoTrue", asy
     assert.equal(response.status, 400, JSON.stringify(body));
     assert.equal(gotrueAdmin(s.paths()), []);
   }
+});
+
+Deno.test("an address the site already holds is a conflict, and GoTrue is not asked", async () => {
+  env(true);
+  const s = stack({
+    "POST /rest/v1/rpc/list_people": { status: 200, body: [{ user_id: TARGET_ID, email: "New@Site.test" }] },
+  });
+  const { response, body } = await run(post({ action: "add", email: "new@site.test", role: "Operator" }), s);
+  assert.equal(response.status, 409);
+  assert.ok(/already exists/.test(body.details));
+  assert.equal(gotrueAdmin(s.paths()), []);
+});
+
+Deno.test("an account GoTrue did not just make is never deleted", async () => {
+  env(true);
+  const s = stack({
+    "POST /auth/v1/invite": {
+      status: 200,
+      body: { id: NEW_ID, email: "new@site.test", created_at: "2026-01-01T00:00:00Z", last_sign_in_at: null },
+    },
+    "POST /rest/v1/rpc/record_person_added": {
+      status: 400,
+      body: { code: "22023", message: "not an account added in the last hour", details: null, hint: null },
+    },
+  });
+  const { response } = await run(post({ action: "add", email: "new@site.test", role: "Operator" }), s);
+  assert.equal(response.status, 500);
+  assert.equal(s.paths().some((p) => p.startsWith("DELETE")), false);
 });
 
 Deno.test("an address already in use is a conflict", async () => {
