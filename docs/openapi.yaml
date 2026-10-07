@@ -999,8 +999,9 @@ paths:
           content:
             application/json:
               schema: { type: object, description: 'The created draft row as JSON.' }
-        '400': { description: The parent already has an open draft, or does not exist. }
+        '400': { description: The parent already has an open draft. }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /rest/v1/rpc/publish_schema_version:
     post:
@@ -1030,6 +1031,7 @@ paths:
               schema: { type: object }
         '400': { description: The target is not a draft. }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /rest/v1/device_submodels:
     get:
@@ -1905,6 +1907,7 @@ paths:
               schema: { type: object }
         '400': { description: 'The patch violates a constraint on the target, or names a column that is not proposable.' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /rest/v1/rpc/reject_proposal:
     post:
@@ -1930,6 +1933,7 @@ paths:
         '200': { description: Rejected. }
         '400': { description: No reason given. }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /rest/v1/rpc/withdraw_proposal:
     post:
@@ -1952,6 +1956,7 @@ paths:
       responses:
         '200': { description: Withdrawn. }
         '403': { description: Not the proposer. }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /rest/v1/rpc/list_proposer_names:
     post:
@@ -2273,6 +2278,7 @@ paths:
         '400': { description: 'Missing or malformed `device_id`.' }
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Forbidden: insufficient privileges.' }
+        '404': { description: 'No device has that `device_id` or `merge_into_device_id`. The body is `{"error": "Device not found"}`.' }
 
   /functions/v1/gateway-bundle:
     get:
@@ -3816,6 +3822,19 @@ components:
       description: Missing or invalid credentials.
     Forbidden:
       description: Authenticated, but the role is not permitted. RLS policies fail closed.
+    NotFound:
+      description: |
+        A row the call names does not exist: the proposal, the schema, or the asset a proposal
+        targets. `code` is `P0002`, as the database raised it, and `message` says which row.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              code: { type: string, example: P0002 }
+              message: { type: string, example: proposal 7fffffff-0000-4000-8000-00000000dead not found }
+              details: { type: string, nullable: true }
+              hint: { type: string, nullable: true }
 
   schemas:
 
