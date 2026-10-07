@@ -97,9 +97,11 @@ CREATE TABLE IF NOT EXISTS auth.identities (
 GRANT SELECT, INSERT ON auth.identities TO postgres;
 
 -- The base image's auth.users predates columns GoTrue has, and ensure_first_administrator() (0163)
--- writes them, as seed.sql does. Added with GoTrue's types; IF NOT EXISTS leaves an image that
--- already has them untouched.
+-- writes them, as seed.sql does. banned_until is how GoTrue bans an account, which the People
+-- functions (0166) read. Added with GoTrue's types; IF NOT EXISTS leaves an image that already has
+-- them untouched.
 ALTER TABLE auth.users
+  ADD COLUMN IF NOT EXISTS banned_until               timestamptz,
   ADD COLUMN IF NOT EXISTS email_confirmed_at         timestamptz,
   ADD COLUMN IF NOT EXISTS is_sso_user                boolean NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS email_change               varchar(255),
