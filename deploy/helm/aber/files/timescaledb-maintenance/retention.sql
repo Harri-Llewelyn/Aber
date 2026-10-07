@@ -110,7 +110,8 @@ END $proc$;
 
 DO $$
 DECLARE
-  -- Several spellings of 'no policy': this value is typed into .env by hand.
+  -- Several spellings of 'no policy': the chart's timescaledb.retention.compressAfter and
+  -- retainFor are typed by hand.
   disabled  CONSTANT text[] := ARRAY['never', 'off', 'disabled', 'none', 'false', '0'];
 
   raw_compress text := btrim(coalesce(current_setting('aber.compress_after', true), ''));

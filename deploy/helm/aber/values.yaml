@@ -1235,7 +1235,7 @@ ingress:
   # listener (an Administrator login), but a database console on a public hostname is reachable
   # by anyone who can reach the ingress. Turning it on requires secrets.studioOAuthClientSecret
   # and secrets.studioProxyHmacSecret (the render fails naming them). Without the route:
-  #   kubectl -n <ns> port-forward svc/<release>-aber-supabase-studio 54323:3000
+  #   kubectl -n <ns> port-forward svc/supabase-studio 54323:3000
   #
   # The studio and gitea logins set Secure cookies, which a browser keeps only on an https origin
   # or on localhost / *.localhost. Over plain http on any other domain the render refuses either

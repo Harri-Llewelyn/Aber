@@ -81,7 +81,8 @@ datasources:
     # without an explicit datasource, keeps resolving to the telemetry it was written against.
     isDefault: false
     jsonData:
-      # Matches `global.scrape_interval` in prometheus/prometheus.yml. Grafana uses it to choose a
+      # Matches the chart's observability.alloy.scrapeInterval, which Alloy scrapes at and
+      # Prometheus's `global.scrape_interval` is set from. Grafana uses it to choose a
       # sensible minimum step, and a value larger than the real interval silently coarsens every
       # graph drawn against this datasource.
       timeInterval: 15s

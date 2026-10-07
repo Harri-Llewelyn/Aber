@@ -862,10 +862,10 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * The mint column is per principal: the two keys that live in .env are rotated, never minted,
-   * because the daemons read their key from the environment at boot.
+   * The mint column is per principal: the two keys in the release Secret are rotated, never
+   * minted, because the daemons read their key from the environment at start.
    */
-  it('offers rotation, not a fresh mint, for the two keys that live in .env', async () => {
+  it('offers rotation, not a fresh mint, for the two keys in the release Secret', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     api.listServicePrincipals.mockResolvedValue([
       { principal_id: 'b0000000-0000-4000-8000-000000000002', permissions: ['telemetry:read'], created_at: null, can_sign_in: false },
@@ -879,6 +879,11 @@ describe('AccessControlTab', () => {
     // Asserted on what would be copied, not what is drawn: both rows render the same "Copy Command"
     // label, and the command survives in the accessible name.
     expect(within(rowOf('Service_Ingestor')).getByLabelText(/npm run keys:rotate/)).toBeTruthy()
+    // Said in the chart's terms: the Secret key the Deployment reads, and which Deployment.
+    const rotate = within(rowOf('Service_Ingestor')).getByLabelText(/npm run keys:rotate/)
+    expect(rotate.getAttribute('title')).toMatch(/SUPABASE_INGESTION_KEY in the release Secret/)
+    expect(rotate.getAttribute('title')).toMatch(/ingestion Deployment/)
+    expect(rotate.getAttribute('title')).not.toMatch(/\.env|containers/)
     expect(within(rowOf('Service_Ingestor')).queryByLabelText(/mint-mcp-token/)).toBeNull()
     // The MCP client is the one that command IS right for, so it keeps it.
     expect(within(rowOf('MCP read-only client')).getByLabelText(/mint-mcp-token\.mjs --principal/)).toBeTruthy()

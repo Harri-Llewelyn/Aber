@@ -6,7 +6,7 @@
 -- Every row the platform needs to come up usable: pure DML, the counterpart of
 -- `0001_baseline_schema.sql`, which must have run.
 --
--- IDEMPOTENT, because supabase-db-init replays every /migrations/*.sql on every boot. Every
+-- IDEMPOTENT, because db-init replays every /migrations/*.sql on every boot. Every
 -- statement carries an ON CONFLICT clause, and the clauses differ per table on purpose:
 --   * Reference vocabularies use DO UPDATE, because they are maintained by editing this file.
 --     MTConnect re-stamps only `category`: `semantic_id` is a hand-corrected assertion.
@@ -2455,7 +2455,7 @@ BEGIN
      AND endpoint_url IS DISTINCT FROM v_forge;
   GET DIAGNOSTICS v_moved = ROW_COUNT;
   IF v_moved > 0 THEN
-    RAISE NOTICE 'directory: the forge now advertised at %, from GITEA_ROOT_URL', v_forge;
+    RAISE NOTICE 'directory: the forge now advertised at %, from GITEA_PUBLIC_URL', v_forge;
   END IF;
 END $$;
 
@@ -2581,7 +2581,7 @@ BEGIN
        AND endpoint_url IS DISTINCT FROM v_nodered_origin;
     GET DIAGNOSTICS v_moved = ROW_COUNT;
     IF v_moved > 0 THEN
-      RAISE NOTICE 'directory: Node-RED now advertised at %, from NODERED_PUBLIC_URL', v_nodered_origin;
+      RAISE NOTICE 'directory: Node-RED now advertised at %, from NODERED_OAUTH_CALLBACK_URL', v_nodered_origin;
     END IF;
   END IF;
 
@@ -2746,8 +2746,9 @@ SELECT public.ensure_cron_job(
 -- ---------------------------------------------------------------------------------------------
 -- Vault: never reachable through PostgREST
 -- ---------------------------------------------------------------------------------------------
--- Vault holds only secrets read from SQL. MQTT_PASSWORD / DB_PASSWORD / POSTGRES_PASSWORD stay
--- in .env: mosquitto-init and supabase-db need them before the database accepts connections.
+-- Vault holds only secrets read from SQL. The broker's and the databases' passwords
+-- (MQTT_DYNSEC_ADMIN_PASSWORD, DB_PASSWORD, POSTGRES_PASSWORD) stay in the chart's Secret: the
+-- broker's initContainer and the databases need them before the database accepts connections.
 -- vault.decrypted_secrets is a view that decrypts on read. `vault` is not in PGRST_DB_SCHEMAS
 -- today, but these REVOKEs mean that adding it later still would not expose plaintext to a
 -- logged-in user.
@@ -2790,7 +2791,7 @@ DECLARE
   -- The trailing slash is trimmed. GRAFANA_PUBLIC_URL is documented without one, but a value
   -- copied from a browser address bar carries it, and `http://host//login/generic_oauth` is not
   -- the string GoTrue compares against -- it fails as `invalid redirect_uri`, which reads as a
-  -- Grafana fault rather than as a stray character in .env.
+  -- Grafana fault rather than as a stray character in the configured URL.
   v_base      TEXT := rtrim(
                         COALESCE(
                           NULLIF(current_setting('aber.grafana_public_url', true), ''),
@@ -2800,7 +2801,8 @@ DECLARE
 BEGIN
   IF v_secret IS NULL OR v_secret = '' THEN
     RAISE WARNING 'grafana oauth client secret not supplied; skipping client registration. '
-                  'Set GRAFANA_OAUTH_CLIENT_SECRET in .env and re-run.';
+                  'Set secrets.grafanaOAuthClientSecret (the Secret key GRAFANA_OAUTH_CLIENT_SECRET) '
+                  'and upgrade the release.';
     RETURN;
   END IF;
 
@@ -2829,8 +2831,8 @@ BEGIN
     token_endpoint_auth_method = EXCLUDED.token_endpoint_auth_method,
     deleted_at                 = NULL,
     updated_at                 = NOW();
-  -- DO UPDATE, not DO NOTHING: supabase-db-init replays every migration on every stack start,
-  -- so a rotated GRAFANA_OAUTH_CLIENT_SECRET in .env has to take effect on the next boot.
+  -- DO UPDATE, not DO NOTHING: db-init replays every migration on every install and upgrade,
+  -- so a rotated secrets.grafanaOAuthClientSecret has to take effect on the next one.
 END $$;
 
 SELECT set_config('aber.grafana_oauth_client_secret', '', false);
@@ -8353,7 +8355,7 @@ DECLARE
   -- Deliberately the next value after Grafana's ...0001.
   v_client_id CONSTANT UUID := 'c0ffee00-0000-4000-8000-000000000002';
   v_secret    TEXT := current_setting('aber.nodered_oauth_client_secret', true);
-  -- Derived from NODERED_PUBLIC_URL by the chart, so this row and the callbackURL settings.js
+  -- Derived from aber.noderedUrl by the chart, so this row and the callbackURL settings.js
   -- hands passport-oauth2 come from one value; they must agree exactly or /oauth/authorize
   -- answers "invalid redirect_uri". /auth/strategy/callback is Node-RED's own fixed route.
   v_redirect  TEXT := COALESCE(
@@ -8363,7 +8365,8 @@ DECLARE
 BEGIN
   IF v_secret IS NULL OR v_secret = '' THEN
     RAISE WARNING 'nodered oauth client secret not supplied; skipping client registration. '
-                  'Set NODERED_OAUTH_CLIENT_SECRET in .env and re-run. Node-RED will refuse to '
+                  'Set secrets.noderedOAuthClientSecret (the Secret key NODERED_OAUTH_CLIENT_SECRET) '
+                  'and upgrade the release. Node-RED will refuse to '
                   'start rather than come up unauthenticated.';
     RETURN;
   END IF;
@@ -8384,8 +8387,8 @@ BEGIN
     'confidential',
     'client_secret_post'
   )
-  -- DO UPDATE, not DO NOTHING: supabase-db-init replays every migration on every stack start,
-  -- so a rotated NODERED_OAUTH_CLIENT_SECRET in .env has to take effect on the next boot.
+  -- DO UPDATE, not DO NOTHING: db-init replays every migration on every install and upgrade,
+  -- so a rotated secrets.noderedOAuthClientSecret has to take effect on the next one.
   ON CONFLICT (id) DO UPDATE SET
     client_secret_hash         = EXCLUDED.client_secret_hash,
     redirect_uris              = EXCLUDED.redirect_uris,
@@ -8416,7 +8419,8 @@ BEGIN
     -- open: dispatch below sends no Authorization header, and Node-RED's httpNodeAuth answers
     -- 401. A webhook stops working, visibly, rather than the endpoint staying open.
     RAISE WARNING 'vault: nodered_webhook_jwt_secret not supplied; a webhook to Node-RED will '
-                  'be rejected (401). Set NODERED_WEBHOOK_JWT_SECRET in .env.';
+                  'be rejected (401). Set secrets.noderedWebhookJwtSecret (the Secret key '
+                  'NODERED_WEBHOOK_JWT_SECRET) and upgrade the release.';
     RETURN;
   END IF;
 
@@ -8435,7 +8439,8 @@ BEGIN
     -- replay. Wrapped, because update_secret decrypts the existing row first and that read fails
     -- when the pgsodium root key no longer matches the stored ciphertext (docs/incidents.md -> "The
     -- pgsodium root key lived in the container, not the volume"). Recreating is safe for this
-    -- secret because the plaintext comes from .env on every boot; the vault row is a cache.
+    -- secret because db-init passes the plaintext from the chart's Secret on every run; the vault
+    -- row is a cache.
     BEGIN
       PERFORM vault.update_secret(v_id, v_secret);
     EXCEPTION WHEN OTHERS THEN

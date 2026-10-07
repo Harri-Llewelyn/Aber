@@ -274,8 +274,9 @@ spec:
 {{- /*
 NO /docker-entrypoint-initdb.d MOUNT HERE, unlike timescaledb, and that is not an omission.
 
-Supabase's schema arrives through supabase-db-init replaying supabase/migrations/*.sql on every
-boot -- an init Job. Putting the migrations in an initdb mount would run them exactly once, on
-an empty volume, which is the opposite of the idempotent-replay contract 0001/0002 are built
-around and would make every later migration unreachable on an existing database.
+Supabase's schema arrives through the db-init Job (`aber-db-init`) replaying
+supabase/migrations/*.sql on every install and upgrade. Putting the migrations in an initdb mount
+would run them exactly once, on an empty volume, which is the opposite of the idempotent-replay
+contract 0001/0002 are built around and would make every later migration unreachable on an
+existing database.
 */ -}}

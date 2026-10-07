@@ -154,10 +154,12 @@ def _credentials():
     node; and this is the middle one -- the worker simply cannot authenticate as a gateway whose
     password it was not given, so a compromised queue cannot make it publish as a real machine.
 
-    A JSON MAP RATHER THAN A PAIR OF VARIABLES, because playback has as many identities as it has
-    targets. The single pair is still read as a fallback: it is what `.env` already carries for
-    `capture.py play`, and a deployment with one playback gateway should not have to learn a new
-    format to keep working.
+    THREE SOURCES, THE DELIVERED FILE WINNING. Issuing a credential for an `is_simulated` gateway
+    delivers its password to PLAYBACK_CREDENTIAL_FILE (archived migration 0078), re-read every pass.
+    MQTT_PLAYBACK_CREDENTIALS (the chart's `secrets.mqttPlaybackCredentials`) carries passwords
+    supplied by hand, as a JSON map because playback has as many identities as it has targets.
+    MQTT_PLAYBACK_USER / MQTT_PLAYBACK_PASSWORD, the pair `capture.py play` reads, is a
+    single-target fallback.
 
     NOT LOGGED, EVER. The keys are gateway ids and are safe; the values are broker passwords.
     """
@@ -186,10 +188,10 @@ def _credentials():
 
     # THE DELIVERED FILE WINS, and the reason is the broker rather than a preference about
     # configuration. Mosquitto holds ONE password per username, so issuing a credential REPLACES the
-    # one before it -- which means a value in `.env` is not an alternative to the delivered one, it
-    # is an OLDER one, and after any re-issue it is simply wrong. Letting the environment override
-    # would make the documented repair for a refused playback ("issue a new credential") the one
-    # thing that could not fix it.
+    # one before it -- which means a value in the environment is not an alternative to the delivered
+    # one, it is an OLDER one, and after any re-issue it is simply wrong. Letting the environment
+    # override would make the documented repair for a refused playback ("issue a new credential")
+    # the one thing that could not fix it.
     credentials.update(_file_credentials())
     return credentials
 
@@ -269,7 +271,8 @@ def _run_job(supabase, storage, credentials, job):
         # otherwise report success and move nothing.
         return 0, 0, (
             "this worker holds no broker credential for %s, so it cannot authenticate as that "
-            "gateway. Add it to MQTT_PLAYBACK_CREDENTIALS." % edge_node
+            "gateway. Issue one from the gateway's drawer on the Gateways page (Generate Broker "
+            "Credential): it reaches this worker within about a minute, with no restart." % edge_node
         )
 
     # ------------------------------------------------------------------------------------------
@@ -364,12 +367,12 @@ def _run_job(supabase, storage, credentials, job):
 
     # ------------------------------------------------------------------------------------------
     # THE BROKER HAS TO ACCEPT US BEFORE A SINGLE MESSAGE IS COUNTED AS SENT. The credential check
-    # above refuses a MISSING password and cannot see a WRONG one, which is what a re-minted
-    # credential leaves behind until the worker is restarted.
+    # above refuses a MISSING password and cannot see a WRONG one, which is what a re-issued
+    # credential leaves behind until its delivery reaches this worker.
     #
     # rc 4 and 5 are the two that mean the password: 4 is bad username/password, 5 is not
     # authorised. They are named rather than lumped in, because they are the ones an operator fixes
-    # by rotating MQTT_PLAYBACK_CREDENTIALS and restarting rather than by looking at the broker.
+    # by issuing a credential rather than by looking at the broker.
     deadline = time.monotonic() + CONNACK_TIMEOUT_SECONDS
     while not client.aber_connack and time.monotonic() < deadline:
         time.sleep(0.05)
@@ -390,9 +393,11 @@ def _run_job(supabase, storage, credentials, job):
             5: "the broker refused this connection as not authorised",
         }.get(rc, "the broker refused the connection")
         return 0, out_of_window, (
-            "%s for %s (CONNACK rc=%s). If this gateway's credential was re-minted, the worker is "
-            "still holding the previous one: update MQTT_PLAYBACK_CREDENTIALS and recreate the "
-            "playback container." % (detail, edge_node, rc)
+            "%s for %s (CONNACK rc=%s), so the password this worker holds is not the one the "
+            "broker has. A credential issued for this gateway reaches the worker within about a "
+            "minute: if one was just issued, start the playback again then; otherwise issue a new "
+            "one from the gateway's drawer on the Gateways page (Generate Broker Credential)."
+            % (detail, edge_node, rc)
         )
 
     sent = 0
@@ -468,9 +473,10 @@ def main():
         # correctly configured for a stack that has not issued any playback targets yet -- it should
         # come up, report the queue is unreachable to it, and start working the moment one is added.
         logger.warning(
-            "No playback credentials configured (MQTT_PLAYBACK_CREDENTIALS / MQTT_PLAYBACK_USER), "
-            "so every job will be refused for want of an identity to publish as. Issue a broker "
-            "credential for a simulated gateway and give it to this worker."
+            "This worker holds no playback credentials yet, so every job will be refused for want "
+            "of an identity to publish as. Issuing a broker credential for a simulated gateway "
+            "(Gateways page, Generate Broker Credential) delivers it here, and the worker picks it "
+            "up without a restart."
         )
     else:
         logger.info("Playback worker holds credentials for %d gateway(s): %s",
@@ -571,7 +577,8 @@ def main():
         # issued a credential; nothing in the database can answer whether this process was given
         # the password. Without this the playback dialog showed a target as ready and the job then
         # failed with "this worker holds no broker credential for …" -- correct, and far too late
-        # to be useful, because minting the credential and pasting it here are two separate acts.
+        # to be useful, because issuing a credential and its delivery reaching this process are
+        # two separate events.
         #
         # IN THE LOOP RATHER THAN ONCE AT STARTUP, because the page has to distinguish "holds
         # nothing" from "is not running", and only a repeating timestamp does that. Failure is

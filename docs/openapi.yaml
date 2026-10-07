@@ -1663,8 +1663,9 @@ paths:
 
         **It exists because the database cannot know this.** `gateway_has_broker_credential()`
         answers whether the *platform* issued a gateway a credential — an audit row, or an enrolment
-        stamp. Whether the *worker* was given that password is a fact about a process's environment,
-        and minting a credential and pasting it into the worker are two separate acts. Before this,
+        stamp. Whether the *worker* holds that password is a fact about a running process: issuing a
+        credential delivers it to the worker's file (archived migration 0078), and the worker picks
+        it up on a later pass, or never if the delivery fails. Before this,
         the playback dialog showed a target as ready and the job failed a second later with
         `this worker holds no broker credential for …`.
 

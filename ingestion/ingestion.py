@@ -205,7 +205,7 @@ def _open_timescaledb_connection():
         password=DB_PASSWORD
     )
 
-# The escape hatch for the check below. Deliberately a separate variable from INGEST_DB_USER: the
+# The escape hatch for the check below. Deliberately a separate variable from DB_USER: the
 # credential and the permission to use a dangerous one are different decisions, and requiring both
 # means nobody reaches this state by editing one line.
 ALLOW_HISTORIAN_SUPERUSER = os.getenv(
@@ -284,10 +284,10 @@ def _assert_historian_is_least_privilege(conn):
         "CRITICAL CONFIGURATION ERROR: connected to the historian as '%s', which is a SUPERUSER. "
         "This process is the most exposed to the plant network, and that credential can DROP the "
         "telemetry hypertable and rewrite any observation -- so 'append-only historian writes' in "
-        "the security model would be a claim nothing enforces. Set INGEST_DB_USER=ingest_writer "
-        "with INGEST_WRITER_PASSWORD (npm run setup mints one; timescaledb/roles.sql creates the "
-        "role). If admin rights are genuinely needed for a recovery, set "
-        "ALLOW_HISTORIAN_SUPERUSER=true and say so out loud.", user
+        "the security model would be a claim nothing enforces. Set the chart's ingestion.dbUser to "
+        "ingest_writer, with secrets.ingestWriterPassword (npm run setup mints one; "
+        "timescaledb/roles.sql creates the role). If admin rights are genuinely needed for a "
+        "recovery, set ALLOW_HISTORIAN_SUPERUSER=true and say so out loud.", user
     )
     raise SystemExit(1)
 
@@ -3527,9 +3527,10 @@ def main():
             logger.critical(
                 "CRITICAL CONFIGURATION ERROR: the historian refused this daemon's credential "
                 "(%s). This never resolves by retrying, and the daemon would otherwise run "
-                "indefinitely discarding every reading. DB_USER is '%s' -- check that "
-                "INGEST_WRITER_PASSWORD matches the role timescaledb/roles.sql created, and that "
-                "INGEST_DB_USER and INGEST_DB_PASSWORD are set together if either is set.",
+                "indefinitely discarding every reading. DB_USER is '%s' -- check that DB_PASSWORD "
+                "is that role's password. The chart sets both from ingestion.dbUser: for "
+                "ingest_writer, DB_PASSWORD is secrets.ingestWriterPassword and must match the "
+                "role timescaledb/roles.sql created.",
                 str(err).strip().splitlines()[-1] if str(err).strip() else err, DB_USER,
             )
             raise SystemExit(1)

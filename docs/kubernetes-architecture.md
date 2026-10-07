@@ -507,8 +507,8 @@ polling the dependency's readiness endpoint anyway, so ordering holds even if `-
 `helm.sh/hook-delete-policy: before-hook-creation` so a re-run replaces the previous Job rather than
 colliding on the name.
 
-**This is safe precisely because the migrations are idempotent.** `supabase-db-init` already replays
-every `*.sql` on every boot with no applied-migrations ledger — a property the beta squash to
+**This is safe precisely because the migrations are idempotent.** The db-init Job (`aber-db-init`)
+replays every `*.sql` on every boot with no applied-migrations ledger — a property the beta squash to
 `0001_baseline_schema.sql` / `0002_seed_data.sql` was explicitly verified to preserve. A Helm
 upgrade re-running the whole set is therefore normal operation, not a risk. Every subsequent
 migration must keep that property; Kubernetes does not change the obligation, it just makes it
