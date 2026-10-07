@@ -251,3 +251,73 @@ A new platform consumer (a BI reader of `uns/#`, say) is a role in `dynsec-roles
 line in `frontend/src/utils/serviceIdentities.js`; and an assertion in
 `scripts/check-broker-config.mjs`.
 `scripts/check-docs-drift.mjs` holds the roles file and the page's list to each other.
+
+## Broker Topic Authorisation
+
+The broker's Dynamic Security plugin confines each gateway to its own edge-node subtree through a
+role generated for it when its credential is issued (*The credential service and the boot reconcile*, above):
+
+```
+gateway-<sparkplug_id>:  publish and receive  spBv1.0/+/+/<sparkplug_id>/#
+gateway (shared):        subscribe            spBv1.0/#       receive spBv1.0/STATE/#
+```
+
+So a gateway provisioned with **username == its `sparkplug_id`** can publish only beneath its own
+segment and to no other. Verified by delivery in `scripts/check-broker-config.mjs`: a publish to
+another gateway's subtree is dropped by the broker.
+
+The dashboard and the enrolment bundle are the ordinary ways to issue a credential. The break-glass
+one, for a stack whose credential service is down or whose Administrator cannot sign in:
+
+```bash
+node scripts/mosquitto-provision-gateway.mjs gwy120000000000400080000
+```
+
+The password is printed **once** — the broker stores only a hash.
+
+**It sends the plugin commands the credential service sends**, so the role reasoning above lives
+in one place, through `kubectl exec` into the broker pod (namespace `aber`, or `ABER_NAMESPACE`),
+and the broker applies them to itself at once: nothing is reloaded, nothing is signalled,
+and the account works before the command returns. Re-issuing an existing gateway **replaces** its
+password and re-enables the account; it never adds a second one.
+
+A gateway issued this way reads *No platform record* beside *Active* on the Access Control page,
+which is the honest pair: the broker holds it, and the platform did not issue it.
+
+### There is no shared broker account
+
+One credential holding `readwrite spBv1.0/#`, shared by the ingestion daemon, the i3X server, a
+simulator and the E2E validator, would let any of them publish `DBIRTH` or `DDATA` for *any*
+machine on the site, and `verify_gateway_binding()` cannot catch that: a forged message published
+under a **correctly bound** device satisfies the binding check by construction.
+
+So each principal is confined, holding a role from
+[`../mosquitto/dynsec-roles.json`](dynsec-roles.json):
+
+| Principal | May do |
+| :--- | :--- |
+| `aber_ingestion` | read `spBv1.0/#`; publish **only** `spBv1.0/+/NCMD/+` (rebirth), its own `spBv1.0/STATE/<primaryHostId>`, the Directory and the Unified Namespace |
+| `aber_i3x` | read `spBv1.0/#` and the Directory. Publish nothing — it refuses writes in code (405), and this is that stance where the broker can enforce it |
+| any `gwy…` account | one per gateway, each confined to its own edge node by a role generated for it. Issued against a row that already exists — from the dashboard for a host-run gateway, by the enrolment bundle for an appliance |
+| `gwy110000000000400080000` | `validate.py`'s own gateway, a fixture it seeds itself |
+| `aber_monitor` | read `$SYS/#` only — the health probes and the metrics exporter. Publishes nothing |
+| `dynsec-admin` | the credential service's account: the plugin's control topic and nothing else |
+
+**The gateway usernames are `sparkplug_id`s and cannot be friendly names.** The gateway's role
+confines it to its own edge-node segment, and that segment must equal the gateway row's *generated*
+`sparkplug_id` or ingestion rejects the message. Both rows therefore have **pinned UUIDs**, which is
+the only reason a credential can be issued before the row exists — that is what let the validator,
+which creates its gateway at runtime, move off the wildcard account at all. Only its *gateway* is
+pinned; its devices are still allocated dynamically, so the onboarding and quarantine checks still
+exercise genuinely unknown device ids.
+
+`scripts/check-broker-config.mjs` asserts all of this against the pinned broker image by whether a
+message is **delivered**, not by exit status — a denied publish at QoS 0 exits 0 and tells the
+client nothing.
+
+**MQTT 5 does not lift that**, and it was proposed for exactly that reason. The `Not authorized`
+reason code rides on `PUBACK`, and QoS 0 has no `PUBACK` under either protocol version — while
+Sparkplug B *requires* QoS 0 and retain false for every message type on this wire, delegating loss
+detection to the `seq` counter and the rebirth request instead. So the silence is a property of the
+protocol combination Sparkplug mandates, not a setting anyone left unset, and delivery remains the
+only honest way to assert the ACL.
