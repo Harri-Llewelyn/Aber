@@ -4223,23 +4223,24 @@ components:
         service_type: { type: string, example: GRAPHICAL_UI }
         endpoint_url:
           type: string
-          example: 'http://127.0.0.1:54323'
+          example: 'http://prometheus:9090'
           description: >-
-            The address a BROWSER reaches the service on. Three rows — Grafana, Node-RED and
-            Studio — are derived by `0085` from the same `*_PUBLIC_URL` values that build their
-            OAuth `redirect_uris`, so those cannot drift from what the service advertises;
-            editing them by hand does not survive the next boot. The rest are seeded literals.
+            The address an operator reaches the service on. The rows the chart publishes carry
+            the public address db-init derives from the chart's values on every run (Grafana,
+            Node-RED and Studio from the same `*_PUBLIC_URL` values that build their OAuth
+            `redirect_uris`), so editing one by hand does not survive the next run. The rest carry
+            their in-cluster Service address, reached through `kubectl port-forward`.
         exposure:
           type: string
           enum: [NETWORK, HOST, INTERNAL, UNKNOWN]
           example: NETWORK
           description: >-
-            Where the service can be reached FROM, as a property of its port binding rather than of
-            `endpoint_url`: `NETWORK` published on every interface, `HOST` bound to `127.0.0.1`
-            (the deployment host or an SSH tunnel), `INTERNAL` no host port at all, `UNKNOWN` not
-            recorded. The two can disagree and both are needed — Studio is `NETWORK` while its
-            `endpoint_url` is still the loopback default, and a loopback *address* cannot be used
-            from a remote browser however broadly the *port* is published.
+            Where the service can be reached FROM, as a property of how it is published rather than
+            of `endpoint_url`: `NETWORK` outside the cluster through an Ingress host or a
+            LoadBalancer port, `HOST` bound to `127.0.0.1` (the deployment host or an SSH tunnel),
+            `INTERNAL` a ClusterIP Service only, `UNKNOWN` not recorded. db-init records it from
+            the chart on every run. The two can disagree and both are needed: a loopback *address*
+            cannot be used from a remote browser however broadly the service is published.
         image:
           type: string
           nullable: true

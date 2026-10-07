@@ -13,8 +13,8 @@ import { formatDateTime } from '../../utils/format'
 
 /**
  * Whether a browser can open this endpoint: an http(s) scheme and a host that is not a single-label
- * container name (`node-exporter`, `supabase-envoy`). Erring towards copy: a copyable address costs
- * one paste, an unresolvable link costs a failed tab and a wrong conclusion.
+ * in-cluster Service name (`prometheus`, `supabase-envoy`). Erring towards copy: a copyable
+ * address costs one paste, an unresolvable link costs a failed tab and a wrong conclusion.
  */
 export function isBrowsableEndpoint(url) {
   let parsed
@@ -26,7 +26,7 @@ export function isBrowsableEndpoint(url) {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
   const host = parsed.hostname
   if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true
-  // A dot means a domain or an IPv4 literal; a colon-free single label means a container.
+  // A dot means a domain or an IPv4 literal; a colon-free single label means a Service name.
   return host.includes('.') || host.includes(':')
 }
 
@@ -44,10 +44,10 @@ export function viewerIsOnDeploymentHost(hostname) {
 
 /**
  * Whether to offer this endpoint as a link, and what to say when not. `isBrowsableEndpoint` says
- * whether it is a web page; `exposure` says what can reach the port (NETWORK, HOST, INTERNAL,
- * UNKNOWN). The loopback test is separate from HOST exposure because the two can disagree: Studio
- * is NETWORK with a 127.0.0.1 address. UNKNOWN is treated as NETWORK, so adding the column was not
- * a regression for reachable services.
+ * whether it is a web page; `exposure` says what can reach the service (NETWORK, HOST, INTERNAL,
+ * UNKNOWN). The loopback test is separate from HOST exposure because the two can disagree, as for a
+ * NETWORK row still at its seeded localhost address. UNKNOWN is treated as NETWORK, so adding the
+ * column was not a regression for reachable services.
  */
 export function endpointReach(url, exposure, viewerOnHost) {
   let parsed
@@ -59,18 +59,18 @@ export function endpointReach(url, exposure, viewerOnHost) {
 
   if (!isBrowsableEndpoint(url)) {
     // Two reasons land here: a non-web scheme, or a web page not addressable from outside the
-    // container network.
+    // cluster.
     const isWeb = parsed.protocol === 'http:' || parsed.protocol === 'https:'
     return {
       open: false,
       note: isWeb
-        ? 'Internal to the stack -- this hostname resolves inside the container network only'
+        ? 'Internal to the stack -- this hostname resolves inside the cluster only'
         : 'Not a web page -- click to copy this address'
     }
   }
 
   if (exposure === 'INTERNAL') {
-    return { open: false, note: 'No host port -- reachable from inside the container network only' }
+    return { open: false, note: 'Not published outside the cluster -- reachable from inside it, or through kubectl port-forward' }
   }
 
   const loopbackAddress = LOOPBACK_HOSTS.has(parsed.hostname)
@@ -218,9 +218,9 @@ export function serviceTypeLabel(type) {
 /**
  * One service's observed liveness, written every minute by `refresh_directory_liveness()` from
  * Prometheus's `up` series. ACTIVE and DOWN are observations, so they are the column's only badges;
- * anything else means nothing scrapes it, said in dim words rather than left blank. It cannot be
- * probed from inside the stack: `endpoint_url` holds browser addresses, which name the wrong host
- * from a container. `last_heartbeat` is shown only beside ACTIVE; it is cleared for the other two
+ * anything else means nothing scrapes it, said in dim words rather than left blank. Nothing probes
+ * `endpoint_url` instead: several are browser addresses, which name the wrong host from inside
+ * the cluster. `last_heartbeat` is shown only beside ACTIVE; it is cleared for the other two
  * so a timestamp cannot read as last seen at.
  */
 function LivenessCell({ status, lastHeartbeat }) {
@@ -243,7 +243,7 @@ function LivenessCell({ status, lastHeartbeat }) {
   return (
     <span
       className="directory-unobserved"
-      title="Nothing in this stack observes this service. Its endpoint_url is a browser address, so a probe from inside a container would be asking about the wrong host."
+      title="Nothing in Aber observes this service. Its status comes only from Prometheus, and no exporter reports on it. The Directory does not probe addresses itself."
     >
       not observed
     </span>
@@ -258,21 +258,21 @@ function LivenessCell({ status, lastHeartbeat }) {
 function ExposureCell({ exposure }) {
   if (exposure === 'NETWORK') {
     return (
-      <span className="badge badge-neutral" title="Published on every interface. Reachable from another machine, subject to the firewall and DNS -- neither of which this stack controls.">
+      <span className="badge badge-neutral" title="Published outside the cluster, through the Ingress or a LoadBalancer port. Reachable from another machine, subject to the firewall and DNS -- neither of which this stack controls.">
         network
       </span>
     )
   }
   if (exposure === 'HOST') {
     return (
-      <span className="badge badge-warning" title="Bound to 127.0.0.1. The deployment host, or an SSH tunnel from anywhere else. The endpoint carries no authentication of its own, which is why the binding is the control.">
+      <span className="badge badge-warning" title="Bound to 127.0.0.1 on the deployment host. Reachable from the host itself, or through an SSH tunnel from anywhere else.">
         host only
       </span>
     )
   }
   if (exposure === 'INTERNAL') {
     return (
-      <span className="badge badge-neutral" style={{ opacity: 0.75 }} title="No host port at all. Reachable from inside the container network by service name, and from nowhere outside it.">
+      <span className="badge badge-neutral" style={{ opacity: 0.75 }} title="Not published outside the cluster. Reachable by service name from inside it, or from a workstation through kubectl port-forward.">
         internal
       </span>
     )
@@ -344,7 +344,7 @@ function ServiceTable({ rows, onNotify }) {
             <th title="Architecture category">Service Type</th>
             <th title="The image tag this release deploys for the service; hover a version for the full image reference. Recorded from the chart by db-init on every install and upgrade">Version</th>
             <th title="Endpoints this browser can reach open in a new tab; everything else copies to the clipboard">Endpoint URL</th>
-            <th title="Where the service can be reached from, as a property of its port binding. Set when the service is registered, and describing the seeded loopback bindings; a deployment that publishes differently updates it">Reach</th>
+            <th title="Where the service can be reached from, as a property of how it is published. Recorded from the chart by db-init on every install and upgrade">Reach</th>
             <th title="Observed liveness. Written every minute from Prometheus's up series; services nothing scrapes read as not observed">Liveness</th>
           </tr>
         </thead>

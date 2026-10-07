@@ -583,8 +583,8 @@ the two databases once something scraped them.
 **Eight of the sixteen are scraped; eight are not, and `UNKNOWN` is the point rather than a
 shortfall.**
 Replacing a fabricated `ACTIVE` with a fabricated probe result would be the same defect in better
-clothes. `endpoint_url` holds *browser* addresses — `http://localhost:8088`,
-`postgres://localhost:54322` — which from inside any container name the container itself, so a
+clothes. `endpoint_url` holds the address an *operator* uses — a browser address such as
+`http://localhost:8088`, which from inside any container names the container itself — so a
 probe against them would answer a question about the wrong host and report it as service health.
 
 **No edge function, because none was needed.** `supabase-db` reaches `prometheus:9090` directly and
@@ -4557,13 +4557,13 @@ deployment host and fails for every other browser — and the dashboard is publi
 exactly those other browsers. **The failure looks like the service being down**, which is the same
 failure the container-hostname clause was written to avoid.
 
-`exposure` describes the **port binding**, not the URL:
+`exposure` describes **how the service is published**, not the URL:
 
 | | |
 | :--- | :--- |
-| `NETWORK` | published on every interface — reachable from another machine, subject to firewall and DNS |
+| `NETWORK` | outside the cluster, through an Ingress host or a LoadBalancer port — reachable from another machine, subject to firewall and DNS |
 | `HOST` | bound to `127.0.0.1` — the deployment host, or an SSH tunnel |
-| `INTERNAL` | no host port at all — the container network only |
+| `INTERNAL` | a ClusterIP Service only — inside the cluster, or through `kubectl port-forward` |
 | `UNKNOWN` | **not recorded** |
 
 **The port and the URL can disagree, and both are consulted.** On the Compose stack this was written
@@ -4593,6 +4593,12 @@ before this column was reached — `endpoint_url` said `localhost` while the cha
 three of them and leaves the rest. What `0084` does is make the remaining wrongness quieter: a row
 marked `HOST` offers a copy button and a tunnel hint instead of a link that was never going to work.
 
+`0002` seeds what the chart publishes: both databases, Prometheus and the ingestion metrics
+endpoint are `INTERNAL`, and the rows behind an ingress route follow `directory_exposure`, a map
+from route name to `NETWORK` or `INTERNAL` that db-init passes from `aber.directoryExposure`. So
+Studio reads `INTERNAL` until `ingress.routes.studio` is turned on. Check 27 of
+`check-docs-drift.mjs` holds the route names equal in the seed and the chart.
+
 ---
 
 ## The Directory reads the address the browser uses (archived migration 0085)
@@ -4616,7 +4622,10 @@ the OAuth clients. `0085` reads the same three values, which is the point: a row
 **Three rows, not fifteen**, and the limit was what db-init passed rather than a judgement about which
 rows deserve it. db-init now also passes `docs_public_url`, `supabase_public_url` and
 `gitea_public_url`, so the Swagger row, the four Supabase gateway rows and the forge's are derived
-the same way; Mosquitto's row and the internal services' rows keep the seed's literals.
+the same way. It passes `broker_public_url` and `broker_internal_url` too, for Mosquitto's row and
+ingestion's subscription. The rows nothing publishes carry their in-cluster Service address
+(`postgres://timescaledb:5432`, `http://prometheus:9090`), and `0002` moves a row off the Compose
+address an earlier seed wrote only while it still holds that exact address, so an edit stays.
 
 **These three are now derived, so hand edits no longer stick.** `directory_services` carries UPDATE
 RLS for Administrator and Shopfloor_Manager, and a replay stamps over an edit to these rows on the

@@ -11463,7 +11463,7 @@ COMMENT ON COLUMN public.directory_services.last_heartbeat IS 'When this service
 --
 
 -- COLUMN directory_services.exposure :: COMMENT
-COMMENT ON COLUMN public.directory_services.exposure IS 'Where this service can be reached FROM, as a property of its port binding rather than of its URL: NETWORK (published on every interface), HOST (bound to 127.0.0.1 -- the deployment host or an SSH tunnel), INTERNAL (no host port; container network only), UNKNOWN (not recorded). Describes the Compose deployment the seed describes; a deployment that publishes differently updates it. Consumed by the Directory page, which combines it with the URL''s own host -- a loopback ADDRESS cannot work from a remote browser however broadly the PORT is published.';
+COMMENT ON COLUMN public.directory_services.exposure IS 'Where this service can be reached FROM, as a property of how it is published rather than of its URL: NETWORK (outside the cluster, through an Ingress host or a LoadBalancer port), HOST (bound to the deployment host''s 127.0.0.1 -- the host itself or an SSH tunnel), INTERNAL (a ClusterIP Service only -- inside the cluster, or through kubectl port-forward), UNKNOWN (not recorded). The seed writes the chart''s rows on every db-init run, the ones behind an ingress route from the chart''s directory_exposure map. Consumed by the Directory page, which combines it with the URL''s own host -- a loopback ADDRESS cannot work from a remote browser however broadly the service is published.';
 
 --
 

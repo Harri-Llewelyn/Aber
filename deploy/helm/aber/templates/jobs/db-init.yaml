@@ -165,6 +165,14 @@ spec:
             # The image each Directory row's workload runs, recorded by 0140 on every boot.
             - name: DIRECTORY_IMAGES
               value: {{ include "aber.directoryImages" . | quote }}
+            # Which Directory rows the Ingress publishes, so their Reach follows ingress.routes.
+            - name: DIRECTORY_EXPOSURE
+              value: {{ include "aber.directoryExposure" . | quote }}
+            # The broker's two addresses, for the Directory's broker and ingestion rows.
+            - name: BROKER_PUBLIC_URL
+              value: {{ include "aber.brokerPublicUrl" . | quote }}
+            - name: BROKER_INTERNAL_URL
+              value: {{ include "aber.brokerInternalUrl" . | quote }}
             - name: NODERED_OAUTH_CALLBACK_URL
               value: {{ printf "%s/auth/strategy/callback" (include "aber.noderedUrl" .) | quote }}
             {{/*
@@ -310,6 +318,9 @@ spec:
                     -v docs_public_url="$DOCS_PUBLIC_URL" \
                     -v supabase_public_url="$SUPABASE_PUBLIC_URL" \
                     -v directory_images="$DIRECTORY_IMAGES" \
+                    -v directory_exposure="$DIRECTORY_EXPOSURE" \
+                    -v broker_public_url="$BROKER_PUBLIC_URL" \
+                    -v broker_internal_url="$BROKER_INTERNAL_URL" \
                     -v nodered_oauth_client_secret="$NODERED_OAUTH_CLIENT_SECRET" \
                     -v nodered_webhook_jwt_secret="$NODERED_WEBHOOK_JWT_SECRET" \
                     -v nodered_redirect_uri="$NODERED_OAUTH_CALLBACK_URL" \

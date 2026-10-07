@@ -159,8 +159,7 @@ spec:
               value: {{ .Chart.AppVersion | quote }}
             {{- end }}
             - name: MQTT_PUBLIC_HOST
-              value: {{ .Values.supabaseFunctions.gatewayEnrolment.mqttPublicHost
-                        | default (include "aber.hostOf" (dict "ctx" . "name" "mqtt")) | quote }}
+              value: {{ include "aber.mqttPublicHost" . | quote }}
             - name: MQTT_PUBLIC_TLS_PORT
               value: {{ .Values.supabaseFunctions.gatewayEnrolment.mqttPublicTlsPort | int64 | quote }}
             {{- /* The credential-issuing sidecar, addressed through its own Service -- NOT the

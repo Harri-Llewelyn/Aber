@@ -2346,6 +2346,10 @@ COMMENT ON TABLE public.opcua_vocabulary IS 'OPC UA companion specification data
 -- Seeded UNKNOWN with no heartbeat: refresh_directory_liveness() writes ACTIVE or DOWN for the
 -- services Prometheus scrapes within a minute of boot and leaves the rest UNKNOWN, so the gap
 -- before the first probe says "not yet known" rather than asserting health nobody checked.
+--
+-- A row nothing publishes carries its in-cluster Service and port, the address an operator
+-- reaches with `kubectl port-forward`. The rows the chart publishes are repointed at their
+-- public addresses further down, from the values db-init passes.
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000001', 'Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
 -- ON CONFLICT (id), not (service_name): a row renamed since it was seeded keeps this id, and a
@@ -2353,9 +2357,9 @@ ON CONFLICT (service_name) DO NOTHING;
 -- boot instead of being skipped.
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000003', 'Node-RED (Host-Run Gateways)', 'EDGE_NODE', 'http://localhost:1880', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (id) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000004', 'Mosquitto MQTT Broker', 'MQTT_BROKER', 'mqtt://localhost:1883', 'UNKNOWN', NULL, NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000004', 'Mosquitto MQTT Broker', 'MQTT_BROKER', 'mqtt://mosquitto:1883', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000005', 'TimescaleDB Telemetry Store', 'TIME_SERIES_DB', 'postgres://localhost:5433', 'UNKNOWN', NULL, NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000005', 'TimescaleDB Telemetry Store', 'TIME_SERIES_DB', 'postgres://timescaledb:5432', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000006', 'Grafana Dashboards', 'MONITORING', 'http://localhost:3002', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
@@ -2368,7 +2372,7 @@ INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000
 ON CONFLICT (service_name) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000a', 'Supabase Edge Functions', 'SERVERLESS', 'http://127.0.0.1:54321/functions/v1', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000b', 'Supabase PostgreSQL', 'DATABASE', 'postgres://localhost:54322', 'UNKNOWN', NULL, NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000b', 'Supabase PostgreSQL', 'DATABASE', 'postgres://supabase-db:5432', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000c', 'Sparkplug B Ingestion Engine', 'INGESTION', 'mqtt://mosquitto:1883/spBv1.0/#', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
@@ -2376,26 +2380,42 @@ INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000
 ON CONFLICT (service_name) DO NOTHING;
 
 -- ---------------------------------------------------------------------------------------------
--- The metrics tier. Prometheus and the ingestion metrics endpoint are published on loopback
--- only, so those two links resolve for a browser on the deployment host and nowhere else;
--- node_exporter has no host port at all. The directory is an inventory of what is deployed,
--- listed at the address each answers on. `METRICS_EXPORTER` groups an exporter with the
--- backend it describes rather than beside Grafana; DirectoryTab's SERVICE_GROUPS decides the
--- section.
+-- The metrics tier. Prometheus and the ingestion metrics endpoint have in-cluster Services only.
+-- node_exporter's collectors run inside Alloy with no port of their own, so that row names the
+-- route Alloy serves their metrics on, through the `alloy` Service; Alloy is a DaemonSet, so on a
+-- cluster of several nodes the Service answers for one of them. The directory is an inventory of
+-- what is deployed. `METRICS_EXPORTER` groups an exporter with the backend it describes rather
+-- than beside Grafana; DirectoryTab's SERVICE_GROUPS decides the section.
 -- ---------------------------------------------------------------------------------------------
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000e', 'Prometheus Metrics Store', 'MONITORING', 'http://localhost:9090', 'UNKNOWN', NULL, NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000e', 'Prometheus Metrics Store', 'MONITORING', 'http://prometheus:9090', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000f', 'Host Metrics Exporter (node_exporter)', 'METRICS_EXPORTER', 'http://node-exporter:9100/metrics', 'UNKNOWN', NULL, NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000f', 'Host Metrics Exporter (node_exporter)', 'METRICS_EXPORTER', 'http://alloy:12345/api/v0/component/prometheus.exporter.unix.host/metrics', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000010', 'Ingestion Metrics Endpoint', 'INGESTION', 'http://localhost:9108/metrics', 'UNKNOWN', NULL, NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000010', 'Ingestion Metrics Endpoint', 'INGESTION', 'http://ingestion-metrics:9108/metrics', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
 
+-- The same rows where an earlier seed wrote the Compose stack's addresses. Moved only while a row
+-- still holds that exact address, so an address an Administrator has edited stays, and a replay
+-- matches nothing.
+UPDATE public.directory_services AS d
+   SET endpoint_url = v.now_url
+  FROM (VALUES
+         ('f1111111-0000-0000-0000-000000000004'::uuid, 'mqtt://localhost:1883',             'mqtt://mosquitto:1883'),
+         ('f1111111-0000-0000-0000-000000000005'::uuid, 'postgres://localhost:5433',         'postgres://timescaledb:5432'),
+         ('f1111111-0000-0000-0000-00000000000b'::uuid, 'postgres://localhost:54322',        'postgres://supabase-db:5432'),
+         ('f1111111-0000-0000-0000-00000000000e'::uuid, 'http://localhost:9090',             'http://prometheus:9090'),
+         ('f1111111-0000-0000-0000-00000000000f'::uuid, 'http://node-exporter:9100/metrics', 'http://alloy:12345/api/v0/component/prometheus.exporter.unix.host/metrics'),
+         ('f1111111-0000-0000-0000-000000000010'::uuid, 'http://localhost:9108/metrics',     'http://ingestion-metrics:9108/metrics')
+       ) AS v(id, was_url, now_url)
+ WHERE d.id = v.id
+   AND d.endpoint_url = v.was_url;
+
 -- ---------------------------------------------------------------------------------------------
--- The forge's door, which is the one row here whose address is not a constant
+-- The forge's door, whose address the chart names
 -- ---------------------------------------------------------------------------------------------
--- GITEA_ROOT_URL, the gateway's forge listener. NETWORK because the gateway publishes that port on
--- every interface behind a login. `SOURCE_CONTROL` is filed beside GRAPHICAL_UI on the page.
--- `status` stays UNKNOWN because nothing observes the forge.
+-- GITEA_PUBLIC_URL, the gateway's forge listener, which the gitea Ingress host publishes behind a
+-- login; its exposure is kept with the others below. `SOURCE_CONTROL` is filed beside
+-- GRAPHICAL_UI on the page. `status` stays UNKNOWN because nothing observes the forge.
 --
 -- NOT A LITERAL, AND SO NOT AN INSERT LIKE THE REST: the address comes from the deployment, and
 -- an operator who moves the forge has to see the move here on the next boot. That is the UPDATE
@@ -2411,6 +2431,8 @@ ON CONFLICT (service_name) DO NOTHING;
 \if :{?gitea_public_url}     \else \set gitea_public_url     '' \endif
 \if :{?docs_public_url}      \else \set docs_public_url      '' \endif
 \if :{?supabase_public_url}  \else \set supabase_public_url  '' \endif
+\if :{?broker_public_url}    \else \set broker_public_url    '' \endif
+\if :{?broker_internal_url}  \else \set broker_internal_url  '' \endif
 
 SELECT set_config('aber.dir_gitea_public_url', :'gitea_public_url', false);
 
@@ -2440,45 +2462,59 @@ END $$;
 -- ---------------------------------------------------------------------------------------------
 -- Who can reach each of them
 -- ---------------------------------------------------------------------------------------------
--- `exposure` describes the PORT, not the URL, and the column defaults to UNKNOWN -- so it has to
--- be stated per row rather than inferred from the address above. Keyed on id, because a name is
--- a display string and two of these have been renamed. Every value is the seed's loopback
--- deployment as it was bound: 127.0.0.1 is HOST, no published port at all is INTERNAL.
+-- `exposure` describes how the chart publishes the service, not its URL, and the column defaults
+-- to UNKNOWN -- so it has to be stated per row rather than inferred from the address above. Keyed
+-- on id, because a name is a display string and two of these have been renamed. NETWORK is an
+-- Ingress host or a LoadBalancer port; INTERNAL is a ClusterIP Service only, reached from inside
+-- the cluster or through `kubectl port-forward`.
+--
+-- The rows behind an ingress route follow the chart: db-init passes `directory_exposure`
+-- (aber.directoryExposure, route name -> NETWORK or INTERNAL), which tracks ingress.enabled and
+-- ingress.routes.<name>. The value beside each row is what the chart's defaults publish, and what
+-- a runner that passes no map (test:db, the schema-equivalence check) records.
+\if :{?directory_exposure} \else \set directory_exposure '' \endif
+
 UPDATE public.directory_services SET exposure = v.exposure
-FROM (VALUES
-    -- NETWORK -- published on every interface.
-    ('f1111111-0000-0000-0000-000000000001'::uuid, 'NETWORK'),  -- Studio, via envoy's 54323 listener
-    ('f1111111-0000-0000-0000-000000000003'::uuid, 'NETWORK'),  -- Node-RED, 1880
-    ('f1111111-0000-0000-0000-000000000004'::uuid, 'NETWORK'),  -- Mosquitto, 1883/9001/8883
-    ('f1111111-0000-0000-0000-000000000006'::uuid, 'NETWORK'),  -- Grafana, 3002
-    ('f1111111-0000-0000-0000-000000000007'::uuid, 'NETWORK'),  -- the gateway itself, 54321
-    ('f1111111-0000-0000-0000-000000000008'::uuid, 'NETWORK'),  -- GoTrue, through that gateway
-    ('f1111111-0000-0000-0000-000000000009'::uuid, 'NETWORK'),  -- PostgREST, likewise
-    ('f1111111-0000-0000-0000-00000000000a'::uuid, 'NETWORK'),  -- Edge Functions, likewise
-    ('f1111111-0000-0000-0000-00000000000d'::uuid, 'NETWORK'),  -- Swagger UI, 8088
+FROM (
+  SELECT s.id, COALESCE(m.routes ->> s.route, s.exposure) AS exposure
+    FROM (VALUES
+      -- Behind an ingress route. Studio's route publishes the gateway's studio listener (8001),
+      -- behind an Administrator login, and is off by default (ingress.routes.studio), so the
+      -- default is ClusterIP only; an operator who turns it on sees NETWORK after the upgrade.
+      ('f1111111-0000-0000-0000-000000000001'::uuid, 'studio',   'INTERNAL'),
+      ('f1111111-0000-0000-0000-000000000003'::uuid, 'nodered',  'NETWORK'),  -- Node-RED, the nodered host
+      -- Mosquitto: the mosquitto-external LoadBalancer (1883/8883), and WebSockets at the mqtt host.
+      ('f1111111-0000-0000-0000-000000000004'::uuid, 'mqtt',     'NETWORK'),
+      ('f1111111-0000-0000-0000-000000000006'::uuid, 'grafana',  'NETWORK'),  -- Grafana, the grafana host
+      ('f1111111-0000-0000-0000-000000000007'::uuid, 'supabase', 'NETWORK'),  -- the gateway, the api host
+      ('f1111111-0000-0000-0000-000000000008'::uuid, 'supabase', 'NETWORK'),  -- GoTrue, through that gateway
+      ('f1111111-0000-0000-0000-000000000009'::uuid, 'supabase', 'NETWORK'),  -- PostgREST, likewise
+      ('f1111111-0000-0000-0000-00000000000a'::uuid, 'supabase', 'NETWORK'),  -- Edge Functions, likewise
+      ('f1111111-0000-0000-0000-00000000000d'::uuid, 'docs',     'NETWORK'),  -- Swagger UI, the docs host
+      -- The forge: the gateway's forge listener (8002) at the gitea host, behind a login. Git over
+      -- SSH is the gitea-external LoadBalancer, which is not this row's address.
+      ('f1111111-0000-0000-0000-000000000011'::uuid, 'gitea',    'NETWORK'),
 
-    -- HOST -- bound to 127.0.0.1. All four were narrowed together, against the rule stated beside
-    -- prometheus's port: a port is published broadly because it either AUTHENTICATES a browser
-    -- session or is a PROTOCOL ENDPOINT that has to be reachable. None of these four is either.
-    ('f1111111-0000-0000-0000-000000000005'::uuid, 'HOST'),     -- TimescaleDB, 127.0.0.1:5433
-    ('f1111111-0000-0000-0000-00000000000b'::uuid, 'HOST'),     -- Supabase Postgres, 127.0.0.1:54322
-    ('f1111111-0000-0000-0000-00000000000e'::uuid, 'HOST'),     -- Prometheus, 127.0.0.1:9090
-    ('f1111111-0000-0000-0000-000000000010'::uuid, 'HOST'),     -- ingestion metrics, 127.0.0.1:9108
-
-    -- INTERNAL -- no host port. Both already rendered as copy buttons because their hosts are
-    -- container names; this records WHY, rather than leaving the page to infer it from the spelling.
-    ('f1111111-0000-0000-0000-00000000000c'::uuid, 'INTERNAL'), -- ingestion's broker subscription
-    ('f1111111-0000-0000-0000-00000000000f'::uuid, 'INTERNAL')  -- node_exporter, deliberately unpublished
-) AS v(id, exposure)
+      -- ClusterIP only, whatever the values.
+      ('f1111111-0000-0000-0000-000000000005'::uuid, NULL,       'INTERNAL'), -- TimescaleDB, timescaledb:5432
+      ('f1111111-0000-0000-0000-00000000000b'::uuid, NULL,       'INTERNAL'), -- Supabase Postgres, supabase-db:5432
+      ('f1111111-0000-0000-0000-00000000000e'::uuid, NULL,       'INTERNAL'), -- Prometheus, prometheus:9090
+      ('f1111111-0000-0000-0000-000000000010'::uuid, NULL,       'INTERNAL'), -- ingestion metrics, headless ingestion-metrics
+      ('f1111111-0000-0000-0000-00000000000c'::uuid, NULL,       'INTERNAL'), -- ingestion's broker subscription: a client, no listener
+      ('f1111111-0000-0000-0000-00000000000f'::uuid, NULL,       'INTERNAL')  -- node_exporter's collectors, through the alloy Service
+    ) AS s(id, route, exposure)
+    CROSS JOIN (SELECT NULLIF(:'directory_exposure', '')::jsonb AS routes) m
+) AS v
 WHERE public.directory_services.id = v.id
   AND public.directory_services.exposure IS DISTINCT FROM v.exposure;
 
 -- ---------------------------------------------------------------------------------------------
--- Three addresses the deployment names, not this file
+-- The addresses the deployment names, not this file
 -- ---------------------------------------------------------------------------------------------
--- The literals above are the loopback defaults. Where the chart publishes one of these behind a
--- real hostname, the Directory has to advertise the address the BROWSER uses -- an operator
--- copying `http://localhost:3002` out of a page served from another machine gets nothing.
+-- The literals above for the rows the chart publishes are what a runner that passes no address
+-- records. Where one of these is behind a real hostname, the Directory has to advertise the
+-- address the BROWSER uses -- an operator copying `http://localhost:3002` out of a page served
+-- from another machine gets nothing.
 --
 -- Staged through session GUCs because psql does not substitute `:variables` inside dollar-quoted
 -- blocks (archived migration 0026), which is the same staging this file uses for its OAuth rows.
@@ -2487,11 +2523,15 @@ SELECT set_config('aber.dir_studio_public_url',  :'studio_public_url',    false)
 SELECT set_config('aber.dir_nodered_redirect',   :'nodered_redirect_uri', false);
 SELECT set_config('aber.dir_docs_public_url',     :'docs_public_url',      false);
 SELECT set_config('aber.dir_supabase_public_url', :'supabase_public_url',  false);
+SELECT set_config('aber.dir_broker_public_url',   :'broker_public_url',    false);
+SELECT set_config('aber.dir_broker_internal_url', :'broker_internal_url',  false);
 
 DO $$
 DECLARE
   v_docs     TEXT := NULLIF(current_setting('aber.dir_docs_public_url',     true), '');
   v_supabase TEXT := NULLIF(current_setting('aber.dir_supabase_public_url', true), '');
+  v_broker   TEXT := NULLIF(current_setting('aber.dir_broker_public_url',   true), '');
+  v_broker_in TEXT := NULLIF(current_setting('aber.dir_broker_internal_url', true), '');
   v_grafana TEXT := NULLIF(current_setting('aber.dir_grafana_public_url', true), '');
   v_studio  TEXT := NULLIF(current_setting('aber.dir_studio_public_url',  true), '');
   v_nodered TEXT := NULLIF(current_setting('aber.dir_nodered_redirect',   true), '');
@@ -2575,6 +2615,31 @@ BEGIN
       RAISE NOTICE 'directory: % Supabase row(s) now advertised under %, from SUPABASE_PUBLIC_URL', v_moved, rtrim(v_supabase, '/');
     END IF;
   END IF;
+
+  -- The broker as a shopfloor gateway dials it through mosquitto-external (aber.brokerPublicUrl:
+  -- the enrolment host, MQTTS when broker TLS is on). Absent when the broker is not published.
+  IF v_broker IS NOT NULL THEN
+    UPDATE public.directory_services
+       SET endpoint_url = v_broker
+     WHERE id = 'f1111111-0000-0000-0000-000000000004'::uuid
+       AND endpoint_url IS DISTINCT FROM v_broker;
+    GET DIAGNOSTICS v_moved = ROW_COUNT;
+    IF v_moved > 0 THEN
+      RAISE NOTICE 'directory: the broker now advertised at %, from BROKER_PUBLIC_URL', v_broker;
+    END IF;
+  END IF;
+
+  -- Ingestion's subscription, on the transport the in-cluster clients use (aber.brokerInternalUrl).
+  IF v_broker_in IS NOT NULL THEN
+    UPDATE public.directory_services
+       SET endpoint_url = v_broker_in || '/spBv1.0/#'
+     WHERE id = 'f1111111-0000-0000-0000-00000000000c'::uuid
+       AND endpoint_url IS DISTINCT FROM v_broker_in || '/spBv1.0/#';
+    GET DIAGNOSTICS v_moved = ROW_COUNT;
+    IF v_moved > 0 THEN
+      RAISE NOTICE 'directory: ingestion''s subscription now advertised at %/spBv1.0/#, from BROKER_INTERNAL_URL', v_broker_in;
+    END IF;
+  END IF;
 END $$;
 
 SELECT set_config('aber.dir_grafana_public_url', '', false);
@@ -2583,6 +2648,8 @@ SELECT set_config('aber.dir_nodered_redirect',   '', false);
 SELECT set_config('aber.dir_gitea_public_url',   '', false);
 SELECT set_config('aber.dir_docs_public_url',     '', false);
 SELECT set_config('aber.dir_supabase_public_url', '', false);
+SELECT set_config('aber.dir_broker_public_url',   '', false);
+SELECT set_config('aber.dir_broker_internal_url', '', false);
 
 -- ---------------------------------------------------------------------------------------------
 -- The image each row's workload runs
