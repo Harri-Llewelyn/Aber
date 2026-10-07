@@ -3707,7 +3707,7 @@ function edgeFunctionNames() {
       const readsError = /\.(?:message|stack)\b|\bString\s*\(/.test(args);
       // A status passed by name: its last declaration above this call, and whether a comparison
       // with a 5xx between the two sends that case elsewhere.
-      const held = /^\s*([A-Za-z_$][\w$]*)\s*(?:,|$)/.exec(args)?.[1]?.replace(/\$/g, '\\$');
+      const held = /^\s*([A-Za-z_$][\w$]*)\s*(?:,|$)/.exec(args)?.[1]?.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&');
       const declared = held
         ? [...code.slice(0, m.index).matchAll(new RegExp(`\\b(?:const|let|var)\\s+${held}\\s*=\\s*([^;]*)`, 'g'))].pop()
         : undefined;
