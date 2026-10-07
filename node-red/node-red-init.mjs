@@ -714,9 +714,6 @@ const storedBrokerCredential = (nodeId) => storedCredentials()[nodeId] || null;
  * it breaks, and the only symptom is "Connection failed to broker". The pairs reach this container
  * from nodeRed.gatewayCredentialsSecret.
  */
-// Where the pairs come from: `<namespace>/<name>` from the chart, for the messages below.
-const CREDENTIALS_SECRET = process.env.GATEWAY_CREDENTIALS_SECRET || 'nodeRed.gatewayCredentialsSecret';
-
 function brokerCredentialFor(node) {
   const prefix = node[CREDENTIALS_ENV_KEY];
   const user = process.env[`${prefix}_USER`];
@@ -729,7 +726,8 @@ function brokerCredentialFor(node) {
     fail(
       `broker node '${node.id}' declares ${CREDENTIALS_ENV_KEY}='${prefix}', but ` +
         `${prefix}_USER and/or ${prefix}_PASSWORD are not set.\n` +
-        `  Add the pair to the Secret ${CREDENTIALS_SECRET} and restart Node-RED, or remove\n` +
+        `  Add the pair to the Secret that nodeRed.gatewayCredentialsSecret names\n` +
+        `  (node-red-gateway-credentials by default) and restart Node-RED, or remove\n` +
         `  ${CREDENTIALS_ENV_KEY} from the node and enter the credential on its Security tab instead.`
     );
   }
