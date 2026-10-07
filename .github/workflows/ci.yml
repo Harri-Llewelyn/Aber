@@ -775,6 +775,15 @@ jobs:
               ('ingestion', 'mosquitto', 1883, 'the spBv1.0/# subscription'),
               ('ingestion', 'timescaledb', 5432, 'telemetry writes'),
               ('supabase-envoy', 'realtime', 4000, 'the WebSocket change feed'),
+              # Hook Jobs: blocked, the install or upgrade waits on them until Helm's timeout, and
+              # db-init runs after timescaledb-maintenance, so the migrations never run.
+              ('timescaledb-maintenance', 'timescaledb', 5432, 'the historian maintenance hook'),
+              ('storage-policies', 'supabase-storage', 5000, 'the storage-policies hook waits on storage-api'),
+              ('storage-policies', 'supabase-db', 5432, 'the storage RLS policies'),
+              # The nightly cold archive: blocked, every export fails at 03:15.
+              ('cold-archive', 'timescaledb', 5432, 'cold chunk export'),
+              ('cold-archive', 'supabase-envoy', 8000, 'the cold archive destination'),
+              ('e2e-validate', 'i3x-service', 8090, 'validate.py checks 12-12f'),
           ]
           for src, dst, port, why in REQUIRED:
               if (src, dst, port) not in egress:
@@ -1864,8 +1873,9 @@ jobs:
         uses: ./.github/actions/install-k3d
 
       # Values from the checkout's `npm run setup`, never values-dev.yaml; cert-manager, the
-      # internal CA and the runbook's site.yaml; then the first administrator signs in through
-      # Traefik and the demo accounts are refused.
+      # internal CA and the runbook's site.yaml, with NetworkPolicies on as values-prod.yaml.example
+      # has them; then the first administrator signs in through Traefik, the demo accounts are
+      # refused, and a pod no policy admits cannot reach the database.
       - name: Install A Site From The Checkout (site-rehearsal install)
         run: node scripts/site-rehearsal.mjs install --cluster=aber-rehearsal --kubeconfig="$KUBECONFIG"
 

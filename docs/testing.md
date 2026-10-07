@@ -752,6 +752,9 @@ a failure leaves it, and prints where its kubeconfig and values are.
   --admin-email=…` and a `site.yaml` like the runbook's (*Install → A*): ingress and broker TLS from
   the internal CA. Before the install it applies the Traefik setting, cert-manager and the internal
   CA, as the runbook does.
+- **install runs with NetworkPolicies on**, as `values-prod.yaml.example` has them, because that is
+  what a site starts from. The `site.yaml` adds `networkPolicy.enabled`, `kube-system` for DNS and
+  the ingress controller, and the node's own address as `apiServerCidr`.
 - **upgrade** starts from the last release: the highest `v*` tag that is not this commit
   (`--from=<tag>` names another). That tag's own `setup.mjs` writes the values, run from a `git
   worktree` that is removed straight after. The script installs
@@ -781,16 +784,27 @@ It asserts that every volume claim kept its uid, so no data volume was replaced.
 claim templates changed must have been created again, by the `claim-templates` pre-upgrade hook
 ([`upgrades.md`](upgrades.md#from-102-or-earlier-the-two-databases-statefulsets-are-replaced-once)),
 and own its running pod; one whose claim templates did not change must be the same object. The
-hook's log is printed with the result.
+hook's log is printed with the result. NetworkPolicies stay off in `upgrade`: a last release may
+predate the edges its own hooks need, and 1.0.2 does (#755).
 
-Measured on a 16 GB laptop with the image builds cached, `install` took 6½ to 7½ minutes and
-`upgrade` 8 to 12½, most of the spread in pulling the published images. CI builds every image
+`install` also asserts the policy layer is enforced, not only rendered. Two probe pods ask
+`pg_isready` about `supabase-db:5432`: one labelled as `db-init`, which an edge admits, is answered,
+and one no rule admits is not. Together with the install passing,
+this shows that every flow the install, its hook Jobs, `helm test` and the sign-in through Traefik
+need is admitted on k3s, and that nothing else is. **It cannot show** whether the API-server rules
+are right: k3s does not filter a pod's traffic to the node it runs on, which is where the API server
+is. Nor can it show flows the install never exercises, such as the cold archive at 03:15, the
+backups, `e2e.enabled` or gateways from outside the cluster. And it shows k3s's policy controller
+only, not Calico's or Cilium's.
+
+Measured on a 16 GB laptop with the image builds cached, `install` took 8 minutes with
+NetworkPolicies on and `upgrade` 7½ to 12½, most of the spread in pulling the published images. CI builds every image
 from nothing, so it takes longer.
 
 **What they do not rehearse** is the rest of
 [#691](https://github.com/Harri-Llewelyn/Aber/issues/691): real hardware, weeks of running, the
-hardening that is off by default (NetworkPolicies, both backup tiers, database TLS), real appliances
-and the failure drills.
+rest of the hardening that is off by default (both backup tiers, database TLS), real appliances and
+the failure drills.
 
 ## Keeping the pinned versions current
 

@@ -87,14 +87,20 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "db-init"            "to" "supabase-db"        "port" 5432 "why" "migrations and seed")
   (dict "from" "db-init"            "to" "supabase-auth"      "port" 9999 "why" "waits on GoTrue: it owns the auth schema")
   (dict "from" "storage-init"       "to" "supabase-storage"   "port" 5000 "why" "creates the bucket via the Storage REST API")
+  (dict "from" "storage-policies"   "to" "supabase-storage"   "port" 5000 "why" "its wait-for-storage initContainer: storage-api creates storage.objects in its own migrations")
+  (dict "from" "storage-policies"   "to" "supabase-db"        "port" 5432 "why" "the storage RLS policies, as supabase_admin")
+  (dict "from" "timescaledb-maintenance" "to" "timescaledb"   "port" 5432 "why" "extension, retention, rollups and roles on every install and upgrade. db-init's hook weight is after it, so blocked, the migrations never run")
 
   (dict "from" "test-fdw"           "to" "supabase-db"        "port" 5432 "why" "M6: queries the foreign table")
   (dict "from" "test-fdw"           "to" "timescaledb"        "port" 5432 "why" "M6: checks the hypertable from the far side")
+  (dict "from" "test-db-tls"        "to" "supabase-db"        "port" 5432 "why" "helm test: plaintext refused, TLS verified")
+  (dict "from" "test-db-tls"        "to" "timescaledb"        "port" 5432 "why" "helm test: plaintext refused, TLS verified")
   (dict "from" "e2e-validate"       "to" "supabase-db"        "port" 5432 "why" "audit-row cleanup, out of reach of service_role")
   (dict "from" "e2e-validate"       "to" "timescaledb"        "port" 5432 "why" "telemetry assertions")
   (dict "from" "e2e-validate"       "to" "mosquitto"          "port" $brokerPort "why" "publishes Sparkplug fixtures")
   (dict "from" "e2e-validate"       "to" $gw      "port" 8000 "why" "seeds through PostgREST")
   (dict "from" "e2e-validate"       "to" "node-red"           "port" 1880 "why" "check 7 probes all three auth surfaces")
+  (dict "from" "e2e-validate"       "to" "i3x-service"        "port" 8090 "why" "checks 12-12f; its wait-for-i3x initContainer probes the same port")
   (dict "from" "e2e-validate"       "to" "ingestion"          "port" 9108 "why" "its wait-for-ingestion initContainer reads aber_ingestion_mqtt_connected off the metrics endpoint -- without it the suite publishes before the daemon has subscribed and QoS 0 drops the fixtures")
   (dict "from" "e2e-aas-export"     "to" $gw      "port" 8000 "why" "invokes aas-export and signs in")
 
@@ -102,6 +108,8 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "backup"             "to" "timescaledb"        "port" 5432 "why" "pg_dump")
   (dict "from" "backup-service"     "to" "supabase-db"        "port" 5432 "why" "pg_dump, and the job queue it claims from")
   (dict "from" "backup-service"     "to" "timescaledb"        "port" 5432 "why" "pg_dump, or asking the pgBackRest sidecar for a backup")
+  (dict "from" "cold-archive"       "to" "timescaledb"        "port" 5432 "why" "exports, verifies and drops cold chunks, as ingest_writer")
+  (dict "from" "cold-archive"       "to" $gw      "port" 8000 "why" "reads its S3 destination (cold_archive_destination) and the archive.* settings through PostgREST")
 
   (dict "from" "alloy"              "to" "prometheus"         "port" 9090 "why" "remote-write of every scraped series")
   (dict "from" "alloy"              "to" "loki"               "port" 3100 "why" "the log push")
@@ -143,7 +151,11 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
       "db-roles-init" (and .Values.initJobs.enabled .Values.supabaseDb.enabled)
       "db-init" (and .Values.initJobs.enabled .Values.supabaseDb.enabled)
       "storage-init" (and .Values.initJobs.enabled .Values.supabaseStorage.enabled)
+      "storage-policies" (and .Values.initJobs.enabled .Values.supabaseStorage.enabled)
+      "timescaledb-maintenance" (and .Values.initJobs.enabled .Values.timescaledb.enabled .Values.timescaledb.retention.enabled)
+      "cold-archive" .Values.coldArchive.enabled
       "test-fdw" (and .Values.supabaseDb.enabled .Values.timescaledb.enabled)
+      "test-db-tls" .Values.postgresTls.enabled
       "e2e-validate" .Values.e2e.enabled
       "e2e-aas-export" .Values.e2e.enabled
       "backup" (and .Values.backup.enabled (not .Values.backupService.enabled))
@@ -503,6 +515,25 @@ spec:
     - Egress
   egress:
     {{- toYaml .Values.backupService.offsiteEgress | nindent 4 }}
+{{- end }}
+{{- if and .Values.coldArchive.enabled .Values.coldArchive.offsiteEgress }}
+---
+{{/* The cold archive's S3 endpoint, set on the Cold Storage page and so not derivable here: the
+     rules coldArchive.offsiteEgress lists, for that one pod. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-offsite-egress-cold-archive" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" "cold-archive") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" . "component" "cold-archive") | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    {{- toYaml .Values.coldArchive.offsiteEgress | nindent 4 }}
 {{- end }}
 {{- with .Values.networkPolicy.extraEgress }}
 ---

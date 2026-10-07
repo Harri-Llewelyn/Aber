@@ -178,13 +178,18 @@ spec:
                       method=method, data=json.dumps(body).encode() if body else None,
                       headers={'Authorization': f'Bearer {token}', 'Accept': 'application/json',
                                'Content-Type': 'application/json'})
-                  try:
-                      with urllib.request.urlopen(req, context=TLS, timeout=30) as r:
-                          return r.status, json.load(r)
-                  except urllib.error.HTTPError as e:
-                      return e.code, e.read().decode(errors='replace')[:500]
-                  except OSError as e:
-                      sys.exit(f'{name}: {method} reached no API server: {e}')
+                  # Retried for 30s: a new pod's first connection can be refused until the
+                  # NetworkPolicy controller admits it.
+                  for attempt in range(15):
+                      try:
+                          with urllib.request.urlopen(req, context=TLS, timeout=10) as r:
+                              return r.status, json.load(r)
+                      except urllib.error.HTTPError as e:
+                          return e.code, e.read().decode(errors='replace')[:500]
+                      except OSError as e:
+                          error = e
+                          time.sleep(2)
+                  sys.exit(f'{name}: {method} reached no API server: {error}')
 
               for name, want in EXPECTED.items():
                   status, sts = call('GET', name)

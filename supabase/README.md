@@ -2456,8 +2456,8 @@ AWS, R2, B2 and MinIO releases from 2022 onward all do. An endpoint that rejects
 every upload with the chunk still in the hypertable — loudly, and losing nothing.
 
 **Under `networkPolicy.enabled` this needs an egress rule.** The chart cannot express a peer
-outside the cluster, so add the endpoint to `networkPolicy.extraEgress`. Without it every export
-fails at connect time, on a schedule, at 03:15.
+outside the cluster, so list the endpoint in `coldArchive.offsiteEgress`, which applies to the archive
+pod alone. Without it every export fails at connect time, on a schedule, at 03:15.
 
 #### The object key, and why each segment is there
 

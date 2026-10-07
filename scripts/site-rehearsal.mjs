@@ -3,8 +3,9 @@
  * A site's install and a site's upgrade, rehearsed on a k3d cluster made for the run.
  *
  *   node scripts/site-rehearsal.mjs install   install the checkout as a new site: values from the
- *                                             checkout's setup.mjs, the runbook's site.yaml, the
- *                                             checkout's chart and images
+ *                                             checkout's setup.mjs, the runbook's site.yaml with
+ *                                             NetworkPolicies on (values-prod.yaml.example turns
+ *                                             them on), the checkout's chart and images
  *   node scripts/site-rehearsal.mjs upgrade   install the last release as a site would (its own
  *                                             setup.mjs, the published chart and images), then
  *                                             `helm upgrade` it to the checkout with the same values
@@ -21,7 +22,9 @@
  * `upgrade` also asserts the upgrade's db-init Job completed, which replays the migration chain
  * onto the last release's database; that every volume claim kept its uid, and a StatefulSet whose
  * claim templates changed was created again and owns its pods; and that the administrator signs in
- * before and after.
+ * before and after. `install` also asserts the policy layer is enforced: supabase-db answers a pod
+ * labelled as db-init and not a pod no rule admits. `upgrade` leaves NetworkPolicies off, because a
+ * last release may predate the edges its own hooks need.
  *
  * The checkout's images are tagged <Chart.yaml version>-ci.<commit>, which no release carries, and
  * the checkout's chart is packaged with that as its version and appVersion, as release.yml packages
@@ -139,8 +142,12 @@ function removeWorktree () {
   worktree = null
 }
 
-/** What the runbook's site.yaml says (deploy/k8s/README.md, Install, A): what only a site can say. */
-function writeSiteValues (nodeAddress) {
+/**
+ * What the runbook's site.yaml says (deploy/k8s/README.md, Install, A): what only a site can say.
+ * `hardened` adds the NetworkPolicy layer for k3s: DNS and Traefik in kube-system, and the API
+ * server on the node itself, which is where a pod's connection to it lands after the Service's DNAT.
+ */
+function writeSiteValues (nodeAddress, hardened) {
   writeFileSync(SITE, [
     'global:',
     '  scheme: https',
@@ -160,9 +167,13 @@ function writeSiteValues (nodeAddress) {
     '    enabled: true',
     '    clusterIssuer: aber-ca',
     `    extraIpSans: [${nodeAddress}]`,
+    ...(hardened
+      ? ['networkPolicy:', '  enabled: true', '  dnsNamespace: kube-system',
+          '  ingressControllerNamespace: kube-system', `  apiServerCidr: ${nodeAddress}/32`]
+      : []),
     '',
   ].join('\n'))
-  console.log(`  ${SITE}, the broker certificate naming ${nodeAddress}`)
+  console.log(`  ${SITE}, the broker certificate naming ${nodeAddress}${hardened ? '; NetworkPolicies on' : ''}`)
 }
 
 /** The first administrator and the publishable key, read back out of the file setup.mjs wrote. */
@@ -346,6 +357,38 @@ function assertStatefulSetsCarried (before, hookLog) {
   console.log(`  all ${before.claims.size} volume claims kept their uid`)
 }
 
+/**
+ * The default-deny is enforced, not only rendered. Two probes on the database's own image ask
+ * pg_isready about supabase-db:5432 for up to 30s (the policy controller takes a few seconds to admit
+ * a new pod): one labelled as db-init, which an edge admits, must be answered; one with no edge must
+ * not be. The pair separates a policy refusal from a database that is not listening.
+ */
+async function probeDatabase (pod, labels, image) {
+  const script = 'r=2; for i in 1 2 3 4 5 6 7 8 9 10; do pg_isready -h supabase-db -p 5432 -t 5; r=$?; ' +
+    '[ $r -eq 0 ] && break; sleep 3; done; echo "pg_isready exit $r"'
+  must('kubectl', ['-n', NS, 'run', pod, '--restart=Never', `--image=${image}`,
+    ...(labels ? [`--labels=${labels}`] : []), '--command', '--', 'sh', '-c', script], `the probe pod ${pod} could not be created`)
+  let phase = ''
+  for (let i = 0; i < 90 && !['Succeeded', 'Failed'].includes(phase); i++) {
+    await sleep(2000)
+    phase = capture('kubectl', ['-n', NS, 'get', 'pod', pod, '-o', 'jsonpath={.status.phase}']).out
+  }
+  const out = capture('kubectl', ['-n', NS, 'logs', pod]).out
+  run('kubectl', ['-n', NS, 'delete', 'pod', pod, '--wait=false'], { stdio: 'ignore' })
+  return /pg_isready exit (\d+)/.exec(out)?.[1] ?? `no result (phase ${phase}): ${out}`
+}
+
+async function assertPolicyEnforced () {
+  const values = JSON.parse(capture('helm', ['get', 'values', RELEASE, '-n', NS, '-a', '-o', 'json']).out)
+  const image = `${values.supabaseDb.image.repository}:${values.supabaseDb.image.tag}`
+  const admitted = await probeDatabase('rehearsal-probe-admitted',
+    `app.kubernetes.io/name=aber,app.kubernetes.io/instance=${RELEASE},app.kubernetes.io/component=db-init`, image)
+  if (admitted !== '0') die(`a pod labelled as db-init could not reach supabase-db:5432 (pg_isready exit ${admitted})`)
+  const denied = await probeDatabase('rehearsal-probe-denied', '', image)
+  if (denied !== '2') die(`a pod no rule admits reached supabase-db:5432 (pg_isready exit ${denied}); the default-deny is not enforced`)
+  console.log('  supabase-db:5432 answered a pod labelled as db-init and not a pod no rule admits: default-deny is enforced')
+}
+
 /** The upgrade's own db-init: the candidate image, completed. Its pod replayed every migration. */
 function assertUpgradeMigrated (version) {
   const r = capture('kubectl', ['-n', NS, 'get', 'job', `${RELEASE}-db-init`, '-o', 'json'])
@@ -451,7 +494,7 @@ async function rehearse () {
     ensureCertManager()
     return address
   })
-  writeSiteValues(nodeAddress)
+  writeSiteValues(nodeAddress, !from)
   const chart = packageChart(candidate)
   const names = imagesToBuild(chart, candidate)
   await phase(`build the checkout's images as ${candidate}`, () => buildImages(candidate, names))
@@ -474,6 +517,7 @@ async function rehearse () {
     await phase(`helm install ${candidate}`, () => helm('install', chart, ['--create-namespace']))
   }
   await phase('every workload rolls out', rollOut)
+  if (!from) await phase('the NetworkPolicy layer is enforced', assertPolicyEnforced)
   if (before) await phase('the StatefulSets and their claims came through the upgrade', () => assertStatefulSetsCarried(before, hookLog))
   await phase('helm test', helmTest)
   await phase('every running pod is on the checkout\'s images', () => assertRunningImages(candidate))
