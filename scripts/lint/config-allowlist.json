@@ -71,7 +71,6 @@
   "KSV-0109 ConfigMap/aber-gitea-scripts": "Names a password or token field (a template, a script or seed SQL column names) and holds no secret value.",
   "KSV-0109 ConfigMap/aber-grafana-config": "Names a password or token field (a template, a script or seed SQL column names) and holds no secret value.",
   "KSV-0109 ConfigMap/aber-mosquitto-scripts": "Names a password or token field (a template, a script or seed SQL column names) and holds no secret value.",
-  "KSV-0109 ConfigMap/aber-seed": "Names a password or token field (a template, a script or seed SQL column names) and holds no secret value.",
   "KSV-0109 ConfigMap/aber-timescaledb-maintenance": "Names a password or token field (a template, a script or seed SQL column names) and holds no secret value.",
   "KSV-0118 container/aber-backup": "No securityContext: tracked in #419.",
   "KSV-0118 container/aber-cold-archive": "No securityContext: tracked in #419.",
