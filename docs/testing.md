@@ -467,6 +467,9 @@ npm run dev:test
 npm run dev:test -- --filter=i3x
 ```
 
+**`validate.py` runs in-cluster as a Job (`e2e.enabled`) and from the host through the dev loop's
+port-forwards**, and the two agreeing is the wiring check.
+
 ### What validate.py leaves behind
 
 Nothing, when its check 16 passes. The run deletes what it created: the Directory rows its `SEEDED`

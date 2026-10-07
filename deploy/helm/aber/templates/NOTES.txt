@@ -107,7 +107,7 @@ if these are missing the PVC must be destroyed, not the pod restarted):
 {{- if .Values.supabaseAuth.demoAccounts }}
 
   ⚠  supabaseAuth.demoAccounts is on: admin@aber.local and three other demo accounts, with the
-     password published in the README, are applied on every install and upgrade. For a
+     password published in docs/install.md, are applied on every install and upgrade. For a
      development stack only.
 {{- else if not (dig "firstAdministrator" "email" "" .Values.supabaseAuth) }}
 

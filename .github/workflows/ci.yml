@@ -150,22 +150,22 @@ jobs:
             echo "::error::the frontend suite has failing tests; the documented count is not the problem"
             exit 1
           fi
-          # A bound, not a count: the suite must run at least what README claims. Equality broke the
-          # moment README became `1,600+`; a bound only ever becomes conservative.
+          # A bound, not a count: the suite must run at least what docs/testing.md claims. Equality broke
+          # the moment the claim became `1,600+`; a bound only ever becomes conservative.
           ACTUAL=$(printf '%s' "$STRIPPED" | grep -oE 'Tests +[0-9]+ passed' | grep -oE '[0-9]+' | tail -1)
-          CLAIMED=$(grep -oE 'Frontend — [0-9,]+\+? tests' README.md | grep -oE '[0-9,]+' | tr -d ',')
-          echo "vitest reports ${ACTUAL:-<unparsed>}; README claims at least ${CLAIMED:-<absent>}"
+          CLAIMED=$(grep -oE 'Frontend — [0-9,]+\+? tests' docs/testing.md | grep -oE '[0-9,]+' | tr -d ',')
+          echo "vitest reports ${ACTUAL:-<unparsed>}; docs/testing.md claims at least ${CLAIMED:-<absent>}"
           # An empty ACTUAL is a broken check, not a documentation problem -- say which.
           if [ -z "$ACTUAL" ]; then
-            echo "::error::could not read the test count out of vitest's output; this check needs fixing, not the README"
+            echo "::error::could not read the test count out of vitest's output; this check needs fixing, not docs/testing.md"
             exit 1
           fi
           if [ -z "$CLAIMED" ]; then
-            echo "::error::could not read the documented lower bound out of README.md; this check needs fixing"
+            echo "::error::could not read the documented lower bound out of docs/testing.md; this check needs fixing"
             exit 1
           fi
           if [ "$ACTUAL" -lt "$CLAIMED" ]; then
-            echo "::error::README.md claims at least $CLAIMED frontend tests, vitest ran $ACTUAL."
+            echo "::error::docs/testing.md claims at least $CLAIMED frontend tests, vitest ran $ACTUAL."
             echo "::error::A lower bound that has risen above reality reads as tests having been deleted."
             exit 1
           fi

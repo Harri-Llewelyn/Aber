@@ -88,5 +88,5 @@ Both of these are known and written down, so please read them before reporting:
 ## How this stack is secured
 
 The architecture — role model, RLS policies, machine identities, credential issuance and the trust
-boundaries between them — is described under **Security model** in the [README](README.md). That
-section answers "how does this work"; this document answers "I found a problem, who do I tell".
+boundaries between them — is described in [`docs/security-model.md`](docs/security-model.md). That
+document answers "how does this work"; this one answers "I found a problem, who do I tell".
