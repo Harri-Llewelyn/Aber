@@ -80,7 +80,7 @@ Anything not on that list is not a major change, whatever it looks like in the d
 you must pass through. That is a property of how the schema is applied rather than a promise being
 made on top of it: `db-init` replays **every** migration in filename order on every boot, with no
 applied-migrations ledger, so arriving from `1.0.0` and arriving from `1.3.2` run exactly the same
-files. [`upgrades.md`](upgrades.md#2-the-database-upgrades-itself-forwards-on-every-boot) has the
+files. [`upgrades.md`](upgrades.md#the-database-upgrades-itself) has the
 mechanism.
 
 **Nothing below 1.0.0 upgrades to it.** 0.1.0 and any install from a checkout before 1.0 reach it

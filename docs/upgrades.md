@@ -1,23 +1,29 @@
-# Upgrading the platform — what survives, and what does not
+# Upgrading Aber
 
-**The question this answers:** *"Will upgrading make me reconfigure every gateway and device again?"*
+**Upgrading Aber is one command, and nothing on the plant needs reconfiguring.** Gateways keep
+publishing, devices keep their identity and their approval, and every reading and Audit Trail entry
+is kept. This page gives the command, explains why nothing needs redoing, and lists the few changes
+that do need your attention.
 
-It is the first thing anyone who has run an industrial data platform in anger asks, because the
-usual answer has been yes — and an upgrade that costs a site visit per appliance is an upgrade
-nobody performs, which is how a fleet ends up years behind on a platform whose whole point is
-interoperability.
-
-The short answer here is **no, and it is structural rather than a promise**. What follows is why,
-and — in §4 — the five places where that is not the whole truth. It holds from 1.0.0 onwards;
-[the floor](#the-floor-100) is what lies below that and what to do about it.
+It applies from 1.0.0 onwards. An install older than that is reinstalled rather than upgraded (see
+[*The floor*](#the-floor-100)).
 
 ---
 
-## 0. The command
+## The upgrade
+
+### Before you start
+
+- **Take a backup.** The database cannot be rolled back (see [*Migrations are forward-only*](#migrations-are-forward-only)).
+  With the backup service on, use the dashboard's **Backups** page: it needs no shell, and a backup
+  taken there is kept until you release it. [*Backups*](#backups) has the other ways.
+- **Read the release notes**, especially *Action required before upgrading*.
+- **Upgrading from 1.0.0?** Set up the site's first administrator first: see
+  [*From 1.0.0, the demo accounts stay*](#from-100-the-demo-accounts-stay-until-you-remove-them).
+
+### The command
 
 ```bash
-# Take a backup first — §2 says why, and the dashboard's Backups page is the way with no shell.
-
 V=<the version you are upgrading to>
 
 # Does it exist? This reads GHCR anonymously and needs no credentials. A version that is not
@@ -31,299 +37,251 @@ helm upgrade aber oci://ghcr.io/harri-llewelyn/aber/aber \
   --wait --timeout 15m
 ```
 
-Three things about that command:
+Three things about it:
 
-- **`--version` is not optional in practice.** Without it Helm resolves the newest release, which
-  makes the command mean something different next month.
-- **Pass the same `--values` you installed with.** `helm upgrade` does not inherit the previous
-  release's values: omitting the file returns every setting to the chart's defaults, which turns off
-  the hardening in [`deploy/k8s/README.md`](../deploy/k8s/README.md) in one step. `--reuse-values`
-  avoids that and brings its own problem — it carries the old release's values forward, so a setting
-  the new chart version introduces does not get its default.
-- **`--wait` is safe here and is not safe on the first install.** The install deadlocks on it — the
-  bootstrap hooks set the database roles the workloads wait for — and `deploy/k8s/README.md` gives
-  that failure in full. On an upgrade the roles already have their passwords, so there is no cycle.
+- **Always give `--version`.** Without it Helm picks the newest release, so the same command would
+  mean something different next month.
+- **Pass the same `--values` you installed with**, for example `values-local.yaml` and `site.yaml`.
+  `helm upgrade` does not keep the previous release's values: leaving them out returns every setting
+  to its default, which turns off the hardening in [`deploy/k8s/README.md`](../deploy/k8s/README.md) in one
+  step. `--reuse-values` avoids that
+  but has its own problem: it carries the old values forward, so a setting new in this version does
+  not get its default.
+- **`--wait` is safe on an upgrade**, though it is not on the first install. On the first install it
+  deadlocks, because the workloads wait for database roles that are only set after `--wait` finishes
+  (`deploy/k8s/README.md` has the details). On an upgrade the roles already exist.
 
 ### The floor: 1.0.0
 
-**This contract holds from 1.0.0, the first release published as `aber`.** Everything in this
-document is about moving from a release at or above it to a later one, which is also what
-[`releases.md`](releases.md#upgrading-between-releases) promises in version terms. Anything below it
-is a reinstall, not an upgrade.
+**Upgrades are supported from 1.0.0, the first release published as `aber`, to any later release.**
+[`releases.md`](releases.md#upgrading-between-releases) promises the same in version terms.
 
-**Every install below 1.0 is reinstalled, and no data is carried across.** That covers 0.1.0, the
-one release before it, and any checkout before 1.0: each differs from 1.0 in its chart name (part of
-every workload's immutable `spec.selector.matchLabels`), and 0.1.0 also in its PostgreSQL major
-version. 1.0's migration chain is two files, `0001` and `0002`, which build a fresh database.
+**Anything older than 1.0 is reinstalled, and no data is carried across.** That covers 0.1.0 and any
+checkout from before 1.0. Each has a different chart name, which is part of every workload's
+immutable `spec.selector.matchLabels`, and 0.1.0 also has a different PostgreSQL major version.
+1.0's migration chain is two files, `0001` and `0002`, which build a fresh database.
 
 **A release that moves the floor says so** under *Action required before upgrading*, and this
 section moves with it. [`releases.md`](releases.md#major--1x--200) lists what moves it.
 
-Everything below is what that one command does and does not disturb.
-
 ---
 
-## 1. Identity cannot change, because nothing can write it
+## What carries on untouched
 
-`gateways.sparkplug_id` and `devices.sparkplug_id` are **generated columns**:
+### Every gateway and device keeps its address
+
+A gateway's or device's Sparkplug ID is made from its database id when it is created, and nothing can
+change it afterwards. `gateways.sparkplug_id` and `devices.sparkplug_id` are **generated columns**:
 
 ```sql
 sparkplug_id text GENERATED ALWAYS AS
   (('gwy'::text || substr(encode(uuid_send(id), 'hex'::text), 1, 21))) STORED
 ```
 
-`GENERATED ALWAYS` means Postgres refuses an `INSERT` or `UPDATE` that supplies a value. There is no
-API that sets it, no admin screen that edits it, and no migration that could rewrite it without
-first dropping the column. It is derived from the row's primary key, which never changes either.
+`GENERATED ALWAYS` means Postgres refuses any insert or update that tries to set it. No API, screen
+or migration can rewrite it, and the id it is made from never changes either.
 
-**That is the single most important property for upgrades.** The reconfiguration pain in comparable
-stacks is almost always identity churn: an upgrade changes how an asset is addressed, so every
-gateway's topic configuration and every downstream binding has to be redone. Here the address is
-`spBv1.0/<group>/<TYPE>/<sparkplug_id>[/<device>]`, and `sparkplug_id` is a function of a UUID that
-was fixed when the row was created. An upgrade has nothing to change it *with*.
+**That is why an upgrade needs no reconfiguring.** In many platforms an upgrade changes how
+equipment is addressed, so every gateway's topics and every connection to them must be redone. Here a
+topic is `spBv1.0/<group>/<TYPE>/<sparkplug_id>[/<device>]`, and an upgrade has nothing to change
+the id with. So **a gateway that was publishing before an upgrade is publishing after it, having done
+nothing.** It does not re-enrol, re-register or re-announce itself.
 
-The consequence worth stating to an operator: **an appliance that was publishing before an upgrade
-is publishing after it, having done nothing.** It does not re-enrol, re-register, or re-announce.
+**The group in the topic is fixed too.** It comes from `ingestion.sparkplugGroup`, which migration `0131`
+stores as a read-only setting on the first boot. If a later install's value differs, `db-init` stops rather
+than quietly moving every gateway to new topics. Changing the group on purpose is a written procedure,
+in [`supabase/README.md`](../supabase/README.md#changing-it-deliberately), not a setting.
 
-**The other half of the address is fixed too, by a different mechanism.** `spBv1.0/<group>/…` takes
-its group from `ingestion.sparkplugGroup`, which `0131` seeds into a read-only setting on the first
-boot and holds there: a later boot whose chart value differs aborts `db-init` rather than
-re-addressing the fleet quietly. **Since 1.0 the key has no default**, so a site whose values
-never named it (it took the chart's `Aber`) adds `ingestion.sparkplugGroup: Aber`, or whatever the
-Settings page shows under *Site*, before upgrading; the render refuses otherwise. So an upgrade
-cannot move a site's topics, and changing the group
-deliberately is a stated procedure in [`supabase/README.md`](../supabase/README.md#changing-it-deliberately)
-rather than an edit.
+### The database upgrades itself
 
----
-
-## 2. The database upgrades itself, forwards, on every boot
-
-`supabase-db-init` replays **every** file in `supabase/migrations/*.sql`, in filename order, on
-every start. There is no "which migrations have run" ledger and no upgrade command:
+The db-init Job (`aber-db-init`) applies **every** file in `supabase/migrations/*.sql`, in
+filename order, every time it runs. There is no record of which migrations have run, and no
+separate upgrade step:
 
 ```sh
 for f in /migrations/*.sql; do psql -v ON_ERROR_STOP=1 ... -f "$f"; done
 ```
 
-Three consequences that matter:
+So:
 
-- **Every migration must be idempotent**, and each says so in its own header. `ADD COLUMN IF NOT
-  EXISTS`, `CREATE OR REPLACE`, `INSERT ... ON CONFLICT DO NOTHING`. A migration that is only
-  correct the first time is a migration that breaks the *second* boot, not a future upgrade.
-- **Upgrading is `helm upgrade`.** There is no separate schema step to
-  forget, and no window in which the code is new and the schema is old.
-- **Ordering is filename order, on every boot** — which is why a later migration can be relied on to
-  run after an earlier one, and why a migration that adds a `gateways` column must rebuild
-  `public.gateway_status` itself rather than trusting `0025`'s rebuild to pick it up.
-  `check-docs-drift.mjs` asserts that.
+- **Upgrading is `helm upgrade`.** There is no schema step to forget, and no moment when the code is
+  new and the schema old.
+- **Every migration can run again safely** (`ADD COLUMN IF NOT EXISTS`, `CREATE OR REPLACE`,
+  `INSERT ... ON CONFLICT DO NOTHING`), and each says so in its header. A migration that only works the
+  first time would break the second boot, not a future upgrade.
+- **Filename order is guaranteed on every run**, so a later migration always runs after an earlier
+  one. `check-docs-drift.mjs` checks the rules that depend on that.
 
-`supabase/migrations/archive/` is **not** replayed: the loop reads `/migrations/*.sql`, which does
-not recurse. Superseded migrations are kept there for provenance, not for execution.
+`supabase/migrations/archive/` is **not** applied. It keeps superseded migrations for reference.
 
-### The historian upgrades itself too, and used not to
+### The historian upgrades itself too
 
-`supabase-db-init` covers the Supabase database. The historian is a separate instance with no
-migration chain, and its own upgrade is one statement that nothing used to run: bumping the
-TimescaleDB image tag upgrades the **binaries** and leaves the **SQL-level extension** where it was.
-Postgres then loads the library matching the *installed* version, so a `2.29.2` image ran `2.29.1`'s
-definitions — indefinitely, silently, and widening on every bump.
+The historian is a separate database with no migration chain. A newer TimescaleDB image brings new
+binaries but leaves the database's extension at its old version until someone updates it. So
+`timescaledb-maintenance` applies [`timescaledb/extension.sql`](../timescaledb/extension.sql) first,
+on every upgrade, in its own session. It does nothing when there is nothing to update, and **it fails
+the step if the two versions still disagree afterwards**, rather than letting the historian run old
+definitions on new binaries. You do nothing: it is part of `helm upgrade`.
 
-`timescaledb-maintenance` now applies [`timescaledb/extension.sql`](../timescaledb/extension.sql)
-first, in its own psql session. It is a no-op when there is
-nothing to update, and it **fails the step** if the two versions still disagree afterwards rather
-than letting the stack carry on — which is the whole difference between this and what it replaced.
+The same step sets the raw readings' chunk interval, worked out from
+`timescaledb.retention.expectedRowsPerDay` and the historian's memory limit unless `chunkInterval` is
+set. A change applies to chunks created afterwards: the chunk open at the time keeps its interval.
 
-An operator does nothing: as above, upgrading is still `helm upgrade`.
+### Gateways are never reached into
 
-The same step sets the raw hypertable's chunk interval, derived from
-`timescaledb.retention.expectedRowsPerDay` and the historian's memory limit unless
-`chunkInterval` is set. It applies to chunks created after the upgrade: the open chunk keeps the
-7 days it was made with, so the smaller floor arrives once that chunk closes. `compressAfter`,
-when left empty, follows it; a site that set `compressAfter` explicitly keeps its value.
+**Aber never pushes anything to a Remote gateway.** A gateway's Node-RED accepts no incoming
+connections: it connects out to the broker on 8883 and to the forge on 22, and nothing assumes traffic
+the other way. So an upgrade is something that happens to the server, not to the fleet.
 
-**The raw window becomes 14 days, and the upgrade applies it.** A chart that left
-`timescaledb.retention.retainFor` empty ran 90 days (or `never`, with a destination in the chart's
-values). The same step now installs the 14-day retention job, and its first daily run drops raw
-telemetry older than 14 days that no archive holds. The rollups keep their own windows. **To keep
-the old window, set `retainFor` before upgrading.** See `supabase/README.md`, *Raw telemetry is
-kept for a stated window*.
+- **A gateway's flow changes only through a pull request** in its own repository in the forge.
+  Nothing is deployed until someone approves and merges it. The gateway's `flow-sync` then fetches it,
+  within five minutes by default ([`remote-gateways.md`](remote-gateways.md#11-proposing-a-flow)).
+- **A gateway's operating system follows the platform playbook at the tag its `platform.yml` names.**
+  An upgrade publishes the new version's playbook, but each gateway stays on its own tag until a pull
+  request in its repository moves it. Move one gateway first.
 
-**The historian runs this repository's image from the same release.** `timescaledb.image` moves
-from `timescale/timescaledb:2.29.2-pg17` to `ghcr.io/harri-llewelyn/aber/timescaledb` at the
-chart's version: the same image with pgBackRest added, for `timescaledb.physicalBackup`. Same
-PostgreSQL, same TimescaleDB, same data directory, so the upgrade restarts the historian once and
-changes nothing on its volume. A site that mirrors images into its own registry adds this one to
-the list; a site that pinned `timescaledb.image` in its values keeps the upstream image and cannot
-turn physical backup on until it unpins it.
+### New capabilities degrade instead of breaking
 
-**The rollups start being compressed, and the first pass is the whole of their history.** The
-maintenance step turns on the rollups' columnstore and a policy for `timescaledb.rollups.compressAfter`
-(2 days), and the policy's first run compresses every closed rollup chunk older than that: about
-73 GB at 100 devices × 10 metrics every 30 s, becoming about 16. It runs in the background and the
-dashboards keep reading throughout, but it is a burst of disk work on the first day, so upgrade a
-large site outside its busiest hours. The chunk open at the upgrade keeps the span it was made
-with (up to 70 days on a stack older than the sized raw chunks) and is compressed once it closes.
-`compressAfter: never` keeps the rollups as they were.
+A gateway on an older bundle keeps working when the server gains a feature it does not know. Gateway
+health reporting (archived migration `0035`) is the example:
+
+- A gateway on an **older bundle** sends the heartbeat it always did. Ingestion reads the metrics it
+  recognises and ignores the rest, so nothing fails.
+- Its `gateways.health_reported_at` stays `NULL`, which means *this bundle does not report health*.
+  That is different from *it stopped reporting*, which is an old timestamp, and the two need different
+  responses.
+- The dashboard shows the health rows only when `health_reported_at` is set, so an older gateway
+  shows a shorter panel rather than rows of `--` that would look like faults.
+
+**The pattern for new features:** a new metric is added on the wire without changing the old ones,
+its absence has a stated meaning, and the dashboard treats "not reported" as a state, not a zero.
+
+---
+
+## What needs your attention
 
 ### Migrations are forward-only
 
-There are no down-migrations, and this is the honest limit of §2. **The images can be rolled back;
-the schema cannot.** Deploying `v1.1.0` after `v1.2.0` gives you old code against a newer schema —
-which mostly works, because every migration so far has been additive, and mostly is not a guarantee.
+There are no down-migrations. **The images can be rolled back; the database cannot.** Installing
+`v1.1.0` after `v1.2.0` runs old code against a newer database. That usually works, because every
+migration so far has only added things, but it is not guaranteed. If you might need to roll back,
+**take a backup before upgrading**.
 
-If a rollback is a real possibility for your deployment, **take a backup before upgrading**.
+### Re-provisioning a gateway needs a new bundle
 
-On Kubernetes that is `backup.enabled=true`, which gives you one of two things depending on a second
-flag. Both write one directory per backup to a PVC that survives `helm uninstall` — deleting the
-release is exactly when a backup is most wanted.
+Setting a Remote gateway up again (on new hardware, or after it was wiped) means issuing a new
+install command or bundle from the dashboard and running it on the gateway. That **uses a fresh
+setup token**, and it is a manual step for each gateway. What it does **not** cost:
 
-- **`backupService.enabled=true` — Dashboard → Backups.** An Administrator asks on the page and a
-  Deployment takes it; the CronJob yields to it. A backup requested this way is **pinned** —
-  retention does not remove it — until an Administrator releases it, which is what you want of the
-  one you took before an upgrade. This is the only path that needs no shell, and the only one that
-  can include the forge.
-- **Otherwise, the nightly CronJob.** A safety net to the last run and no finer, so it is not a
-  substitute for taking one deliberately before an upgrade.
-
-Either way the two databases are always dumped, and the **storage objects and the forge's volume
-are not**: they are `backup.includeStorage` and `backup.includeForge`, both off by default, and each
-pins the pod to a ReadWriteOnce volume's node.
-[`deploy/k8s/README.md`](../deploy/k8s/README.md) has that caveat in full.
-
-From a host with a shell, against any reachable Postgres:
-
-```bash
-bash scripts/backup-databases.sh          # both databases plus the storage objects
-bash scripts/restore-databases.sh         # the other half
-```
-
-**Restore is a runbook, not a button** — [`supabase/README.md`](../supabase/README.md) §*Backup and
-Recovery*. A dump holds `auth.users`, every OAuth secret's hash and the whole `audit_trail`, so
-the bytes are deliberately never handed to a browser.
-
-**`audit_trail` is the reason this matters more than it looks.** It is append-only audit and is
-unreconstructable from anything else, so it is the one table for which "restore from backup" is the
-entire recovery story.
-
----
-
-## 3. Appliances are never reached into
-
-**Nothing in this platform pushes a flow to a plant appliance.** A Remote gateway's Node-RED has
-no inbound path at all: it dials out to the broker on 8883 and nothing anywhere assumes traffic in
-the other direction.
-
-So an appliance keeps running the flow it was bundled with, across every platform upgrade, until
-somebody deliberately changes it.
-
-That is a deliberate trade — see §4.1 for what it costs — and it is what makes a platform upgrade a
-platform-side event rather than a fleet-side one.
-
-### New platform capabilities degrade instead of breaking
-
-The appliance health telemetry added in `0035` is the worked example of how a capability is meant to
-arrive:
-
-- An appliance on an **older bundle** publishes the heartbeat it always did. The daemon reads the
-  metrics it recognises and ignores the rest, so nothing errors.
-- Its `gateways.health_reported_at` stays `NULL`, and `0035` gives that a **specific meaning**:
-  *this bundle does not report health* — deliberately distinguishable from *it stopped reporting*,
-  which is a stale timestamp. Those need different responses from an operator.
-- The dashboard shows the health fields only when `health_reported_at` is set, so an older appliance
-  shows a shorter panel rather than eight rows of `--` that read as eight faults.
-
-**The pattern to copy:** a new metric is additive on the wire, its absence has a distinct and
-documented meaning, and the UI treats "not reported" as a state rather than as a zero.
-
----
-
-## 4. Where this is not the whole truth
-
-### 4.1 Updating an appliance's *flow* still means a new bundle
-
-There is no fleet flow-update path. Changing what a Remote gateway publishes means issuing a new
-bundle from the dashboard and running it on the appliance — which **consumes a fresh enrolment
-token** and is a manual act, per appliance.
-
-**What that does *not* cost, which is the part worth being precise about:**
-
-- **The gateway row survives.** `enroll-gateway` performs an `UPDATE` on the existing row — it sets
-  `status`, `enrolled_at` and `agent_version` and nothing else. It never inserts a gateway.
-- **`sparkplug_id` is unchanged**, because §1.
-- **Its devices are untouched.** `enroll-gateway` does not reference the `devices` table at all.
-  Approved devices stay approved and stay bound; they are not re-quarantined and do not need
-  re-approving.
-- **History survives.** `telemetry`, `audit_trail` and `platform_alerts` all key on identity that
+- **The gateway's record survives.** Enrolment updates the existing gateway (`status`,
+  `enrolled_at` and `agent_version`) and never creates a new one.
+- **Its Sparkplug ID is unchanged**, for the reason above.
+- **Its devices are untouched.** Enrolment does not touch devices at all: approved devices stay
+  approved and stay tied to the gateway, and nothing goes back into quarantine.
+- **Its history survives.** `telemetry`, `audit_trail` and `platform_alerts` all key on identity that
   did not change.
 
-So re-bundling is *re-provisioning an appliance*, not *re-registering an asset*. That is a much
-smaller thing than the reconfiguration this document opens by talking about — but it is a manual
-step per appliance, and calling it anything else would be dishonest.
+So re-provisioning sets up the gateway's computer again. It does not re-register anything.
 
-### 4.2 `agent_version` is recorded and not yet acted on
+### A gateway's bundle version is shown, not acted on
 
-Since `0035` every appliance reports its bundle version on the heartbeat, so the fleet's vintage is
-visible on the Gateways page without a shell on anything. **Nothing consumes it.** The platform
-cannot yet say "this gateway predates the capability you are looking for", so an operator inferring
-why one gateway shows health and another does not is reading two columns and joining them by eye.
+Every Remote gateway reports its bundle version on its heartbeat (archived migration `0035`), so the
+**Bundle** row on the Gateways page shows how old each one is. **Nothing acts on it yet.** Aber cannot
+say "this gateway's bundle is too old for that feature", so if one gateway shows health and another
+does not, compare their bundle versions yourself.
 
-### 4.3 Turning statement statistics on or off restarts the historian
+### Turning statement statistics on or off restarts the historian
 
 `databaseMetrics.statementStats` adds `pg_stat_statements` to the historian's
-`shared_preload_libraries`. That is a **postmaster setting**: PostgreSQL reads it once at start and
-`-c` on the command line is the only way to set it, so flipping the flag either way rolls
-`timescaledb-0`. One restart, on the upgrade that changes it — not on every upgrade afterwards.
+`shared_preload_libraries`. PostgreSQL reads that setting only at start, and `-c` on the command line
+is the only way to set it, so switching the flag either way restarts `timescaledb-0`, once, on the
+upgrade that changes it.
 
-It is a separate flag from `databaseMetrics.enabled` for exactly this reason: the exporter itself
-costs no restart, and an operator can take the metrics without taking a restart of the database they
-are watching. `supabase-db` is unaffected either way — `supabase/postgres` preloads the library
-already.
+It is separate from `databaseMetrics.enabled` for that reason: the exporter needs no restart, so you
+can have the metrics without restarting the database you are watching. `supabase-db` is not affected
+either way, because its image already loads the library.
 
-The historian's image preloads `timescaledb` alone, and `-c` **replaces** that value rather than
-appending to it, so the chart names both libraries with `timescaledb` first. A build that dropped it
-would start a server that does not know what a hypertable is.
+The historian's image loads `timescaledb` on its own, and `-c` **replaces** that list rather than
+adding to it, so the chart names both libraries, `timescaledb` first. Without it, the server
+would not know what a hypertable is.
 
-### 4.4 Turning the historian's physical backup on or off restarts it
+### Turning the historian's physical backup on or off restarts it
 
-`timescaledb.physicalBackup.enabled` sets `archive_mode`, another postmaster setting, so switching
-it either way rolls `timescaledb-0` once. Turning it on also stops the nightly logical dump taking
-the historian; turning it off puts the historian back in the dump and leaves the repository where
-it is. See `deploy/k8s/README.md`, *Backing up the historian*.
+`timescaledb.physicalBackup.enabled` sets `archive_mode`, which PostgreSQL also reads only at start,
+so switching it either way restarts `timescaledb-0` once. Turning it on also takes the historian out
+of the nightly logical dump; turning it off puts it back and leaves the backup repository where it is.
+See `deploy/k8s/README.md`, *Backing up the historian*.
 
-### 4.5 A renamed metric orphans its history
+### A renamed metric leaves its history under the old name
 
-`metric_catalog` registers every metric name with its standard and semantic id. A future version that
-**renames** a metric would leave the old name's history under the old name — the historian records
-what was observed, and nothing rewrites past rows. Publishing an unregistered name creates an
+`metric_catalog` registers every metric name with its standard and identifier. If a future version
+**renamed** a metric, its history would stay under the old name: the historian stores what was
+observed, and nothing rewrites past rows. Sending a name that is not registered creates a separate,
 orphaned series rather than an error.
 
-This has not happened and the vocabularies are generated from published standards specifically so it
-is unlikely to. It is listed here because it is the one change that *would* need a data migration
-rather than a schema one.
+This has not happened, and the vocabularies are generated from published standards to make it
+unlikely. It is listed because it is the one change that would need a data migration, not just a
+schema one.
 
-### 4.6 From 1.0.0, the demo accounts stay until you remove them
+### From 1.0.0, the demo accounts stay until you remove them
 
-1.0.0 applied the four demo accounts (`admin@aber.local` and three others, password `aber123`) on
-every install and upgrade. From 1.0.1 they are applied only where `supabaseAuth.demoAccounts` is
-on, which `values-dev.yaml` alone sets, and a site names its own first administrator instead
-(`supabaseAuth.firstAdministrator`, migration `0163`). The upgrade deletes nothing, so a site that
-signs in as a demo account keeps doing so. Before upgrading, set the first administrator
-(`npm run setup -- --admin-email=` writes both values into a fresh file; copy the two into yours);
-after it, sign in as that account and remove the four demo accounts, in Studio or with GoTrue's
-admin API.
+1.0.0 created the four demo accounts (`admin@aber.local` and three others, password `aber123`) on
+every install and upgrade. From 1.0.1 they are created only where `supabaseAuth.demoAccounts` is on,
+which only `values-dev.yaml` sets, and a site names its own first administrator instead
+(`supabaseAuth.firstAdministrator`, migration `0163`). The upgrade deletes nothing, so the demo
+accounts still work afterwards.
+
+1. **Before upgrading**, set the first administrator. `npm run setup -- --admin-email=` writes both
+   values into a fresh file; copy the two into your own values.
+2. **After upgrading**, sign in as that account and remove the four demo accounts, in Studio or with
+   GoTrue's admin API.
 
 ---
 
-## 5. What to check after an upgrade
+## Backups
 
-Nothing here is required — the point of the above is that an upgrade is not an event. These are what
-to look at if you want positive confirmation rather than absence of complaints:
+`backup.enabled=true` turns backups on, in one of two ways depending on a second setting. Both write
+one folder per backup to a volume that survives `helm uninstall`, since deleting the release is
+exactly when a backup is most wanted.
 
-**The two Job logs have an hour on them.** `initJobs.ttlSecondsAfterFinished` is 3600, so a Job that
-succeeded is garbage-collected an hour later and `kubectl logs job/...` then reports that it does not
-exist. That is the Job being cleaned up, not the upgrade having failed — but it means the first two
-checks are ones to run while the upgrade is still fresh.
+- **`backupService.enabled=true`: Dashboard → Backups.** An Administrator asks for a backup on the
+  page, and a worker takes it; the nightly job steps aside for it. A backup taken this way is
+  **pinned**, so retention does not remove it until an Administrator releases it. That is what you
+  want of the one you took before an upgrade. It is the only way that needs no shell, and the only one
+  that can include the forge.
+- **Otherwise, the nightly job.** It is a safety net as of its last run and no newer, so it is no
+  substitute for a backup taken just before an upgrade.
+
+Either way, both databases are always backed up. **The stored files and the forge's volume are not**,
+unless you turn on `backup.includeStorage` and `backup.includeForge`. Both are off by default, because
+each ties the backup to the node that holds that volume. [`deploy/k8s/README.md`](../deploy/k8s/README.md)
+explains.
+
+From a machine with a shell, against any Postgres you can reach:
+
+```bash
+STORAGE_HOST_PATH=<dir> bash scripts/backup-databases.sh   # both databases plus the storage objects in <dir>
+bash scripts/restore-databases.sh                          # the other half
+```
+
+**Restoring is a runbook, not a button**: [`supabase/README.md`](../supabase/README.md),
+*Backup and Recovery*. A backup holds every account, every OAuth secret's hash and the whole Audit
+Trail, so it is never handed to a browser.
+
+**The Audit Trail is why backups matter more than they look.** It can only be added to, and it cannot
+be rebuilt from anything else, so a backup is its only recovery.
+
+---
+
+## What to check after an upgrade
+
+None of this is required: the point of the sections above is that an upgrade is uneventful. These
+are the places to look if you want to confirm it.
+
+**Check the two job logs within the hour.** `initJobs.ttlSecondsAfterFinished` is 3600, so a finished
+job is cleaned up an hour later, and `kubectl logs job/...` then says it does not exist. That is the
+cleanup, not a failed upgrade, but it means the first two checks below must be run while the upgrade
+is fresh.
 
 | Check | Where |
 | :--- | :--- |
@@ -332,18 +290,18 @@ checks are ones to run while the upgrade is still fresh.
 | Policy jobs are getting workers | `kubectl -n aber logs statefulset/timescaledb \| grep -c 'failed to start a background worker'` — expect `0` |
 | Gateways still reporting | Dashboard → Gateways: `Last Heartbeat` under 90s |
 | Telemetry still landing | Grafana → *Stack & Ingestion Health* → rows ingested per second |
-| The daemon is not dropping anything new | `curl localhost:9108/metrics \| grep dropped` — every reason is a separate series |
-| Appliance bundles still current | Dashboard → Gateways → `Bundle`, per gateway |
+| Ingestion is not dropping anything new | `curl localhost:9108/metrics \| grep dropped` — every reason is a separate series |
+| Gateway bundles still current | Dashboard → Gateways → `Bundle`, per gateway |
 
 ---
 
 ## Related
 
-- [`releases.md`](releases.md) — the other half of this document: how long a release is supported,
-  what makes a version major, and how a site learns that a release matters to it
-- [`remote-gateways.md`](remote-gateways.md) — the appliance runbook, including re-issuing a
-  bundle and what it invalidates
-- [`kubernetes-architecture.md`](kubernetes-architecture.md) — the chart, and how a release is
+- [`releases.md`](releases.md): how long a release is supported, what makes a version major, and how
+  a site learns that a release matters to it
+- [`remote-gateways.md`](remote-gateways.md): the gateway runbook, including issuing a new bundle and
+  what that invalidates
+- [`kubernetes-architecture.md`](kubernetes-architecture.md): the chart, and how a release is
   published from a single `v*` tag
-- [`incidents.md`](incidents.md) — the CA re-minting incident, which is the one failure mode that
-  *does* take a whole fleet offline at once, and what now warns about it
+- [`incidents.md`](incidents.md): the CA re-minting incident, the one failure that took a whole fleet
+  offline at once, and what now warns about it
