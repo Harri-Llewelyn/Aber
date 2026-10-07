@@ -2124,6 +2124,24 @@ an auditor reads to check that did not happen, exactly the thing it was written 
 none: it is bounded by revocation (`0038`), not by a countdown. Inventing an `expires_at` would put a
 reassuring date against a credential that has no such date.
 
+### A Host gateway's credential can be shown again (0164)
+
+A Host or Simulated gateway's credential is typed into the Node-RED editor by a person, who may need
+it again. So when `gateway-credential` issues one, it also calls `keep_gateway_credential()`, which
+stores an encrypted copy in Vault under `gateway_broker_password:<gateway id>`. The function answers
+`false`, and keeps nothing, for a Remote or Playback gateway: an appliance's credential never reaches
+a person, and the playback worker's is delivered to it.
+
+- **Who may see it.** `show_gateway_credential()` is Administrator only. Each call writes a
+  `CREDENTIAL_SHOWN` row to the Audit Trail, with the gateway but never the password. The dashboard
+  calls it from the gateway's drawer (**Show Broker Credential**).
+- **How long it lives.** Issuing a new credential replaces the copy. Archiving or deleting the
+  gateway deletes it (`trg_gateways_forget_credential`), at the moment its broker account is disabled.
+- **No copy.** A credential issued before `0164`, or one whose copy could not be written, answers
+  `NO_DATA_FOUND`. Issuing a new one is the way back.
+- **Why it is allowed.** Keeping these passwords recoverably is an accepted risk, in
+  [`docs/security-model.md`](../docs/security-model.md#host-gateway-passwords-are-kept-and-administrators-can-see-them).
+
 ### Three kinds of gateway, and two lanes for what is not real (archived migrations 0052 and 0059)
 
 **`is_simulated` (`0052`) records provenance and each consumer decides what to do with it.** It sits

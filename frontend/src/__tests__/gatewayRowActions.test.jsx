@@ -523,3 +523,40 @@ describe('the Gateways list', () => {
     expect(document.querySelector('.card.card-fill > .table-wrap')).not.toBeNull()
   })
 })
+
+/**
+ * Showing a Host gateway's credential again (0164) is Administrator only, as the RPC is, and never on
+ * a gateway that keeps no copy: a Remote one, whose credential never reaches a person, or the Playback
+ * gateway, whose credential is delivered to its worker.
+ */
+describe('Show Broker Credential', () => {
+  const showAs = async (rows, userRole) => {
+    api.get.mockImplementation(routeGet(rows))
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} userRole={userRole}
+      initialSearchFilter="" onClearFilter={vi.fn()} />)
+    await waitFor(() => expect(rowNamed(rows[0].gateway_name)).toBeTruthy())
+  }
+  const showButton = (panel) => panel.queryByRole('button', { name: /Show Broker Credential/i })
+
+  it('is offered to an Administrator on a Host gateway', async () => {
+    await showAs([gateway()], 'Administrator')
+    expect(showButton(openPanel())).toBeInTheDocument()
+  })
+
+  it('is not offered to a Shopfloor_Manager, who may issue a credential but not see one again', async () => {
+    await showAs([gateway()], 'Shopfloor_Manager')
+    const panel = openPanel()
+    expect(panel.getByRole('button', { name: /Generate Broker Credential/i })).toBeInTheDocument()
+    expect(showButton(panel)).toBeNull()
+  })
+
+  it('is not offered on a Remote gateway', async () => {
+    await showAs([gateway({ deployment: 'remote', access_url: null })], 'Administrator')
+    expect(showButton(openPanel())).toBeNull()
+  })
+
+  it('is not offered on the Playback gateway', async () => {
+    await showAs([gateway({ gateway_name: 'Playback', is_shadow: true, is_simulated: true, cell_id: null })], 'Administrator')
+    expect(showButton(openPanel('Playback'))).toBeNull()
+  })
+})

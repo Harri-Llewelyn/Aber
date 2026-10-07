@@ -177,3 +177,34 @@ describe('GatewayCredentialModal', () => {
     expect(screen.getByDisplayValue(CREDENTIAL.password)).toBeTruthy()
   })
 })
+
+/**
+ * Whether the password can be shown again is the server's answer (credential_kept, 0164), so the
+ * dialog's warning follows it rather than the gateway type.
+ */
+describe('what the dialog says about seeing the password again', () => {
+  it('says an Administrator can show it again before it is issued', () => {
+    renderModal()
+    expect(screen.getByText(/An Administrator can show the password again later/i)).toBeInTheDocument()
+    expect(screen.queryByText(/cannot be recovered/i)).toBeNull()
+  })
+
+  it('points at Show Broker Credential when the server kept a copy', async () => {
+    api.mintGatewayCredential.mockResolvedValue({ ...CREDENTIAL, credential_kept: true })
+    renderModal()
+    await confirmAndMint()
+
+    await waitFor(() => expect(screen.getByText(/Copy this into Node-RED now/i)).toBeInTheDocument())
+    expect(screen.getByText('Show Broker Credential')).toBeInTheDocument()
+    expect(screen.queryByText(/it is not shown again/i)).toBeNull()
+  })
+
+  it('warns that it is not shown again when no copy was kept', async () => {
+    api.mintGatewayCredential.mockResolvedValue({ ...CREDENTIAL, credential_kept: false })
+    renderModal()
+    await confirmAndMint()
+
+    await waitFor(() => expect(screen.getByText(/it is not shown again/i)).toBeInTheDocument())
+    expect(screen.queryByText('Show Broker Credential')).toBeNull()
+  })
+})

@@ -40,7 +40,7 @@ const DESCRIPTIONS = {
     + 'its credential is issued to the appliance when it enrols and never passes through a browser.',
   [GATEWAY_TYPES.HOST]:
     'A connector running inside this stack. Nothing to install, and no appliance to enrol — its '
-    + 'credential is issued here and shown once.',
+    + 'credential is issued here, and an Administrator can show it again.',
   [GATEWAY_TYPES.SIMULATED]:
     'A host-run connector whose readings are generated rather than observed. Its devices inherit '
     + 'the mark; they have no setting of their own. Ingestion is unchanged: this is a label for '

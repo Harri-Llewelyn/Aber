@@ -381,6 +381,9 @@ python supabase/migrations/test_gateway_enrollment.py
 # The machine-path credential recorder (0062), and the grant that decides whether it is a fix.
 # Every test rolls back: the rows it writes are audit rows, and that table cannot be pruned.
 python supabase/migrations/test_credential_recorder.py
+# Showing a Host gateway's credential again (0164): who may keep and see the copy, the audit row
+# without the password, and the copy going with the broker account. Every test rolls back.
+python supabase/migrations/test_gateway_credential_shown_again.py
 # Revocation reaching a host-run gateway (0063), and still passing over one that holds nothing.
 # Rolls back for a second reason: net.http_post queues inside the transaction, so the revocation
 # requests these tests provoke are un-queued rather than sent.
