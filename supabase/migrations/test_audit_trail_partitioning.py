@@ -15,7 +15,7 @@ security-domain audit row -- role grants, token mints, principal withdrawals -- 
 reader, and NOTHING ELSE IN THE STACK WOULD SAY SO. That asymmetry is why this file asserts the
 boring things at length.
 
-THE OTHER HALF IS REPLAY. supabase-db-init runs `for f in /migrations/*.sql` on every boot with
+THE OTHER HALF IS REPLAY. The db-init Job runs `for f in /migrations/*.sql` on every boot with
 ON_ERROR_STOP=1 and there is no applied-migrations ledger, so 0079 executes again on every start
 for the life of the deployment. A conversion that is not idempotent does not fail once -- it takes
 the stack down on the second boot, which is the first boot any real deployment performs.

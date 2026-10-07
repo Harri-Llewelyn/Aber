@@ -511,8 +511,8 @@ polling the dependency's readiness endpoint anyway, so ordering holds even if `-
 `helm.sh/hook-delete-policy: before-hook-creation` so a re-run replaces the previous Job rather than
 colliding on the name.
 
-**This is safe precisely because the migrations are idempotent.** `supabase-db-init` already replays
-every `*.sql` on every boot with no applied-migrations ledger — a property the beta squash to
+**This is safe precisely because the migrations are idempotent.** The db-init Job (`aber-db-init`)
+replays every `*.sql` on every boot with no applied-migrations ledger — a property the beta squash to
 `0001_baseline_schema.sql` / `0002_seed_data.sql` was explicitly verified to preserve. A Helm
 upgrade re-running the whole set is therefore normal operation, not a risk. Every subsequent
 migration must keep that property; Kubernetes does not change the obligation, it just makes it
@@ -609,13 +609,13 @@ The check is therefore scoped to `value:` / `port:` / `containerPort:` / `target
 was confirmed against a deliberate regression. **A check that reports a known-benign hit is worse
 than no check**, because the next real hit is dismissed with it.
 
-*Still unfixed, and now deliberately narrower:* those two rows still read `localhost:5433` and
-`localhost:54322`, which is wrong on a cluster. `0085` has since parameterised the three rows it
-could — Grafana, Node-RED and Studio, from the `*_public_url` values `db-init.yaml` already passes
-psql — so on a configured cluster those three now advertise the ingress hostnames rather than
+Those two rows read `localhost:5433` and `localhost:54322` until `0002` gave them their in-cluster
+Service addresses, `postgres://timescaledb:5432` and `postgres://supabase-db:5432`. `0085` has
+since parameterised the three rows it could — Grafana, Node-RED and Studio, from the
+`*_public_url` values `db-init.yaml` already passes psql — so on a configured cluster those three now advertise the ingress hostnames rather than
 `localhost`. The two database rows are not among them because no `-v` entry carries their address,
 and adding one means editing both db-init call sites. They remain display-only metadata, and `0084`'s
-`exposure` column now marks them `HOST` so the page stops offering them as links.
+`exposure` column now marks them `INTERNAL` so the page stops offering them as links.
 
 ---
 

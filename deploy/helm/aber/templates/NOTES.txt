@@ -127,6 +127,12 @@ if these are missing the PVC must be destroyed, not the pod restarted):
      db-init are all derived from it. Set it and upgrade — db-init is a post-upgrade hook, so it
      re-registers both OAuth clients in the same operation.
 {{- end }}
+{{- if .Values.ingestion.allowHistorianSuperuser }}
+
+  ⚠  ingestion.allowHistorianSuperuser is on. If ingestion.dbUser is a superuser, the ingestion
+     daemon writes the historian with the right to DROP the hypertable and rewrite any
+     observation. Set it back to false once the recovery is done.
+{{- end }}
 {{- if and .Values.ingress.enabled (not .Values.ingress.tls.enabled) }}
 
   ⚠  The ingress is serving PLAIN HTTP. Every session token, including the service-role key if

@@ -143,6 +143,32 @@ when its node_exporter collectors run. check-docs-drift.mjs holds the list equal
 {{- end -}}
 
 {{/*
+How the chart publishes the Directory rows behind an ingress route, as JSON from route name to
+NETWORK or INTERNAL, for db-init to write into directory_services.exposure (0002). A route counts
+as published under the rule ingress.yaml applies: ingress on, the route not turned off in
+ingress.routes, and a host resolved. `mqtt` is also NETWORK while the mosquitto-external Service
+publishes the broker's TCP ports.
+*/}}
+{{- define "aber.directoryExposure" -}}
+{{- $published := dict -}}
+{{- if .Values.ingress.enabled -}}
+{{- range (include "aber.ingressRoutes" . | fromYamlArray) -}}
+{{- if and (ne (index $.Values.ingress.routes .name) false) .host -}}
+{{- $_ := set $published .name true -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if and .Values.mosquitto.enabled .Values.mosquitto.external.enabled -}}
+{{- $_ := set $published "mqtt" true -}}
+{{- end -}}
+{{- $out := dict -}}
+{{- range list "studio" "nodered" "mqtt" "grafana" "supabase" "docs" "gitea" -}}
+{{- $_ := set $out . (ternary "NETWORK" "INTERNAL" (hasKey $published .)) -}}
+{{- end -}}
+{{- toJson $out -}}
+{{- end -}}
+
+{{/*
 The Prometheus the Grafana datasource points at: the chart's own when observability.enabled,
 otherwise the value, and an empty value fails the render because a datasource pointed at nothing
 gives every alert rule DatasourceError against a healthy stack. aber.lokiUrl is the same for Loki.
@@ -623,6 +649,44 @@ port set for one and not another is unrepresentable.
 - name: MQTT_PORT
   value: "1883"
 {{- end }}
+{{- end -}}
+
+{{/*
+The broker as the in-cluster clients dial it, under the same rule as aber.brokerClientEnv. db-init
+passes it for the Directory's ingestion row (0002).
+*/}}
+{{- define "aber.brokerInternalUrl" -}}
+{{- if and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients -}}
+mqtts://mosquitto:8883
+{{- else -}}
+mqtt://mosquitto:1883
+{{- end -}}
+{{- end -}}
+
+{{/* The host a shopfloor gateway dials the broker on: MQTT_PUBLIC_HOST for enrolment. */}}
+{{- define "aber.mqttPublicHost" -}}
+{{- .Values.supabaseFunctions.gatewayEnrolment.mqttPublicHost | default (include "aber.hostOf" (dict "ctx" . "name" "mqtt")) -}}
+{{- end -}}
+
+{{/*
+The broker as a shopfloor gateway dials it, through mosquitto-external: MQTTS on the enrolment TLS
+port when broker TLS is on, otherwise plaintext on 1883 (or its node port). Empty when the broker
+is not published or no host resolves. db-init passes it for the Directory's broker row (0002).
+*/}}
+{{- define "aber.brokerPublicUrl" -}}
+{{- $host := include "aber.mqttPublicHost" . -}}
+{{- $ext := .Values.mosquitto.external -}}
+{{- if and $host .Values.mosquitto.enabled $ext.enabled -}}
+{{- if .Values.mosquitto.tls.enabled -}}
+{{- printf "mqtts://%s:%d" $host (.Values.supabaseFunctions.gatewayEnrolment.mqttPublicTlsPort | int64) -}}
+{{- else if $ext.plaintext -}}
+{{- $port := 1883 -}}
+{{- if and (eq $ext.type "NodePort") $ext.nodePort -}}
+{{- $port = $ext.nodePort -}}
+{{- end -}}
+{{- printf "mqtt://%s:%d" $host ($port | int64) -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 
 {{/*

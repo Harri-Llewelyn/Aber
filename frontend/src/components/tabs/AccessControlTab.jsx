@@ -695,9 +695,9 @@ export function AccessControlTab({ showToast, initialSection = '', onClearSectio
                               variant="button"
                               className="btn-sm"
                               // The tooltip carries the distinction the label cannot: this is `npm
-                              // run keys:rotate`, because the identity's key lives in .env and is
-                              // read at boot.
-                              title={`Copy \`${meta.mintCommand.replace('{id}', p.principal_id)}\` — this identity's key lives in .env and is read at boot, so ROTATING it, not minting a new token, is what changes what the process presents. It records the issue before writing, and names the containers to restart.`}
+                              // run keys:rotate`, because the identity's key is in the release
+                              // Secret and its Deployment reads it at start.
+                              title={`Copy \`${meta.mintCommand.replace('{id}', p.principal_id)}\` — this key is ${meta.secretKey || 'a key'} in the release Secret, read by the ${meta.deployment || 'worker'} Deployment at start. Rotating it, not minting a token, changes what the process presents. With --apply it patches the Secret and restarts the Deployment.`}
                               onNotify={showToast}
                             />
                           )}

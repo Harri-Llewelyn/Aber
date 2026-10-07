@@ -936,9 +936,13 @@ coldArchive:
 ingestion:
   # Which role the daemon connects to the historian as. `ingest_writer` cannot UPDATE, DELETE or
   # TRUNCATE; secrets.ingestWriterPassword is required while this is set. Override to the admin
-  # user only for a recovery (the daemon refuses a superuser unless ALLOW_HISTORIAN_SUPERUSER is
-  # also set).
+  # user only for a recovery (the daemon refuses a superuser unless allowHistorianSuperuser is
+  # also true).
   dbUser: "ingest_writer"
+  # Lets the daemon write the historian as a superuser. A separate decision from dbUser, so a
+  # recovery takes both. Set it for the recovery only, and back to false once it is done; the
+  # release notes warn while it is on.
+  allowHistorianSuperuser: false
   enabled: true
   image:
     # Built from ingestion/Dockerfile with the REPOSITORY ROOT as context (sparkplug_b.proto):
@@ -1241,7 +1245,7 @@ ingress:
   # listener (an Administrator login), but a database console on a public hostname is reachable
   # by anyone who can reach the ingress. Turning it on requires secrets.studioOAuthClientSecret
   # and secrets.studioProxyHmacSecret (the render fails naming them). Without the route:
-  #   kubectl -n <ns> port-forward svc/<release>-aber-supabase-studio 54323:3000
+  #   kubectl -n <ns> port-forward svc/supabase-studio 54323:3000
   #
   # The studio and gitea logins set Secure cookies, which a browser keeps only on an https origin
   # or on localhost / *.localhost. Over plain http on any other domain the render refuses either

@@ -118,6 +118,9 @@ export const KNOWN_PRINCIPALS = {
     // worker would ever read, since the daemon takes its key from the environment. Rotation is the
     // only operation that changes what these processes present.
     mintCommand: 'npm run keys:rotate',
+    // Where the key is on the chart and which Deployment reads it at start (templates/apps).
+    secretKey: 'SUPABASE_INGESTION_KEY',
+    deployment: 'ingestion',
   },
   'b0000000-0000-4000-8000-000000000003': {
     name: 'Service_Playback',
@@ -129,6 +132,8 @@ export const KNOWN_PRINCIPALS = {
     mintedBy: 'scripts/setup.mjs, re-signed by scripts/rotate-service-keys.mjs',
     // Not mint-mcp-token.mjs, for the same reason as the ingestion identity above.
     mintCommand: 'npm run keys:rotate',
+    secretKey: 'SUPABASE_PLAYBACK_KEY',
+    deployment: 'playback',
   },
 }
 

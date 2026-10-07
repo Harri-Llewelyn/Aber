@@ -43,7 +43,7 @@ describe('isMintableFromPage', () => {
     expect(isMintableFromPage(describePrincipal('b0000000-0000-4000-8000-000000000001'))).toBe(true)
   })
 
-  it('refuses the two identities whose keys live in .env', () => {
+  it('refuses the two identities whose keys are in the release Secret', () => {
     // Their mintCommand is `npm run keys:rotate`, because rotating is what changes what those
     // processes actually present. Minting for them produces a valid token no worker will read.
     expect(isMintableFromPage(describePrincipal('b0000000-0000-4000-8000-000000000002'))).toBe(false)

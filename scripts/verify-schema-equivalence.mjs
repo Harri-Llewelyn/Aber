@@ -29,17 +29,17 @@
  * THE PRECONDITIONS, EACH ONE LEARNED BY A FAILURE
  * =================================================================================================
  *
- * A migration chain does not run against a virgin `supabase/postgres`. `supabase-db-init` runs
- * after two other things have already touched the database, and reproducing that is most of what
- * this script does:
+ * A migration chain does not run against a virgin `supabase/postgres`. The db-init Job
+ * (`aber-db-init`) runs after two other things have already touched the database, and reproducing
+ * that is most of what this script does:
  *
- *   GoTrue's `auth` SCHEMA. db-init declares `supabase-auth: condition: service_healthy`, so
- *   GoTrue has migrated its own schema before migration 0001 runs. The bare image ships 5 auth
- *   tables; a stack that has booted has 23. `0002` inserts the Grafana OAuth client into
- *   `auth.oauth_clients` with no existence guard, so without this the chain aborts there. The
- *   fixture is dumped from a RUNNING stack rather than committed, because it is GoTrue's schema
- *   and not ours -- a committed copy would be a second description of someone else's migrations,
- *   pinned to whatever version was current the day it was written.
+ *   GoTrue's `auth` SCHEMA. db-init's `wait-for-auth` initContainer holds it until `supabase-auth`
+ *   answers /health, so GoTrue has migrated its own schema before migration 0001 runs. The bare
+ *   image ships 5 auth tables; a stack that has booted has 23. `0002` inserts the Grafana OAuth
+ *   client into `auth.oauth_clients` with no existence guard, so without this the chain aborts
+ *   there. The fixture is dumped from a RUNNING stack rather than committed, because it is
+ *   GoTrue's schema and not ours -- a committed copy would be a second description of someone
+ *   else's migrations, pinned to whatever version was current the day it was written.
  *
  *   THE `search_path`. db-init's entrypoint runs
  *   `ALTER ROLE postgres SET search_path TO auth, public, extensions` BEFORE the chain. That one

@@ -37,16 +37,16 @@ const svc = (name, type, url) => ({
 const SERVICES = [
   svc('API Reference (Swagger UI)', 'DOCUMENTATION', 'http://localhost:8088'),
   svc('Grafana Dashboards', 'MONITORING', 'http://localhost:3002'),
-  svc('Mosquitto MQTT Broker', 'MQTT_BROKER', 'mqtt://localhost:1883'),
+  svc('Mosquitto MQTT Broker', 'MQTT_BROKER', 'mqtt://mosquitto:1883'),
   svc('Node-RED (Host-Run Gateways)', 'EDGE_NODE', 'http://localhost:1880'),
   svc('Sparkplug B Ingestion Engine', 'INGESTION', 'mqtt://mosquitto:1883/spBv1.0/#'),
   svc('Supabase API Gateway (Envoy)', 'API_GATEWAY', 'http://127.0.0.1:54321'),
   svc('Supabase Auth (GoTrue)', 'AUTHENTICATION', 'http://127.0.0.1:54321/auth/v1'),
   svc('Supabase Edge Functions', 'SERVERLESS', 'http://127.0.0.1:54321/functions/v1'),
   svc('Supabase PostgREST API', 'REST_API', 'http://127.0.0.1:54321/rest/v1'),
-  svc('Supabase PostgreSQL', 'DATABASE', 'postgres://localhost:54322'),
+  svc('Supabase PostgreSQL', 'DATABASE', 'postgres://supabase-db:5432'),
   svc('Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323'),
-  svc('TimescaleDB Telemetry Store', 'TIME_SERIES_DB', 'postgres://localhost:5433')
+  svc('TimescaleDB Telemetry Store', 'TIME_SERIES_DB', 'postgres://timescaledb:5432')
 ]
 
 async function renderTab() {
@@ -280,9 +280,9 @@ describe('DirectoryTab service groups', () => {
         const { showToast } = await renderTab()
 
         openTab('Ingestion & Messaging')
-        fireEvent.click(screen.getByText('mqtt://localhost:1883').closest('button'))
+        fireEvent.click(screen.getByText('mqtt://mosquitto:1883').closest('button'))
 
-        await waitFor(() => expect(writeText).toHaveBeenCalledWith('mqtt://localhost:1883'))
+        await waitFor(() => expect(writeText).toHaveBeenCalledWith('mqtt://mosquitto:1883'))
         await waitFor(() =>
           expect(showToast).toHaveBeenCalledWith(
             expect.stringContaining('Copied endpoint address'), 'success'))
@@ -293,11 +293,12 @@ describe('DirectoryTab service groups', () => {
       }
     })
 
-    it('treats a container hostname as unopenable even though it is http', async () => {
-      /* The case a scheme test alone gets wrong: `node-exporter` resolves on the cluster network
-         and nowhere else, so a link would produce a failed tab that reads as the service being
+    it('treats an in-cluster hostname as unopenable even though it is http', async () => {
+      /* The case a scheme test alone gets wrong: `prometheus` resolves inside the cluster and
+         nowhere else, so a link would produce a failed tab that reads as the service being
          down. */
-      expect(isBrowsableEndpoint('http://node-exporter:9100/metrics')).toBe(false)
+      expect(isBrowsableEndpoint('http://prometheus:9090')).toBe(false)
+      expect(isBrowsableEndpoint('http://alloy:12345/api/v0/component/prometheus.exporter.unix.host/metrics')).toBe(false)
       expect(isBrowsableEndpoint('http://supabase-envoy:8000')).toBe(false)
     })
 
@@ -308,8 +309,8 @@ describe('DirectoryTab service groups', () => {
     })
 
     it('treats a non-http scheme as unopenable whatever its host', async () => {
-      expect(isBrowsableEndpoint('mqtt://localhost:1883')).toBe(false)
-      expect(isBrowsableEndpoint('postgres://localhost:5433')).toBe(false)
+      expect(isBrowsableEndpoint('mqtt://mosquitto:1883')).toBe(false)
+      expect(isBrowsableEndpoint('postgres://timescaledb:5432')).toBe(false)
     })
 
     it('does not throw on an unparseable endpoint', async () => {
@@ -364,17 +365,16 @@ describe('DirectoryTab service groups', () => {
     expect(words.className).not.toMatch(/badge/)
   })
 
-  it('explains WHY an unobserved service cannot be probed', async () => {
+  it('explains WHY an unobserved service has no status', async () => {
     // Otherwise "not observed" reads as a gap somebody should close with a probe against
-    // endpoint_url, a browser address that would answer about the wrong host from inside a
-    // container.
+    // endpoint_url, which for a browser address would answer about the wrong host.
     api.get.mockResolvedValue([
       { ...svc('Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323'),
         status: 'UNKNOWN', last_heartbeat: null }
     ])
     await renderTab()
 
-    expect(screen.getByTitle(/browser address/i)).toBeInTheDocument()
+    expect(screen.getByTitle(/no exporter reports on it/i)).toBeInTheDocument()
   })
 
   it('does not show a heartbeat beside a service that is not up', async () => {
@@ -586,16 +586,19 @@ describe('Directory reachability', () => {
       expect(endpointReach('http://localhost:9090', 'HOST', true).open).toBe(true)
     })
 
-    /* The case the two facts disagree on: Studio's port is published on every interface (NETWORK)
-       while its URL is still the loopback default, which a remote browser cannot use. */
+    /* The case the two facts disagree on: a service published outside the cluster (NETWORK) whose
+       URL is still the seeded loopback default, which a remote browser cannot use. */
     it('withholds a loopback ADDRESS from a remote reader even when the PORT is NETWORK', () => {
       expect(endpointReach('http://127.0.0.1:54323', 'NETWORK', false).open).toBe(false)
       expect(endpointReach('http://127.0.0.1:54323', 'NETWORK', true).open).toBe(true)
     })
 
-    it('never offers an INTERNAL service, on the host or off it', () => {
+    it('never offers an INTERNAL service, on the host or off it, and names the way in', () => {
       expect(endpointReach('http://localhost:9100/metrics', 'INTERNAL', true).open).toBe(false)
-      expect(endpointReach('http://localhost:9100/metrics', 'INTERNAL', false).open).toBe(false)
+      const away = endpointReach('http://localhost:9100/metrics', 'INTERNAL', false)
+      expect(away.open).toBe(false)
+      // INTERNAL is a ClusterIP Service: a port-forward reaches it, a host port does not exist.
+      expect(away.note).toMatch(/kubectl port-forward/)
     })
 
     /* UNKNOWN behaves as NETWORK: rows registered before the column existed must not be demoted to
@@ -605,14 +608,14 @@ describe('Directory reachability', () => {
       expect(endpointReach('http://grafana.plant.local:3002', 'UNKNOWN', false).open).toBe(true)
     })
 
-    it('still refuses a container hostname, and says why rather than calling it "not a web page"', () => {
-      const r = endpointReach('http://node-exporter:9100/metrics', 'INTERNAL', true)
+    it('still refuses an in-cluster hostname, and says why rather than calling it "not a web page"', () => {
+      const r = endpointReach('http://alloy:12345/api/v0/component/prometheus.exporter.unix.host/metrics', 'INTERNAL', true)
       expect(r.open).toBe(false)
-      expect(r.note).toMatch(/container network/)
+      expect(r.note).toMatch(/inside the cluster only/)
     })
 
     it('still refuses a non-web scheme, and says THAT rather than talking about networks', () => {
-      const r = endpointReach('postgres://localhost:5433', 'HOST', true)
+      const r = endpointReach('postgres://timescaledb:5432', 'INTERNAL', true)
       expect(r.open).toBe(false)
       expect(r.note).toMatch(/Not a web page/)
     })
@@ -626,8 +629,8 @@ describe('Directory reachability', () => {
     beforeEach(() => {
       api.get.mockResolvedValue([
         { ...svc('Grafana Dashboards', 'MONITORING', 'http://localhost:3002'), exposure: 'NETWORK' },
-        { ...svc('Prometheus Metrics Store', 'MONITORING', 'http://localhost:9090'), exposure: 'HOST' },
-        { ...svc('Host Metrics Exporter', 'METRICS_EXPORTER', 'http://node-exporter:9100/metrics'), exposure: 'INTERNAL' },
+        { ...svc('Something Bound To Loopback', 'MONITORING', 'http://localhost:9090'), exposure: 'HOST' },
+        { ...svc('Host Metrics Exporter', 'METRICS_EXPORTER', 'http://alloy:12345/api/v0/component/prometheus.exporter.unix.host/metrics'), exposure: 'INTERNAL' },
         { ...svc('Something Newly Registered', 'GRAPHICAL_UI', 'http://elsewhere.plant.local') }
       ])
     })
@@ -641,6 +644,8 @@ describe('Directory reachability', () => {
       // The exporter is infrastructure, on its own tab.
       openTab('Data & Backend Infrastructure')
       expect(screen.getByText('internal')).toBeInTheDocument()
+      // A ClusterIP Service: its tooltip names the way in.
+      expect(screen.getByText('internal').getAttribute('title')).toMatch(/kubectl port-forward/)
     })
 
     it('keeps the loopback links clickable for a reader who is on the host', async () => {
@@ -702,7 +707,7 @@ describe('the Version column', () => {
   // "v3.14.0" beside "13.2.0" reads as two formats; the tooltip keeps the tag as published.
   it('drops one leading "v", and only from the display', async () => {
     api.get.mockResolvedValue([
-      { ...svc('Prometheus Metrics Store', 'MONITORING', 'http://localhost:9090'), image: 'prom/prometheus:v3.14.0' },
+      { ...svc('Prometheus Metrics Store', 'MONITORING', 'http://prometheus:9090'), image: 'prom/prometheus:v3.14.0' },
       { ...svc('Something Vendored', 'MONITORING', 'http://localhost:9091'), image: 'example/thing:vendor-2' }
     ])
     await renderTab()

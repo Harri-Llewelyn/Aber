@@ -152,6 +152,11 @@ spec:
             - name: DB_USER
               value: {{ $ingestUser | quote }}
             {{- include "aber.secretEnv" (dict "name" "DB_PASSWORD" "secretName" $secretName "key" $ingestPwKey) | nindent 12 }}
+            {{- if .Values.ingestion.allowHistorianSuperuser }}
+            {{- /* The second half of a recovery override: the daemon refuses a superuser without it. */}}
+            - name: ALLOW_HISTORIAN_SUPERUSER
+              value: "true"
+            {{- end }}
             {{- /* Host, port and TLS from one shared helper, so this and Node-RED cannot drift. */}}
             {{- include "aber.brokerClientEnv" . | nindent 12 }}
             {{- /*

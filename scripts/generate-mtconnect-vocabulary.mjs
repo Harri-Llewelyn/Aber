@@ -25,7 +25,7 @@ const SCHEMA_URL =
   `https://raw.githubusercontent.com/mtconnect/schema/master/MTConnectDevices_${SCHEMA_VERSION}_draft-04.schema.json`;
 
 /**
- * THE LIVE SEED (`0002`), AND IT HAS TO BE. `supabase-db-init` globs `/migrations/*.sql`, which
+ * THE LIVE SEED (`0002`), AND IT HAS TO BE. The db-init Job globs `/migrations/*.sql`, which
  * does not recurse, so anything written into `archive/` is never executed -- and the documented
  * procedure for adopting a newer MTConnect release ("bump SCHEMA_VERSION and re-run") would change
  * nothing on any database and say so nowhere. The archived file is a historical record, not an

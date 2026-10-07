@@ -7,17 +7,17 @@
 -- chain before 1.0 built (the chain is kept under `supabase/migrations/archive/`). Baseline data
 -- lives in `0002_seed_data.sql`.
 --
--- IDEMPOTENT, AND THAT IS NOT OPTIONAL. `supabase-db-init` replays every `/migrations/*.sql` on
--- every boot with no ledger, so every statement survives re-execution: `CREATE TABLE IF NOT
--- EXISTS`, `CREATE OR REPLACE` for functions and views, `DROP ... IF EXISTS` ahead of every
--- constraint, policy and trigger.
+-- IDEMPOTENT, AND THAT IS NOT OPTIONAL. The db-init Job (`aber-db-init`) replays every
+-- `/migrations/*.sql` on every install and upgrade with no ledger, so every statement survives
+-- re-execution: `CREATE TABLE IF NOT EXISTS`, `CREATE OR REPLACE` for functions and views,
+-- `DROP ... IF EXISTS` ahead of every constraint, policy and trigger.
 --
 -- Not here: the `storage.buckets` row (storage-api owns that schema and migrates it after
 -- db-init has finished; `scripts/storage-init.mjs` creates the bucket), and anything owned by
 -- GoTrue, Realtime or storage-api. The policies on `storage.objects` are here, because that
 -- table exists from the image's stub onward.
 --
--- PSQL VARIABLES. `supabase-db-init` passes `-v ts_host ts_port ts_dbname ts_user ts_password`.
+-- PSQL VARIABLES. db-init passes `-v ts_host ts_port ts_dbname ts_user ts_password`.
 -- Each is defaulted below so this file is still runnable standalone.
 -- =============================================================================================
 
@@ -6902,7 +6902,7 @@ BEGIN
     END IF;
 
     -- ---- Everything unobserved is set UNKNOWN on EVERY run. ----------------------------------
-    -- Not only on the first. If a job disappears from prometheus.yml, or a service is renamed so
+    -- Not only on the first. If a job is no longer scraped, or a service is renamed so
     -- the map stops matching, its row must fall back to UNKNOWN rather than keeping the last
     -- ACTIVE it was ever given -- which would be a fabricated status with a real timestamp, the
     -- most convincing kind.
@@ -6928,7 +6928,7 @@ ALTER FUNCTION public.refresh_directory_liveness() OWNER TO postgres;
 --
 
 -- FUNCTION refresh_directory_liveness() :: COMMENT
-COMMENT ON FUNCTION public.refresh_directory_liveness() IS 'Collects the previous Prometheus `up` probe, writes ACTIVE/DOWN for the six observed services and UNKNOWN for the rest, then queues the next probe. Returns how many rows were written from a real observation. Run every minute by cron; safe to call by hand.';
+COMMENT ON FUNCTION public.refresh_directory_liveness() IS 'Collects the previous Prometheus `up` probe, writes ACTIVE/DOWN for the services directory_liveness_job_map() names and UNKNOWN for the rest, then queues the next probe. Returns how many rows were written from a real observation. Run every minute by cron; safe to call by hand.';
 
 --
 
@@ -11453,7 +11453,7 @@ END $c$;
 --
 
 -- COLUMN directory_services.status :: COMMENT
-COMMENT ON COLUMN public.directory_services.status IS 'Observed liveness: ACTIVE (Prometheus reports up=1), DOWN (up=0), or UNKNOWN (nothing observes this service). Written only by refresh_directory_liveness(). UNKNOWN is not a failure -- nine of the fifteen registered services have no exporter, and saying so is the point.';
+COMMENT ON COLUMN public.directory_services.status IS 'Observed liveness: ACTIVE (Prometheus reports up=1), DOWN (up=0), or UNKNOWN (nothing observes this service). Written only by refresh_directory_liveness(). UNKNOWN is not a failure -- a service with no exporter reads UNKNOWN, and saying so is the point.';
 
 --
 
@@ -11463,7 +11463,7 @@ COMMENT ON COLUMN public.directory_services.last_heartbeat IS 'When this service
 --
 
 -- COLUMN directory_services.exposure :: COMMENT
-COMMENT ON COLUMN public.directory_services.exposure IS 'Where this service can be reached FROM, as a property of its port binding rather than of its URL: NETWORK (published on every interface), HOST (bound to 127.0.0.1 -- the deployment host or an SSH tunnel), INTERNAL (no host port; container network only), UNKNOWN (not recorded). Describes the Compose deployment the seed describes; a deployment that publishes differently updates it. Consumed by the Directory page, which combines it with the URL''s own host -- a loopback ADDRESS cannot work from a remote browser however broadly the PORT is published.';
+COMMENT ON COLUMN public.directory_services.exposure IS 'Where this service can be reached FROM, as a property of how it is published rather than of its URL: NETWORK (outside the cluster, through an Ingress host or a LoadBalancer port), HOST (bound to the deployment host''s 127.0.0.1 -- the host itself or an SSH tunnel), INTERNAL (a ClusterIP Service only -- inside the cluster, or through kubectl port-forward), UNKNOWN (not recorded). The seed writes the chart''s rows on every db-init run, the ones behind an ingress route from the chart''s directory_exposure map. Consumed by the Directory page, which combines it with the URL''s own host -- a loopback ADDRESS cannot work from a remote browser however broadly the service is published.';
 
 --
 
@@ -19141,7 +19141,7 @@ REVOKE ALL ON SEQUENCE public.audit_trail_id_seq FROM anon, authenticated;
 REVOKE ALL ON SEQUENCE public.audit_trail_id_seq FROM service_role;
 
 -- APPEND-ONLY IS ENFORCED BY THE ABSENCE OF A GRANT, which is precisely what a dump cannot state.
--- `service_role` is the credential ingestion and every edge function hold, so these two tables --
+-- `service_role` is the credential every edge function holds, so these two tables --
 -- the audit trail and the ledger that stops a one-shot migration running twice -- are the two the
 -- squash must not hand back write access to. A generated baseline grants ALL by default and the
 -- only trace of the mistake would be four extra words in one ACL line.
