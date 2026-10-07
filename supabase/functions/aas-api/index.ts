@@ -20,6 +20,7 @@ import {
 } from "../_shared/aas/shell.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
+import { logFailure, REQUEST_ID_HEADER, requestIdOf, SERVER_FAILURE } from "../_shared/failure.ts";
 
 const SERVICE_NAME = "aas-api";
 const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" };
@@ -31,12 +32,13 @@ const json = (body: unknown, status = 200) =>
  * The specification's error shape: a conformant client parses `messages[]`, not a bare `{error:
  * "..."}`.
  */
-const problem = (status: number, text: string, code = String(status)) =>
+const problem = (status: number, text: string, code = String(status), correlationId?: string) =>
   json({
     messages: [{
       messageType: "Error",
       text,
       code,
+      ...(correlationId ? { correlationId } : {}),
       timestamp: new Date().toISOString(),
     }],
   }, status);
@@ -385,8 +387,14 @@ export default async function handler(req: Request): Promise<Response> {
 
     return problem(404, `Not found: ${path}`, "404");
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return problem(500, message || "Internal server error", "500");
+    // The specification's shape, with the request id as the message's correlationId and in the
+    // header; the error itself goes to the log under that id.
+    const requestId = requestIdOf(req);
+    logFailure(SERVICE_NAME, requestId, err);
+    const failed = problem(500, SERVER_FAILURE, "500", requestId);
+    failed.headers.set(REQUEST_ID_HEADER, requestId);
+    failed.headers.set("Access-Control-Expose-Headers", REQUEST_ID_HEADER);
+    return failed;
   }
 }
 

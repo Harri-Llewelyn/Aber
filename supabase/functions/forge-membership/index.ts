@@ -27,6 +27,7 @@ import { serviceRoleClient } from "../_shared/serviceClient.ts";
 import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
+import { serverError } from "../_shared/failure.ts";
 import {
   ensureOrganisation,
   ensurePlatformOrganisation,
@@ -201,8 +202,11 @@ export default async function handler(req: Request): Promise<Response> {
     teamIds = null;
     readersId = null;
     placed.delete(username);
-    console.error(`forge-membership: placement FAILED for ${user.email} (${username}): ${err instanceof Error ? err.message : err}`);
-    return json({ error: "Could not place the caller in a forge team", details: err instanceof Error ? err.message : String(err) }, 502);
+    return serverError(req, "forge-membership", err, {
+      status: 502,
+      error: "Could not place the caller in a forge team",
+      context: `placement FAILED for ${user.email} (${username})`,
+    });
   }
 }
 

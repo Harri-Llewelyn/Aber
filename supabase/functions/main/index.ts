@@ -8,6 +8,7 @@
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { platformRootReader } from "../_shared/caPin.ts";
+import { serverError } from "../_shared/failure.ts";
 
 const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" };
 
@@ -306,14 +307,11 @@ Deno.serve(async (req: Request) => {
 
     return await worker.fetch(req);
   } catch (err) {
-    // Report the real failure. Never mask it as a 404 -- that is what made the
-    // original bug undiagnosable from both the logs and the browser.
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`failed to boot worker for '${serviceName}': ${message}`);
-
-    return new Response(
-      JSON.stringify({ error: `Failed to invoke '${serviceName}'`, details: message }),
-      { status: 500, headers: jsonHeaders }
-    );
+    // A 500 naming the function, never a 404, with the boot error in the log under the request id:
+    // this answer reaches callers who have not signed in. offline-check.sh matches the sentence.
+    return serverError(req, "main", err, {
+      error: `Failed to invoke '${serviceName}'`,
+      context: `the '${serviceName}' worker failed`,
+    });
   }
 });

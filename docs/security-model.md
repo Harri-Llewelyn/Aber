@@ -24,6 +24,13 @@ unrecognised role produces `403`.
 | **Supabase Studio** | Behind the gateway's `studio` listener: an OAuth login against this stack's GoTrue and an `Administrator` check (`0081`). Off the Ingress by default |
 | **The forge** | Behind the gateway's `forge` listener: the same login, admitting `Administrator` and `Shopfloor_Manager` (`0094`). Gitea's own HTTP port is reachable only from the gateway and the edge runtime |
 
+**An error tells the caller what to fix, never how the platform is built.** A refusal the caller
+can act on says what to change. An edge function that fails unexpectedly answers a fixed sentence
+and a request id. The error's own text can name an internal host, a table or a constraint, so it
+goes only to the function's log, under that id
+([`supabase/functions/README.md`](../supabase/functions/README.md#when-a-function-fails)). PostgREST
+is not covered: an RPC's error still carries the database's message.
+
 ## Historian roles
 
 The historian is a separate database, and a grant issued in a Supabase migration does not reach it.

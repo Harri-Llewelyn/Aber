@@ -4,6 +4,7 @@ import { strToU8 } from "fflate";
 import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
+import { serverError } from "../_shared/failure.ts";
 import { brokerPublicHost, platformPublicUrl } from "../_shared/publicAddresses.ts";
 import { BUNDLE_VERSION, newCredentialSecret, renderGatewayEnv } from "../_shared/gatewayEnv.ts";
 import {
@@ -120,9 +121,13 @@ async function rootIsFetchable(caUrl: string): Promise<string | null> {
     if (!response.ok) return `${caUrl} answers ${response.status}, so an appliance has no root to fetch`;
     return null;
   } catch (err) {
+    // The fetch error's own text goes to the log: the reason is shown to any signed-in user.
+    if (!(err instanceof Error && err.name === "TimeoutError")) {
+      console.warn(`gateway-bundle: ${caUrl} could not be fetched: ${err instanceof Error ? err.message : err}`);
+    }
     const why = err instanceof Error && err.name === "TimeoutError"
       ? `did not answer within ${ROOT_PROBE_TIMEOUT_MS} ms`
-      : `could not be fetched (${err instanceof Error ? err.message : err})`;
+      : "could not be fetched (the functions' log has the error)";
     return `${caUrl} ${why}, so an appliance has no root to fetch`;
   }
 }
@@ -320,7 +325,10 @@ export default async function handler(req: Request): Promise<Response> {
       .maybeSingle();
 
     if (gatewayError) {
-      return json(500, { error: "Could not read the gateway", details: gatewayError.message });
+      return serverError(req, "gateway-bundle", gatewayError, {
+        error: "Could not read the gateway",
+        context: `reading gateway ${gatewayId}`,
+      });
     }
     if (!gateway) {
       return json(404, { error: "No such gateway" });
@@ -513,8 +521,7 @@ See README.md for the rest, including what to do if the token has expired.
       },
     });
   } catch (err) {
-    console.error("gateway-bundle failed:", err);
-    return json(500, { error: "Could not generate the bundle", details: err instanceof Error ? err.message : String(err) });
+    return serverError(req, "gateway-bundle", err, { error: "Could not generate the bundle" });
   }
 }
 

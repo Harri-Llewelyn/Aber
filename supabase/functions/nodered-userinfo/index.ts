@@ -13,6 +13,7 @@ import { serviceRoleClient } from "../_shared/serviceClient.ts";
 import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
+import { serverError } from "../_shared/failure.ts";
 
 /**
  * Supabase RBAC role to Node-RED permissions. Node-RED has only '*' and 'read', and everything
@@ -88,10 +89,7 @@ export default async function handler(req: Request): Promise<Response> {
 
     return jsonResponse(body, 200);
   } catch (err) {
-    return jsonResponse(
-      { error: "Failed to resolve user info", details: err instanceof Error ? err.message : String(err) },
-      500
-    );
+    return serverError(req, "nodered-userinfo", err, { error: "Failed to resolve user info" });
   }
 }
 
