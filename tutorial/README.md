@@ -2,7 +2,8 @@
 
 In about twenty minutes you connect one machine to Aber and watch its readings arrive. You create a
 [cell](../docs/glossary.md#cell), a [gateway](../docs/glossary.md#gateway), a
-[schema](../docs/glossary.md#schema) and a [device](../docs/glossary.md#device), then build a small
+[metric](../docs/glossary.md#metric), a [schema](../docs/glossary.md#schema) and a
+[device](../docs/glossary.md#device), then build a small
 [Node-RED](../docs/glossary.md#node-red) flow that sends the device's readings. Every step is one you
 would repeat for real hardware.
 
@@ -13,7 +14,7 @@ the password `aber123`. On a site, use the first administrator that `npm run set
 **A new install is empty.** It has no cells, gateways, devices or schemas, Node-RED opens on an empty
 editor, and Grafana's dashboards describe the platform rather than a shopfloor. The one gateway
 listed is the **Playback gateway**, which replays recorded data. You can ignore it until you record
-something.
+something. On a site the metric catalog is empty too. On a laptop it holds some example metrics.
 
 | You will use | On a laptop | On a site |
 | :--- | :--- | :--- |
@@ -59,7 +60,7 @@ later, check this first.
 
 Open the gateway's drawer by clicking its row, then choose **Generate Broker Credential**. Type the
 gateway's name and choose **Issue Credential**. Copy the username and password it shows: you enter
-them in Node-RED in step 7. If you lose them, an `Administrator` can show them again from the same
+them in Node-RED in step 8. If you lose them, an `Administrator` can show them again from the same
 drawer (**Show Broker Credential**).
 
 The order of steps 3 and 4 matters. The broker account's username is the gateway's Sparkplug ID, so
@@ -70,7 +71,24 @@ offers an install command to paste on a fresh Ubuntu machine, or a bundle for on
 Docker. That computer then sets itself up and gets its own password, which never passes through a
 browser. [`docs/remote-gateways.md`](../docs/remote-gateways.md) covers it.
 
-### 5. Create a schema
+### 5. Register a metric
+
+A metric is one value a device sends, such as a temperature. The device in this tutorial sends
+`Systems/TEMPERATURE`. Register it in the catalog first, so your schema can use it.
+
+1. Open **Metrics** and choose **Add Metric**.
+2. Leave **Standard** on **MTConnect**.
+3. Set **Group** to **Systems** and **Data Item Type** to **TEMPERATURE**.
+4. Set **Units** to **CELSIUS**. Leave **Sparkplug Datatype** on **Double**.
+5. Check that the dialog says devices will publish it as `Systems/TEMPERATURE`, then choose **Add**.
+
+Only an `Administrator` can add a metric. On a laptop the catalog already lists
+`Systems/TEMPERATURE` among its example metrics, so you can skip this step there.
+
+**A metric's name and datatype cannot be changed after you add it.** Check both before you choose
+**Add**: devices are set up against them.
+
+### 6. Create a schema
 
 Open **Schemas** and choose **Build Schema from Catalog**. A schema says what a kind of device
 sends: which [metrics](../docs/glossary.md#metric), of which type, meaning what. Each metric comes
@@ -83,20 +101,20 @@ Create the schema before the device. Without one:
   nameplate and nothing else.
 - The device's **Configuration Parameters** panel has nothing to show.
 
-Pick metric names from the catalog rather than inventing them. A name the catalog does not have is
-shown as plain text and exported without a standard identifier.
+Add `Systems/TEMPERATURE` from step 5. Pick metric names from the catalog rather than inventing them.
+A name the catalog does not have is shown as plain text and exported without a standard identifier.
 
-### 6. Create the device
+### 7. Create the device
 
 Open **Devices** and choose **New Device**. Choose the gateway from step 3, the cell from step 2 and
-the schema from step 5. **Copy the Sparkplug ID it shows**: `dev` followed by 21 characters, made the
+the schema from step 6. **Copy the Sparkplug ID it shows**: `dev` followed by 21 characters, made the
 same way as the gateway's.
 
 You can skip this step too. Send messages under any well-formed `dev` id you make up, and the device
 waits in [quarantine](../docs/glossary.md#quarantine) for you to approve it. See
 [*Let a device arrive on its own*](#let-a-device-arrive-on-its-own), below.
 
-### 7. Build the flow in Node-RED
+### 8. Build the flow in Node-RED
 
 Open the Node-RED editor. It starts empty. You need one connection to the broker, and enough
 [Sparkplug B](../docs/glossary.md#sparkplug-b) messages for Aber to recognise the gateway and device:
@@ -116,7 +134,7 @@ it starts, so leave the server and port as they are. The broker accepts a gatewa
 its own Sparkplug ID ([`mosquitto/README.md`](../mosquitto/README.md#broker-topic-authorisation)
 says why).
 
-### 8. Check that it worked
+### 9. Check that it worked
 
 - On **Gateways**, the gateway turns `ONLINE` within one heartbeat.
 - On **Devices**, the device appears with its readings arriving.
@@ -127,7 +145,7 @@ says why).
 
 ## Add more devices
 
-A second device on a flow that already works is steps 6 and 7 again:
+A second device on a flow that already works is steps 7 and 8 again:
 
 1. Create the device on **Devices**, and copy its **Sparkplug ID**.
 2. Put that id at the end of the device's topics **and** in the `Asset_ID` metric of its `DBIRTH`
@@ -186,7 +204,7 @@ shows it on that item's page, where you can click it to copy it. It never change
 anything without breaking it.
 
 Nothing on a new install has an id yet, so the pair you send under is the pair the dashboard issued
-in steps 3 and 6. That is why those steps come first.
+in steps 3 and 7. That is why those steps come first.
 
 The examples use `gwy120000000000400080000` and `dev220000000000400080000` in place of your two ids.
 Use your own throughout.

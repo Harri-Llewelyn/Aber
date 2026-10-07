@@ -90,8 +90,9 @@ const MIRRORS = [
   {
     source: 'supabase',
     dest: 'seed',
-    match: (name) => name === 'seed.sql',
-    why: 'GoTrue demo accounts and user_roles; runs after the migrations',
+    // Each file is opt-in by its own chart value; db-init.yaml gates it into the ConfigMap.
+    match: (name) => name === 'seed.sql' || name === 'example-metrics.sql',
+    why: 'GoTrue demo accounts and user_roles, and the example metrics; run after the migrations',
   },
   {
     source: 'supabase',
