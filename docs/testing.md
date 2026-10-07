@@ -85,6 +85,9 @@ python supabase/test_auth_rate_limit.py
 # write since the daemon started, and a saturated stack and a generator that cannot push hard
 # enough both show as a shortfall against target.
 python test-harness/test_load_generator.py
+# The broker verdict the stack suites read a credential from: a timeout is retried and is never a
+# refusal, so a slow runner neither fails a working credential nor passes a revocation.
+python test-harness/test_stack_exec.py
 python ingestion/test_entity_cache.py
 python ingestion/test_telemetry_batching.py
 # The historian writer -- several messages become one transaction; one bad message still loses one

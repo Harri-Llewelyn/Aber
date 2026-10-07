@@ -141,13 +141,11 @@ def client_entry(username):
 
 
 def publish_as(username, password):
-    """Publish under the account's own edge node over MQTTS; the exit status is the broker's answer."""
-    return stack_exec.run(
-        "broker", "mosquitto_pub",
-        "--cafile", "/mosquitto/certs/ca.crt", "-h", stack_exec.broker_host(), "-p", "8883",
-        "-u", username, "-P", password,
-        "-t", f"spBv1.0/Aber/DBIRTH/{username}/probe", "-m", "x",
-    )
+    """
+    Publish under the account's own edge node over MQTTS, and return the broker's verdict and the
+    process. A timeout is retried and never read as a refusal (stack_exec.publish).
+    """
+    return stack_exec.publish(username, password, f"spBv1.0/Aber/DBIRTH/{username}/probe")
 
 
 @unittest.skipIf(not TOKEN, "MQTT_CREDENTIAL_SERVICE_TOKEN is not set")
@@ -252,10 +250,10 @@ class TestIssuance(CredentialServiceBase):
 
         # And it is a real credential. Published over MQTTS on 8883 under its OWN edge node, which
         # is the only subtree its role permits it.
-        publish = publish_as(TEST_GW, payload["password"])
+        verdict, publish = publish_as(TEST_GW, payload["password"])
         self.assertEqual(
-            publish.returncode, 0,
-            f"the issued credential was refused by the broker: {publish.stderr.strip()}",
+            verdict, stack_exec.ACCEPTED,
+            f"the issued credential was {verdict} by the broker: {publish.stderr.strip()}",
         )
 
     def test_reissuing_replaces_rather_than_appends(self):
@@ -271,10 +269,11 @@ class TestIssuance(CredentialServiceBase):
         self.assertEqual(len(after), len(before), "re-issuing added a second account")
         self.assertEqual(after.count(TEST_GW), 1)
 
-        self.assertEqual(publish_as(TEST_GW, second["password"]).returncode, 0, "the new password does not work")
-        self.assertNotEqual(
-            publish_as(TEST_GW, first["password"]).returncode, 0,
-            "the SUPERSEDED password still authenticates",
+        self.assertEqual(publish_as(TEST_GW, second["password"])[0], stack_exec.ACCEPTED,
+                         "the new password does not work")
+        self.assertEqual(
+            publish_as(TEST_GW, first["password"])[0], stack_exec.REFUSED,
+            "the SUPERSEDED password was not refused",
         )
 
     def test_the_password_is_generated_when_not_supplied(self):
@@ -286,7 +285,7 @@ class TestIssuance(CredentialServiceBase):
 class TestRevocation(CredentialServiceBase):
     def test_revoking_disables_and_reissuing_reenables(self):
         _, issued = call({"sparkplug_id": TEST_GW})
-        self.assertEqual(publish_as(TEST_GW, issued["password"]).returncode, 0)
+        self.assertEqual(publish_as(TEST_GW, issued["password"])[0], stack_exec.ACCEPTED)
         before = accounts()
 
         status, payload = call({"sparkplug_id": TEST_GW}, path="/revocations")
@@ -295,8 +294,8 @@ class TestRevocation(CredentialServiceBase):
         self.assertTrue(payload["existed"])
 
         # Refused at CONNECT, still listed, listed as disabled -- and nothing else lost.
-        self.assertNotEqual(publish_as(TEST_GW, issued["password"]).returncode, 0,
-                            "a revoked account still authenticates")
+        self.assertEqual(publish_as(TEST_GW, issued["password"])[0], stack_exec.REFUSED,
+                         "a revoked account was not refused")
         self.assertEqual(set(accounts()), set(before))
         self.assertTrue(client_entry(TEST_GW)["disabled"])
 
@@ -305,7 +304,7 @@ class TestRevocation(CredentialServiceBase):
         self.assertEqual(status, 200)
         self.assertTrue(again["replaced"])
         self.assertFalse(client_entry(TEST_GW)["disabled"])
-        self.assertEqual(publish_as(TEST_GW, again["password"]).returncode, 0)
+        self.assertEqual(publish_as(TEST_GW, again["password"])[0], stack_exec.ACCEPTED)
 
     def test_revoking_an_unknown_account_creates_nothing(self):
         before = accounts()

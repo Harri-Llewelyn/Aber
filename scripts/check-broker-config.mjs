@@ -335,7 +335,10 @@ function cleanup() {
 }
 
 const startFailure = (r) => (r.log.match(/^.*Error.*$/gim) || []).slice(0, 3).join('\n         ') || r.log.slice(0, 300);
-const refusedConnect = (result) => /not authorised|Connection Refused/i.test(result.stderr + result.stdout);
+// The broker's refusal of a credential, in MQTT 3.1.1 and 5 wording. Not "connection refused",
+// which a refused TCP connection prints too.
+const refusedConnect = (result) =>
+  /not authori[sz]ed|bad user name or password/i.test(result.stderr + result.stdout);
 
 try {
   // 0. The boot reconcile writes the document the broker will start on. This is the real script in

@@ -891,6 +891,14 @@ export const SUITES = {
       'ON CONFLICT DO NOTHING, so a repeated stamp loses its rows while the write path still ' +
       'counts them.',
   },
+  'test-harness/test_stack_exec.py': {
+    lanes: ['unit'],
+    why:
+      'The verdict the stack suites read a broker credential from. A timeout read as a refusal ' +
+      'passes a revocation that never happened, and one read as an answer fails a working ' +
+      'credential on a slow runner; "connection refused" is printed for a refused TCP connection ' +
+      'too, so matching it would do the first.',
+  },
   'test-harness/test_log_pipeline.py': {
     // STACK ONLY, AND IT CANNOT BE ANYTHING ELSE. Every assertion here is about four processes
     // and two independent stores agreeing at run time -- broker, daemon, collector, store. The
