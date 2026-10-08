@@ -14,7 +14,7 @@
  * a blank flow and when. tutorial/README.md holds the walkthrough, and node-red/README.md the
  * failure modes behind each authentication guard.
  *
- * Verified against Node-RED 5.0.1.
+ * Verified against Node-RED 5.0.7.
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';

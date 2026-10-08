@@ -367,8 +367,7 @@ def probe_nodered_editor_login():
         if user.get("permissions") != "*":
             return False, (f"editor session reports permissions={user.get('permissions')!r} for an "
                            "Administrator; expected '*'. The Deploy button will show a padlock. "
-                           "adminAuth.users must return permissions, and the map backing it must "
-                           "be persisted -- an in-memory one is empty after every restart.")
+                           "adminAuth.users must return the permissions the sign-in gave.")
 
         flows_res = fetch(f"{NODERED_BASE_URL}/flows",
                           headers={"Authorization": f"Bearer {editor_token}"})

@@ -533,14 +533,15 @@ static_resources:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
     # THE FORGE'S LOGIN (supabase/README.md, "The forge's door"). Gitea cannot be an OIDC client of
-    # GoTrue, so Studio's three filters run the code flow, verify the token locally, and hand the
-    # identity to Gitea as X-WEBAUTH-* headers through its reverse-proxy authentication; Administrator
-    # and Shopfloor_Manager get in, and what a person may do inside is Gitea's team model. The headers
-    # are the credential: Gitea signs in whoever X-WEBAUTH-USER names, so the control is that only this
-    # listener and the edge runtime can reach Gitea's HTTP port (the NetworkPolicy), the routes overwrite
-    # or remove the headers, and the API ignores them. Two paths pass without a session, written in all
-    # three filters because they share no matcher: /api/ and /assets/ssh_host_key.pub. Smart-HTTP clone
-    # ends at a redirect by design; clones are SSH, through gitea-external.
+    # GoTrue, so the oauth2, jwt_authn and rbac filters Studio's listener also runs do the code flow,
+    # verify the token locally, and hand the identity to Gitea as X-WEBAUTH-* headers through its
+    # reverse-proxy authentication; Administrator and Shopfloor_Manager get in, and what a person may
+    # do inside is Gitea's team model. The headers are the credential: Gitea signs in whoever
+    # X-WEBAUTH-USER names, so the control is that only this listener and the edge runtime can reach
+    # Gitea's HTTP port (the NetworkPolicy), the routes overwrite or remove the headers, and the API
+    # ignores them. Two paths pass without a session, written in all three of those filters because
+    # they share no matcher: /api/ and /assets/ssh_host_key.pub. Smart-HTTP clone ends at a redirect
+    # by design; clones are SSH, through gitea-external.
     - name: forge
       address:
         socket_address: { address: 0.0.0.0, port_value: 8002 }
@@ -756,6 +757,9 @@ static_resources:
                       transport_api_version: V3
                       failure_mode_allow: true
                       status_on_error: { code: ServiceUnavailable }
+                      allowed_headers:
+                        patterns:
+                          - exact: authorization
                       http_service:
                         server_uri:
                           uri: http://supabase-functions:9000
@@ -763,10 +767,6 @@ static_resources:
                           timeout: 8s
                         # The edge runtime routes on the first path segment.
                         path_prefix: /forge-membership
-                        authorization_request:
-                          allowed_headers:
-                            patterns:
-                              - exact: authorization
                         authorization_response:
                           allowed_client_headers:
                             patterns:
