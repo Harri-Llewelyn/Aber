@@ -72,9 +72,9 @@ ON CONFLICT (name) DO NOTHING;
 
 -- ASHRAE 223P: facility and BMS ambient telemetry (5 rows). 223P is a reference here: its classes
 -- name equipment, not readings, so each row carries the QUDT quantity kind of what it reports, the
--- kind 223P's models give the observed property. QUDT is not seeded, so these ids are typed; the
--- rows of 0172 and check-docs-drift check 47 hold the same five pairs. A metric name forbids the
--- hyphen in 223P's `Constituent-CO2`, hence `BMS/CO2_CONCENTRATION`.
+-- kind 223P's models give the observed property. QUDT is not seeded, so these ids are typed, and
+-- check-docs-drift check 47 holds them to the pairs 0172 repoints an older install to. A metric
+-- name forbids the hyphen in 223P's `Constituent-CO2`, hence `BMS/CO2_CONCENTRATION`.
 INSERT INTO public.metric_catalog (name, datatype, description, category, units, standard,
                                    semantic_id, semantic_id_type)
 SELECT s.name, s.datatype, s.description, s.category, s.units, 'ASHRAE 223P', s.semantic_id, 'IRI'

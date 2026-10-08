@@ -101,7 +101,8 @@ before proposing a change:
 Three decisions shape every metric the form creates from a vocabulary, whatever the standard:
 
 - **A metric's semantic id names the concept, not the metric.** ISO 22400 and OPC UA take the
-  vocabulary row's id. 223P gives none: it is a reference here (*ASHRAE 223P* below). An MTConnect metric takes its data item type's id,
+  vocabulary row's id, and 223P, a reference here, gives none. An MTConnect metric takes its data
+  item type's id,
   `…/mtconnect/v2.0/DataItemType/<TYPE>`, so `Axes/X/POSITION` and `Axes/W/POSITION` share one;
   the component path, instance and subType stay in the name and `sub_type` (#457). A custom
   MTConnect type is a local extension and gets no id.
@@ -329,6 +330,32 @@ plus `STANDARDS.ASHRAE223`, `utils/ashrae223.js`, a Vocabulary-page tab and an A
 the one vocabulary here with a table of its own: it is not an OPC UA companion specification, and
 filing it in `opcua_vocabulary` would misstate its provenance.
 
+- **Real external IRIs** under `http://data.ashrae.org/standard223#`, the second vocabulary (after
+  IDTA) whose `semantic_id` is not locally minted.
+- **Pre-publication, and said so.** The concept IRIs come from a pre-publication ontology release, so
+  a concept moving before publication is foreseeable rather than a surprise.
+- **One `metric_groups` row, not 640.** `enforce_metric_group_spelling()` makes the first spelling
+  permanent, so registering a group per concept, for a standard that is not yet published, would
+  permanently fix a naming the standard may still change. The group is `BMS`, so a point is
+  `BMS/<concept>`: a `Building` group would put the word in the group picker and in device tags,
+  where the dashboard says *area* (#456). `check-mirror-drift.mjs` holds the form and the seed to
+  the same group.
+- **A real Turtle tokeniser, not a regex, and the trap was concrete.** `rdfs:comment` appears inside
+  the nested `sh:property [ … ]` blank nodes as a SHACL constraint message, several times per class.
+  A scan that found `rdfs:comment` after a subject would have described `s223:Fan` as *"A `Fan` shall
+  have at least one outlet using the medium `Fluid-Air`"*. The parser tracks bracket depth and reads
+  predicates only at the top level of a subject block.
+- **Whitespace is collapsed in descriptions**, because several comments are hard-wrapped in the
+  ontology and a newline inside a SQL string breaks the one-statement-per-line shape the digest, the
+  seed-sync check and every `git diff` of that file rely on.
+- **Only the `s223:` namespace is seeded.** The ontology `owl:imports` QUDT
+  (`http://qudt.org/3.2.1/shacl/qudt-all`) for quantity kinds and units. Following it would pull in
+  a second vocabulary several times the size, under its own licence (CC BY 4.0). Units come from
+  MTConnect's `units` vocabulary; the example readings cite QUDT quantity kinds without seeding
+  them.
+- **Browsable without a BMS adapter.** Per-point tagging over BACnet is the long pole, and the
+  vocabulary does not wait for it.
+
 **223P is a reference here, not a source of metric semantic ids (#461).** A 223P class names
 equipment or a substance, not a reading. In 223P a reading is a `QuantifiableObservableProperty`
 with a QUDT quantity kind (`qudt:hasQuantityKind`), observed by a sensor. So
@@ -343,7 +370,8 @@ datatype, the units and the id. A class shows as in use when a 223P metric is na
 `http://qudt.org/vocab/quantitykind/<Kind>` with `semantic_id_type` `IRI`. Each IRI was
 dereferenced on 2026-10-08 and is defined by QUDT 3.5.2's quantity-kind vocabulary, none
 deprecated. Each kind is the one the pinned 223P ontology's sensor class admits for that reading,
-and the QUDT unit of the metric's unit lists it:
+and QUDT lists the metric's unit among the kind's units (`unit:PERCENT_RH` for the humidity's
+`PERCENT`):
 
 | Metric | Unit | Quantity kind | Why this kind |
 | :--- | :--- | :--- | :--- |
@@ -374,32 +402,6 @@ has no case for QUDT.
 **The full model waits for a BMS adapter:** a QUDT quantity-kind vocabulary of its own, with its
 provenance, and a second field saying what a point is attached to (its 223P class). Until then the
 class lives only in a metric's name.
-
-- **Real external IRIs** under `http://data.ashrae.org/standard223#`, the second vocabulary (after
-  IDTA) whose `semantic_id` is not locally minted.
-- **Pre-publication, and said so.** The concept IRIs come from a pre-publication ontology release, so
-  a concept moving before publication is foreseeable rather than a surprise.
-- **One `metric_groups` row, not 640.** `enforce_metric_group_spelling()` makes the first spelling
-  permanent, so registering a group per concept, for a standard that is not yet published, would
-  permanently fix a naming the standard may still change. The group is `BMS`, so a point is
-  `BMS/<concept>`: a `Building` group would put the word in the group picker and in device tags,
-  where the dashboard says *area* (#456). `check-mirror-drift.mjs` holds the form and the seed to
-  the same group.
-- **A real Turtle tokeniser, not a regex, and the trap was concrete.** `rdfs:comment` appears inside
-  the nested `sh:property [ … ]` blank nodes as a SHACL constraint message, several times per class.
-  A scan that found `rdfs:comment` after a subject would have described `s223:Fan` as *"A `Fan` shall
-  have at least one outlet using the medium `Fluid-Air`"*. The parser tracks bracket depth and reads
-  predicates only at the top level of a subject block.
-- **Whitespace is collapsed in descriptions**, because several comments are hard-wrapped in the
-  ontology and a newline inside a SQL string breaks the one-statement-per-line shape the digest, the
-  seed-sync check and every `git diff` of that file rely on.
-- **Only the `s223:` namespace is seeded.** The ontology `owl:imports` QUDT
-  (`http://qudt.org/3.2.1/shacl/qudt-all`) for quantity kinds and units. Following it would pull in
-  a second vocabulary several times the size, under its own licence (CC BY 4.0). Units come from
-  MTConnect's `units` vocabulary; the example readings cite QUDT quantity kinds without seeding
-  them.
-- **Browsable without a BMS adapter.** Per-point tagging over BACnet is the long pole, and the
-  vocabulary does not wait for it.
 
 ---
 
