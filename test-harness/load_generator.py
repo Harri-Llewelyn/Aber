@@ -2,9 +2,10 @@
 Synthetic Sparkplug B load, for measuring where this stack stops keeping up.
 
 Publishes DDATA for a fleet that `scripts/load-test.mjs up` provisioned, holding each rate in
-`--plan` for its duration, and samples the ingestion daemon's own metrics endpoint across every
-step. The report names the step at which the historian writer stopped draining its queue, and
-whether the shortfall was the stack's or this generator's.
+`--plan` for its duration (and, with `--soak`, the last rate that held for longer), and samples the
+ingestion daemon's own metrics endpoint across every step. The report names the step at which the
+historian writer stopped draining its queue, and whether the shortfall was the stack's or this
+generator's. `--compress` adds the run's chunks' compressed bytes a row.
 
 NOT the demonstration simulator: nothing here runs unless a Job is applied on purpose, the fleet
 must already exist in the directory, and the accounts it publishes as are fixture accounts.
@@ -198,10 +199,38 @@ def _set_value(metric, value):
         metric.datatype = 12
 
 
-def device_birth(asset_id, asset_name, metric_names, timestamp_ms):
+REBIRTH_METRIC_NAME = "Node Control/Rebirth"
+
+
+class SequenceCounter:
+    """
+    One edge node's Sparkplug `seq`, shared by its NBIRTH, DBIRTH and DDATA: an NBIRTH restarts it
+    at 0, every other message takes the next value, and it wraps from 255 to 0. A value is
+    committed only once its message was handed to the client, so a failed publish is not a gap.
+    """
+
+    def __init__(self):
+        self.last = None
+
+    def peek(self, msg_type):
+        if msg_type == "NBIRTH" or self.last is None:
+            return 0
+        return (self.last + 1) % 256
+
+    def commit(self, seq):
+        self.last = seq
+
+
+def asks_for_rebirth(payload):
+    """Whether an NCMD payload carries `Node Control/Rebirth` = true."""
+    return any(m.name == REBIRTH_METRIC_NAME and m.boolean_value for m in payload.metrics)
+
+
+def device_birth(asset_id, asset_name, metric_names, timestamp_ms, seq):
     """A DBIRTH declaring the metric set. Asset_ID is the cross-check against the topic."""
     payload = sparkplug_b_pb2.Payload()
     payload.timestamp = timestamp_ms
+    payload.seq = seq
     identity = payload.metrics.add()
     identity.name = "Asset_ID"
     identity.string_value = asset_id
@@ -218,10 +247,11 @@ def device_birth(asset_id, asset_name, metric_names, timestamp_ms):
     return payload.SerializeToString()
 
 
-def node_birth(timestamp_ms):
+def node_birth(timestamp_ms, seq):
     """An NBIRTH. Node topics carry no device, so there is no Asset_ID to declare."""
     payload = sparkplug_b_pb2.Payload()
     payload.timestamp = timestamp_ms
+    payload.seq = seq
     metric = payload.metrics.add()
     metric.name = "bdSeq"
     metric.timestamp = timestamp_ms
@@ -230,10 +260,11 @@ def node_birth(timestamp_ms):
     return payload.SerializeToString()
 
 
-def device_data(metric_names, timestamp_ms, rng):
+def device_data(metric_names, timestamp_ms, rng, seq):
     """A DDATA carrying one value per declared metric. No Asset_ID: the topic is authoritative."""
     payload = sparkplug_b_pb2.Payload()
     payload.timestamp = timestamp_ms
+    payload.seq = seq
     for name in metric_names:
         metric = payload.metrics.add()
         metric.name = name
@@ -326,6 +357,15 @@ class Sample:
                 total += value
         return total
 
+    def sequence_gaps(self, nodes=None):
+        """`aber_ingestion_sequence_gaps_total` summed over its edge nodes, or over `nodes` only."""
+        total = 0.0
+        for labels, value in self.labelled.get("aber_ingestion_sequence_gaps_total", {}).items():
+            node = labels.split('"')[1] if '"' in labels else labels
+            if nodes is None or node in nodes:
+                total += value
+        return total
+
     def write_buckets(self):
         """The write histogram's cumulative buckets as {upper bound: count}."""
         out = {}
@@ -364,6 +404,10 @@ class Publisher(threading.Thread):
     role confines an account to `spBv1.0/+/+/<its own id>/#`. It is also what keeps the generator
     off the critical path -- a single connection's socket writes would be measured instead of the
     stack.
+
+    It behaves as an edge node towards the daemon: one `seq` across its births and data, and an
+    NCMD `Node Control/Rebirth` answered with a fresh NBIRTH and DBIRTH set. Every publish happens
+    on this thread (or before it starts), so `seq` reaches the wire in order.
     """
 
     def __init__(self, gateway, devices, metric_names, group_id):
@@ -385,6 +429,10 @@ class Publisher(threading.Thread):
         # Messages the pacer gave up on rather than repaying as a burst. Non-zero means this
         # generator could not hold the step's rate.
         self.abandoned = 0
+        self.sequence = SequenceCounter()
+        # Set by an NCMD rebirth request on paho's thread, answered on this one.
+        self._rebirth = threading.Event()
+        self.rebirths = 0
         self._stop = threading.Event()
         self._cursor = 0
         self._epoch = time.perf_counter()
@@ -408,11 +456,13 @@ class Publisher(threading.Thread):
             )
             self.client.tls_insecure_set(False)
 
-        def on_connect(_client, _userdata, _flags, reason_code, _properties=None):
+        def on_connect(client, _userdata, _flags, reason_code, _properties=None):
             if getattr(reason_code, "value", reason_code) == 0:
+                client.subscribe(f"spBv1.0/{self.group_id}/NCMD/{self.node_id}", qos=0)
                 self.connected.set()
 
         self.client.on_connect = on_connect
+        self.client.on_message = self._on_command
         self.client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
         self.client.loop_start()
         if not self.connected.wait(timeout=30):
@@ -429,27 +479,57 @@ class Publisher(threading.Thread):
         self._last_ms[asset_id] = now
         return now
 
+    def _send(self, msg_type, topic, build):
+        """Publish `build(seq)` with this node's next `seq`. Returns whether the client took it."""
+        seq = self.sequence.peek(msg_type)
+        info = self.client.publish(topic, build(seq))
+        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            return False
+        self.sequence.commit(seq)
+        return True
+
     def births(self):
         """NBIRTH, then a DBIRTH per device. Returns how many births were published."""
         stamp = int(time.time() * 1000)
-        self.client.publish(f"spBv1.0/{self.group_id}/NBIRTH/{self.node_id}", node_birth(stamp))
+        self._send("NBIRTH", f"spBv1.0/{self.group_id}/NBIRTH/{self.node_id}",
+                   lambda seq: node_birth(stamp, seq))
         for device in self.devices:
-            asset_id = device["sparkplug_id"]
-            self.client.publish(
-                f"spBv1.0/{self.group_id}/DBIRTH/{self.node_id}/{asset_id}",
-                device_birth(asset_id, device["name"], self.metric_names, self._next_ms(asset_id)),
+            asset_id, name = device["sparkplug_id"], device["name"]
+            self._send(
+                "DBIRTH", f"spBv1.0/{self.group_id}/DBIRTH/{self.node_id}/{asset_id}",
+                lambda seq, a=asset_id, n=name: device_birth(
+                    a, n, self.metric_names, self._next_ms(a), seq),
             )
         return len(self.devices) + 1
+
+    def _on_command(self, _client, _userdata, message):
+        """An NCMD for this node, on paho's thread. Only a rebirth request is acted on."""
+        try:
+            payload = sparkplug_b_pb2.Payload()
+            payload.ParseFromString(message.payload)
+        except Exception:
+            return
+        if asks_for_rebirth(payload):
+            self._rebirth.set()
+
+    def answer_rebirth(self):
+        """The births again, if a rebirth was asked for since the last call. Returns whether."""
+        if not self._rebirth.is_set():
+            return False
+        self._rebirth.clear()
+        self.births()
+        self.rebirths += 1
+        return True
 
     def publish_one(self):
         device = self.devices[self._cursor % len(self.devices)]
         self._cursor += 1
         asset_id = device["sparkplug_id"]
-        payload = device_data(self.metric_names, self._next_ms(asset_id), self.rng)
-        info = self.client.publish(
-            f"spBv1.0/{self.group_id}/DDATA/{self.node_id}/{asset_id}", payload
+        sent = self._send(
+            "DDATA", f"spBv1.0/{self.group_id}/DDATA/{self.node_id}/{asset_id}",
+            lambda seq: device_data(self.metric_names, self._next_ms(asset_id), self.rng, seq),
         )
-        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+        if not sent:
             self.publish_errors += 1
             return False
         self.published += 1
@@ -463,6 +543,7 @@ class Publisher(threading.Thread):
         per second. `pace()` decides what is due and what is too old to send.
         """
         while not self._stop.is_set():
+            self.answer_rebirth()
             rate = self.target_rate
             if rate <= 0:
                 time.sleep(0.005)
@@ -511,20 +592,27 @@ SELECT coalesce(sum(total_bytes), 0)::bigint AS total,
 """
 
 
-def storage_snapshot():
-    """Bytes and chunk count for the telemetry hypertable, or None when no historian is configured."""
+def _historian():
+    """A connection to the historian, or None when none is configured or psycopg2 is absent."""
     if not DB_HOST:
         return None
     try:
         import psycopg2
     except ImportError:
         return None
+    return psycopg2.connect(
+        host=DB_HOST, port=DB_PORT, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD,
+        connect_timeout=15,
+    )
+
+
+def storage_snapshot():
+    """Bytes and chunk count for the telemetry hypertable, or None when no historian is configured."""
     connection = None
     try:
-        connection = psycopg2.connect(
-            host=DB_HOST, port=DB_PORT, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD,
-            connect_timeout=15,
-        )
+        connection = _historian()
+        if connection is None:
+            return None
         with connection.cursor() as cursor:
             cursor.execute(CHUNK_SIZE_SQL)
             total, heap, indexes, chunks = cursor.fetchone()
@@ -535,6 +623,68 @@ def storage_snapshot():
     except Exception as error:
         log(f"Storage snapshot unavailable: {error}")
         return None
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+# The chunks a run wrote into: every telemetry chunk whose range ends after the run started.
+RUN_CHUNKS_SQL = """
+SELECT format('%%I.%%I', chunk_schema, chunk_name), range_start, range_end
+  FROM timescaledb_information.chunks
+ WHERE hypertable_name = 'telemetry' AND range_end > to_timestamp(%s)
+ ORDER BY range_start
+"""
+CHUNKS_BYTES_SQL = """
+SELECT coalesce(sum(total_bytes), 0)::bigint
+  FROM chunks_detailed_size('telemetry')
+ WHERE format('%%I.%%I', chunk_schema, chunk_name) = ANY(%s)
+"""
+COMPRESSION_STATS_SQL = """
+SELECT coalesce(sum(before_compression_total_bytes), 0)::bigint,
+       coalesce(sum(after_compression_total_bytes), 0)::bigint
+  FROM chunk_compression_stats('telemetry')
+ WHERE format('%%I.%%I', chunk_schema, chunk_name) = ANY(%s)
+"""
+
+
+def compress_run_chunks(since):
+    """
+    compress_chunk() on every chunk the run wrote into, with chunks_detailed_size read before and
+    after. The chunks hold whatever else was written in their range, so the figures are the
+    chunks', counted over all their rows. Returns None with no historian, {"error": ...} on failure.
+    """
+    connection = None
+    try:
+        connection = _historian()
+        if connection is None:
+            return None
+        connection.autocommit = True
+        with connection.cursor() as cursor:
+            cursor.execute(RUN_CHUNKS_SQL, (since,))
+            found = cursor.fetchall()
+            if not found:
+                return {"error": "the run wrote no telemetry chunk"}
+            chunks = [name for name, _, _ in found]
+            cursor.execute("SELECT count(*)::bigint FROM telemetry WHERE time >= %s AND time < %s",
+                           (found[0][1], found[-1][2]))
+            (rows,) = cursor.fetchone()
+            cursor.execute(CHUNKS_BYTES_SQL, (chunks,))
+            (before,) = cursor.fetchone()
+            started = time.time()
+            for name in chunks:
+                log(f"compress_chunk({name})...")
+                cursor.execute("SELECT compress_chunk(%s::regclass, if_not_compressed => true)", (name,))
+            seconds = time.time() - started
+            cursor.execute(CHUNKS_BYTES_SQL, (chunks,))
+            (after,) = cursor.fetchone()
+            cursor.execute(COMPRESSION_STATS_SQL, (chunks,))
+            stats_before, stats_after = cursor.fetchone()
+        return {"chunks": chunks, "rows": rows, "before_bytes": before, "after_bytes": after,
+                "seconds": round(seconds, 1),
+                "compression_stats": {"before_bytes": stats_before, "after_bytes": stats_after}}
+    except Exception as error:
+        return {"error": str(error).strip()}
     finally:
         if connection is not None:
             connection.close()
@@ -553,12 +703,46 @@ def parse_plan(text):
             continue
         rate, _, duration = part.partition("x")
         try:
-            steps.append((float(rate), float(duration)))
+            step = (float(rate), float(duration))
         except ValueError:
             raise SystemExit(f"--plan step '{part}' is not <rate>x<seconds>")
+        if not (step[0] > 0 and step[1] > 0):
+            raise SystemExit(f"--plan step '{part}' needs a rate and a duration above zero")
+        steps.append(step)
     if not steps:
         raise SystemExit("--plan named no steps")
     return steps
+
+
+def held(step):
+    """A step the stack kept up with: no growing queue, no drops, and the generator kept its rate."""
+    return not (step["saturated"] or step["dropped"] or step["generator_limited"])
+
+
+def soak_target(steps):
+    """The last step of the plan that held, which `--soak` holds again; None when none did."""
+    candidates = [s for s in steps if held(s) and not s.get("soak")]
+    return candidates[-1] if candidates else None
+
+
+def soaked(step, steps):
+    """Whether a soak that held ran at this step's rate or above it."""
+    return any(s.get("soak") and held(s) and s["target_rate"] >= step["target_rate"] for s in steps)
+
+
+def drain(timeout=300.0):
+    """Wait, publishing nothing, until the writer's queue is empty. Returns the last depth read."""
+    deadline = time.time() + timeout
+    depth = None
+    while time.time() < deadline:
+        try:
+            depth = scrape().get("aber_ingestion_write_queue_depth")
+        except Exception:
+            depth = None
+        if depth is not None and depth < 1:
+            break
+        time.sleep(2)
+    return depth
 
 
 def run_step(publishers, rate, duration, settle):
@@ -578,6 +762,7 @@ def run_step(publishers, rate, duration, settle):
     broker_before = broker_dropped_total()
     sent_at_sample = sum(p.published for p in publishers)
     abandoned_at_sample = sum(p.abandoned for p in publishers)
+    rebirths_at_sample = sum(p.rebirths for p in publishers)
     depths = []
     deadline = time.time() + max(duration - settle, 1.0)
     while time.time() < deadline:
@@ -590,8 +775,10 @@ def run_step(publishers, rate, duration, settle):
     broker_after = broker_dropped_total()
     published = sum(p.published for p in publishers) - sent_at_sample
     abandoned = sum(p.abandoned for p in publishers) - abandoned_at_sample
+    rebirths = sum(p.rebirths for p in publishers) - rebirths_at_sample
     for publisher in publishers:
         publisher.end_step()
+    nodes = {p.node_id for p in publishers}
 
     window = after.at - before.at
     received = after.received_ddata() - before.received_ddata()
@@ -620,6 +807,8 @@ def run_step(publishers, rate, duration, settle):
 
     return {
         "target_rate": rate,
+        "held_seconds": duration,
+        "soak": False,
         "duration_seconds": round(window, 1),
         "published": published,
         "published_per_second": round(achieved, 1),
@@ -643,6 +832,9 @@ def run_step(publishers, rate, duration, settle):
             after.labelled.get("aber_ingestion_cache_evictions_total", {}).values()
         ) - sum(before.labelled.get("aber_ingestion_cache_evictions_total", {}).values()),
         "dropped": dropped,
+        # Gaps the daemon saw in this fleet's `seq`, and the rebirths it asked for and was given.
+        "sequence_gaps": int(after.sequence_gaps(nodes) - before.sequence_gaps(nodes)),
+        "rebirths": rebirths,
         "saturated": saturated,
         "generator_limited": generator_limited,
     }
@@ -653,36 +845,93 @@ def verdict(steps):
     saturated = [s for s in steps if s["saturated"]]
     dropped = [s for s in steps if s["dropped"]]
     limited = [s for s in steps if s["generator_limited"]]
-    sustained = [s for s in steps if not s["saturated"] and not s["generator_limited"]]
-    # A plan whose every step gave way has no sustained rate to name -- a soak of one step, held
-    # to see whether the ramp's answer holds, is the usual case -- and "0 msg/s" would read as a
-    # stack that wrote nothing.
-    highest = max((s["written_per_second"] for s in sustained), default=None)
-    highest_text = (f"{highest:.0f} msg/s written" if highest is not None
-                    else "none in this plan held")
+    kept = [s for s in steps if held(s)]
+    highest = max((s["written_per_second"] for s in kept), default=None)
 
     if saturated:
-        first = saturated[0]
+        # The lowest rate, not the first in the plan: a soak runs last, below the ramp's knee.
+        first = min(saturated, key=lambda s: s["target_rate"])
+        where = f", in the {_held_for(first):.0f} s soak" if first.get("soak") else ""
         return (
-            f"The historian writer's queue grew at {first['target_rate']:.0f} msg/s "
+            f"The historian writer's queue grew at {first['target_rate']:.0f} msg/s{where} "
             f"(depth {first['queue_depth_start']} -> {first['queue_depth_end']}). "
-            f"Highest sustained rate: {highest_text}."
+            f"{highest_held(steps)}."
         )
     if dropped:
         first = dropped[0]
         reasons = ", ".join(f"{r} x{int(v)}" for r, v in first["dropped"].items())
         return (
             f"Messages were dropped at {first['target_rate']:.0f} msg/s ({reasons}). "
-            f"Highest sustained rate: {highest_text}."
+            f"{highest_held(steps)}."
         )
     if limited:
         first = limited[0]
         return (
             f"The stack kept up with every step. This generator could not reach "
             f"{first['target_rate']:.0f} msg/s (published {first['published_per_second']:.0f}), so "
-            f"the limit above {highest or 0:.0f} msg/s is the generator's and not the stack's."
+            f"the limit above {highest or 0:.0f} msg/s is the generator's and not the stack's. "
+            f"{highest_held(steps)}."
         )
-    return f"The stack sustained every step in the plan; highest {highest or 0:.0f} msg/s written."
+    if all(s.get("soak") or soaked(s, steps) for s in steps):
+        return f"The stack sustained every step in the plan. {highest_held(steps)}."
+    return f"The stack kept up with every step in the plan. {highest_held(steps)}."
+
+
+def _held_for(step):
+    """How long a step held its rate: its planned duration, or the sample window in an old report."""
+    return step.get("held_seconds") or step.get("duration_seconds") or 0
+
+
+def highest_held(steps):
+    """
+    The highest rate the stack kept, and on what evidence. Only a soak that held makes a rate
+    sustained; a step that held for its own duration alone is reported as that. A plan whose every
+    step gave way names none, rather than "0 msg/s", which would read as a stack that wrote nothing.
+    """
+    kept = [s for s in steps if held(s)]
+    if not kept:
+        return "Highest sustained rate: none in this plan held"
+    confirmed = [s for s in kept if s.get("soak") or soaked(s, steps)]
+    if confirmed:
+        soak = max((s for s in kept if s.get("soak")), key=lambda s: s["target_rate"])
+        best = max(s["written_per_second"] for s in confirmed)
+        return (f"Highest sustained rate: {best:.0f} msg/s written, "
+                f"through a {_held_for(soak):.0f} s soak at {soak['target_rate']:.0f} msg/s")
+    best = max(kept, key=lambda s: s["written_per_second"])
+    failed = [s for s in steps if s.get("soak") and not held(s)]
+    why = (f"the {failed[0]['target_rate']:.0f} msg/s soak did not hold" if failed
+           else "not soaked (--soak)")
+    return (f"Highest rate held: {best['written_per_second']:.0f} msg/s written, "
+            f"for {_held_for(best):.0f} s only; {why}")
+
+
+def step_note(step, steps):
+    """The table's verdict column for one step, read against the whole run for the soak."""
+    # Saturation and drops are reported together where both happened: a full queue is what
+    # produces `write_queue_full`, and a note carrying only one of them loses the other.
+    if step["saturated"]:
+        note = "queue growing"
+        if step["dropped"]:
+            note += "; dropped " + ", ".join(step["dropped"])
+    elif step["dropped"]:
+        note = "dropped: " + ", ".join(step["dropped"])
+    elif step["generator_limited"]:
+        note = f"generator-limited ({step['abandoned']} abandoned)"
+    elif step.get("soak") or soaked(step, steps):
+        note = "sustained"
+    elif any(s.get("soak") and s["target_rate"] == step["target_rate"] for s in steps):
+        note = f"held {_held_for(step):.0f} s; the soak did not"
+    else:
+        note = f"held {_held_for(step):.0f} s, not soaked"
+    if step.get("soak"):
+        note = f"{_held_for(step):.0f} s soak: {note}"
+    # An undelivered message is the one loss the daemon cannot see, so say who dropped it
+    # where the broker was able to confirm it.
+    if step["undelivered"] and step.get("broker_dropped"):
+        note += f"; broker shed {step['broker_dropped']:,}"
+    if step.get("sequence_gaps") or step.get("rebirths"):
+        note += f"; seq gaps {step.get('sequence_gaps', 0)}, rebirths {step.get('rebirths', 0)}"
+    return note
 
 
 def render(report):
@@ -696,22 +945,7 @@ def render(report):
     lines.append(header)
     lines.append("| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- |")
     for step in report["steps"]:
-        # Saturation and drops are reported together where both happened: a full queue is what
-        # produces `write_queue_full`, and a note carrying only one of them loses the other.
-        if step["saturated"]:
-            note = "queue growing"
-            if step["dropped"]:
-                note += "; dropped " + ", ".join(step["dropped"])
-        elif step["dropped"]:
-            note = "dropped: " + ", ".join(step["dropped"])
-        elif step["generator_limited"]:
-            note = f"generator-limited ({step['abandoned']} abandoned)"
-        else:
-            note = "sustained"
-        # An undelivered message is the one loss the daemon cannot see, so say who dropped it
-        # where the broker was able to confirm it.
-        if step["undelivered"] and step.get("broker_dropped"):
-            note += f"; broker shed {step['broker_dropped']:,}"
+        note = step_note(step, report["steps"])
         lines.append(
             f"| {step['target_rate']:.0f} | {step['published_per_second']:.0f} "
             f"| {step['received_per_second']:.0f} | {step['written_per_second']:.0f} "
@@ -746,9 +980,50 @@ def render(report):
                 "before compression and retention."
             )
         lines.append("")
+    lines.extend(compression_lines(report.get("compression"), report["metrics_per_message"]))
     lines.append(f"VERDICT: {report['verdict']}")
     lines.append("")
     return "\n".join(lines)
+
+
+def compression_lines(compression, metrics):
+    """The report's compressed-storage paragraph: nothing without --compress, the error on failure."""
+    if not compression:
+        return []
+    if compression.get("error"):
+        return [f"Compressed: not measured. {compression['error']}", ""]
+    rows, before, after = compression["rows"], compression["before_bytes"], compression["after_bytes"]
+    if not rows or not after:
+        return [f"Compressed: not measured. {len(compression['chunks'])} chunk(s) held "
+                f"{rows:,} rows and {after:,} bytes after compress_chunk().", ""]
+    rows_per_day = 1000 * metrics * 86400
+    lines = [
+        f"Compressed (compress_chunk on the {len(compression['chunks'])} chunk(s) the run wrote, "
+        f"{rows:,} rows, {compression['seconds']:.0f} s): {before / 1048576:.1f} MiB -> "
+        f"{after / 1048576:.1f} MiB, {before / after:.1f}x; {before / rows:.1f} -> "
+        f"{after / rows:.1f} bytes a row.",
+        f"So the same thousand devices' day takes "
+        f"{rows_per_day * after / rows / 1073741824:.1f} GiB compressed, before retention.",
+    ]
+    # chunk_compression_stats is TimescaleDB's own account of the same compression: a second
+    # reading, shown only when it disagrees with chunks_detailed_size by more than a tenth.
+    stats_after = (compression.get("compression_stats") or {}).get("after_bytes") or 0
+    if stats_after and abs(stats_after - after) > after / 10:
+        lines.append(f"chunk_compression_stats reads {stats_after / 1048576:.1f} MiB after "
+                     "compression; the two disagree, so neither figure is settled.")
+    return lines + [""]
+
+
+def _log_step(result):
+    log(
+        f"  published {result['published_per_second']:.0f}/s, "
+        f"written {result['written_per_second']:.0f}/s, "
+        f"queue {result['queue_depth_start']} -> {result['queue_depth_end']}, "
+        f"write mean {result['write_mean_ms']} ms, "
+        f"seq gaps {result['sequence_gaps']}, rebirths {result['rebirths']}"
+    )
+    if result["saturated"]:
+        log("  the writer's queue is growing; the knee is here.")
 
 
 def main():
@@ -769,9 +1044,19 @@ def main():
         "--birth-timeout", type=float, default=300.0,
         help="seconds to wait for the daemon to consume every DBIRTH",
     )
+    parser.add_argument(
+        "--soak", type=float, default=0.0,
+        help="after the plan, hold the last step that held for this many seconds; 0 runs no soak",
+    )
+    parser.add_argument(
+        "--compress", action="store_true",
+        help="compress_chunk() the chunks the run wrote and report compressed bytes a row",
+    )
     parser.add_argument("--report", default="", help="write the report as JSON to this path")
     arguments = parser.parse_args()
 
+    if arguments.soak < 0:
+        raise SystemExit("--soak is a number of seconds, 0 or more")
     if not LOADGEN_PASSWORD:
         raise SystemExit(
             "LOADGEN_PASSWORD is not set. The fixture accounts are issued by "
@@ -803,7 +1088,7 @@ def main():
     # Births first, and waited for: a DDATA whose device has not birthed still writes, but the
     # birth path is what a real fleet pays on connection and it is one of the things being measured.
     birth_before = scrape()
-    birth_started = time.time()
+    birth_started = run_started = time.time()
     births = sum(publisher.births() for publisher in publishers)
     consumed = 0
     while time.time() - birth_started < arguments.birth_timeout:
@@ -827,16 +1112,19 @@ def main():
     try:
         for rate, duration in steps:
             log(f"Step: {rate:.0f} msg/s for {duration:.0f}s...")
-            result = run_step(publishers, rate, duration, arguments.settle)
-            results.append(result)
-            log(
-                f"  published {result['published_per_second']:.0f}/s, "
-                f"written {result['written_per_second']:.0f}/s, "
-                f"queue {result['queue_depth_start']} -> {result['queue_depth_end']}, "
-                f"write mean {result['write_mean_ms']} ms"
-            )
-            if result["saturated"]:
-                log("  the writer's queue is growing; the knee is here.")
+            results.append(run_step(publishers, rate, duration, arguments.settle))
+            _log_step(results[-1])
+        target = soak_target(results) if arguments.soak else None
+        if arguments.soak and target is None:
+            log("Soak: no step held, so there is nothing to soak.")
+        if target is not None:
+            # From an empty queue, so a backlog the ramp left is not counted against the soak.
+            depth = drain()
+            log(f"Soak: {target['target_rate']:.0f} msg/s, the last step that held, for "
+                f"{arguments.soak:.0f}s (the writer's queue at {depth}).")
+            results.append(dict(run_step(publishers, target["target_rate"], arguments.soak,
+                                         arguments.settle), soak=True))
+            _log_step(results[-1])
     finally:
         for publisher in publishers:
             publisher.stop()
@@ -844,6 +1132,9 @@ def main():
     # After the publishers stop: the queue drains into chunks that are only then written.
     time.sleep(10)
     after_storage = storage_snapshot()
+    compression = compress_run_chunks(run_started) if arguments.compress else None
+    if arguments.compress and compression is None:
+        compression = {"error": "no historian is configured (DB_HOST)."}
 
     report = {
         "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -854,6 +1145,7 @@ def main():
                    "seconds": round(birth_seconds, 1)},
         "steps": results,
         "storage": {"before": before_storage, "after": after_storage},
+        "compression": compression,
         "verdict": verdict(results),
     }
     print(render(report))
