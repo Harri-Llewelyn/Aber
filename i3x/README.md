@@ -213,11 +213,17 @@ The mappings that are decisions rather than mechanics:
 
   | Keyword | From the row |
   | :--- | :--- |
-  | `enum` | `permitted_values`, converted to the values served for the datatype, with `null` added. Left out when one does not convert, since an enum no served value could match would reject them all |
   | `description` | `description` |
   | `x-unit` | `units` |
   | `x-category` | `category`: `SAMPLE`, `EVENT` or `CONDITION` |
   | `x-semantic-id-type` | `semantic_id_type`: `IRI` or `IRDI`. The id itself is the type's `sourceTypeId` |
+  | `x-permitted-values` | `permitted_values`, converted to the values served for the datatype. Left out when the row has none, or when one does not convert |
+
+  **`x-permitted-values` is advisory, not a constraint.** It lists the values the catalog gives
+  for the metric, usually from its standard's vocabulary. A device that reports a value outside
+  the list is accepted: ingestion stores it, the dashboard tags the device *Out of vocabulary*,
+  and this server serves it. So the list is never `enum`. A type must admit every value the
+  server serves for it, and an `enum` would be violated by the server's own answer.
 
   A metric the catalog lacks takes `i3x:type:sparkplug:<datatype>` from its DBIRTH datatype, else
   `UnknownType`. `UnknownType`'s schema is `{}`, not the guide's `{"type": "object"}`: a metric's

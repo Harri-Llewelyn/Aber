@@ -454,11 +454,11 @@ _INTEGER_TEXT = re.compile(r"[+-]?\d+", re.ASCII)
 _BOOLEAN_TEXT = {"true": True, "false": False}
 
 
-def permitted_enum(values, datatype) -> Optional[list]:
+def permitted_values(values, datatype) -> Optional[list]:
     """
-    A catalog row's `permitted_values` (text) as the values served for its datatype, with null,
-    which every metric admits. None when there are none, or when one does not convert: an `enum`
-    that no served value could match would reject every value of the metric.
+    A catalog row's `permitted_values` (text) in the form served for its datatype. None when
+    there are none, or when one does not convert, since a list unlike every served value would
+    mislead. Advisory only: a value outside it is accepted and flagged as out of vocabulary.
     """
     scalar = SPARKPLUG_SCALARS.get(datatype)
     if not scalar or not isinstance(values, list) or not values:
@@ -483,7 +483,7 @@ def permitted_enum(values, datatype) -> Optional[list]:
             out.append(number)
         else:
             return None
-    return out + [None]
+    return out
 
 
 def metric_type_id(name: str) -> str:
@@ -494,20 +494,20 @@ def metric_type_id(name: str) -> str:
 def metric_type_from_catalog(row: dict) -> dict:
     """
     A `metric_catalog` row is the type of that metric on every device: a nullable scalar derived
-    from its datatype, its `permitted_values` as `enum`, annotated with its description, unit,
-    category and semantic id type, with its semantic id as `sourceTypeId`. Read only, never
-    written back to `schemas`.
+    from its datatype, annotated with its description, unit, category, semantic id type and
+    permitted values, with its semantic id as `sourceTypeId`. Never `enum`: the server serves a
+    value outside the permitted ones, so the type must admit it. Read only, never written back.
     """
     schema = scalar_schema(row.get("datatype"))
-    permitted = permitted_enum(row.get("permitted_values"), row.get("datatype"))
-    if permitted is not None:
-        schema["enum"] = permitted
+    permitted = permitted_values(row.get("permitted_values"), row.get("datatype"))
     if row.get("description"):
         schema["description"] = row["description"]
     for column, keyword in (("units", "x-unit"), ("category", "x-category"),
                             ("semantic_id_type", "x-semantic-id-type")):
         if row.get(column):
             schema[keyword] = row[column]
+    if permitted is not None:
+        schema["x-permitted-values"] = permitted
     return {
         "elementId": metric_type_id(row["name"]),
         "displayName": row["name"],

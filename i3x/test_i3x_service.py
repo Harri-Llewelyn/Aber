@@ -2710,9 +2710,10 @@ except ImportError:  # CI's unit lane installs it; a bare checkout may not have 
 
 class TestTypesSayWhatTheCatalogHolds(_MetricSpace):
     """
-    A metric type carries what its catalog row holds: `enum` from `permitted_values`, the category
-    and semantic id type beside the unit, and null in its type, since any Sparkplug metric can
-    arrive with `is_null`. A device's type refers to those types rather than restating them.
+    A metric type carries what its catalog row holds: the category, semantic id type and permitted
+    values beside the unit, and null in its type, since any Sparkplug metric can arrive with
+    `is_null`. The permitted values are advisory, never `enum`: a value outside them is accepted
+    and served. A device's type refers to those types rather than restating them.
     """
 
     def rows(self):
@@ -2734,12 +2735,19 @@ class TestTypesSayWhatTheCatalogHolds(_MetricSpace):
     def test_a_metric_type_says_what_its_catalog_row_holds(self):
         execution = self.types()[A.metric_type_id("Controller/EXECUTION")]["schema"]
         self.assertEqual(execution, {"type": ["string", "null"],
-                                     "enum": ["ACTIVE", "READY", "STOPPED", None],
+                                     "x-permitted-values": ["ACTIVE", "READY", "STOPPED"],
                                      "x-category": "EVENT", "x-semantic-id-type": "IRI"})
         position = self.types()[A.metric_type_id("Axes/X/POSITION")]["schema"]
         self.assertEqual(position["x-category"], "SAMPLE")
-        self.assertNotIn("enum", position, "a row with no permitted_values is unconstrained")
+        self.assertNotIn("x-permitted-values", position, "a row with no permitted_values lists none")
         self.assertNotIn("x-semantic-id-type", position)
+
+    def test_no_type_constrains_a_metric_to_its_permitted_values(self):
+        # Ingestion accepts a value outside them and the dashboard flags it as out of vocabulary,
+        # so this server serves it, and a type that refused it would be violated by its own value.
+        for type_id, served in self.types().items():
+            with self.subTest(type=type_id):
+                self.assertNotIn('"enum"', json.dumps(served["schema"]))
 
     def test_every_metric_type_admits_null(self):
         for type_id, served in self.types().items():
@@ -2749,15 +2757,14 @@ class TestTypesSayWhatTheCatalogHolds(_MetricSpace):
             with self.subTest(type=type_id):
                 schema = served["schema"]
                 self.assertTrue("type" not in schema or "null" in schema["type"], schema)
-                self.assertTrue("enum" not in schema or None in schema["enum"], schema)
 
-    def test_permitted_values_become_the_values_served_or_nothing(self):
+    def test_permitted_values_are_listed_as_served_or_not_at_all(self):
         string, int32, double, boolean, dataset = 12, 3, 10, 11, 16
         for values, datatype, expected in (
-            (["A", "B"], string, ["A", "B", None]),
-            (["0", "-1", "+2"], int32, [0, -1, 2, None]),
-            (["1.5", "2"], double, [1.5, 2.0, None]),
-            (["true", "False"], boolean, [True, False, None]),
+            (["A", "B"], string, ["A", "B"]),
+            (["0", "-1", "+2"], int32, [0, -1, 2]),
+            (["1.5", "2"], double, [1.5, 2.0]),
+            (["true", "False"], boolean, [True, False]),
             (["1", "two"], int32, None),
             (["1.5"], int32, None),
             (["nan"], double, None),
@@ -2767,7 +2774,7 @@ class TestTypesSayWhatTheCatalogHolds(_MetricSpace):
             ([], string, None),
         ):
             with self.subTest(values=values, datatype=datatype):
-                self.assertEqual(A.permitted_enum(values, datatype), expected)
+                self.assertEqual(A.permitted_values(values, datatype), expected)
 
     def test_a_devices_properties_refer_to_their_metrics_types(self):
         types = self.types()
@@ -2834,12 +2841,16 @@ class TestTypesSayWhatTheCatalogHolds(_MetricSpace):
         self.assertEqual(list(mill.iter_errors(
             {"Axes/X/POSITION": None, "Controller/EXECUTION": None, "Local/NOTE": "x"})), [])
         self.assertEqual(list(mill.iter_errors({"Axes/X/POSITION": 1.5, "Controller/EXECUTION": "READY"})), [])
-        errors = list(mill.iter_errors({"Axes/X/POSITION": 1.0, "Controller/EXECUTION": "RUNNING"}))
-        self.assertEqual([e.validator for e in errors], ["enum"], "the reference is followed")
+        # A value outside x-permitted-values is served, flagged out of vocabulary, and conforms.
+        self.assertEqual(list(mill.iter_errors({"Axes/X/POSITION": 1.0, "Controller/EXECUTION": "RUNNING"})), [])
+        errors = list(mill.iter_errors({"Axes/X/POSITION": 1.0, "Controller/EXECUTION": 5}))
+        self.assertEqual([e.validator for e in errors], ["type"], "the reference is followed")
         pair = types[A.schema_set_type_id([MILL, OEE])]["schema"]
         self.assertEqual(list(jsonschema.Draft202012Validator(pair).iter_errors(
             {"Axes/X/POSITION": 2.0, "OEE/AVAILABILITY": None})), [])
-        self.assertTrue(list(jsonschema.Draft202012Validator(pair).iter_errors({"OEE/AVAILABILITY": "x"})))
+        errors = list(jsonschema.Draft202012Validator(pair).iter_errors(
+            {"Axes/X/POSITION": 2.0, "OEE/AVAILABILITY": "x"}))
+        self.assertEqual([e.validator for e in errors], ["type"], "followed from inside allOf too")
 
 
 # -------------------------------------------------------------------------------------------------
