@@ -214,12 +214,13 @@ npm run dev:down      # delete the cluster
 Browsers treat it as a secure context, which the Studio and forge logins need over plain HTTP. They
 set Secure cookies, and any other http host loses them.
 
-The two addresses an appliance dials use this machine's LAN address instead:
+The addresses an appliance dials use this machine's LAN address instead:
 
 - The broker's TLS listener, which `up` turns on, carries the LAN address in its certificate.
-- The bundle's API address is `api.<LAN address>.nip.io`. It resolves only where the DNS resolver
-  answers nip.io names carrying private addresses. Many home routers refuse to, as DNS-rebind
-  protection.
+- The bundle's API address is `api.<LAN address>.nip.io`, and Traefik routes it as well as
+  `api.localhost`. The forge's clone URLs name `git.<LAN address>.nip.io`. Both names resolve only
+  where the DNS resolver answers nip.io names carrying private addresses. Many home routers refuse
+  to, as DNS-rebind protection. `docs/remote-gateways.md` §7 has the details.
 
 Where the resolver does answer them, `--domain=<LAN address>.nip.io` moves every host onto the LAN,
 and the Studio and forge logins then need `ingress.tls`.

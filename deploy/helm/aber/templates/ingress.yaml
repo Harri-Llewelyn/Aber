@@ -9,6 +9,8 @@
 {{- $enabled = append $enabled . -}}
 {{- end -}}
 {{- end -}}
+{{- /* After them, the API's names under ingress.additionalDomains (aber.additionalIngressRoutes). */ -}}
+{{- $enabled = concat $enabled (include "aber.additionalIngressRoutes" . | fromYamlArray) -}}
 {{- /*
 Renders nothing when no route resolved, rather than failing here: the assertion lives in
 aber.validateIngress, because a `fail` inside a resource template pre-empts the whole

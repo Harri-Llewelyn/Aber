@@ -49,6 +49,9 @@ Reachable on ({{ .Values.ingress.className }} ingress{{ if .Values.ingress.tls.e
   {{ printf "%s://%s" $.Values.global.scheme .host }}  ->  {{ .service }}:{{ .port }}
 {{- end }}
 {{- end }}
+{{- range (include "aber.additionalIngressRoutes" . | fromYamlArray) }}
+  {{ printf "%s://%s" $.Values.global.scheme .host }}  ->  {{ .service }}:{{ .port }}  (ingress.additionalDomains)
+{{- end }}
 {{- if .Values.mosquitto.external.enabled }}
 
 Raw MQTT (1883) is NOT on the ingress -- it is TCP, not HTTP:

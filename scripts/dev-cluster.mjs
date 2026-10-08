@@ -388,12 +388,16 @@ async function installChart ({ tls, e2e, holdE2e = false }) {
   // What an appliance is told to dial. The browser-facing hosts stay on the loopback domain, which
   // resolves on this machine whatever the resolver does; the two functions that hand an appliance
   // an address refuse loopback, so they get this machine's LAN address instead. An appliance
-  // reaches the broker by that address (it is in the certificate); the API host it is given
-  // resolves only where the resolver returns private nip.io answers.
+  // reaches the broker by that address (it is in the certificate); the API and forge hosts it is
+  // given resolve only where the resolver returns private nip.io answers, and Traefik routes the
+  // API's because ingress.additionalDomains names it.
   const ip = await lanAddress()
   if (ip) {
     sets.push('--set', `supabaseFunctions.gatewayEnrolment.mqttPublicHost=${ip}`,
       '--set', `supabaseFunctions.gatewayEnrolment.supabasePublicUrl=http://api.${ip}.nip.io`,
+      '--set', `ingress.additionalDomains={${ip}.nip.io}`,
+      // The host the forge's clone URLs name, so the same name as the API's.
+      '--set', `gitea.ssh.domain=git.${ip}.nip.io`,
       // The model URL an exported shell carries: the same address, for the same reason.
       '--set', `supabaseFunctions.aas.modelPublicBase=http://api.${ip}.nip.io/storage/v1/object/public/asset-3d-models`)
     if (tls) sets.push('--set', `mosquitto.tls.extraIpSans={${ip}}`)
@@ -698,7 +702,12 @@ function testEnvironment () {
 async function assertIngressHostsResolve () {
   const r = kubectl('get', 'ingress', '-o',
     'jsonpath={range .items[*]}{range .spec.rules[*]}{.host} {end}{end}')
-  const hosts = [...new Set((r.out || '').split(/\s+/).filter(Boolean))]
+  // Not the API's names under ingress.additionalDomains: no suite follows them, and `up`'s
+  // <LAN address>.nip.io resolves only where the resolver answers nip.io with private addresses.
+  const values = releaseValues()
+  const appliances = (values.ingress?.additionalDomains || [])
+    .filter(d => d !== values.global?.publicBaseDomain).map(d => `api.${d}`)
+  const hosts = [...new Set((r.out || '').split(/\s+/).filter(Boolean))].filter(h => !appliances.includes(h))
   if (!hosts.length) return  // no Ingress: nothing follows a name, so nothing to check
   const unresolved = []
   for (const host of hosts) {

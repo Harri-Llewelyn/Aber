@@ -348,7 +348,7 @@ Both name the same machine. The chart derives both from `global.publicBaseDomain
 `npm run setup` asks for. `--domain=<base>` answers it from a script. Leaving it blank keeps the
 loopback default, and then remote gateways cannot be enrolled. `supabaseFunctions.gatewayEnrolment`
 overrides either one where the address appliances dial differs from the domain browsers use. That
-is what `npm run dev:up` does on a laptop.
+is what `npm run dev:up` does on a laptop ([the dev loop's addresses](#the-dev-loops-addresses)).
 
 **The dashboard asks before it offers.** `GET /functions/v1/gateway-bundle` reports both addresses.
 It judges them with the same checks the two refusals use (`_shared/publicAddresses.ts`). The
@@ -356,6 +356,35 @@ Gateways page shows the answer above the table. Until the deployment can issue a
 withholds Save for a Remote gateway, and withholds the drawer's bundle action. A `503` reached some
 other way is shown with the variable it names and no retry, since retrying cannot fix a deployment
 fault.
+
+### The dev loop's addresses
+
+`npm run dev:up` keeps the browser hosts on `*.localhost`. Those names mean "this machine" to
+whoever resolves them, so an appliance cannot use them. `up` hands appliances this machine's LAN
+address instead:
+
+| What the appliance is given | The dev loop's value |
+| :--- | :--- |
+| The broker (`MQTT_PUBLIC_HOST`) | `<LAN address>` |
+| The API (`SUPABASE_PUBLIC_URL`, the bundle's `ABER_SUPABASE_URL`) | `http://api.<LAN address>.nip.io` |
+| The forge's clone URLs | `git.<LAN address>.nip.io`, port 2222 |
+| An AAS export's model links | `http://api.<LAN address>.nip.io/storage/v1/object/public/asset-3d-models/…` |
+
+nip.io is a public DNS service that answers `api.192.168.1.20.nip.io` with `192.168.1.20`. Traefik
+routes `api.<LAN address>.nip.io` to the API as well as `api.localhost`, because `up` sets the
+chart's `ingress.additionalDomains` to `<LAN address>.nip.io`. So a bundle from the dev loop enrols
+an appliance on the same network without edits.
+
+Two things can still stop it:
+
+- **The router may refuse the name.** Many home and office routers drop a DNS answer that carries
+  a private address, as protection against DNS rebinding. The appliance's first request then fails
+  to resolve the API. Give the appliance another resolver, or map both names,
+  `api.<LAN address>.nip.io` and `git.<LAN address>.nip.io`, to the LAN address in its
+  `/etc/hosts` (or in the bundle's compose file, with `extra_hosts`).
+- **The dev cluster does not publish the forge's SSH port.** Its load balancer publishes 80, 1883
+  and 8883 only, so the appliance enrols and then cannot clone. Add the port once:
+  `k3d cluster edit aber --port-add 2222:2222@loadbalancer`.
 
 ### The third value: the primary host id
 
