@@ -14,7 +14,7 @@
 
 # The release this file belongs to and installs, and the cert-manager it applies. check-docs-drift
 # holds them to Chart.yaml's `version:`, the installer URL in docs/install.md, and step 4's pin.
-ABER_VERSION=1.0.1
+ABER_VERSION=1.1.0
 CERT_MANAGER_VERSION=v1.16.2
 
 REPO_URL=https://github.com/Harri-Llewelyn/Aber

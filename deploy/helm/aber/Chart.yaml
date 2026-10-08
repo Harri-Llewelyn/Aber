@@ -9,7 +9,7 @@ type: application
 # the install of the release it is. Between releases they stay at the last release, so a working
 # tree renders as the release it descends from rather than as one that does not exist yet.
 # release.yml also stamps both from the tag when it packages the chart.
-version: 1.0.2
+version: 1.1.0
 
 # The platform release this chart deploys, and -- because `image.tag` is empty for every image
 # this repository builds -- the tag those five images are pulled at. That coupling is the point:
@@ -20,7 +20,7 @@ version: 1.0.2
 #
 # Quoted because Helm requires a string here and an unquoted 0.1.0 is fine but 1.0 would become
 # a float.
-appVersion: "1.0.2"
+appVersion: "1.1.0"
 
 kubeVersion: ">=1.25.0-0"
 

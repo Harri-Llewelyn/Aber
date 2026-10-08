@@ -332,7 +332,7 @@ Three things it is not:
   this stack was told to run. Checking GHCR would need an egress allowance the chart does not grant,
   and would fail closed on a plant network with no route out.
 - **It compares `MAJOR.MINOR.PATCH` only.** A development bundle names itself with `git describe`
-  (`v1.0.2-12-g04374f9-dirty`), so anything stricter would warn on every dev cluster permanently.
+  (`v1.1.0-12-g04374f9-dirty`), so anything stricter would warn on every dev cluster permanently.
 - **It is a statement, not a button.** Nothing in a browser can upgrade the stack; the upgrade is
   [`docs/upgrades.md`](../docs/upgrades.md).
 

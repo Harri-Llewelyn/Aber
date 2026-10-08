@@ -4,7 +4,7 @@
 # rollout, so the pointer is a file in the gateway's own repository, changed by pull request: a
 # fleet bump is one pull request per gateway or a scripted batch, and a canary is one gateway.
 platform:
-  tag: v1.0.2
+  tag: v1.1.0
   # Variables the platform playbook accepts, applied to this appliance alone. Optional. They also
   # reach a custom.yml in this repository, which runs after the platform playbook; the paths the
   # platform owns are handed to it afterwards and cannot be overridden here.

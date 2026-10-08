@@ -84,7 +84,7 @@ new ones.
 **Install it with one command.** Run this on the machine:
 
 ```bash
-curl -sfL https://raw.githubusercontent.com/Harri-Llewelyn/Aber/v1.0.1/deploy/install.sh | sudo sh -
+curl -sfL https://raw.githubusercontent.com/Harri-Llewelyn/Aber/v1.1.0/deploy/install.sh | sudo sh -
 ```
 
 The installer is [`deploy/install.sh`](../deploy/install.sh). To read it before it runs, download
@@ -118,7 +118,7 @@ To install without questions, give the answers as flags. `--yes` accepts the sug
 base IRI, and `--help` lists every flag:
 
 ```bash
-curl -sfL https://raw.githubusercontent.com/Harri-Llewelyn/Aber/v1.0.1/deploy/install.sh | sudo sh -s -- \
+curl -sfL https://raw.githubusercontent.com/Harri-Llewelyn/Aber/v1.1.0/deploy/install.sh | sudo sh -s -- \
   --domain=aber.plant.example --admin-email=you@plant.example --site-name=plant1 --yes
 ```
 
@@ -188,14 +188,14 @@ Both are done outside the machine:
 ### 4. Prepare the cluster
 
 Run the rest on the machine, as your own user rather than root. The clone holds only the setup
-script and two cluster files; the chart and Aber's images are downloaded from GHCR at 1.0.2.
+script and two cluster files; the chart and Aber's images are downloaded from GHCR at 1.1.0.
 
 These steps are needed once per cluster. Traefik is told to keep each client's address, and
 cert-manager runs the [internal CA](glossary.md#internal-ca-and-root-certificate) that issues every
 certificate (runbook, *Install* and *TLS*).
 
 ```bash
-git clone --branch v1.0.2 https://github.com/Harri-Llewelyn/Aber.git && cd Aber
+git clone --branch v1.1.0 https://github.com/Harri-Llewelyn/Aber.git && cd Aber
 
 kubectl apply -f deploy/k8s/traefik-config.yaml
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
@@ -254,7 +254,7 @@ EOF
 ### 7. Install Aber
 
 ```bash
-helm install aber oci://ghcr.io/harri-llewelyn/aber/aber --version 1.0.2 \
+helm install aber oci://ghcr.io/harri-llewelyn/aber/aber --version 1.1.0 \
   -n aber --create-namespace \
   -f deploy/helm/aber/values-local.yaml -f site.yaml --timeout 15m
 
