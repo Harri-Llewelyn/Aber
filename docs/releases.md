@@ -128,8 +128,12 @@ workflow opens the release as a draft from it, with `aber-<version>-sbom.tar.gz`
 image's SBOM and provenance, and the digests the signatures are over. The notes are then written by
 hand; nothing here is generated from commits.
 
-**Watch the repository's releases** to be told. On GitHub: *Watch → Custom → Releases*. There is no
-mailing list and no announcement channel; adding one nobody reads would be worse than saying so.
+**Watch the repository's releases** to be told of each one. On GitHub: *Watch → Custom → Releases*.
+
+**The [Announcements](https://github.com/Harri-Llewelyn/Aber/discussions/categories/announcements)
+in the repository's Discussions** say what one release's notes cannot: how the project stands as a
+whole, such as a period when releases are coming quickly to fix faults found since the last. Tick
+*Discussions* as well under *Watch → Custom* to be told of those. There is no mailing list.
 
 ---
 
