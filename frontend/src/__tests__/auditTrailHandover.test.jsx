@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AuditTrailTab } from '../components/tabs/AuditTrailTab';
 import { api } from '../api';
+import { ENTITY_KIND_BY_TABLE } from '../constants';
 
 /**
  * The Devices page navigates here with the device it was on. These cover the handover itself: the
@@ -52,7 +53,53 @@ describe('AuditTrailTab handover', () => {
     expect(screen.getByPlaceholderText('Search a name or any ID…').value).toBe(DEVICE_ID);
     await waitFor(() =>
       expect(trailCalls().some((url) => url.includes(`search=${DEVICE_ID}`))).toBe(true));
-    expect(trailCalls().some((url) => url.includes('entity_type=DEVICE'))).toBe(true);
+    // No kind filter: the device's nameplate and schema rows carry its id too, and filtering to
+    // DEVICE would drop them (see below).
+    expect(trailCalls().every((url) => !url.includes('entity_type='))).toBe(true);
+  });
+
+  it('keeps the kind filter for a hand-over that nothing else is keyed by', async () => {
+    const GATEWAY_ID = '22222222-3333-4444-5555-666666666666';
+    render(<AuditTrailTab initialEntity={{ id: GATEWAY_ID, type: 'GATEWAY' }} onClearEntity={vi.fn()} />);
+    await waitFor(() =>
+      expect(trailCalls().some((url) => url.includes(`search=${GATEWAY_ID}`))).toBe(true));
+    expect(trailCalls().every((url) => url.includes('entity_type=GATEWAY'))).toBe(true);
+  });
+
+  it('draws the device, its nameplate and its schema attachments from one hand-over', async () => {
+    // A schema change from the Devices page is a device_submodels row keyed by the device's id; in
+    // 1.0 it was a devices UPDATE, which this view showed, so dropping the kind is what keeps it.
+    const keyedRows = [
+      events[0],
+      {
+        event_id: 'trail-2', entity_type: 'device_nameplate', entity_id: DEVICE_ID, event_type: 'INSERT',
+        timestamp: '2026-08-11T10:00:00Z', actor_source: 'user',
+        old_data: null, new_data: { device_id: DEVICE_ID, serial_number: 'SN-1' }
+      },
+      {
+        event_id: 'trail-3', entity_type: 'device_submodels', entity_id: DEVICE_ID, event_type: 'INSERT',
+        timestamp: '2026-08-12T10:00:00Z', actor_source: 'user',
+        old_data: null, new_data: { device_id: DEVICE_ID, schema_id: 'sch-1', submodel_key: null }
+      }
+    ];
+    api.get.mockImplementation((url) => {
+      if (url.startsWith('/api/v1/audit-trail')) {
+        // Honours the kind filter as audit_trail_page() does, so a DEVICE filter would drop rows.
+        const kind = new URL(url, 'http://trail.test').searchParams.get('entity_type');
+        return Promise.resolve(keyedRows.filter((r) =>
+          !kind || r.entity_type === kind || ENTITY_KIND_BY_TABLE[r.entity_type] === kind));
+      }
+      if (url === '/api/v1/devices') {
+        return Promise.resolve([{ asset_id: DEVICE_ID, asset_name: 'Simulated_CNC_01' }]);
+      }
+      return Promise.resolve([]);
+    });
+
+    render(<AuditTrailTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={vi.fn()} />);
+
+    await screen.findByRole('button', { name: /UPDATE on Simulated_CNC_01/ });
+    expect(document.querySelectorAll('.trail-lane:not(.trail-axis)').length).toBe(3);
+    expect(screen.getAllByRole('button', { name: /INSERT on Simulated_CNC_01/ })).toHaveLength(2);
   });
 
   it('shows everything when opened without a handover', async () => {

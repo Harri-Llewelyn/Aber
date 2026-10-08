@@ -1918,9 +1918,9 @@ const apiMethods = {
       ]);
       if (error) throw error;
 
-      // The schemas attached to each device, read from the `device_schemas` view so the choice
-      // between device_submodels rows and devices.schema_id is made once, in SQL. Non-fatal:
-      // schemasForDevice() falls back to schema_id.
+      // The schemas attached to each device, read from the `device_schemas` view, which unions
+      // device_submodels rows and devices.schema_id in SQL. Non-fatal: schemasForDevice() still
+      // reads schema_id.
       const { data: links } = await supabase.from('device_schemas').select('device_id, schema_id');
       const schemasByDevice = new Map();
       for (const link of links || []) {
@@ -2536,7 +2536,7 @@ const apiMethods = {
         description: emptyToNull(body.description),
         gateway_id: gatewayIdFrom(body),
         connection_method: emptyToNull(body.connection_method),
-        schema_id: emptyToNull(body.schema_id),
+        // NO `schema_id`: schemas are attached afterwards through PUT .../schemas.
         // NO `status`. It is observed, never asserted: ingestion writes ONLINE on a DBIRTH, and the
         // column defaults to OFFLINE for a device that has not connected. Sending one here claims a
         // machine is running before the platform has heard from it, which
@@ -2879,6 +2879,20 @@ const apiMethods = {
     }
 
     /**
+     * Make a device's schemas exactly `body.schema_ids`, through set_device_schemas(): one
+     * transaction that writes `device_submodels` and clears the deprecated `devices.schema_id`.
+     */
+    if (/^\/api\/v1\/devices\/[^/]+\/schemas$/.test(path)) {
+      const deviceId = path.split('/')[4];
+      const { data, error } = await supabase.rpc('set_device_schemas', {
+        p_device_id: deviceId,
+        p_schema_ids: body.schema_ids || []
+      });
+      if (error) throw error;
+      return data;
+    }
+
+    /**
      * Upsert a device's nameplate. An empty field clears the column rather than being skipped, so
      * a wrong serial number can be blanked. The row is deleted when every field is empty: "no
      * nameplate data" is modelled as no row, and the exporter omits an empty submodel.
@@ -2924,7 +2938,6 @@ const apiMethods = {
       // how a `WHERE description IS NULL` starts missing rows.
       if ('description' in body) patch.description = emptyToNull(body.description);
       if ('connection_method' in body) patch.connection_method = emptyToNull(body.connection_method);
-      if ('schema_id' in body) patch.schema_id = emptyToNull(body.schema_id);
       // Not emptyToNull: the column is NOT NULL with a default of 'audit', so an absent key is how the
       // caller says "leave it alone", and the CHECK constraint refuses anything outside the two values.
       if ('conformance_policy' in body) patch.conformance_policy = body.conformance_policy;

@@ -25,6 +25,7 @@ import {
 import { CardHeading } from '../common/CardHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { plural } from '../../utils/format'
+import { schemaIdsForDevice } from '../../utils/deviceTags'
 
 /**
  * @param {Function} onSelectSchema Opens the Devices page filtered to a schema.
@@ -73,14 +74,11 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   useEffect(() => { load() }, [load])
 
   /**
-   * The devices provisioned against one exact schema version: submodels if any, else
-   * `schema_id`, the rule `schemasForDevice` applies from the other direction. The list, with the
-   * count derived from it.
+   * The devices attached to one exact schema version by either path, the rule `schemasForDevice`
+   * applies from the other direction. The list, with the count derived from it.
    */
   const devicesForSchema = (schemaUuid) =>
-    devices.filter(d =>
-      (d.submodel_schema_ids?.length ? d.submodel_schema_ids : [d.schema_id]).includes(schemaUuid)
-    )
+    devices.filter(d => schemaIdsForDevice(d).includes(schemaUuid))
 
   const deviceCountFor = (schemaUuid) => devicesForSchema(schemaUuid).length
 

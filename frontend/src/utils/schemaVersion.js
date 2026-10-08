@@ -102,9 +102,11 @@ export const isCurrentSchema = (schema) => schemaStatus(schema) !== SCHEMA_STATU
 export const isAssignableSchema = (schema) => schemaStatus(schema) !== SCHEMA_STATUS.ARCHIVED
 
 /**
- * The schemas a picker may offer. `currentId` is kept even when archived: a device on an archived
- * schema is an unfinished migration, and filtering it out would make the select show a schema the
- * device does not have and reassign it on an unrelated save. Input order is preserved.
+ * The schemas a picker may offer. `current` (one id or a list) is kept even when archived: a device
+ * on an archived schema is an unfinished migration, and hiding it would detach it on an unrelated
+ * save. Input order is preserved.
  */
-export const assignableSchemas = (schemas, currentId) =>
-  (schemas || []).filter(s => isAssignableSchema(s) || (s.schema_uuid || s.id) === currentId)
+export const assignableSchemas = (schemas, current) => {
+  const kept = new Set([].concat(current ?? []))
+  return (schemas || []).filter(s => isAssignableSchema(s) || kept.has(s.schema_uuid || s.id))
+}

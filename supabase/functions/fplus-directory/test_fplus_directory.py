@@ -20,9 +20,9 @@ subscribe to a set of addresses that the devices themselves do not claim to publ
 asserts the round trip rather than either half.
 
 Two members are provisioned, not one, and the second is the point: `device_schemas` reads
-`device_submodels` and `devices.schema_id`, the dashboard's attachment, and a reverse lookup written
-against the join table alone would pass every other check in this file while silently omitting every
-device the dashboard attached.
+`device_submodels` and the deprecated `devices.schema_id`, and a reverse lookup written against the
+join table alone would pass every other check in this file while silently omitting every device
+attached through the column, which a 1.0 dashboard wrote and an API client still may.
 
 Run:  python supabase/functions/fplus-directory/test_fplus_directory.py
 """
@@ -227,7 +227,7 @@ class TestTheSourceKeepsItsShape(unittest.TestCase):
 
     def test_the_reverse_lookup_reads_the_view_not_the_join_table(self):
         # device_schemas reads the join table and devices.schema_id. Reading device_submodels
-        # alone omits every device the dashboard attached, and reports success.
+        # alone omits every device attached through the column, and reports success.
         self.assertIn('.from("device_schemas")', self.members)
         self.assertNotIn('.from("device_submodels")', self.members)
 

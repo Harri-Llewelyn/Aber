@@ -34,7 +34,7 @@ export const PROPOSAL_FORMS = {
     // Why each one is out, in the words the form shows the reader.
     withheld: {
       active_gateway_id: 'The gateway is this device’s data path — an Administrator moves it.',
-      schema_id: 'The schema is what this device’s telemetry is judged against — an Administrator changes it.',
+      schema_ids: 'The schemas are what this device’s telemetry is judged against — an Administrator changes them.',
       conformance_policy: 'Conformance policy decides what happens to unmodelled metrics — an Administrator sets it.'
     }
   },

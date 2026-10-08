@@ -49,7 +49,7 @@ import {
 import { AreaIcon } from '../../utils/areaIcon'
 import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
 import {
-  unmodelledMetrics, schemasForDevice, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG
+  unmodelledMetrics, schemaIdsForDevice, schemasForDevice, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG
 } from '../../utils/deviceTags'
 import { assignableSchemas, isAssignableSchema, schemaStatus, statusLabel } from '../../utils/schemaVersion'
 import { suggestMatches } from '../../utils/quarantineMatching'
@@ -83,6 +83,9 @@ import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 // with a cell UUID, and kept out of `cells` because neither lane is a row in that table.
 const CELL_FILTER_UNASSIGNED = '__unassigned__'
 const CELL_FILTER_SITE_WIDE = '__site_wide__'
+
+/** Whether two lists of schema ids name the same schemas, in any order. */
+const sameSchemaSet = (a, b) => a.length === b.length && a.every(id => b.includes(id))
 
 /** Each tab's "?", drawn in the tab bar for the selected tab. */
 const VIEW_HELP = {
@@ -139,7 +142,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [exportTelemetry, setExportTelemetry] = useState(null)
   // A device's type is derived from its schema's metric groups (utils/deviceTags.js).
   // `cell_id` starts empty, meaning inherit from the gateway.
-  const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_id: '', cell_id: '', area_id: '', location_scope: SCOPE_CELL })
+  const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_ids: [], cell_id: '', area_id: '', location_scope: SCOPE_CELL })
   const [areas, setAreas]       = useState([])
   const [form, setForm]         = useState(blank)
   const [filterMode, setFilterMode] = useState('active')
@@ -191,15 +194,10 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     latestBySparkplugId.get(effectiveSparkplugId(device)) || null
 
   /**
-   * A device row shaped for the edit form. `schema_id` is seeded with the resolved schema so the
-   * picker shows what is attached; an explicit `devices.schema_id` wins over a submodel, and the
-   * fallback only fills a hole. A device with several submodels cannot be represented by one
-   * select, so the form names them rather than dropping any.
+   * A device row shaped for the edit form. `schema_ids` is every schema attached by either path,
+   * so the picker shows the whole set and saving writes it back as device_submodels rows.
    */
-  const editFormFor = (device) => {
-    const attached = schemasForDevice(device, schemas)
-    return { ...device, schema_id: device.schema_id || attached[0]?.schema_uuid || '' }
-  }
+  const editFormFor = (device) => ({ ...device, schema_ids: schemaIdsForDevice(device) })
 
   const getInitialSearch = () => {
     const params = new URLSearchParams(window.location.search)
@@ -333,7 +331,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         description: form.description || '',
         connection_method: form.connection_method || null,
         active_gateway_id: form.active_gateway_id || null,
-        schema_id: form.schema_id || null,
         // '' is the inherit option, which api.js turns into NULL. All three keys are always sent
         // because the form always shows the one picker that sets them.
         cell_id: form.cell_id || '',
@@ -363,15 +360,43 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         return
       }
 
+      // Schemas are written after the device, through set_device_schemas(), and only when the set
+      // changed, so saving a rename writes no schema rows.
+      const schemaIds = form.schema_ids || []
       if (editing) {
         await api.put(`/api/v1/devices/${editing.asset_id}`, payload)
+        if (!sameSchemaSet(schemaIds, schemaIdsForDevice(editing))) {
+          await api.put(`/api/v1/devices/${editing.asset_id}/schemas`, { schema_ids: schemaIds })
+        }
       } else {
         // No asset_id: the devices table generates the UUID (gen_random_uuid()).
-        await api.post('/api/v1/devices', payload)
+        const created = await api.post('/api/v1/devices', payload)
+        if (schemaIds.length > 0) {
+          try {
+            await api.put(`/api/v1/devices/${created.id}/schemas`, { schema_ids: schemaIds })
+          } catch (e) {
+            // The device exists now, so the form closes: saving it again would create a second one.
+            setShowForm(false); loadAll()
+            showToast(`Device created, but its schemas were not attached (${e.message}). Open Edit Details to attach them.`, 'error')
+            return
+          }
+        }
       }
       setShowForm(false); loadAll(); showToast(editing ? 'Device saved successfully' : 'Device created successfully', 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
+
+  /** Tick or untick one schema in the form's set. */
+  const toggleSchema = (schemaId) => setForm(f => {
+    const current = f.schema_ids || []
+    return {
+      ...f,
+      schema_ids: current.includes(schemaId) ? current.filter(id => id !== schemaId) : [...current, schemaId]
+    }
+  })
+
+  /** The schema rows the form has ticked: what the device will be judged against once saved. */
+  const formSchemas = schemas.filter(s => (form.schema_ids || []).includes(s.schema_uuid))
 
   // In-flight state for the form and for the row being restored or rejected. Restore and Reject
   // share one key because both reload the list.
@@ -1174,9 +1199,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               <label className="form-label">Device Type / Classification <span className="form-hint-inline">(derived)</span></label>
               {/* flexWrap is load-bearing: a tri-standard schema derives six tags, and the count
                   grows with the schema. */}
-              <div className="form-control derived-tags" title="Derived from the metric groups the assigned schema models — not typed in by hand">
+              <div className="form-control derived-tags" title="Derived from the metric groups the ticked schemas model — not typed in by hand">
                 {(() => {
-                  const preview = deviceTagList(editing, schemas.find(s => s.schema_uuid === form.schema_id) || null)
+                  const preview = deviceTagList(editing, formSchemas)
                   if (preview.length === 0) {
                     return <span className="cell-meta">Assign a schema below to classify this device</span>
                   }
@@ -1187,51 +1212,54 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               </div>
             </div>
 
-            <div className="form-group">
-              <label className="form-label">Schema (optional)</label>
-              <Withheld field="schema_id" />
-              {/* Archived versions are not offered; assignableSchemas() keeps the one this device
-                  already carries, labelled with its status. The database refuses the write as well. */}
-              <select className="form-control" disabled={proposeMode} value={form.schema_id || ''} onChange={e => setForm(f => ({ ...f, schema_id: e.target.value }))} title={proposeMode ? withheldFields.schema_id : "Expected metric schema, from the Schemas registry. Archived versions are not offered — publish a version instead of reattaching the one it replaced."}>
-                <option value="">— No schema assigned —</option>
-                {assignableSchemas(schemas, form.schema_id).map(s => (
-                  <option key={s.schema_uuid} value={s.schema_uuid}>
-                    {isAssignableSchema(s) ? s.schema_name : `${s.schema_name} · ${statusLabel(schemaStatus(s))}`}
-                  </option>
-                ))}
-              </select>
+            {/* A fieldset of checkboxes: the legend names the group to a screen reader, and Tab and
+                Space work without a custom widget. */}
+            <fieldset className="form-group schema-picker">
+              <legend className="form-label">Schemas (optional)</legend>
+              <Withheld field="schema_ids" />
+              {/* Archived versions are not offered; assignableSchemas() keeps the ones this device
+                  already carries, labelled with their status. The database refuses the write as well. */}
+              <div
+                className="form-control schema-checklist"
+                title={proposeMode ? withheldFields.schema_ids : 'The metric contracts this device is judged against, from the Schemas registry. Archived versions are not offered — publish a version instead of reattaching the one it replaced.'}
+              >
+                {(() => {
+                  const offered = assignableSchemas(schemas, editing ? schemaIdsForDevice(editing) : [])
+                  if (offered.length === 0) {
+                    return <span className="cell-meta">No schemas yet. Create one on the Schemas page.</span>
+                  }
+                  return offered.map(s => (
+                    <label key={s.schema_uuid}>
+                      <input
+                        type="checkbox"
+                        disabled={proposeMode}
+                        checked={(form.schema_ids || []).includes(s.schema_uuid)}
+                        onChange={() => toggleSchema(s.schema_uuid)}
+                      />
+                      <span>{isAssignableSchema(s) ? s.schema_name : `${s.schema_name} · ${statusLabel(schemaStatus(s))}`}</span>
+                    </label>
+                  ))
+                })()}
+              </div>
               {/* The contract every DDATA value is judged against comes first; the quarantine hint
                   second, since suggestMatches() weights a required-metric overlap above name
                   similarity. */}
               <div className="form-hint">
-                The contract this device's metrics are judged against. Once the device exists, its
-                Schema Conformance setting decides whether a violation is recorded or the reading is
-                dropped. Optional: with none attached nothing is judged. It also helps identify this
-                device if it turns up in the Quarantine queue under another name, by matching the
-                metrics it reports against the schema's required fields.
+                The contracts this device's metrics are judged against. A metric any of them models
+                is modelled. Once the device exists, its Schema Conformance setting decides whether a
+                violation is recorded or the reading is dropped. Optional: with none ticked nothing is
+                judged. They also help identify this device if it turns up in the Quarantine queue
+                under another name, by matching the metrics it reports against their required fields.
               </div>
               {/* Said only when it applies: the device is on a version its lineage has moved past,
                   which is a migration to finish. */}
-              {form.schema_id && !isAssignableSchema(schemas.find(s => s.schema_uuid === form.schema_id)) && (
+              {formSchemas.some(s => !isAssignableSchema(s)) && (
                 <div className="form-hint hint-warning">
-                  This device is still on an archived version. It is kept selectable so saving does not
+                  This device is still on an archived version. It stays ticked so saving does not
                   silently detach it — move it forward by publishing from the Schemas page, not from here.
                 </div>
               )}
-              {/* The one case a single select cannot state: several submodels. Naming the others is
-                  the smallest honest version. */}
-              {editing && (() => {
-                const attached = schemasForDevice(editing, schemas)
-                if (attached.length < 2) return null
-                return (
-                  <div className="form-hint hint-warning">
-                    This device has {attached.length} schemas attached
-                    ({attached.map(s => s.schema_name).join(', ')}). This picker sets only the primary
-                    one; the rest are managed as AAS submodels and are unaffected by saving here.
-                  </div>
-                )
-              })()}
-            </div>
+            </fieldset>
 
             {/* Only when editing: a device being created has no schema yet, and the column defaults
                 to 'audit' server-side. */}
@@ -1256,7 +1284,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                 {/* The state that looks like it worked and does nothing: with no schema attached,
                     'enforce' is inert. */}
                 {form.conformance_policy === 'enforce'
-                  && schemasForDevice(editing, schemas).length === 0 && (
+                  && formSchemas.length === 0 && (
                   <div className="form-hint hint-warning">
                     This device has no schema attached, so enforcing does nothing — there is
                     nothing to judge a value against. Attach a schema above first.
@@ -1267,7 +1295,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                     back. */}
                 {form.conformance_policy === 'enforce'
                   && editing.conformance_policy !== 'enforce'
-                  && schemasForDevice(editing, schemas).length > 0 && (
+                  && formSchemas.length > 0 && (
                   <div className="form-hint hint-danger">
                     From the next message, a value contradicting this device's schema will not be
                     written to the historian and cannot be recovered. The violation is still
@@ -1531,8 +1559,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             title: !canArchive ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE) : 'Restore device back to active service'
           } : {
             icon: <IconPencil size={13} />,
-            // Seeded with the resolved schema, not the raw row, whose `schema_id` is null for a
-            // device schema'd through `device_submodels`.
+            // Seeded with every attached schema, not the raw row's `schema_id`.
             label: proposeMode ? 'Propose a Change' : 'Edit Details',
             onClick: () => {
               setEditing(selectedDevice)

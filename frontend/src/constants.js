@@ -117,6 +117,8 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   // Without these two a proposal row lands with no kind, unlabelled and unfilterable.
   { kind: 'NAMEPLATE',        table: 'device_nameplate',   label: 'Device nameplates',  domain: 'asset' },
   { kind: 'PROPOSAL',         table: 'change_proposals',   label: 'Change proposals',   domain: 'asset' },
+  // A schema attached to or detached from a device; the entity id is the device's (0168).
+  { kind: 'DEVICE SCHEMA',    table: 'device_submodels',   label: 'Device schemas',     domain: 'asset' },
   // The backup lane: the act and the artefact, both filed under security by audit_domain_for()'s
   // fail-closed default, which is where an act on the whole database belongs.
   { kind: 'BACKUP JOB',       table: 'backup_jobs',        label: 'Backup jobs',        domain: 'security' },

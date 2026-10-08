@@ -754,9 +754,9 @@ paths:
         `Auditor`, the security lane by `Administrator` and `Auditor`.
 
         `entity_type` names the table an event is about: `areas`, `cells`, `gateways`, `devices`,
-        `device_nameplate`, `schemas`, `metric_catalog` and `change_proposals` in the asset lane,
-        and `user_roles`, `service_principals`, `system_settings`, `backup_jobs` and `backups` in
-        the security lane. A trail older than their retirement also holds `area_floors`,
+        `device_nameplate`, `device_submodels`, `schemas`, `metric_catalog` and `change_proposals` in
+        the asset lane, and `user_roles`, `service_principals`, `system_settings`, `backup_jobs` and
+        `backups` in the security lane. A trail older than their retirement also holds `area_floors`,
         `cell_links`, `gateway_links` and `device_links` rows. Rows key on `entity_id`. To find an
         entity's history after deleting it, collect the ids first.
 
@@ -1182,10 +1182,11 @@ paths:
       tags: [Registry]
       summary: Schemas attached to a device
       description: |
-        Many schemas per device, one AAS Submodel each, written through the API; the dashboard
-        attaches its one schema through `devices.schema_id`. **Prefer `device_schemas`** for
-        reading — it reads these rows, or `devices.schema_id` for a device that has none, and is
-        what the exporter and the frontend resolve through.
+        Many schemas per device, one AAS Submodel each. This is where a device's schemas are
+        written: the Devices page writes them through `rpc/set_device_schemas`, and writing the
+        deprecated `devices.schema_id` instead is still read. **Prefer `device_schemas`** for
+        reading — it returns these rows and `devices.schema_id` together, and is what ingestion,
+        the AAS export, i3X, the Directory and the frontend resolve through.
 
         The modelled metric set is the **union** across attachments. Judging a device against
         one schema flags it for publishing what another of its own submodels accounts for.
@@ -1229,10 +1230,11 @@ paths:
   /rest/v1/device_schemas:
     get:
       tags: [Registry]
-      summary: Resolved schema attachments (join rows, or devices.schema_id)
+      summary: Resolved schema attachments (join rows and devices.schema_id)
       description: |
-        Read-only view. `source` says which arm supplied the row (`device_submodels` |
-        `devices.schema_id`).
+        Read-only view, one row per (device, schema): every `device_submodels` row, and the
+        deprecated `devices.schema_id` when no row names that schema. `source` says which arm
+        supplied the row (`device_submodels` | `devices.schema_id`).
         Read this rather than `device_submodels` unless you are writing attachments.
       parameters:
         - $ref: '#/components/parameters/Select'
@@ -1243,6 +1245,44 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/DeviceSchema' } }
+
+  /rest/v1/rpc/set_device_schemas:
+    post:
+      tags: [Registry]
+      summary: Set a device's schemas
+      description: |
+        Makes the device's schemas exactly `p_schema_ids`, in one transaction: inserts the missing
+        `device_submodels` rows, deletes the rest, and clears the deprecated `devices.schema_id`.
+        An empty array detaches every schema. A row the device keeps keeps its `submodel_key`.
+        This is how the Devices page saves its schema picker. `Administrator` or
+        `Shopfloor_Manager`.
+
+        An archived schema is refused unless the device already carries it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_device_id, p_schema_ids]
+              properties:
+                p_device_id: { type: string, format: uuid }
+                p_schema_ids: { type: array, items: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The device's schemas after the change.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  device_id: { type: string, format: uuid }
+                  schema_ids: { type: array, items: { type: string, format: uuid } }
+                  attached: { type: integer, description: Schemas the device did not carry before. }
+                  detached: { type: integer, description: Schemas the device no longer carries. }
+        '400': { description: An archived schema the device does not already carry. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /rest/v1/metric_catalog:
     get:
@@ -4362,7 +4402,8 @@ components:
           type: string
           format: uuid
           nullable: true
-          description: 'The one schema the dashboard attaches. `device_submodels` holds further attachments written through the API; `device_schemas` reads both.'
+          deprecated: true
+          description: 'Deprecated for writes: attach schemas as `device_submodels` rows, or all at once with `rpc/set_device_schemas`. Still read: the `device_schemas` view returns it beside the device''s `device_submodels` rows. Removed no sooner than the next minor release.'
         model_3d_path:
           type: string
           nullable: true
@@ -4414,7 +4455,7 @@ components:
         location_scope: { $ref: '#/components/schemas/LocationScope' }
         status: { type: string, enum: [ONLINE, OFFLINE] }
         is_quarantined: { type: boolean }
-        schema_id: { type: string, format: uuid, nullable: true }
+        schema_id: { type: string, format: uuid, nullable: true, deprecated: true, description: 'Deprecated: write `device_submodels` rows, or call `rpc/set_device_schemas`. Still read through `device_schemas`.' }
         model_3d_path: { type: string, nullable: true }
         connection_method: { type: string, nullable: true }
         is_archived: { type: boolean }
@@ -4463,7 +4504,7 @@ components:
         device_id: { type: string, format: uuid }
         schema_id: { type: string, format: uuid }
         submodel_key: { type: string, nullable: true }
-        source: { type: string, enum: [device_submodels, devices.schema_id], description: '`devices.schema_id` means the row is the dashboard''s attachment on a device with no `device_submodels` rows.' }
+        source: { type: string, enum: [device_submodels, devices.schema_id], description: '`devices.schema_id` means the row comes from the deprecated column, which no `device_submodels` row of this device repeats.' }
 
     TelemetryRow:
       type: object
@@ -4517,8 +4558,8 @@ components:
         id: { type: integer, readOnly: true }
         entity_type:
           type: string
-          enum: [areas, cells, gateways, devices, device_nameplate, schemas, metric_catalog, change_proposals,
-                 user_roles, service_principals, system_settings, backup_jobs, backups]
+          enum: [areas, cells, gateways, devices, device_nameplate, device_submodels, schemas, metric_catalog,
+                 change_proposals, user_roles, service_principals, system_settings, backup_jobs, backups]
           description: >-
             The table the event is about: the types the trail records today. A trail older than
             their retirement also holds `area_floors`, `cell_links`, `gateway_links` and

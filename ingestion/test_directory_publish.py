@@ -235,9 +235,9 @@ class TheProjection(unittest.TestCase):
 
     def test_schemas_are_attached_from_the_view_in_one_query(self):
         """
-        `device_schemas`, not `device_submodels`. The view reads the join table and
-        `devices.schema_id`, the dashboard's attachment, and reading the join table alone reports
-        "no schema" for every device the dashboard attached.
+        `device_schemas`, not `device_submodels`. The view reads the join table and the deprecated
+        `devices.schema_id`, and reading the join table alone reports "no schema" for every device
+        attached through the column.
         """
         supabase = FakeSupabase()
         directory_publish.directory_documents(supabase)

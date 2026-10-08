@@ -5159,6 +5159,29 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   background: var(--bg-glass);
 }
 
+/* The device form's schema picker: a fieldset of checkboxes, scrolling once the registry is long. */
+.schema-picker {
+  border: none;
+  padding: 0;
+  margin-inline: 0;
+  min-width: 0;
+}
+.schema-checklist {
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 6px 14px;
+}
+.schema-checklist label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.schema-checklist input:disabled,
+.schema-checklist input:disabled + span { cursor: not-allowed; color: var(--text-muted); }
+
 /* The panel's Location row: the area and cell chips on one line, "›" between them. */
 .device-location {
   display: flex;
