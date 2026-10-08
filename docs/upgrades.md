@@ -22,6 +22,8 @@ It applies from 1.0.0 onwards. An install older than that is reinstalled rather 
   [*From 1.0.0, the demo accounts stay*](#from-100-the-demo-accounts-stay-until-you-remove-them).
 - **Values from `npm run setup` in 1.0.0 or 1.0.1?** Add the i3X broker password first: see
   [*Values from `npm run setup` before 1.0.2*](#values-from-npm-run-setup-before-102-lack-the-i3x-broker-password).
+- **NetworkPolicies on, and a cold archive in object storage?** Add its endpoint first: see
+  [*From 1.1.0, the cold archive's endpoint is listed*](#from-110-the-cold-archives-endpoint-is-listed-under-networkpolicies).
 
 ### The command
 
@@ -298,6 +300,34 @@ which only `values-dev.yaml` sets.
 
 The upgrade deletes nothing, because devices may already publish under those names. To retire one
 you do not use, open it on the **Metrics** page and choose **Deprecate**.
+
+### From 1.1.0, the cold archive's endpoint is listed under NetworkPolicies
+
+Up to 1.0.2, `networkPolicy.enabled` gave the `cold-archive` CronJob no route at all, so every export
+failed at connect time (#755). From 1.1.0 the chart routes it to the historian and to PostgREST. Its
+S3 endpoint is outside the cluster and is a Cold Storage page setting, so the chart cannot derive
+it. **Before upgrading**, list it in `coldArchive.offsiteEgress`, which applies to the archive pod
+alone:
+
+```yaml
+coldArchive:
+  offsiteEgress:
+    - to: [{ ipBlock: { cidr: 203.0.113.10/32 } }]
+      ports: [{ protocol: TCP, port: 443 }]
+```
+
+A site without NetworkPolicies, or without `coldArchive.enabled`, has nothing to do.
+
+### From 1.1.0, writing `devices.schema_id` is deprecated
+
+From 1.1.0 the Devices page attaches a device's schemas as `device_submodels` rows, through
+`rpc/set_device_schemas`, which makes them exactly the list it is given and clears
+`devices.schema_id`. Every reader, from ingestion's conformance check to the AAS export, sees the
+union of the rows and the column.
+
+The upgrade changes no device: a schema set in the column stays attached. An API client that writes
+the column keeps working, and should move to `rpc/set_device_schemas`. The column is removed no
+sooner than 1.2.0 ([`releases.md`](releases.md#deprecation)).
 
 ---
 

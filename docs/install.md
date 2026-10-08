@@ -73,9 +73,61 @@ new ones.
 
 ## Run it on a site
 
-**You need** one Linux machine on amd64, sized as above, with a fixed address on the site network.
-These commands assume Ubuntu 22.04 or 24.04 and a user with `sudo`. You also need a domain for the
-site, such as `aber.plant.example`, on your site's DNS server.
+**You need:**
+
+- One Linux machine on amd64, sized as above, with a fixed address on the site network. The
+  installer needs Ubuntu 22.04 or 24.04, and a user who can run `sudo`.
+- A domain for the site, such as `aber.plant.example`, on the site's DNS server.
+- One record on that DNS server: `*.<domain>`, pointing at the machine's address. You can add it
+  while the install runs. The ports in [step 3](#3-set-up-dns-and-open-the-ports) must be open too.
+
+**Install it with one command.** Run this on the machine:
+
+```bash
+curl -sfL https://raw.githubusercontent.com/Harri-Llewelyn/Aber/v1.1.0/deploy/install.sh | sudo sh -
+```
+
+The installer is [`deploy/install.sh`](../deploy/install.sh). To read it before it runs, download
+it first, then run `sudo sh install.sh`.
+
+It checks the machine first, and stops with a message if the machine is too small. Then it asks
+five questions:
+
+| Question | What to give |
+| :--- | :--- |
+| Domain | The site's domain, such as `aber.plant.example` |
+| Administrator's email | The email the first administrator signs in with |
+| Site name | A short name for the site, such as `plant1`. Every gateway's settings carry it, so it can never change |
+| This machine's address | Its address on the site network, which gateways connect to. The installer suggests one |
+| Base IRI for asset ids | A web address under a domain your organisation controls. The installer suggests one. It cannot change once an [asset shell](glossary.md#asset-administration-shell-aas) has been exported |
+
+It shows your answers and asks before it changes anything. Then it installs k3s, Helm and Node.js
+where they are missing, and then Aber. The first install takes 5 to 20 minutes, most of it downloading. At the end it
+prints:
+
+- the address to sign in at, `https://app.<domain>`, with the administrator's email and password;
+- the DNS record to add, if `app.<domain>` does not reach the machine yet;
+- where it saved the root certificate, `/etc/aber/aber-ca.crt`.
+
+It keeps the site's passwords and settings in `/etc/aber`. **Keep `/etc/aber/values-local.yaml`
+safe:** it holds every password. If the install stops, fix what the message says and run the same
+command again. It carries on from where it stopped. On a finished install, it upgrades Aber to the
+release named in the command.
+
+To install without questions, give the answers as flags. `--yes` accepts the suggested address and
+base IRI, and `--help` lists every flag:
+
+```bash
+curl -sfL https://raw.githubusercontent.com/Harri-Llewelyn/Aber/v1.1.0/deploy/install.sh | sudo sh -s -- \
+  --domain=aber.plant.example --admin-email=you@plant.example --site-name=plant1 --yes
+```
+
+**Then install the root certificate and sign in.** Follow [step 8](#8-install-the-root-certificate)
+and [step 9](#9-sign-in). The installer has already saved the certificate to a file, so you can skip
+step 8's command.
+
+The numbered steps below are the same install, done by hand. Follow them to see or change each
+part. Their commands assume Ubuntu too.
 
 ### 1. Move the machine's SSH off port 22
 
@@ -136,14 +188,14 @@ Both are done outside the machine:
 ### 4. Prepare the cluster
 
 Run the rest on the machine, as your own user rather than root. The clone holds only the setup
-script and two cluster files; the chart and Aber's images are downloaded from GHCR at 1.0.2.
+script and two cluster files; the chart and Aber's images are downloaded from GHCR at 1.1.0.
 
 These steps are needed once per cluster. Traefik is told to keep each client's address, and
 cert-manager runs the [internal CA](glossary.md#internal-ca-and-root-certificate) that issues every
 certificate (runbook, *Install* and *TLS*).
 
 ```bash
-git clone --branch v1.0.2 https://github.com/Harri-Llewelyn/Aber.git && cd Aber
+git clone --branch v1.1.0 https://github.com/Harri-Llewelyn/Aber.git && cd Aber
 
 kubectl apply -f deploy/k8s/traefik-config.yaml
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
@@ -202,7 +254,7 @@ EOF
 ### 7. Install Aber
 
 ```bash
-helm install aber oci://ghcr.io/harri-llewelyn/aber/aber --version 1.0.2 \
+helm install aber oci://ghcr.io/harri-llewelyn/aber/aber --version 1.1.0 \
   -n aber --create-namespace \
   -f deploy/helm/aber/values-local.yaml -f site.yaml --timeout 15m
 
@@ -239,8 +291,8 @@ would tell you if someone were intercepting your sign-in (runbook, *TLS → 3*).
 
 ### 9. Sign in
 
-Open `https://app.<domain>` and sign in with the email you gave `npm run setup` and the password it
-printed. That account is created once, as an `Administrator`. After that it belongs to the site:
+Open `https://app.<domain>` and sign in with the administrator's email and the password the
+installer or `npm run setup` printed. That account is created once, as an `Administrator`. After that it belongs to the site:
 no install or upgrade changes it.
 
 Next, build your first machine with the [tutorial](../tutorial/README.md), or
