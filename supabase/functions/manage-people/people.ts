@@ -1,15 +1,17 @@
 /**
- * Add a person, remove their access, or restore it: the GoTrue half of the People tab. A function
- * and not an RPC because GoTrue's admin API needs the secret key, which is not in the database.
+ * Add a person, remove their access, restore it, or set them a new password: the GoTrue half of the
+ * People tab. A function and not an RPC because GoTrue's admin API needs the secret key, which is
+ * not in the database.
  *
  * Administrator only, checked twice: here, from the caller's session, before any admin call; and by
  * the SECURITY DEFINER function each act calls in the caller's session, which also writes its audit
- * row. Removing and restoring call the database FIRST, so its rules (not your own access, not the
- * last Administrator who can sign in) are decided before GoTrue changes anything. Removing bans the
- * account and never deletes it: the Audit Trail names the person through it.
+ * row. Removing, restoring and setting a password call the database FIRST, so its rules (not your
+ * own account, not the last Administrator who can sign in) are decided before GoTrue changes
+ * anything. Removing bans the account and never deletes it: the Audit Trail names the person
+ * through it.
  *
- * Without a mail relay a new account gets a password minted here and returned once. Nothing stores
- * or logs it; GoTrue keeps only its hash.
+ * A new account without a mail relay, and every new password, is minted here and returned once.
+ * Nothing stores or logs it; GoTrue keeps only its hash.
  */
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -60,19 +62,26 @@ type AuthError = { status?: number; code?: string; message?: string };
 // deno-lint-ignore no-explicit-any -- clients created without a schema type
 type Client = SupabaseClient<any, any, any>;
 
-/** A database refusal as an HTTP status, carrying the database's own sentence. */
-function dbRefusal(error: DbError, what: string): Response {
-  const status = error.code === "42501" ? 403
-    : error.code === "P0002" ? 404
-    : error.code === "P0001" ? 409
-    : error.code === "22023" ? 400
-    : 500;
-  if (status === 500) console.error(`manage-people: ${what}: ${error.message}`);
+const FN = "manage-people";
+
+/** The SQLSTATEs the People functions raise for a refusal the caller can act on. */
+const REFUSALS: Record<string, number> = { "42501": 403, P0002: 404, P0001: 409, "22023": 400 };
+
+/**
+ * A database refusal the caller can act on, as its status with the database's own sentence. Any
+ * other failure is ours: it answers `what` and a request id, and the error goes to the log.
+ */
+function dbRefusal(req: Request, error: DbError, what: string): Response {
+  const status = REFUSALS[error.code ?? ""];
+  if (!status) return serverError(req, FN, error, { error: what, context: what });
   return json(status, { error: what, details: error.message });
 }
 
-/** A GoTrue refusal: an address already in use is the caller's to fix, an outage is not. */
-function authRefusal(error: AuthError, what: string): Response {
+/**
+ * A GoTrue refusal: an address already in use or a bad value is the caller's to fix, with GoTrue's
+ * sentence. GoTrue failing or not answering is not: a 502 with `what`, and the error in the log.
+ */
+function authRefusal(req: Request, error: AuthError, what: string): Response {
   if (error.code === "email_exists" || error.code === "user_already_exists" ||
     /already (been )?registered|already exists/i.test(error.message ?? "")) {
     return json(409, { error: what, details: "An account with this email address already exists." });
@@ -83,30 +92,31 @@ function authRefusal(error: AuthError, what: string): Response {
   if (error.status && error.status >= 400 && error.status < 500) {
     return json(400, { error: what, details: error.message });
   }
-  console.error(`manage-people: GoTrue answered ${error.status ?? "without a status"}: ${error.message}`);
-  return json(502, {
-    error: what,
-    details: error.status
-      ? `The sign-in service refused: ${error.message}. Nothing was changed.`
-      : "The sign-in service did not answer. Nothing was changed; retry.",
+  return serverError(req, FN, error, {
+    status: 502,
+    error: error.status
+      ? `${what}: the sign-in service failed. Nothing was changed.`
+      : `${what}: the sign-in service did not answer. Nothing was changed; retry.`,
+    context: `GoTrue answered ${error.status ?? "without a status"}`,
   });
 }
 
-function targetOf(body: Record<string, unknown>, callerId: string): string | Response {
+function targetOf(
+  body: Record<string, unknown>,
+  callerId: string,
+  ownRefusal = "You cannot change your own access. Ask another Administrator.",
+): string | Response {
   const userId = typeof body.user_id === "string" ? body.user_id.trim() : "";
   if (!isUuid(userId)) {
     return json(400, { error: "Malformed request", details: "`user_id` must be the person's UUID." });
   }
   if (userId === callerId) {
-    return json(403, {
-      error: "Forbidden",
-      details: "You cannot change your own access. Ask another Administrator.",
-    });
+    return json(403, { error: "Forbidden", details: ownRefusal });
   }
   return userId;
 }
 
-async function addPerson(body: Record<string, unknown>, caller: Client, admin: Client): Promise<Response> {
+async function addPerson(req: Request, body: Record<string, unknown>, caller: Client, admin: Client): Promise<Response> {
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
   if (!EMAIL.test(email) || email.length > 254) {
     return json(400, { error: "Malformed request", details: "`email` must be an email address." });
@@ -119,7 +129,7 @@ async function addPerson(body: Record<string, unknown>, caller: Client, admin: C
   // Asked first, because GoTrue's invitation to an address it already holds, unconfirmed, re-sends
   // to that account instead of refusing, and that account is not this request's to record or undo.
   const { data: people, error: listError } = await caller.rpc("list_people");
-  if (listError) return dbRefusal(listError, "The person was not added");
+  if (listError) return dbRefusal(req, listError, "The person was not added");
   if (((people ?? []) as { email?: string | null }[]).some((p) => p.email?.toLowerCase() === email)) {
     return json(409, { error: "The person was not added", details: "An account with this email address already exists." });
   }
@@ -131,18 +141,20 @@ async function addPerson(body: Record<string, unknown>, caller: Client, admin: C
   if (invited) {
     const redirectTo = Deno.env.get("AUTH_INVITE_REDIRECT_URL") || undefined;
     const { data, error } = await admin.auth.admin.inviteUserByEmail(email, redirectTo ? { redirectTo } : {});
-    if (error) return authRefusal(error, "The invitation was not sent");
+    if (error) return authRefusal(req, error, "The invitation was not sent");
     created = data.user;
   } else {
     password = initialPassword();
     const { data, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true });
-    if (error) return authRefusal(error, "The account was not created");
+    if (error) return authRefusal(req, error, "The account was not created");
     created = data.user;
   }
   const userId = created?.id;
   if (!userId) {
-    console.error("manage-people: GoTrue answered without the new account's id");
-    return json(502, { error: "The person was not added", details: "The sign-in service returned no account." });
+    return serverError(req, FN, new Error("GoTrue answered without the new account's id"), {
+      status: 502,
+      error: "The person was not added: the sign-in service returned no account.",
+    });
   }
 
   // The role and the audit row, as the caller. If they fail, an account this request created is
@@ -157,55 +169,88 @@ async function addPerson(body: Record<string, unknown>, caller: Client, admin: C
       Date.now() - Date.parse(created?.created_at ?? "") < 10 * 60_000;
     const { error: undoError } = fresh ? await admin.auth.admin.deleteUser(userId) : { error: { message: "not new" } };
     if (undoError) {
-      console.error(`manage-people: unrecorded account ${userId} was not deleted: ${undoError.message}`);
-      return json(500, {
-        error: "The person was not added",
-        details: `${recordError.message}. The account the sign-in service holds for this address was ` +
-          "not deleted; check its role and access on the People tab.",
+      // Both failures in the one log line.
+      const failure = { code: recordError.code, message: `${recordError.message}; not deleted: ${undoError.message}` };
+      return serverError(req, FN, failure, {
+        error: "The person was not added, and the account made for this address was not deleted. " +
+          "Check its role and access on the People tab.",
+        context: `recording new account ${userId}`,
       });
     }
-    return dbRefusal(recordError, "The person was not added");
+    return dbRefusal(req, recordError, "The person was not added");
   }
 
   return json(200, { user_id: userId, email, role, invited, ...(password ? { password } : {}) });
 }
 
-async function removeAccess(body: Record<string, unknown>, callerId: string, caller: Client, admin: Client) {
+async function removeAccess(req: Request, body: Record<string, unknown>, callerId: string, caller: Client, admin: Client) {
   const userId = targetOf(body, callerId);
   if (userId instanceof Response) return userId;
 
   const { error } = await caller.rpc("remove_person_access", { p_user_id: userId });
-  if (error) return dbRefusal(error, "Access was not removed");
+  if (error) return dbRefusal(req, error, "Access was not removed");
 
   const { error: banError } = await admin.auth.admin.updateUserById(userId, { ban_duration: BAN_DURATION });
   if (banError) {
-    console.error(`manage-people: role removed but ${userId} not banned: ${banError.message}`);
-    return json(502, {
-      error: "Sign-in is not blocked yet",
-      details: "Their role is removed, so they can do nothing that needs one, but the sign-in " +
-        "service did not block the account. Select Remove access again.",
+    return serverError(req, FN, banError, {
+      status: 502,
+      error: "Sign-in is not blocked yet. Their role is removed, so they can do nothing that needs " +
+        "one, but the sign-in service did not block the account. Select Remove Access again.",
+      context: `banning ${userId}`,
     });
   }
   return json(200, { user_id: userId, access: "removed" });
 }
 
-async function restoreAccess(body: Record<string, unknown>, callerId: string, caller: Client, admin: Client) {
+async function restoreAccess(req: Request, body: Record<string, unknown>, callerId: string, caller: Client, admin: Client) {
   const userId = targetOf(body, callerId);
   if (userId instanceof Response) return userId;
 
   const { data: role, error } = await caller.rpc("restore_person_access", { p_user_id: userId });
-  if (error) return dbRefusal(error, "Access was not restored");
+  if (error) return dbRefusal(req, error, "Access was not restored");
 
   const { error: unbanError } = await admin.auth.admin.updateUserById(userId, { ban_duration: "none" });
   if (unbanError) {
-    console.error(`manage-people: role restored but ${userId} still banned: ${unbanError.message}`);
-    return json(502, {
-      error: "Sign-in is still blocked",
-      details: "Their role is back, but the sign-in service did not lift the block. Select Restore " +
-        "access again.",
+    return serverError(req, FN, unbanError, {
+      status: 502,
+      error: "Sign-in is still blocked. Their role is back, but the sign-in service did not lift " +
+        "the block. Select Restore Access again.",
+      context: `lifting the ban on ${userId}`,
     });
   }
   return json(200, { user_id: userId, access: "active", role: typeof role === "string" ? role : null });
+}
+
+/**
+ * A new password for someone else, minted as `add` mints one, with or without a mail relay. One
+ * function decides and records: called with p_check_only before GoTrue, so a refusal changes
+ * nothing, and again after it to write PASSWORD_SET. If that record fails, the password WAS changed
+ * and nobody has seen it, so the answer withholds it and says to set it again.
+ */
+async function setPassword(req: Request, body: Record<string, unknown>, callerId: string, caller: Client, admin: Client) {
+  const userId = targetOf(body, callerId,
+    "You cannot set your own password here. Use Change Password in your account menu.");
+  if (userId instanceof Response) return userId;
+
+  const { error } = await caller.rpc("record_person_password_set", { p_user_id: userId, p_check_only: true });
+  if (error) return dbRefusal(req, error, "The password was not set");
+
+  const password = initialPassword();
+  const { error: authError } = await admin.auth.admin.updateUserById(userId, { password });
+  if (authError) return authRefusal(req, authError, "The password was not set");
+
+  const { error: recordError } = await caller.rpc("record_person_password_set", {
+    p_user_id: userId,
+    p_check_only: false,
+  });
+  if (recordError) {
+    return serverError(req, FN, recordError, {
+      error: "The password was changed but not recorded. Nobody has seen the new one: select Set " +
+        "New Password again.",
+      context: `recording a new password for ${userId}`,
+    });
+  }
+  return json(200, { user_id: userId, password });
 }
 
 export async function handler(req: Request): Promise<Response> {
@@ -244,7 +289,7 @@ export async function handler(req: Request): Promise<Response> {
     if (await resolveUserRole(caller, user.id) !== "Administrator") {
       return json(403, {
         error: "Forbidden: Insufficient privileges",
-        details: "Only an Administrator may add people or change their access.",
+        details: "Only an Administrator may add people, or change their access or password.",
       });
     }
 
@@ -261,13 +306,18 @@ export async function handler(req: Request): Promise<Response> {
     const admin = serviceRoleClient(supabaseUrl, serviceKey);
     switch (body.action) {
       case "add":
-        return await addPerson(body, caller, admin);
+        return await addPerson(req, body, caller, admin);
       case "remove":
-        return await removeAccess(body, user.id, caller, admin);
+        return await removeAccess(req, body, user.id, caller, admin);
       case "restore":
-        return await restoreAccess(body, user.id, caller, admin);
+        return await restoreAccess(req, body, user.id, caller, admin);
+      case "set-password":
+        return await setPassword(req, body, user.id, caller, admin);
       default:
-        return json(400, { error: "Malformed request", details: "`action` must be add, remove or restore." });
+        return json(400, {
+          error: "Malformed request",
+          details: "`action` must be add, remove, restore or set-password.",
+        });
     }
   } catch (err) {
     return serverError(req, "manage-people", err);

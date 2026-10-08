@@ -1,5 +1,5 @@
 """
-An Administrator adds people, sets their roles and removes their access (0166).
+An Administrator adds people, sets their roles and passwords, and removes their access (0166, 0167).
 
     python supabase/migrations/test_people_management.py
 
@@ -7,9 +7,10 @@ Requires a migrated Supabase database (54322 by default; `npm run test:db` start
 
 What is held here: that only an Administrator may list people or change one, that a machine
 identity is never a person, that an unknown person is a 404, that a person keeps exactly one role
-row however often it is set, that nobody changes their own role or access, that the last
-Administrator who can sign in cannot be demoted or removed, that the acts serialise on one lock, and
-that each act is in the Audit Trail's security lane, attributed, with no password in it.
+row however often it is set, that nobody changes their own role, access or password here, that the
+last Administrator who can sign in cannot be demoted or removed, that a removed person's password
+is not set, that the acts serialise on one lock, that each act is in the Audit Trail's security
+lane, attributed, with no password in it, and that nothing gives a self-registered account a role.
 
 EVERY TEST ROLLS BACK. The acts write Audit Trail rows, and the audit table cannot be pruned.
 """
@@ -40,6 +41,7 @@ PUBLIC_FUNCTIONS = [
     "public.record_person_added(uuid, text, boolean)",
     "public.remove_person_access(uuid)",
     "public.restore_person_access(uuid)",
+    "public.record_person_password_set(uuid, boolean)",
 ]
 INTERNAL_FUNCTIONS = [
     "public.person_access_is_removed(uuid)",
@@ -126,6 +128,9 @@ class PeopleManagement(unittest.TestCase):
     def restore(self, actor, target):
         return self.call(actor, "SELECT public.restore_person_access(%s);", (target,))[0][0]
 
+    def set_password(self, actor, target, check_only=False):
+        return self.call(actor, "SELECT public.record_person_password_set(%s, %s);", (target, check_only))
+
     def people(self, actor=ADMIN_ID):
         rows = self.call(actor, "SELECT * FROM public.list_people();")
         names = ["user_id", "email", "role", "status", "sign_in_blocked", "role_on_restore",
@@ -173,7 +178,7 @@ class PeopleManagement(unittest.TestCase):
 
     # -- the grants -------------------------------------------------------------------------------
 
-    def test_the_api_roles_reach_only_the_five_entry_points(self):
+    def test_the_api_roles_reach_only_the_entry_points(self):
         for fn in PUBLIC_FUNCTIONS:
             self.cur.execute("SELECT has_function_privilege('anon', %s, 'EXECUTE'),"
                              " has_function_privilege('authenticated', %s, 'EXECUTE');", (fn, fn))
@@ -194,6 +199,8 @@ class PeopleManagement(unittest.TestCase):
             ("SELECT public.record_person_added(%s, 'Operator', false);", (NEWCOMER_ID,)),
             ("SELECT public.remove_person_access(%s);", (OPERATOR_ID,)),
             ("SELECT public.restore_person_access(%s);", (OPERATOR_ID,)),
+            ("SELECT public.record_person_password_set(%s, true);", (OPERATOR_ID,)),
+            ("SELECT public.record_person_password_set(%s, false);", (OPERATOR_ID,)),
         ]
         for actor in (MANAGER_ID, OPERATOR_ID, AUDITOR_ID):
             for sql, args in calls:
@@ -207,7 +214,8 @@ class PeopleManagement(unittest.TestCase):
         self.assertNotIn(MACHINE_ID, self.people())
         for sql in ("SELECT public.set_person_role(%s, 'Operator');",
                     "SELECT public.remove_person_access(%s);",
-                    "SELECT public.record_person_added(%s, 'Operator', false);"):
+                    "SELECT public.record_person_added(%s, 'Operator', false);",
+                    "SELECT public.record_person_password_set(%s, false);"):
             with self.subTest(sql=sql):
                 with self.assertRaises(psycopg2.Error) as refused:
                     self.call(ADMIN_ID, sql, (MACHINE_ID,))
@@ -219,7 +227,9 @@ class PeopleManagement(unittest.TestCase):
         unknown = str(uuid.uuid4())
         for sql in ("SELECT public.set_person_role(%s, 'Operator');",
                     "SELECT public.remove_person_access(%s);",
-                    "SELECT public.restore_person_access(%s);"):
+                    "SELECT public.restore_person_access(%s);",
+                    "SELECT public.record_person_password_set(%s, true);",
+                    "SELECT public.record_person_password_set(%s, false);"):
             with self.subTest(sql=sql):
                 with self.assertRaises(psycopg2.Error) as refused:
                     self.call(ADMIN_ID, sql, (unknown,))
@@ -301,6 +311,8 @@ class PeopleManagement(unittest.TestCase):
             "restore": lambda: self.restore(ADMIN_ID, AUDITOR_ID),
             "add": lambda: self.call(
                 ADMIN_ID, "SELECT public.record_person_added(%s, 'Operator', false);", (NEWCOMER_ID,)),
+            "check a password": lambda: self.set_password(ADMIN_ID, OPERATOR_ID, check_only=True),
+            "record a password": lambda: self.set_password(ADMIN_ID, OPERATOR_ID),
         }
         for name, act in acts.items():
             with self.subTest(act=name):
@@ -409,6 +421,73 @@ class PeopleManagement(unittest.TestCase):
         # The ban is GoTrue's, made by the edge function after this; the database alone has not
         # blocked sign-in, and says so.
         self.assertFalse(listed[AUDITOR_ID]["sign_in_blocked"])
+
+    # -- setting a password -----------------------------------------------------------------------
+
+    def test_checking_writes_nothing_and_recording_holds_no_password(self):
+        self.set_password(ADMIN_ID, OPERATOR_ID, check_only=True)
+        self.call(ADMIN_ID, "SELECT public.record_person_password_set(%s, NULL);", (OPERATOR_ID,))
+        self.assertEqual(self.audit(OPERATOR_ID, "PASSWORD_SET"), [], "a check is not a change")
+
+        self.set_password(ADMIN_ID, OPERATOR_ID)
+        rows = self.audit(OPERATOR_ID, "PASSWORD_SET")
+        self.assertEqual(rows, [(ADMIN_ID, "security", None,
+                                 {"email": f"{OPERATOR_ID}@people.test",
+                                  "method": "new password shown once"})])
+        self.assertNotIn("not-a-real-hash", json.dumps(rows[0][3]))
+        # A password is not a role: the role rows are untouched.
+        self.assertEqual(self.role_rows(OPERATOR_ID), ["Operator"])
+        self.assertEqual(self.audit(OPERATOR_ID, "ROLE_GRANTED"), [])
+
+    def test_an_invited_person_and_an_administrator_can_be_given_a_password(self):
+        for target in (NEWCOMER_ID, SECOND_ADMIN_ID):
+            with self.subTest(target=target):
+                self.set_password(ADMIN_ID, target)
+                self.assertEqual(len(self.audit(target, "PASSWORD_SET")), 1)
+
+    def test_nobody_sets_their_own_password_here(self):
+        for check_only in (True, False):
+            with self.subTest(check_only=check_only):
+                with self.assertRaises(psycopg2.Error) as refused:
+                    self.set_password(ADMIN_ID, ADMIN_ID, check_only)
+                self.assertEqual(refused.exception.pgcode, "42501")
+                self.assertIn("Change Password", refused.exception.diag.message_primary)
+        self.assertEqual(self.audit(ADMIN_ID, "PASSWORD_SET"), [])
+
+    def test_a_removed_person_is_restored_before_their_password_is_set(self):
+        # Removed here, and banned outside the dashboard: both read as removed.
+        self.remove(ADMIN_ID, MANAGER_ID)
+        self.cur.execute("UPDATE auth.users SET banned_until = now() + interval '1 day' WHERE id = %s;",
+                         (AUDITOR_ID,))
+        for target in (MANAGER_ID, AUDITOR_ID):
+            for check_only in (True, False):
+                with self.subTest(target=target, check_only=check_only):
+                    with self.assertRaises(psycopg2.Error) as refused:
+                        self.set_password(ADMIN_ID, target, check_only)
+                    self.assertEqual(refused.exception.pgcode, "P0001")
+                    self.assertIn("Restore it first", refused.exception.diag.message_primary)
+            self.assertEqual(self.audit(target, "PASSWORD_SET"), [])
+        self.restore(ADMIN_ID, MANAGER_ID)
+        self.set_password(ADMIN_ID, MANAGER_ID)
+        self.assertEqual(len(self.audit(MANAGER_ID, "PASSWORD_SET")), 1)
+
+    # -- sign-up ----------------------------------------------------------------------------------
+
+    def test_nothing_gives_a_self_registered_account_a_role(self):
+        self.cur.execute("SELECT to_regprocedure('public.handle_new_user()');")
+        self.assertIsNone(self.cur.fetchone()[0], "handle_new_user() is back")
+        self.cur.execute("SELECT tgname FROM pg_trigger"
+                         " WHERE tgrelid = 'auth.users'::regclass AND NOT tgisinternal;")
+        self.assertEqual(self.cur.fetchall(), [], "a trigger on auth.users runs for every sign-up")
+        # The row GoTrue's sign-up writes: an address, a password hash, and no role declared.
+        signed_up = str(uuid.uuid4())
+        self.cur.execute(
+            "INSERT INTO auth.users (id, email, encrypted_password, raw_app_meta_data, created_at)"
+            " VALUES (%s, %s, 'not-a-real-hash', '{\"provider\": \"email\"}', now());",
+            (signed_up, f"{signed_up}@people.test"),
+        )
+        self.assertEqual(self.role_rows(signed_up), [])
+        self.assertIsNone(self.people()[signed_up]["role"])
 
 
 if __name__ == "__main__":

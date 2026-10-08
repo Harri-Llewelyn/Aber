@@ -26,10 +26,11 @@ const NEW_USER = { id: NEW_ID, email: "new@site.test", created_at: new Date().to
 type Call = { method: string; path: string; query: string; body: Record<string, unknown> | null; auth: string | null };
 
 /**
- * GoTrue and PostgREST behind the gateway, answered from `replies` keyed "METHOD /path". The caller
- * is an Administrator unless `role` says otherwise. Every request is recorded in order.
+ * GoTrue and PostgREST behind the gateway, answered from `replies` keyed "METHOD /path"; a list
+ * answers successive requests, its last entry repeating. The caller is an Administrator unless
+ * `role` says otherwise. Every request is recorded in order.
  */
-function stack(replies: Record<string, Reply> = {}, role = "Administrator") {
+function stack(replies: Record<string, Reply | Reply[]> = {}, role = "Administrator") {
   const calls: Call[] = [];
   const defaults: Record<string, Reply> = {
     "GET /auth/v1/user": { status: 200, body: { id: ADMIN_ID, aud: "authenticated", email: "admin@site.test" } },
@@ -40,6 +41,7 @@ function stack(replies: Record<string, Reply> = {}, role = "Administrator") {
     "POST /rest/v1/rpc/record_person_added": { status: 204, body: null },
     "POST /rest/v1/rpc/remove_person_access": { status: 200, body: true },
     "POST /rest/v1/rpc/restore_person_access": { status: 200, body: "Operator" },
+    "POST /rest/v1/rpc/record_person_password_set": { status: 204, body: null },
     [`PUT /auth/v1/admin/users/${TARGET_ID}`]: { status: 200, body: { id: TARGET_ID } },
     [`DELETE /auth/v1/admin/users/${NEW_ID}`]: { status: 200, body: {} },
   };
@@ -56,7 +58,9 @@ function stack(replies: Record<string, Reply> = {}, role = "Administrator") {
       auth: req.headers.get("Authorization"),
     });
     const key = `${req.method} ${url.pathname}`;
-    const reply = replies[key] ?? defaults[key] ?? { status: 599, body: { message: `unexpected ${key}` } };
+    const listed = replies[key];
+    const given = Array.isArray(listed) ? (listed.length > 1 ? listed.shift() : listed[0]) : listed;
+    const reply = given ?? defaults[key] ?? { status: 599, body: { message: `unexpected ${key}` } };
     return new Response(reply.body === null ? null : JSON.stringify(reply.body), {
       status: reply.status,
       headers: { "Content-Type": "application/json" },
@@ -101,6 +105,24 @@ async function run(request: Request, s: ReturnType<typeof stack>) {
     console.error = originalError;
     s.restore();
   }
+}
+
+/**
+ * A failure that is ours, not the caller's: `status`, a body of a fixed sentence and a request id
+ * that the header repeats, and `cause` (the database's or GoTrue's text) in the log line under that
+ * id and nowhere in the answer.
+ */
+function assertServerFailure(
+  { response, body, logged }: { response: Response; body: Record<string, string>; logged: string[] },
+  status: number,
+  cause: string,
+) {
+  assert.equal(response.status, status);
+  assert.equal(Object.keys(body).sort(), ["error", "request_id"]);
+  assert.equal(response.headers.get("X-Request-Id"), body.request_id);
+  assert.ok(!JSON.stringify(body).includes(cause), `the answer carries "${cause}"`);
+  const line = logged.find((l) => l.includes(body.request_id)) ?? "";
+  assert.ok(line.includes(cause), `the log line under ${body.request_id} lacks "${cause}"`);
 }
 
 const gotrueAdmin = (paths: string[]) =>
@@ -221,8 +243,9 @@ Deno.test("an account GoTrue did not just make is never deleted", async () => {
       body: { code: "22023", message: "not an account added in the last hour", details: null, hint: null },
     },
   });
-  const { response } = await run(post({ action: "add", email: "new@site.test", role: "Operator" }), s);
-  assert.equal(response.status, 500);
+  const answer = await run(post({ action: "add", email: "new@site.test", role: "Operator" }), s);
+  assertServerFailure(answer, 500, "not an account added in the last hour");
+  assert.ok(/not deleted/.test(answer.body.error), answer.body.error);
   assert.equal(s.paths().some((p) => p.startsWith("DELETE")), false);
 });
 
@@ -313,9 +336,67 @@ Deno.test("an unknown person is a 404", async () => {
 Deno.test("a ban GoTrue did not make says to remove access again", async () => {
   env(false);
   const s = stack({ [`PUT /auth/v1/admin/users/${TARGET_ID}`]: { status: 500, body: { code: 500, msg: "boom" } } });
-  const { response, body } = await run(post({ action: "remove", user_id: TARGET_ID }), s);
-  assert.equal(response.status, 502);
-  assert.ok(/Remove access again/.test(body.details));
+  const answer = await run(post({ action: "remove", user_id: TARGET_ID }), s);
+  assertServerFailure(answer, 502, "boom");
+  assert.ok(/Remove Access again/.test(answer.body.error), answer.body.error);
+});
+
+Deno.test("a lifted ban GoTrue did not make says to restore access again", async () => {
+  env(false);
+  const s = stack({ [`PUT /auth/v1/admin/users/${TARGET_ID}`]: { status: 500, body: { code: 500, msg: "upstream gone" } } });
+  const answer = await run(post({ action: "restore", user_id: TARGET_ID }), s);
+  assertServerFailure(answer, 502, "upstream gone");
+  assert.ok(/Restore Access again/.test(answer.body.error), answer.body.error);
+});
+
+Deno.test("a database failure that is not a refusal answers a reference, not its message", async () => {
+  for (const [action, path] of [["remove", "remove_person_access"], ["set-password", "record_person_password_set"]]) {
+    env(false);
+    const s = stack({
+      [`POST /rest/v1/rpc/${path}`]: {
+        status: 500,
+        body: { code: "XX000", message: "relation public.secret_table is broken", details: null, hint: null },
+      },
+    });
+    const answer = await run(post({ action, user_id: TARGET_ID }), s);
+    assertServerFailure(answer, 500, "relation public.secret_table is broken");
+    assert.equal(gotrueAdmin(s.paths()), [], action);
+  }
+});
+
+Deno.test("GoTrue failing answers a 502 and a reference, not GoTrue's message", async () => {
+  env(false);
+  const s = stack({ "POST /auth/v1/admin/users": { status: 500, body: { code: 500, msg: "database at 10.0.0.7 refused" } } });
+  const answer = await run(post({ action: "add", email: "new@site.test", role: "Operator" }), s);
+  assertServerFailure(answer, 502, "database at 10.0.0.7 refused");
+  assert.equal(answer.body.error, "The account was not created: the sign-in service failed. Nothing was changed.");
+  assert.equal(s.paths().includes("POST /rest/v1/rpc/record_person_added"), false);
+});
+
+Deno.test("an account neither recorded nor deleted answers a reference, and names both causes in the log", async () => {
+  env(false);
+  const s = stack({
+    "POST /rest/v1/rpc/record_person_added": {
+      status: 500,
+      body: { code: "XX000", message: "the record failed", details: null, hint: null },
+    },
+    [`DELETE /auth/v1/admin/users/${NEW_ID}`]: { status: 500, body: { code: 500, msg: "the delete failed" } },
+  });
+  const answer = await run(post({ action: "add", email: "new@site.test", role: "Operator" }), s);
+  assertServerFailure(answer, 500, "the record failed");
+  assert.ok(answer.logged.some((l) => l.includes("the delete failed")), "the delete's failure is logged");
+  assert.ok(!JSON.stringify(answer.body).includes("the delete failed"));
+  assert.equal("password" in answer.body, false);
+});
+
+Deno.test("a request id the gateway sent is the one answered and logged", async () => {
+  env(false);
+  const s = stack({ [`PUT /auth/v1/admin/users/${TARGET_ID}`]: { status: 500, body: { code: 500, msg: "boom" } } });
+  const request = post({ action: "remove", user_id: TARGET_ID });
+  request.headers.set("X-Request-Id", "gateway-id-0123456789");
+  const answer = await run(request, s);
+  assertServerFailure(answer, 502, "boom");
+  assert.equal(answer.body.request_id, "gateway-id-0123456789");
 });
 
 Deno.test("restoring access gives the role back, then lifts the ban", async () => {
@@ -329,4 +410,101 @@ Deno.test("restoring access gives the role back, then lifts the ban", async () =
     `PUT /auth/v1/admin/users/${TARGET_ID}`,
   ]);
   assert.equal(s.calls.find((c) => c.method === "PUT")?.body, { ban_duration: "none" });
+});
+
+const RECORD_PATH = "/rest/v1/rpc/record_person_password_set";
+
+Deno.test("setting a password asks the database, changes it in GoTrue, then records it", async () => {
+  // With a relay as well: a new password is always minted and shown, never mailed.
+  for (const smtp of [false, true]) {
+    env(smtp);
+    const s = stack();
+    const { response, body, logged } = await run(post({ action: "set-password", user_id: TARGET_ID }), s);
+    assert.equal(response.status, 200, `relay ${smtp}`);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal(s.paths().slice(2), [
+      `POST ${RECORD_PATH}`,
+      `PUT /auth/v1/admin/users/${TARGET_ID}`,
+      `POST ${RECORD_PATH}`,
+    ]);
+
+    const [check, record] = s.calls.filter((c) => c.path === RECORD_PATH);
+    assert.equal(check.body, { p_user_id: TARGET_ID, p_check_only: true });
+    assert.equal(record.body, { p_user_id: TARGET_ID, p_check_only: false });
+    assert.equal(check.auth, `Bearer ${CALLER_TOKEN}`, "decided as the caller");
+    assert.equal(record.auth, `Bearer ${CALLER_TOKEN}`, "recorded as the caller");
+
+    const change = s.calls.find((c) => c.method === "PUT")!;
+    assert.equal(change.auth, `Bearer ${SERVICE_KEY}`, "the admin call carries the secret key");
+    assert.equal(Object.keys(change.body ?? {}), ["password"], "only the password changes");
+    assert.ok(PASSWORD_SHAPE.test(String(change.body?.password)));
+    assert.equal(body, { user_id: TARGET_ID, password: change.body?.password });
+    assert.ok(!JSON.stringify([check.body, record.body]).includes(body.password), "the password never reaches the database");
+    assert.ok(!logged.join("\n").includes(body.password), "nor the log");
+  }
+});
+
+Deno.test("nobody sets their own password here, and nothing is called", async () => {
+  env(false);
+  const s = stack();
+  const { response, body } = await run(post({ action: "set-password", user_id: ADMIN_ID }), s);
+  assert.equal(response.status, 403);
+  assert.ok(/Change Password/.test(body.details), "points at the account menu");
+  assert.equal(s.paths(), ["GET /auth/v1/user", "GET /rest/v1/user_roles"]);
+});
+
+Deno.test("a caller who is not an Administrator sets no password", async () => {
+  for (const role of ["Shopfloor_Manager", "Operator", "Auditor"]) {
+    env(false);
+    const s = stack({}, role);
+    const { response } = await run(post({ action: "set-password", user_id: TARGET_ID }), s);
+    assert.equal(response.status, 403, role);
+    assert.equal(s.paths(), ["GET /auth/v1/user", "GET /rest/v1/user_roles"], role);
+  }
+});
+
+Deno.test("a password the database refuses never reaches GoTrue", async () => {
+  const refusals: [number, string, string, number][] = [
+    [403, "42501", "insufficient privileges to set a person's password", 403],
+    [404, "P0002", `person ${TARGET_ID} not found`, 404],
+    [400, "22023", `${TARGET_ID} is a machine identity, not a person.`, 400],
+    [400, "P0001", "this person's access is removed. Restore it first, then set a new password.", 409],
+  ];
+  for (const [status, code, message, expected] of refusals) {
+    env(false);
+    const s = stack({ [`POST ${RECORD_PATH}`]: { status, body: { code, message, details: null, hint: null } } });
+    const { response, body } = await run(post({ action: "set-password", user_id: TARGET_ID }), s);
+    assert.equal(response.status, expected, code);
+    assert.equal(body.details, message, code);
+    assert.equal("password" in body, false, code);
+    assert.equal(gotrueAdmin(s.paths()), [], code);
+    assert.equal(s.paths().filter((p) => p.endsWith(RECORD_PATH)).length, 1, `${code}: nothing recorded`);
+  }
+});
+
+Deno.test("a password GoTrue did not change is not recorded", async () => {
+  env(false);
+  const s = stack({ [`PUT /auth/v1/admin/users/${TARGET_ID}`]: { status: 500, body: { code: 500, msg: "boom" } } });
+  const { response, body } = await run(post({ action: "set-password", user_id: TARGET_ID }), s);
+  assert.equal(response.status, 502);
+  assert.equal("password" in body, false);
+  assert.equal(s.paths().filter((p) => p.endsWith(RECORD_PATH)).length, 1, "only the check ran");
+});
+
+Deno.test("a change the database did not record says so, and withholds the password", async () => {
+  env(false);
+  const s = stack({
+    [`POST ${RECORD_PATH}`]: [
+      { status: 204, body: null },
+      { status: 503, body: { code: "57P01", message: "terminating connection", details: null, hint: null } },
+    ],
+  });
+  const answer = await run(post({ action: "set-password", user_id: TARGET_ID }), s);
+  assertServerFailure(answer, 500, "terminating connection");
+  assert.ok(/was changed but not recorded/.test(answer.body.error) && /Set New Password again/.test(answer.body.error),
+    answer.body.error);
+  assert.equal("password" in answer.body, false);
+  const password = String(s.calls.find((c) => c.method === "PUT")?.body?.password);
+  assert.ok(!answer.logged.join("\n").includes(password), "the password is not logged");
+  assert.ok(!JSON.stringify(answer.body).includes(password));
 });

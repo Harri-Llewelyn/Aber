@@ -12,8 +12,9 @@ A function that cannot do what it was asked answers in one of two ways.
   that is not allowed or a row that does not exist answers `4xx` with a sentence saying what to
   change. A deployment missing a setting answers a fixed sentence that names the setting.
 - **An unexpected failure answers a fixed sentence and a request id, and nothing else.** The status
-  is the one that path has always answered: `500`, or `502` from `forge-membership` and
-  `forge-sweep`. The dashboard shows the id after the message, as `Reference: <id>`.
+  is the one that path has always answered: `500`, or `502` from `forge-membership`,
+  `forge-sweep` and `manage-people` (when GoTrue fails). The dashboard shows the id after the
+  message, as `Reference: <id>`.
 
 ```http
 HTTP/1.1 500 Internal Server Error
@@ -66,4 +67,4 @@ Answer an unexpected failure with `serverError()` from [`_shared/failure.ts`](_s
 Pass the request, the function's name and the error, with the path's status and a fixed sentence.
 Never put an error's `message` or `stack` in a response. Check 41 of
 [`scripts/check-docs-drift.mjs`](../../scripts/check-docs-drift.mjs) refuses the two common ways of
-doing so, in each function's `index.ts`.
+doing so, in each function's `index.ts` and in a module its handler is imported from.

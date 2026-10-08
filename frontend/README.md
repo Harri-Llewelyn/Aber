@@ -211,12 +211,19 @@ card. The page does not show sessions: an *Active* account is one that may conne
 
 The **People** tab (`components/tabs/PeopleSection.jsx`) is offered only when `App.jsx` passes
 `userRole` Administrator, and the page opens on it. Roles go through `set_person_role()`; adding,
-removing and restoring go through `manage-people`, because GoTrue's admin API needs the secret key.
-The controls the database would refuse (your own row, the last Administrator who can sign in, a
-removed person's role) are disabled with the reason as their tooltip, computed in
-`utils/people.js`, so the page and the database state the same rule. The password `AddPersonModal`
-shows, on a site with no mail relay, lives in that dialog's state until it closes, as a minted
-token does in `ServiceTokenModal`.
+removing, restoring and Set New Password go through `manage-people`, because GoTrue's admin API
+needs the secret key. The controls the database would refuse (your own row, the last Administrator
+who can sign in, a removed person's role or password) are disabled with the reason as their
+tooltip, computed in `utils/people.js`, so the page and the database state the same rule. A password
+`manage-people` mints, for Add Person on a site with no mail relay or for Set New Password, is shown
+by `PasswordShownOnce` and lives in its dialog's state until it closes, as a minted token does in
+`ServiceTokenModal`.
+
+**Change Password**, in the account menu (`App.jsx`'s `UserMenu`), opens `ChangePasswordModal`.
+`utils/passwords.js` checks the current password with a password grant it sends with `fetch`, not
+`supabase.auth.signInWithPassword()`, which would store the session it opens in place of the
+dashboard's. Then `supabase.auth.updateUser()` sets the new one. The item is disabled for a session
+with no email address, a machine identity, which has no password.
 
 ### Why the cold-archive destination is one dialog
 

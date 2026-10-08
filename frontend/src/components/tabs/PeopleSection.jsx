@@ -7,9 +7,11 @@ import { IconPlus, IconRefreshCw, IconShieldAlert, IconUser } from '../common/Ic
 import { LoadingState } from '../common/LoadingState'
 import { AddPersonModal } from '../modals/AddPersonModal'
 import { ConfirmModal } from '../modals/ConfirmModal'
+import { NewPasswordModal } from '../modals/NewPasswordModal'
 import { formatDateTime } from '../../utils/format'
 import {
   PERSON_ROLES,
+  passwordSetBlocked,
   personRoleLabel,
   personStatus,
   removalBlocked,
@@ -18,18 +20,21 @@ import {
 
 /**
  * Access Control's People tab: every person who can sign in, with their role, for an
- * Administrator to add, re-role, remove or restore. Roles are set through set_person_role();
- * adding, removing and restoring go through manage-people, which holds GoTrue's secret key. The
- * database refuses your own role or access and the last Administrator who can sign in; the
- * controls are disabled for those with the reason as their tooltip.
+ * Administrator to add, re-role, remove or restore, or to give a new password. Roles are set
+ * through set_person_role(); adding, removing, restoring and setting a password go through
+ * manage-people, which holds GoTrue's secret key. The database refuses your own role, access or
+ * password and the last Administrator who can sign in; the controls are disabled for those with
+ * the reason as their tooltip. A new password is shown once, in NewPasswordModal.
  */
 export function PeopleSection({ showToast, currentUserId }) {
   const [people, setPeople] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [adding, setAdding] = useState(false)
-  // { act: 'remove' | 'restore', person } while the confirmation is open.
+  // { act: 'remove' | 'restore' | 'password', person } while the confirmation is open.
   const [confirming, setConfirming] = useState(null)
+  // { email, password } while a new password is on screen; gone when its dialog closes.
+  const [newPassword, setNewPassword] = useState(null)
   // The user_id whose role is being saved, so its select shows the wait.
   const [savingRole, setSavingRole] = useState(null)
 
@@ -61,6 +66,10 @@ export function PeopleSection({ showToast, currentUserId }) {
       if (act === 'remove') {
         await api.removePersonAccess(person.user_id)
         showToast?.(`${person.email} can no longer sign in`, 'success')
+      } else if (act === 'password') {
+        const result = await api.managePeople({ action: 'set-password', user_id: person.user_id })
+        setNewPassword({ email: person.email, password: result.password })
+        showToast?.(`${person.email} has a new password`, 'success')
       } else {
         const result = await api.restorePersonAccess(person.user_id)
         showToast?.(
@@ -123,6 +132,7 @@ export function PeopleSection({ showToast, currentUserId }) {
                 const status = personStatus(p)
                 const roleBlocked = roleChangeBlocked(p, people, currentUserId)
                 const removeBlocked = removalBlocked(p, people, currentUserId)
+                const passwordBlocked = passwordSetBlocked(p, currentUserId)
                 const removed = p.status === 'removed'
                 const isSelf = p.user_id === currentUserId
                 return (
@@ -154,6 +164,15 @@ export function PeopleSection({ showToast, currentUserId }) {
                     </td>
                     <td className="cell-meta">{p.last_sign_in_at ? formatDateTime(p.last_sign_in_at) : 'Never'}</td>
                     <td className="row-actions">
+                      <ActionButton
+                        className="btn btn-ghost btn-sm"
+                        permitted={!passwordBlocked}
+                        deniedTitle={passwordBlocked}
+                        onClick={() => setConfirming({ act: 'password', person: p })}
+                        title="Make them a new password, shown to you once. Their current one stops working."
+                      >
+                        Set New Password
+                      </ActionButton>
                       {removed && (
                         <ActionButton
                           className="btn btn-ghost btn-sm"
@@ -211,6 +230,33 @@ export function PeopleSection({ showToast, currentUserId }) {
           pendingLabel="Removing…"
           onConfirm={confirmAct}
           onCancel={() => setConfirming(null)}
+        />
+      )}
+
+      {confirming?.act === 'password' && (
+        <ConfirmModal
+          title={`Set a new password for ${confirming.person.email}`}
+          message={(
+            <>
+              Aber makes a new password and shows it to you once, for you to give them. Their
+              current password stops working at once, and the dashboard signs them out within the
+              hour. Their role, their account and its history stay as they are.
+            </>
+          )}
+          confirmLabel="Set New Password"
+          pendingLabel="Setting…"
+          confirmClassName="btn btn-primary"
+          onConfirm={confirmAct}
+          onCancel={() => setConfirming(null)}
+        />
+      )}
+
+      {newPassword && (
+        <NewPasswordModal
+          email={newPassword.email}
+          password={newPassword.password}
+          onClose={() => setNewPassword(null)}
+          showToast={showToast}
         />
       )}
 

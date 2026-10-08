@@ -194,8 +194,9 @@ paths:
       tags: [Auth]
       summary: Register a new account
       description: |
-        Self-registered accounts are granted the read-only `Operator` role by the
-        `handle_new_user` trigger. An `Administrator` must promote them.
+        Refused while `supabaseAuth.disableSignup` is true, the default. When it is opened, a
+        self-registered account starts with no role: nothing gives one at sign-up (`0167` dropped
+        `handle_new_user()`). An `Administrator` gives it one on the People tab.
       security:
         - apiKeyAuth: []
       requestBody:
@@ -1039,6 +1040,35 @@ paths:
               schema: { type: string, nullable: true }
         '400': { description: 'A machine identity, or access that is not removed.' }
         '403': { description: 'Not an Administrator, or your own access.' }
+        '404': { description: 'No such person (`P0002`).' }
+
+  /rest/v1/rpc/record_person_password_set:
+    post:
+      tags: [Auth]
+      summary: Decide, then record, an Administrator setting a person's password
+      description: |
+        Called twice by `/functions/v1/manage-people` in the caller's session (`0167`): with
+        `p_check_only` true BEFORE GoTrue sets the password, which checks and writes nothing, and
+        with false AFTER, which writes `PASSWORD_SET` (email and method, never the password). A null
+        `p_check_only` checks only. Administrator only.
+
+        Refused, with the reason in the message: your own password (403; Change Password is how you
+        change it); a machine identity (400); a person whose access is removed, until it is
+        restored (400, `P0001`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_user_id, p_check_only]
+              properties:
+                p_user_id:    { type: string, format: uuid }
+                p_check_only: { type: boolean, description: True to check only; false to record a change GoTrue has made. }
+      responses:
+        '204': { description: Allowed, and recorded when `p_check_only` is false. }
+        '400': { description: 'A machine identity, or a person whose access is removed.' }
+        '403': { description: 'Not an Administrator, or your own password.' }
         '404': { description: 'No such person (`P0002`).' }
 
   # ------------------------------------------------------------ Registry ----
@@ -2776,9 +2806,9 @@ paths:
   /functions/v1/manage-people:
     post:
       tags: [Edge Functions]
-      summary: Add a person, remove their access, or restore it
+      summary: Add a person, remove their access, restore it, or set a new password
       description: |
-        The GoTrue half of the People tab (`0166`). A function because GoTrue's admin API takes the
+        The GoTrue half of the People tab (`0166`, `0167`). A function because GoTrue's admin API takes the
         service-role key, which is not in the database. Requires `Administrator`, checked here
         before any admin call and again by the database function each act calls in the caller's
         session, which also writes the audit row.
@@ -2791,8 +2821,18 @@ paths:
         - **`remove`**: `remove_person_access()` first, so its rules are decided before GoTrue
           changes anything, then a ban (`ban_duration` `876000h`). The account is never deleted.
         - **`restore`**: `restore_person_access()`, then the ban is lifted.
+        - **`set-password`**: a new password minted as `add` mints one, with or without a relay,
+          returned once in `password`. `record_person_password_set()` decides first (a person whose
+          access is removed is a 409), GoTrue sets it, then the same function records
+          `PASSWORD_SET`. If GoTrue fails, nothing changed (502). If the record fails, the answer is
+          a 500 that withholds the password: it was changed, nobody has seen it, and setting it
+          again records it. GoTrue ends the person's sessions; an access token already issued lasts
+          until it expires.
 
-        Your own access is refused (403).
+        Your own access or password is refused (403); you change your own password with
+        `PUT /auth/v1/user`. A refusal the caller can act on (4xx) carries the database's or GoTrue's
+        sentence in `details`. A failure that is not one (500, 502) answers a fixed sentence and a
+        request id, and the error goes to the log.
       requestBody:
         required: true
         content:
@@ -2801,10 +2841,10 @@ paths:
               type: object
               required: [action]
               properties:
-                action:  { type: string, enum: [add, remove, restore] }
+                action:  { type: string, enum: [add, remove, restore, set-password] }
                 email:   { type: string, format: email, description: '`add` only.' }
                 role:    { type: string, enum: [Administrator, Shopfloor_Manager, Operator, Auditor], description: '`add` only.' }
-                user_id: { type: string, format: uuid, description: '`remove` and `restore`.' }
+                user_id: { type: string, format: uuid, description: '`remove`, `restore` and `set-password`.' }
       responses:
         '200':
           description: 'Done. Sent with `Cache-Control: no-store`.'
@@ -2817,15 +2857,21 @@ paths:
                   email:    { type: string, description: '`add`.' }
                   role:     { type: string, nullable: true, description: '`add`, and the role `restore` gave back.' }
                   invited:  { type: boolean, description: '`add`: true when an invitation was sent.' }
-                  password: { type: string, description: '`add` without a mail relay only. Shown once; nothing keeps a copy.' }
+                  password: { type: string, description: '`add` without a mail relay, and `set-password`. Shown once; nothing keeps a copy.' }
                   access:   { type: string, enum: [removed, active], description: '`remove` and `restore`.' }
         '400': { description: 'Malformed request, an unknown role, or the database refused the person.' }
         '401': { description: Missing or invalid Authorization header. }
-        '403': { description: 'Requires Administrator; or your own access.' }
+        '403': { description: 'Requires Administrator; or your own access or password.' }
         '404': { description: No such person. }
         '409': { description: 'The address is already in use, the last Administrator, or access in the other state.' }
         '500': { $ref: '#/components/responses/FunctionFailure' }
-        '502': { description: 'The database act was done but GoTrue did not ban or lift the ban; repeat it.' }
+        '502':
+          description: >-
+            GoTrue failed or did not answer. For `add` and `set-password` nothing was changed. For
+            `remove` and `restore` the database act was done but the ban was not made or lifted;
+            repeat it. A fixed sentence and a request id, as for a 500.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
 
   /functions/v1/revoke-gateway-credential:
     post:
@@ -4570,7 +4616,7 @@ components:
           enum: [INSERT, UPDATE, DELETE, SCHEMA_REJECTION, CREDENTIAL_ISSUED, CREDENTIAL_SHOWN, TOKEN_MINTED, TOKEN_REVOKED,
                  PRINCIPAL_REVOKED, PRINCIPAL_REINSTATED, PRINCIPAL_DESCRIBED, PROPOSAL_APPLIED, EXPORTED,
                  PROPOSAL_EXPIRED, ROLE_GRANTED, ROLE_REVOKED, PERSON_ADDED, ACCESS_REMOVED, ACCESS_RESTORED,
-                 FLOW_DEPLOYED, BACKUP_REQUESTED,
+                 PASSWORD_SET, FLOW_DEPLOYED, BACKUP_REQUESTED,
                  BACKUP_CANCELLED, BACKUP_RELEASED, BACKUP_TAKEN, BACKUP_FAILED, BACKUP_PRUNED]
           description: >-
             What happened. The audit trigger on each audited table writes `INSERT`, `UPDATE` and

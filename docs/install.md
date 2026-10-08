@@ -351,10 +351,15 @@ the person's sign-in and keeps their account, so the Audit Trail still names the
 closed (`supabaseAuth.disableSignup`). If you open it instead, a new account has no role until an
 `Administrator` gives it one on the **People** tab.
 
+**Changing your own password** works with or without an email relay. Open the account menu (the round
+button at the top right), then select **Change Password**. Give your current password, then the new
+one twice. It needs at least 12 characters.
+
 **Forgotten passwords** are reset from the sign-in page (*Forgot your password?*), which emails a link
 to `/reset-password`. That needs an email relay: set `supabaseAuth.smtp` and `secrets.smtpPassword`.
-Without one, the request fails and the page says to ask an administrator, who can set a new password
-through the Auth API or in Studio.
+Without one, the request fails and the page says to ask an administrator. The administrator opens
+**Access Control**, then **People**, and selects **Set New Password** on the person's row. The
+dashboard shows the new password once. Give it to the person yourself.
 
 ---
 

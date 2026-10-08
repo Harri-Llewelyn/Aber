@@ -1,20 +1,17 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
-import { copyText } from '../common/CopyableId'
 import { Modal } from '../common/Modal'
-import { IconCheck, IconCopy, IconPlus, IconShieldAlert, IconUser } from '../common/Icons'
+import { IconCheck, IconPlus, IconUser } from '../common/Icons'
 import { PERSON_ROLES, personRoleLabel } from '../../utils/people'
-
-const COPY_FEEDBACK_MS = 1600
+import { PasswordShownOnce } from './PasswordShownOnce'
 
 /** ensure_first_administrator()'s and manage-people's test of an address. */
 const EMAIL = /^[^@\s]+@[^@\s]+$/
 
 /**
  * Add a person with a role. manage-people decides how they get in: an invitation when the site has
- * a mail relay, otherwise a password it mints, which this dialog shows once. The password lives in
- * this component's state until the dialog closes: not in a toast, the URL or the Audit Trail.
+ * a mail relay, otherwise a password it mints, which this dialog shows once (PasswordShownOnce).
  *
  * `onAdded` runs once the person exists, so the list behind the dialog can reload.
  */
@@ -24,10 +21,6 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
   const [added, setAdded] = useState(null)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
-  const [copied, setCopied] = useState(null)
-
-  const copyTimer = useRef(null)
-  useEffect(() => () => clearTimeout(copyTimer.current), [])
 
   const valid = EMAIL.test(email.trim())
 
@@ -45,14 +38,6 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
       setBusy(false)
     }
   }, [email, role, onAdded, showToast])
-
-  const copy = useCallback(async (label, value) => {
-    const ok = await copyText(value)
-    setCopied(ok ? label : null)
-    clearTimeout(copyTimer.current)
-    copyTimer.current = setTimeout(() => setCopied(null), COPY_FEEDBACK_MS)
-    if (!ok) showToast?.('Could not reach the clipboard — select the value and copy it.', 'error')
-  }, [showToast])
 
   const close = useCallback(() => onClose(), [onClose])
 
@@ -78,43 +63,16 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
             </div>
           </div>
         ) : (
-          <>
-            <div className="callout callout-warning">
-              <IconShieldAlert size={14} className="callout-icon" />
-              <div>
-                <strong>Copy this password now — it is not shown again.</strong>
-                <div>
-                  Closing this dialog discards it, and nothing in Aber keeps a copy. Give it to{' '}
-                  {added.email} in person, or by a channel you trust. They sign in with it as{' '}
-                  {personRoleLabel(added.role)}.
-                </div>
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label" htmlFor="person-email">Email</label>
-              <input id="person-email" className="form-control mono" readOnly value={added.email} />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label" htmlFor="person-password">Password</label>
-              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                <input id="person-password" className="form-control mono" readOnly value={added.password || ''} />
-                <button
-                  className="btn btn-ghost btn-icon"
-                  onClick={() => copy('password', added.password)}
-                  title="Copy password"
-                  aria-label="Copy password"
-                >
-                  {copied === 'password' ? <IconCheck size={13} /> : <IconCopy size={13} />}
-                </button>
-              </div>
-              <div className="form-hint">
-                It cannot be shown again. Without a mail relay, a lost password is set again outside
-                the dashboard: see Accounts in docs/install.md.
-              </div>
-            </div>
-          </>
+          <PasswordShownOnce
+            email={added.email}
+            password={added.password}
+            showToast={showToast}
+            hint="It cannot be shown again. If it is lost, select Set New Password on their row."
+          >
+            Closing this dialog discards it, and nothing in Aber keeps a copy. Give it to{' '}
+            {added.email} in person, or by a channel you trust. They sign in with it as{' '}
+            {personRoleLabel(added.role)}.
+          </PasswordShownOnce>
         )}
       </Modal>
     )
