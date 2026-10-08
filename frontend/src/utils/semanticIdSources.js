@@ -41,8 +41,8 @@ export function vocabularySuggestion(standard, entryName, semanticId) {
  * The suggestion Add Metric makes for a catalog row's standard and type, so Edit can offer it back.
  * The type is the last name segment once a trailing `sub_type` is removed, as archived migration 0142 finds
  * it. OPC UA names shared by two companion specifications are told apart by the group, which is the
- * first segment of the point's browse path. `null` for a local extension, an entry the vocabulary
- * no longer holds, or ASHRAE 223P, a reference whose classes name equipment rather than readings.
+ * first segment of the point's browse path. `null` for a local extension, or an entry the
+ * vocabulary no longer holds.
  */
 export function suggestionForMetric(metric, { mtconnect, iso22400, opcua } = {}) {
   const segments = (metric?.name || '').split('/')
@@ -65,6 +65,7 @@ export function suggestionForMetric(metric, { mtconnect, iso22400, opcua } = {})
       const ids = new Set((grouped.length > 0 ? grouped : named).map(p => p.semantic_id))
       return ids.size === 1 ? vocabularySuggestion(STANDARDS.OPCUA, type, [...ids][0]) : null
     }
+    // ASHRAE 223P is a reference here: its classes name equipment, not readings, so it suggests no id.
     default:
       return null
   }
