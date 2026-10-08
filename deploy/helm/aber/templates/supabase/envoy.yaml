@@ -119,16 +119,29 @@ spec:
             - -e
             - -c
             - |
+              # Each check is handed the name and the value. No indirect expansion: the kubelet turns a
+              # doubled dollar in a container's command into one before the shell reads it.
+              require_set () {
+                if [ -z "$2" ]; then
+                  echo "$1 must be set -- see secrets in values.yaml; node scripts/setup.mjs mints the set." >&2
+                  exit 1
+                fi
+              }
+              require_count () {
+                case "$2" in
+                  ''|0|*[!0-9]*)
+                    echo "$1 must be a whole number of at least 1 (supabaseEnvoy.signInRateLimit in values.yaml). Got: $2" >&2
+                    exit 1
+                    ;;
+                esac
+              }
               # All four, or nothing: an empty key substituted into the Lua filter is matched by
               # any caller sending an empty apikey, and an empty JWT is a bearer no upstream
               # accepts, which answers 401 to every request while every pod reports healthy.
-              for name in SUPABASE_PUBLISHABLE_KEY SUPABASE_SECRET_KEY SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY; do
-                eval "value=\$$name"
-                if [ -z "$value" ]; then
-                  echo "$name must be set -- see secrets in values.yaml; node scripts/setup.mjs mints the set." >&2
-                  exit 1
-                fi
-              done
+              require_set SUPABASE_PUBLISHABLE_KEY "$SUPABASE_PUBLISHABLE_KEY"
+              require_set SUPABASE_SECRET_KEY "$SUPABASE_SECRET_KEY"
+              require_set SUPABASE_ANON_KEY "$SUPABASE_ANON_KEY"
+              require_set SUPABASE_SERVICE_ROLE_KEY "$SUPABASE_SERVICE_ROLE_KEY"
               case "$ENVOY_CORS_ORIGINS" in
                 '['*']') ;;
                 *)
@@ -144,15 +157,8 @@ spec:
                   ;;
               esac
               # Substituted as numbers into the gateway listener; anything else is a bootstrap Envoy refuses.
-              for name in SIGN_IN_LIMIT_PER_CLIENT SIGN_IN_LIMIT_TOTAL; do
-                eval "value=\$$name"
-                case "$value" in
-                  ''|0|*[!0-9]*)
-                    echo "$name must be a whole number of at least 1 (supabaseEnvoy.signInRateLimit in values.yaml). Got: $value" >&2
-                    exit 1
-                    ;;
-                esac
-              done
+              require_count SIGN_IN_LIMIT_PER_CLIENT "$SIGN_IN_LIMIT_PER_CLIENT"
+              require_count SIGN_IN_LIMIT_TOTAL "$SIGN_IN_LIMIT_TOTAL"
               case "$XFF_TRUSTED_HOPS" in
                 ''|*[!0-9]*)
                   echo "XFF_TRUSTED_HOPS must be a whole number (supabaseEnvoy.trustedProxyHops in values.yaml). Got: $XFF_TRUSTED_HOPS" >&2
