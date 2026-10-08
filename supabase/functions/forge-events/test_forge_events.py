@@ -14,7 +14,7 @@ The last class acts as the appliance: it enrols with a key it generated, clones 
 SSH with that key, and pushes what it is running to `appliance` the way flow-sync.mjs does, then
 asserts that the forge delivered that push and the row records it, that `main` refused the same
 key, and that a force-push to `appliance` was refused. It needs GITEA_TEST_SSH, the forge's SSH
-address as reachable from this host (`ssh://git@127.0.0.1:2222` behind the dev loop's forward).
+address as reachable from this host (`ssh://git@127.0.0.1:2222` in the dev loop).
 
 Needs the stack, the forge, and GITEA_WEBHOOK_SECRET (the value the edge runtime holds; read it from
 .env). Skips without them.

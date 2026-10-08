@@ -171,6 +171,7 @@ k3d cluster create aber \
   --port "80:80@loadbalancer" \
   --port "1883:1883@loadbalancer" \
   --port "8883:8883@loadbalancer" \
+  --port "2222:2222@loadbalancer" \
   --k3s-arg "--disable=metrics-server@server:0" \
   --wait
 ```
@@ -181,6 +182,9 @@ through its real path, rather than by port-forwarding straight to a Service.
 `--port 1883:1883@loadbalancer` and `8883:8883@loadbalancer` do the same for the
 `mosquitto-external` LoadBalancer. A gateway on the LAN (MQTTS on 8883), or a simulator on the
 host, then reaches the broker at the host's address.
+
+`--port 2222:2222@loadbalancer` does the same for `gitea-external`, the forge's SSH, which a gateway
+clones its flows from. The dev values put it on 2222.
 
 To tear the cluster down, run `k3d cluster delete aber`. It deletes the PVCs too: right for a
 throwaway cluster, and never what you want on k3s.

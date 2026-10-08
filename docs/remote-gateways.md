@@ -382,9 +382,12 @@ Two things can still stop it:
   to resolve the API. Give the appliance another resolver, or map both names,
   `api.<LAN address>.nip.io` and `git.<LAN address>.nip.io`, to the LAN address in its
   `/etc/hosts` (or in the bundle's compose file, with `extra_hosts`).
-- **The dev cluster does not publish the forge's SSH port.** Its load balancer publishes 80, 1883
-  and 8883 only, so the appliance enrols and then cannot clone. Add the port once:
-  `k3d cluster edit aber --port-add 2222:2222@loadbalancer`.
+- **An older dev cluster does not publish the forge's SSH port.** A cluster `npm run dev:up`
+  creates publishes 2222, as it publishes 1883 and 8883. One created before that publishes 80, 1883
+  and 8883 only, so the appliance enrols and then cannot clone. `node scripts/dev-cluster.mjs
+  status` says so on its `forge SSH` line. Add the port once:
+  `k3d cluster edit aber --port-add 2222:2222@loadbalancer`. Until then, `npm run dev:forward`
+  reaches the forge from this machine only.
 
 ### The third value: the primary host id
 
