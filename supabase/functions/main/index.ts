@@ -173,6 +173,9 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GITEA_MACHINE_USER",
     "GITEA_MACHINE_PASSWORD",
   ],
+  // The studio listener's ext_authz step: whether the caller is an Administrator in user_roles now.
+  // The service key is for that lookup, after GoTrue has verified the caller's session.
+  "studio-admission": ["SUPABASE_SERVICE_ROLE_KEY"],
   // Gitea's own sign-out link, routed here by the forge listener: ends every GoTrue session the
   // caller holds, then sends the browser through the door's sign-out. Needs the service key to
   // revoke.

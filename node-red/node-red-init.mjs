@@ -37,8 +37,8 @@ const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
 // needs; without it a settings.js that merely has an adminAuth passes settingsAreCorrect()
 // forever. v2 adminAuth.users; v3 persisted username -> permissions map; v4 constant-time
 // NODERED_ADMIN_TOKEN comparison; v5 editorTheme.tours off; v6 telemetry off; v7 the editor's
-// response headers.
-const SETTINGS_VERSION = 7;
+// response headers; v8 the editor's role re-checked every minute, the persisted map retired.
+const SETTINGS_VERSION = 8;
 
 function fail(message) {
   console.error(`[node-red-init] ERROR: ${message}`);
@@ -87,7 +87,10 @@ const runtimeConfigPath = path.join(DATA_DIR, '.config.runtime.json');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const SEED_MARKER_NAME = '.aber-seeded';
-const EDITOR_USERS_NAME = '.aber-editor-users.json';
+
+// The username -> permissions map settings.js v3 to v7 persisted. Nothing reads it now; removed so
+// the volume holds no stale grant.
+fs.rmSync(path.join(DATA_DIR, '.aber-editor-users.json'), { force: true });
 
 // 1. Seed the flow definition: first run only. The guard is a marker file, not `flows.json`
 // existing, because the image ships a placeholder and Docker pre-populates a fresh volume from it.
@@ -398,43 +401,76 @@ const roleCache = new Map();
 const CACHE_TTL_MS = 30000;
 
 /**
- * Username -> permissions, for adminAuth.users. Node-RED re-resolves the user by username on
- * every editor request, long after the OAuth profile has gone.
- *
- * Persisted, because Node-RED writes editor sessions to /data/.sessions.json and they outlive a
- * restart; an in-memory map would leave the session authenticated with no permissions, which
- * the editor renders as a padlock on Deploy. The file holds usernames and permission strings
- * only; a role change reaches the editor at the next sign-in.
+ * The editor's sign-ins, by username: the person's own GoTrue tokens from the OAuth sign-in, the
+ * permissions it granted, and when user_roles last confirmed them. Node-RED enforces the scope it
+ * stored with the session, so a different answer ends the session rather than changing it. In
+ * memory only: no refresh token is written to a volume every flow author can read, and a restart
+ * asks each editor to sign in again.
  */
-// path.posix, not path.join: this string is baked into a file that only ever runs inside the
-// container, but the generator can be run from Windows, where join() would emit a backslash path.
-const EDITOR_USERS_FILE = ${JSON.stringify(path.posix.join(DATA_DIR, EDITOR_USERS_NAME))};
-const editorUsers = new Map();
+const editorSessions = new Map();
+const RECHECK_MS = 60000;
 
-try {
-  const stored = JSON.parse(require('fs').readFileSync(EDITOR_USERS_FILE, 'utf8'));
-  for (const [name, permissions] of Object.entries(stored)) editorUsers.set(name, permissions);
-} catch (err) {
-  // Absent on first boot, and unreadable is no worse than absent: the fallback in \`users\`
-  // keeps existing sessions working, they just render read-only until the next sign-in.
-  if (err.code !== 'ENOENT') {
-    console.warn('[aber] could not read ' + EDITOR_USERS_FILE + ': ' + err.message);
+/** Swaps \`entry\`'s refresh token for a new access token at GoTrue. False when GoTrue refuses. */
+async function refreshed(entry) {
+  if (!entry.refreshToken) return false;
+  try {
+    const res = await fetch(env.NODERED_OAUTH_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: entry.refreshToken,
+        client_id: env.NODERED_OAUTH_CLIENT_ID,
+        client_secret: env.NODERED_OAUTH_CLIENT_SECRET
+      })
+    });
+    if (!res.ok) {
+      // A ban, a sign-out everywhere or a new password: GoTrue has ended the session.
+      console.warn(
+        '[aber] token refresh for ' + entry.username + ' -> HTTP ' + res.status +
+        '; editor session ended.'
+      );
+      return false;
+    }
+    const body = await res.json();
+    entry.accessToken = body.access_token;
+    // GoTrue rotates the refresh token; the spent one must not be sent again.
+    entry.refreshToken = body.refresh_token;
+    return Boolean(entry.accessToken);
+  } catch (err) {
+    console.warn('[aber] token refresh failed: ' + err.message);
+    return false;
   }
 }
 
-function rememberEditorUser(username, permissions) {
-  if (editorUsers.get(username) === permissions) return;
-  editorUsers.set(username, permissions);
-  try {
-    require('fs').writeFileSync(
-      EDITOR_USERS_FILE,
-      JSON.stringify(Object.fromEntries(editorUsers), null, 2)
-    );
-  } catch (err) {
-    // Non-fatal: the sign-in itself has already succeeded and the in-memory map still serves
-    // this process. Only the next restart would notice.
-    console.warn('[aber] could not persist ' + EDITOR_USERS_FILE + ': ' + err.message);
+/** Whether user_roles still gives \`entry\` the permissions its sign-in granted. */
+async function stillGranted(entry) {
+  const claims = jwt.decode(entry.accessToken);
+  const expiring = !claims || typeof claims.exp !== 'number' || claims.exp * 1000 - Date.now() < 30000;
+  if (expiring && !(await refreshed(entry))) return false;
+  const info = await userinfo(entry.accessToken);
+  return Boolean(info && info.permissions === entry.permissions);
+}
+
+/**
+ * The permissions the editor session for \`username\` still holds, or null to end it.
+ * user_roles is asked at most once a minute per person, and one question at a time, so a page's
+ * burst of requests shares one answer and the rotating refresh token is never spent twice.
+ */
+async function editorPermissions(username) {
+  const entry = editorSessions.get(username);
+  if (!entry) return null;
+  if (Date.now() - entry.checkedAt >= RECHECK_MS) {
+    if (!entry.pending) {
+      entry.pending = stillGranted(entry).finally(() => { entry.pending = null; });
+    }
+    if (!(await entry.pending)) {
+      if (editorSessions.get(username) === entry) editorSessions.delete(username);
+      return null;
+    }
+    entry.checkedAt = Date.now();
   }
+  return entry.permissions;
 }
 
 function cacheGet(token) {
@@ -491,8 +527,9 @@ module.exports = {
   adminAuth: {
     type: 'strategy',
 
-    // Node-RED's default editor session is 7 days, and the role is only re-derived at login. Eight
-    // hours bounds a revoked user to about a shift. The machine path re-checks within 30s.
+    // Node-RED's default editor session is 7 days; eight hours is about a shift. A removed or
+    // changed role ends a session sooner: \`users\` below re-checks within RECHECK_MS, and the
+    // machine path within 30s.
     sessionExpiryTime: 28800,
 
     strategy: {
@@ -545,8 +582,17 @@ module.exports = {
               '[aber] sign-in: ' + info.email + ' (' + info.supabase_role +
               ') -> permissions=' + info.permissions
             );
+            const username = info.email || info.sub;
+            editorSessions.set(username, {
+              username: username,
+              accessToken: accessToken,
+              refreshToken: refreshToken,
+              permissions: info.permissions,
+              checkedAt: Date.now(),
+              pending: null
+            });
             return done(null, {
-              username: info.email || info.sub,
+              username: username,
               email: info.email,
               permissions: info.permissions,
               supabase_role: info.supabase_role
@@ -566,19 +612,24 @@ module.exports = {
     authenticate: async function (profile, password) {
       if (password !== undefined) return null;
       if (!profile || !profile.permissions) return null;
-      rememberEditorUser(profile.username, profile.permissions);
       return { username: profile.username, permissions: profile.permissions };
     },
 
     /**
      * Resolve a user by username. Required: bearerStrategy calls Users.get() on every editor
-     * request. It must return permissions, or the editor draws a padlock on Deploy. The last-resort
-     * branch returns a bare username to keep an unknown session alive; enforcement reads the
-     * token's stored scope, not this object.
+     * request, and refuses the request (401) when this answers null. It must return permissions,
+     * or the editor draws a padlock on Deploy. Null for a session this process did not sign in (a
+     * restart) and for a role user_roles no longer grants. Never rejects: bearerStrategy does not
+     * catch, and the request would hang.
      */
     users: async function (username) {
-      const permissions = editorUsers.get(username);
-      return permissions ? { username: username, permissions: permissions } : { username: username };
+      try {
+        const permissions = await editorPermissions(username);
+        return permissions ? { username: username, permissions: permissions } : null;
+      } catch (err) {
+        console.warn('[aber] could not re-check ' + username + ': ' + err.message);
+        return null;
+      }
     },
 
     /**

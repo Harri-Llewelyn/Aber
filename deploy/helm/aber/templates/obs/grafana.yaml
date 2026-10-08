@@ -356,6 +356,12 @@ spec:
               value: {{ printf "%s/" $grafanaPublic | quote }}
             - name: GF_AUTH_GENERIC_OAUTH_AUTH_URL
               value: {{ printf "%s/auth/v1/oauth/authorize" $supabasePublic | quote }}
+            # When the access token from sign-in expires (supabaseAuth.jwtExpiry), Grafana refreshes
+            # it at token_url, and a refresh GoTrue refuses (a ban by Remove Access, a sign-out
+            # everywhere, a new password) logs the session out. Off, a session lasts until Grafana's
+            # own login lifetime (7 days idle, 30 in all).
+            - name: GF_AUTH_GENERIC_OAUTH_USE_REFRESH_TOKEN
+              value: "true"
             - name: GF_INSTALL_PLUGINS
               value: ""
             # Provisioning lives in two directories rather than one; see the ConfigMap notes.

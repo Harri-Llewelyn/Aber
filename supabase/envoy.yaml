@@ -371,8 +371,9 @@ static_resources:
     # STUDIO'S LOGIN (supabase/README.md, "The second listener"). Studio has no authentication of its
     # own and runs as the database owner, so: an OAuth 2.1 code flow against this stack's GoTrue, a
     # session cookie, and an Administrator check. Its own listener because machine principals on 8000
-    # cannot complete a browser login. No userinfo function: the role is in the access token. No openid
-    # scope: GoTrue refuses to sign an ID token with HS256. Minimum Envoy 1.34 (PKCE).
+    # cannot complete a browser login. The role claim in the access token is checked first, then
+    # user_roles on every request (studio-admission). No openid scope: GoTrue refuses to sign an ID
+    # token with HS256. Minimum Envoy 1.34 (PKCE).
     - name: studio
       address:
         socket_address: { address: 0.0.0.0, port_value: 8001 }
@@ -459,20 +460,19 @@ static_resources:
                             sds_config:
                               path_config_source: { path: /etc/envoy/studio-hmac-secret.yaml }
                   # 2. THE TOKEN: verifies what GoTrue signed; oct is the JWKS key type for HMAC. No issuer check,
-                  # because GoTrue's OAuth access token carries no iss.
+                  # because GoTrue's OAuth access token carries no iss. Forwarded after verification for step 4;
+                  # step 5 strips it, so Studio never sees a Supabase JWT.
                   - name: envoy.filters.http.jwt_authn
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
                       providers:
                         gotrue:
                           audiences: [authenticated]
+                          forward: true
                           local_jwks:
                             inline_string: '{"keys":[{"kty":"oct","alg":"HS256","k":"__SUPABASE_JWT_SECRET_B64URL__"}]}'
                           payload_in_metadata: jwt_payload
                       rules:
-                        # Everything else: the verified claims OVERWRITE whatever arrived (Gitea reads the first of
-                        # duplicate headers). The bearer is stripped here, after the placement step has presented it; Gitea
-                        # must never see a Supabase JWT. The username is the token's sub (Gitea refuses @).
                         - match: { prefix: "/" }
                           requires: { provider_name: gotrue }
                   # 3. THE PRIVILEGE: every persona can complete the flow above; only Administrator passes.
@@ -495,6 +495,39 @@ static_resources:
                                       - { key: app_metadata }
                                       - { key: role }
                                     value: { string_match: { exact: Administrator } }
+                  # 4. THE ROLE NOW: the claim above was true when the token was signed; studio-admission reads
+                  # user_roles on every request, so a removed or demoted Administrator is refused on the next one.
+                  # Its 403 and its 302 (a session GoTrue ended, to /oauth2/signout) are honoured; a 5xx or no
+                  # answer admits on the claim step 3 checked (failure_mode_allow), as at the forge's door.
+                  - name: envoy.filters.http.ext_authz
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+                      transport_api_version: V3
+                      failure_mode_allow: true
+                      status_on_error: { code: ServiceUnavailable }
+                      http_service:
+                        server_uri:
+                          uri: http://supabase-functions:9000
+                          cluster: functions-v1
+                          timeout: 8s
+                        # The edge runtime routes on the first path segment.
+                        path_prefix: /studio-admission
+                        authorization_request:
+                          allowed_headers:
+                            patterns:
+                              - exact: authorization
+                        authorization_response:
+                          allowed_client_headers:
+                            patterns:
+                              - exact: content-type
+                              - exact: location
+                  # 5. The bearer step 2 forwarded goes no further: Studio runs as the database owner and needs none.
+                  - name: envoy.filters.http.header_mutation
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.header_mutation.v3.HeaderMutation
+                      mutations:
+                        request_mutations:
+                          - remove: authorization
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router

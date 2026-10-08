@@ -87,10 +87,14 @@ pod publishes nothing of its own.
 
 Three things follow, and none of them is obvious:
 
-- **The role is read from the token, not fetched.** `custom_access_token_hook` mirrors it into the
-  access token and the gateway verifies that token itself, so Studio needs no `studio-userinfo`
-  function of the kind Grafana and Node-RED have. `openid` is deliberately absent from the requested
-  scope: GoTrue refuses to sign an ID token with HS256, which is what this whole stack signs with.
+- **The role is read from the token, then from `user_roles` on every request.**
+  `custom_access_token_hook` mirrors it into the access token, and the gateway verifies that token
+  itself and refuses any other role cheaply. Then its `ext_authz` step asks `studio-admission`,
+  which asks GoTrue whether the session still exists and reads `user_roles`, so a removed or demoted
+  Administrator is refused on the next request, not when the token expires. A 5xx from that step
+  admits on the claim already checked, as the forge's door does, so a broken edge runtime does not
+  also take away the console. `openid` is deliberately absent from the requested scope: GoTrue
+  refuses to sign an ID token with HS256, which is what this whole stack signs with.
 - **It closes the unauthenticated MCP server.** Studio's port also served `/api/mcp` — a Supabase
   MCP server exposing `execute_sql` and `apply_migration` as the owner, completing `initialize` with
   no credential at all. It is covered because it is not exempted, and an MCP client cannot complete
@@ -277,36 +281,48 @@ that bypasses PostgREST is ever added.
 
 ### A removed person keeps what a session already holds
 
-Removing a person's access (`0166`) deletes their role at once, and everything that reads
-`user_roles` on each request refuses them from the next one: the API's RLS, the edge functions and
-the forge's door. The GoTrue ban refuses a new sign-in and a token refresh. Four things already
-issued are not reached:
+Removing a person's access (`0166`) deletes their role at once, and GoTrue bans the account, which
+refuses a new sign-in and a token refresh. What they already hold ends as follows:
 
-- **An access token** stays valid until its `exp`, at most `supabaseAuth.jwtExpiry` (3600 s by
-  default). With no role it reaches what RLS grants any signed-in account: the registry tables and
-  vocabularies, and nothing a role or permission gates. `auth_pre_request()` refuses tokens by
-  subject only for machine identities.
-- **Studio** admits on the token's `app_metadata.role` claim, so a removed Administrator's open
-  Studio session lasts until that token expires.
-- **Node-RED's editor** keeps the permission it granted at sign-in for its session, up to eight
-  hours (`sessionExpiryTime`).
-- **Grafana** keeps the role it mapped at sign-in for its own session.
+| Surface | When it refuses them |
+| :--- | :--- |
+| The API (PostgREST), and i3X and the edge functions that query through it | The next request. `auth_pre_request()` refuses a subject with a row in `access_removals` (`0170`) |
+| Edge functions that read `user_roles` | The next request |
+| The forge | The next request (`forge-membership`) |
+| Studio | The next request (`studio-admission`: GoTrue refuses the banned token, and the role is gone) |
+| Node-RED's editor | Within 60 seconds. `adminAuth.users` asks `nodered-userinfo` again once a minute |
+| Node-RED's admin API, with a Supabase token | Within 30 seconds (the `tokens` cache) |
+| Grafana | When the access token it holds expires, at most `supabaseAuth.jwtExpiry` (3600 s by default). GoTrue refuses the refresh, and Grafana logs the session out |
+| Storage and Realtime | When the access token expires, at most `supabaseAuth.jwtExpiry`. They verify the token themselves and do not run `auth_pre_request()`; with no role it reaches what RLS grants any signed-in account |
 
-**Accepted because** the API, where every write that matters goes, refuses the person at once; the
-token window is bounded by the expiry; and Studio is off the Ingress by default.
+Restore Access deletes the `access_removals` row and lifts the ban, so the same token works again
+at the API at once.
 
-**Revisit if** `jwtExpiry` is raised, if Studio is put on the Ingress, or if removing an
-Administrator ever has to be immediate everywhere. Studio's and Node-RED's checks would then read
-`user_roles` per request, as the forge's does, and `auth_pre_request()` would refuse a removed
-person's subject.
+Three windows remain:
+
+- **Grafana, up to an hour.** A removed Administrator keeps Grafana's Admin role until the refresh is
+  refused. Grafana maps a role only at sign-in, so a role changed without a removal lasts until the
+  next sign-in.
+- **Storage and Realtime, up to an hour.** Read-only, and only what any signed-in account reads.
+- **Studio when its check fails.** A 5xx from `studio-admission` admits on the token's claim, so a
+  removed Administrator could reach Studio while the edge runtime or the API is down, until the
+  door's cookie expires (3600 s).
+
+**Accepted because** the API, where every write that matters goes, Studio, the forge and Node-RED
+refuse the person within a minute; Storage and Realtime only read; and Grafana's window is bounded by
+the token's expiry, which was the bound on every surface before `0170`.
+
+**Revisit if** `jwtExpiry` is raised, which lengthens the Grafana, Storage and Realtime windows with
+it, or if a role change in Grafana ever has to be immediate.
 
 ### A new password does not end a session at once
 
 Set New Password (`0167`) changes a person's password straight away, and GoTrue deletes every
-session they have, so none of their refresh tokens works again. As with a removal, what was already
-issued is not reached: an access token stays valid until its `exp` (at most
-`supabaseAuth.jwtExpiry`), and Node-RED's, Grafana's and Studio's own sessions last until they
-expire. Unlike a removal, the person keeps their role meanwhile.
+session they have, so none of their refresh tokens works again. Studio and the forge refuse the next
+request, because their doors ask GoTrue for the session, and Node-RED's editor within 60 seconds.
+What only checks the token's signature is not reached: the API, Storage and Realtime accept the
+access token until its `exp` (at most `supabaseAuth.jwtExpiry`), and Grafana keeps its session
+until that token's refresh is refused. Unlike a removal, the person keeps their role meanwhile.
 
 **Accepted because** Set New Password is how a person who lost their password gets back in, not how
 one is stopped. Remove Access stops one, and is immediate for every role check.

@@ -23,16 +23,31 @@ export async function resolveUserRole(
   client: SupabaseClient<any, any, any>,
   userId: string,
 ): Promise<string | null> {
+  try {
+    return await lookUpUserRole(client, userId);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
+/**
+ * The same lookup for a caller that must tell "no role" from "could not tell" (`studio-admission`,
+ * whose listener falls back to the token's claim on a 5xx): a failed query throws instead of
+ * answering null.
+ */
+export async function lookUpUserRole(
+  // deno-lint-ignore no-explicit-any -- callers pass clients created without a schema type
+  client: SupabaseClient<any, any, any>,
+  userId: string,
+): Promise<string | null> {
   const { data, error } = await client
     .from("user_roles")
     .select("roles(name)")
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (error) {
-    console.error(`role lookup failed for user ${userId}: ${error.message}`);
-    return null;
-  }
+  if (error) throw new Error(`role lookup failed for user ${userId}: ${error.message}`);
 
   const dbRole = (data as { roles?: { name?: string } } | null)?.roles?.name;
   return typeof dbRole === "string" ? dbRole : null;

@@ -1,4 +1,4 @@
-import { resolveUserRole } from "./roles.ts";
+import { lookUpUserRole, resolveUserRole } from "./roles.ts";
 
 // Local rather than an assertion library: a test import would enter deno.lock and the image's graph.
 const assert = {
@@ -109,4 +109,20 @@ Deno.test("a row whose role is not a name is no role", async () => {
     const { client } = fakeClient({ data, error: null });
     assert.equal(await resolveUserRole(client, USER_ID), null, JSON.stringify(data));
   }
+});
+
+Deno.test("lookUpUserRole reads the same row, and throws where resolveUserRole answers null", async () => {
+  const found = fakeClient({ data: { roles: { name: "Administrator" } }, error: null });
+  assert.equal(await lookUpUserRole(found.client, USER_ID), "Administrator");
+  assert.deepEqual(found.calls, LOOKUP);
+  assert.equal(await lookUpUserRole(fakeClient({ data: null, error: null }).client, USER_ID), null);
+
+  const failing = fakeClient({ data: null, error: { message: "permission denied for table user_roles" } });
+  let thrown = "";
+  try {
+    await lookUpUserRole(failing.client, USER_ID);
+  } catch (err) {
+    thrown = err instanceof Error ? err.message : String(err);
+  }
+  assert.equal(thrown.includes(USER_ID) && thrown.includes("permission denied"), true, thrown);
 });

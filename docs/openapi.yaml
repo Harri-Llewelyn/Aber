@@ -3963,6 +3963,35 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
         '503':
           description: This deployment has no forge configured, or the role lookup failed. The listener lets the request through.
+  /functions/v1/studio-admission:
+    post:
+      tags: [Edge Functions]
+      summary: Whether the caller is an Administrator now (the studio listener's ext_authz step)
+      description: |
+        Called by the gateway's `studio` listener on every request through Studio's door, after the
+        listener has verified the access token and admitted its `app_metadata.role` claim. Asks GoTrue
+        whether the token's session still exists, then reads the caller's role from `user_roles`, so a
+        person whose access was removed or whose role changed since the token was signed is refused on
+        their next request rather than when the token expires.
+
+        **Acts only on the caller**, whose identity is the token's subject. Calling it directly tells you
+        whether you are an Administrator, and nothing else. Any method is accepted: the listener forwards
+        the original request's method.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The caller is an Administrator in `user_roles`.
+        '302':
+          description: The token verified but GoTrue refuses it (a ban, a sign-out, a password set since). `Location` is the door's `/oauth2/signout`, which clears the cookies and starts a fresh login.
+        '401':
+          description: No bearer token at all.
+        '403':
+          description: The caller holds another role, or none.
+        '503':
+          description: GoTrue or the role lookup did not answer. The listener admits on the role claim it already checked.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
   /functions/v1/forge-sweep:
     post:
       tags: [Edge Functions]

@@ -220,11 +220,8 @@ spec:
             claimName: {{ printf "%s-node-red" $fullname }}
           {{- else }}
           {{/*
-            An emptyDir loses the encrypted credentials, the persisted editor sessions AND
-            /data/.aber-editor-users.json on every restart. That last one is the nasty part:
-            without it a live Administrator silently degrades to a read-only editor -- Node-RED
-            draws a padlock on Deploy -- while the admin API would still accept the deploy. It is
-            not a logout, so nothing tells the user. Only for throwaway testing.
+            An emptyDir loses the flows and their encrypted credentials on every restart. Only for
+            throwaway testing.
           */}}
           emptyDir: {}
           {{- end }}
