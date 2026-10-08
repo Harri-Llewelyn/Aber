@@ -6,6 +6,9 @@ each metric carries the time it was read, and a refresh republishes unchanged va
 of the refresh. The protobuf path has always honoured a metric's own timestamp; these pin that the
 JSON path does too, so a reading is filed when it was taken rather than when its message was built.
 
+The playback recorder (capture.py) decodes JSON through the same reader, so a recorded message
+replays as what the daemon stored from the original; ReplayReadsAsTheDaemonStored pins that.
+
 Needs the generated `sparkplug_b_pb2` (python -m grpc_tools.protoc --python_out=ingestion -I.
 sparkplug_b.proto). The run-python-suites runner starts each suite in its own process, so the
 stubbed modules below cannot leak into a sibling.
@@ -33,6 +36,7 @@ _stub("paho.mqtt")
 _stub("paho.mqtt.client", Client=object)
 
 import ingestion  # noqa: E402  (must follow the stubs above)
+import capture  # noqa: E402  (the module ingestion imported, bound to the same protobuf)
 
 
 class _Message:
@@ -40,6 +44,11 @@ class _Message:
 
     def __init__(self, body):
         self.payload = json.dumps(body).encode("utf-8")
+
+
+class _Wire(_Message):
+    def __init__(self, raw):
+        self.payload = raw
 
 
 def parse(metrics, **payload):
@@ -169,6 +178,124 @@ class JsonValuesAgreeWithI3x(unittest.TestCase):
             {"name": "Ratio", "datatype": 9, "float_value": 0.5},
         ])
         self.assertEqual([self.reads(metric) for metric in payload.metrics], [2**40, 0.5])
+
+
+class ReplayReadsAsTheDaemonStored(unittest.TestCase):
+    """
+    A JSON message recorded by capture.py and played back reads as the daemon read the original.
+
+    Recording is decode_wire_payload() then payload_to_dict(). Playback is encode_wire_payload() in
+    the encoding recorded (JSON), and in protobuf, which goes through dict_to_payload(): the capture
+    file is JSON whichever encoding replays it, so both must read it as the daemon does.
+    """
+
+    TIMESTAMP = 1790000000000
+
+    @classmethod
+    def setUpClass(cls):
+        with open(FIXTURE, encoding="utf-8") as f:
+            cls.cases = json.load(f)["cases"]
+
+    @staticmethod
+    def daemon(raw):
+        """parse_sparkplug_payload() on the wire bytes, with its refusal warnings throttled off."""
+        throttled, ingestion._throttled = ingestion._throttled, lambda *_: False
+        try:
+            return ingestion.parse_sparkplug_payload(_Wire(raw))
+        finally:
+            ingestion._throttled = throttled
+
+    @staticmethod
+    def reading(payload):
+        """Everything the daemon takes from a parsed payload: the clocks, seq and each metric."""
+        def field(message, name):
+            return getattr(message, name) if message.HasField(name) else None
+
+        metrics = []
+        for metric in payload.metrics:
+            value = JsonValuesAgreeWithI3x.reads(metric)
+            metrics.append((metric.name, field(metric, "alias"), field(metric, "datatype"),
+                            value, type(value).__name__, field(metric, "timestamp")))
+        return {"timestamp": field(payload, "timestamp"), "seq": field(payload, "seq"),
+                "metrics": metrics}
+
+    def assert_replays_as_stored(self, body):
+        raw = json.dumps(body).encode("utf-8")
+        stored = self.reading(self.daemon(raw))
+
+        recorded, encoding = capture.decode_wire_payload(raw)
+        self.assertEqual(encoding, capture.ENCODING_JSON)
+        self.assertEqual(self.reading(recorded), stored, "the recorder decoded what the daemon did not")
+
+        entry = capture.payload_to_dict(recorded)
+        for replay in (capture.ENCODING_JSON, capture.ENCODING_PROTOBUF):
+            with self.subTest(replayed_as=replay):
+                replayed = self.daemon(capture.encode_wire_payload(entry, replay))
+                self.assertEqual(self.reading(replayed), stored)
+
+        # The original body as a hand-written capture entry, played back as protobuf.
+        edited = self.daemon(capture.dict_to_payload_bytes(body))
+        self.assertEqual(self.reading(edited), stored, "dict_to_payload() read the body differently")
+        return entry
+
+    def test_every_fixture_case_replays_as_stored(self):
+        for case in self.cases:
+            with self.subTest(case=case["metric"]["name"]):
+                self.assert_replays_as_stored({"timestamp": self.TIMESTAMP, "seq": 4,
+                                               "metrics": [case["metric"]]})
+
+    def test_the_whole_fixture_in_one_message_replays_as_stored(self):
+        # A refused metric costs only itself on both sides, so the message is recorded.
+        entry = self.assert_replays_as_stored({"timestamp": self.TIMESTAMP, "seq": 4,
+                                               "metrics": [case["metric"] for case in self.cases]})
+        kept = [case["metric"]["name"] for case in self.cases if not case.get("dropped")]
+        self.assertEqual([metric["name"] for metric in entry["metrics"]], kept)
+
+    def test_the_four_readings_the_recorder_used_to_get_wrong(self):
+        # A bare `value` was lost, a negative Int64 was kept in 32 bits, an int_value too wide for
+        # its field skipped the whole message, and the string "false" was recorded as true.
+        entry = self.assert_replays_as_stored({"timestamp": self.TIMESTAMP, "metrics": [
+            {"name": "Bare", "value": 2.5},
+            {"name": "Offset", "datatype": 4, "int_value": -5},
+            {"name": "Too_Wide", "int_value": 2**32},
+            {"name": "Flag", "boolean_value": "false"},
+            {"name": "Temperature", "datatype": 10, "double_value": 21.4},
+        ]})
+        self.assertEqual(entry["metrics"], [
+            {"name": "Bare", "double_value": 2.5},
+            {"name": "Offset", "datatype": 4, "long_value": 2**64 - 5},
+            {"name": "Temperature", "datatype": 10, "double_value": 21.4},
+        ])
+
+    def test_metric_names_aliases_and_timestamps_replay_as_stored(self):
+        entry = self.assert_replays_as_stored({"timestamp": self.TIMESTAMP, "metrics": [
+            {"alias": 7, "datatype": 10, "double_value": 1.5},
+            {"name": None, "alias": "8", "double_value": 2.5},
+            {"name": "Stamped", "double_value": 3.5, "timestamp": self.TIMESTAMP - 10000},
+            {"name": "Zero_Stamp", "double_value": 4.5, "timestamp": 0},
+            {"name": "Text_Stamp", "double_value": 5.5, "timestamp": "1789999990000"},
+            {"name": 5, "double_value": 6.5},
+        ]})
+        # An alias-only metric is recorded without a name, as the publisher sent it.
+        self.assertNotIn("name", entry["metrics"][0])
+        self.assertEqual(len(entry["metrics"]), 5)
+
+    def test_a_seq_the_daemon_ignores_is_not_recorded(self):
+        # Neither is a sequence number to the daemon. The recorder used to keep the first as 4 and
+        # skip the whole message on the second.
+        for seq in ("4", "x", True):
+            with self.subTest(seq=seq):
+                entry = self.assert_replays_as_stored({"timestamp": self.TIMESTAMP, "seq": seq,
+                                                       "metrics": [{"name": "T", "double_value": 1.0}]})
+                self.assertNotIn("seq", entry)
+
+    def test_a_message_the_daemon_drops_is_not_recorded(self):
+        # A null payload clock fails the daemon's whole JSON parse; the recorder skips it too.
+        raw = json.dumps({"timestamp": None, "metrics": [{"name": "T", "double_value": 1.0}]}).encode()
+        with self.assertLogs(ingestion.logger, "WARNING"):
+            self.assertIsNone(self.daemon(raw))
+        with self.assertRaises(TypeError):
+            capture.decode_wire_payload(raw)
 
 
 if __name__ == "__main__":

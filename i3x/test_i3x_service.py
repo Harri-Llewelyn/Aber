@@ -4201,8 +4201,8 @@ class TestJsonValuesAgreeWithIngestion(unittest.TestCase):
         mine = self._function(here / "i3x_service.py")
         self.assertIsNotNone(mine)
         self.assertEqual(
-            mine, self._function(INGESTION_DIR / "ingestion.py"),
-            "json_metric_value has drifted between i3x_service.py and ingestion.py",
+            mine, self._function(INGESTION_DIR / "capture.py"),
+            "json_metric_value has drifted between i3x_service.py and ingestion/capture.py",
         )
 
     def test_every_case_is_served_as_the_fixture_says(self):
