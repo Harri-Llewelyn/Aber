@@ -23,7 +23,7 @@ Every check needs Docker. `lint:js` also needs npm, `scan:config` needs helm, an
 advisory databases, the first ESLint install and `lint:deno`, which reads the edge functions' npm
 registry metadata on every run, need network access.
 
-CI runs all nine on a clean `ubuntu-latest` runner, in two jobs of [`ci.yml`](../.github/workflows/ci.yml):
+CI runs all nine on a clean `ubuntu-24.04` runner, in two jobs of [`ci.yml`](../.github/workflows/ci.yml):
 
 - **Secret Scan** runs `scan:secrets` on every push, documentation included, over a full clone
   (`fetch-depth: 0`), because a secret pasted into a README is the case it exists for.
