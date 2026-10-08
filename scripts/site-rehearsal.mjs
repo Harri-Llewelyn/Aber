@@ -26,7 +26,7 @@
  * answers a pod labelled as db-init and not a pod no rule admits. `upgrade` keeps them off from a
  * release before 1.1.0, whose chart lacks the edges its own hooks need.
  *
- * The checkout's images are tagged <Chart.yaml version>-ci.<commit>, which no release carries, and
+ * The checkout's images are tagged <Chart.yaml version>-ci.g<commit>, which no release carries, and
  * the checkout's chart is packaged with that as its version and appVersion, as release.yml packages
  * a release. Otherwise a tree between releases names the last release's tag, and the node would
  * hold the published and the built image under one name. No host port is published: the sign-in
@@ -100,9 +100,13 @@ function git (...args) {
   return r.out
 }
 
-/** A tag no release can have, so the node never holds a built and a published image under one name. */
+/**
+ * A tag no release can have, so the node never holds a built and a published image under one name.
+ * The `g` keeps the identifier alphanumeric: SemVer refuses an all-digit one with a leading zero, and
+ * Helm will not package a chart versioned with it.
+ */
 function candidateVersion () {
-  return `${readChartVersion(REPO)}-ci.${git('rev-parse', '--short=8', 'HEAD')}`
+  return `${readChartVersion(REPO)}-ci.g${git('rev-parse', '--short=8', 'HEAD')}`
 }
 
 /** The highest release tag by version that is not this commit, or the tag --from names. */

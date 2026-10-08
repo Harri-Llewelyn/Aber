@@ -771,7 +771,7 @@ a failure leaves it, and prints where its kubeconfig and values are.
   and the upgrade run with NetworkPolicies off: those charts lack the edges their own hooks need
   under the layer (#755).
 
-**The checkout's images carry a tag no release has**, `<Chart.yaml version>-ci.<commit>`. The
+**The checkout's images carry a tag no release has**, `<Chart.yaml version>-ci.g<commit>`. The
 checkout's chart is packaged with that as its version and `appVersion`, as `release.yml` packages a
 release. Between releases `Chart.yaml` names the last release, so without this the node would hold a
 built and a published image under one name. Only the built images the site's render names are built:
