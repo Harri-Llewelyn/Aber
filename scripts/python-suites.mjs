@@ -620,6 +620,13 @@ export const SUITES = {
       'raise_not_found() (0165) raises the shape PostgREST answers 404 with, and no API role may ' +
       'call it. A body PostgREST cannot parse would answer 500, the fault 0165 exists to remove.',
   },
+  'supabase/migrations/test_people_management.py': {
+    lanes: ['db'],
+    why:
+      'Who may add people, set their roles and remove their access (0166): Administrator only, ' +
+      'never a machine identity, never your own, never the last Administrator who can sign in, ' +
+      'one role row per person, and every act attributed in the security lane.',
+  },
   'supabase/migrations/test_credential_revocation.py': {
     lanes: ['db'],
     why:

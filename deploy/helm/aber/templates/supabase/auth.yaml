@@ -124,6 +124,9 @@ spec:
               value: {{ .Values.supabaseAuth.smtp.senderName | default "Aber" | quote }}
             - name: GOTRUE_MAILER_SUBJECTS_RECOVERY
               value: "Reset your Aber password"
+            # Sent when an Administrator adds a person from the People tab with a relay set.
+            - name: GOTRUE_MAILER_SUBJECTS_INVITE
+              value: "You have been invited to Aber"
             - name: GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED
               value: "true"
             - name: GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI

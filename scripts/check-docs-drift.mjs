@@ -1077,6 +1077,10 @@ function edgeFunctionNames() {
     permissions: 'RBAC internals',
     role_permissions: 'RBAC internals',
     user_roles: 'RBAC internals — read server-side by the two userinfo functions, never by a client',
+    access_removals:
+      'RBAC internals (0166): the role an Administrator removed with a person\'s access, kept for '
+      + 'restoring it. RLS on with no policy and nothing granted to anon/authenticated; the People '
+      + 'tab reads it through list_people(), which is Administrator-only',
     principal_permissions:
       'RBAC internals — the machine-side twin of role_permissions (0080). A browser reads it only '
       + 'through list_machine_principals(), which is Administrator-only and returns permission '

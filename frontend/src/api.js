@@ -720,6 +720,59 @@ const apiMethods = {
   },
 
   /**
+   * Every person, for the People tab: `{ user_id, email, role, status, sign_in_blocked,
+   * role_on_restore, invited_at, last_sign_in_at, created_at }` from `list_people()` (0166).
+   * Administrator only; anybody else is refused.
+   */
+  listPeople: async () => {
+    const { data, error } = await supabase.rpc('list_people');
+    if (error) throw new Error(error.message || 'Could not list people');
+    return data || [];
+  },
+
+  /**
+   * Give a person one of the four roles. The database refuses your own role, a person whose access
+   * is removed, and the last Administrator who can sign in, and its sentence is the error.
+   */
+  setPersonRole: async (userId, role) => {
+    const { data, error } = await supabase.rpc('set_person_role', { p_user_id: userId, p_role: role });
+    if (error) throw new Error(error.message || 'Could not change the role');
+    return data;
+  },
+
+  /**
+   * Add a person, remove their access or restore it, through manage-people: GoTrue's admin API
+   * needs the secret key. `add` returns `password` only when the site has no mail relay; it is
+   * shown once and kept nowhere. `details` is preferred over `error`, as for the other functions.
+   */
+  managePeople: async (body) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/manage-people`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_GATEWAY_KEY,
+        // The CALLER's token: the function checks the role from it, and every database act it
+        // makes runs and is recorded as the caller.
+        Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+
+    let result = null;
+    try { result = await res.json(); } catch { /* non-JSON body */ }
+
+    if (!res.ok) {
+      throw new Error(result?.details || result?.error || `The request failed (${res.status})`);
+    }
+    return result;
+  },
+
+  addPerson: (email, role) => api.managePeople({ action: 'add', email, role }),
+  removePersonAccess: (userId) => api.managePeople({ action: 'remove', user_id: userId }),
+  restorePersonAccess: (userId) => api.managePeople({ action: 'restore', user_id: userId }),
+
+  /**
    * The cold telemetry catalogue: every chunk that has been claimed for archival.
    *
    * Read from the historian over the FDW through a SECURITY DEFINER function. `cold_storage_rows()`

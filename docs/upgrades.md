@@ -236,8 +236,9 @@ accounts still work afterwards.
 
 1. **Before upgrading**, set the first administrator. `npm run setup -- --admin-email=` writes both
    values into a fresh file; copy the two into your own values.
-2. **After upgrading**, sign in as that account and remove the four demo accounts, in Studio or with
-   GoTrue's admin API.
+2. **After upgrading**, sign in as that account and remove the four demo accounts' access: on
+   **Access Control**, **People**, select **Remove Access** on each. Their sign-in is blocked and
+   the accounts stay, so the Audit Trail still names them.
 
 ### Values from `npm run setup` before 1.0.2 lack the i3X broker password
 

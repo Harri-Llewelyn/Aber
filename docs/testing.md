@@ -331,6 +331,11 @@ python supabase/migrations/test_backup_health.py
 # with the page looking exactly as it should. Both directions per role, and `anon` stopped by the
 # missing grant before it reaches the body.
 python supabase/migrations/test_user_accounts_listing.py
+# The People tab's database half (0166): Administrator only, never a machine identity, an unknown
+# person a 404, one role row however often it is set, never your own role or access, never the
+# last Administrator who can sign in, one lock for every act, and each act attributed in the
+# security lane with no password. Every test rolls back.
+python supabase/migrations/test_people_management.py
 # A site's first administrator (0163). Created once, as a person holding Administrator; a later run
 # with a different password changes nothing, so what the site changed stays changed; and no API
 # role may execute it, since it writes a password.

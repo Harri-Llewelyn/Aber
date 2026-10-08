@@ -209,6 +209,15 @@ The broker read may fail without failing the page. The Broker column then reads 
 is a fact about the page load and not about any account, and the reason is stated once in the
 card. The page does not show sessions: an *Active* account is one that may connect.
 
+The **People** tab (`components/tabs/PeopleSection.jsx`) is offered only when `App.jsx` passes
+`userRole` Administrator, and the page opens on it. Roles go through `set_person_role()`; adding,
+removing and restoring go through `manage-people`, because GoTrue's admin API needs the secret key.
+The controls the database would refuse (your own row, the last Administrator who can sign in, a
+removed person's role) are disabled with the reason as their tooltip, computed in
+`utils/people.js`, so the page and the database state the same rule. The password `AddPersonModal`
+shows, on a site with no mail relay, lives in that dialog's state until it closes, as a minted
+token does in `ServiceTokenModal`.
+
 ### Why the cold-archive destination is one dialog
 
 `ColdStorageDestinationModal` holds the whole destination, the write-only secret key and the
