@@ -187,10 +187,11 @@ export is the platform's root for the one-liner's pin.
 
 ### 2.3 Gateway config: template, don't `sed`
 
-`supabase/envoy.yaml` is a **template**, not a config: thirteen `__UPPER_SNAKE__` placeholders,
+`supabase/envoy.yaml` is a **template**, not a config: eighteen `__UPPER_SNAKE__` placeholders,
 mirrored into the chart (§3.5) and substituted at boot by the gateway's `render-config`
-initContainer from environment variables sourced from the Secret. Helm has templating and does not
-use it here, for the reason §4.5 gives: with `secrets.existingSecret` the chart cannot see the keys.
+initContainer from environment variables, the keys among them sourced from the Secret. Helm has
+templating and does not use it here, for the reason §4.5 gives: with `secrets.existingSecret` the
+chart cannot see the keys.
 
 One template is the point: the file a developer edits is the file the cluster runs, so a route
 cannot exist in one and be missing from the other. `scripts/check-gateway-surface.mjs` asserts that
@@ -1307,11 +1308,14 @@ oversights.
 - **Object storage stays on the `file` backend by default.** `supabaseStorage.backend: s3` is a
   supported switch (§4.4). With the durability gap closed (§10.5), what remains is a *scaling*
   question — the `file` backend is what pins that Deployment to one replica — not a data-loss one.
-- **Only sign-in is rate-limited.** GoTrue limits sign-in, token refresh, OTP, verify and MFA per
-  client address (`supabaseAuth.rateLimitHeader`), which Traefik has to preserve
-  (`deploy/k8s/traefik-config.yaml`; `docs/gateway.md`, *The client's address*). The gateway limits
-  nothing: no overall request ceiling and no per-route limit (#442). §7.1 covers the longer-term
-  Gateway API question.
+- **Only sign-in is rate-limited.** The gateway limits password sign-ins and recovery requests per
+  client address and in total (`supabaseEnvoy.signInRateLimit`; `docs/gateway.md`, *The sign-in
+  limit*). Behind it GoTrue limits sign-in, token refresh, OTP, verify and MFA per client address
+  (`supabaseAuth.rateLimitHeader`). Both key on the address the gateway resolves from
+  `X-Forwarded-For`, which Traefik has to preserve (`deploy/k8s/traefik-config.yaml`;
+  `docs/gateway.md`, *The client's address*). There is no overall request ceiling, and the gateway
+  does not limit `/rest/v1/`, `/functions/v1/` or a token refresh. Each gateway replica counts on
+  its own. §7.1 covers the longer-term Gateway API question.
 - **The platform database's backup is a logical dump, not PITR** (§10.3). Its recovery floor is the
   last nightly run; only the historian has a physical backup, and only when it is switched on.
 

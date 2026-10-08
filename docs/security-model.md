@@ -16,7 +16,7 @@ unrecognised role produces `403`.
 | :--- | :--- |
 | **Broker** | `allow_anonymous false`; the Dynamic Security plugin's roles ([`mosquitto/dynsec-roles.json`](../mosquitto/dynsec-roles.json), [`mosquitto/README.md`](../mosquitto/README.md)) confine each gateway to `spBv1.0/+/+/<own-id>/#`, and revocation drops a live session |
 | **Ingestion** | Gateway↔device binding; quarantine gating; append-only historian writes — a **grant**, not a promise: the daemon connects as `ingest_writer` (`ingestion.dbUser`, with `secrets.ingestWriterPassword`), which may INSERT and cannot UPDATE, DELETE or TRUNCATE, and it refuses to run as the historian superuser — see [Historian roles](#historian-roles) |
-| **Gateway** | Envoy's `apikey` check on `/rest`, `/realtime`, `/storage`, `/functions` — with **four** documented exemptions ([`supabase/README.md`](../supabase/README.md)) |
+| **Gateway** | Envoy's `apikey` check on `/rest`, `/realtime`, `/storage`, `/functions` — with **four** documented exemptions ([`supabase/README.md`](../supabase/README.md)); password sign-ins and recovery limited per client address and in total, ahead of GoTrue's own limits; `nosniff` on every response, `no-store` on sign-in, `Strict-Transport-Security` under `https`; every request in an access log that leaves out the query and credentials ([`docs/gateway.md`](gateway.md)) |
 | **API** | PostgREST JWT verification plus RLS on every table |
 | **Database** | `has_role()` reads `user_roles` directly, so revocation is immediate; `audit_trail` is append-only against `service_role` too |
 | **Edge functions** | Explicit router allow-list; per-function secret scoping; role resolved from the database, never a stale JWT claim |

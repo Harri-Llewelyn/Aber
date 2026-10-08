@@ -1,4 +1,4 @@
-# The gateway (docs/gateway.md; supabase/README.md, "API Gateway"). A TEMPLATE, not a config: thirteen
+# The gateway (docs/gateway.md; supabase/README.md, "API Gateway"). A TEMPLATE, not a config: eighteen
 # __UPPER_SNAKE__ placeholders are substituted at boot by the initContainer, and check-gateway-surface.mjs
 # asserts that the substituter knows every one and that they are still placeholders. Three listeners:
 # the API on 8000, which admits the opaque sb_publishable_* / sb_secret_* keys and hands each upstream
@@ -25,11 +25,55 @@ static_resources:
               typed_config:
                 "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                 stat_prefix: gateway
+                # The client's address, read from X-Forwarded-For past the trusted proxies (Traefik is one); a caller
+                # with no forwarded header is its connection's address. The sign-in limits key on it.
+                use_remote_address: true
+                xff_num_trusted_hops: __XFF_TRUSTED_HOPS__
+                # use_remote_address makes every request an edge request, whose X-Request-Id Envoy would replace,
+                # and pack_trace_reason rewrites one character of a 36-character id. A caller's id is kept as sent.
+                preserve_external_request_id: true
+                request_id_extension:
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.request_id.uuid.v3.UuidRequestIdConfig
+                    pack_trace_reason: false
+                # One line per request. The path without its query (which can carry the apikey), and no header that
+                # carries a credential; key= is the kind of key a gated route admitted.
+                access_log:
+                  - name: envoy.access_loggers.stdout
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                      log_format:
+                        formatters:
+                          - name: envoy.formatter.req_without_query
+                            typed_config:
+                              "@type": type.googleapis.com/envoy.extensions.formatter.req_without_query.v3.ReqWithoutQuery
+                        text_format_source:
+                          inline_string: "aber-api method=%REQ(:METHOD)% path=%REQ_WITHOUT_QUERY(X-ENVOY-ORIGINAL-PATH?:PATH)% status=%RESPONSE_CODE% flags=%RESPONSE_FLAGS% upstream=%UPSTREAM_CLUSTER% duration_ms=%DURATION% request_id=%REQ(X-REQUEST-ID)% client=%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT% key=%DYNAMIC_METADATA(aber:key)%\n"
+                # The sign-in limit's 429 in GoTrue's shape, so a client reads it as the limit it already knows. Only
+                # the limit answers 429 from the gateway itself.
+                local_reply_config:
+                  mappers:
+                    - filter:
+                        status_code_filter:
+                          comparison:
+                            op: EQ
+                            value: { default_value: 429, runtime_key: gateway.sign_in_limit_status }
+                      body_format_override:
+                        text_format_source:
+                          inline_string: '{"code":429,"error_code":"over_request_rate_limit","msg":"Request rate limit reached"}'
+                        content_type: application/json
                 # Realtime is a WebSocket upstream.
                 upgrade_configs:
                   - upgrade_type: websocket
                 route_config:
                   name: supabase
+                  # Every routed response, the gateway's own refusals included. Strict-Transport-Security is empty, and
+                  # so not sent, unless global.scheme is https.
+                  response_headers_to_add:
+                    - header: { key: x-content-type-options, value: nosniff }
+                      append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                    - header: { key: strict-transport-security, value: "__STRICT_TRANSPORT_SECURITY__" }
+                      append_action: OVERWRITE_IF_EXISTS_OR_ADD
                   virtual_hosts:
                     - name: supabase
                       domains: ["*"]
@@ -45,12 +89,76 @@ static_resources:
                           allow_credentials: true
                       routes:
                         # Exemption 1 of 4: sign-in must work before a session exists. Not gated, but a bearer that is one
-                        # of the two keys is translated to its JWT (Studio presents the secret key as the bearer).
+                        # of the two keys is translated to its JWT (Studio presents the secret key as the bearer). Both
+                        # routes hand GoTrue the client's address alone as X-Forwarded-For, which its own limits key on.
+                        #
+                        # This first one is the sign-in limit: every POST to /token and /recover, each client address its
+                        # own bucket and a total bucket under all of them. A refresh is exempt only in the one spelling the
+                        # clients send, so a re-encoded or reordered query lands on the limited side. A port-forward
+                        # arrives from loopback, the operator's own path, and has only the total bucket.
+                        - name: auth-v1-limited-routes
+                          match:
+                            safe_regex: { regex: "/auth/v1/+(token|recover)/*" }
+                            headers:
+                              - name: ":method"
+                                string_match: { exact: POST }
+                              - name: ":path"
+                                string_match: { exact: "/auth/v1/token?grant_type=refresh_token" }
+                                invert_match: true
+                          route:
+                            cluster: auth-v1
+                            regex_rewrite: { pattern: { regex: "^/auth/v1/+" }, substitution: "/" }
+                          request_headers_to_add:
+                            - header: { key: x-forwarded-for, value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%" }
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                          response_headers_to_add:
+                            - header: { key: cache-control, value: no-store }
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                          typed_per_filter_config:
+                            envoy.filters.http.lua:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
+                              name: translate_bearer
+                            envoy.filters.http.local_ratelimit:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                              stat_prefix: sign_in_limit
+                              # 100 when supabaseEnvoy.signInRateLimit.enabled, otherwise 0.
+                              filter_enabled:
+                                default_value: { numerator: __SIGN_IN_LIMIT_PERCENT__, denominator: HUNDRED }
+                              filter_enforced:
+                                default_value: { numerator: __SIGN_IN_LIMIT_PERCENT__, denominator: HUNDRED }
+                              # The total, consumed by every request a client bucket admits.
+                              token_bucket:
+                                max_tokens: __SIGN_IN_LIMIT_TOTAL__
+                                tokens_per_fill: __SIGN_IN_LIMIT_TOTAL__
+                                fill_interval: 60s
+                              always_consume_default_token_bucket: true
+                              rate_limits:
+                                - actions: [{ remote_address: {} }]
+                              descriptors:
+                                # No value: one bucket per address seen, the least recently used dropped past the cap.
+                                - entries: [{ key: remote_address }]
+                                  token_bucket:
+                                    max_tokens: __SIGN_IN_LIMIT_PER_CLIENT__
+                                    tokens_per_fill: __SIGN_IN_LIMIT_PER_CLIENT__
+                                    fill_interval: 60s
+                                - entries: [{ key: remote_address, value: 127.0.0.1 }]
+                                  token_bucket:
+                                    max_tokens: __SIGN_IN_LIMIT_TOTAL__
+                                    tokens_per_fill: __SIGN_IN_LIMIT_TOTAL__
+                                    fill_interval: 60s
+                              max_dynamic_descriptors: 1000
+
                         - name: auth-v1-routes
                           match: { prefix: "/auth/v1/" }
                           route:
                             cluster: auth-v1
                             prefix_rewrite: "/"
+                          request_headers_to_add:
+                            - header: { key: x-forwarded-for, value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%" }
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                          response_headers_to_add:
+                            - header: { key: cache-control, value: no-store }
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
                           typed_per_filter_config:
                             envoy.filters.http.lua:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
@@ -154,6 +262,13 @@ static_resources:
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.cors.v3.Cors
 
+                  # The sign-in limit. Off here and configured per route (auth-v1-limited-routes); after CORS, so a
+                  # preflight never spends a token.
+                  - name: envoy.filters.http.local_ratelimit
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                      stat_prefix: sign_in_limit
+
                   # key-auth: an exact string match of the presented key against the registered ones; no signature
                   # is verified. default_source_code gates and strips; keyauth_preserve gates and keeps, for Realtime
                   # alone; exempt routes set disabled: true. A query-string apikey reaching PostgREST is parsed as a
@@ -256,6 +371,8 @@ static_resources:
                               )
                               return
                             end
+                            -- The kind of key, never the key, for the access log.
+                            handle:streamInfo():dynamicMetadata():set("aber", "key", jwt == SERVICE and "secret" or "publishable")
                             synthesise_bearer(handle, jwt)
                             -- Strip the key from BOTH the header and the query: a query-string apikey
                             -- reaching PostgREST is parsed as a column filter (PGRST100).
@@ -351,6 +468,7 @@ static_resources:
                                 )
                                 return
                               end
+                              handle:streamInfo():dynamicMetadata():set("aber", "key", jwt == SERVICE and "secret" or "publishable")
                               replace_key(handle, jwt)
                               -- Same rule as the default filter: somebody else's token is never overwritten.
                               local auth = handle:headers():get("authorization")
@@ -403,6 +521,10 @@ static_resources:
                   - upgrade_type: websocket
                 route_config:
                   name: studio
+                  # Empty, and so not sent, unless global.scheme is https.
+                  response_headers_to_add:
+                    - header: { key: strict-transport-security, value: "__STRICT_TRANSPORT_SECURITY__" }
+                      append_action: OVERWRITE_IF_EXISTS_OR_ADD
                   virtual_hosts:
                     - name: studio
                       domains: ["*"]
@@ -564,6 +686,10 @@ static_resources:
                           inline_string: "aber-forge method=%REQ(:METHOD)% path=%REQ_WITHOUT_QUERY(:PATH)% status=%RESPONSE_CODE% flags=%RESPONSE_FLAGS% user=%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:email)% role=%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:jwt_payload:app_metadata:role)% downstream=%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%\n"
                 route_config:
                   name: forge
+                  # As Studio's: Gitea has no setting of its own for it.
+                  response_headers_to_add:
+                    - header: { key: strict-transport-security, value: "__STRICT_TRANSPORT_SECURITY__" }
+                      append_action: OVERWRITE_IF_EXISTS_OR_ADD
                   virtual_hosts:
                     - name: forge
                       domains: ["*"]

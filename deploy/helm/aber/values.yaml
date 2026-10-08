@@ -551,9 +551,10 @@ supabaseAuth:
   demoAccounts: false
   jwtExpiry: 3600
   # The request header GoTrue keys its per-client rate limits on (sign-in, token refresh, OTP,
-  # verify, MFA), taking the first address in it. Traefik sets X-Forwarded-For, which names the
-  # client only once deploy/k8s/traefik-config.yaml is applied; with k3s's default Service every
-  # request carries the same address and the whole site shares one limit. Empty turns the limits off.
+  # verify, MFA). On /auth/v1/ the gateway sets X-Forwarded-For to the one client address it
+  # resolves (supabaseEnvoy.trustedProxyHops), which names the client only once
+  # deploy/k8s/traefik-config.yaml is applied; with k3s's default Service every request carries the
+  # same address and the whole site shares one limit. Empty turns the limits off.
   rateLimitHeader: X-Forwarded-For
   # The relay GoTrue sends "forgot your password" links and People-tab invitations through. Empty
   # host: a reset request fails and the sign-in card tells the user to ask an administrator, and
@@ -594,6 +595,18 @@ supabaseEnvoy:
     pullPolicy: IfNotPresent
   replicas: 1
   logLevel: info
+  # How many proxies in front of the gateway append to X-Forwarded-For: 1 is Traefik. Add one for
+  # each proxy of the site's own that Traefik trusts (deploy/k8s/README.md). The gateway reads the
+  # client's address that many entries from the right, and the sign-in limits below and GoTrue's own
+  # key on it (docs/gateway.md, "The client's address").
+  trustedProxyHops: 1
+  # Password sign-ins and password-recovery requests (every POST to /auth/v1/token except a token
+  # refresh, and /auth/v1/recover), limited at the gateway per client address and in total. A
+  # refused request answers 429. Each gateway replica counts on its own.
+  signInRateLimit:
+    enabled: true
+    perClientPerMinute: 10
+    totalPerMinute: 120
   metrics:
     enabled: true
     # Envoy's admin listener serves /ready and /stats/prometheus. Unauthenticated; not on the

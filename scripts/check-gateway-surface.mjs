@@ -4,9 +4,13 @@
  * `validate.py` asserts the 401s that should happen; nothing can assert the absence of a route
  * nobody wrote, and a gateway change that quietly widened an exemption would pass every other
  * test. Three modes: (default) template hygiene over `supabase/envoy.yaml`: every credential is
- * still an `__UPPER_SNAKE__` placeholder and the placeholder set is known to the substituter.
- * `--runtime`: the route surface against a live gateway, every row in EXPECTED, gated routes
- * refused before their upstream and open ones through. `--authenticated`: extends --runtime with
+ * still an `__UPPER_SNAKE__` placeholder, the placeholder set is known to the substituter, every
+ * API route has a row in EXPECTED, and the API listener keeps its sign-in limit, response headers
+ * and access log. `--runtime`: the route surface against a live gateway, every row in EXPECTED,
+ * gated routes refused before their upstream and open ones through, the response headers present,
+ * and a burst of password grants from one client address refused with 429 while another address
+ * and a token refresh pass. The burst names its addresses in X-Forwarded-For, which the gateway
+ * trusts from a direct caller only: run it against a port-forward. `--authenticated`: extends --runtime with
  * a credentialled pass, presenting a valid key by header and by query and an unregistered key,
  * and asserting that on a route which hides credentials the header and query forms are
  * indistinguishable upstream. Both modes share EXPECTED so two inventories cannot drift.
@@ -16,6 +20,7 @@
  * argument, or SUPABASE_URL. No dependencies: this runs in CI before any `npm install`, and the
  * runtime modes use `node:http`; see probeOnce.
  */
+import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
@@ -45,6 +50,11 @@ const EXEMPTIONS = {
 };
 
 const EXPECTED = [
+  // The same exemption under the sign-in limit; POST only, so the burst below probes it.
+  { service: 'auth-v1', route: 'auth-v1-limited-routes', paths: ['/auth/v1/token', '/auth/v1/recover'],
+    strip: true, auth: 'open', exemption: 'sign-in',
+    probe: null, marker: null, unprobeable: 'POST only; the sign-in limit pass sends to it' },
+
   { service: 'auth-v1', route: 'auth-v1-routes', paths: ['/auth/v1/'], strip: true,
     auth: 'open', exemption: 'sign-in',
     probe: '/auth/v1/health', marker: '"name":"GoTrue"' },
@@ -134,43 +144,48 @@ if (RUNTIME) {
    * One unauthenticated GET. `node:http` and not `fetch`: Node's fetch holds sockets in a
    * keep-alive pool, and `process.exit()` while undici owns one aborts the process on Windows with
    * a libuv assertion after the report has printed. `agent: false` gives each request its own
-   * socket. No headers beyond Accept.
+   * socket. No headers beyond Accept unless given; a GET unless `method` and `body` are given.
    */
-  const probeOnce = (url, extraHeaders = {}) => new Promise((resolveProbe) => {
-    let mod, opts;
-    try {
-      const u = new URL(url);
-      mod = u.protocol === 'https:' ? https : http;
-      opts = {
-        method: 'GET',
-        hostname: u.hostname,
-        port: u.port || (u.protocol === 'https:' ? 443 : 80),
-        path: `${u.pathname}${u.search}`,
-        headers: { Accept: '*/*', ...extraHeaders },
-        agent: false,
-      };
-    } catch (err) {
-      resolveProbe({ status: 0, body: '', error: `unparseable URL: ${err.message}` });
-      return;
-    }
+  const probeOnce = (url, extraHeaders = {}, { method = 'GET', body: payload = null } = {}) =>
+    new Promise((resolveProbe) => {
+      let mod, opts;
+      try {
+        const u = new URL(url);
+        mod = u.protocol === 'https:' ? https : http;
+        opts = {
+          method,
+          hostname: u.hostname,
+          port: u.port || (u.protocol === 'https:' ? 443 : 80),
+          path: `${u.pathname}${u.search}`,
+          headers: {
+            Accept: '*/*',
+            ...(payload === null ? {} : { 'Content-Length': Buffer.byteLength(payload) }),
+            ...extraHeaders,
+          },
+          agent: false,
+        };
+      } catch (err) {
+        resolveProbe({ status: 0, body: '', headers: {}, error: `unparseable URL: ${err.message}` });
+        return;
+      }
 
-    const req = mod.request(opts, (res) => {
-      let body = '';
-      res.setEncoding('utf8');
-      res.on('data', (chunk) => { body += chunk; });
-      res.on('end', () => resolveProbe({ status: res.statusCode, body, error: null }));
+      const req = mod.request(opts, (res) => {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => { body += chunk; });
+        res.on('end', () => resolveProbe({ status: res.statusCode, body, headers: res.headers, error: null }));
+      });
+      req.setTimeout(15000, () => {
+        req.destroy();
+        resolveProbe({ status: 0, body: '', headers: {}, error: 'timed out after 15s' });
+      });
+      req.on('error', (err) => resolveProbe({ status: 0, body: '', headers: {}, error: err.message }));
+      req.end(payload === null ? undefined : payload);
     });
-    req.setTimeout(15000, () => {
-      req.destroy();
-      resolveProbe({ status: 0, body: '', error: 'timed out after 15s' });
-    });
-    req.on('error', (err) => resolveProbe({ status: 0, body: '', error: err.message }));
-    req.end();
-  });
 
   const results = await Promise.all(probes.map(async (row) => {
-    const { status, body, error } = await probeOnce(`${base}${row.probe}`);
-    return { row, status, body, error };
+    const { status, body, headers, error } = await probeOnce(`${base}${row.probe}`);
+    return { row, status, body, headers, error };
   }));
 
   for (const { row, status, body, error } of results) {
@@ -217,9 +232,116 @@ if (RUNTIME) {
     }
   }
 
+  // Response headers. nosniff on every routed response, the gateway's own refusals included;
+  // no-store on sign-in; Strict-Transport-Security wherever the gateway is reached over https.
+  {
+    const answered = results.filter((r) => !r.error);
+    const sniffable = answered.filter((r) => r.headers['x-content-type-options'] !== 'nosniff');
+    if (sniffable.length) {
+      runtimeProblems.push(
+        `${sniffable.map((r) => r.row.probe).join(', ')} answered without X-Content-Type-Options: nosniff, `
+        + 'which the API listener adds to every routed response (route_config response_headers_to_add).'
+      );
+    } else if (answered.length) {
+      runtimeOk.push(`every probed route answers X-Content-Type-Options: nosniff, refusals included`);
+    }
+    const signIn = answered.find((r) => r.row.route === 'auth-v1-routes');
+    if (signIn && !/\bno-store\b/.test(signIn.headers['cache-control'] || '')) {
+      runtimeProblems.push(
+        `${signIn.row.probe} answered Cache-Control ${JSON.stringify(signIn.headers['cache-control'] || '')}, `
+        + 'not no-store: the sign-in routes carry tokens no cache may keep.'
+      );
+    } else if (signIn) {
+      runtimeOk.push(`${signIn.row.probe} answers Cache-Control: no-store`);
+    }
+    if (base.startsWith('https:')) {
+      const unpinned = answered.filter((r) => !r.headers['strict-transport-security']);
+      if (unpinned.length) {
+        runtimeProblems.push(
+          `${unpinned.map((r) => r.row.probe).join(', ')} answered over https without `
+          + 'Strict-Transport-Security, which the chart sets when global.scheme is https.'
+        );
+      } else {
+        runtimeOk.push('every probed route answers Strict-Transport-Security over https');
+      }
+    }
+  }
+
+  // The sign-in limit. Wrong-password grants from one client address until the gateway itself
+  // refuses one: a 429 with no x-envoy-upstream-service-time, which only an upstream's answer
+  // carries. Then a grant from another address and a refresh from the first must reach GoTrue. The
+  // addresses are fresh documentation addresses (2001:db8::/32), so no earlier run's bucket is spent.
+  {
+    const burst = Number(process.env.SIGN_IN_BURST || 20);
+    const hex = () => randomBytes(2).toString('hex');
+    const address = () => `2001:db8::${hex()}:${hex()}`;
+    const grant = (from, query, payload) => probeOnce(
+      `${base}/auth/v1/token?${query}`,
+      { 'Content-Type': 'application/json', 'X-Forwarded-For': from },
+      { method: 'POST', body: JSON.stringify(payload) },
+    );
+    const password = () => ({ email: `gateway-surface-${hex()}${hex()}@aber.invalid`, password: 'not-the-password' });
+    const byGateway = (r) => r.status === 429 && !r.headers['x-envoy-upstream-service-time'];
+    const reachedGoTrue = (r) => !r.error && Boolean(r.headers['x-envoy-upstream-service-time']);
+
+    const first = address();
+    let refusal = null;
+    let sent = 0;
+    let transport = null;
+    while (!refusal && sent < burst) {
+      const r = await grant(first, 'grant_type=password', password());
+      sent += 1;
+      if (r.error) { transport = r.error; break; }
+      if (byGateway(r)) refusal = r;
+    }
+
+    if (transport) {
+      runtimeProblems.push(`the sign-in limit pass could not reach /auth/v1/token -- ${transport}`);
+    } else if (!refusal) {
+      runtimeProblems.push(
+        `${burst} password grants from one client address within seconds were never refused by the `
+        + 'gateway. The sign-in limit is off (supabaseEnvoy.signInRateLimit) or not keyed on the '
+        + 'client address; or this ran through an ingress, which replaces the X-Forwarded-For it names.'
+      );
+    } else {
+      const shapeProblems = [];
+      if (!refusal.body.includes('over_request_rate_limit')) {
+        shapeProblems.push(`its body is not GoTrue's over_request_rate_limit shape (${refusal.body.slice(0, 120)})`);
+      }
+      if (refusal.headers['x-content-type-options'] !== 'nosniff'
+        || !/\bno-store\b/.test(refusal.headers['cache-control'] || '')) {
+        shapeProblems.push('it lacks nosniff or Cache-Control: no-store');
+      }
+      const [other, refresh] = [
+        await grant(address(), 'grant_type=password', password()),
+        await grant(first, 'grant_type=refresh_token', { refresh_token: 'not-a-refresh-token' }),
+      ];
+      if (!reachedGoTrue(other)) {
+        shapeProblems.push(
+          `a grant from a different address did not reach GoTrue (HTTP ${other.status || other.error}): `
+          + 'the limit is shared rather than per client'
+        );
+      }
+      if (!reachedGoTrue(refresh)) {
+        shapeProblems.push(
+          `a token refresh from the refused address did not reach GoTrue (HTTP ${refresh.status || refresh.error}): `
+          + 'refreshes are not limited, since every open dashboard tab sends them'
+        );
+      }
+      if (shapeProblems.length) {
+        runtimeProblems.push(`the gateway refused password grant ${sent} with 429, but ${shapeProblems.join('; ')}.`);
+      } else {
+        runtimeOk.push(
+          `the gateway refused password grant ${sent} from one address with 429; another address and a `
+          + 'refresh from the first still reached GoTrue'
+        );
+      }
+    }
+  }
+
   for (const line of runtimeOk) console.log(`  ok   ${line}`);
   for (const row of unprobeable) {
-    console.log(`  --   ${row.route}: declared ${row.auth}, not probeable over plain HTTP`);
+    console.log(`  --   ${row.route}: declared ${row.auth}, ${row.unprobeable || 'not probeable over plain HTTP'}`);
   }
 
   if (runtimeProblems.length) {
@@ -399,9 +521,15 @@ const TEMPLATE_PLACEHOLDERS = [
   // The forge listener's two (0094). It shares the JWKS key and SUPABASE_PUBLIC_URL with Studio's.
   '__GITEA_PUBLIC_URL__',
   '__GITEA_UPSTREAM_ADDRESS__',
+  // The API listener's client address and sign-in limit, and the HSTS value all three send.
+  '__XFF_TRUSTED_HOPS__',
+  '__SIGN_IN_LIMIT_PERCENT__',
+  '__SIGN_IN_LIMIT_PER_CLIENT__',
+  '__SIGN_IN_LIMIT_TOTAL__',
+  '__STRICT_TRANSPORT_SECURITY__',
 ];
 
-const template = read(ENVOY_TEMPLATE);
+const template = read(ENVOY_TEMPLATE).replace(/\r\n/g, '\n');
 
 // ---- 1. Every placeholder in the template is declared, and nothing else looks like one. --------
 {
@@ -476,6 +604,123 @@ const template = read(ENVOY_TEMPLATE);
     );
   } else {
     pass(`${CHART_ENVOY} substitutes all ${TEMPLATE_PLACEHOLDERS.length} placeholders`);
+  }
+}
+
+/** The lines after the one equal to `first`, up to the first that `stop` matches. */
+const linesAfter = (lines, first, stop) => {
+  const start = lines.indexOf(first);
+  if (start < 0) return '';
+  let end = start + 1;
+  while (end < lines.length && !stop.test(lines[end])) end += 1;
+  return lines.slice(start + 1, end).join('\n');
+};
+/** One listener's text: from its `- name:` line to the next listener or the clusters. */
+const listenerText = (name) => linesAfter(template.split('\n'), `    - name: ${name}`, /^ {4}- name: |^ {2}clusters:/);
+const gateway = listenerText('gateway');
+// Route names are kebab-case; filter, logger and header-matcher names have dots or quotes.
+const ROUTE_LINE = /^ *- name: ([a-z0-9-]+) *$/;
+const routesStart = gateway.indexOf('routes:');
+const filtersStart = gateway.indexOf('http_filters:');
+const routeLines = gateway.slice(routesStart, filtersStart).split('\n');
+const routeNames = routeLines.map((l) => (l.match(ROUTE_LINE) || [])[1]).filter(Boolean);
+/** One gateway route's text, from its `- name:` line to the next route's. */
+const routeText = (name) => linesAfter(routeLines.map((l) => l.trim()), `- name: ${name}`, ROUTE_LINE);
+
+// ---- 4. Every API route has a row in EXPECTED, and every row names a route. --------------------
+{
+  const declared = new Set(EXPECTED.map((r) => r.route));
+  const unreviewed = routeNames.filter((n) => !declared.has(n));
+  const absent = [...declared].filter((n) => !routeNames.includes(n));
+  if (!routeNames.length) {
+    fail(`found no routes on the gateway listener in ${ENVOY_TEMPLATE}; this script's reading of it is stale.`);
+  } else if (unreviewed.length || absent.length) {
+    fail(
+      `${ENVOY_TEMPLATE}'s API routes and EXPECTED disagree.`
+      + (unreviewed.length ? ` Routes with no row: ${unreviewed.join(', ')}.` : '')
+      + (absent.length ? ` Rows naming no route: ${absent.join(', ')}.` : '')
+      + ' A route is reviewed by adding its row, with its posture, in the same change.'
+    );
+  } else {
+    pass(`each of the ${routeNames.length} API routes has its row in EXPECTED`);
+  }
+}
+
+// ---- 5. The API listener keeps its sign-in limit, response headers and access log. ------------
+// Text assertions, since this script has no YAML parser: each names what removing it would undo.
+{
+  const before = problems.length;
+  const need = (text, fragment, what) => {
+    if (!text.includes(fragment)) fail(`${ENVOY_TEMPLATE}: ${what} (expected ${JSON.stringify(fragment)}).`);
+  };
+
+  need(gateway, 'use_remote_address: true',
+    'the API listener must resolve the client address itself, or the sign-in limit keys on Traefik');
+  need(gateway, 'xff_num_trusted_hops: __XFF_TRUSTED_HOPS__', 'the trusted hops come from supabaseEnvoy.trustedProxyHops');
+  need(gateway, 'preserve_external_request_id: true',
+    'without it an edge request\'s X-Request-Id is replaced, and an edge function\'s error no longer echoes the caller\'s id');
+  need(gateway, 'pack_trace_reason: false', 'with it Envoy rewrites one character of a caller\'s 36-character request id');
+
+  const filters = gateway.slice(filtersStart);
+  const order = ['cors', 'local_ratelimit', 'lua', 'router'].map((f) => filters.indexOf(`- name: envoy.filters.http.${f}`));
+  if (order.some((i) => i < 0) || order.some((i, n) => n > 0 && i < order[n - 1])) {
+    fail(
+      `${ENVOY_TEMPLATE}: the API listener's filters must run CORS, the sign-in limit, the key check, then the `
+      + 'router; a limit before CORS would spend a token on every preflight, and none at all limits nothing.'
+    );
+  }
+
+  const limited = routeText('auth-v1-limited-routes');
+  if (routeNames[0] !== 'auth-v1-limited-routes') {
+    fail(`${ENVOY_TEMPLATE}: auth-v1-limited-routes must be the API listener's first route; routes are first-match.`);
+  }
+  for (const [fragment, what] of [
+    ['(token|recover)', 'the sign-in limit covers /token and /recover'],
+    ['exact: POST', 'the sign-in limit matches POST only'],
+    ['exact: "/auth/v1/token?grant_type=refresh_token"', 'only a refresh, in the one spelling clients send, is exempt'],
+    ['invert_match: true', 'the refresh spelling is excluded from the limit, not the only thing limited'],
+    ['envoy.filters.http.local_ratelimit', 'the limit itself is this route\'s per-route config'],
+    ['remote_address: {}', 'the limit keys on the client address'],
+    ['- entries: [{ key: remote_address }]', 'each client address has a bucket of its own'],
+    ['__SIGN_IN_LIMIT_PER_CLIENT__', 'the per-client rate comes from supabaseEnvoy.signInRateLimit'],
+    ['__SIGN_IN_LIMIT_TOTAL__', 'the total rate comes from supabaseEnvoy.signInRateLimit'],
+    ['__SIGN_IN_LIMIT_PERCENT__', 'supabaseEnvoy.signInRateLimit.enabled switches it'],
+    ['name: translate_bearer', 'sign-in is not gated by a key: the route keeps the sign-in Lua'],
+  ]) need(limited, fragment, `auth-v1-limited-routes: ${what}`);
+
+  for (const name of ['auth-v1-limited-routes', 'auth-v1-routes']) {
+    const text = routeText(name);
+    need(text, 'key: x-forwarded-for, value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"',
+      `${name}: GoTrue's own limits key on X-Forwarded-For, which the route sets to the client address alone`);
+    need(text, 'key: cache-control, value: no-store', `${name}: sign-in responses carry tokens no cache may keep`);
+  }
+
+  const headersOf = (text) => text.slice(text.indexOf('route_config:'), text.indexOf('virtual_hosts:'));
+  need(headersOf(gateway), 'key: x-content-type-options, value: nosniff', 'every API response carries nosniff');
+  for (const name of ['gateway', 'studio', 'forge']) {
+    need(headersOf(listenerText(name)), 'key: strict-transport-security, value: "__STRICT_TRANSPORT_SECURITY__"',
+      `the ${name} listener sends Strict-Transport-Security when global.scheme is https`);
+  }
+  need(gateway, '"error_code":"over_request_rate_limit"', 'the limit answers 429 in GoTrue\'s shape, which clients read');
+
+  const format = (gateway.match(/inline_string: "(aber-api [^"]*)"/) || [])[1] || '';
+  if (!format) {
+    fail(`${ENVOY_TEMPLATE}: the API listener writes no aber-api access log line.`);
+  } else {
+    need(gateway, 'envoy.formatter.req_without_query', 'the access log needs the formatter that drops the query string');
+    for (const field of ['method=', 'path=%REQ_WITHOUT_QUERY(', 'status=', 'flags=', 'upstream=', 'duration_ms=', 'request_id=', 'client=']) {
+      need(format, field, 'the aber-api access log line keeps each of its fields');
+    }
+    if (/%REQ\([^)]*PATH/i.test(format) || /%(?:REQ|RESP|REQ_WITHOUT_QUERY)\([^)]*(?:apikey|authorization|cookie)/i.test(format)) {
+      fail(
+        `${ENVOY_TEMPLATE}: the aber-api access log line names the path with its query, or a credential header. `
+        + 'The query can carry the apikey; the log goes to Loki.'
+      );
+    }
+  }
+
+  if (problems.length === before) {
+    pass('the API listener keeps its sign-in limit, client address, response headers and access log');
   }
 }
 

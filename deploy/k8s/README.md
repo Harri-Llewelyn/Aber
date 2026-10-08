@@ -289,14 +289,14 @@ EOF
 kubectl -n kube-system get svc traefik -o jsonpath='{.spec.externalTrafficPolicy}'
 ```
 
-**Why.** It makes Aber's sign-in limits apply to each client rather than to the whole site. GoTrue,
-the sign-in service, limits sign-in, token refresh, OTP and MFA per client. It identifies a client
-by the first address in `X-Forwarded-For` (`supabaseAuth.rateLimitHeader`). Traefik writes that
-header from the connection it receives. k3s installs Traefik's Service with
-`externalTrafficPolicy: Cluster`. Under that policy, kube-proxy rewrites the source of every
-outside request to the node's own pod-network address. The whole site is then one client with one
-limit: thirty sign-ins, then one every two seconds, shared by everyone. One person guessing
-passwords locks everybody out. `Local` delivers each request with its source intact.
+**Why.** It makes Aber's sign-in limits apply to each client rather than to the whole site. The
+gateway allows each client ten password sign-ins a minute (`supabaseEnvoy.signInRateLimit`).
+GoTrue, the sign-in service, also limits sign-in, token refresh, OTP and MFA per client. Both
+identify a client by the address Traefik writes into `X-Forwarded-For`, from the connection it
+receives. k3s installs Traefik's Service with `externalTrafficPolicy: Cluster`. Under that policy,
+kube-proxy rewrites the source of every outside request to the node's own pod-network address. The
+whole site is then one client with one limit: ten sign-ins a minute, shared by everyone. One person
+guessing passwords locks everybody out. `Local` delivers each request with its source intact.
 [`docs/gateway.md`](../../docs/gateway.md#the-clients-address) has the path end to end.
 
 **On more than one node,** point DNS at the addresses the Service lists. With `Local`, ServiceLB
@@ -307,15 +307,17 @@ rather than forwarding it.
 of the site network), do not set k3s's `node-external-ip` on any node. k3s documents that `Local`
 does not work with it.
 
-**Where the address cannot be kept,** set `supabaseAuth.rateLimitHeader: ""`. That turns GoTrue's
-limits off, which is better than one limit shared by the whole site.
+**Where the address cannot be kept,** set `supabaseAuth.rateLimitHeader: ""`, which turns GoTrue's
+limits off. Also set `supabaseEnvoy.signInRateLimit.perClientPerMinute` to the same value as
+`totalPerMinute`. Both are better than one small limit shared by the whole site.
 
 **A proxy of your own in front of the cluster** makes every request arrive from the proxy. Then:
 
 - Add the proxy's address to Traefik's trusted senders, in the same `valuesContent`, under
   `ports.web.forwardedHeaders.trustedIPs`. With ingress TLS, add it under `ports.websecure` too.
-- Have the proxy *replace* any `X-Forwarded-For` a client sent, rather than append to it. GoTrue
-  takes the first address, so with an appended header the client chooses that address.
+- Set `supabaseEnvoy.trustedProxyHops` to 2: Traefik and your proxy. The gateway reads the client's
+  address that many entries from the right of `X-Forwarded-For`, so an address a client wrote
+  there itself is never the one used. Add one more for each further proxy.
 
 ### A. From the published chart (no image builds)
 
@@ -617,6 +619,11 @@ Aber has nine subdomains, all on one Ingress and all derived from `global.public
 **Raw MQTT on 1883 is not on the Ingress**, and cannot be, because it is TCP, not HTTP. The
 `mosquitto-external` Service carries it instead.
 
+**`api.<domain>` logs every request** in the gateway's own log, one `aber-api` line each, without
+the query string or any credential. It sends `X-Content-Type-Options: nosniff` on every response
+and `Cache-Control: no-store` on sign-in. [`docs/gateway.md`](../../docs/gateway.md#the-access-log)
+says what each line holds and how to find it in Loki.
+
 For local k3s, `values-dev.yaml` uses `localhost`, and Traefik listens on the node's :80. Browsers
 resolve every `*.localhost` name to loopback themselves, so there is no `/etc/hosts` editing. They
 also treat it as a secure context, so the two logins that set Secure cookies (Studio and the forge)
@@ -724,6 +731,12 @@ helm upgrade ... \
 **`global.scheme=https` is not optional here and the chart enforces it.** Every browser-facing URL
 is built from it, including every OAuth `redirect_uri` that db-init registers. If you leave it
 `http` with TLS on, sign-in breaks with `invalid redirect_uri`, while every pod reports healthy.
+
+**With `https`, the hosts tell browsers to use only HTTPS with them for a year.** The dashboard,
+the API, Grafana, Studio and the forge send `Strict-Transport-Security`. A browser that has seen
+it refuses plain HTTP to that host. It also turns a certificate warning there into an error nobody
+can click past. So install the root certificate (step 3) before people use the site, and install
+the new one before you replace the CA. Node-RED, i3X and the documentation host do not send it.
 
 Use one wildcard certificate for `*.<domain>`, or nine subdomains mean nine certificates, each
 renewing on its own.

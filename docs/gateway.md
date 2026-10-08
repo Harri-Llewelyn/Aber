@@ -76,11 +76,15 @@ from the Host label, per-route credential hiding, and the Directory routes keepi
 
 ## The client's address
 
-Traefik establishes the caller's address, and the gateway passes it on. Traefik writes
-`X-Forwarded-For` from the connection it receives and replaces any a client sent, because it
-trusts no forwarded header unless `forwardedHeaders.trustedIPs` names the sender. Envoy runs with
-`use_remote_address` unset, which leaves the header as it arrived. GoTrue keys its sign-in, token
-refresh, OTP, verify and MFA limits on the first address in it (`supabaseAuth.rateLimitHeader`).
+The API listener works out each caller's address, and the sign-in limit below and GoTrue's own
+limits key on it. Envoy runs with `use_remote_address` on and `xff_num_trusted_hops` from
+`supabaseEnvoy.trustedProxyHops`, 1 by default for Traefik. It reads `X-Forwarded-For` from the
+right, past that many proxies. A caller that sent no forwarded header is its connection's address.
+
+Traefik writes `X-Forwarded-For` from the connection it receives. It replaces any a client sent,
+because it trusts no forwarded header unless `forwardedHeaders.trustedIPs` names the sender. On
+the `/auth/v1/` routes the gateway hands GoTrue that one address as `X-Forwarded-For`. GoTrue keys
+its sign-in, token refresh, OTP, verify and MFA limits on it (`supabaseAuth.rateLimitHeader`).
 `/oauth/token`, where Grafana, Node-RED and the gateway's two logins exchange their codes, has no
 limit.
 
@@ -91,28 +95,98 @@ Three things break it, each without an error:
   one client and one limit serves the whole site.
   [`deploy/k8s/traefik-config.yaml`](../deploy/k8s/traefik-config.yaml) sets `Local`; the
   runbook's *Install* section applies it.
-- **A proxy in front of Traefik.** Every request then comes from the proxy. It needs naming in
-  `forwardedHeaders.trustedIPs`, and it must replace a client's `X-Forwarded-For` rather than
-  append to it, since GoTrue reads the first address.
-- **A caller that bypasses Traefik**, such as an in-cluster service or a port-forward to the
-  gateway (the stack-lane suites sign in this way), sends no header. GoTrue logs a warning and
-  does not limit it.
+- **A proxy in front of Traefik that the hop count leaves out.** Every request then comes from the
+  proxy. Name it in Traefik's `forwardedHeaders.trustedIPs`, and add one to
+  `supabaseEnvoy.trustedProxyHops` for it.
+- **A hop count larger than the proxies in front.** The gateway then reads an entry the client
+  wrote itself, so a client can name any address it likes.
+
+A caller that reaches the gateway directly, such as an in-cluster service or a port-forward, is
+its connection's address. With one trusted hop it can also name another address in
+`X-Forwarded-For`; the NetworkPolicy decides which pods can reach the gateway, and the total
+bucket below limits whatever addresses they name. `check-gateway-surface.mjs --runtime` uses this
+to send from addresses of its own choosing.
 
 [`supabase/test_auth_rate_limit.py`](../supabase/test_auth_rate_limit.py) proves, on the
 development cluster, that one client spending its limit leaves another able to sign in.
 
+## The sign-in limit
+
+The gateway limits password sign-ins and password-recovery requests itself, in front of GoTrue's
+own limits:
+
+- every `POST` to `/auth/v1/token` and `/auth/v1/recover`, except a token refresh;
+- 10 a minute from each client address, and 120 a minute in total
+  (`supabaseEnvoy.signInRateLimit`);
+- a refused request answers `429` with GoTrue's own body for its limit,
+  `{"code":429,"error_code":"over_request_rate_limit","msg":"Request rate limit reached"}`, so
+  `supabase-js` reports it as the limit it already knows.
+
+A refresh is exempt only as `POST /auth/v1/token?grant_type=refresh_token`, the spelling
+`supabase-js` and the other clients send; every open dashboard tab refreshes its token. Any other
+spelling of the query is limited. A rule naming `password` instead would hold only while Envoy and
+GoTrue decode a query string alike (`passw%6Frd`, a repeated `grant_type`); this way a spelling
+they disagree on lands on the limited side.
+
+A port-forward arrives from `127.0.0.1` and has only the total bucket. It is the operator's own
+path, and the stack-lane suites sign in through it many times a minute.
+
+Each client address keeps its bucket while it is among the 1000 most recently seen; the total
+bucket holds however many addresses a caller uses. Each gateway replica counts on its own, so two
+replicas allow twice the rates. Envoy counts refusals in
+`sign_in_limit.http_local_rate_limit.rate_limited`, and the access log marks each with `flags=RL`.
+
+**Where Traefik cannot keep the client's address**, every client is one address, and ten sign-ins
+a minute serve the whole site. Set `perClientPerMinute` to the same value as `totalPerMinute`
+there. `enabled: false` turns the gateway's limit off and leaves GoTrue's.
+
+## Response headers
+
+| Header | Sent on | When |
+| :--- | :--- | :--- |
+| `X-Content-Type-Options: nosniff` | every response the API listener routes, its own refusals included | always |
+| `Cache-Control: no-store` | `/auth/v1/` | always |
+| `Strict-Transport-Security: max-age=31536000` | all three listeners | `global.scheme: https` |
+
+The same `Strict-Transport-Security` value comes from the dashboard's nginx and from Grafana, each
+set by the chart. The forge's comes from its listener here, because Gitea has no setting for it.
+It carries no `includeSubDomains`: the hosts are siblings under `publicBaseDomain`, and the site's
+other names are not the chart's to pin.
+
+## The access log
+
+The API listener writes one line per request to stdout. Alloy ships it to Loki with every other
+container's log, labelled `service="supabase-envoy"`:
+
+```text
+aber-api method=POST path=/auth/v1/token status=429 flags=RL upstream=auth-v1 duration_ms=0 request_id=6f2c... client=192.0.2.40 key=-
+```
+
+`path` is the path the caller sent, without its query: the query can carry the `apikey`.
+`upstream` is the cluster the route names. `flags` are Envoy's response flags; `RL` marks a request
+the sign-in limit refused. `client` is the address above. `key` is `publishable` or `secret` for
+the key a gated route admitted, and `-` elsewhere. No header that carries a credential is written.
+The studio and forge listeners write the same kind of line, prefixed `aber-studio` and
+`aber-forge`.
+
+```logql
+{service="supabase-envoy"} |= "aber-api" |= "status=429"
+```
+
 ## The request id
 
 The API listener gives a request an `X-Request-Id`, a UUID, when it arrives without one. It keeps
-one a caller sent: `generate_request_id` is left at its default, and with `use_remote_address` unset
-Envoy treats no request as arriving at the edge, so it never replaces the header. An edge function
-that fails unexpectedly answers with the id, in its body and in the same header, and logs the
-failure under it. [`supabase/functions/README.md`](../supabase/functions/README.md#finding-the-cause)
-says how to find that log line.
+one a caller sent, unchanged. `use_remote_address` makes every request an edge request, whose id
+Envoy would otherwise replace, so the listener sets `preserve_external_request_id`. It also sets
+`pack_trace_reason: false`, without which Envoy rewrites one character of a 36-character id. An
+edge function that fails unexpectedly answers with the id, in its body and in the same header, and
+logs the failure under it.
+[`supabase/functions/README.md`](../supabase/functions/README.md#finding-the-cause) says how to
+find that log line.
 
 ## Rendering
 
-The template carries thirteen `__UPPER_SNAKE__` placeholders. The initContainer substitutes them
+The template carries eighteen `__UPPER_SNAKE__` placeholders. The initContainer substitutes them
 at boot, refuses an empty key or JWT (an empty key would be matched by any caller sending an empty
 `apikey` header), and scans the rendered file for leftovers. Substitution is not done in Helm
 because with `secrets.existingSecret` set the chart cannot see the keys. The rendered file lives
@@ -125,7 +199,7 @@ cover the keys, which come from the Secret: rotating one needs
 ## Verifying it
 
 ```bash
-node scripts/check-gateway-surface.mjs                      # static: placeholders, no committed key
+node scripts/check-gateway-surface.mjs                      # static: placeholders, no committed key, routes, limit, headers, log
 kubectl -n aber port-forward svc/supabase-envoy 18080:8000
 SUPABASE_PUBLISHABLE_KEY=$(kubectl -n aber get secret aber-secrets \
   -o jsonpath='{.data.SUPABASE_PUBLISHABLE_KEY}' | base64 -d) \
@@ -134,8 +208,11 @@ SUPABASE_PUBLISHABLE_KEY=$(kubectl -n aber get secret aber-secrets \
 
 The runtime pass asserts posture, not configuration: gated routes refused before their upstream,
 open ones through, a valid key accepted by header and by query, an unregistered key refused, and
-on a route that hides credentials the header and query forms indistinguishable upstream. CI runs
-it against the k3d stack. `validate.py`'s check 14 adds the refusal the probe cannot see from
+on a route that hides credentials the header and query forms indistinguishable upstream. It also
+checks the response headers, and sends wrong-password grants from one address until the gateway
+answers `429`, then a grant from another address and a refresh, which must reach GoTrue. Those
+addresses are named in `X-Forwarded-For`, so run it against a port-forward, as above: through the
+ingress, Traefik replaces them with yours. CI runs it against the k3d stack. `validate.py`'s check 14 adds the refusal the probe cannot see from
 outside: the service-role JWT presented as the `apikey` answers 401.
 
 Two traps: the key must come from the cluster's own Secret, and Windows reserves TCP

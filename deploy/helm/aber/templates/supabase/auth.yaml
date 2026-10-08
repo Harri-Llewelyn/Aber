@@ -96,7 +96,8 @@ spec:
               value: "true"
             - name: GOTRUE_DISABLE_SIGNUP
               value: {{ .Values.supabaseAuth.disableSignup | quote }}
-            # Per-client rate limits key on this header's first address; empty skips every one.
+            # Per-client rate limits key on this header, which the gateway sets to the client's one
+            # address on /auth/v1/; empty skips every one.
             - name: GOTRUE_RATE_LIMIT_HEADER
               value: {{ .Values.supabaseAuth.rateLimitHeader | quote }}
             # PUT /auth/v1/user sets a password only with the correct current_password, so an access

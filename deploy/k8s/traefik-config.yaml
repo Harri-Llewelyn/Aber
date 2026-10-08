@@ -1,7 +1,7 @@
 # Traefik as k3s installs it, with the one change this stack needs: the Service keeps each
 # client's address. With k3s's default, externalTrafficPolicy Cluster, every request reaches Traefik
 # from the node's own pod-network address, so X-Forwarded-For names one client for the whole site
-# and GoTrue's per-client rate limits become one limit shared by everyone.
+# and the per-client sign-in limits, the gateway's and GoTrue's, become one limit shared by everyone.
 #
 #   kubectl apply -f deploy/k8s/traefik-config.yaml
 #

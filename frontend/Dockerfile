@@ -103,7 +103,13 @@ FROM nginx:alpine
 # Alpine packages from the base, taken to the current fixes the distribution ships: a fix Alpine ships
 # between two base cuts reaches the release rather than waiting for the next base (#347).
 RUN apk upgrade --no-cache
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# nginx.conf is a template: the base image's entrypoint renders /etc/nginx/templates/*.template into
+# conf.d at start, substituting only the variables the filter names (nginx's own $uri stays). The
+# stock default.conf goes, so a skipped render serves nothing rather than nginx's welcome page.
+ENV NGINX_ENVSUBST_FILTER=^ABER_ \
+    ABER_STRICT_TRANSPORT_SECURITY=""
+RUN rm -f /etc/nginx/conf.d/default.conf
+COPY nginx.conf /etc/nginx/templates/default.conf.template
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 EXPOSE 3000

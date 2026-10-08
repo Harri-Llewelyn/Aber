@@ -119,16 +119,29 @@ spec:
             - -e
             - -c
             - |
+              # Each check is handed the name and the value. No indirect expansion: the kubelet turns a
+              # doubled dollar in a container's command into one before the shell reads it.
+              require_set () {
+                if [ -z "$2" ]; then
+                  echo "$1 must be set -- see secrets in values.yaml; node scripts/setup.mjs mints the set." >&2
+                  exit 1
+                fi
+              }
+              require_count () {
+                case "$2" in
+                  ''|0|*[!0-9]*)
+                    echo "$1 must be a whole number of at least 1 (supabaseEnvoy.signInRateLimit in values.yaml). Got: $2" >&2
+                    exit 1
+                    ;;
+                esac
+              }
               # All four, or nothing: an empty key substituted into the Lua filter is matched by
               # any caller sending an empty apikey, and an empty JWT is a bearer no upstream
               # accepts, which answers 401 to every request while every pod reports healthy.
-              for name in SUPABASE_PUBLISHABLE_KEY SUPABASE_SECRET_KEY SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY; do
-                eval "value=\$$name"
-                if [ -z "$value" ]; then
-                  echo "$name must be set -- see secrets in values.yaml; node scripts/setup.mjs mints the set." >&2
-                  exit 1
-                fi
-              done
+              require_set SUPABASE_PUBLISHABLE_KEY "$SUPABASE_PUBLISHABLE_KEY"
+              require_set SUPABASE_SECRET_KEY "$SUPABASE_SECRET_KEY"
+              require_set SUPABASE_ANON_KEY "$SUPABASE_ANON_KEY"
+              require_set SUPABASE_SERVICE_ROLE_KEY "$SUPABASE_SERVICE_ROLE_KEY"
               case "$ENVOY_CORS_ORIGINS" in
                 '['*']') ;;
                 *)
@@ -140,6 +153,15 @@ spec:
                 realtime-dev*) ;;
                 *)
                   echo "REALTIME_UPSTREAM_HOST must begin with the label 'realtime-dev' -- Realtime reads the tenant id from it and answers a bare 403 otherwise. Got: $REALTIME_UPSTREAM_HOST" >&2
+                  exit 1
+                  ;;
+              esac
+              # Substituted as numbers into the gateway listener; anything else is a bootstrap Envoy refuses.
+              require_count SIGN_IN_LIMIT_PER_CLIENT "$SIGN_IN_LIMIT_PER_CLIENT"
+              require_count SIGN_IN_LIMIT_TOTAL "$SIGN_IN_LIMIT_TOTAL"
+              case "$XFF_TRUSTED_HOPS" in
+                ''|*[!0-9]*)
+                  echo "XFF_TRUSTED_HOPS must be a whole number (supabaseEnvoy.trustedProxyHops in values.yaml). Got: $XFF_TRUSTED_HOPS" >&2
                   exit 1
                   ;;
               esac
@@ -222,6 +244,11 @@ spec:
                   -e "s|__GITEA_PUBLIC_URL__|$GITEA_PUBLIC_URL|g" \
                   -e "s|__GITEA_UPSTREAM_ADDRESS__|$GITEA_UPSTREAM_ADDRESS|g" \
                   -e "s|__SUPABASE_JWT_SECRET_B64URL__|$JWT_B64URL|g" \
+                  -e "s|__XFF_TRUSTED_HOPS__|$XFF_TRUSTED_HOPS|g" \
+                  -e "s|__SIGN_IN_LIMIT_PERCENT__|$SIGN_IN_LIMIT_PERCENT|g" \
+                  -e "s|__SIGN_IN_LIMIT_PER_CLIENT__|$SIGN_IN_LIMIT_PER_CLIENT|g" \
+                  -e "s|__SIGN_IN_LIMIT_TOTAL__|$SIGN_IN_LIMIT_TOTAL|g" \
+                  -e "s|__STRICT_TRANSPORT_SECURITY__|$STRICT_TRANSPORT_SECURITY|g" \
                   /template/envoy.yaml > /config/envoy.yaml
 
               # The leftover scan. Comments are excluded -- envoy.yaml's header documents the
@@ -248,6 +275,20 @@ spec:
             # chart does not serve: origin policy has one source or it has none.
             - name: ENVOY_CORS_ORIGINS
               value: {{ include "aber.corsOrigins" . | quote }}
+            # The API listener's client address and sign-in limit (values.yaml, supabaseEnvoy). Read
+            # through dig with values.yaml's defaults, because `helm upgrade --reuse-values` from a
+            # release without these keys carries none; `int`, so a large value renders as digits.
+            - name: XFF_TRUSTED_HOPS
+              value: {{ dig "trustedProxyHops" 1 .Values.supabaseEnvoy | int | quote }}
+            - name: SIGN_IN_LIMIT_PERCENT
+              value: {{ ternary "100" "0" (dig "signInRateLimit" "enabled" true .Values.supabaseEnvoy) | quote }}
+            - name: SIGN_IN_LIMIT_PER_CLIENT
+              value: {{ dig "signInRateLimit" "perClientPerMinute" 10 .Values.supabaseEnvoy | int | quote }}
+            - name: SIGN_IN_LIMIT_TOTAL
+              value: {{ dig "signInRateLimit" "totalPerMinute" 120 .Values.supabaseEnvoy | int | quote }}
+            # All three listeners send it; empty, and so not sent, unless global.scheme is https.
+            - name: STRICT_TRANSPORT_SECURITY
+              value: {{ include "aber.strictTransportSecurity" . | quote }}
             # ------------------------------------------------------------------------------
             # The studio listener's inputs. See the listener in files/envoy/envoy.yaml.
             # ------------------------------------------------------------------------------
