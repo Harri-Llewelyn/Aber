@@ -86,10 +86,14 @@ before proposing a change:
   Environment (`buildConceptDescriptions()`, #460), because most resolve nowhere (`aber.local`, an
   operator's IRDI). Its IEC 61360 content carries the concept's name, a definition,
   `metric_catalog.units` as `unit` (MTConnect UnitEnum names as free text; `unitId` is unset) and a
-  `dataType` derived from the Sparkplug datatype. The definition is the catalog description only
-  when every live metric carrying the id agrees on it: the POSITION metrics describe their own axes,
-  so that concept's definition defers to MTConnect instead. A new standard's ids are covered with
-  no code change.
+  `dataType` derived from the Sparkplug datatype. **The definition is the vocabulary's own text**
+  wherever one defines the id. `concept_definitions` (`0169`) unions the IDTA, ASHRAE 223P, OPC UA
+  and ISO 22400 descriptions, in that order of precedence. So 223P's `TemperatureSensor` is
+  defined by 223P, not by "Zone air temperature", the description of the one BMS metric carrying
+  it. MTConnect stores no definitions yet, so its ids, like any id an Administrator typed, take the
+  catalog description only when every live metric carrying the id agrees on it. The POSITION
+  metrics describe their own axes, so that concept's definition defers to MTConnect instead. A new
+  standard's ids are covered with no code change; its definitions need an arm in the view.
 
 ## How a vocabulary entry becomes a metric
 

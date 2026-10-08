@@ -19,6 +19,9 @@ application of the file to changing nothing, an operator's later edit included.
 
 That no migration seeds a metric is check 12 of scripts/check-docs-drift.mjs: this lane's database
 is shared by every suite, so a count here would read their fixtures.
+
+TestConceptDefinitions holds `concept_definitions` (0169), the vocabularies' own text the AAS
+exporter defines a concept by, to its precedence and its grants.
 """
 import os
 import pathlib
@@ -458,6 +461,120 @@ class TestProvenanceResolves(ExampleTestCase):
         for name, spec in cases:
             with self.subTest(name=name):
                 self.assertEqual(found[name], 1, f"{name} does not resolve within {spec}")
+
+
+
+class TestConceptDefinitions(unittest.TestCase):
+    """
+    `concept_definitions` (0169): one row per semantic id a vocabulary defines, with that
+    vocabulary's own text. Each probe runs in its own transaction and is rolled back.
+    """
+
+    SENSOR = "http://data.ashrae.org/standard223#TemperatureSensor"
+    # Every vocabulary with a description column, and the spelling the view gives its standard.
+    DESCRIBED = (("idta_submodel_templates", "IDTA"), ("ashrae223_vocabulary", "ASHRAE 223P"),
+                 ("opcua_vocabulary", "OPC UA"), ("iso22400_vocabulary", "ISO 22400"))
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            connect().close()
+        except psycopg2.OperationalError as exc:
+            raise unittest.SkipTest(f"cannot reach Supabase Postgres ({exc}); is the stack up?")
+
+    def in_transaction(self, work):
+        """Run `work(cur)` on a fresh connection and roll everything back."""
+        conn = connect()
+        conn.autocommit = False
+        try:
+            with conn.cursor() as cur:
+                return work(cur)
+        finally:
+            conn.rollback()
+            conn.close()
+
+    @staticmethod
+    def fetch(cur, sql, params=None):
+        cur.execute(sql, params or ())
+        return cur.fetchall()
+
+    def defined(self, cur, semantic_id):
+        return self.fetch(cur, "SELECT definition, standard FROM public.concept_definitions"
+                               " WHERE semantic_id = %s", (semantic_id,))
+
+    def test_the_223p_temperature_sensor_is_defined_by_223p(self):
+        rows = self.in_transaction(lambda cur: self.defined(cur, self.SENSOR))
+        self.assertEqual(len(rows), 1)
+        self.assertIn("represents a measure of temperature", rows[0][0])
+        self.assertEqual(rows[0][1], "ASHRAE 223P")
+
+    def test_every_described_row_is_in_the_view_with_its_own_text(self):
+        # No two vocabularies share an id today. A seed that starts to fails here, and the
+        # precedence below decides which text the export carries.
+        for table, standard in self.DESCRIBED:
+            with self.subTest(table=table):
+                missing = self.in_transaction(lambda cur, table=table, standard=standard: self.fetch(
+                    cur, f"SELECT v.semantic_id FROM public.{table} v"
+                         "  LEFT JOIN public.concept_definitions c ON c.semantic_id = v.semantic_id"
+                         " WHERE NULLIF(btrim(v.description), '') IS NOT NULL"
+                         "   AND (c.definition IS DISTINCT FROM v.description"
+                         "        OR c.standard IS DISTINCT FROM %s)", (standard,)))
+                self.assertEqual(missing, [])
+
+    def test_mtconnect_contributes_nothing_until_it_stores_definitions(self):
+        shared = self.in_transaction(lambda cur: self.fetch(
+            cur, "SELECT c.semantic_id FROM public.concept_definitions c"
+                 "  JOIN public.mtconnect_vocabulary v ON v.semantic_id = c.semantic_id"))
+        self.assertEqual(shared, [])
+
+    def test_each_semantic_id_appears_once(self):
+        twice = self.in_transaction(lambda cur: self.fetch(
+            cur, "SELECT semantic_id FROM public.concept_definitions"
+                 " GROUP BY semantic_id HAVING count(*) > 1"))
+        self.assertEqual(twice, [])
+
+    def test_an_id_two_vocabularies_hold_takes_the_first_in_precedence(self):
+        """IDTA, then ASHRAE 223P, then OPC UA, then ISO 22400."""
+        local = "urn:example:fixture-0169"
+
+        def probe(cur):
+            for semantic_id in (self.SENSOR, local):
+                cur.execute("INSERT INTO public.iso22400_vocabulary (name, kpi_id, description, semantic_id)"
+                            " VALUES (%s, 'F', 'ISO 22400 text', %s)",
+                            ("FIXTURE_0169_" + str(len(semantic_id)), semantic_id))
+                cur.execute("INSERT INTO public.opcua_vocabulary (name, companion_spec, description, semantic_id)"
+                            " VALUES (%s, 'OPC 0169 Fixture', 'OPC UA text', %s)",
+                            ("Fixture0169_" + str(len(semantic_id)), semantic_id))
+            seen = [self.defined(cur, local), self.defined(cur, self.SENSOR)[0][1]]
+            cur.execute("INSERT INTO public.idta_submodel_templates (template_id, template_name,"
+                        " template_version, id_short, semantic_id, semantic_id_type, description, ordinal)"
+                        " VALUES ('urn:example:fixture-0169', 'Fixture', '1.0', 'Fixture0169', %s, 'IRI',"
+                        " 'IDTA text', 1)", (self.SENSOR,))
+            seen.append(self.defined(cur, self.SENSOR))
+            return seen
+        opc_over_iso, ashrae_over_both, idta_over_all = self.in_transaction(probe)
+        self.assertEqual(opc_over_iso, [("OPC UA text", "OPC UA")])
+        self.assertEqual(ashrae_over_both, "ASHRAE 223P")
+        self.assertEqual(idta_over_all, [("IDTA text", "IDTA")])
+
+    def test_a_row_without_text_defines_nothing(self):
+        def probe(cur):
+            cur.execute("INSERT INTO public.iso22400_vocabulary (name, kpi_id, description, semantic_id)"
+                        " VALUES ('FIXTURE_0169', 'F', '   ', 'urn:example:fixture-0169')")
+            return self.defined(cur, "urn:example:fixture-0169")
+        self.assertEqual(self.in_transaction(probe), [])
+
+    def test_authenticated_reads_it_and_anon_does_not(self):
+        grants = self.in_transaction(lambda cur: self.fetch(
+            cur, "SELECT has_table_privilege('authenticated', 'public.concept_definitions', 'SELECT'),"
+                 "       has_table_privilege('anon', 'public.concept_definitions', 'SELECT'),"
+                 "       has_table_privilege('authenticated', 'public.concept_definitions', 'INSERT')"))
+        self.assertEqual(grants, [(True, False, False)])
+
+    def test_it_applies_the_callers_policies(self):
+        options = self.in_transaction(lambda cur: self.fetch(
+            cur, "SELECT reloptions FROM pg_class WHERE oid = 'public.concept_definitions'::regclass"))
+        self.assertIn("security_invoker=true", options[0][0] or [])
 
 
 if __name__ == "__main__":

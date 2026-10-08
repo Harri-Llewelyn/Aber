@@ -277,15 +277,19 @@ function conceptDescription(
 
 /**
  * One ConceptDescription per semantic id, from rows the shell was built from: the nameplate
- * template, else the catalog rows carrying the id, else the schema. A catalog description is the
- * definition only when every live row carrying the id agrees on it, since several metrics can share
- * one concept (#457); the unit and datatype likewise. `unitId` is not set: the units are MTConnect
- * UnitEnum names, which IEC 61360 `unit` takes as free text.
+ * template, else the catalog rows carrying the id, else the schema. The definition is the
+ * vocabulary's own text (`concept_definitions`) wherever a vocabulary defines the id, so one
+ * metric's description never defines a standard concept. For any other id, a catalog description
+ * is the definition only when every live row carrying the id agrees on it, since several metrics
+ * can share one concept (#457). The unit and datatype come from the catalog rows on the same terms.
+ * `unitId` is not set: the units are MTConnect UnitEnum names, which IEC 61360 `unit` takes as free
+ * text.
  */
 export function buildConceptDescriptions(
   ids: string[],
-  rows: Pick<DeviceRecord, "catalog" | "templates" | "schemas">,
+  rows: Pick<DeviceRecord, "catalog" | "templates" | "schemas" | "definitions">,
 ): Record<string, unknown>[] {
+  const definedBy = new Map(rows.definitions.map((d) => [d.semantic_id, d]));
   return ids.map((id) => {
     const template = rows.templates.find((t) => t.semantic_id === id);
     if (template) {
@@ -297,12 +301,13 @@ export function buildConceptDescriptions(
       );
     }
 
+    const defined = definedBy.get(id);
     const carrying = rows.catalog.filter((m) => m.semantic_id === id);
     const live = carrying.filter((m) => !m.deprecated);
     const metrics = live.length > 0 ? live : carrying;
     if (metrics.length > 0) {
       const named = conceptName(id);
-      const name = named ?? String(metrics.map((m) => m.name).sort()[0]);
+      const name = named ?? defined?.name ?? String(metrics.map((m) => m.name).sort()[0]);
       const standard = onlyValue(metrics.map((m) => m.standard));
       const units = new Set(metrics.map((m) => String(m.units ?? "").trim()).filter(Boolean));
       const unit = units.size === 1 ? [...units][0] : undefined;
@@ -316,7 +321,7 @@ export function buildConceptDescriptions(
       return conceptDescription(
         id,
         name,
-        onlyValue(metrics.map((m) => m.description)) ?? deferred,
+        defined?.definition ?? onlyValue(metrics.map((m) => m.description)) ?? deferred,
         {
           unit,
           // Units that disagree leave the type unsaid: MEASURE needs one unit, COUNT claims none.
@@ -328,11 +333,34 @@ export function buildConceptDescriptions(
     }
 
     const schema = rows.schemas.find((s) => s.semantic_id === id);
-    const name = conceptName(id) ?? String(schema?.schema_name ?? "Concept");
-    const definition = (schema?.description as string | null) ||
+    const name = conceptName(id) ?? defined?.name ?? String(schema?.schema_name ?? "Concept");
+    const definition = defined?.definition || (schema?.description as string | null) ||
       `The concept ${name}, which this shell references.`;
     return conceptDescription(id, name, definition);
   });
+}
+
+/**
+ * The semantic ids a shell built from these rows can reference, besides the nameplate template's:
+ * those of the catalog metrics the attached schemas model, and the schemas' own. The loader reads
+ * `concept_definitions` for exactly these, so it must cover what buildEnvironment() references.
+ */
+export function conceptIdsFor(
+  rows: Pick<DeviceRecord, "catalog" | "schemas">,
+): string[] {
+  const catalogByName = new Map(rows.catalog.map((m) => [String(m.name), m]));
+  const ids = new Set<string>();
+  for (const schema of rows.schemas) {
+    if (schema.semantic_id) ids.add(String(schema.semantic_id));
+    const modelled = modelledMetrics(
+      (schema.schema_definition as Record<string, unknown> | null) ?? null,
+    );
+    for (const name of modelled) {
+      const id = catalogByName.get(name)?.semantic_id;
+      if (id) ids.add(String(id));
+    }
+  }
+  return [...ids].sort();
 }
 
 // Loading
@@ -347,6 +375,16 @@ export interface DeviceRecord {
   nameplate: Record<string, unknown> | null;
   templates: { id_short: string; semantic_id: string; description?: string | null }[];
   schemas: Record<string, unknown>[];
+  /** `concept_definitions` rows for the ids conceptIdsFor() names. */
+  definitions: ConceptDefinition[];
+}
+
+/** A row of `concept_definitions`: a vocabulary's own name and text for a semantic id. */
+export interface ConceptDefinition {
+  semantic_id: string;
+  name: string;
+  definition: string;
+  standard: string;
 }
 
 /** Any Supabase client. Deliberately structural: the authority is the caller's to choose. */
@@ -355,7 +393,8 @@ type Client = any;
 
 /**
  * Read every row one device's shell is composed from, or null when there is no such device. The six
- * reads are independent and run in parallel, since the REST API hits this per request.
+ * independent reads run in parallel, since the REST API hits this per request; the schemas and then
+ * the vocabulary definitions follow, because each needs the rows before it.
  */
 export async function loadDeviceRecord(
   client: Client,
@@ -399,6 +438,14 @@ export async function loadDeviceRecord(
     ? await client.from("schemas").select("*").in("id", schemaIds)
     : { data: [] };
 
+  // One query for every vocabulary definition the shell can use. Without rows (an error, or a
+  // database that lacks the view) each definition falls back to the catalog text.
+  const conceptIds = conceptIdsFor({ catalog: catalogRows ?? [], schemas: schemaRows ?? [] });
+  const { data: definitionRows } = conceptIds.length > 0
+    ? await client.from("concept_definitions").select("semantic_id, name, definition, standard")
+      .in("semantic_id", conceptIds)
+    : { data: [] };
+
   return {
     device,
     config: configRows ?? [],
@@ -408,6 +455,7 @@ export async function loadDeviceRecord(
     nameplate: nameplateRows?.[0] ?? null,
     templates: templateRows ?? [],
     schemas: schemaRows ?? [],
+    definitions: definitionRows ?? [],
   };
 }
 
@@ -431,7 +479,8 @@ export interface BuiltShell {
  * and no environment beyond the module constants, so the same graph is reproducible from a fixture.
  */
 export function buildEnvironment(record: DeviceRecord): BuiltShell {
-  const { device, config, links, catalog, gateway, nameplate, templates, schemas } = record;
+  const { device, config, links, catalog, gateway, nameplate, templates, schemas, definitions } =
+    record;
 
   const keyBySchema = new Map<string, string | null>(
     links.map((l) => [String(l.schema_id), l.submodel_key ?? null]),
@@ -669,6 +718,7 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     catalog,
     templates,
     schemas,
+    definitions,
   });
 
   const environment = {
