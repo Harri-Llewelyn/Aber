@@ -18,8 +18,8 @@
  * descriptions.** MachineTool declares 356 UAVariable nodes and 18 of them have a Description
  * element; Machinery/Energy has 87 and zero. A bulk extraction would therefore produce hundreds of
  * rows with a NULL description, and `VocabularyPanel` matches a search against the tooltip as well
- * as the name -- so the bulk import would make the vocabulary *less* findable than the 19
- * hand-written rows it joined. The raw node lists are also dominated by modelling scaffolding
+ * as the name -- so the bulk import would make the vocabulary *less* findable than a curated
+ * list. The raw node lists are also dominated by modelling scaffolding
  * (`IsNamespaceSubset`, `StaticNodeIdTypes`, `EngineeringUnits`) rather than by anything a device
  * publishes.
  *
@@ -37,7 +37,9 @@
  *
  * A rename, a retype, a renumbering or a version bump upstream therefore fails the build or shows in
  * the seed's diff, instead of silently shipping a vocabulary that describes a specification nobody
- * publishes any more. Every opcua_vocabulary row comes from here; none is hand-written.
+ * publishes any more. Every opcua_vocabulary row comes from here; none is hand-written. The script
+ * also writes each entry's metric group to frontend/src/utils/opcuaGroups.generated.js, which the
+ * Add Metric form suggests.
  *
  *   node scripts/generate-opcua-vocabulary.mjs --print-map   also prints each row's former id
  */
