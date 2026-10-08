@@ -547,16 +547,16 @@ groups publishing the same edge node id resolved to one row — silently, each g
 attributed to the other's asset. `gateways.sparkplug_group` closes that, and is what makes
 `/v1/address/{group_id}/{node_id}` mean anything.
 
-Resolution order in `resolve_gateway()`, with the middle arm as the migration path:
+Resolution order in `resolve_gateway()`:
 
-1. `(sparkplug_group, sparkplug_id)` — the current scheme.
-2. `sparkplug_id` alone — warns `DEPRECATED IDENTITY`, throttled, naming both the group on the
-   wire and the one on the row. **Not a refusal**: a fleet is reconfigured one gateway at a time,
-   and refusing here would strand every device behind a node not yet corrected.
-3. `name` — legacy, pre-`sparkplug_id`.
+1. `(sparkplug_group, sparkplug_id)` — the exact pair.
+2. `sparkplug_id` alone — accepted under any group, and warned `SPARKPLUG GROUP MISMATCH`,
+   throttled, naming both the group on the wire and the one on the row. **A tolerance, not a
+   refusal**: `sparkplug_id` is unique site-wide, so the group adds no identity
+   ([`ingestion/README.md`](../ingestion/README.md#resolution-precedence)).
 
-The resolution cache is keyed by the **pair**. A cache keyed on the node alone would hand a hit
-from one group to a request from another — precisely the collision this closes.
+The resolution cache is keyed by the **pair**, so a node publishing under another group misses the
+entry the directory refresher fills and reaches the warning.
 
 > **Adding a column to `gateways` requires `ensure_gateway_status_view()`.** `0008` calls it, and
 > `0001` no longer carries a second, explicit-column copy of the view — see below.
@@ -977,6 +977,7 @@ holds them for every other writer, a Manager's PATCH included.
 | `gateway_status` | `gateways` plus read-time `live_status` / `is_stale` (90 s threshold) |
 | `device_locations` | A device's effective cell: `COALESCE(device.cell_id, gateway.cell_id)` |
 | `device_schemas` | Every schema attached to a device, one row per (device, schema): its `device_submodels` rows and its deprecated `devices.schema_id` (`0168`) |
+| `concept_definitions` | Each semantic id a vocabulary defines, with the vocabulary's own text, for the AAS export's ConceptDescriptions (`0169`) |
 | `telemetry` | `security_invoker` view over `timescale.telemetry`, a `postgres_fdw` foreign table |
 
 > The raw foreign table lives in its own `timescale` schema, deliberately kept out of
@@ -5791,6 +5792,18 @@ Every vocabulary must satisfy all nine, and CI checks five of them:
    namespace its semantic id is defined in (`metric_type_namespace` in `i3x/address_space.py`,
    [`../i3x/README.md`](../i3x/README.md#address-space)). Ids under a new authority are local
    there until it gains a case, and `GET /namespaces` lists a namespace only while a type uses it.
+
+**A vocabulary's definitions reach the AAS export through `concept_definitions` (`0169`).** The
+view is one row per semantic id, `(semantic_id, name, definition, standard)`, from each
+vocabulary's own description column: the IDTA templates, ASHRAE 223P, OPC UA and ISO 22400. An id
+held by two vocabularies takes the first in that order, the one whose ids are issued furthest from
+this deployment, and a row with no text is left out. MTConnect contributes nothing until
+`mtconnect_vocabulary` stores definitions. The exporter reads the view in one query and uses
+catalog text only for an id no vocabulary holds, such as one an Administrator typed. A new
+vocabulary with a description column adds an arm in a migration that redeclares the view; the
+columns stay the same, so `CREATE OR REPLACE VIEW` keeps its grants. It is `security_invoker`, so
+the vocabularies' own policies apply to the caller: `authenticated` and `service_role` read it,
+`anon` does not. `test_metric_catalog_seed.py` holds the precedence.
 
 ---
 

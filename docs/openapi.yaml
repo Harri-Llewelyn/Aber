@@ -48,7 +48,8 @@ info:
     write verbs are revoked from every application role including `service_role`.
 
     The reference vocabularies (`mtconnect_vocabulary`, `iso22400_vocabulary`,
-    `opcua_vocabulary`) are `SELECT`-only for `authenticated`; `anon` is revoked.
+    `opcua_vocabulary`, `ashrae223_vocabulary`, `idta_submodel_templates`) and the
+    `concept_definitions` view over them are `SELECT`-only for `authenticated`; `anon` is revoked.
 
     ### PostgREST conventions
 
@@ -1543,6 +1544,35 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/IDTASubmodelTemplateElement' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
+  /rest/v1/concept_definitions:
+    get:
+      tags: [Registry]
+      summary: Read each vocabulary concept's own definition
+      description: |
+        A view: one row per semantic id a vocabulary defines, with that vocabulary's own text.
+        It unions the IDTA templates, ASHRAE 223P, OPC UA and ISO 22400. MTConnect contributes
+        nothing yet, because `mtconnect_vocabulary` has no description column. A row with no
+        text is left out.
+
+        **An id held by two vocabularies takes the first** in the order IDTA, ASHRAE 223P, OPC UA,
+        ISO 22400: the one whose ids are issued furthest from this deployment. No id is shared
+        today.
+
+        The AAS exporter reads it for each ConceptDescription's `definition`. Filter by
+        `?semantic_id=in.(…)`.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - { name: semantic_id, in: query, schema: { type: string }, description: 'e.g. `eq.http://data.ashrae.org/standard223#TemperatureSensor`' }
+        - { name: standard, in: query, schema: { type: string }, description: '`eq.IDTA` | `eq.ASHRAE 223P` | `eq.OPC UA` | `eq.ISO 22400`' }
+      responses:
+        '200':
+          description: Concept definitions.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ConceptDefinition' } }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
   /rest/v1/platform_alerts:
@@ -3227,7 +3257,7 @@ paths:
                 properties:
                   assetAdministrationShells: { type: array, items: { type: object } }
                   submodels: { type: array, items: { type: object } }
-                  conceptDescriptions: { type: array, items: { type: object }, description: 'One per semantic id the shell carries, with IEC 61360 content: name, definition, unit and data type. Omitted when there are none — `minItems: 1` in the IDTA schema.' }
+                  conceptDescriptions: { type: array, items: { type: object }, description: 'One per semantic id the shell carries, with IEC 61360 content: name, definition, unit and data type. The definition is the vocabulary''s own text (`concept_definitions`) where one defines the id, and catalog text only otherwise. Omitted when there are none — `minItems: 1` in the IDTA schema.' }
                   stats: { type: object }
             application/asset-administration-shell-package+xml:
               schema: { type: string, format: binary }
@@ -4857,6 +4887,15 @@ components:
         description: { type: string, nullable: true }
         is_mandatory: { type: boolean, description: 'What the template requires. Descriptive only — the exporter does not claim the template.' }
         ordinal: { type: integer, description: 'Order in the published template.' }
+
+    ConceptDefinition:
+      type: object
+      readOnly: true
+      properties:
+        semantic_id: { type: string, example: 'http://data.ashrae.org/standard223#TemperatureSensor', description: 'Unique in the view.' }
+        name: { type: string, example: TemperatureSensor, description: 'The concept''s key in its vocabulary: the IDTA idShort, or the vocabulary row''s name.' }
+        definition: { type: string, example: 'A `Sensor` that `observes` a `QuantifiableObservableProperty` that represents a measure of temperature.' }
+        standard: { type: string, enum: [IDTA, ASHRAE 223P, OPC UA, ISO 22400] }
 
     SystemSetting:
       type: object

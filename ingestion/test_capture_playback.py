@@ -280,8 +280,8 @@ class IdentityRewriteTests(unittest.TestCase):
         self.assertEqual(source["metrics"][0]["string_value"], CAPTURED_DEV)
 
     def test_the_group_is_preserved_by_default(self):
-        # Not rewritten silently: resolve_gateway() scopes by group, so a capture from another
-        # group should fail the binding check loudly rather than be relabelled into passing.
+        # Not rewritten silently: resolve_gateway() warns that a capture from another group was
+        # matched by sparkplug_id, which a relabelled topic would hide.
         topic, _ = capture.rewrite_identity(
             "spBv1.0/Other-Group/DDATA/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
             {"metrics": []}, GW, DEFAULT_MAP,

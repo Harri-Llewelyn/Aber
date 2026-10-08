@@ -523,6 +523,10 @@ def run_build_environment(record: dict) -> dict:
 
 MTC = "https://aber.local/semantics/mtconnect/v2.0/DataItemType/"
 ISO = "https://aber.local/semantics/iso22400/"
+S223 = "http://data.ashrae.org/standard223#"
+# The ASHRAE 223P vocabulary's own text for the concept, as concept_definitions returns it.
+TEMPERATURE_SENSOR = ("A `Sensor` that `observes` a `QuantifiableObservableProperty` that represents "
+                      "a measure of temperature.")
 
 
 def metric(name, semantic_id, datatype, units=None, description=None, standard="MTConnect",
@@ -534,7 +538,8 @@ def metric(name, semantic_id, datatype, units=None, description=None, standard="
 # One shell's rows, as loadDeviceRecord() returns them: two metrics sharing an MTConnect concept
 # with different descriptions, a KPI whose deprecated predecessor shares its id, an operator's
 # IRDI, a local extension an operator mapped to a concept of their own (the seed mints none), an
-# unmapped metric, two nameplate elements and a schema with an id.
+# unmapped metric, a BMS metric carrying a 223P concept its vocabulary defines, two nameplate
+# elements and a schema with an id.
 LOCAL_CONCEPT = "urn:example:plant:safety-interlock"
 SHELL_RECORD = {
     "device": {"id": "d1", "sparkplug_id": "dev1", "name": "Mill 1", "status": "ONLINE",
@@ -553,6 +558,8 @@ SHELL_RECORD = {
         metric("safety_interlock", LOCAL_CONCEPT, 11, None, "Safety interlock present", standard=None),
         metric("Custom/UNMAPPED", None, 10, None, None, standard=None),
         metric("SERIAL_NUMBER", MTC + "SERIAL_NUMBER", 12, None, "Manufacturer serial number"),
+        metric("BMS/ZONE_TEMPERATURE", S223 + "TemperatureSensor", 10, "CELSIUS", "Zone air temperature",
+               standard="ASHRAE 223P"),
     ],
     "gateway": None,
     "nameplate": {"manufacturer_name": "Acme"},
@@ -568,8 +575,13 @@ SHELL_RECORD = {
         "schema_definition": {"properties": {n: {} for n in (
             "Axes/X/POSITION", "Axes/Y/POSITION", "Controller/EXECUTION", "OEE/EFFECTIVENESS",
             "OEE/PERFORMANCE", "Spindle/TORQUE", "safety_interlock", "Custom/UNMAPPED",
+            "BMS/ZONE_TEMPERATURE",
         )}},
     }],
+    "definitions": [
+        {"semantic_id": S223 + "TemperatureSensor", "name": "TemperatureSensor",
+         "definition": TEMPERATURE_SENSOR, "standard": "ASHRAE 223P"},
+    ],
 }
 
 
@@ -614,6 +626,21 @@ class TestConceptDescriptions(unittest.TestCase):
         self.assertEqual(content["definition"][0]["text"], "POSITION, as MTConnect defines it.")
         self.assertEqual((content["unit"], content["dataType"]), ("MILLIMETER", "REAL_MEASURE"))
         self.assertEqual(self.by_id[MTC + "POSITION"]["idShort"], "POSITION")
+
+    def test_a_vocabulary_defines_its_concept_whatever_the_metric_says(self):
+        # The one metric carrying the concept describes its own zone; the vocabulary defines it.
+        content = self.content(S223 + "TemperatureSensor")
+        self.assertEqual(content["definition"][0]["text"], TEMPERATURE_SENSOR)
+        self.assertEqual(content["preferredName"], [{"language": "en", "text": "TemperatureSensor"}])
+        self.assertEqual((content["unit"], content["dataType"]), ("CELSIUS", "REAL_MEASURE"))
+
+    def test_catalog_text_defines_only_an_id_no_vocabulary_holds(self):
+        record = {**SHELL_RECORD, "definitions": []}
+        environment = run_build_environment(record)["environment"]
+        content = next(cd for cd in environment["conceptDescriptions"]
+                       if cd["id"] == S223 + "TemperatureSensor")
+        text = content["embeddedDataSpecifications"][0]["dataSpecificationContent"]["definition"]
+        self.assertEqual(text[0]["text"], "Zone air temperature")
 
     def test_a_deprecated_metric_does_not_define_the_concept_its_successor_carries(self):
         content = self.content(ISO + "EFFECTIVENESS")
