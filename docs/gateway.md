@@ -164,9 +164,10 @@ aber-api method=POST path=/auth/v1/token status=429 flags=RL upstream=auth-v1 du
 
 `path` is the path the caller sent, without its query: the query can carry the `apikey`.
 `upstream` is the cluster the route names. `flags` are Envoy's response flags; `RL` marks a request
-the sign-in limit refused. `client` is the address above. `key` is `publishable` or `secret` for the key a gated route
-admitted, and `-` elsewhere. No header that carries a credential is written. The studio and forge
-listeners write the same kind of line, prefixed `aber-studio` and `aber-forge`.
+the sign-in limit refused. `client` is the address above. `key` is `publishable` or `secret` for
+the key a gated route admitted, and `-` elsewhere. No header that carries a credential is written.
+The studio and forge listeners write the same kind of line, prefixed `aber-studio` and
+`aber-forge`.
 
 ```logql
 {service="supabase-envoy"} |= "aber-api" |= "status=429"
