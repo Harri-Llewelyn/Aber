@@ -15,6 +15,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
+import { serverError } from "../_shared/failure.ts";
 import { resolveUserRole } from "../_shared/roles.ts";
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
 // The validator CI keeps byte-identical with the frontend's; see mint-service-token.
@@ -269,7 +270,6 @@ export async function handler(req: Request): Promise<Response> {
         return json(400, { error: "Malformed request", details: "`action` must be add, remove or restore." });
     }
   } catch (err) {
-    console.error(`manage-people: ${err instanceof Error ? err.message : String(err)}`);
-    return json(500, { error: "Internal server error" });
+    return serverError(req, "manage-people", err);
   }
 }

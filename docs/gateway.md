@@ -101,6 +101,15 @@ Three things break it, each without an error:
 [`supabase/test_auth_rate_limit.py`](../supabase/test_auth_rate_limit.py) proves, on the
 development cluster, that one client spending its limit leaves another able to sign in.
 
+## The request id
+
+The API listener gives a request an `X-Request-Id`, a UUID, when it arrives without one. It keeps
+one a caller sent: `generate_request_id` is left at its default, and with `use_remote_address` unset
+Envoy treats no request as arriving at the edge, so it never replaces the header. An edge function
+that fails unexpectedly answers with the id, in its body and in the same header, and logs the
+failure under it. [`supabase/functions/README.md`](../supabase/functions/README.md#finding-the-cause)
+says how to find that log line.
+
 ## Rendering
 
 The template carries thirteen `__UPPER_SNAKE__` placeholders. The initContainer substitutes them

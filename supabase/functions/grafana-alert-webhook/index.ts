@@ -1,4 +1,5 @@
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
+import { serverError } from "../_shared/failure.ts";
 
 /**
  * Grafana alert notification receiver. Grafana evaluates the rules in
@@ -244,8 +245,10 @@ export default async function handler(req: Request): Promise<Response> {
     .upsert(toWrite, { onConflict: "fingerprint,starts_at" });
 
   if (writeError) {
-    console.error(`[grafana-alert-webhook] write failed: ${writeError.message}`);
-    return jsonResponse({ success: false, error: writeError.message }, 500);
+    return serverError(req, "grafana-alert-webhook", writeError, {
+      error: "Could not record the alerts",
+      context: `writing ${toWrite.length} alert(s) to platform_alerts`,
+    });
   }
 
   const firing = toWrite.filter((r) => r.status === FIRING).length;
