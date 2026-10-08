@@ -551,9 +551,10 @@ supabaseAuth:
   demoAccounts: false
   jwtExpiry: 3600
   # The request header GoTrue keys its per-client rate limits on (sign-in, token refresh, OTP,
-  # verify, MFA), taking the first address in it. Traefik sets X-Forwarded-For, which names the
-  # client only once deploy/k8s/traefik-config.yaml is applied; with k3s's default Service every
-  # request carries the same address and the whole site shares one limit. Empty turns the limits off.
+  # verify, MFA). On /auth/v1/ the gateway sets X-Forwarded-For to the one client address it
+  # resolves (supabaseEnvoy.trustedProxyHops), which names the client only once
+  # deploy/k8s/traefik-config.yaml is applied; with k3s's default Service every request carries the
+  # same address and the whole site shares one limit. Empty turns the limits off.
   rateLimitHeader: X-Forwarded-For
   # The relay GoTrue sends "forgot your password" links and People-tab invitations through. Empty
   # host: a reset request fails and the sign-in card tells the user to ask an administrator, and
