@@ -132,21 +132,22 @@ function historianSize () {
 
 /**
  * The telemetry chunks the fixture's rows can be in: every chunk whose range ends after the first
- * fixture gateway was made. Each with its compressed relation where it has one, which only
- * TimescaleDB's catalog names; `compressed` is undefined when that catalog cannot be read.
+ * fixture gateway was made. Each with its compressed relation where it has one: TimescaleDB 2.29
+ * keeps a compressed chunk's rows beside it as <chunk>_compressed. `compressed` is '' for a chunk
+ * that is not compressed, and undefined for a compressed one whose relation is not found that way.
  */
 function fixtureChunks () {
   const since = psql(`SELECT min(created_at) FROM gateways WHERE name LIKE '${LIKE}'`);
   if (!/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(\.\d+)?[+-]\d\d(:\d\d)?$/.test(since)) return null;
   const where = `WHERE c.hypertable_name = 'telemetry' AND c.range_end > '${since}'::timestamptz ORDER BY c.range_start`;
   const name = "format('%I.%I', c.chunk_schema, c.chunk_name)";
-  const withCatalog = historian(
-    `SELECT ${name}, coalesce((SELECT format('%I.%I', z.schema_name, z.table_name) ` +
-    'FROM _timescaledb_catalog.chunk k JOIN _timescaledb_catalog.chunk z ON z.id = k.compressed_chunk_id ' +
-    `WHERE k.schema_name = c.chunk_schema AND k.table_name = c.chunk_name), '') FROM timescaledb_information.chunks c ${where}`);
-  const found = withCatalog !== null
-    ? rows(withCatalog).map(([chunk, compressed]) => ({ chunk, compressed }))
-    : rows(historian(`SELECT ${name} FROM timescaledb_information.chunks c ${where}`)).map(([chunk]) => ({ chunk }));
+  const out = historian(
+    `SELECT ${name}, c.is_compressed, ` +
+    `coalesce(to_regclass(format('%I.%I', c.chunk_schema, c.chunk_name || '_compressed'))::text, '') ` +
+    `FROM timescaledb_information.chunks c ${where}`);
+  if (out === null) return null;
+  const found = rows(out).map(([chunk, isCompressed, compressed]) =>
+    ({ chunk, compressed: compressed || (isCompressed === 't' ? undefined : '') }));
   // Each becomes an identifier in a statement; format('%I') made them, the pattern holds them to it.
   return found.filter(({ chunk, compressed }) => [chunk, compressed].every((r) => !r || /^[A-Za-z0-9_."]+$/.test(r)));
 }
@@ -165,8 +166,9 @@ function relationSizes (relations) {
  */
 function vacuumFull (chunks) {
   if (chunks === null) {
-    console.log('  NOT VACUUMED: the fixture\'s first gateway has no readable created_at, so its chunks are ' +
-      'unknown and the deleted rows keep their disk. VACUUM FULL telemetry; rewrites every chunk.');
+    console.log('  NOT VACUUMED: the fixture\'s chunks could not be listed (its first gateway has no readable ' +
+      'created_at, or the historian did not answer), so the deleted rows keep their disk. ' +
+      'VACUUM FULL telemetry; rewrites every chunk.');
     return;
   }
   if (!chunks.length) {
@@ -180,7 +182,7 @@ function vacuumFull (chunks) {
   const after = relationSizes(relations);
   for (const r of relations) console.log(`    ${r}: ${before[r] ?? '?'} -> ${after[r] ?? '?'}`);
   for (const { chunk } of chunks.filter(({ compressed }) => compressed === undefined)) {
-    console.log(`    ${chunk}: its compressed relation is not named (TimescaleDB's catalog did not answer), ` +
+    console.log(`    ${chunk}: compressed, but no ${chunk}_compressed relation was found beside it, ` +
       'so deleted compressed rows keep their disk until retention drops the chunk');
   }
   if (errors.length) {
