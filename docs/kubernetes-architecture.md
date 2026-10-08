@@ -906,6 +906,11 @@ cannot supply both a file and a directory beneath it.
 **Routes are individually removable** (`ingress.routes.<name>: false`) without disabling the service
 — Studio and the API docs are the usual candidates on a public deployment, since neither is meant for
 anyone outside the operations team.
+
+**The API alone can answer a second name.** Each `ingress.additionalDomains` entry adds a rule for
+`api.<domain>`, for machines that reach the stack by another name than browsers do; the dev loop
+uses it for `<LAN address>.nip.io`. No other route takes one, because their OAuth callbacks, Secure
+cookies and CORS origins are registered for the primary hosts (`aber.additionalIngressRoutes`).
 ---
 
 ## 8. CI and drift control

@@ -49,3 +49,6 @@
 # `binary` is shorthand for `-text -diff`, so it also stops git printing 149 KiB of deflate noise
 # into a diff.
 *.gz binary
+
+# The dashboard's fonts are Brotli-compressed, and bytes for the same reason.
+*.woff2 binary

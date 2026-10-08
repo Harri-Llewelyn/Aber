@@ -215,12 +215,13 @@ npm run dev:down      # delete the cluster
 Browsers treat it as a secure context, which the Studio and forge logins need over plain HTTP. They
 set Secure cookies, and any other http host loses them.
 
-The two addresses an appliance dials use this machine's LAN address instead:
+The addresses an appliance dials use this machine's LAN address instead:
 
 - The broker's TLS listener, which `up` turns on, carries the LAN address in its certificate.
-- The bundle's API address is `api.<LAN address>.nip.io`. It resolves only where the DNS resolver
-  answers nip.io names carrying private addresses. Many home routers refuse to, as DNS-rebind
-  protection.
+- The bundle's API address is `api.<LAN address>.nip.io`, and Traefik routes it as well as
+  `api.localhost`. The forge's clone URLs name `git.<LAN address>.nip.io`. Both names resolve only
+  where the DNS resolver answers nip.io names carrying private addresses. Many home routers refuse
+  to, as DNS-rebind protection. `docs/remote-gateways.md` §7 has the details.
 
 Where the resolver does answer them, `--domain=<LAN address>.nip.io` moves every host onto the LAN,
 and the Studio and forge logins then need `ingress.tls`.
@@ -1351,12 +1352,15 @@ that would, and where each is switched off:
   plugin catalogue page queries grafana.com when an administrator opens it.
 - Node-RED's editor loads the node catalogue from catalogue.nodered.org each time it opens. The
   palette manager's Install tab and its update badges read it.
-- The dashboard's fonts come from Google Fonts (#438).
 - Destinations a site configures itself, such as a remote cold archive or backup target.
 
 The edge functions fetch nothing at run time: they load their dependencies from the image. The image
 build resolves them against a lock file and boots every function with no network. A function that
 would fetch fails the build instead (`supabase/README.md`, *Edge function dependencies*).
+
+A dashboard page loads nothing from another origin. Its fonts are in the frontend image
+(`frontend/src/assets/fonts/`), and `scripts/check-docs-drift.mjs` fails if `index.html` or a
+stylesheet names another host.
 
 The dashboard's 3D viewer fetches nothing either. It decodes Draco- or KTX2-compressed models with
 decoders the dashboard serves itself, under `/decoders/`. By default `@google/model-viewer` fetches

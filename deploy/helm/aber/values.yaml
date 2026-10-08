@@ -1281,6 +1281,15 @@ ingress:
   routes:
     studio: false
   #  docs: false
+  # More base domains the API answers on, as api.<domain>, for machines that reach the stack by
+  # another name than browsers do: an appliance enrolling, a reader following an AAS export's model
+  # links. Only the API: no other route is one they dial, and the browser routes' sign-ins and
+  # origins are registered for publicBaseDomain's hosts alone. Empty renders the Ingress exactly as without it. With tls.enabled the certificate must name
+  # these hosts too; cert-manager does when tls.certManager.clusterIssuer is set. The dev loop sets
+  # <LAN address>.nip.io, the name it hands appliances (docs/remote-gateways.md).
+  #   additionalDomains:
+  #     - 192.168.1.20.nip.io
+  additionalDomains: []
 
 # ---------------------------------------------------------------------------------------------
 # In-cluster conformance suites. Off by default: they seed and delete fixtures, drive real MQTT

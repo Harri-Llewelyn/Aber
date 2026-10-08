@@ -444,6 +444,11 @@ than in ingress.yaml so validation runs in one ordered place.
 {{- if not $hosts -}}
 {{- fail "\n\naber: ingress.enabled is true but no route resolved a hostname.\n\nEvery host is derived from global.publicBaseDomain (or an explicit publicUrls.* entry). With neither\nset this would render an Ingress with empty `host:` fields -- which the API server ACCEPTS, and which\nthen matches EVERY request arriving at the controller, so unrelated traffic reaches the dashboard and\nnone of the intended hostnames route.\n\nSet global.publicBaseDomain, or ingress.enabled=false to run the stack cluster-internal only.\n" -}}
 {{- end -}}
+{{- range (.Values.ingress.additionalDomains | default list) -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*$" (toString .)) -}}
+{{- fail (printf "\n\naber: ingress.additionalDomains has %q, which is not a domain name.\n\nGive the base domain alone, in lower case, such as 192.168.1.20.nip.io. The chart puts api. in front\nof it, and an Ingress host takes no scheme, port or path.\n" (toString .)) -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 
@@ -1098,6 +1103,35 @@ Read by ingress.yaml, NOTES.txt and the NetworkPolicies, so the public surface h
 {{- $routes = append $routes (dict "name" "mqtt" "host" (include "aber.hostOf" (dict "ctx" . "name" "mqtt")) "service" "mosquitto" "port" 9001) -}}
 {{- end -}}
 {{- toYaml $routes -}}
+{{- end -}}
+
+{{/*
+The API route again as api.<domain> for each ingress.additionalDomains entry: a second name for the
+machines that dial the stack (an appliance enrolling, a reader following an AAS export's model
+links). The API alone: no other route is one they dial, and the browser routes' OAuth callbacks,
+cookies and CORS origins belong to the primary hosts. A host the published routes already answer
+is skipped. Read by ingress.yaml and NOTES.txt.
+*/}}
+{{- define "aber.additionalIngressRoutes" -}}
+{{- $out := list -}}
+{{- $hosts := list -}}
+{{- $api := dict -}}
+{{- range (include "aber.ingressRoutes" . | fromYamlArray) -}}
+{{- if and (ne (index $.Values.ingress.routes .name) false) .host -}}
+{{- $hosts = append $hosts .host -}}
+{{- if eq .name "supabase" }}{{ $api = . }}{{ end -}}
+{{- end -}}
+{{- end -}}
+{{- if $api -}}
+{{- range (.Values.ingress.additionalDomains | default list) -}}
+{{- $host := printf "api.%s" . -}}
+{{- if not (has $host $hosts) -}}
+{{- $hosts = append $hosts $host -}}
+{{- $out = append $out (dict "name" $api.name "host" $host "service" $api.service "port" $api.port) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- toYaml $out -}}
 {{- end -}}
 
 {{/* The image of a wait-for initContainer whose probe is an HTTP request. */}}
