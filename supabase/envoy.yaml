@@ -505,6 +505,10 @@ static_resources:
                       transport_api_version: V3
                       failure_mode_allow: true
                       status_on_error: { code: ServiceUnavailable }
+                      # The filter-level field; http_service.authorization_request.allowed_headers is deprecated.
+                      allowed_headers:
+                        patterns:
+                          - exact: authorization
                       http_service:
                         server_uri:
                           uri: http://supabase-functions:9000
@@ -512,10 +516,6 @@ static_resources:
                           timeout: 8s
                         # The edge runtime routes on the first path segment.
                         path_prefix: /studio-admission
-                        authorization_request:
-                          allowed_headers:
-                            patterns:
-                              - exact: authorization
                         authorization_response:
                           allowed_client_headers:
                             patterns:
