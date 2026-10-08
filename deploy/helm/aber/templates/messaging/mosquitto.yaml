@@ -556,8 +556,9 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-              # Starts as root and drops to mosquitto (uid 1883) once it has read its config.
-              add: ["SETGID", "SETUID"]
+              # The entrypoint chowns /mosquitto to uid 1883, so the broker can write its plugin
+              # document on any storage class; then it starts as root and drops to that uid.
+              add: ["CHOWN", "SETGID", "SETUID"]
           resources:
             {{- toYaml .Values.mosquitto.resources | nindent 12 }}
           volumeMounts:

@@ -461,7 +461,9 @@ spec:
           args:
             - run
             - --server.http.listen-addr=0.0.0.0:12345
-            - --storage.path=/var/lib/alloy/data
+            # Not under /var/lib/alloy: the image keeps it 0770 for uid 473, and root without
+            # DAC_OVERRIDE cannot enter it.
+            - --storage.path=/var/lib/alloy-data
             # Alloy reports which components it runs to Grafana Labs unless told not to.
             - --disable-reporting
             - /etc/alloy/config.alloy
@@ -497,7 +499,7 @@ spec:
               mountPath: /etc/alloy
               readOnly: true
             - name: data
-              mountPath: /var/lib/alloy/data
+              mountPath: /var/lib/alloy-data
             {{- if $cfg.hostMetrics }}
             - name: host-proc
               mountPath: /host/proc

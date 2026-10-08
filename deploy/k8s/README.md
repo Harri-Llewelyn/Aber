@@ -1386,7 +1386,7 @@ container gets back only the capabilities its process was shown to need, each na
 | `frontend`, `swagger-ui` | `CHOWN`, `SETGID`, `SETUID` | The nginx master runs as root. It chowns its temp directories to `nginx` and drops to that user for the workers. |
 | `envoy` (supabase-envoy) | `CHOWN`, `SETGID`, `SETUID` | The image's entrypoint hands `/dev/stdout` and `/dev/stderr` to the envoy user, then drops to it. |
 | `realtime` (supabase-realtime) | `SETGID`, `SETUID` | `/app/run.sh` runs the migrations as `nobody` through `sudo`. Its start logs `sudo: unable to send audit message: Operation not permitted`, which is harmless. |
-| `mosquitto` | `SETGID`, `SETUID` | The broker starts as root and drops to uid 1883. |
+| `mosquitto` | `CHOWN`, `SETGID`, `SETUID` | The entrypoint hands `/mosquitto` to uid 1883, so the broker can save its plugin document on any storage class. The broker then starts as root and drops to that uid. |
 | `assemble-config` (mosquitto) | `CHOWN`, `DAC_OVERRIDE`, `FOWNER` | It reads the plugin's document (uid 1883, mode 0600) and writes its replacement owned by 1883. |
 | `certificate-reload` (mosquitto, broker TLS only) | `KILL` | It sends SIGHUP to the broker, which runs as another uid. |
 | `timescaledb` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `SETGID`, `SETUID` | The entrypoint fixes the data directory's owner and mode, then drops to postgres (uid 70). tini forwards the stop signal to it. |
