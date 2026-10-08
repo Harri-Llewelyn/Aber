@@ -25,7 +25,9 @@ from conformance import (
     constraint_violations, enforceable_violation,
     modelled_constraints, payload_violations, violation_signature,
 )
-# capture.py owns the capture file format, so the daemon and the CLI cannot diverge.
+# capture.py owns the capture file format, so the daemon and the CLI cannot diverge. It also holds
+# the daemon's JSON payload reader, json_payload(), so a recording replays as the daemon read it.
+import capture
 import capture_worker
 # Imported at module level so a syntax error in it is a startup failure.
 import directory_publish
@@ -2928,60 +2930,6 @@ def on_disconnect(client, userdata, rc, properties=None):
             "Under MQTT 3.1.1 this line could only have said 'unexpected'.", rc, int(rc.value)
         )
 
-# MIRRORED in i3x/i3x_service.py; test_i3x_service.py asserts the two copies agree, and both
-# suites read test-harness/fixtures/sparkplug-json-values.json.
-def json_metric_value(metric):
-    """
-    The (field, value, datatype) one JSON-encoded metric carries, as the protobuf encoding would
-    hold it: the first present of the six Sparkplug value keys, then a bare `value`, which is typed
-    by what it holds. An integer is stored as its two's complement in `int_value`, or `long_value`
-    when the key, a 64-bit datatype or its size needs 64 bits; a negative one with no datatype is
-    marked Int32 or Int64 so it reads back signed. A `float_value` is rounded to 32 bits.
-
-    (None, None, datatype) when no value key is present. ValueError when the value is not the JSON
-    type its key names or does not fit its field; the caller drops that metric, not its payload.
-    """
-    import struct
-
-    datatype = metric.get("datatype")
-    if not isinstance(datatype, int) or isinstance(datatype, bool) or not 0 <= datatype < 2**32:
-        datatype = None
-    for key in ("int_value", "long_value", "float_value", "double_value", "boolean_value",
-                "string_value", "value"):
-        value = metric.get(key)
-        if value is None:
-            continue
-        if key == "value" and (isinstance(value, bool) or not isinstance(value, int)):
-            key = {bool: "boolean_value", float: "double_value", str: "string_value"}.get(type(value))
-            if key is None:
-                raise ValueError("value %r is not a number, a boolean or a string" % (value,))
-        if key in ("int_value", "long_value", "value"):
-            if isinstance(value, float) and value.is_integer():
-                value = int(value)
-            if not isinstance(value, int) or isinstance(value, bool):
-                raise ValueError("%s %r is not an integer" % (key, value))
-            wide = (key == "long_value" or datatype in (4, 8, 13)
-                    or (key == "value" and not -(2**31) <= value < 2**32))
-            bits = 64 if wide else 32
-            if not -(2 ** (bits - 1)) <= value < 2**bits:
-                raise ValueError("%s %d does not fit in %d bits" % (key, value, bits))
-            if value < 0 and datatype is None:
-                datatype = 4 if wide else 3
-            return ("long_value" if wide else "int_value"), value & ((1 << bits) - 1), datatype
-        if key in ("float_value", "double_value"):
-            if not isinstance(value, (int, float)) or isinstance(value, bool):
-                raise ValueError("%s %r is not a number" % (key, value))
-            if key == "float_value":
-                try:
-                    value = struct.unpack("<f", struct.pack("<f", value))[0]
-                except OverflowError:
-                    raise ValueError("float_value %r does not fit in 32 bits" % (value,)) from None
-            return key, float(value), datatype
-        if not isinstance(value, bool if key == "boolean_value" else str):
-            raise ValueError("%s %r is not a %s" % (key, value, key.split("_")[0]))
-        return key, value, datatype
-    return None, None, datatype
-
 # Throttle for metrics dropped from a JSON payload, keyed by topic: a publisher sending a bad value
 # sends it in every message.
 _json_metric_refused_warned = {}
@@ -2991,6 +2939,8 @@ def parse_sparkplug_payload(msg):
     """
     Decode a Sparkplug B payload, falling back to the JSON encoding the gateway appliance's
     Node-RED flow publishes. Returns None if the payload cannot be decoded.
+
+    The JSON reading is capture.json_payload(), which the playback recorder decodes with too.
     """
     payload = sparkplug_b_pb2.Payload()
     try:
@@ -2999,53 +2949,17 @@ def parse_sparkplug_payload(msg):
     except Exception as pb_err:
         try:
             import json
-            data = json.loads(msg.payload.decode('utf-8'))
-            if 'timestamp' in data:
-                payload.timestamp = int(data['timestamp'])
-            else:
+            refused = []
+            payload = capture.json_payload(json.loads(msg.payload.decode('utf-8')), refused)
+            if not payload.HasField('timestamp'):
                 payload.timestamp = int(time.time() * 1000)
-
-            # The Factory+ payload marker. Carried through so the fallback parser presents the
-            # same payload shape the protobuf path does; nothing branches on it, because the
-            # TOPIC is what identifies the asset and a self-declared marker is not evidence.
-            if data.get('uuid'):
-                payload.uuid = str(data['uuid'])
-
-            # `seq` is carried through so the JSON fallback is not exempt from gap detection. Assigned
-            # only when present and integral: defaulting a missing seq to 0 would read as a wrap.
-            if isinstance(data.get('seq'), (int, float)) and not isinstance(data.get('seq'), bool):
-                payload.seq = int(data['seq']) % 256
-
-            for m in data.get('metrics', []):
-                # Built apart and appended whole, so a metric that cannot be held is dropped and
-                # logged while the rest of its payload lands.
-                metric = sparkplug_b_pb2.Payload.Metric()
-                try:
-                    field, value, datatype = json_metric_value(m)
-                    # A null name is an alias-only metric, as i3X reads it.
-                    metric.name = m.get('name') or ''
-                    # Carried through so the fallback is not silently alias-blind. Assigning the
-                    # field is what makes HasField('alias') true, which resolve_metric_name() tests.
-                    if m.get('alias') is not None:
-                        metric.alias = int(m['alias'])
-                    if field is not None:
-                        setattr(metric, field, value)
-                    if datatype is not None:
-                        metric.datatype = datatype
-                    # The metric's own reading time, which the protobuf path already honours: a
-                    # report-by-exception refresh or a batched reading is filed when it was taken.
-                    ts = m.get('timestamp')
-                    if isinstance(ts, (int, float)) and not isinstance(ts, bool) and ts > 0:
-                        metric.timestamp = int(ts)
-                except (AttributeError, TypeError, ValueError) as err:
-                    if _throttled(_json_metric_refused_warned, msg.topic, JSON_METRIC_REFUSED_WARN_INTERVAL_SECONDS):
-                        logger.warning(
-                            "Dropped a metric from the JSON payload on %s and kept the rest: %s. "
-                            "Metric: %.200r (further drops on this topic are not logged for %ds)",
-                            msg.topic, err, m, JSON_METRIC_REFUSED_WARN_INTERVAL_SECONDS
-                        )
-                    continue
-                payload.metrics.add().CopyFrom(metric)
+            for m, err in refused:
+                if _throttled(_json_metric_refused_warned, msg.topic, JSON_METRIC_REFUSED_WARN_INTERVAL_SECONDS):
+                    logger.warning(
+                        "Dropped a metric from the JSON payload on %s and kept the rest: %s. "
+                        "Metric: %.200r (further drops on this topic are not logged for %ds)",
+                        msg.topic, err, m, JSON_METRIC_REFUSED_WARN_INTERVAL_SECONDS
+                    )
             return payload
         except Exception:
             logger.warning("Failed to decode Sparkplug B payload on topic %s: %s", msg.topic, pb_err)

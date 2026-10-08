@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
+import { serverError } from "../_shared/failure.ts";
 
 /**
  * Mint a broker credential for a host-run gateway and reveal it exactly once. The second caller of
@@ -114,12 +115,19 @@ Deno.serve(async (req) => {
     .rpc("authorize_host_gateway_credential", { p_gateway_id: gatewayId });
 
   if (authError) {
-    console.error(`gateway-credential: authorisation refused: ${authError.message}`);
     // The RPC's ERRCODEs carry the distinction the HTTP status should: a privilege refusal is 403,
-    // a bad subject is 400, and anything else is ours rather than the caller's.
+    // a bad subject is 400, and anything else is ours rather than the caller's, so its message is
+    // logged rather than returned.
     const status = authError.code === "42501" ? 403
       : authError.code === "22023" || authError.code === "23503" ? 400
         : 500;
+    if (status === 500) {
+      return serverError(req, "gateway-credential", authError, {
+        error: "Cannot mint a credential",
+        context: `authorising a credential for gateway ${gatewayId}`,
+      });
+    }
+    console.error(`gateway-credential: authorisation refused: ${authError.message}`);
     return json(status, { error: "Cannot mint a credential", details: authError.message });
   }
 

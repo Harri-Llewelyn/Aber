@@ -21,6 +21,7 @@ const SERVICE_NAME = "fplus-directory";
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
+import { serverError } from "../_shared/failure.ts";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -30,8 +31,8 @@ function json(body: unknown, status = 200): Response {
 }
 
 /**
- * The request path with the routing prefixes removed. The gateway routes `/v1/...` with
- * `strip_path: false` onto a service URL ending in `/fplus-directory`, so the runtime sees
+ * The request path with the routing prefixes removed. The gateway rewrites `/v1/...` to
+ * `/fplus-directory/v1/...` (Envoy's `prefix_rewrite`), so the runtime sees
  * `/fplus-directory/v1/device`; invoked through `/functions/v1/fplus-directory` the same handler
  * sees nothing after the function name.
  */
@@ -130,7 +131,7 @@ export default async function handler(req: Request): Promise<Response> {
       if (requested) query = query.eq("id", requested);
 
       const { data, error } = await query;
-      if (error) return json({ error: "Device lookup failed", details: error.message }, 500);
+      if (error) return serverError(req, SERVICE_NAME, error, { error: "Device lookup failed" });
 
       const entries = await attachSchemas(supabase, (data ?? []).map(deviceEntry));
 
@@ -158,7 +159,7 @@ export default async function handler(req: Request): Promise<Response> {
         .eq("sparkplug_group", groupId)
         .eq("sparkplug_id", nodeId)
         .eq("is_archived", false);
-      if (gwError) return json({ error: "Address lookup failed", details: gwError.message }, 500);
+      if (gwError) return serverError(req, SERVICE_NAME, gwError, { error: "Address lookup failed" });
 
       const gateway = (gateways ?? [])[0];
       if (!gateway) return json({ error: "No edge node at that address" }, 404);
@@ -168,7 +169,7 @@ export default async function handler(req: Request): Promise<Response> {
         .select("id,name,sparkplug_id,status,is_quarantined,gateway_id,gateways(sparkplug_id,sparkplug_group)")
         .eq("gateway_id", gateway.id)
         .eq("is_archived", false);
-      if (devError) return json({ error: "Address lookup failed", details: devError.message }, 500);
+      if (devError) return serverError(req, SERVICE_NAME, devError, { error: "Address lookup failed" });
 
       const entries = await attachSchemas(supabase, (devices ?? []).map(deviceEntry));
 
@@ -206,13 +207,13 @@ export default async function handler(req: Request): Promise<Response> {
         }, 400);
       }
 
-      if (requested) return await schemaMembers(supabase, requested);
+      if (requested) return await schemaMembers(req, supabase, requested);
 
       const { data, error } = await supabase
         .from("schemas")
         .select("id,schema_name,version,status")
         .eq("status", "active");
-      if (error) return json({ error: "Schema lookup failed", details: error.message }, 500);
+      if (error) return serverError(req, SERVICE_NAME, error, { error: "Schema lookup failed" });
       return json({
         namespace: "local",
         note: LOCAL_SCHEMA_NOTE,
@@ -233,7 +234,7 @@ export default async function handler(req: Request): Promise<Response> {
       const { data, error } = await supabase
         .from("directory_services")
         .select("id,service_name,service_type,endpoint_url,status");
-      if (error) return json({ error: "Service lookup failed", details: error.message }, 500);
+      if (error) return serverError(req, SERVICE_NAME, error, { error: "Service lookup failed" });
       return json({
         namespace: "local",
         note: "Stack service endpoints, not registered Factory+ Service_UUIDs.",
@@ -260,10 +261,7 @@ export default async function handler(req: Request): Promise<Response> {
       ],
     }, 404);
   } catch (err) {
-    return json(
-      { error: "Directory lookup failed", details: err instanceof Error ? err.message : String(err) },
-      500,
-    );
+    return serverError(req, SERVICE_NAME, err, { error: "Directory lookup failed" });
   }
 }
 
@@ -275,6 +273,7 @@ export default async function handler(req: Request): Promise<Response> {
  * attached through the deprecated `devices.schema_id`.
  */
 async function schemaMembers(
+  req: Request,
   supabase: SupabaseClient,
   schemaId: string,
 ): Promise<Response> {
@@ -282,7 +281,7 @@ async function schemaMembers(
     .from("schemas")
     .select("id,schema_name,version,status")
     .eq("id", schemaId);
-  if (schemaError) return json({ error: "Schema lookup failed", details: schemaError.message }, 500);
+  if (schemaError) return serverError(req, SERVICE_NAME, schemaError, { error: "Schema lookup failed" });
 
   const schema = (schemas ?? [])[0] as
     | { id: string; schema_name: string; version: number; status: string }
@@ -293,7 +292,7 @@ async function schemaMembers(
     .from("device_schemas")
     .select("device_id")
     .eq("schema_id", schemaId);
-  if (memberError) return json({ error: "Schema lookup failed", details: memberError.message }, 500);
+  if (memberError) return serverError(req, SERVICE_NAME, memberError, { error: "Schema lookup failed" });
 
   const deviceIds = [...new Set((members ?? []).map((row) => String((row as { device_id: string }).device_id)))];
 
@@ -306,7 +305,7 @@ async function schemaMembers(
       .select("id,name,sparkplug_id,status,is_quarantined,gateway_id,gateways(sparkplug_id,sparkplug_group)")
       .in("id", deviceIds)
       .eq("is_archived", false);
-    if (deviceError) return json({ error: "Schema lookup failed", details: deviceError.message }, 500);
+    if (deviceError) return serverError(req, SERVICE_NAME, deviceError, { error: "Schema lookup failed" });
     // attachSchemas re-reads the view to give each device its full set, not the set of one this
     // query filtered on.
     entries = await attachSchemas(supabase, (devices ?? []).map(deviceEntry));

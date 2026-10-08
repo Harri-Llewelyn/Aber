@@ -665,7 +665,7 @@ function Dashboard({ session, onSignOut }) {
               <ColdStorageTab showToast={showToast} userRole={userRole} />}
             {/* The role is re-checked here, not only in the nav: routing can put `tab` on a value
                 the nav never offered. Still a courtesy -- RLS is what refuses the write. */}
-            {tab === 'access-control' && userRole === 'Administrator' && <AccessControlTab showToast={showToast} initialSection={selectedSection} onClearSection={() => setSelectedSection('')} />}
+            {tab === 'access-control' && userRole === 'Administrator' && <AccessControlTab showToast={showToast} initialSection={selectedSection} onClearSection={() => setSelectedSection('')} userRole={userRole} currentUserId={session?.user?.id} />}
             {tab === 'backups' && userRole === 'Administrator' && <BackupsTab showToast={showToast} />}
             {tab === 'settings' && userRole === 'Administrator' && <SettingsTab showToast={showToast} initialSetting={selectedSettingKey} onClearSetting={() => setSelectedSettingKey('')} />}
           </Suspense>

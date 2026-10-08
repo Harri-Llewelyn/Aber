@@ -8,6 +8,7 @@ import { ServiceTokenInventoryModal } from '../modals/ServiceTokenInventoryModal
 import { ServicePrincipalRevocationModal } from '../modals/ServicePrincipalRevocationModal'
 import { ServicePrincipalCreateModal } from '../modals/ServicePrincipalCreateModal'
 import { ServicePrincipalDescribeModal } from '../modals/ServicePrincipalDescribeModal'
+import { PeopleSection } from './PeopleSection'
 import {
   IconBot, IconDownload, IconLock, IconPencil, IconPlus, IconRadio, IconRefreshCw, IconShieldAlert,
   IconShieldCheck,
@@ -73,6 +74,9 @@ const ROLE_ENTRIES = [
   },
 ]
 
+/** People comes first, and only for an Administrator; see AccessControlTab. */
+const PEOPLE_SECTION = { id: 'people', label: 'People', title: 'Everyone who can sign in, and their role' }
+
 /** The page's lists, one per tab, in tab order. A search-bar card opens one by its id. */
 const SECTIONS = [
   { id: 'credentials', label: 'Broker credentials', title: "Every gateway's broker credential, recorded and live" },
@@ -83,6 +87,10 @@ const SECTIONS = [
 
 /** Each tab's "?", drawn in the tab bar for the selected tab. */
 const SECTION_HELP = {
+  people: {
+    label: 'About people',
+    text: 'Everyone who signs in to the dashboard, with their role. Add a person, change a role, or remove access. Removing access blocks sign-in and removes the role at once; the account and its history stay. You cannot change your own role or access.',
+  },
   credentials: {
     label: 'About broker credentials',
     text: 'Each gateway connects to the broker as its own Sparkplug ID, confined to its edge node. Credential is what the platform issued and recorded; Broker is what the broker holds now, read live from Dynamic Security.',
@@ -102,7 +110,11 @@ const SECTION_HELP = {
 }
 
 /**
- * Access Control: broker credentials and machine identities, as four tabs of one card.
+ * Access Control: people, broker credentials and machine identities, as tabs of one card.
+ *
+ * People is the people who sign in, for an Administrator to add, re-role and remove (PeopleSection).
+ * It is offered only when `userRole` is Administrator, and the page opens on it; the functions behind
+ * it check the role again. `currentUserId` is the signed-in account, whose own controls are disabled.
  *
  * Broker credentials is the per-gateway list, with two sources side by side: what the platform
  * issued and recorded (the database), and what the broker holds right now (its Dynamic Security
@@ -114,8 +126,10 @@ const SECTION_HELP = {
  * `initialSection` is a SECTIONS id handed over by the search bar; `onClearSection` drops it once
  * the tab is open.
  */
-export function AccessControlTab({ showToast, initialSection = '', onClearSection }) {
-  const [section, setSection] = useState('credentials')
+export function AccessControlTab({ showToast, initialSection = '', onClearSection, userRole = null, currentUserId = null }) {
+  const showPeople = userRole === 'Administrator'
+  const sections = useMemo(() => (showPeople ? [PEOPLE_SECTION, ...SECTIONS] : SECTIONS), [showPeople])
+  const [section, setSection] = useState(showPeople ? 'people' : 'credentials')
   // The role whose rules the drawer shows, by name; null when closed.
   const [openRole, setOpenRole] = useState(null)
   const [rows, setRows] = useState([])
@@ -223,9 +237,9 @@ export function AccessControlTab({ showToast, initialSection = '', onClearSectio
   // default.
   useEffect(() => {
     if (!initialSection) return
-    if (SECTIONS.some(s => s.id === initialSection)) selectSection(initialSection)
+    if (sections.some(s => s.id === initialSection)) selectSection(initialSection)
     onClearSection?.()
-  }, [initialSection, onClearSection, selectSection])
+  }, [initialSection, onClearSection, selectSection, sections])
 
   // Counts per filter value, over the whole list, so the dropdown answers "is there any?" without
   // being selected. Archived rows count only under Archived: archiving rotated their credential to
@@ -316,16 +330,20 @@ export function AccessControlTab({ showToast, initialSection = '', onClearSectio
           <CardHeading
             icon={<IconLock size={15} />}
             title="Access Control"
-            description="The credentials that let gateways and the stack's own processes reach the broker and the database, kept on two separate planes."
+            description="Who may reach Aber: the people who sign in, and the credentials that let gateways and the stack's own processes reach the broker and the database."
           />
 
           <TabStrip
             ariaLabel="Access Control list"
             value={section}
             onChange={selectSection}
-            tabs={SECTIONS}
+            tabs={sections}
             help={<HelpTip label={SECTION_HELP[section].label} text={SECTION_HELP[section].text} />}
           />
+
+          {section === 'people' && showPeople && (
+            <PeopleSection showToast={showToast} currentUserId={currentUserId} />
+          )}
 
           {section === 'credentials' && (<>
           <div className="filter-bar">

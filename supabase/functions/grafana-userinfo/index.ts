@@ -12,6 +12,7 @@ import { serviceRoleClient } from "../_shared/serviceClient.ts";
 import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
+import { serverError } from "../_shared/failure.ts";
 
 /**
  * Supabase RBAC role to Grafana org role. Operator and Auditor both map to Viewer: Grafana has no
@@ -88,10 +89,7 @@ export default async function handler(req: Request): Promise<Response> {
 
     return jsonResponse(body, 200);
   } catch (err) {
-    return jsonResponse(
-      { error: "Failed to resolve user info", details: err instanceof Error ? err.message : String(err) },
-      500
-    );
+    return serverError(req, "grafana-userinfo", err, { error: "Failed to resolve user info" });
   }
 }
 

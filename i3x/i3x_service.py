@@ -2729,8 +2729,8 @@ def _ms_to_iso(ms) -> Optional[str]:
         return None
 
 
-# MIRRORED FROM ingestion.py -- `test_i3x_service.py` asserts both copies agree, and both suites
-# read test-harness/fixtures/sparkplug-json-values.json.
+# MIRRORED FROM ingestion/capture.py -- `test_i3x_service.py` asserts both copies agree, and both
+# suites read test-harness/fixtures/sparkplug-json-values.json.
 def json_metric_value(metric):
     """
     The (field, value, datatype) one JSON-encoded metric carries, as the protobuf encoding would

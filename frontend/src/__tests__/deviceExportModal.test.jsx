@@ -85,6 +85,16 @@ describe('DeviceExportModal', () => {
     ))
   })
 
+  it('gives the reference the function logged the storage failure under', async () => {
+    const stats = { bundle: { stored: false, reason: 'the server could not store it', request_id: 'req-0001-abcd' } }
+    api.post.mockResolvedValue({ ...BUNDLE_OK, stats })
+    const { dialog, showToast } = open({ initialFormat: 'bundle' })
+    fireEvent.click(exportButton(dialog))
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(
+      expect.stringMatching(/could not store it\. Keep the file\. Reference: req-0001-abcd$/), 'warning'
+    ))
+  })
+
   it('warns when a cap was reached', async () => {
     api.post.mockResolvedValue({ ...BUNDLE_OK, stats: { bundle: { stored: true, truncated: true } } })
     const { dialog, showToast } = open({ initialFormat: 'bundle' })

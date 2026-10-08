@@ -1,14 +1,33 @@
 ## What this page is for
 
-This page shows which machines may reach Aber, and with which credential. It covers the things that do not sign in: gateways, and Aber's own processes. It lists no people. Only Administrators can open it.
+This page shows who and what may reach Aber. Its first tab, **People**, lists everyone who signs in to the dashboard, with their role. The other four tabs cover the things that do not sign in: gateways, and Aber's own processes. Only Administrators can open it.
 
-The page is one card with four tabs: **Broker credentials**, **Machine identities**, **Broker accounts** and **Broker roles**. The list inside the card scrolls, and the page stays put. The **?** just after the tab names explains the selected tab.
+The page is one card with five tabs: **People**, **Broker credentials**, **Machine identities**, **Broker accounts** and **Broker roles**. The page opens on People. The list inside the card scrolls, and the page stays put. The **?** just after the tab names explains the selected tab.
 
-Broker credentials has a row of controls under the tabs: its filter on the left, and its buttons at the right-hand end. Machine identities has one for **New Machine Identity**. Broker accounts and Broker roles have no controls, so their lists start straight under the tabs.
+People has a row of controls under the tabs, with **Refresh** and **Add Person**. Broker credentials has its filter on the left, and its buttons at the right-hand end. Machine identities has one for **New Machine Identity**. Broker accounts and Broker roles have no controls, so their lists start straight under the tabs.
 
-## What the controls do
+## Adding and removing people
 
-- **Broker credentials** is the tab the page opens on. It has one row per gateway, with the credential it uses to connect to the broker.
+- **Add Person** asks for an email address and a role. The person signs in with that address.
+- If this site has a mail relay, the person gets an invitation by email. They choose their own password from the link in it.
+- Without a mail relay, Aber makes a password for them and shows it once. Copy it before you close the dialog. Give it to them in person, or by a channel you trust. Nothing in Aber keeps a copy.
+- If that password is lost, it cannot be shown again. Without a mail relay, a new one is set outside the dashboard; the **Accounts** section of the install guide says how.
+- **Role** is a list on each row. Choosing another role changes it straight away. Their own dashboard catches up when it next reloads. Each person holds one role.
+- **Administrator** can do everything, including this page, backups and settings.
+- **Shopfloor Manager** manages areas, cells, gateways and devices, and decides the quarantine queue.
+- **Operator** reads the shopfloor and its live readings, and can propose changes.
+- **Auditor** reads the Audit Trail, including who was given access.
+- **Remove Access** asks you to confirm. Then it removes the person's role and blocks their sign-in. Their account stays, so the Audit Trail still names them.
+- **Restore Access** lets them sign in again, with the role they had.
+- **You cannot change your own role or remove your own access.** Ask another Administrator. Your own row is marked **YOU**, and its controls are greyed out. Hover over one to see why.
+- **One Administrator who can sign in always remains.** The last one cannot be given another role, or have their access removed. Make someone else an Administrator first.
+- Adding a person, changing a role, removing access and restoring it are each recorded in the Audit Trail. The record names the person and who made the change. It never holds a password.
+
+**Sessions a removed person already has end on their own, not at once.** Their role goes straight away, so the dashboard refuses anything a role allows. An open dashboard session can still read what any signed-in person can, such as the device list, for up to an hour. Sessions in Node-RED, Grafana and Studio keep what they had until they expire, up to eight hours in Node-RED. They cannot sign in again. If they held Administrator, check Node-RED's flows and the Audit Trail afterwards.
+
+## The other tabs
+
+- **Broker credentials** has one row per gateway, with the credential it uses to connect to the broker.
 - The **credential filter** opens on **Active**. It offers each credential state with its count, and **Archived**. **Refresh** reads everything again, and **Clear filters** sets the filter back to Active.
 - **Type** is the kind of gateway: Remote, Host, Simulated or Playback.
 - **Credential** is what Aber issued and recorded. **Broker** is what the broker holds right now, read live. They sit side by side because they can disagree, and a disagreement is worth looking into.
@@ -16,7 +35,7 @@ Broker credentials has a row of controls under the tabs: its filter on the left,
 - **Bundle** is offered for a Remote gateway. It produces the setup bundle. The gateway creates its own credential when it enrols, so the password never passes through a browser.
 - An archived gateway offers neither, only **Restore to issue**. Its credential was disabled at the broker. Once the gateway is restored, it can be issued a new one.
 - The Playback gateway's credential is shown only once. If it is lost, issue another.
-- **Machine identities** lists Aber's own non-human identities on the database side. **Broker accounts** lists the broker's own accounts, read live. **Broker roles** lists what each role may publish, receive and subscribe to. Search for one of the four tab names in the search bar to open the page on that tab.
+- **Machine identities** lists Aber's own non-human identities on the database side. **Broker accounts** lists the broker's own accounts, read live. **Broker roles** lists what each role may publish, receive and subscribe to. Search for one of the five tab names in the search bar to open the page on that tab.
 - **No gateway** marks a broker account that looks like a gateway's, but that no gateway claims and nothing declares. It is listed under **Broker accounts**, after Aber's own accounts. It is usually the account of a gateway that was deleted before deleting a gateway also disabled its broker account. `scripts/revoke-orphaned-broker-accounts.mjs` lists such accounts and disables them. It never deletes one.
 - **New Machine Identity** creates an identity for a process that uses Aber through the API. You give a name, a purpose and permissions from a fixed menu, then issue its first token.
 - Machines propose, and people decide. The menu's two writes are filing change proposals and versioning schemas. Nothing on it lets a machine write a device, decide a proposal or a quarantine, or change who has access.
@@ -32,12 +51,15 @@ Broker credentials has a row of controls under the tabs: its filter on the left,
 
 ## What the states mean
 
+- **Active**, on a person: they have signed in. **Invited**: they were sent an invitation and have not signed in yet. **Not signed in yet**: they were given a password and have not used it.
+- **Access removed**: the person has no role and cannot sign in. **Restore Access** brings both back.
+- **Sign-in still open**: the person's role was removed, but blocking their sign-in did not finish. Select **Remove Access** again to finish it.
 - **CANNOT SIGN IN**: on a machine identity, it has no password and no session, and holds a token instead. This is the normal state, not a fault.
 - **WITHDRAWN**: the machine identity was taken out of use. The API refuses every token that names it, including tokens issued afterwards.
 - **REVOKED**: a token, or a gateway's broker credential, was revoked. A revoked broker credential is disabled at the broker, and its next connection is refused.
 - **No platform record**: the broker holds an account that Aber never recorded issuing. It was usually made on the host by a script. Look into it, because it means a change was made somewhere Aber did not see.
 - **Setup outstanding**: setup was started for a Remote gateway, as an install command or a bundle, and the gateway's machine has not used it yet.
-- **Active**, **Disabled**, **No account** and **Not read** are what the **Broker** column says about the account itself. **Not read** means the broker could not be reached. That is about this page load, not about the account.
+- **Active**, **Disabled**, **No account** and **Not read** in the **Broker** column are about the broker account itself. **Not read** means the broker could not be reached. That is about this page load, not about the account.
 - **ARCHIVED**: taken out of service on purpose, and kept so that its history can still be looked up.
 
 **Withdrawing a machine identity reaches further than revoking its tokens.** Tokens are revoked one at a time. Withdrawing the identity refuses every token that names it. That includes tokens nobody remembered issuing, and tokens issued afterwards. To stop a machine's access, withdraw its identity.
@@ -49,3 +71,5 @@ A machine identity lives on one of two sides, and nothing holds both. A database
 ## What this page is not
 
 **It does not show who is connected.** It reads the broker's accounts and roles live, but not its sessions. So an account that is Active is one that may connect, not one that has. When the broker cannot be read, the Broker column says **Not read**, and the two broker tabs say so. Only the database half of the page is left.
+
+**It does not change passwords.** A person resets their own with **Forgot your password?** on the sign-in page, which needs a mail relay.

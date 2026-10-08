@@ -69,6 +69,10 @@ export const AUDIT_TRAIL_ACTIONS = {
   // Named rather than INSERT/DELETE because what happened is that somebody became an Administrator.
   ROLE_GRANTED:      'Role granted',
   ROLE_REVOKED:      'Role revoked',
+  // The People tab's acts on an account (0166), in the person's lane beside the role rows.
+  PERSON_ADDED:      'Person added',
+  ACCESS_REMOVED:    'Access removed',
+  ACCESS_RESTORED:   'Access restored',
   // Written by `ingest_record_gateway_health()` (archive/0100_a_deployed_flow_is_an_event_and_a_reading_is_not.sql)
   // when an appliance reports a different flow hash: the digest before and after, and what the
   // forge's main held at that moment. Actor `ingestion`, no user.

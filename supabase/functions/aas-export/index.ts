@@ -48,6 +48,7 @@ import {
 import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
+import { logFailure, requestIdOf, serverError } from "../_shared/failure.ts";
 
 const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" };
 
@@ -400,8 +401,11 @@ export default async function handler(req: Request): Promise<Response> {
         stored.export_id = row.id;
         stored.sha256 = digest;
       } catch (err) {
-        stored.reason = err instanceof Error ? err.message : String(err);
-        console.error(`[aas-export] bundle for ${device.id} was not stored: ${stored.reason}`);
+        // The error's text is logged under the request id, which the header carries instead.
+        const requestId = requestIdOf(req);
+        logFailure("aas-export", requestId, err, `the bundle for ${device.id} was not stored`);
+        stored.reason = "the server could not store it";
+        stored.request_id = requestId;
       }
 
       return new Response(bytes, {
@@ -445,8 +449,7 @@ export default async function handler(req: Request): Promise<Response> {
       { status: 200, headers: jsonHeaders },
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return json({ error: message || "Internal server error" }, 500);
+    return serverError(req, "aas-export", err);
   }
 }
 

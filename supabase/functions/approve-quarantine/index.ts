@@ -4,6 +4,7 @@ import { isUuid } from "./isUuid.ts";
 import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
+import { serverError } from "../_shared/failure.ts";
 
 const ALLOWED_ROLES = ["Administrator", "Shopfloor_Manager"];
 
@@ -155,10 +156,9 @@ export default async function handler(req: Request): Promise<Response> {
         ? 400
         : 500;
 
-      console.error(
-        `approve_quarantined_device failed for device ${device_id} ` +
-          `(actor ${user.id}, code ${rpcError.code}): ${rpcError.message}`
-      );
+      const context = `approve_quarantined_device failed for device ${device_id} (actor ${user.id})`;
+      if (status === 500) return serverError(req, "approve-quarantine", rpcError, { error: "Approval failed", context });
+      console.error(`${context}, code ${rpcError.code}: ${rpcError.message}`);
 
       return jsonResponse(
         {
@@ -166,9 +166,7 @@ export default async function handler(req: Request): Promise<Response> {
             ? "Device not found"
             : status === 403
             ? "Forbidden: Insufficient privileges"
-            : status === 400
-            ? "Invalid approval request"
-            : "Approval failed",
+            : "Invalid approval request",
         },
         status
       );
@@ -176,10 +174,7 @@ export default async function handler(req: Request): Promise<Response> {
 
     return jsonResponse({ success: true, data }, 200);
   } catch (err) {
-    // The caller gets a generic message; the detail goes to the function log, where an operator
-    // can see it and an anonymous caller cannot.
-    console.error(`approve-quarantine unhandled error: ${err instanceof Error ? err.stack : String(err)}`);
-    return jsonResponse({ error: "Internal server error" }, 500);
+    return serverError(req, "approve-quarantine", err);
   }
 }
 

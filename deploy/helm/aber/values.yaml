@@ -538,7 +538,8 @@ supabaseAuth:
   replicas: 1
   # Whether GoTrue refuses self-registration at POST /auth/v1/signup. True is closed, and it is
   # the only signup control: the dashboard offers no sign-up form. Accounts arrive from the first
-  # administrator below, the demo personas, an admin invite, or an upstream identity provider.
+  # administrator below, the demo personas, an Administrator on the People tab, or an upstream
+  # identity provider.
   disableSignup: true
   # The site's first administrator, created by db-init (migration 0163) when no account has this
   # address, with secrets.firstAdministratorPassword. Never changed afterwards: the password, the
@@ -554,9 +555,11 @@ supabaseAuth:
   # client only once deploy/k8s/traefik-config.yaml is applied; with k3s's default Service every
   # request carries the same address and the whole site shares one limit. Empty turns the limits off.
   rateLimitHeader: X-Forwarded-For
-  # The relay GoTrue sends "forgot your password" links through. Empty host: a reset request
-  # fails and the sign-in card tells the user to ask an administrator. The password is
-  # secrets.smtpPassword. Sign-up confirmation is off, so this is the only mail the stack sends.
+  # The relay GoTrue sends "forgot your password" links and People-tab invitations through. Empty
+  # host: a reset request fails and the sign-in card tells the user to ask an administrator, and
+  # a person added from the People tab gets a password shown once instead of an invitation. The
+  # password is secrets.smtpPassword. Sign-up confirmation is off, so these are the only mails the
+  # stack sends.
   smtp:
     host: ""
     port: 587
@@ -911,8 +914,8 @@ coldArchive:
   # another building all serve it. Which one is the operator's decision and the code never knows.
   #
   # UNDER networkPolicy.enabled THIS NEEDS AN EGRESS RULE. The chart cannot express a peer outside
-  # the cluster, so add the endpoint to networkPolicy.extraEgress -- otherwise every export fails
-  # at connect time, on a schedule, at 03:15.
+  # the cluster, so list the endpoint in coldArchive.offsiteEgress below -- otherwise every export
+  # fails at connect time, on a schedule, at 03:15.
   s3:
     # This site's identity in every object key: site=<siteKey>/dataset=telemetry/v=1/...
     #
@@ -935,6 +938,11 @@ coldArchive:
     # MinIO and most self-hosted gateways address buckets by path; AWS, R2 and B2 take the
     # virtual-host form. Wrong, this fails as DNS resolution, which names nothing useful.
     pathStyle: false
+  # NetworkPolicy egress rules for the S3 endpoint, applied to this pod alone under
+  # networkPolicy.enabled. The endpoint is a page setting, so the chart cannot derive it. For example:
+  #   - to: [{ ipBlock: { cidr: 203.0.113.10/32 } }]
+  #     ports: [{ protocol: TCP, port: 443 }]
+  offsiteEgress: []
 
 ingestion:
   # Which role the daemon connects to the historian as. `ingest_writer` cannot UPDATE, DELETE or

@@ -8,6 +8,7 @@
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { platformRootReader } from "../_shared/caPin.ts";
+import { serverError } from "../_shared/failure.ts";
 
 const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" };
 
@@ -46,6 +47,12 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // turn every path to SQL execution into a path to an unrevocable credential. No service-role key:
   // record_service_token_issued() is SECURITY DEFINER and re-checks the actor.
   "mint-service-token": ["JWT_SECRET"],
+
+  // Adds a person, removes their access or restores it, for the People tab: GoTrue's admin API
+  // takes the service-role key. Administrator only, checked here and again by the SECURITY
+  // DEFINER function each act calls as the caller, which also writes the audit row. Whether
+  // GoTrue can send mail decides between an invitation and a password shown once.
+  "manage-people": ["SUPABASE_SERVICE_ROLE_KEY", "AUTH_SMTP_CONFIGURED", "AUTH_INVITE_REDIRECT_URL"],
 
   // Remote gateway enrolment, the only function here with no user: the caller is an appliance
   // holding a single-use token. It holds the service-role key because the token table is reachable
@@ -300,14 +307,11 @@ Deno.serve(async (req: Request) => {
 
     return await worker.fetch(req);
   } catch (err) {
-    // Report the real failure. Never mask it as a 404 -- that is what made the
-    // original bug undiagnosable from both the logs and the browser.
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`failed to boot worker for '${serviceName}': ${message}`);
-
-    return new Response(
-      JSON.stringify({ error: `Failed to invoke '${serviceName}'`, details: message }),
-      { status: 500, headers: jsonHeaders }
-    );
+    // A 500 naming the function, never a 404, with the boot error in the log under the request id:
+    // this answer reaches callers who have not signed in. offline-check.sh matches the sentence.
+    return serverError(req, "main", err, {
+      error: `Failed to invoke '${serviceName}'`,
+      context: `the '${serviceName}' worker failed`,
+    });
   }
 });

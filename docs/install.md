@@ -13,6 +13,7 @@ the [glossary](glossary.md).
 
 | You want to | Route | What it builds |
 | :--- | :--- | :--- |
+| **Look at Aber** on your own computer | [*Try it*](#try-it): `npm run try`, the published release on [k3d](glossary.md#k3d) at `localhost` | nothing: the images are downloaded |
 | **Run Aber** for real, on a site | [*Run it on a site*](#run-it-on-a-site): the published release, installed on a [k3s](glossary.md#k3s) machine | nothing: the images are downloaded |
 | **Work on Aber's code** on a laptop | [*Develop on a laptop*](#develop-on-a-laptop): `npm run dev:up`, on [k3d](glossary.md#k3d) | all eleven images, from your checkout |
 
@@ -24,6 +25,49 @@ is comfortable. On a smaller machine Aber does not just run slowly: parts of it 
 the chart reserves 1.6 CPU cores and 3.7 GiB, and anything that does not fit waits as `Pending`.
 The server's images are built for `linux/amd64` only, so it cannot run on a Raspberry Pi. Sizing,
 and what grows over time, are in the runbook, *Prerequisites → Hardware*.
+
+---
+
+## Try it
+
+Look at Aber on one computer before you set up a site. A trial runs the published release at
+`localhost`, so you need no DNS record, no certificate and no build.
+
+**You need** an amd64 computer, because Aber's images are not built for ARM. Docker must be running,
+with at least 4 CPU cores and 8 GiB of memory for Aber. You also need [k3d](glossary.md#k3d),
+`kubectl`, Helm, Node.js and git. The command checks for each one first, and says where to get any
+that is missing.
+
+```bash
+git clone https://github.com/Harri-Llewelyn/Aber.git && cd Aber
+npm run try
+```
+
+`npm run try` creates a k3d cluster called `aber-try` and creates the trial's passwords with
+`npm run setup`. Then it installs the release from GHCR and waits for every part of Aber to start.
+The first run downloads every image, which takes several minutes. It ends by printing the address,
+an administrator's email and its password.
+
+Open http://app.localhost and sign in with them. To see data, add a Simulated gateway:
+**Gateways → New Gateway**. It runs inside Aber, so there is nothing to install. The
+[tutorial](../tutorial/README.md) builds a gateway the same way.
+
+**If a port is taken, the command stops and names what holds it.** A trial needs ports 80, 1883 and
+8883. A developer's `aber` cluster (*Develop on a laptop*) uses the same ports: stop it first with
+`k3d cluster stop aber`.
+
+**A trial is for this computer only.** Remote gateways cannot enrol, because nothing else on the
+network can reach `localhost`. Running `npm run try` again upgrades the same trial.
+
+To remove it:
+
+```bash
+npm run try:down
+```
+
+That deletes the cluster and everything in it. The passwords stay in
+`deploy/helm/aber/values-try.yaml`, so the next `npm run try` reuses them. Delete that file to get
+new ones.
 
 ---
 
@@ -284,7 +328,7 @@ push to that branch directly: a change is a pull request, merged with one approv
 **The first administrator** comes from `npm run setup` (step 5), and is the only account a new site
 has.
 
-**Demo accounts exist on a laptop only.** `values-dev.yaml` turns them on
+**Demo accounts exist on a development laptop only.** `values-dev.yaml` turns them on
 (`supabaseAuth.demoAccounts`), and [`supabase/seed.sql`](../supabase/seed.sql) creates them. The
 password for each is `aber123`.
 
@@ -295,11 +339,17 @@ password for each is `aber123`.
 | `operator@aber.local` | `Operator` | Read-only + telemetry |
 | `auditor@aber.local` | `Auditor` | Audit Trail read-only |
 
-**Adding people** happens outside the dashboard for now
-([#705](https://github.com/Harri-Llewelyn/Aber/issues/705)). Sign-up is closed
-(`supabaseAuth.disableSignup`), so create the account with GoTrue's admin API or in Studio, and give
-it a role with a row in `public.user_roles`. If you open sign-up instead, each new account starts as
-a read-only `Operator` (the `handle_new_user` trigger), and an `Administrator` has to promote it.
+**Adding people** is done in the dashboard, by an `Administrator`: open **Access Control**, then
+**People**, then **Add Person**. Give the person's email address and a role.
+
+- With an email relay (`supabaseAuth.smtp` and `secrets.smtpPassword`), the person is sent an
+  invitation. They choose their own password from its link.
+- Without one, the dashboard shows a password once. Give it to the person yourself.
+
+The same tab changes a person's role, and removes or restores their access. Removing access blocks
+the person's sign-in and keeps their account, so the Audit Trail still names them. Sign-up stays
+closed (`supabaseAuth.disableSignup`). If you open it instead, a new account has no role until an
+`Administrator` gives it one on the **People** tab.
 
 **Forgotten passwords** are reset from the sign-in page (*Forgot your password?*), which emails a link
 to `/reset-password`. That needs an email relay: set `supabaseAuth.smtp` and `secrets.smtpPassword`.

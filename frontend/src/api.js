@@ -4,7 +4,7 @@ import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId } from './utils/sparkplugId';
 import { resolveDeviceLocation, normaliseScope, SCOPE_CELL, SCOPE_AREA_WIDE } from './utils/cellResolution';
 import { isSvgFile, readSvgPlan, decodeSvgBytes, areaPlanPath, AREA_PLAN_MAX_BYTES } from './utils/areaPlans';
-import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
+import { edgeFunctionErrorMessage, withReference } from './utils/edgeFunctionError';
 import { AUDIT_TRAIL_ACTIONS, ENTITY_TABLE_BY_KIND } from './constants';
 import { metricNameError } from './utils/metricGroup';
 import { readSetting } from './config';
@@ -597,12 +597,13 @@ const apiMethods = {
       // modal shows that instead of a retry that cannot succeed.
       let message = `Bundle generation failed (${res.status})`;
       let details = null;
+      let body = null;
       try {
-        const body = await res.json();
+        body = await res.json();
         message = body?.error || message;
         details = body?.details || null;
       } catch { /* non-JSON body */ }
-      const error = new Error(message);
+      const error = new Error(withReference(message, body));
       error.status = res.status;
       error.details = details;
       throw error;
@@ -636,7 +637,7 @@ const apiMethods = {
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const error = new Error(body?.error || `The install command could not be minted (${res.status})`);
+      const error = new Error(withReference(body?.error || `The install command could not be minted (${res.status})`, body));
       error.status = res.status;
       error.details = body?.details || null;
       throw error;
@@ -667,7 +668,10 @@ const apiMethods = {
         Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`
       }
     });
-    if (!res.ok) throw new Error(`Could not read enrolment readiness (${res.status})`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(withReference(`Could not read enrolment readiness (${res.status})`, body));
+    }
     return res.json();
   },
 
@@ -718,6 +722,59 @@ const apiMethods = {
     if (error) throw new Error(error.message || 'Could not list user accounts');
     return data || [];
   },
+
+  /**
+   * Every person, for the People tab: `{ user_id, email, role, status, sign_in_blocked,
+   * role_on_restore, invited_at, last_sign_in_at, created_at }` from `list_people()` (0166).
+   * Administrator only; anybody else is refused.
+   */
+  listPeople: async () => {
+    const { data, error } = await supabase.rpc('list_people');
+    if (error) throw new Error(error.message || 'Could not list people');
+    return data || [];
+  },
+
+  /**
+   * Give a person one of the four roles. The database refuses your own role, a person whose access
+   * is removed, and the last Administrator who can sign in, and its sentence is the error.
+   */
+  setPersonRole: async (userId, role) => {
+    const { data, error } = await supabase.rpc('set_person_role', { p_user_id: userId, p_role: role });
+    if (error) throw new Error(error.message || 'Could not change the role');
+    return data;
+  },
+
+  /**
+   * Add a person, remove their access or restore it, through manage-people: GoTrue's admin API
+   * needs the secret key. `add` returns `password` only when the site has no mail relay; it is
+   * shown once and kept nowhere. `details` is preferred over `error`, as for the other functions.
+   */
+  managePeople: async (body) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/manage-people`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_GATEWAY_KEY,
+        // The CALLER's token: the function checks the role from it, and every database act it
+        // makes runs and is recorded as the caller.
+        Authorization: `Bearer ${session?.access_token || SUPABASE_GATEWAY_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+
+    let result = null;
+    try { result = await res.json(); } catch { /* non-JSON body */ }
+
+    if (!res.ok) {
+      throw new Error(withReference(result?.details || result?.error || `The request failed (${res.status})`, result));
+    }
+    return result;
+  },
+
+  addPerson: (email, role) => api.managePeople({ action: 'add', email, role }),
+  removePersonAccess: (userId) => api.managePeople({ action: 'remove', user_id: userId }),
+  restorePersonAccess: (userId) => api.managePeople({ action: 'restore', user_id: userId }),
 
   /**
    * The cold telemetry catalogue: every chunk that has been claimed for archival.
@@ -1007,7 +1064,7 @@ const apiMethods = {
     try { body = await res.json(); } catch { /* non-JSON body */ }
 
     if (!res.ok) {
-      throw new Error(body?.details || body?.error || `Could not read the broker (${res.status})`);
+      throw new Error(withReference(body?.details || body?.error || `Could not read the broker (${res.status})`, body));
     }
 
     return body;
@@ -1054,7 +1111,7 @@ const apiMethods = {
       // `details` carries the RPC's own message -- "gateway X is a Remote gateway; use an
       // enrolment bundle", "gateway X is archived" -- which is the sentence an operator can act on.
       // `error` alone would flatten all of them to "Cannot mint a credential".
-      throw new Error(body?.details || body?.error || `Could not mint a credential (${res.status})`);
+      throw new Error(withReference(body?.details || body?.error || `Could not mint a credential (${res.status})`, body));
     }
 
     return body;
@@ -1089,7 +1146,7 @@ const apiMethods = {
     try { body = await res.json(); } catch { /* non-JSON body */ }
 
     if (!res.ok) {
-      throw new Error(body?.details || body?.error || `Could not mint a token (${res.status})`);
+      throw new Error(withReference(body?.details || body?.error || `Could not mint a token (${res.status})`, body));
     }
 
     return body;
@@ -2650,9 +2707,8 @@ const apiMethods = {
       });
 
       if (!res.ok) {
-        let message = `Export failed (${res.status})`;
-        try { message = (await res.json())?.error || message; } catch { /* non-JSON body */ }
-        throw new Error(message);
+        const failed = await res.json().catch(() => null);
+        throw new Error(withReference(failed?.error || `Export failed (${res.status})`, failed));
       }
 
       let stats = {};
@@ -2682,9 +2738,8 @@ const apiMethods = {
         if (!res.ok) {
           // The function reports failures as JSON even on the AASX path, so the real message is
           // recoverable rather than being swallowed as an opaque status.
-          let message = `AAS export failed (${res.status})`;
-          try { message = (await res.json())?.error || message; } catch { /* non-JSON body */ }
-          throw new Error(message);
+          const failed = await res.json().catch(() => null);
+          throw new Error(withReference(failed?.error || `AAS export failed (${res.status})`, failed));
         }
 
         // Counts ride in a header because a binary body has nowhere to carry them.
