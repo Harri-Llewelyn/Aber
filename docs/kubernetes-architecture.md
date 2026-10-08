@@ -1001,9 +1001,10 @@ direction, a service added to Kubernetes and never added to Compose.
 
 ---
 
-## 9. Hardening register (M1–M6)
+## 9. Hardening register (M1–M7)
 
-Six hazards from the architectural review, each threaded into a section above. They are collected
+Six hazards from the architectural review, each threaded into a section above, and one from the
+configuration scan (M7). They are collected
 here because each is a **cross-cutting failure whose symptom appears somewhere other than its
 cause** — the kind that is expensive to diagnose from the templates alone.
 
@@ -1149,6 +1150,44 @@ SELECT count(*) FROM public.telemetry WHERE time > now() - interval '1 hour' LIM
 A `SELECT 1` proves nothing — it never crosses the wrapper. The query must **touch the foreign
 table**, so it exercises the server definition, the user mapping and reachability in one statement.
 Wire it as a gate: `helm test` first, `validate.py` only if it passes.
+
+### M7 — Default security contexts (§9-M5)
+
+**Failure:** a container with no `securityContext` runs with whatever the runtime grants: root in
+most of these images, about fourteen capabilities, privilege escalation through setuid binaries,
+and no seccomp filter unless the kubelet defaults one. `trivy config` reported it for 54 of 58
+containers (`KSV-0118`, #419).
+
+**Mitigation, in three phases (#419).** The first is built. Every pod sets `seccompProfile:
+RuntimeDefault`, and every container, init containers and hooks included, sets
+`allowPrivilegeEscalation: false` and `capabilities.drop: ["ALL"]`. A container gets back only what
+its image was shown to need. The runbook's *Security contexts* table lists each one with its
+reason, and `check-docs-drift.mjs` (check 51) holds that table and the templates together. The
+second phase gives each image this repository builds a non-root `USER`, matched by `runAsNonRoot`
+and `runAsUser`. The third makes each root filesystem read-only, one workload at a time.
+
+**Each add-back was measured, not read off an entrypoint.** The pinned image ran in Docker with
+`--cap-drop ALL --security-opt no-new-privileges` and the candidate set, through its own entrypoint,
+twice on one volume where it keeps state, and was stopped with `docker stop`. Three results are not
+obvious from the scripts:
+
+- **`KILL`, wherever a root process signals one that has dropped to another uid.** tini in the
+  historian, s6 in Gitea and the broker's certificate-reload sidecar all do. Without it the signal
+  fails with EPERM, the stop takes the whole grace period, and the database or the SQLite file is
+  killed rather than shut down. The historian's next start then reads "database system was not
+  properly shut down; automatic recovery in progress".
+- **`DAC_OVERRIDE`, wherever root reads a file another uid owns at 0600 or 0700.** The postgres
+  entrypoint's `find "$PGDATA"` fails on the second boot without it, and so do the broker
+  reconcile's reread of its document and the backup service's archive of the forge and broker
+  volumes.
+- **`NET_BIND_SERVICE` and `SYS_CHROOT` for Gitea's sshd.** Docker sets
+  `net.ipv4.ip_unprivileged_port_start` to 0 in each container, so binding 22 needed nothing in the
+  measurement; a runtime that leaves it at 1024 refuses the bind without the capability. Without
+  `SYS_CHROOT` the privilege-separation chroot fails and every clone stops at key exchange.
+
+Alloy keeps its read-only `hostPath` mounts (`KSV-0121`, allow-listed) and needs no capability: the
+host files it reads belong to root, which it runs as. Its host metrics measured the same with every
+capability dropped.
 
 ## 10. Production hardening
 

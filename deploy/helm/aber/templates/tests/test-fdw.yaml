@@ -40,6 +40,9 @@ spec:
   imagePullSecrets:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
   {{- /* A new pod's first connection can be refused until the NetworkPolicy controller admits
        it (k3s refused test-fdw's in the second it started), so wait as the hook Jobs do. */}}
   initContainers:
@@ -107,6 +110,10 @@ spec:
 
           echo
           echo 'PASS: postgres_fdw reaches TimescaleDB at {{ include "aber.timescale.host" . }}:{{ include "aber.timescale.port" . }} and public.telemetry is queryable.'
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
       resources:
         requests: { cpu: 50m, memory: 64Mi }
         limits: { memory: 256Mi }

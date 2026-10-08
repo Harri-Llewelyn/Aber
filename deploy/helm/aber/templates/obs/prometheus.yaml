@@ -97,6 +97,8 @@ spec:
         runAsGroup: 65534
         fsGroup: 65534
         fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: prometheus
           image: "{{ $cfg.image.repository }}:{{ $cfg.image.tag }}"
@@ -129,6 +131,10 @@ spec:
               port: http
             periodSeconds: 20
             failureThreshold: 4
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             {{- toYaml $cfg.resources | nindent 12 }}
           volumeMounts:

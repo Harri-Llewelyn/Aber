@@ -373,7 +373,7 @@ spec:
       {{- end }}
       # M5. eclipse-mosquitto runs as uid/gid 1883.
       securityContext:
-        {{- toYaml .Values.mosquitto.podSecurityContext | nindent 8 }}
+        {{- include "aber.podSecurityContext" .Values.mosquitto.podSecurityContext | nindent 8 }}
       initContainers:
         {{/*
           Assembles /mosquitto/config as a WRITABLE emptyDir, then writes the plugin's document onto
@@ -394,6 +394,11 @@ spec:
           imagePullPolicy: {{ .Values.gatewayCredential.image.pullPolicy }}
           securityContext:
             runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              # Reads the stored document (uid 1883, 0600), then chowns and chmods its replacement.
+              add: ["CHOWN", "DAC_OVERRIDE", "FOWNER"]
           env:
             {{- include "aber.mqttPrincipalEnv" . | nindent 12 }}
             {{- include "aber.secretEnv" (dict "name" "MQTT_DYNSEC_ADMIN_USER" "secretName" $secretName "key" "MQTT_DYNSEC_ADMIN_USER") | nindent 12 }}
@@ -547,6 +552,12 @@ spec:
             periodSeconds: 20
             timeoutSeconds: 5
             failureThreshold: 4
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              # Starts as root and drops to mosquitto (uid 1883) once it has read its config.
+              add: ["SETGID", "SETUID"]
           resources:
             {{- toYaml .Values.mosquitto.resources | nindent 12 }}
           volumeMounts:
@@ -588,6 +599,10 @@ spec:
           securityContext:
             # Root, to signal a process running as 1883.
             runAsUser: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["KILL"]
           command:
             - /bin/sh
             - -c
@@ -654,6 +669,9 @@ spec:
             # nothing on this target. The image's default user is root and is not needed.
             runAsUser: 1883
             runAsGroup: 1883
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           command: ["node", "/scripts/gateway-credential-service.mjs"]
           env:
             - name: MQTT_CREDENTIAL_SERVICE_PORT
@@ -749,6 +767,10 @@ spec:
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             {{- toYaml .Values.mosquitto.metrics.resources | nindent 12 }}
         {{- end }}

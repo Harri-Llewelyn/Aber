@@ -66,6 +66,9 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         {{/*
           Waits for the HYPERTABLE, not for the server. Readiness means the port answers; the
@@ -96,6 +99,10 @@ spec:
                 sleep 3
               done
               echo "telemetry hypertable exists"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             requests: { cpu: 10m, memory: 32Mi }
             limits: { memory: 128Mi }
@@ -236,6 +243,10 @@ spec:
             - name: sql
               mountPath: /sql
               readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             requests: { cpu: 50m, memory: 64Mi }
             limits: { memory: 256Mi }

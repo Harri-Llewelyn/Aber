@@ -46,6 +46,9 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: swagger-ui
           image: {{ include "aber.image" (dict "image" .Values.swaggerUi.image "ctx" $) | quote }}
@@ -90,6 +93,13 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              # The nginx master runs as root: it chowns its temp directories to the nginx user
+              # and drops to that user for the workers.
+              add: ["CHOWN", "SETGID", "SETUID"]
           resources:
             {{- toYaml .Values.swaggerUi.resources | nindent 12 }}
 {{- end }}

@@ -451,6 +451,9 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ printf "%s-alloy" $fullname }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: alloy
           image: "{{ $cfg.image.repository }}:{{ $cfg.image.tag }}"
@@ -482,6 +485,11 @@ spec:
               port: http
             periodSeconds: 20
             failureThreshold: 4
+          # Root without a capability: the host files it reads read-only belong to root.
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             {{- toYaml $cfg.resources | nindent 12 }}
           volumeMounts:

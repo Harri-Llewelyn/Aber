@@ -74,7 +74,7 @@ spec:
         avoids a recursive chgrp on every restart. The initContainer below therefore does NOT chown.
       */}}
       securityContext:
-        {{- toYaml .Values.nodeRed.podSecurityContext | nindent 8 }}
+        {{- include "aber.podSecurityContext" .Values.nodeRed.podSecurityContext | nindent 8 }}
       initContainers:
         {{/*
           =========================================================================================
@@ -151,6 +151,10 @@ spec:
                    identical to a wrong password, with certificates never mentioned. */}}
             {{- include "aber.brokerClientCaMount" . | nindent 12 }}
             {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             requests: { cpu: 50m, memory: 128Mi }
             limits: { memory: 512Mi }
@@ -200,6 +204,10 @@ spec:
             periodSeconds: 20
             timeoutSeconds: 5
             failureThreshold: 4
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             {{- toYaml .Values.nodeRed.resources | nindent 12 }}
           volumeMounts:
