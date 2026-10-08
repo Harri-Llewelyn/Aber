@@ -10,7 +10,7 @@ Fixtures and suites that need the assembled stack rather than a module.
 | :--- | :--- |
 | [`Dockerfile`](Dockerfile) | The `test-runner` image: the ingestion image plus `jsonschema`, the AAS suites and the load generator |
 | [`load_generator.py`](load_generator.py) | Synthetic Sparkplug load, and the report that says what gave way |
-| [`test_load_generator.py`](test_load_generator.py) | The generator's arithmetic — the part that decides what a run reports |
+| [`test_load_generator.py`](test_load_generator.py) | The generator's arithmetic — the part that decides what a run reports — and its Sparkplug `seq` and rebirth answer |
 | [`test_log_pipeline.py`](test_log_pipeline.py) | A drop is countable in Prometheus *and* readable in Loki, for the same device |
 | [`aas_fixture.py`](aas_fixture.py) | The device both AAS suites provision and assert against |
 | [`stack_exec.py`](stack_exec.py) | Reaching into the stack's own processes — `kubectl exec`, a Service taken off the network |
@@ -56,11 +56,34 @@ trustworthy.
 node scripts/load-test.mjs up --gateways 8 --devices-per-gateway 50
 
 # 2. Run. Each step is <messages per second>x<seconds>, held and reported on its own.
-node scripts/load-test.mjs run --plan 100x90,250x90,500x90,1000x90,2000x90
+node scripts/load-test.mjs run --plan 100x90,250x90,500x90,1000x90,2000x90 --soak 1200 --compress
 
 # 3. Take it away. The broker accounts are deleted; the historian keeps its rows.
-node scripts/load-test.mjs down          # --purge-telemetry deletes those too
+node scripts/load-test.mjs down          # --purge-telemetry deletes those too, then VACUUM FULL
 ```
+
+Two options change what a run does, and both are off by default:
+
+- **`--soak <seconds>`** holds the last step of the plan that held, for that long, after the plan
+  and before the verdict. It starts once the writer's queue has drained (up to five minutes), so a
+  backlog the ramp left is not counted against it. *How the verdict is decided* says what it
+  changes in the table.
+- **`--compress`** calls `compress_chunk()` on every chunk the run wrote into, re-reads
+  `chunks_detailed_size`, and reports compressed bytes a row and the ratio beside the uncompressed
+  figure. The chunks are those whose range ends after the run started. On a development stack
+  that is usually the current chunk, with whatever else was written in its range, so the figures
+  are the chunks', over all their rows. Later writes into a compressed chunk still land.
+
+`--compress` is the generator's, not a `down --compress-before-purge` on the launcher: the figure
+belongs in the run's report, beside the uncompressed one, and the generator already holds the
+historian connection and the run's start time. Compressing just before a purge would also make the
+purge delete from compressed batches.
+
+`down --purge-telemetry` deletes the fixture's rows one asset at a time, which frees no disk on its
+own. So it then runs `VACUUM FULL` on every chunk written since `up`, and on each one's compressed
+relation, and prints each relation's size before and after. Each is locked while it is rewritten,
+so ingestion into the current chunk waits for it. After the 2026-09-23 run, the chunk held 13 GB of
+deleted rows until a `VACUUM FULL` by hand.
 
 `up` writes the rows as the database owner over `kubectl exec`, not through PostgREST: one
 statement provisions two thousand devices, and the generated `sparkplug_id` of each row is the
@@ -95,6 +118,8 @@ give way.
 | msg/txn | written ÷ `aber_ingestion_write_seconds_count` — how much batching the load earned |
 | write mean | `aber_ingestion_write_seconds_sum ÷ _count` over the step |
 | p95 | the bucket the 95th write falls in, over the step's bucket **deltas** |
+| seq gaps | `aber_ingestion_sequence_gaps_total` for the fleet's edge nodes, in the verdict column when not zero |
+| rebirths | NCMD rebirth requests the generator answered, beside the gaps |
 
 **published, received and written are three different numbers and the gaps between them are the
 findings.** published > received means the messages did not survive the broker — Sparkplug is
@@ -124,6 +149,13 @@ stayed flat. Saturation and a generator that cannot push hard enough look identi
 published rate alone; the queue is the only thing that tells them apart, and getting it backwards
 inverts the finding from *the stack broke here* to *we could not push it that hard*. The run says
 which, in those words.
+
+A step that kept up is **sustained** only when a soak at its rate or above held. Otherwise the
+table says how long it held: `held 90 s, not soaked`, or `held 90 s; the soak did not` at the rate
+whose soak failed. The soak's own row reads `1200 s soak: ...`. The verdict's headline names the
+evidence too: *Highest sustained rate* through a soak, or *Highest rate held* for a step's own
+duration only. A 90 s step is not a soak: on 2026-09-23, 1,250 msg/s held its 90 s and then failed
+a 20-minute hold, and a ramp alone would have overstated the envelope by 25 %.
 
 ### Ceilings that are arithmetic rather than measurement
 
@@ -176,6 +208,12 @@ up, not the sustained rate.
 * **Each device's timestamps never repeat.** `telemetry` is keyed `(time, asset_id, metric_name)`
   `ON CONFLICT DO NOTHING`, so a repeated millisecond loses its rows silently while the write path
   still counts them — which would make the storage figures flatter than the truth.
+* **Each publisher is an edge node to the daemon.** It numbers its NBIRTH, DBIRTH and DDATA with
+  one Sparkplug `seq` (an NBIRTH restarts it at 0, and it wraps from 255 to 0). It answers an NCMD
+  `Node Control/Rebirth` with an NBIRTH and a DBIRTH per device, as an appliance does. So where the
+  broker sheds, the daemon sees the gaps, counts them and asks for rebirths, throttled per node by
+  `REBIRTH_REQUEST_INTERVAL_SECONDS`. Until 2026-10-08 the generator sent no `seq`, so that path
+  went untested through a run that shed 56,871 messages.
 
 ### Results
 
@@ -206,7 +244,8 @@ Mosquitto 2.0.22 at its defaults. The generator ran on the same node, as the met
 | 2000 | 2000 | 1248 | 1246 | 12,465 | 56,372 | 10,000 | 500 | 396.5 ms | 1000 ms | queue growing; broker shed 56,871 |
 
 Each step held 90 s with a 15 s settle. `undelivered` is published minus received; `broker shed`
-is the broker's own `broker_publish_messages_dropped` over the same window.
+is the broker's own `broker_publish_messages_dropped` over the same window. The *(90 s only)* label
+was added by hand from the soaks below; the generator now writes it (`--soak`).
 
 #### The soaks
 
@@ -354,7 +393,8 @@ keys each, so under the old cap it would have met the wall at 500.
 
 Measured across 14.7 M rows of the 1250 soak: **366.8 bytes per row on disk, and 74 % of that
 is index** (3,798 MiB of 5,152 MiB); the 1000 soak's 12.0 M rows read 369.3, the same picture. Uncompressed — every row written today sits in this week's chunk, and
-compression runs after 7 days, so the compressed figure is not yet measurable from a one-day run.
+compression runs after 7 days, so these runs could not read a compressed figure. `--compress` now
+compresses the run's own chunks and reports one; it has not yet been run at this scale.
 
 On that basis, a thousand devices at one message a second with 10 metrics each write
 864 M rows and **295 GiB a day** before compression; one 7-day chunk of that is about 2 TiB, and
@@ -399,9 +439,10 @@ second) is upstream's price for the dashboard's live updates, over a seven-table
 
 * **Metric counts other than 10 and 2**, and the 2-metric shape on anything but the minimum
   profile, where its knee meets the CPU cap and the writer together.
-* **Compressed storage**, for the reason above. It has since been measured on synthetic telemetry
+* **Compressed storage of a load run's own chunk.** It has been measured on synthetic telemetry
   shaped like this (8.4 bytes a row, an upper bound on smooth values), with the rollups' bytes a
-  row beside it, in `deploy/k8s/README.md`, *What grows*; a load run's own chunk still is not.
+  row beside it, in `deploy/k8s/README.md`, *What grows*. `--compress` measures a run's chunk;
+  no run at this scale has used it yet.
 * **The recommended profile.** 8 vCPU / 16 GiB sits between the two nodes measured, which agree.
 
 #### What the run found in the harness

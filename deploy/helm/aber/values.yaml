@@ -1342,6 +1342,11 @@ loadTest:
   # Seconds at the step's rate before the sample window opens, so work carried over from the
   # previous step is not counted against this one.
   settleSeconds: 15
+  # After the plan, the last step that held is held again for this long; 0 runs no soak. Without
+  # one, a step that held reads "held 90 s, not soaked" rather than "sustained".
+  soakSeconds: 0
+  # compress_chunk() the chunks the run wrote, and report compressed bytes a row.
+  compress: false
   # The fleet is every gateway whose name starts with this.
   prefix: "LOADGEN"
   # Written by `scripts/load-test.mjs up`, not by this chart. Empty names <release>-load-test.

@@ -17,7 +17,7 @@ import {
   CLUSTER_PORTS, apiPort, createClusterArgs, describeMissing, missingTools, parseClusters,
   portTakenMessage, publishersOf,
 } from './lib/k3d.mjs';
-import { CHART_REF, chartVersionOf, readChartVersion } from './lib/release-chart.mjs';
+import { CHART_REF, chartVersionOf, compareReleases, readChartVersion } from './lib/release-chart.mjs';
 import { CONTEXT, DEFAULT_ADMIN_EMAIL, VALUES, adminFrom, installArgs, parseArgs } from './try.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -108,6 +108,15 @@ test('the version is Chart.yaml\'s version:, not appVersion or apiVersion', () =
   assert.equal(chartVersionOf('apiVersion: v2\nname: aber\nversion: 1.2.3\nappVersion: "9.9.9"\n'), '1.2.3');
   assert.equal(chartVersionOf('apiVersion: v2\n'), null);
   assert.equal(readChartVersion(REPO), /^version:\s*(\S+)/m.exec(readFileSync(join(REPO, 'deploy/helm/aber/Chart.yaml'), 'utf8'))[1]);
+});
+
+test('releases compare by number, not as text', () => {
+  assert.ok(compareReleases('v1.10.0', '1.9.2') > 0);
+  assert.ok(compareReleases('1.0.2', '1.1.0') < 0);
+  assert.equal(compareReleases('v1.1.0', '1.1.0'), 0);
+  assert.ok(compareReleases('2.0.0', '1.99.99') > 0);
+  assert.throws(() => compareReleases('1.1', '1.1.0'), /not a release version/);
+  assert.throws(() => compareReleases('1.1.0-ci.abcdef12', '1.1.0'), /not a release version/);
 });
 
 test('the trial installs the published chart with its own values, and nothing from development', () => {

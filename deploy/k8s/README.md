@@ -93,7 +93,8 @@ several times faster, and a network volume several times slower.
 #### What grows, and what bounds it
 
 Each row in the table below grows until it reaches its bound. Disk is returned only when a chunk or
-partition is dropped (#393); deleting rows frees nothing.
+partition is dropped, or rewritten by `VACUUM FULL`, which nothing in the stack runs on a schedule
+(#393). Deleting rows alone frees nothing.
 
 The per-row figures were measured on `timescale/timescaledb:2.29.2-pg17`, with synthetic telemetry
 shaped like Aber's: 24-character asset ids and ten metric names. Raw telemetry

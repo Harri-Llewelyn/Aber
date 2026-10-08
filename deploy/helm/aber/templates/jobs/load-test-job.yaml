@@ -60,6 +60,11 @@ spec:
             - {{ .Values.loadTest.metricsPerMessage | quote }}
             - --settle
             - {{ .Values.loadTest.settleSeconds | quote }}
+            - --soak
+            - {{ .Values.loadTest.soakSeconds | quote }}
+            {{- if .Values.loadTest.compress }}
+            - --compress
+            {{- end }}
           env:
             {{- with include "aber.dbClientTlsEnv" . }}{{ . | nindent 12 }}{{- end }}
             - name: DB_HOST

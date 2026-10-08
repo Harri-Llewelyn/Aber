@@ -759,7 +759,7 @@ a failure leaves it, and prints where its kubeconfig and values are.
   --admin-email=…` and a `site.yaml` like the runbook's (*Install → A*): ingress and broker TLS from
   the internal CA. Before the install it applies the Traefik setting, cert-manager and the internal
   CA, as the runbook does.
-- **install runs with NetworkPolicies on**, as `values-prod.yaml.example` has them, because that is
+- **Both run with NetworkPolicies on**, as `values-prod.yaml.example` has them, because that is
   what a site starts from. The `site.yaml` adds `networkPolicy.enabled`, `kube-system` for DNS and
   the ingress controller, and the node's own address as `apiServerCidr`.
 - **upgrade** starts from the last release: the highest `v*` tag that is not this commit
@@ -767,9 +767,11 @@ a failure leaves it, and prints where its kubeconfig and values are.
   worktree` that is removed straight after. The script installs
   `oci://ghcr.io/harri-llewelyn/aber/aber` at that version, with its published images, and waits for
   it to be healthy. Then it runs `helm upgrade` to the checkout with the same two values files, as
-  [`upgrades.md`](upgrades.md) says.
+  [`upgrades.md`](upgrades.md) says. From a release before 1.1.0 (`--from=v1.0.2`) both the install
+  and the upgrade run with NetworkPolicies off: those charts lack the edges their own hooks need
+  under the layer (#755).
 
-**The checkout's images carry a tag no release has**, `<Chart.yaml version>-ci.<commit>`. The
+**The checkout's images carry a tag no release has**, `<Chart.yaml version>-ci.g<commit>`. The
 checkout's chart is packaged with that as its version and `appVersion`, as `release.yml` packages a
 release. Between releases `Chart.yaml` names the last release, so without this the node would hold a
 built and a published image under one name. Only the built images the site's render names are built:
@@ -791,14 +793,16 @@ It asserts that every volume claim kept its uid, so no data volume was replaced.
 claim templates changed must have been created again, by the `claim-templates` pre-upgrade hook
 ([`upgrades.md`](upgrades.md#from-102-or-earlier-the-two-databases-statefulsets-are-replaced-once)),
 and own its running pod; one whose claim templates did not change must be the same object. The
-hook's log is printed with the result. NetworkPolicies stay off in `upgrade`: a last release may
-predate the edges its own hooks need, and 1.0.2 does (#755).
+hook's log is printed with the result. That pre-upgrade hook runs under the last release's
+NetworkPolicies and its own. The post-upgrade hook Jobs (`db-init`, `timescaledb-maintenance`,
+`storage-policies` and the rest) run under the candidate's. So an edge the candidate adds or drops
+shows up here.
 
-`install` also asserts the policy layer is enforced, not only rendered. Two probe pods ask
-`pg_isready` about `supabase-db:5432`: one labelled as `db-init`, which an edge admits, is answered,
-and one no rule admits is not. Together with the install passing,
-this shows that every flow the install, its hook Jobs, `helm test` and the sign-in through Traefik
-need is admitted on k3s, and that nothing else is. **It cannot show** whether the API-server rules
+Both also assert the policy layer is enforced, not only rendered; `upgrade` does so after the
+upgrade. Two probe pods ask `pg_isready` about `supabase-db:5432`: one labelled as `db-init`, which
+an edge admits, is answered, and one no rule admits is not. Together with the rest passing,
+this shows that every flow the install or upgrade, its hook Jobs, `helm test` and the sign-in
+through Traefik need is admitted on k3s, and that nothing else is. **It cannot show** whether the API-server rules
 are right: k3s does not filter a pod's traffic to the node it runs on, which is where the API server
 is. Nor can it show flows the install never exercises, such as the cold archive at 03:15, the
 backups, `e2e.enabled` or gateways from outside the cluster. And it shows k3s's policy controller

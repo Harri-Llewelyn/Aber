@@ -3,8 +3,8 @@
  * Provision a synthetic fleet, run the load generator against it, and take it away again.
  *
  *   node scripts/load-test.mjs up   --gateways 8 --devices-per-gateway 50
- *   node scripts/load-test.mjs run  --plan 100x90,250x90,500x90,1000x90
- *   node scripts/load-test.mjs down
+ *   node scripts/load-test.mjs run  --plan 100x90,250x90,500x90,1000x90 [--soak 1200] [--compress]
+ *   node scripts/load-test.mjs down [--purge-telemetry]
  *   node scripts/load-test.mjs status
  *
  * `up` writes rows straight into Supabase's database as the owner and issues one broker account per
@@ -130,6 +130,67 @@ function historianSize () {
   return out ? rows(out)[0] : null;
 }
 
+/**
+ * The telemetry chunks the fixture's rows can be in: every chunk whose range ends after the first
+ * fixture gateway was made. Each with its compressed relation where it has one: TimescaleDB 2.29
+ * keeps a compressed chunk's rows beside it as <chunk>_compressed. `compressed` is '' for a chunk
+ * that is not compressed, and undefined for a compressed one whose relation is not found that way.
+ */
+function fixtureChunks () {
+  const since = psql(`SELECT min(created_at) FROM gateways WHERE name LIKE '${LIKE}'`);
+  if (!/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(\.\d+)?[+-]\d\d(:\d\d)?$/.test(since)) return null;
+  const where = `WHERE c.hypertable_name = 'telemetry' AND c.range_end > '${since}'::timestamptz ORDER BY c.range_start`;
+  const name = "format('%I.%I', c.chunk_schema, c.chunk_name)";
+  const out = historian(
+    `SELECT ${name}, c.is_compressed, ` +
+    `coalesce(to_regclass(format('%I.%I', c.chunk_schema, c.chunk_name || '_compressed'))::text, '') ` +
+    `FROM timescaledb_information.chunks c ${where}`);
+  if (out === null) return null;
+  const found = rows(out).map(([chunk, isCompressed, compressed]) =>
+    ({ chunk, compressed: compressed || (isCompressed === 't' ? undefined : '') }));
+  // Each becomes an identifier in a statement; format('%I') made them, the pattern holds them to it.
+  return found.filter(({ chunk, compressed }) => [chunk, compressed].every((r) => !r || /^[A-Za-z0-9_."]+$/.test(r)));
+}
+
+/** pg_total_relation_size of each relation, as {name: pretty size}. */
+function relationSizes (relations) {
+  const list = relations.map((r) => `'${r.replaceAll("'", "''")}'`).join(',');
+  const out = historian(`SELECT r, pg_size_pretty(pg_total_relation_size(r::regclass)) FROM unnest(ARRAY[${list}]) r`);
+  return Object.fromEntries(rows(out));
+}
+
+/**
+ * VACUUM FULL on the chunks the fixture wrote, and on their compressed relations: a DELETE returns
+ * no disk, only a rewrite or a dropped chunk does. Each relation is locked while it is rewritten,
+ * so ingestion into the current chunk waits for it.
+ */
+function vacuumFull (chunks) {
+  if (chunks === null) {
+    console.log('  NOT VACUUMED: the fixture\'s chunks could not be listed (its first gateway has no readable ' +
+      'created_at, or the historian did not answer), so the deleted rows keep their disk. ' +
+      'VACUUM FULL telemetry; rewrites every chunk.');
+    return;
+  }
+  if (!chunks.length) {
+    console.log('  no telemetry chunk was written after the fixture was made; nothing to VACUUM');
+    return;
+  }
+  const relations = chunks.flatMap(({ chunk, compressed }) => (compressed ? [chunk, compressed] : [chunk]));
+  const before = relationSizes(relations);
+  console.log(`  VACUUM FULL on ${relations.length} relation(s); each is locked while it is rewritten`);
+  const errors = historianEach(relations.map((r) => `VACUUM FULL ${r};`));
+  const after = relationSizes(relations);
+  for (const r of relations) console.log(`    ${r}: ${before[r] ?? '?'} -> ${after[r] ?? '?'}`);
+  for (const { chunk } of chunks.filter(({ compressed }) => compressed === undefined)) {
+    console.log(`    ${chunk}: compressed, but no ${chunk}_compressed relation was found beside it, ` +
+      'so deleted compressed rows keep their disk until retention drops the chunk');
+  }
+  if (errors.length) {
+    for (const error of errors.slice(0, 5)) console.error(`  ${error}`);
+    process.exitCode = 1;
+  }
+}
+
 // -------------------------------------------------------------------------------------------
 
 function up () {
@@ -207,15 +268,19 @@ function run () {
   const plan = option('plan', '100x90,250x90,500x90,1000x90,2000x90');
   const metrics = Number(option('metrics-per-message', '10'));
   const settle = Number(option('settle', '15'));
+  const soak = Number(option('soak', '0'));
+  const compress = flag('compress');
   if (!/^\s*\d+(\.\d+)?x\d+(\.\d+)?(\s*,\s*\d+(\.\d+)?x\d+(\.\d+)?)*\s*$/.test(plan)) {
     die(`--plan '${plan}' must be <rate>x<seconds> steps, comma separated`);
   }
+  if (!Number.isFinite(soak) || soak < 0) die('--soak must be a number of seconds, 0 or more');
   const present = fleet();
   if (present.length === 0) die(`No '${PREFIX}_' fleet exists. Run: node scripts/load-test.mjs up`);
 
-  const seconds = plan.split(',').reduce((total, part) => total + Number(part.split('x')[1]), 0);
+  const seconds = plan.split(',').reduce((total, part) => total + Number(part.split('x')[1]), 0) + soak;
   console.log(`Fleet: ${present.length} gateways, ${present.reduce((n, g) => n + g.devices, 0)} devices`);
-  console.log(`Plan:  ${plan}  (${Math.round(seconds / 60)} minutes of steps)`);
+  console.log(`Plan:  ${plan}${soak ? `, then a ${soak} s soak of the last step that held` : ''}` +
+    `  (${Math.round(seconds / 60)} minutes of steps)${compress ? '; the run\'s chunks are compressed after it' : ''}`);
 
   step('Rendering the load-test Job from the chart');
   const scratch = mkdtempSync(join(tmpdir(), 'aber-load-'));
@@ -228,6 +293,8 @@ function run () {
     `  plan: ${JSON.stringify(plan)}\n` +
     `  metricsPerMessage: ${metrics}\n` +
     `  settleSeconds: ${settle}\n` +
+    `  soakSeconds: ${soak}\n` +
+    `  compress: ${compress}\n` +
     `  prefix: ${JSON.stringify(PREFIX)}\n` +
     `  credentialSecret: ${JSON.stringify(SECRET)}\n`);
 
@@ -299,6 +366,8 @@ function down () {
       `WHERE g.name LIKE '${LIKE}' AND d.sparkplug_id IS NOT NULL`
     )).map(([id]) => id).filter((id) => /^[A-Za-z0-9]+$/.test(id));
     if (ids.length) {
+      // Read before the delete: the chunks written since the fixture was provisioned.
+      const chunks = fixtureChunks();
       // One asset per statement, each its own transaction, the id a literal: TimescaleDB
       // decompresses only the batches whose asset_id segment matches a constant, and caps what one
       // transaction may decompress (docs/testing.md, "What validate.py leaves behind").
@@ -316,6 +385,7 @@ function down () {
       } else {
         console.log(`  the fixture's telemetry is deleted (${ids.length} assets)`);
       }
+      vacuumFull(chunks);
     }
   } else {
     const size = historianSize();
@@ -361,7 +431,7 @@ if (!commands[command]) {
   console.error(
     'Usage: node scripts/load-test.mjs <up|run|down|status> [options]\n\n' +
     '  up    --gateways N --devices-per-gateway M [--prefix LOADGEN] [--password ...]\n' +
-    '  run   --plan 100x90,250x90 [--metrics-per-message 10] [--settle 15]\n' +
+    '  run   --plan 100x90,250x90 [--metrics-per-message 10] [--settle 15] [--soak SECONDS] [--compress]\n' +
     '  down  [--purge-telemetry]\n' +
     '  status\n'
   );
