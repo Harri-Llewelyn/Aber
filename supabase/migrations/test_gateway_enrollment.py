@@ -342,8 +342,7 @@ class TestRedeeming(GatewayEnrollmentBase):
         # anything else authenticates and then has every message dropped by the broker.
         self.assertRegex(sparkplug_id, r"^gwy[0-9a-f]{21}$")
         # The other half of the address resolve_gateway() looks up first. Omitting it leaves the
-        # appliance falling through to the group-agnostic arm, which works until a second group
-        # exists and then silently stops.
+        # appliance matched by sparkplug_id alone, which ingestion accepts with a mismatch warning.
         self.assertTrue(sparkplug_group)
         self.assertEqual(name, "Test_Remote_Gateway")
 

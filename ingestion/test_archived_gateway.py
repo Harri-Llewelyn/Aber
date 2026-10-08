@@ -1,5 +1,6 @@
 """
-Unit tests for refusing traffic from an ARCHIVED edge node (`resolve_gateway` in ingestion.py).
+Unit tests for refusing traffic from an ARCHIVED edge node (`resolve_gateway` in ingestion.py), and
+for accepting a live one that publishes under another Sparkplug group (GroupMismatchTests).
 
 WHY THIS IS THE APPLICATION TIER OF SOMETHING ELSE'S JOB. archived migration 0038 revokes a gateway's broker
 credential when it is archived, so an archived appliance should not be able to connect at all. Two
@@ -198,6 +199,80 @@ class ArchivedGatewayBindingTests(unittest.TestCase):
         reason = ingestion.verify_gateway_binding(self.DEVICE, "gwy999999999999999999999", GROUP)
         self.assertIn("not registered", reason)
         self.assertNotIn("ARCHIVED", reason)
+
+
+class _FilteringQuery:
+    """A gateways query that applies its eq() filters, so the two lookups answer differently."""
+
+    def __init__(self, rows, calls):
+        self.rows, self.calls, self.filters = rows, calls, []
+
+    def select(self, _columns):
+        return self
+
+    def eq(self, column, value):
+        self.filters.append((column, value))
+        return self
+
+    def execute(self):
+        self.calls.append(tuple(self.filters))
+        rows = [r for r in self.rows if all(r.get(c) == v for c, v in self.filters)]
+        return types.SimpleNamespace(data=[dict(r) for r in rows])
+
+
+class GroupMismatchTests(unittest.TestCase):
+    """
+    A node publishing under a group other than its row's is accepted by sparkplug_id alone. The
+    id is unique across the site's gateways, so the group adds no identity; the warning names both
+    groups so an operator can make them agree.
+    """
+
+    def setUp(self):
+        ingestion._gateway_cache.clear()
+        ingestion._group_mismatch_warned.clear()
+        self._real_client = ingestion.supabase_client
+        self.calls = []
+        client = MagicMock()
+        client.table.side_effect = lambda _name: _FilteringQuery([_row()], self.calls)
+        ingestion.supabase_client = client
+
+    def tearDown(self):
+        ingestion.supabase_client = self._real_client
+        ingestion._gateway_cache.clear()
+        ingestion._group_mismatch_warned.clear()
+
+    def test_the_exact_pair_matches_in_one_lookup_and_warns_nothing(self):
+        with self.assertNoLogs("ingestion", level="WARNING"):
+            got = ingestion.resolve_gateway(NODE, GROUP)
+        self.assertEqual(got["sparkplug_id"], NODE)
+        self.assertEqual(self.calls, [(("sparkplug_group", GROUP), ("sparkplug_id", NODE))])
+
+    def test_another_group_is_accepted_by_sparkplug_id(self):
+        got = ingestion.resolve_gateway(NODE, "Other-Group")
+        self.assertIsNotNone(got)
+        self.assertEqual(got["id"], _row()["id"])
+        self.assertEqual(self.calls[-1], (("sparkplug_id", NODE),))
+
+    def test_the_warning_names_both_groups_and_why_the_match_is_safe(self):
+        with self.assertLogs("ingestion", level="WARNING") as captured:
+            ingestion.resolve_gateway(NODE, "Other-Group")
+        joined = "\n".join(captured.output)
+        self.assertIn("published under Sparkplug group 'Other-Group'", joined)
+        self.assertIn(f"registered under '{GROUP}'", joined)
+        self.assertIn("unique site-wide", joined)
+        self.assertNotIn("DEPRECATED", joined)
+        self.assertNotIn("will be removed", joined)
+
+    def test_the_warning_is_throttled(self):
+        with self.assertLogs("ingestion", level="WARNING") as captured:
+            for _ in range(5):
+                ingestion._gateway_cache.clear()
+                self.assertIsNotNone(ingestion.resolve_gateway(NODE, "Other-Group"))
+        self.assertEqual(len([line for line in captured.output if "MISMATCH" in line]), 1)
+
+    def test_a_message_naming_no_group_matches_by_id_without_a_warning(self):
+        with self.assertNoLogs("ingestion", level="WARNING"):
+            self.assertIsNotNone(ingestion.resolve_gateway(NODE, None))
 
 
 if __name__ == "__main__":

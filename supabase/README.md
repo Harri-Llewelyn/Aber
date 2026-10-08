@@ -547,16 +547,16 @@ groups publishing the same edge node id resolved to one row — silently, each g
 attributed to the other's asset. `gateways.sparkplug_group` closes that, and is what makes
 `/v1/address/{group_id}/{node_id}` mean anything.
 
-Resolution order in `resolve_gateway()`, with the middle arm as the migration path:
+Resolution order in `resolve_gateway()`:
 
-1. `(sparkplug_group, sparkplug_id)` — the current scheme.
-2. `sparkplug_id` alone — warns `DEPRECATED IDENTITY`, throttled, naming both the group on the
-   wire and the one on the row. **Not a refusal**: a fleet is reconfigured one gateway at a time,
-   and refusing here would strand every device behind a node not yet corrected.
-3. `name` — legacy, pre-`sparkplug_id`.
+1. `(sparkplug_group, sparkplug_id)` — the exact pair.
+2. `sparkplug_id` alone — accepted under any group, and warned `SPARKPLUG GROUP MISMATCH`,
+   throttled, naming both the group on the wire and the one on the row. **A tolerance, not a
+   refusal**: `sparkplug_id` is unique site-wide, so the group adds no identity
+   ([`ingestion/README.md`](../ingestion/README.md#resolution-precedence)).
 
-The resolution cache is keyed by the **pair**. A cache keyed on the node alone would hand a hit
-from one group to a request from another — precisely the collision this closes.
+The resolution cache is keyed by the **pair**, so a node publishing under another group misses the
+entry the directory refresher fills and reaches the warning.
 
 > **Adding a column to `gateways` requires `ensure_gateway_status_view()`.** `0008` calls it, and
 > `0001` no longer carries a second, explicit-column copy of the view — see below.

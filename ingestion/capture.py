@@ -385,10 +385,10 @@ def rewrite_identity(topic, payload_dict, gateway_id, device_map):
     Returns (topic, payload_dict) -- a NEW dict, because a caller replaying the same capture at
     two speeds must not have the first run's rebasing edit the second run's source.
 
-    THE GROUP IS NOT REWRITTEN. resolve_gateway() scopes the edge-node lookup by group, and the
-    playback gateway is registered under one group; but a capture recorded under a different group
-    that is otherwise valid should fail the binding check loudly rather than be quietly relabelled
-    into passing. `--group` overrides it explicitly when that is genuinely what is wanted.
+    THE GROUP IS NOT REWRITTEN. A capture recorded under another group replays under it, and
+    resolve_gateway() accepts it by sparkplug_id with a group-mismatch warning, so the difference
+    stays visible in the log rather than being quietly relabelled away. `--group` overrides it
+    explicitly when that is genuinely what is wanted.
     """
     group, msg_type, _, device = split_topic(topic)
 

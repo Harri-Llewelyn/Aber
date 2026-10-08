@@ -1218,8 +1218,8 @@ def _resolve_gateway_row(wire_id: str, group_id: str = None):
 
     The address is (group, node), as Factory+ addresses an edge node. Resolution order:
 
-      1. (sparkplug_group, sparkplug_id) -- the current scheme.
-      2. sparkplug_id alone              -- group-agnostic. Warns, throttled.
+      1. (sparkplug_group, sparkplug_id) -- the exact pair.
+      2. sparkplug_id alone              -- accepted under any group, warned, throttled.
 
     Gateways are never auto-created: an unregistered edge node is logged and dropped.
     """
@@ -1230,8 +1230,8 @@ def _resolve_gateway_row(wire_id: str, group_id: str = None):
             "Supabase client is not configured; cannot resolve edge node '%s'" % wire_id
         )
 
-    # Keyed by the PAIR. A cache keyed on the node alone would hand a hit from one group to a
-    # request from another, which is precisely the collision this change exists to close.
+    # Keyed by the pair, as the directory refresher fills it, so a node publishing under a group
+    # other than its row's misses that entry and reaches the mismatch warning below.
     cache_key = (group_id or "", wire_id)
     hit, row = _gateway_cache.get(cache_key)
     if hit:
@@ -1252,7 +1252,7 @@ def _resolve_gateway_row(wire_id: str, group_id: str = None):
                 _gateway_cache.set(cache_key, row)
                 return row
 
-        # 2. Group-agnostic fallback.
+        # 2. sparkplug_id alone.
         res = supabase_client.table("gateways").select(columns).eq("sparkplug_id", wire_id).execute()
         rows = res.data if res else []
         if not rows:
@@ -1262,15 +1262,16 @@ def _resolve_gateway_row(wire_id: str, group_id: str = None):
         row = dict(rows[0])
         row["_identity_source"] = SOURCE_SPARKPLUG_ID
         if group_id and row.get("sparkplug_group") != group_id:
-            # Resolved, but under the wrong group. NOT a refusal: a fleet is reconfigured one
-            # gateway at a time, and refusing here would strand every device behind a node
-            # whose group had not been corrected yet.
+            # A tolerance, not a refusal: sparkplug_id is unique across the site's gateways, so
+            # the group identifies nothing more. The broker grants a gateway every group under its
+            # own node id, so a hand-built flow or an edited row reaches this.
             if _throttled(_group_mismatch_warned, wire_id, GROUP_MISMATCH_WARN_INTERVAL_SECONDS):
                 logger.warning(
-                    "DEPRECATED IDENTITY: edge node '%s' published under Sparkplug group '%s' but "
-                    "is registered under '%s'. Matched group-agnostically. Set gateways."
-                    "sparkplug_group to '%s', or reconfigure the gateway to publish under '%s'; "
-                    "group-agnostic matching will be removed.",
+                    "SPARKPLUG GROUP MISMATCH: edge node '%s' published under Sparkplug group "
+                    "'%s' but is registered under '%s'. Accepted: a sparkplug_id is unique "
+                    "site-wide, so the group adds no identity. To make them agree, set "
+                    "gateways.sparkplug_group to '%s', or reconfigure the gateway to publish "
+                    "under '%s'.",
                     wire_id, group_id, row.get("sparkplug_group"),
                     group_id, row.get("sparkplug_group") or DEFAULT_SPARKPLUG_GROUP
                 )

@@ -81,6 +81,17 @@ decommissioned machine's readings being written. The three message paths ask for
 `include_archived=True` and refuse it themselves, because `None` on the DBIRTH path means
 *unregistered* and would quarantine a second row for a device this stack already holds archived.
 
+**An edge node resolves by its group and `sparkplug_id`, and a group mismatch is tolerated.**
+`resolve_gateway()` looks up the pair `(sparkplug_group, sparkplug_id)` first, as Factory+
+addresses an edge node. When the pair misses, it looks the node up by `sparkplug_id` alone and
+accepts the row whatever group the message named. `gateways.sparkplug_id` is unique site-wide, so
+the group adds no identity. A mismatch can happen: each gateway's broker role grants
+`spBv1.0/+/+/<sparkplug_id>/#`, so a hand-built flow, an edited `sparkplug_group` or a host-run
+gateway configured by hand can publish under another group. The daemon accepts that traffic and
+logs `SPARKPLUG GROUP MISMATCH` once per node every five minutes, naming the group the message used
+and the group the gateway is registered under. To clear it, change one of the two so they agree.
+`test_archived_gateway.py` holds both arms and the wording.
+
 ### The directory refresher
 
 Both resolution caches hold a row for `CACHE_TTL_SECONDS` (5 s), so a change made in the dashboard
@@ -1032,10 +1043,9 @@ standards-compliant device.
   carry an alias that only the gateway's NBIRTH declared. A per-device table resolves the common
   case perfectly and fails only on gateways that declare shared metrics once — silently, and on
   the more sophisticated half of a fleet.
-- **The Sparkplug Group ID is read from the topic but goes no further.** It scopes this table and
-  addresses a rebirth back at the right node. Gateway and device resolution still ignore it and no
-  column stores it — making the group part of an asset's identity is a schema change and belongs
-  with that work.
+- **The Sparkplug Group ID scopes this table.** It also addresses a rebirth back at the right
+  node. Device resolution ignores it; gateway resolution compares it with `gateways.sparkplug_group`
+  and tolerates a mismatch (*Resolution precedence* above).
 - **NBIRTH resets the node's whole table; DBIRTH merges.** An NBIRTH invalidates every prior
   binding for the node and its devices, so a gateway that renumbers its aliases must not leave the
   old ones behind to be matched — that would write real samples under the *wrong* metric name,

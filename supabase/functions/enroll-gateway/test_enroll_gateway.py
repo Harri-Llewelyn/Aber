@@ -250,7 +250,7 @@ class TestSuccessfulEnrolment(EnrollGatewayBase):
         self.assertEqual(payload["sparkplug_id"], self.sparkplug_id)
         self.assertEqual(payload["mqtt_username"], self.sparkplug_id)
         # The other half of the address resolve_gateway() looks up FIRST. An appliance told only the
-        # node id falls through to the group-agnostic arm, which works until a second group exists.
+        # node id is matched by sparkplug_id alone, which ingestion accepts with a mismatch warning.
         self.assertEqual(payload["sparkplug_group"], "Aber")
 
         # ENDPOINT. Must be an address an appliance can actually resolve -- never the in-network
