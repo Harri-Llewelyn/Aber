@@ -1440,9 +1440,10 @@ jobs:
 
       # From the requirements files, not a hand-picked list. jsonschema, pytest and pyyaml are the
       # three not declared by either package: jsonschema validates the AAS export against the IDTA
-      # schema, pytest is for ingestion/test_cold_archive.py, the one suite with no `__main__` block,
-      # and pyyaml is what the appliance's converge script reads platform.yml with (an appliance
-      # has it as python3-yaml, from the platform playbook's base role).
+      # schema and the i3X server's types as JSON Schema, pytest is for
+      # ingestion/test_cold_archive.py, the one suite with no `__main__` block, and pyyaml is what the
+      # appliance's converge script reads platform.yml with (an appliance has it as python3-yaml, from
+      # the platform playbook's base role).
       - name: Install Python Test Dependencies
         run: |
           python -m pip install --upgrade pip

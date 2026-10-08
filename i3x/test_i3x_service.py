@@ -2147,10 +2147,19 @@ class TestAddressSpaceReads(unittest.TestCase):
              "metric_catalog", "schemas", "system_settings"],
         )
 
-    def test_the_history_read_names_real_columns(self):
+    def test_the_history_reads_name_real_columns(self):
+        from datetime import datetime, timezone
+
         pg = ColumnCheckingPostgrest()
-        i3x_service._read_telemetry(pg, "dev1", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", 10)
-        self.assertEqual([relation for relation, _ in pg.calls], ["telemetry"])
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        i3x_service._History(pg, {"devices": []}, start, start, 10, "a limit").tiers()
+        relations = ["telemetry"] + [relation for relation, _, _ in i3x_service.ROLLUPS]
+        for relation in relations:
+            i3x_service._read_rows(pg, relation, "dev1", "2026-01-02T00:00:00Z", 10,
+                                   lower="2026-01-01T00:00:00Z", metric="Temp")
+            i3x_service._read_rows(pg, relation, "dev1", "2026-01-02T00:00:00Z", 10, inclusive=False)
+        self.assertEqual([relation for relation, _ in pg.calls],
+                         ["telemetry_horizons"] + [r for r in relations for _ in (1, 2)])
 
     def test_a_device_is_filed_under_its_resolved_cell(self):
         space = i3x_service._read_address_space(ColumnCheckingPostgrest(_seeded_rows()))
@@ -2515,11 +2524,11 @@ class TestMetricsAreComponentsOfTheirDevice(_MetricSpace):
         self.assertEqual(metric["metadata"]["typeNamespaceUri"], MTCONNECT)
         self.assertEqual(metric["metadata"]["sourceTypeId"], MTCONNECT + "/DataItemType/POSITION")
         position = types[metric["typeElementId"]]
-        self.assertEqual(position["schema"], {"type": "number", "x-unit": "MILLIMETER",
+        self.assertEqual(position["schema"], {"type": ["number", "null"], "x-unit": "MILLIMETER",
                                               "description": "Linear position of X"})
         self.assertEqual(position["namespaceUri"], MTCONNECT)
         execution = types[objects["dev-one/Controller/EXECUTION"]["typeElementId"]]
-        self.assertEqual(execution["schema"], {"type": "string"})
+        self.assertEqual(execution["schema"], {"type": ["string", "null"]})
         # Every device carrying the metric shares the one type.
         self.assertEqual(objects["dev-two/Axes/X/POSITION"]["typeElementId"],
                          metric["typeElementId"])
@@ -2529,7 +2538,7 @@ class TestMetricsAreComponentsOfTheirDevice(_MetricSpace):
         types = {t["elementId"]: t for t in types}
         humidity = objects["dev-ext/Environmental/HUMIDITY"]
         self.assertEqual(humidity["typeElementId"], "i3x:type:sparkplug:Double")
-        self.assertEqual(types[humidity["typeElementId"]]["schema"], {"type": "number"})
+        self.assertEqual(types[humidity["typeElementId"]]["schema"], {"type": ["number", "null"]})
         # No catalog row and no DBIRTH seen since startup: nothing says what it is.
         count = objects["dev-ext/Vendor/COUNT"]
         self.assertEqual(count["typeElementId"], A.UNKNOWN_TYPE_ID)
@@ -2548,7 +2557,9 @@ class TestMetricsAreComponentsOfTheirDevice(_MetricSpace):
                     continue
                 value = i3x_service._current_value(objects, space, element_id)["value"]
                 if value is not None and "type" in served["schema"]:
-                    self.assertTrue(json_types[served["schema"]["type"]](value), (value, served))
+                    allowed = served["schema"]["type"]
+                    allowed = allowed if isinstance(allowed, list) else [allowed]
+                    self.assertTrue(any(json_types[t](value) for t in allowed), (value, served))
 
     def test_element_ids_are_unique_across_objects_and_types(self):
         _, objects, types = self.space()
@@ -2625,10 +2636,23 @@ class TestDevicesAreTypedByEveryAttachedSchema(_MetricSpace):
         self.assertEqual(objects["dev-three"]["typeElementId"], type_id)
         served = [t for t in types if t["elementId"] == type_id]
         self.assertEqual(len(served), 1, "one type for the set, not one per device")
-        rows = {s["id"]: s for s in _metric_rows()["schemas"]}
+        by_id = {t["elementId"]: t["schema"] for t in types}
+        position, execution, availability = (
+            A.metric_type_id(n) for n in ("Axes/X/POSITION", "Controller/EXECUTION", "OEE/AVAILABILITY")
+        )
+        # Each definition inlined, its catalog metrics referring to their types in the root's $defs.
         self.assertEqual(served[0]["schema"], {
             "type": "object",
-            "allOf": [rows[MILL]["schema_definition"], rows[OEE]["schema_definition"]],
+            "allOf": [
+                {"type": "object",
+                 "properties": {"Axes/X/POSITION": {"$ref": "#/$defs/i3x:type:metric:Axes~1X~1POSITION"},
+                                "Controller/EXECUTION": {"$ref": "#/$defs/i3x:type:metric:Controller~1EXECUTION"}},
+                 "required": ["Axes/X/POSITION"]},
+                {"type": "object",
+                 "properties": {"OEE/AVAILABILITY": {"$ref": "#/$defs/i3x:type:metric:OEE~1AVAILABILITY"}}},
+            ],
+            "$defs": {position: by_id[position], execution: by_id[execution],
+                      availability: by_id[availability]},
         })
         self.assertEqual(served[0]["displayName"], "Mill + OEE")
         self.assertEqual(served[0]["related"],
@@ -2650,7 +2674,7 @@ class TestDevicesAreTypedByEveryAttachedSchema(_MetricSpace):
         self.assertTrue(device["isExtended"])
         # From the DBIRTH datatype; `{}` where none was seen and the catalog has no row.
         self.assertEqual(device["metadata"]["schemaExtensions"],
-                         {"Environmental/HUMIDITY": {"type": "number"}, "Vendor/COUNT": {}})
+                         {"Environmental/HUMIDITY": {"type": ["number", "null"]}, "Vendor/COUNT": {}})
         self.assertEqual(device["metadata"]["system"], {"quarantined": True})
         self.assertNotIn("quarantined", device["metadata"], "a vendor key belongs in system")
 
@@ -2674,6 +2698,159 @@ class TestDevicesAreTypedByEveryAttachedSchema(_MetricSpace):
         _, objects, _ = self.space()
         self.assertEqual(objects["dev-bare"]["typeElementId"], A.UNTYPED_DEVICE_TYPE_ID)
         self.assertFalse(objects["dev-bare"]["isExtended"])
+
+
+try:
+    import jsonschema
+
+    HAVE_JSONSCHEMA = True
+except ImportError:  # CI's unit lane installs it; a bare checkout may not have it.
+    HAVE_JSONSCHEMA = False
+
+
+class TestTypesSayWhatTheCatalogHolds(_MetricSpace):
+    """
+    A metric type carries what its catalog row holds: the category, semantic id type and permitted
+    values beside the unit, and null in its type, since any Sparkplug metric can arrive with
+    `is_null`. The permitted values are advisory, never `enum`: a value outside them is accepted
+    and served. A device's type refers to those types rather than restating them.
+    """
+
+    def rows(self):
+        rows = _metric_rows()
+        execution = rows["metric_catalog"][1]
+        execution.update(permitted_values=["ACTIVE", "READY", "STOPPED"], category="EVENT",
+                         semantic_id_type="IRI")
+        rows["metric_catalog"][0]["category"] = "SAMPLE"
+        # A hand-written property: its own title and description stay beside the reference.
+        rows["schemas"][0]["schema_definition"]["properties"]["Axes/X/POSITION"] = {
+            "type": "number", "title": "X", "description": "Front axis"}
+        rows["schemas"][0]["schema_definition"]["properties"]["Local/NOTE"] = {"type": "string"}
+        return rows
+
+    def types(self, rows=None):
+        _, _, types = self.space(rows or self.rows())
+        return {t["elementId"]: t for t in types}
+
+    def test_a_metric_type_says_what_its_catalog_row_holds(self):
+        execution = self.types()[A.metric_type_id("Controller/EXECUTION")]["schema"]
+        self.assertEqual(execution, {"type": ["string", "null"],
+                                     "x-permitted-values": ["ACTIVE", "READY", "STOPPED"],
+                                     "x-category": "EVENT", "x-semantic-id-type": "IRI"})
+        position = self.types()[A.metric_type_id("Axes/X/POSITION")]["schema"]
+        self.assertEqual(position["x-category"], "SAMPLE")
+        self.assertNotIn("x-permitted-values", position, "a row with no permitted_values lists none")
+        self.assertNotIn("x-semantic-id-type", position)
+
+    def test_no_type_constrains_a_metric_to_its_permitted_values(self):
+        # Ingestion accepts a value outside them and the dashboard flags it as out of vocabulary,
+        # so this server serves it, and a type that refused it would be violated by its own value.
+        for type_id, served in self.types().items():
+            with self.subTest(type=type_id):
+                self.assertNotIn('"enum"', json.dumps(served["schema"]))
+
+    def test_every_metric_type_admits_null(self):
+        for type_id, served in self.types().items():
+            if not (type_id.startswith(A.METRIC_TYPE_PREFIX) or type_id.startswith(A.SPARKPLUG_TYPE_PREFIX)
+                    or type_id == A.UNKNOWN_TYPE_ID):
+                continue
+            with self.subTest(type=type_id):
+                schema = served["schema"]
+                self.assertTrue("type" not in schema or "null" in schema["type"], schema)
+
+    def test_permitted_values_are_listed_as_served_or_not_at_all(self):
+        string, int32, double, boolean, dataset = 12, 3, 10, 11, 16
+        for values, datatype, expected in (
+            (["A", "B"], string, ["A", "B"]),
+            (["0", "-1", "+2"], int32, [0, -1, 2]),
+            (["1.5", "2"], double, [1.5, 2.0]),
+            (["true", "False"], boolean, [True, False]),
+            (["1", "two"], int32, None),
+            (["1.5"], int32, None),
+            (["nan"], double, None),
+            (["yes"], boolean, None),
+            (["A"], dataset, None),
+            (None, string, None),
+            ([], string, None),
+        ):
+            with self.subTest(values=values, datatype=datatype):
+                self.assertEqual(A.permitted_values(values, datatype), expected)
+
+    def test_a_devices_properties_refer_to_their_metrics_types(self):
+        types = self.types()
+        mill = types[MILL]["schema"]
+        position, execution = A.metric_type_id("Axes/X/POSITION"), A.metric_type_id("Controller/EXECUTION")
+        self.assertEqual(mill["properties"], {
+            "Axes/X/POSITION": {"$ref": "#/$defs/i3x:type:metric:Axes~1X~1POSITION",
+                                "title": "X", "description": "Front axis"},
+            "Controller/EXECUTION": {"$ref": "#/$defs/i3x:type:metric:Controller~1EXECUTION"},
+            # No catalog row, so the schema's own word stands.
+            "Local/NOTE": {"type": "string"},
+        })
+        self.assertEqual(mill["$defs"], {position: types[position]["schema"],
+                                         execution: types[execution]["schema"]})
+        self.assertEqual(mill["required"], ["Axes/X/POSITION"])
+
+    def test_each_reference_is_a_json_pointer_to_the_type_it_names(self):
+        for type_id, served in self.types().items():
+            schema = served["schema"]
+            members = schema.get("allOf") or [schema]
+            for member in members:
+                for name, spec in (member.get("properties") or {}).items():
+                    if "$ref" not in spec:
+                        continue
+                    with self.subTest(type=type_id, property=name):
+                        pointer = spec["$ref"]
+                        self.assertTrue(pointer.startswith("#/"), pointer)
+                        node = schema
+                        for token in pointer[2:].split("/"):
+                            node = node[token.replace("~1", "/").replace("~0", "~")]
+                        self.assertEqual(node, self.types()[A.metric_type_id(name)]["schema"])
+
+    def test_the_schema_definitions_read_are_never_changed(self):
+        rows = self.rows()
+        before = json.loads(json.dumps([s["schema_definition"] for s in rows["schemas"]]))
+        space, _, _ = self.space(rows)
+        self.assertEqual([s["schema_definition"] for s in space["schemas"]], before)
+
+    def test_a_definition_with_its_own_defs_or_id_keeps_them(self):
+        catalog = {"Axes/X/POSITION": A.metric_type_from_catalog(_metric_rows()["metric_catalog"][0])}
+        own = {"properties": {"Axes/X/POSITION": {}}, "$defs": {"mine": {"type": "string"}}}
+        served = A.object_type_from_schema({"id": "s", "schema_definition": own}, catalog)["schema"]
+        self.assertEqual(set(served["$defs"]), {"mine", "i3x:type:metric:Axes/X/POSITION"})
+        broken = {"properties": {"Axes/X/POSITION": {}}, "$defs": ["not", "an", "object"]}
+        self.assertEqual(A.object_type_from_schema({"id": "s", "schema_definition": broken}, catalog)["schema"],
+                         broken, "a $defs that is not an object has nowhere to hold the types")
+        with_id = {"$id": "https://example.com/pump", "properties": {"Axes/X/POSITION": {}}}
+        plain = {"properties": {"Axes/X/POSITION": {}}}
+        both = A.schema_set_type([{"id": "a", "schema_definition": with_id},
+                                  {"id": "b", "schema_definition": plain}], catalog)["schema"]
+        self.assertEqual(both["allOf"][0], with_id, "its own resource, where #/$defs would not reach")
+        self.assertIn("$ref", both["allOf"][1]["properties"]["Axes/X/POSITION"])
+        self.assertIn("i3x:type:metric:Axes/X/POSITION", both["$defs"])
+
+    @unittest.skipUnless(HAVE_JSONSCHEMA, "jsonschema is not installed")
+    def test_every_type_is_valid_json_schema_and_its_references_resolve(self):
+        types = self.types()
+        for type_id, served in types.items():
+            for validator in (jsonschema.Draft202012Validator, jsonschema.Draft7Validator):
+                with self.subTest(type=type_id, draft=validator.__name__):
+                    validator.check_schema(served["schema"])
+        mill = jsonschema.Draft202012Validator(types[MILL]["schema"])
+        # A metric that arrived with is_null is null in the device's map, which its type admits.
+        self.assertEqual(list(mill.iter_errors(
+            {"Axes/X/POSITION": None, "Controller/EXECUTION": None, "Local/NOTE": "x"})), [])
+        self.assertEqual(list(mill.iter_errors({"Axes/X/POSITION": 1.5, "Controller/EXECUTION": "READY"})), [])
+        # A value outside x-permitted-values is served, flagged out of vocabulary, and conforms.
+        self.assertEqual(list(mill.iter_errors({"Axes/X/POSITION": 1.0, "Controller/EXECUTION": "RUNNING"})), [])
+        errors = list(mill.iter_errors({"Axes/X/POSITION": 1.0, "Controller/EXECUTION": 5}))
+        self.assertEqual([e.validator for e in errors], ["type"], "the reference is followed")
+        pair = types[A.schema_set_type_id([MILL, OEE])]["schema"]
+        self.assertEqual(list(jsonschema.Draft202012Validator(pair).iter_errors(
+            {"Axes/X/POSITION": 2.0, "OEE/AVAILABILITY": None})), [])
+        errors = list(jsonschema.Draft202012Validator(pair).iter_errors(
+            {"Axes/X/POSITION": 2.0, "OEE/AVAILABILITY": "x"}))
+        self.assertEqual([e.validator for e in errors], ["type"], "followed from inside allOf too")
 
 
 # -------------------------------------------------------------------------------------------------
@@ -3412,15 +3589,20 @@ class TestRequestValidation(unittest.TestCase):
 # -------------------------------------------------------------------------------------------------
 # History: a metric's samples, a device's map snapshots, and a 206 whenever a limit cuts either.
 # -------------------------------------------------------------------------------------------------
+ROLLUP_RELATIONS = ("telemetry_1m", "telemetry_5m", "telemetry_1h")
+
+
 class TelemetryPostgrest(ColumnCheckingPostgrest):
     """
-    ColumnCheckingPostgrest that also answers `telemetry` and `telemetry_latest` as PostgREST
-    would: filtered by asset, metric and time, ordered, limited, then projected onto `select`.
-    `telemetry_latest` is the newest telemetry row of each (asset, metric), as the view is.
+    ColumnCheckingPostgrest that also answers `telemetry`, `telemetry_latest` and the rollups as
+    PostgREST would: filtered by asset, metric and time (a rollup's `bucket`), ordered, limited,
+    then projected onto `select`. `telemetry_latest` is the newest telemetry row of each (asset,
+    metric), and `telemetry_horizons` each relation's oldest row, as the views are.
     """
 
-    def __init__(self, telemetry=(), rows=None):
-        super().__init__({**(rows or {}), "telemetry": list(telemetry)})
+    def __init__(self, telemetry=(), rows=None, rollups=None):
+        held = {relation: list((rollups or {}).get(relation, ())) for relation in ROLLUP_RELATIONS}
+        super().__init__({**(rows or {}), "telemetry": list(telemetry), **held})
 
     @staticmethod
     def _instant(text):
@@ -3428,14 +3610,25 @@ class TelemetryPostgrest(ColumnCheckingPostgrest):
 
         return datetime.fromisoformat(text.replace("Z", "+00:00"))
 
+    def horizons(self):
+        out = []
+        for relation in ("telemetry",) + ROLLUP_RELATIONS:
+            column = "time" if relation == "telemetry" else "bucket"
+            times = [self._instant(row[column]) for row in self.rows.get(relation, [])]
+            out.append({"relation": relation, "oldest": min(times).isoformat() if times else None})
+        return out
+
     def get(self, relation, params=None):
         import operator
 
         answer = super().get(relation, params)  # the column checks, and `calls`
-        if relation not in ("telemetry", "telemetry_latest"):
-            return answer
         params = dict(params or {})
-        rows = list(self.rows["telemetry"])
+        if relation == "telemetry_horizons":
+            return [{c: row[c] for c in params["select"].split(",")} for row in self.horizons()]
+        if relation not in ("telemetry", "telemetry_latest") + ROLLUP_RELATIONS:
+            return answer
+        column = "bucket" if relation in ROLLUP_RELATIONS else "time"
+        rows = list(self.rows["telemetry" if relation == "telemetry_latest" else relation])
         if relation == "telemetry_latest":
             newest = {}
             for row in rows:
@@ -3444,17 +3637,17 @@ class TelemetryPostgrest(ColumnCheckingPostgrest):
                     newest[key] = row
             rows = list(newest.values())
         filters = [
-            (column, *params[column].split(".", 1))
-            for column in ("asset_id", "metric_name", "time") if column in params
+            (name, *params[name].split(".", 1))
+            for name in ("asset_id", "metric_name", column) if name in params
         ]
-        for op, value in re.findall(r"time\.(\w+)\.([^,)]+)", params.get("and", "")):
-            filters.append(("time", op, value))
+        for op, value in re.findall(rf"{column}\.(\w+)\.([^,)]+)", params.get("and", "")):
+            filters.append((column, op, value))
         compare = {"eq": operator.eq, "lt": operator.lt, "lte": operator.le, "gte": operator.ge}
 
         def keep(row):
-            for column, op, value in filters:
-                left, right = row[column], value
-                if column == "time":
+            for name, op, value in filters:
+                left, right = row[name], value
+                if name == column:
                     left, right = self._instant(left), self._instant(right)
                 if not compare[op](left, right):
                     return False
@@ -3462,9 +3655,9 @@ class TelemetryPostgrest(ColumnCheckingPostgrest):
 
         rows = [r for r in rows if keep(r)]
         for part in reversed([p for p in params.get("order", "").split(",") if p]):
-            column, _, direction = part.partition(".")
+            name, _, direction = part.partition(".")
             rows.sort(
-                key=lambda r: self._instant(r["time"]) if column == "time" else r[column],
+                key=lambda r: self._instant(r[name]) if name == column else r[name],
                 reverse=direction == "desc",
             )
         if "limit" in params:
@@ -3525,9 +3718,9 @@ class _HistoryCase(unittest.TestCase):
     def setUp(self):
         i3x_service._space_cache_clear()
 
-    def history(self, body, telemetry=(), devices=((SID, ("Temp",)),)):
+    def history(self, body, telemetry=(), devices=((SID, ("Temp",)),), rollups=None, pg=None):
         space, objects = _device_space(*devices)
-        pg = TelemetryPostgrest(telemetry)
+        pg = pg or TelemetryPostgrest(telemetry, rollups=rollups)
         req = FakeRequest(body={**WINDOW, **body}, pg=pg)
         with mock.patch.object(i3x_service, "_load_address_space", return_value=space), \
                 mock.patch.object(i3x_service, "_build_objects", return_value=objects):
@@ -3538,6 +3731,13 @@ class _HistoryCase(unittest.TestCase):
         self.assertEqual(len(req.result), 1)
         self.assertTrue(req.result[0]["success"], req.result[0])
         return req.result[0]["result"]
+
+    def reads(self, pg) -> list:
+        """The reads after the request's one read of telemetry_horizons, which comes first."""
+        relations = [relation for relation, _ in pg.calls]
+        self.assertEqual(relations[:1], ["telemetry_horizons"])
+        self.assertEqual(relations.count("telemetry_horizons"), 1)
+        return pg.calls[1:]
 
     def assertCut(self, req, element_id, *phrases):
         """A 206 on the response naming `element_id`, and one on its item saying each phrase."""
@@ -3624,7 +3824,7 @@ class TestHistoryWindow(_HistoryCase):
 
     def test_the_filters_carry_the_parsed_instant_not_the_text(self):
         req, pg = self.history({"elementIds": [f"{SID}/Temp"], "startTime": "2026-09-28T11:00:00+01:00",
-                                "endTime": "2026-09-28T11:00:00.5Z"})
+                                "endTime": "2026-09-28T11:00:00.5Z"}, _telemetry((_at("09:00"), "Temp", 1.0)))
         self.assertEqual(req.status, 200)
         _, params = pg.calls[-1]
         self.assertEqual(params["time"], "gte.2026-09-28T10:00:00.000000Z")
@@ -3669,8 +3869,8 @@ class TestHistorySeries(_HistoryCase):
             {"value": 22.0, "quality": "Good", "timestamp": "2026-09-28T10:30:00Z"},
             {"value": 21.0, "quality": "Good", "timestamp": "2026-09-28T10:10:00Z"},
         ]})
-        self.assertEqual(len(pg.calls), 1)
-        relation, params = pg.calls[0]
+        self.assertEqual(len(self.reads(pg)), 1)
+        relation, params = self.reads(pg)[0]
         self.assertEqual((relation, params["asset_id"], params["metric_name"]),
                          ("telemetry", f"eq.{SID}", "eq.Temp"))
 
@@ -3679,7 +3879,7 @@ class TestHistorySeries(_HistoryCase):
         req, pg = self.history({"elementIds": [f"{SID}/Controller/EXECUTION"]}, rows,
                                ((SID, ("Controller/EXECUTION", "Temp")),))
         self.assertEqual([v["value"] for v in self.only(req)["values"]], ["ACTIVE"])
-        self.assertEqual(pg.calls[0][1]["metric_name"], "eq.Controller/EXECUTION")
+        self.assertEqual(self.reads(pg)[0][1]["metric_name"], "eq.Controller/EXECUTION")
 
     def test_a_device_is_a_map_per_instant_carried_forward_from_before_the_window(self):
         req, pg = self.history({"elementIds": [SID]}, self.ROWS, self.DEVICE)
@@ -3695,18 +3895,20 @@ class TestHistorySeries(_HistoryCase):
         ])
         self.assertTrue(all(v["quality"] == "Good" for v in result["values"]))
         # The window, the newest row per metric, and the rows just before the window.
-        self.assertEqual([relation for relation, _ in pg.calls], ["telemetry", "telemetry_latest", "telemetry"])
-        self.assertEqual(pg.calls[2][1]["time"], "lt.2026-09-28T10:00:00.000000Z")
+        reads = self.reads(pg)
+        self.assertEqual([relation for relation, _ in reads], ["telemetry", "telemetry_latest", "telemetry"])
+        self.assertEqual(reads[2][1]["time"], "lt.2026-09-28T10:00:00.000000Z")
         # Unbounded below, so only a filter and an order postgres_fdw ships keep it cheap.
-        self.assertEqual(pg.calls[2][1]["order"], "time.desc")
+        self.assertEqual(reads[2][1]["order"], "time.desc")
 
     def test_the_read_before_the_window_asks_for_few_rows_whatever_the_limit(self):
         # postgres_fdw ships its LIMIT only up to 6338 rows (README.md -> History); past that, this
         # read, unbounded below, would fetch the device's whole history.
         with mock.patch.object(i3x_service, "HISTORY_MAX_ROWS", 20000):
             _, pg = self.history({"elementIds": [SID]}, self.ROWS, self.DEVICE)
-        self.assertEqual(pg.calls[0][1]["limit"], "20001")
-        self.assertEqual(pg.calls[2][1]["limit"], str(i3x_service.HISTORY_SEED_MAX_ROWS))
+        reads = self.reads(pg)
+        self.assertEqual(reads[0][1]["limit"], "20001")
+        self.assertEqual(reads[2][1]["limit"], str(i3x_service.HISTORY_SEED_MAX_ROWS))
         self.assertLessEqual(i3x_service.HISTORY_SEED_MAX_ROWS, 6338)
         self.assertLessEqual(i3x_service.HISTORY_MAX_ROWS + 1, 6338)
 
@@ -3714,7 +3916,7 @@ class TestHistorySeries(_HistoryCase):
         rows = _telemetry((_at("09:50"), "Temp", 20.0), (_at("11:30"), "Temp", 23.0))
         req, pg = self.history({"elementIds": [SID]}, rows)
         self.assertEqual(self.only(req)["values"], [])
-        self.assertEqual(len(pg.calls), 1)
+        self.assertEqual(len(self.reads(pg)), 1)
 
     def test_components_are_its_metrics_sliced_from_the_devices_own_rows(self):
         for depth in (0, 2):
@@ -3732,7 +3934,7 @@ class TestHistorySeries(_HistoryCase):
                         f"{SID}/Serial": [],
                     },
                 )
-                self.assertEqual(len(pg.calls), 3, "components add no reads")
+                self.assertEqual(len(self.reads(pg)), 3, "components add no reads")
 
     def test_every_value_lies_inside_the_window(self):
         req, _ = self.history({"elementIds": [SID, f"{SID}/Temp"], "maxDepth": 0}, self.ROWS, self.DEVICE)
@@ -3781,12 +3983,12 @@ class TestHistoryIsNeverSilentlyCut(_HistoryCase):
         self.assertEqual([v["value"] for v in self.only(req)["values"]], [5.0, 4.0, 3.0])
         self.assertCut(req, f"{SID}/Temp", "this request's limit of 3 rows",
                        "nothing at or before 2026-09-28T10:20:00.000000Z")
-        self.assertEqual(pg.calls[0][1]["limit"], "4", "one row past the limit shows there is more")
+        self.assertEqual(self.reads(pg)[0][1]["limit"], "4", "one row past the limit shows there is more")
 
     def test_the_limit_field_lowers_the_server_limit_and_never_raises_it(self):
         with mock.patch.object(i3x_service, "HISTORY_MAX_ROWS", 2):
             req, pg = self.history({"elementIds": [f"{SID}/Temp"], "limit": 100}, self.TEMPS)
-            self.assertEqual(pg.calls[0][1]["limit"], "3")
+            self.assertEqual(self.reads(pg)[0][1]["limit"], "3")
             self.assertCut(req, f"{SID}/Temp", "the server limit (I3X_HISTORY_MAX_ROWS) of 2 rows")
             req, pg = self.history({"elementIds": [f"{SID}/Temp"]}, self.TEMPS)
             self.assertEqual(len(self.only(req)["values"]), 2)
@@ -3816,7 +4018,7 @@ class TestHistoryIsNeverSilentlyCut(_HistoryCase):
                        "nothing at or before 2026-09-28T10:20:00.000000Z",
                        f"{SID}/B: This series stops at this request's limit of 4 rows",
                        "nothing at or before 2026-09-28T10:10:00.000000Z")
-        self.assertEqual([relation for relation, _ in pg.calls], ["telemetry", "telemetry_latest"])
+        self.assertEqual([relation for relation, _ in self.reads(pg)], ["telemetry", "telemetry_latest"])
 
     def test_a_cut_window_seeds_from_the_instant_it_was_cut_at(self):
         # Three rows read for a limit of two stop inside 10:10, before B's row there. B changes
@@ -3826,7 +4028,7 @@ class TestHistoryIsNeverSilentlyCut(_HistoryCase):
         req, pg = self.history({"elementIds": [SID], "limit": 2}, rows, ((SID, ("A", "B")),))
         self.assertEqual([(v["timestamp"], v["value"]) for v in self.only(req)["values"]],
                          [("2026-09-28T10:30:00Z", {"A": 3.0, "B": "b"})])
-        self.assertEqual(pg.calls[2][1]["time"], "lte.2026-09-28T10:10:00.000000Z")
+        self.assertEqual(self.reads(pg)[2][1]["time"], "lte.2026-09-28T10:10:00.000000Z")
         self.assertCut(req, SID, "nothing at or before 2026-09-28T10:20:00.000000Z")
 
     def test_a_wide_device_is_cut_by_the_values_it_returns(self):
@@ -3860,6 +4062,319 @@ class TestHistoryIsNeverSilentlyCut(_HistoryCase):
                                          "responseDetail": detail}))
         self.assertEqual(sent[1][0], 200)
         self.assertNotIn("responseDetail", sent[1][1])
+
+
+def _rollup_rows(*buckets, sid=SID) -> list:
+    """Rollup rows for `sid` from (bucket, metric, last value), the value in its typed column."""
+    rows = []
+    for bucket, metric, value in buckets:
+        row = {"bucket": bucket, "asset_id": sid, "metric_name": metric,
+               "last_double": None, "last_string": None, "last_bool": None}
+        row["last_string" if isinstance(value, str) else "last_double"] = value
+        rows.append(row)
+    return rows
+
+
+class TestHistoryContinuesIntoTheRollups(_HistoryCase):
+    """
+    Where a window reaches back before the raw rows, the finest rollup that covers it continues
+    the series, a bucket's last value timestamped at its start, and the 206 says where they join.
+    """
+
+    DEVICE = ((SID, ("Speed", "State", "Temp")),)
+    # Raw retention has dropped everything before 10:30.
+    RAW = _telemetry(
+        (_at("10:30"), "Temp", 18.0),
+        (_at("10:40"), "State", "ACTIVE"),
+        (_at("10:50"), "Temp", 19.0),
+        (_at("10:55"), "Speed", 6.0),
+    )
+    ROLLUPS = {
+        "telemetry_1m": _rollup_rows(
+            (_at("09:50"), "State", "STOPPED"),
+            (_at("09:55"), "Speed", 5.0),
+            (_at("10:05"), "Temp", 15.0),
+            (_at("10:15"), "Temp", 16.0),
+            (_at("10:15"), "State", "IDLE"),
+            (_at("10:29"), "Temp", 17.0),
+            # The rollup holds what the raw rows hold too. History never serves these.
+            (_at("10:30"), "Temp", 18.0),
+            (_at("10:40"), "State", "ACTIVE"),
+            (_at("10:50"), "Temp", 19.0),
+            (_at("10:55"), "Speed", 6.0),
+        ),
+        "telemetry_5m": _rollup_rows((_at("09:00"), "Temp", 10.0), (_at("10:15"), "Temp", 16.0)),
+        "telemetry_1h": _rollup_rows((_at("08:00"), "Temp", 9.0), (_at("10:00"), "Temp", 17.0)),
+    }
+    JOIN = ("Values before 2026-09-28T10:30:00.000000Z, where the raw samples begin, are 1-minute "
+            "buckets from telemetry_1m, not samples: each is the last value in its bucket, "
+            "timestamped at the bucket's start.")
+
+    def run_history(self, body, **kwargs):
+        kwargs.setdefault("rollups", self.ROLLUPS)
+        return self.history(body, self.RAW, self.DEVICE, **kwargs)
+
+    @staticmethod
+    def stamps(values) -> list:
+        return [(v["timestamp"][11:16], v["value"]) for v in values]
+
+    def assertBucketed(self, req, element_id, *phrases):
+        self.assertEqual(req.status, 206)
+        self.assertIn(f"1 result(s) answer part of the range from a rollup's buckets, not raw "
+                      f"samples: {element_id}.", req.detail["detail"])
+        item = next(i for i in req.result if i["elementId"] == element_id)
+        self.assertTrue(item["success"])
+        for phrase in phrases or (self.JOIN,):
+            self.assertIn(phrase, item["responseDetail"]["detail"])
+
+    # --- a metric's scalars -----------------------------------------------------------------------
+    def test_a_metric_older_than_the_raw_rows_is_the_rollups_buckets(self):
+        req, pg = self.run_history({"elementIds": [f"{SID}/Temp"], "endTime": "2026-09-28T10:20:00Z"})
+        self.assertEqual(self.stamps(self.only(req)["values"]), [("10:15", 16.0), ("10:05", 15.0)])
+        self.assertTrue(all(v["quality"] == "Good" for v in self.only(req)["values"]))
+        self.assertBucketed(req, f"{SID}/Temp")
+        # The window ends before the raw rows begin, so they are not read.
+        reads = self.reads(pg)
+        self.assertEqual([relation for relation, _ in reads], ["telemetry_1m"])
+        self.assertEqual(reads[0][1], {
+            "select": "bucket,metric_name,last_double,last_string,last_bool",
+            "asset_id": f"eq.{SID}", "bucket": "gte.2026-09-28T10:00:00.000000Z",
+            "and": "(bucket.lte.2026-09-28T10:20:00.000000Z)", "order": "bucket.desc",
+            "limit": "1001", "metric_name": "eq.Temp",
+        })
+
+    def test_a_metric_straddling_the_raw_window_joins_raw_and_buckets_once(self):
+        req, pg = self.run_history({"elementIds": [f"{SID}/Temp"]})
+        self.assertEqual(self.stamps(self.only(req)["values"]), [
+            ("10:50", 19.0), ("10:30", 18.0),
+            ("10:29", 17.0), ("10:15", 16.0), ("10:05", 15.0),
+        ])
+        self.assertBucketed(req, f"{SID}/Temp")
+        reads = self.reads(pg)
+        self.assertEqual([relation for relation, _ in reads], ["telemetry", "telemetry_1m"])
+        # Only buckets that end by the time raw begins, so the 10:30 bucket is not served twice.
+        self.assertEqual(reads[1][1]["and"], "(bucket.lte.2026-09-28T10:29:00.000000Z)")
+        self.assertEqual(reads[1][1]["limit"], "999", "what the raw rows left of the limit")
+
+    def test_a_metric_inside_the_raw_window_reads_no_rollup(self):
+        req, pg = self.run_history({"elementIds": [f"{SID}/Temp"], "startTime": "2026-09-28T10:45:00Z"})
+        self.assertEqual(self.stamps(self.only(req)["values"]), [("10:50", 19.0)])
+        self.assertEqual(req.status, 200)
+        self.assertIsNone(req.detail)
+        self.assertEqual([relation for relation, _ in self.reads(pg)], ["telemetry"])
+
+    # --- a device's maps, carried forward --------------------------------------------------------
+    def test_a_device_older_than_the_raw_rows_is_maps_of_buckets(self):
+        req, pg = self.run_history({"elementIds": [SID], "endTime": "2026-09-28T10:20:00Z", "maxDepth": 0})
+        result = self.only(req)
+        # Speed and State carried forward from the buckets before the window.
+        self.assertEqual(self.stamps(result["values"]), [
+            ("10:15", {"Speed": 5.0, "State": "IDLE", "Temp": 16.0}),
+            ("10:05", {"Speed": 5.0, "State": "STOPPED", "Temp": 15.0}),
+        ])
+        self.assertEqual({k: self.stamps(c["values"]) for k, c in result["components"].items()}, {
+            f"{SID}/Speed": [], f"{SID}/State": [("10:15", "IDLE")],
+            f"{SID}/Temp": [("10:15", 16.0), ("10:05", 15.0)],
+        })
+        self.assertBucketed(req, SID)
+        reads = self.reads(pg)
+        self.assertEqual([relation for relation, _ in reads],
+                         ["telemetry_1m", "telemetry_latest", "telemetry_1m"])
+        # Before the window, unbounded below and small, as the raw read before it is.
+        self.assertEqual(reads[2][1]["bucket"], "lt.2026-09-28T10:00:00.000000Z")
+        self.assertEqual(reads[2][1]["order"], "bucket.desc")
+        self.assertEqual(reads[2][1]["limit"], str(i3x_service.HISTORY_SEED_MAX_ROWS))
+
+    def test_a_device_straddling_the_raw_window_is_one_series(self):
+        req, pg = self.run_history({"elementIds": [SID], "maxDepth": 0})
+        result = self.only(req)
+        self.assertEqual(self.stamps(result["values"]), [
+            ("10:55", {"Speed": 6.0, "State": "ACTIVE", "Temp": 19.0}),
+            ("10:50", {"Speed": 5.0, "State": "ACTIVE", "Temp": 19.0}),
+            ("10:40", {"Speed": 5.0, "State": "ACTIVE", "Temp": 18.0}),
+            ("10:30", {"Speed": 5.0, "State": "IDLE", "Temp": 18.0}),
+            ("10:29", {"Speed": 5.0, "State": "IDLE", "Temp": 17.0}),
+            ("10:15", {"Speed": 5.0, "State": "IDLE", "Temp": 16.0}),
+            ("10:05", {"Speed": 5.0, "State": "STOPPED", "Temp": 15.0}),
+        ])
+        self.assertEqual({k: self.stamps(c["values"]) for k, c in result["components"].items()}, {
+            f"{SID}/Speed": [("10:55", 6.0)],
+            f"{SID}/State": [("10:40", "ACTIVE"), ("10:15", "IDLE")],
+            f"{SID}/Temp": [("10:50", 19.0), ("10:30", 18.0), ("10:29", 17.0), ("10:15", 16.0),
+                            ("10:05", 15.0)],
+        })
+        self.assertBucketed(req, SID)
+        self.assertEqual(req.result[0]["responseDetail"]["detail"].count("1-minute buckets"), 1,
+                         "said once for the device and its components")
+        self.assertEqual([relation for relation, _ in self.reads(pg)],
+                         ["telemetry", "telemetry_1m", "telemetry_latest", "telemetry_1m"])
+
+    def test_a_device_inside_the_raw_window_carries_forward_from_the_rollup(self):
+        # Speed's value before the window is older than every raw row: only the rollup holds it.
+        # A bucket's last value is the metric's value when it ends, so no value here is a bucket.
+        req, pg = self.run_history({"elementIds": [SID], "startTime": "2026-09-28T10:45:00Z"})
+        self.assertEqual(self.stamps(self.only(req)["values"]), [
+            ("10:55", {"Speed": 6.0, "State": "ACTIVE", "Temp": 19.0}),
+            ("10:50", {"Speed": 5.0, "State": "ACTIVE", "Temp": 19.0}),
+        ])
+        self.assertEqual(req.status, 200)
+        self.assertIsNone(req.detail)
+        reads = self.reads(pg)
+        self.assertEqual([relation for relation, _ in reads],
+                         ["telemetry", "telemetry_latest", "telemetry", "telemetry_1m"])
+        self.assertEqual(reads[3][1]["bucket"], "lte.2026-09-28T10:29:00.000000Z")
+
+    def test_a_device_whose_seeds_are_raw_reads_no_rollup(self):
+        rollups = {**self.ROLLUPS, "telemetry_1m": [r for r in self.ROLLUPS["telemetry_1m"]
+                                                    if r["metric_name"] != "Speed"]}
+        raw = self.RAW + _telemetry((_at("10:35"), "Speed", 5.5))
+        req, pg = self.history({"elementIds": [SID], "startTime": "2026-09-28T10:45:00Z"}, raw,
+                               self.DEVICE, rollups=rollups)
+        self.assertEqual(self.only(req)["values"][-1]["value"], {"Speed": 5.5, "State": "ACTIVE", "Temp": 19.0})
+        self.assertEqual([relation for relation, _ in self.reads(pg)],
+                         ["telemetry", "telemetry_latest", "telemetry"])
+
+    # --- a 206 for buckets beside a 206 for a limit ----------------------------------------------
+    def test_a_cut_inside_the_buckets_says_both(self):
+        req, pg = self.run_history({"elementIds": [f"{SID}/Temp"], "limit": 3})
+        self.assertEqual(self.stamps(self.only(req)["values"]), [("10:50", 19.0), ("10:30", 18.0), ("10:29", 17.0)])
+        self.assertCut(req, f"{SID}/Temp", "this request's limit of 3 rows",
+                       "nothing at or before 2026-09-28T10:15:00.000000Z", self.JOIN)
+        self.assertBucketed(req, f"{SID}/Temp")
+        self.assertIn(f"A server limit cut 1 result(s) short: {SID}/Temp.", req.detail["detail"])
+        self.assertEqual(self.reads(pg)[1][1]["limit"], "2", "one past the limit, less the raw rows")
+
+    def test_a_cut_inside_the_raw_rows_reads_no_rollup(self):
+        req, pg = self.run_history({"elementIds": [f"{SID}/Temp"], "limit": 1})
+        self.assertEqual(self.stamps(self.only(req)["values"]), [("10:50", 19.0)])
+        self.assertCut(req, f"{SID}/Temp", "nothing at or before 2026-09-28T10:30:00.000000Z")
+        self.assertNotIn("rollup", req.detail["detail"])
+        self.assertNotIn("buckets", req.result[0]["responseDetail"]["detail"])
+        self.assertEqual([relation for relation, _ in self.reads(pg)], ["telemetry"])
+
+    def test_resuming_at_each_cut_crosses_the_join_with_no_gap_or_overlap(self):
+        collected, end = [], WINDOW["endTime"]
+        for _ in range(10):
+            req, _ = self.run_history({"elementIds": [f"{SID}/Temp"], "limit": 2, "endTime": end})
+            collected += self.stamps(self.only(req)["values"])
+            cut = re.search(r"nothing at or before (\S+) was returned",
+                            req.result[0].get("responseDetail", {}).get("detail", ""))
+            if cut is None:
+                break
+            end = cut.group(1)
+        self.assertEqual(collected, [("10:50", 19.0), ("10:30", 18.0), ("10:29", 17.0),
+                                     ("10:15", 16.0), ("10:05", 15.0)])
+
+    def test_every_value_lies_inside_the_window(self):
+        body = {"elementIds": [SID, f"{SID}/Temp"], "maxDepth": 0, "startTime": "2026-09-28T10:10:00Z"}
+        req, _ = self.run_history(body)
+        stamps = [v["timestamp"] for item in req.result for v in item["result"]["values"]]
+        stamps += [v["timestamp"] for c in req.result[0]["result"]["components"].values() for v in c["values"]]
+        self.assertIn("2026-09-28T10:15:00Z", stamps)
+        for stamp in stamps:
+            self.assertTrue("2026-09-28T10:10:00Z" <= stamp <= WINDOW["endTime"], stamp)
+
+    # --- which rollup ----------------------------------------------------------------------------
+    def test_the_finest_rollup_that_reaches_the_start_answers(self):
+        # telemetry_1m starts at 09:50, after this window does; telemetry_5m reaches 09:00.
+        body = {"elementIds": [f"{SID}/Temp"], "startTime": "2026-09-28T09:00:00Z",
+                "endTime": "2026-09-28T09:30:00Z"}
+        req, pg = self.run_history(body)
+        self.assertEqual(self.stamps(self.only(req)["values"]), [("09:00", 10.0)])
+        self.assertEqual([relation for relation, _ in self.reads(pg)], ["telemetry_5m"])
+        self.assertBucketed(req, f"{SID}/Temp", "are 5-minute buckets from telemetry_5m")
+        self.assertNotIn("any resolution", req.result[0]["responseDetail"]["detail"])
+
+    def test_with_none_reaching_the_start_the_furthest_answers_and_says_so(self):
+        body = {"elementIds": [f"{SID}/Temp"], "startTime": "2026-09-28T07:00:00Z",
+                "endTime": "2026-09-28T09:30:00Z"}
+        req, pg = self.run_history(body)
+        self.assertEqual(self.stamps(self.only(req)["values"]), [("08:00", 9.0)])
+        self.assertEqual([relation for relation, _ in self.reads(pg)], ["telemetry_1h"])
+        self.assertBucketed(req, f"{SID}/Temp", "1-hour buckets from telemetry_1h",
+                            "Nothing before 2026-09-28T08:00:00.000000Z is held at any resolution.")
+
+    def test_with_no_raw_rows_the_rollup_is_the_whole_series(self):
+        req, pg = self.history({"elementIds": [f"{SID}/Temp", SID]}, (), self.DEVICE,
+                               rollups={"telemetry_1m": self.ROLLUPS["telemetry_1m"]})
+        self.assertEqual(self.stamps(req.result[0]["result"]["values"]), [
+            ("10:50", 19.0), ("10:30", 18.0), ("10:29", 17.0), ("10:15", 16.0), ("10:05", 15.0),
+        ], "every bucket in the window, none held back for raw rows that are not there")
+        self.assertIn("No raw samples are held, so these values are 1-minute buckets",
+                      req.result[0]["responseDetail"]["detail"])
+        # No raw read, and no telemetry_latest: there is nothing in either.
+        self.assertEqual([relation for relation, _ in self.reads(pg)],
+                         ["telemetry_1m", "telemetry_1m", "telemetry_1m"])
+
+    def test_a_rollup_holding_nothing_older_than_the_raw_rows_is_not_read(self):
+        # A young stack: the 1m bucket at 10:00 holds the first raw sample, at 10:00:30.
+        raw = _telemetry(("2026-09-28T10:00:30+00:00", "Temp", 1.0), (_at("10:10"), "Temp", 2.0))
+        rollups = {"telemetry_1m": _rollup_rows((_at("10:00"), "Temp", 1.0), (_at("10:10"), "Temp", 2.0))}
+        req, pg = self.history({"elementIds": [f"{SID}/Temp"], "startTime": "2026-09-28T09:00:00Z"},
+                               raw, rollups=rollups)
+        self.assertEqual([v["value"] for v in self.only(req)["values"]], [2.0, 1.0])
+        self.assertEqual(req.status, 200)
+        self.assertEqual([relation for relation, _ in self.reads(pg)], ["telemetry"])
+
+    def test_a_failed_horizons_read_is_an_error_not_an_empty_series(self):
+        class Refusing(TelemetryPostgrest):
+            def get(self, relation, params=None):
+                if relation == "telemetry_horizons":
+                    raise SubscriptionError(502, "Bad Gateway", "Upstream read failed (503): down")
+                return super().get(relation, params)
+
+        req, _ = self.run_history({"elementIds": [f"{SID}/Temp", "cell-1"]},
+                                  pg=Refusing(self.RAW, rollups=self.ROLLUPS))
+        self.assertFalse(req.result[0]["success"])
+        self.assertEqual(req.result[0]["responseDetail"]["status"], 502)
+        self.assertTrue(req.result[1]["success"], "an object with no series reads nothing")
+
+    def test_the_rollup_is_chosen_as_the_export_dialog_chooses(self):
+        from datetime import datetime, timedelta, timezone
+
+        raw = datetime(2026, 9, 28, tzinfo=timezone.utc)
+        day = timedelta(days=1)
+        held = {"telemetry": raw, "telemetry_1m": raw - 180 * day, "telemetry_5m": raw - 365 * day,
+                "telemetry_1h": raw - 5 * 365 * day}
+
+        def chosen(horizons, start):
+            rollup = i3x_service._rollup_for(horizons, start)
+            return rollup and rollup[0]
+
+        for start, expected in (
+            (raw - 100 * day, "telemetry_1m"),   # the finest that covers the start
+            (raw - 180 * day, "telemetry_1m"),   # a horizon at the start covers it, as coversRange's <=
+            (raw - 200 * day, "telemetry_5m"),
+            (raw - 2 * 365 * day, "telemetry_1h"),
+            (raw - 6 * 365 * day, "telemetry_1h"),  # none covers: the one reaching furthest back
+            (raw + day, "telemetry_1m"),         # raw covers the window: the finest, for seeds
+        ):
+            with self.subTest(days_back=(raw - start) / day):
+                self.assertEqual(chosen(held, start), expected)
+        # A rollup must hold a whole bucket older than the first raw row to add anything.
+        young = {"telemetry": raw + timedelta(seconds=30), "telemetry_1m": raw, "telemetry_5m": raw,
+                 "telemetry_1h": raw}
+        self.assertIsNone(chosen(young, raw - day))
+        self.assertIsNone(chosen({"telemetry": raw, "telemetry_1m": None}, raw - day), "empty")
+        self.assertIsNone(chosen({}, raw), "a view that names nothing")
+        self.assertEqual(chosen({"telemetry": None, "telemetry_5m": raw}, raw - day), "telemetry_5m")
+
+    def test_the_rollups_are_the_export_dialogs_and_the_historians(self):
+        root = Path(__file__).resolve().parents[1]
+        dialog = (root / "frontend" / "src" / "utils" / "telemetryExport.js").read_text(encoding="utf-8")
+        relations = re.findall(r"relation: '(\w+)'", dialog)
+        self.assertEqual(relations, ["telemetry"] + [r for r, _, _ in i3x_service.ROLLUPS],
+                         "the same rollups, finest first, as EXPORT_RESOLUTIONS")
+        aggregates = (root / "timescaledb" / "aggregates.sql").read_text(encoding="utf-8")
+        widths = dict(re.findall(
+            r"CREATE MATERIALIZED VIEW IF NOT EXISTS (\w+)\s+WITH \(timescaledb\.continuous\) AS\s+"
+            r"SELECT time_bucket\(INTERVAL '([^']+)'", aggregates))
+        units = {"minute": 60, "minutes": 60, "hour": 3600, "hours": 3600}
+        for relation, width, _ in i3x_service.ROLLUPS:
+            with self.subTest(relation=relation):
+                count, unit = widths[relation].split()
+                self.assertEqual(width.total_seconds(), int(count) * units[unit])
+                self.assertIn(f"'{relation}'::text", aggregates, "a row of telemetry_horizons")
 
 
 class TestComponentLimit(_HistoryCase):

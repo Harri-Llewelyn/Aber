@@ -38,7 +38,7 @@ worth adopting:
 
 | i3X concept | Already exists here as |
 | :--- | :--- |
-| ObjectType (a JSON Schema) | `schemas.schema_definition` — **the same thing**, no translation; a metric's is its `metric_catalog` row |
+| ObjectType (a JSON Schema) | `schemas.schema_definition` — **the same thing**, except that a property naming a catalog metric refers to that metric's type; a metric's is its `metric_catalog` row |
 | `elementId` (unique, persistent) | `sparkplug_id`; a metric's is `<sparkplug_id>/<metric name>`, the key of `telemetry` |
 | `displayName` (human-readable when practical) | `name` |
 | `isExtended` (publishes beyond its type) | Unmodelled, derived by `deviceTags.js` |
@@ -208,16 +208,51 @@ The mappings that are decisions rather than mechanics:
   never published is `GoodNoData` while its device is online. There is no metric-group level,
   because `Controller` and `Controller/EXECUTION` can both be metrics.
 
-  A metric's type is its catalog row, `i3x:type:metric:<name>`: a scalar schema from its
-  Sparkplug datatype, with the row's description and its unit as `x-unit`. A metric the catalog
-  lacks takes `i3x:type:sparkplug:<datatype>` from its DBIRTH datatype, else `UnknownType`.
-  `UnknownType`'s schema is `{}`, not the guide's `{"type": "object"}`: a metric's value is a
-  bare scalar, and a value must conform to its type (the suite's QRY-03).
+  A metric's type is its catalog row, `i3x:type:metric:<name>`, read at request time and never
+  written back. Its schema is a scalar from the row's Sparkplug datatype, with these keywords:
+
+  | Keyword | From the row |
+  | :--- | :--- |
+  | `description` | `description` |
+  | `x-unit` | `units` |
+  | `x-category` | `category`: `SAMPLE`, `EVENT` or `CONDITION` |
+  | `x-semantic-id-type` | `semantic_id_type`: `IRI` or `IRDI`. The id itself is the type's `sourceTypeId` |
+  | `x-permitted-values` | `permitted_values`, converted to the values served for the datatype. Left out when the row has none, or when one does not convert |
+
+  **`x-permitted-values` is advisory, not a constraint.** It lists the values the catalog gives
+  for the metric, usually from its standard's vocabulary. A device that reports a value outside
+  the list is accepted: ingestion stores it, the dashboard tags the device *Out of vocabulary*,
+  and this server serves it. So the list is never `enum`. A type must admit every value the
+  server serves for it, and an `enum` would be violated by the server's own answer.
+
+  A metric the catalog lacks takes `i3x:type:sparkplug:<datatype>` from its DBIRTH datatype, else
+  `UnknownType`. `UnknownType`'s schema is `{}`, not the guide's `{"type": "object"}`: a metric's
+  value is a bare scalar, and a value must conform to its type (the suite's QRY-03).
+- **Every metric type is nullable**, because the guide requires nullability to be declared, not
+  inferred: `{"type": ["number", "null"]}`, and likewise for each JSON type, catalog or fallback.
+  So is each `schemaExtensions` fragment. Any Sparkplug metric can arrive with `is_null`, and a
+  null value means the metric reported no value. The only other null is a datatype with no
+  scalar form (DataSet, Template, Bytes), whose `{}` schema admits it. Quality says the rest, by
+  the table below:
+  - a metric's own null value is `GoodNoData`, or `Bad` when its source is down, never `Good`;
+  - in a device's map the field is null, and the map's quality is the map's;
+  - a stored null in history is `GoodNoData`.
 - **A device is typed by every schema attached to it**, read from the `device_schemas` view as
   the dashboard, the AAS exporter and ingestion read it, not from `devices.schema_id` alone. One
   schema is its type. Several are one synthesized type per distinct set,
   `i3x:type:schemas:<ids sorted, joined by +>`, whose schema is `allOf` over their definitions,
-  inlined. `isExtended` is judged against the union of what they model. When it is true,
+  inlined.
+- **A device's type refers to its metrics' types.** Each property that names a catalog metric
+  becomes `{"$ref": "#/$defs/<metric type id>"}`, keeping the property's own `title` and
+  `description`, and the metric type's schema is copied into the type's `$defs`. The guide reads
+  a `$ref` inside `properties` as "is made up of" (`HasComponent`), which is what a device's
+  metrics are. The reference is a JSON Pointer, so `/` in a metric name is written `~1`:
+  `#/$defs/i3x:type:metric:Axes~1X~1POSITION`. Its last segment is the type's elementId, and it
+  resolves inside the schema it sits in, so a validator needs nothing else. A property with no
+  catalog row keeps the schema as written. On a set's type the `$defs` is at the root, beside
+  `allOf`. A definition with its own `$id` is left as written there, since `#/$defs` inside it
+  would name its own root. The `schemas` row itself is never changed.
+- **`isExtended` is judged against the union of what a device's schemas model.** When it is true,
   `metadata.schemaExtensions` gives each metric beyond them a JSON Schema fragment from its DBIRTH
   datatype. Vendor keys, `quarantined` among them, are under `metadata.system`.
 - **`quality` is derived at read time, by one rule.** `value_quality()` in `address_space.py`
@@ -326,7 +361,7 @@ All under `/v1`. `GET /info` is open; everything else requires `Authorization`.
 | POST | `/objects/list` | Bulk, **results in request order** |
 | POST | `/objects/related` | Edges as `{sourceRelationship, object}` |
 | POST | `/objects/value` | From the MQTT cache, gated on a PostgREST read; what the cache lacks from `telemetry_latest` |
-| POST | `/objects/history` | From TimescaleDB; `startTime`/`endTime` **required** |
+| POST | `/objects/history` | From TimescaleDB, and its rollups before the raw rows begin; `startTime`/`endTime` **required** |
 | POST | `/subscriptions` | + `/list`, `/delete`, `/register`, `/unregister` |
 | POST | `/subscriptions/sync` | MUST. 206 on queue overflow, or when elements left the caller's view |
 | POST | `/subscriptions/stream` | MAY. SSE, **one stream per subscription** |
@@ -347,14 +382,16 @@ from `docs/openapi.yaml` on purpose**: this server is not behind the gateway, ta
 newest first in every case:
 
 - **A metric**, `<sparkplug_id>/<metric_name>` split at the first `/`: its stored samples as scalar
-  VQTs. One read, on `(asset_id, metric_name)`.
+  VQTs, read on `(asset_id, metric_name)`. One read, or two when the window reaches back before the
+  raw rows ([Older than the raw rows](#older-than-the-raw-rows)).
 - **A device**: one map per instant at which any of its metrics changed, holding every metric's
   newest value at that instant, which is the shape of its current value. Sparkplug reports by
   exception, so each value is carried forward from before the window: `telemetry_latest` gives it
   for a metric quiet since, and one read of the rows just before the window gives it for the rest.
-  A metric with no value yet is absent from the map rather than invented. That is at most three
-  reads (the window, `telemetry_latest`, the rows before it), and one for a device quiet through
-  the window.
+  A metric with no value yet is absent from the map rather than invented. That is at most four
+  reads: the window, `telemetry_latest` and the rows before the window, plus a second read for
+  whichever of the window or the rows before it reaches into a rollup. A device quiet through the
+  window costs only the window's reads.
 - **Its components**, at `maxDepth` 0 or above 1: each metric's samples under `components`, keyed
   by elementId. They are sliced from the device's own rows, so they add no reads and agree with
   its maps.
@@ -376,19 +413,50 @@ The maps then leave the quiet metric out until it changes, and its own elementId
 
 `startTime` and `endTime` are RFC 3339 with `Z` or an offset, parsed in full. PostgREST is sent the
 parsed instant, never the text, and a start after the end is a 400. The reads run one after
-another, so a request naming N devices costs up to 3N.
+another, so a request naming N devices costs up to 4N, plus one read of `telemetry_horizons`.
+
+#### Older than the raw rows
+
+Raw rows are kept for `timescaledb.retention.retainFor`, 14 days in the chart. The rollups are kept
+longer, by `timescaledb.rollups`: `telemetry_1m` for 180 days, `telemetry_5m` for a year and
+`telemetry_1h` for five. Where a window reaches back before the oldest raw row, a rollup continues
+the series, so last month comes back as per-minute buckets rather than as nothing.
+
+- **Which rollup.** The request reads `telemetry_horizons` once, before its first series: the
+  oldest row each relation holds. The finest rollup whose oldest bucket reaches `startTime`
+  answers, the rule of the export dialog's `bestResolutionFor()`
+  (`frontend/src/utils/telemetryExport.js`). When none reaches it, the one reaching furthest back
+  answers. A rollup counts only if it holds a whole bucket from before the raw rows begin. A young
+  stack's rollups hold only what its raw rows hold, so it reads none.
+- **What a bucket is.** Its `last_double`, `last_string` or `last_bool` is the value, and its start
+  is the timestamp. Only buckets that end by the time the raw rows begin are read, and every raw
+  row is newer, so the two never overlap and a series joins them once. A bucket that the first
+  raw row falls inside is not served. Raw retention drops whole chunks, so that bucket holds raw
+  rows only, unless `timescaledb.retention.chunkInterval` is not a whole number of buckets.
+- **The 206.** An item with a bucketed value, in its values or its components, answers 206. Its
+  `responseDetail` names the rollup and its resolution and the instant the raw rows begin. When no
+  rollup reaches `startTime`, it also names the oldest instant held at any resolution. The
+  response's own `responseDetail` names every such item. A limit can cut the same series, and the
+  detail then says both. Resuming at the instant it names crosses the join like any other.
+- **Values carried forward.** A device's maps take their seeds from the rows before the window:
+  raw rows first, then the rollup's buckets when the raw rows run out first. This happens wherever
+  the window starts. A bucket's last value is the metric's value when the bucket ends. So a value
+  carried from a bucket into maps at raw instants is a sampled value, not an aggregate, and those
+  maps are not called buckets. Maps at bucket instants are buckets, and the 206 says so.
 
 **Every read depends on a small LIMIT.** `public.telemetry` is a `postgres_fdw` foreign table with
 no statistics. The planner ships the `WHERE`, `ORDER BY` and `LIMIT` to the historian whole only
 while the LIMIT is small. Measured on PostgreSQL 17 with the columns these reads select, that holds
 up to 6338 rows. From 6339 up it ships only the `WHERE`, then fetches every matching row and sorts
 them locally. Turning on `use_remote_estimate` would fix the plan but costs 4 to 80 ms of planning
-on every telemetry read, so it stays off. Two consequences:
+on every telemetry read, so it stays off. The rollups are foreign tables of the same kind, and a
+rollup read selects columns of the same types (`bucket`, `metric_name` and the three `last_*`), so
+it is held to the same bounds; the threshold was measured on `telemetry`. Two consequences:
 - `I3X_HISTORY_MAX_ROWS` defaults to 1000. Raised past about 6300, each window read fetches its
-  whole window.
+  whole window. A window's raw and rollup reads share that limit.
 - The read before the window has no lower time bound, so it asks for at most 1000 rows
-  (`HISTORY_SEED_MAX_ROWS`) whatever the limit. Past the threshold it would fetch the device's
-  entire history.
+  (`HISTORY_SEED_MAX_ROWS`) whatever the limit, raw and bucketed together. Past the threshold it
+  would fetch the device's entire history.
 
 The AAS export's keyset pages (`supabase/functions/_shared/aas/bundle.ts`, 5000 rows) are under
 it too.
@@ -566,7 +634,7 @@ obvious.
 | `server_info` | `GET /info` — including `update.current: false` |
 | `list_root_objects`, `get_object`, `search_objects`, `refresh_catalog` | `GET /objects`, `POST /objects/list` |
 | `read_current_value` | `POST /objects/value` — values, `quality`, timestamp |
-| `get_history` | `POST /objects/history` — raw samples out of TimescaleDB; the server serves no rollups |
+| `get_history` | `POST /objects/history` — samples out of TimescaleDB, continued by a rollup's buckets where the range is older than the raw rows (a 206 says where) |
 | `find_related` | `POST /objects/related` — `HasParent` / `HasChildren` / `HasComponent` |
 | `describe_type` | `GET /objecttypes` |
 | `watch_values` | the subscription set, capped by `I3X_WATCH_MAX_SEC` (default 300s) |
@@ -954,10 +1022,8 @@ than minutes, and why `0` disables the cache outright.
   it. The gateway appliance beats every 30 s.
 - **A metric silent for longer than raw retention** (`timescaledb.retention.retainFor`, 14 days
   in the chart) is not in `telemetry_latest`, so after a restart it is `GoodNoData` until it
-  changes.
-- **History reads the raw hypertable only.** A range older than raw retention
-  (`timescaledb.retention.retainFor`, 14 days in the chart) comes back empty, although the rollups
-  still hold it (#505).
+  changes. A device's history maps leave it out until it changes too, unless the read before the
+  window reaches into a rollup and meets it there ([History](#history)).
 - **Writes are not implemented, and that is a decision rather than a gap.** `PUT /objects/value`
   answers 405 and `/info` declares `update.current: false`. A server that does not implement the
   verb cannot be talked into it.

@@ -385,8 +385,8 @@ export const SUITES = {
       "protecting a client's unprocessed updates -- reporting \"no updates were observed on the " +
       'subscription", because a demo device publishing every five seconds does not reliably ' +
       'produce one inside the window. Those are covered here or nowhere. Queue overflow needs ' +
-      '10,000 batches and TTL expiry needs minutes of wall clock, neither of which a live run ' +
-      'reaches.',
+      'I3X_SUBSCRIPTION_QUEUE_LIMIT (500) undelivered batches and TTL expiry needs minutes of ' +
+      'wall clock, neither of which a live run reaches.',
   },
   'supabase/functions/grafana-alert-webhook/test_grafana_alert_webhook.py': {
     lanes: ['unit'],

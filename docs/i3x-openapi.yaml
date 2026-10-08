@@ -197,14 +197,20 @@ paths:
         and untyped-device types that give the structural objects something to point at.
 
         The metric types, always served so every metric's `typeElementId` resolves:
-        * `i3x:type:metric:<name>` per `metric_catalog` row: a scalar schema from its Sparkplug
-          datatype, with `description` and the unit as `x-unit`, and its semantic id as
-          `sourceTypeId`;
-        * `i3x:type:sparkplug:<datatype>` for a metric the catalog lacks, by its DBIRTH datatype;
+        * `i3x:type:metric:<name>` per `metric_catalog` row: a nullable scalar schema from its
+          Sparkplug datatype, with `description`, and the unit, category, semantic id type and
+          permitted values as `x-unit`, `x-category`, `x-semantic-id-type` and
+          `x-permitted-values`; its semantic id is the `sourceTypeId`;
+        * `i3x:type:sparkplug:<datatype>` for a metric the catalog lacks, by its DBIRTH datatype,
+          nullable as well;
         * `UnknownType` (`i3x:type:unknown`), schema `{}`, when no datatype is known.
 
+        A schema's property that names a catalog metric refers to that metric's type with a
+        `$ref` into the schema's own `$defs`.
+
         And `i3x:type:schemas:<ids sorted, joined by +>` for each distinct set of schemas
-        attached to a device: `allOf` over their definitions, inlined.
+        attached to a device: `allOf` over their definitions, inlined, with one `$defs` at the
+        root for the metric types they refer to.
       parameters:
         - name: namespaceUri
           in: query
@@ -525,8 +531,8 @@ paths:
       tags: [Values]
       summary: Historical values
       description: |
-        From the TimescaleDB hypertable through PostgREST, **never** from the value cache, so
-        these reads carry the caller's token like every other.
+        From the TimescaleDB hypertable and its rollups through PostgREST, **never** from the
+        value cache, so these reads carry the caller's token like every other.
 
         `startTime` and `endTime` are **required**: an unbounded history query over a
         hypertable is not a slow request, it is an availability incident. Both are RFC 3339
@@ -551,6 +557,17 @@ paths:
         `responseDetail` names the instant it stops at, and asking again with that instant as
         `endTime` returns the rest. `I3X_MAX_COMPONENTS` bounds the components, as on
         `/objects/value`.
+
+        **Older than the raw rows, a rollup continues the series.** Raw rows are kept for
+        `timescaledb.retention.retainFor` (14 days in the chart); `telemetry_1m`,
+        `telemetry_5m` and `telemetry_1h` are kept longer. The finest rollup whose oldest
+        bucket reaches `startTime` answers for the part of the window before the raw rows
+        begin, as the dashboard's export dialog chooses, else the one reaching furthest back.
+        Each bucket is one value: its last value, timestamped at the bucket's start. Only
+        buckets that end by the time the raw rows begin are served, so the series joins raw
+        and buckets once. A device's maps carry values forward from the rollup too. An item
+        holding any bucketed value answers **206**, and its `responseDetail` names the rollup,
+        its resolution and the instant the raw rows begin, beside any limit that cut it.
       requestBody:
         required: true
         content:
@@ -609,9 +626,11 @@ paths:
                         - { value: 37.4, quality: Good, timestamp: '2026-09-28T10:10:00Z' }
         '206':
           description: |
-            A server limit cut at least one series or components list short. Each item cut is
-            still `success: true` and carries its own `responseDetail` with status 206 saying
-            where it stops; the top-level one names every item cut.
+            A server limit cut at least one series or components list short, or part of a
+            series is a rollup's buckets because it is older than the raw rows, or both. Each
+            such item is still `success: true` and carries its own `responseDetail` with status
+            206 saying where it stops and where the buckets join the raw samples; the top-level
+            one names every such item.
           content:
             application/json:
               schema:
@@ -634,10 +653,21 @@ paths:
                       title: Partial results returned
                       status: 206
                       detail: "This series stops at this request's limit of 2 rows: nothing at or before 2026-09-28T10:30:00.000000Z was returned. Request it again with that endTime for the rest."
+                  - success: true
+                    elementId: dev220000000000400080000/Controller/EXECUTION
+                    result:
+                      isComposition: false
+                      values:
+                        - { value: ACTIVE, quality: Good, timestamp: '2026-09-14T00:02:11.402Z' }
+                        - { value: READY, quality: Good, timestamp: '2026-09-13T23:58:00Z' }
+                    responseDetail:
+                      title: Partial results returned
+                      status: 206
+                      detail: "Values before 2026-09-14T00:00:00.000000Z, where the raw samples begin, are 1-minute buckets from telemetry_1m, not samples: each is the last value in its bucket, timestamped at the bucket's start."
                 responseDetail:
                   title: Partial results returned
                   status: 206
-                  detail: "A server limit cut 1 result(s) short: dev220000000000400080000/Systems/TEMPERATURE. Each one's responseDetail says where."
+                  detail: "A server limit cut 1 result(s) short: dev220000000000400080000/Systems/TEMPERATURE. 1 result(s) answer part of the range from a rollup's buckets, not raw samples: dev220000000000400080000/Controller/EXECUTION. Each one's responseDetail says where."
         '400':
           description: '`elementIds` missing or not an array of strings, `startTime`/`endTime` absent, not RFC 3339 or the start after the end, `limit` not a positive integer, or `maxDepth` not an integer of 0 or more.'
           content:
@@ -1140,10 +1170,20 @@ components:
         schema:
           type: object
           description: |
-            `schemas.schema_definition` verbatim — it already is a JSON Schema, so nothing is
-            translated. A metric type's is a scalar such as `{"type": "number", "x-unit":
-            "CELSIUS"}`; `UnknownType`'s is `{}`; a set of schemas' is `{"type": "object",
-            "allOf": [...]}` over their definitions.
+            `schemas.schema_definition` as written — it already is a JSON Schema — except that
+            each property naming a catalog metric is `{"$ref": "#/$defs/<metric type id>"}`
+            (`/` in the name written `~1`), with that metric type's schema in the type's own
+            `$defs`. A `$ref` inside `properties` reads as "is made up of".
+
+            A metric type's is a nullable scalar such as `{"type": ["number", "null"],
+            "x-unit": "CELSIUS", "x-category": "SAMPLE"}`: any metric can arrive with
+            `is_null`, and null means it reported no value. From its catalog row, `x-unit` is
+            the unit, `x-category` the category (`SAMPLE`, `EVENT` or `CONDITION`),
+            `x-semantic-id-type` `IRI` or `IRDI`, and `x-permitted-values` the values the
+            catalog lists for the metric. That list is advisory, never `enum`: a value outside
+            it is accepted, served, and flagged out of vocabulary on the dashboard.
+            `UnknownType`'s is `{}`. A set of schemas' is `{"type": "object", "allOf": [...],
+            "$defs": {...}}` over their definitions.
         related:
           type: object
           description: 'Only on a type synthesized for a set of schemas: `{relationshipType: InheritsFrom, types: [<schema ids>]}`, the schemas it is a kind of.'
@@ -1236,7 +1276,9 @@ components:
             lane or Unassigned `{deviceCount, description}`, a gateway `{status, sparkplugGroup,
             lastHeartbeat}`, or `null` with `GoodNoData` when it has no stored status. Counts are
             of devices or cells, never of children.
-            A metric sends its latest value, a bare scalar.
+            A metric sends its latest value, a bare scalar, or `null` (`GoodNoData`, or `Bad`
+            when its source is down) when it reported `is_null`; a device's map holds that
+            null under the metric's name, which its type declares nullable.
         quality: { $ref: '#/components/schemas/Quality' }
         timestamp: { type: string, format: date-time }
         components:
@@ -1253,6 +1295,8 @@ components:
           description: |
             Newest first, all inside the window. A metric's are scalars; a device's are maps of
             metric name to value, one per instant a metric changed. Empty for anything else.
+            Before the raw rows begin, each is a rollup bucket's last value at the bucket's
+            start, and the item's 206 `responseDetail` says so.
           items:
             type: object
             properties:
