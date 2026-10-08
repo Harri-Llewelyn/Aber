@@ -66,7 +66,7 @@ jobs:
   # not repeated; they ran on the commit this tag points at.
   prepare-release:
     name: Resolve Version & Pre-flight Checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       push: ${{ steps.resolve.outputs.push }}
@@ -143,7 +143,7 @@ jobs:
   build-images:
     name: Image — ${{ matrix.name }}
     needs: prepare-release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       # One image failing should not leave the others unbuilt: the chart job `needs` this one, so a
       # failure anywhere stops the chart, and finishing the siblings shows whether the failure was
@@ -314,7 +314,7 @@ jobs:
   build-ingestion-chain:
     name: Images — ingestion, test-runner
     needs: prepare-release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       # docker-bake.hcl reads these.
       VERSION: ${{ needs.prepare-release.outputs.version }}
@@ -417,7 +417,7 @@ jobs:
   publish-chart:
     name: Helm Chart
     needs: [prepare-release, build-images, build-ingestion-chain]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout Code
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -577,7 +577,7 @@ jobs:
     name: SBOMs On The GitHub Release
     needs: [prepare-release, build-images, build-ingestion-chain, publish-chart]
     if: needs.prepare-release.outputs.push == 'true' && github.ref_type == 'tag'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       packages: read

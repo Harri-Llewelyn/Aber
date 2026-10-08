@@ -91,7 +91,7 @@ concurrency:
 jobs:
   rehearse:
     name: Seed → Backup → Destroy → Reinstall → Restore → Assert
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The target is under 30 minutes so it stays enabled; this is the ceiling that stops a hung
     # wait burning an hour, not the expectation.
     timeout-minutes: 45
@@ -118,7 +118,7 @@ jobs:
 
       - name: Install psql
         # The rehearsal talks to both databases directly over a port-forward, so the CLIENT has to
-        # be on the runner. ubuntu-latest ships one, but not necessarily a 17 -- and pg_dump refuses
+        # be on the runner. The runner image ships one, but not necessarily a 17 -- and pg_dump refuses
         # to dump a server newer than itself, which would present as a backup failure rather than
         # as a missing package.
         run: |

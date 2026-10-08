@@ -25,7 +25,7 @@ jobs:
   # it cannot compute runs everything). No third-party action; `git diff` answers this.
   changes:
     name: Which Paths Changed
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       code: ${{ steps.classify.outputs.code }}
@@ -124,7 +124,7 @@ jobs:
 
   frontend-build:
     name: Frontend Build & Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     # Ordering only -- there is no job-level `if`, so this job runs whatever the diff holds. One
     # step inside it reads `playbook`, and a step cannot see an output the job did not ask for.
@@ -353,7 +353,7 @@ jobs:
   # that cannot produce valid manifests fails on the PR. The in-cluster run is k8s-validation.
   helm-chart:
     name: Helm Chart Lint & Render
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Checkout Code
@@ -1414,7 +1414,7 @@ jobs:
 
   edge-function-auth-test:
     name: Edge Function & RLS Authorization Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
@@ -1528,7 +1528,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     name: End-to-End Kubernetes (k3d) Stack Validation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Sequential inside the job; the whole thing is bounded so a hung wait cannot burn an hour.
     timeout-minutes: 60
     env:
@@ -1855,7 +1855,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.install == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     name: Site Install Rehearsal (k3d)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       NS: aber
@@ -1907,7 +1907,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.install == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     name: Upgrade From The Last Release (k3d)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 75
     env:
       NS: aber
@@ -1954,7 +1954,7 @@ jobs:
   # because it reads history, and a shallow clone would scan one commit and say so.
   secret-scan:
     name: Secret Scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout Code
@@ -1972,7 +1972,7 @@ jobs:
     name: Static Analysis
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Checkout Code
