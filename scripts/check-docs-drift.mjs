@@ -4077,12 +4077,12 @@ function edgeFunctionNames() {
     'frontend/index.html',
     ...allFiles.filter((f) => f.startsWith('frontend/src/') && f.endsWith('.css')),
   ];
-  const ORIGIN = String.raw`["']?\s*(?:https?:)?//`;
+  // Each ends at an http:, https: or protocol-relative // after the opening quote, if any.
   const REFERENCES = [
-    ['<link>', new RegExp(String.raw`<link\b[^>]*\bhref\s*=\s*${ORIGIN}`, 'gi')],
-    ['<script src>', new RegExp(String.raw`<script\b[^>]*\bsrc\s*=\s*${ORIGIN}`, 'gi')],
-    ['@import', new RegExp(String.raw`@import\s+(?:url\(\s*)?${ORIGIN}`, 'gi')],
-    ['url()', new RegExp(String.raw`(?<!@import\s+)\burl\(\s*${ORIGIN}`, 'gi')],
+    ['<link>', /<link\b[^>]*\bhref\s*=\s*["']?\s*(?:https?:)?\/\//gi],
+    ['<script src>', /<script\b[^>]*\bsrc\s*=\s*["']?\s*(?:https?:)?\/\//gi],
+    ['@import', /@import\s+(?:url\(\s*)?["']?\s*(?:https?:)?\/\//gi],
+    ['url()', /(?<!@import\s+)\burl\(\s*["']?\s*(?:https?:)?\/\//gi],
   ];
   // A comment keeps its newlines, so a line number still points at the source.
   const blank = (text) => text.replace(/<!--[\s\S]*?-->|\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '));

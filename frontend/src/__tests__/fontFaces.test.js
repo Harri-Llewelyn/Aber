@@ -11,7 +11,9 @@ import path from 'node:path'
 const SRC = path.resolve(__dirname, '..')
 const APP_CSS = fs.readFileSync(path.join(SRC, 'App.css'), 'utf8')
 const FACES = [...APP_CSS.matchAll(/@font-face \{([^}]*)\}/g)].map((m) => {
-  const prop = (name) => m[1].match(new RegExp(`${name}:\\s*([^;]+);`))?.[1].trim()
+  const declarations = Object.fromEntries(m[1].split(';').filter((d) => d.includes(':'))
+    .map((d) => [d.slice(0, d.indexOf(':')).trim(), d.slice(d.indexOf(':') + 1).trim()]))
+  const prop = (name) => declarations[name]
   return {
     family: prop('font-family'),
     weight: prop('font-weight'),
