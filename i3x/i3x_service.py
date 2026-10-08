@@ -50,7 +50,7 @@ import sys
 import threading
 import time
 from collections import OrderedDict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, List, Optional
 
@@ -2040,25 +2040,70 @@ def _pg_time(instant: datetime) -> str:
 
 
 TELEMETRY_COLUMNS = "time,metric_name,val_double,val_string,val_bool"
+# The rollups that continue a series older than the raw rows, finest first, as EXPORT_RESOLUTIONS
+# in frontend/src/utils/telemetryExport.js lists them: (relation, bucket width, name). A bucket
+# stands for its last value, read in columns of the same types as TELEMETRY_COLUMNS.
+ROLLUPS = (
+    ("telemetry_1m", timedelta(minutes=1), "1-minute"),
+    ("telemetry_5m", timedelta(minutes=5), "5-minute"),
+    ("telemetry_1h", timedelta(hours=1), "1-hour"),
+)
+ROLLUP_COLUMNS = "bucket,metric_name,last_double,last_string,last_bool"
 
 
-def _read_telemetry(pg: PostgrestClient, element_id: str, start, end, limit: int,
-                    metric: Optional[str] = None) -> List[dict]:
+def _read_rows(pg: PostgrestClient, relation: str, element_id: str, upper: str, limit: int, *,
+               lower: Optional[str] = None, inclusive: bool = True,
+               metric: Optional[str] = None) -> List[dict]:
     """
-    A device's stored rows in [start, end], or one metric's, newest first. `start` and `end` are
-    `_pg_time` strings. The upper bound goes in `and` because a params dict holds one `time` key.
+    A device's stored rows, or one metric's, newest first: `telemetry`'s by `time`, or a rollup's
+    by `bucket`. At or after `lower` when given, and before `upper`, or at it when `inclusive`.
+    The bounds are `_pg_time` strings; the upper one goes in `and` beside a lower one because a
+    params dict holds one key per column.
     """
-    params = {
-        "select": TELEMETRY_COLUMNS,
-        "asset_id": "eq." + element_id,
-        "time": "gte." + str(start),
-        "and": "(time.lte." + str(end) + ")",
-        "order": "time.desc",
-        "limit": str(limit),
-    }
+    column = "time" if relation == "telemetry" else "bucket"
+    bound = ("lte." if inclusive else "lt.") + upper
+    params = {"select": TELEMETRY_COLUMNS if column == "time" else ROLLUP_COLUMNS,
+              "asset_id": "eq." + element_id}
+    if lower is None:
+        params[column] = bound
+    else:
+        params[column] = "gte." + lower
+        params["and"] = f"({column}.{bound})"
+    params["order"] = column + ".desc"
+    params["limit"] = str(limit)
     if metric is not None:
         params["metric_name"] = "eq." + metric
-    return pg.get("telemetry", params)
+    return pg.get(relation, params)
+
+
+def _rollup_for(horizons: Dict[str, Optional[datetime]], start: datetime) -> Optional[tuple]:
+    """
+    The rollup that answers for what is older than the raw rows: the finest whose oldest bucket
+    reaches `start`, as the export dialog's bestResolutionFor() chooses, else the one reaching
+    furthest back. It must hold a whole bucket from before the raw rows begin. `horizons` is
+    `telemetry_horizons`, relation to its oldest row or None. Returns (relation, width, name,
+    oldest bucket), or None.
+    """
+    raw = horizons.get("telemetry")
+    held = [
+        (relation, width, name, horizons[relation])
+        for relation, width, name in ROLLUPS
+        if horizons.get(relation) is not None and (raw is None or horizons[relation] + width <= raw)
+    ]
+    covering = next((r for r in held if r[3] <= start), None)
+    return covering or min(held, key=lambda r: r[3], default=None)
+
+
+def _bucket_row(row: dict) -> dict:
+    """A rollup row as a stored row: its bucket's start and last value, marked as a bucket."""
+    return {
+        "time": row.get("bucket"),
+        "metric_name": row.get("metric_name"),
+        "val_double": row.get("last_double"),
+        "val_string": row.get("last_string"),
+        "val_bool": row.get("last_bool"),
+        "bucketed": True,
+    }
 
 
 def _sample_value(row: dict):
@@ -2124,35 +2169,102 @@ def _snapshots(rows: List[dict], seeds: Dict[str, dict], budget: int) -> tuple:
 class _History:
     """
     One history request's series, each read at most once. A metric's is its stored samples; a
-    device's is a map snapshot per instant. README.md -> "History" states what each costs.
+    device's is a map snapshot per instant. Where a series reaches back before the raw rows, a
+    rollup's buckets continue it. README.md -> "History" states what each costs.
     """
 
     def __init__(self, pg: PostgrestClient, space: dict, start: datetime, end: datetime,
                  rows: int, limit: str):
         self.pg, self.rows, self.limit = pg, rows, limit
         self.devices = space.get("_devices_by_sid") or {d["sparkplug_id"]: d for d in space["devices"]}
-        self.start, self.window = start, (_pg_time(start), _pg_time(end))
+        self.start, self.end = start, end
+        self._tiers: Optional[tuple] = None
         self._device_cache: Dict[str, tuple] = {}
         self._metric_cache: Dict[tuple, tuple] = {}
 
     def series(self, element_id: str, component: bool = False) -> tuple:
         """
-        (values newest first, notes on what cut them short). A metric reached as a component of
-        its device is sliced from the device's rows, so it matches the device's snapshots.
+        (values newest first, notes on what cut them short, whether any value is a bucket). A
+        metric reached as a component of its device is sliced from the device's rows, so it
+        matches the device's snapshots.
         """
         sid, slash, name = element_id.partition("/")
         if slash and sid in self.devices:
             if component and sid in self._device_cache:
-                rows, _, _, row_notes = self._device_cache[sid]
+                rows, _, _, row_notes, _ = self._device_cache[sid]
                 mine = [r for r in rows if r["metric_name"] == name]
-                return [_vqt(_sample_value(r), r.get("time")) for r in mine], row_notes
+                return ([_vqt(_sample_value(r), r.get("time")) for r in mine], row_notes,
+                        any(r.get("bucketed") for r in mine))
             return self._metric(sid, name)
         if element_id in self.devices:
-            _, snapshots, notes, _ = self._device(element_id)
-            return snapshots, notes
+            _, snapshots, notes, _, bucketed = self._device(element_id)
+            return snapshots, notes, bucketed
         # Only devices and their metrics carry telemetry. Anything else has no series of its own,
         # and inventing an aggregate would assert a measurement nobody took.
-        return [], []
+        return [], [], False
+
+    def tiers(self) -> tuple:
+        """
+        (where the raw rows begin, None when there are none; the rollup that answers before them,
+        or None), from one read of `telemetry_horizons` per request, made when first needed.
+        """
+        if self._tiers is None:
+            rows = self.pg.get("telemetry_horizons", {"select": "relation,oldest"})
+            horizons = {row.get("relation"): _rfc3339(row.get("oldest")) for row in rows}
+            self._tiers = (horizons.get("telemetry"), _rollup_for(horizons, self.start))
+        return self._tiers
+
+    def bucket_note(self) -> str:
+        """Where a series turns from raw samples into the rollup's buckets, and what they are."""
+        raw_from, (relation, _, name, oldest) = self.tiers()
+        text = (
+            f"Values before {_pg_time(raw_from)}, where the raw samples begin, are"
+            if raw_from is not None else "No raw samples are held, so these values are"
+        ) + (
+            f" {name} buckets from {relation}, not samples: each is the last value in its bucket, "
+            f"timestamped at the bucket's start."
+        )
+        if oldest > self.start:
+            text += f" Nothing before {_pg_time(oldest)} is held at any resolution."
+        return text
+
+    def _raw(self, sid: str, upper: datetime, inclusive: bool, limit: int,
+             lower: Optional[datetime] = None, metric: Optional[str] = None) -> List[dict]:
+        """The raw rows in the range, newest first; no read when the range ends before them."""
+        raw_from, _ = self.tiers()
+        if raw_from is None or upper < raw_from or (upper == raw_from and not inclusive):
+            return []
+        return _read_rows(self.pg, "telemetry", sid, _pg_time(upper), limit,
+                          lower=_pg_time(lower) if lower is not None else None, inclusive=inclusive,
+                          metric=metric)
+
+    def _buckets(self, sid: str, upper: datetime, inclusive: bool, limit: int,
+                 lower: Optional[datetime] = None, metric: Optional[str] = None) -> List[dict]:
+        """
+        The rollup's buckets in the range that end by the time the raw rows begin, newest first,
+        as stored rows. Nothing else is added to the read: postgres_fdw ships its WHERE, ORDER BY
+        and LIMIT whole only while the LIMIT stays small.
+        """
+        raw_from, rollup = self.tiers()
+        if rollup is None or limit <= 0:
+            return []
+        relation, width = rollup[0], rollup[1]
+        if raw_from is not None and raw_from - width < upper:
+            upper, inclusive = raw_from - width, True
+        if lower is not None and (upper < lower or (upper == lower and not inclusive)):
+            return []
+        rows = _read_rows(self.pg, relation, sid, _pg_time(upper), limit,
+                          lower=_pg_time(lower) if lower is not None else None, inclusive=inclusive,
+                          metric=metric)
+        return [_bucket_row(r) for r in rows]
+
+    def _window(self, sid: str, limit: int, metric: Optional[str] = None) -> List[dict]:
+        """The rows in the window, newest first: raw, then buckets for what the raw rows lack."""
+        rows = self._raw(sid, self.end, True, limit, lower=self.start, metric=metric)
+        if len(rows) < limit:
+            rows += self._buckets(sid, self.end, True, limit - len(rows), lower=self.start,
+                                  metric=metric)
+        return rows
 
     def _cut_note(self, cut, unit: str = "rows") -> str:
         instant = _rfc3339(cut)
@@ -2163,24 +2275,26 @@ class _History:
         )
 
     def _metric(self, sid: str, name: str) -> tuple:
-        """One read: the metric's rows in the window."""
+        """The metric's rows in the window: a read of each tier the window reaches."""
         if (sid, name) not in self._metric_cache:
-            rows = _read_telemetry(self.pg, sid, *self.window, self.rows + 1, metric=name)
+            rows = self._window(sid, self.rows + 1, metric=name)
             kept, cut = _cut(rows, self.rows)
             self._metric_cache[(sid, name)] = (
                 [_vqt(_sample_value(r), r.get("time")) for r in kept],
                 [self._cut_note(cut)] if cut is not None else [],
+                any(r.get("bucketed") for r in kept),
             )
         return self._metric_cache[(sid, name)]
 
     def _device(self, sid: str) -> tuple:
         """
-        At most three reads: the window's rows, and for the values metrics held before it,
-        `telemetry_latest` and the rows just before the window. Returns (rows kept, snapshots,
-        notes on the snapshots, notes on the rows), the last for components sliced from them.
+        At most four reads: the window's rows, raw and bucketed, and for the values metrics held
+        before it, `telemetry_latest` and the rows just before the window. Returns (rows kept,
+        snapshots, notes on the snapshots, notes on the rows, whether a snapshot is of buckets),
+        the rows and their notes for components sliced from them.
         """
         if sid not in self._device_cache:
-            rows = _read_telemetry(self.pg, sid, *self.window, self.rows + 1)
+            rows = self._window(sid, self.rows + 1)
             kept, cut = _cut(rows, self.rows)
             row_notes = [self._cut_note(cut)] if cut is not None else []
             snapshots, notes = [], list(row_notes)
@@ -2200,17 +2314,22 @@ class _History:
                         f"further back, so the snapshots leave them out until they change: "
                         f"{', '.join(sorted(missing)[:5])}. Their own elementIds give their samples."
                     )
-            self._device_cache[sid] = (kept, snapshots, notes, row_notes)
+            # Buckets are older than every raw row, so the snapshots past the raw instants are theirs.
+            raw_instants = len({r.get("time") for r in kept if not r.get("bucketed")})
+            self._device_cache[sid] = (kept, snapshots, notes, row_notes, len(snapshots) > raw_instants)
         return self._device_cache[sid]
 
     def _seed(self, sid: str, kept: List[dict], seeds: Dict[str, dict], boundary: datetime,
               inclusive: bool) -> set:
         """
         Fill `seeds` with each metric's newest row before `boundary` (or at it, `inclusive`):
-        `telemetry_latest` for a metric quiet since, else one read of the rows just before it.
-        Returns the metrics that read may have stopped short of.
+        `telemetry_latest` for a metric quiet since, else one read of the raw rows just before
+        it, continued into the rollup's buckets when it runs out of raw rows first. A bucket's
+        last value is the metric's value when the bucket ends. Returns the metrics those reads
+        may have stopped short of.
         """
-        latest = self.pg.get(
+        raw_from, _ = self.tiers()
+        latest = [] if raw_from is None else self.pg.get(
             "telemetry_latest", {"select": TELEMETRY_COLUMNS, "asset_id": "eq." + sid}
         )
         active = {r["metric_name"] for r in kept}
@@ -2225,21 +2344,12 @@ class _History:
         active -= set(seeds)
         if not active:
             return set()
-        before = self.pg.get(
-            "telemetry",
-            {
-                "select": TELEMETRY_COLUMNS,
-                "asset_id": "eq." + sid,
-                "time": ("lte." if inclusive else "lt.") + _pg_time(boundary),
-                # No lower bound: postgres_fdw ships this WHERE, ORDER BY and LIMIT whole only
-                # while the LIMIT stays small, so nothing may be added to them.
-                "order": "time.desc",
-                "limit": str(self._seed_rows()),
-            },
-        )
+        # No lower bound, so the LIMIT is what keeps each read small (README.md -> History).
+        before = self._raw(sid, boundary, inclusive, self._seed_rows())
+        if active - {r["metric_name"] for r in before} - set(seeds):
+            before += self._buckets(sid, boundary, inclusive, self._seed_rows() - len(before))
         for row in before:
-            if row["metric_name"] in active:
-                seeds.setdefault(row["metric_name"], row)
+            seeds.setdefault(row["metric_name"], row)
         # A read that came back short reached the oldest row there is, so a metric it did not
         # meet had no earlier value. A full one may have stopped before reaching it.
         return (active - set(seeds)) if len(before) >= self._seed_rows() else set()
@@ -2250,20 +2360,24 @@ class _History:
 
 class _Partial:
     """
-    What server limits cut from one bulk read: components past MAX_COMPONENTS, and history series
-    stopped at their row limit. Each item cut carries its own 206 `responseDetail` and the response
-    carries one naming them all, since a partial answer must never pass as a complete one.
+    What one bulk read could not return as asked: components past MAX_COMPONENTS, history series
+    stopped at their row limit, and history answered in part from a rollup's buckets. Each such
+    item carries its own 206 `responseDetail` and the response carries one naming them all, since
+    a partial answer must never pass as a complete one.
     """
 
     TITLE = "Partial results returned"
 
     def __init__(self):
         self.room = MAX_COMPONENTS
-        # id(result) -> (result, notes). Holding the result keeps its id from being reused.
+        # id(result) -> (result, notes, kinds). Holding the result keeps its id from being reused.
         self.notes: Dict[int, tuple] = {}
 
-    def note(self, result: dict, text: str) -> None:
-        self.notes.setdefault(id(result), (result, []))[1].append(text)
+    def note(self, result: dict, text: str, bucketed: bool = False) -> None:
+        """A note on `result`: a limit cut it (the default), or some of its values are buckets."""
+        _, texts, kinds = self.notes.setdefault(id(result), (result, [], set()))
+        texts.append(text)
+        kinds.add("bucketed" if bucketed else "cut")
 
     def components(self, result: dict, children: list) -> list:
         """The `children` that fit in what is left of MAX_COMPONENTS; a cut is noted on `result`."""
@@ -2279,35 +2393,43 @@ class _Partial:
         return kept
 
     def detail(self, results: List[dict]) -> Optional[dict]:
-        """Attach each cut item's 206 and return the response's, or None when nothing was cut."""
-        cut = []
+        """Attach each noted item's 206 and return the response's, or None when nothing was noted."""
+        named = {"cut": [], "bucketed": []}
         for item in results:
-            _, texts = self.notes.get(id(item.get("result")), (None, None))
+            _, texts, kinds = self.notes.get(id(item.get("result")), (None, None, ()))
             if texts:
                 item["responseDetail"] = {
                     "title": self.TITLE, "status": 206, "detail": " ".join(texts)
                 }
-                cut.append(item["elementId"])
-        if not cut:
+                for kind in kinds:
+                    named[kind].append(item["elementId"])
+        if not (named["cut"] or named["bucketed"]):
             return None
-        named = ", ".join(cut[:10]) + (f" and {len(cut) - 10} more" if len(cut) > 10 else "")
-        return {
-            "title": self.TITLE,
-            "status": 206,
-            "detail": f"A server limit cut {len(cut)} result(s) short: {named}. Each one's "
-                      f"responseDetail says where.",
-        }
+
+        def listed(ids: List[str]) -> str:
+            return ", ".join(ids[:10]) + (f" and {len(ids) - 10} more" if len(ids) > 10 else "")
+
+        sentences = []
+        if named["cut"]:
+            sentences.append(f"A server limit cut {len(named['cut'])} result(s) short: "
+                             f"{listed(named['cut'])}.")
+        if named["bucketed"]:
+            sentences.append(f"{len(named['bucketed'])} result(s) answer part of the range from "
+                             f"a rollup's buckets, not raw samples: {listed(named['bucketed'])}.")
+        sentences.append("Each one's responseDetail says where.")
+        return {"title": self.TITLE, "status": 206, "detail": " ".join(sentences)}
 
 
 def h_objects_history(req: "Handler") -> None:
     """
     History comes from TimescaleDB through PostgREST, never from the value cache.
 
-    `public.telemetry` is a `postgres_fdw` projection, so these reads cross the wrapper and carry
-    the caller's token like every other read. startTime and endTime are REQUIRED: an unbounded
-    history query over a hypertable is not a slow request, it is an availability incident, and the
-    spec makes both mandatory for that reason. Every read is bounded in rows as well, and a series
-    cut short is a 206, never a complete-looking 200.
+    `public.telemetry` and its rollups are `postgres_fdw` projections, so these reads cross the
+    wrapper and carry the caller's token like every other read. startTime and endTime are
+    REQUIRED: an unbounded history query over a hypertable is not a slow request, it is an
+    availability incident, and the spec makes both mandatory for that reason. Every read is
+    bounded in rows as well, and a series cut short, or continued from a rollup, is a 206, never a
+    complete-looking 200.
     """
     body = req._body()
     wanted = _require_element_ids(body)
@@ -2333,7 +2455,7 @@ def h_objects_history(req: "Handler") -> None:
             continue
         result = {"isComposition": obj["isComposition"]}
         try:
-            result["values"], notes = history.series(eid)
+            result["values"], notes, bucketed = history.series(eid)
             for text in notes:
                 partial.note(result, text)
             if obj["isComposition"] and max_depth != 1:
@@ -2341,11 +2463,14 @@ def h_objects_history(req: "Handler") -> None:
                 budget = -1 if max_depth == 0 else max_depth - 1
                 components = {}
                 for child in partial.components(result, _component_ids(objects, eid, budget)):
-                    values, notes = history.series(child, component=True)
+                    values, notes, child_bucketed = history.series(child, component=True)
+                    bucketed = bucketed or child_bucketed
                     components[child] = {"values": values}
                     for text in notes:
                         partial.note(result, f"{child}: {text}")
                 result["components"] = components
+            if bucketed:
+                partial.note(result, history.bucket_note(), bucketed=True)
         except SubscriptionError as exc:
             results.append(
                 {

@@ -531,8 +531,8 @@ paths:
       tags: [Values]
       summary: Historical values
       description: |
-        From the TimescaleDB hypertable through PostgREST, **never** from the value cache, so
-        these reads carry the caller's token like every other.
+        From the TimescaleDB hypertable and its rollups through PostgREST, **never** from the
+        value cache, so these reads carry the caller's token like every other.
 
         `startTime` and `endTime` are **required**: an unbounded history query over a
         hypertable is not a slow request, it is an availability incident. Both are RFC 3339
@@ -557,6 +557,17 @@ paths:
         `responseDetail` names the instant it stops at, and asking again with that instant as
         `endTime` returns the rest. `I3X_MAX_COMPONENTS` bounds the components, as on
         `/objects/value`.
+
+        **Older than the raw rows, a rollup continues the series.** Raw rows are kept for
+        `timescaledb.retention.retainFor` (14 days in the chart); `telemetry_1m`,
+        `telemetry_5m` and `telemetry_1h` are kept longer. The finest rollup whose oldest
+        bucket reaches `startTime` answers for the part of the window before the raw rows
+        begin, as the dashboard's export dialog chooses, else the one reaching furthest back.
+        Each bucket is one value: its last value, timestamped at the bucket's start. Only
+        buckets that end by the time the raw rows begin are served, so the series joins raw
+        and buckets once. A device's maps carry values forward from the rollup too. An item
+        holding any bucketed value answers **206**, and its `responseDetail` names the rollup,
+        its resolution and the instant the raw rows begin, beside any limit that cut it.
       requestBody:
         required: true
         content:
@@ -615,9 +626,11 @@ paths:
                         - { value: 37.4, quality: Good, timestamp: '2026-09-28T10:10:00Z' }
         '206':
           description: |
-            A server limit cut at least one series or components list short. Each item cut is
-            still `success: true` and carries its own `responseDetail` with status 206 saying
-            where it stops; the top-level one names every item cut.
+            A server limit cut at least one series or components list short, or part of a
+            series is a rollup's buckets because it is older than the raw rows, or both. Each
+            such item is still `success: true` and carries its own `responseDetail` with status
+            206 saying where it stops and where the buckets join the raw samples; the top-level
+            one names every such item.
           content:
             application/json:
               schema:
@@ -640,10 +653,21 @@ paths:
                       title: Partial results returned
                       status: 206
                       detail: "This series stops at this request's limit of 2 rows: nothing at or before 2026-09-28T10:30:00.000000Z was returned. Request it again with that endTime for the rest."
+                  - success: true
+                    elementId: dev220000000000400080000/Controller/EXECUTION
+                    result:
+                      isComposition: false
+                      values:
+                        - { value: ACTIVE, quality: Good, timestamp: '2026-09-14T00:02:11.402Z' }
+                        - { value: READY, quality: Good, timestamp: '2026-09-13T23:58:00Z' }
+                    responseDetail:
+                      title: Partial results returned
+                      status: 206
+                      detail: "Values before 2026-09-14T00:00:00.000000Z, where the raw samples begin, are 1-minute buckets from telemetry_1m, not samples: each is the last value in its bucket, timestamped at the bucket's start."
                 responseDetail:
                   title: Partial results returned
                   status: 206
-                  detail: "A server limit cut 1 result(s) short: dev220000000000400080000/Systems/TEMPERATURE. Each one's responseDetail says where."
+                  detail: "A server limit cut 1 result(s) short: dev220000000000400080000/Systems/TEMPERATURE. 1 result(s) answer part of the range from a rollup's buckets, not raw samples: dev220000000000400080000/Controller/EXECUTION. Each one's responseDetail says where."
         '400':
           description: '`elementIds` missing or not an array of strings, `startTime`/`endTime` absent, not RFC 3339 or the start after the end, `limit` not a positive integer, or `maxDepth` not an integer of 0 or more.'
           content:
@@ -1269,6 +1293,8 @@ components:
           description: |
             Newest first, all inside the window. A metric's are scalars; a device's are maps of
             metric name to value, one per instant a metric changed. Empty for anything else.
+            Before the raw rows begin, each is a rollup bucket's last value at the bucket's
+            start, and the item's 206 `responseDetail` says so.
           items:
             type: object
             properties:

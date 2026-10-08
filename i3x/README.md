@@ -355,7 +355,7 @@ All under `/v1`. `GET /info` is open; everything else requires `Authorization`.
 | POST | `/objects/list` | Bulk, **results in request order** |
 | POST | `/objects/related` | Edges as `{sourceRelationship, object}` |
 | POST | `/objects/value` | From the MQTT cache, gated on a PostgREST read; what the cache lacks from `telemetry_latest` |
-| POST | `/objects/history` | From TimescaleDB; `startTime`/`endTime` **required** |
+| POST | `/objects/history` | From TimescaleDB, and its rollups before the raw rows begin; `startTime`/`endTime` **required** |
 | POST | `/subscriptions` | + `/list`, `/delete`, `/register`, `/unregister` |
 | POST | `/subscriptions/sync` | MUST. 206 on queue overflow, or when elements left the caller's view |
 | POST | `/subscriptions/stream` | MAY. SSE, **one stream per subscription** |
@@ -376,14 +376,16 @@ from `docs/openapi.yaml` on purpose**: this server is not behind the gateway, ta
 newest first in every case:
 
 - **A metric**, `<sparkplug_id>/<metric_name>` split at the first `/`: its stored samples as scalar
-  VQTs. One read, on `(asset_id, metric_name)`.
+  VQTs, read on `(asset_id, metric_name)`. One read, or two when the window reaches back before the
+  raw rows ([Older than the raw rows](#older-than-the-raw-rows)).
 - **A device**: one map per instant at which any of its metrics changed, holding every metric's
   newest value at that instant, which is the shape of its current value. Sparkplug reports by
   exception, so each value is carried forward from before the window: `telemetry_latest` gives it
   for a metric quiet since, and one read of the rows just before the window gives it for the rest.
-  A metric with no value yet is absent from the map rather than invented. That is at most three
-  reads (the window, `telemetry_latest`, the rows before it), and one for a device quiet through
-  the window.
+  A metric with no value yet is absent from the map rather than invented. That is at most four
+  reads: the window, `telemetry_latest` and the rows before the window, plus a second read for
+  whichever of the window or the rows before it reaches into a rollup. A device quiet through the
+  window costs only the window's reads.
 - **Its components**, at `maxDepth` 0 or above 1: each metric's samples under `components`, keyed
   by elementId. They are sliced from the device's own rows, so they add no reads and agree with
   its maps.
@@ -405,19 +407,50 @@ The maps then leave the quiet metric out until it changes, and its own elementId
 
 `startTime` and `endTime` are RFC 3339 with `Z` or an offset, parsed in full. PostgREST is sent the
 parsed instant, never the text, and a start after the end is a 400. The reads run one after
-another, so a request naming N devices costs up to 3N.
+another, so a request naming N devices costs up to 4N, plus one read of `telemetry_horizons`.
+
+#### Older than the raw rows
+
+Raw rows are kept for `timescaledb.retention.retainFor`, 14 days in the chart. The rollups are kept
+longer, by `timescaledb.rollups`: `telemetry_1m` for 180 days, `telemetry_5m` for a year and
+`telemetry_1h` for five. Where a window reaches back before the oldest raw row, a rollup continues
+the series, so last month comes back as per-minute buckets rather than as nothing.
+
+- **Which rollup.** The request reads `telemetry_horizons` once, before its first series: the
+  oldest row each relation holds. The finest rollup whose oldest bucket reaches `startTime`
+  answers, the rule of the export dialog's `bestResolutionFor()`
+  (`frontend/src/utils/telemetryExport.js`). When none reaches it, the one reaching furthest back
+  answers. A rollup counts only if it holds a whole bucket from before the raw rows begin. A young
+  stack's rollups hold only what its raw rows hold, so it reads none.
+- **What a bucket is.** Its `last_double`, `last_string` or `last_bool` is the value, and its start
+  is the timestamp. Only buckets that end by the time the raw rows begin are read, and every raw
+  row is newer, so the two never overlap and a series joins them once. A bucket that the first
+  raw row falls inside is not served. Raw retention drops whole chunks, so that bucket holds raw
+  rows only, unless `timescaledb.retention.chunkInterval` is not a whole number of buckets.
+- **The 206.** An item with a bucketed value, in its values or its components, answers 206. Its
+  `responseDetail` names the rollup and its resolution and the instant the raw rows begin. When no
+  rollup reaches `startTime`, it also names the oldest instant held at any resolution. The
+  response's own `responseDetail` names every such item. A limit can cut the same series, and the
+  detail then says both. Resuming at the instant it names crosses the join like any other.
+- **Values carried forward.** A device's maps take their seeds from the rows before the window:
+  raw rows first, then the rollup's buckets when the raw rows run out first. This happens wherever
+  the window starts. A bucket's last value is the metric's value when the bucket ends. So a value
+  carried from a bucket into maps at raw instants is a sampled value, not an aggregate, and those
+  maps are not called buckets. Maps at bucket instants are buckets, and the 206 says so.
 
 **Every read depends on a small LIMIT.** `public.telemetry` is a `postgres_fdw` foreign table with
 no statistics. The planner ships the `WHERE`, `ORDER BY` and `LIMIT` to the historian whole only
 while the LIMIT is small. Measured on PostgreSQL 17 with the columns these reads select, that holds
 up to 6338 rows. From 6339 up it ships only the `WHERE`, then fetches every matching row and sorts
 them locally. Turning on `use_remote_estimate` would fix the plan but costs 4 to 80 ms of planning
-on every telemetry read, so it stays off. Two consequences:
+on every telemetry read, so it stays off. The rollups are foreign tables of the same kind, and a
+rollup read selects columns of the same types (`bucket`, `metric_name` and the three `last_*`), so
+it is held to the same bounds; the threshold was measured on `telemetry`. Two consequences:
 - `I3X_HISTORY_MAX_ROWS` defaults to 1000. Raised past about 6300, each window read fetches its
-  whole window.
+  whole window. A window's raw and rollup reads share that limit.
 - The read before the window has no lower time bound, so it asks for at most 1000 rows
-  (`HISTORY_SEED_MAX_ROWS`) whatever the limit. Past the threshold it would fetch the device's
-  entire history.
+  (`HISTORY_SEED_MAX_ROWS`) whatever the limit, raw and bucketed together. Past the threshold it
+  would fetch the device's entire history.
 
 The AAS export's keyset pages (`supabase/functions/_shared/aas/bundle.ts`, 5000 rows) are under
 it too.
@@ -595,7 +628,7 @@ obvious.
 | `server_info` | `GET /info` — including `update.current: false` |
 | `list_root_objects`, `get_object`, `search_objects`, `refresh_catalog` | `GET /objects`, `POST /objects/list` |
 | `read_current_value` | `POST /objects/value` — values, `quality`, timestamp |
-| `get_history` | `POST /objects/history` — raw samples out of TimescaleDB; the server serves no rollups |
+| `get_history` | `POST /objects/history` — samples out of TimescaleDB, continued by a rollup's buckets where the range is older than the raw rows (a 206 says where) |
 | `find_related` | `POST /objects/related` — `HasParent` / `HasChildren` / `HasComponent` |
 | `describe_type` | `GET /objecttypes` |
 | `watch_values` | the subscription set, capped by `I3X_WATCH_MAX_SEC` (default 300s) |
@@ -983,10 +1016,8 @@ than minutes, and why `0` disables the cache outright.
   it. The gateway appliance beats every 30 s.
 - **A metric silent for longer than raw retention** (`timescaledb.retention.retainFor`, 14 days
   in the chart) is not in `telemetry_latest`, so after a restart it is `GoodNoData` until it
-  changes.
-- **History reads the raw hypertable only.** A range older than raw retention
-  (`timescaledb.retention.retainFor`, 14 days in the chart) comes back empty, although the rollups
-  still hold it (#505).
+  changes. A device's history maps leave it out until it changes too, unless the read before the
+  window reaches into a rollup and meets it there ([History](#history)).
 - **Writes are not implemented, and that is a decision rather than a gap.** `PUT /objects/value`
   answers 405 and `/info` declares `update.current: false`. A server that does not implement the
   verb cannot be talked into it.
