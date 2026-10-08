@@ -8,8 +8,9 @@
 -- while the value is on; deprecate it instead.
 --
 -- Semantic ids are SELECTed from the vocabulary tables, never typed: a concept missing from its
--- vocabulary inserts no row rather than a guessed id. Plain SQL with no psql meta-commands, because
--- test_metric_catalog_seed.py applies it through psycopg2.
+-- vocabulary inserts no row rather than a guessed id. The 223P rows are the one exception, below.
+-- Plain SQL with no psql meta-commands, because test_metric_catalog_seed.py applies it through
+-- psycopg2.
 
 -- MTConnect 2.x: machine tool axes, controller and systems (17 rows). Joined on kind =
 -- 'DATA_ITEM_TYPE': the vocabulary also holds COMPONENT, SUB_TYPE, UNIT and NATIVE_UNIT rows under
@@ -69,20 +70,21 @@ SELECT s.name, s.datatype, s.description, s.category, s.units, 'OPC UA', v.seman
   JOIN public.opcua_vocabulary v ON v.companion_spec = s.spec AND v.name = s.concept
 ON CONFLICT (name) DO NOTHING;
 
--- ASHRAE 223P: facility and BMS ambient telemetry (5 rows). The semantic id names a sensor class,
--- not a quantity: 223P attaches a measured Property to a Sensor, and this catalog has one flat name
--- per series. A metric name forbids the hyphen in `Constituent-CO2`, hence `BMS/CO2_CONCENTRATION`.
+-- ASHRAE 223P: facility and BMS ambient telemetry (5 rows). 223P is a reference here: its classes
+-- name equipment, not readings, so each row carries the QUDT quantity kind of what it reports, the
+-- kind 223P's models give the observed property. QUDT is not seeded, so these ids are typed; the
+-- rows of 0172 and check-docs-drift check 47 hold the same five pairs. A metric name forbids the
+-- hyphen in 223P's `Constituent-CO2`, hence `BMS/CO2_CONCENTRATION`.
 INSERT INTO public.metric_catalog (name, datatype, description, category, units, standard,
                                    semantic_id, semantic_id_type)
-SELECT s.name, s.datatype, s.description, s.category, s.units, 'ASHRAE 223P', v.semantic_id, 'IRI'
+SELECT s.name, s.datatype, s.description, s.category, s.units, 'ASHRAE 223P', s.semantic_id, 'IRI'
   FROM (VALUES
-    ('BMS/ZONE_TEMPERATURE', 10, 'Zone air temperature', 'SAMPLE', 'CELSIUS', 'TemperatureSensor'),
-    ('BMS/ZONE_HUMIDITY', 10, 'Zone relative humidity', 'SAMPLE', 'PERCENT', 'HumiditySensor'),
-    ('BMS/CO2_CONCENTRATION', 10, 'Zone CO2 concentration', 'SAMPLE', 'PARTS/MILLION', 'Constituent-CO2'),
-    ('BMS/STATIC_PRESSURE', 10, 'Duct static pressure', 'SAMPLE', 'PASCAL', 'PressureSensor'),
-    ('BMS/SUPPLY_AIR_FLOW', 10, 'Supply air volumetric flow rate', 'SAMPLE', 'LITER/SECOND', 'FlowSensor')
-  ) AS s(name, datatype, description, category, units, concept)
-  JOIN public.ashrae223_vocabulary v ON v.name = s.concept
+    ('BMS/ZONE_TEMPERATURE', 10, 'Zone air temperature', 'SAMPLE', 'CELSIUS', 'http://qudt.org/vocab/quantitykind/Temperature'),
+    ('BMS/ZONE_HUMIDITY', 10, 'Zone relative humidity', 'SAMPLE', 'PERCENT', 'http://qudt.org/vocab/quantitykind/RelativeHumidity'),
+    ('BMS/CO2_CONCENTRATION', 10, 'Zone CO2 concentration', 'SAMPLE', 'PARTS/MILLION', 'http://qudt.org/vocab/quantitykind/MoleFraction'),
+    ('BMS/STATIC_PRESSURE', 10, 'Duct static pressure', 'SAMPLE', 'PASCAL', 'http://qudt.org/vocab/quantitykind/Pressure'),
+    ('BMS/SUPPLY_AIR_FLOW', 10, 'Supply air volumetric flow rate', 'SAMPLE', 'LITER/SECOND', 'http://qudt.org/vocab/quantitykind/VolumeFlowRate')
+  ) AS s(name, datatype, description, category, units, semantic_id)
 ON CONFLICT (name) DO NOTHING;
 
 -- ISO 22400: KPIs a device publishes (8 rows). Registered, not computed: nothing here derives them

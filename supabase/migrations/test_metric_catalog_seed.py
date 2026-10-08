@@ -12,7 +12,10 @@ that does not exist, in an artefact handed to a customer, until something notice
 
 So the assertions below are about PROVENANCE as much as presence: every example row must carry a
 semantic id that is still resolvable in the vocabulary table it came from. A vocabulary re-key or a
-renamed concept would otherwise leave the file inserting nothing for that concept. The suite also
+renamed concept would otherwise leave the file inserting nothing for that concept. The five 223P
+readings are the exception: they carry QUDT quantity kinds, which no table here holds, so they are
+held to the exact ids instead, and 0172's repoint of the 223P classes they once carried is tested
+on the same rows. The suite also
 holds each group to one standard, every name to the metric-name format, the immutability trigger to
 freezing name and datatype while semantic_id and permitted_values stay correctable, and a second
 application of the file to changing nothing, an operator's later edit included.
@@ -72,16 +75,25 @@ EXAMPLES = {
         "Energy/Pressure", "Energy/Temperature",
         "Energy/VolumeFlowRate", "Energy/Volume",
     ],
-    "ashrae223_vocabulary": [
-        "BMS/ZONE_TEMPERATURE", "BMS/ZONE_HUMIDITY",
-        "BMS/CO2_CONCENTRATION", "BMS/STATIC_PRESSURE", "BMS/SUPPLY_AIR_FLOW",
-    ],
     "iso22400_vocabulary": [
         "OEE/AVAILABILITY", "OEE/EFFECTIVENESS", "OEE/QUALITY",
         "OEE/OEE", "OEE/UTILIZATION", "OEE/SCRAP_RATIO", "OEE/MTBF", "OEE/MTTR",
     ],
 }
-ALL_EXAMPLES = [name for names in EXAMPLES.values() for name in names]
+# The 223P readings: the QUDT quantity kind each reports, typed in the file because QUDT is not seeded
+# (docs/vocabularies.md), and the 223P class each carried until 0172 repointed it.
+QUANTITY_KIND = "http://qudt.org/vocab/quantitykind/"
+S223 = "http://data.ashrae.org/standard223#"
+BMS_READINGS = {
+    "BMS/ZONE_TEMPERATURE": (QUANTITY_KIND + "Temperature", S223 + "TemperatureSensor"),
+    "BMS/ZONE_HUMIDITY": (QUANTITY_KIND + "RelativeHumidity", S223 + "HumiditySensor"),
+    "BMS/CO2_CONCENTRATION": (QUANTITY_KIND + "MoleFraction", S223 + "Constituent-CO2"),
+    "BMS/STATIC_PRESSURE": (QUANTITY_KIND + "Pressure", S223 + "PressureSensor"),
+    "BMS/SUPPLY_AIR_FLOW": (QUANTITY_KIND + "VolumeFlowRate", S223 + "FlowSensor"),
+}
+REPOINT_FILE = pathlib.Path(__file__).resolve().parent / "0172_a_223p_reading_carries_its_quantity_kind.sql"
+
+ALL_EXAMPLES = [name for names in EXAMPLES.values() for name in names] + list(BMS_READINGS)
 
 # What the dev database's history put in 0002's seed and the example set leaves out: a rename
 # replayed as a deprecated row, and two local test entries with no standard behind them.
@@ -407,11 +419,23 @@ class TestProvenanceResolves(ExampleTestCase):
     def test_opcua_rows_resolve(self):
         self.assert_resolves("opcua_vocabulary")
 
-    def test_ashrae_rows_resolve(self):
-        self.assert_resolves("ashrae223_vocabulary")
-
     def test_iso22400_rows_resolve(self):
         self.assert_resolves("iso22400_vocabulary")
+
+    def test_the_223p_readings_carry_their_qudt_quantity_kinds(self):
+        """223P is a reference here: a reading carries the kind of quantity it is, not a 223P class."""
+        rows = self.applied(lambda cur: self.fetch(
+            cur, "SELECT name, semantic_id, semantic_id_type, standard FROM public.metric_catalog"
+                 " WHERE name = ANY(%s) ORDER BY name", (list(BMS_READINGS),)))
+        self.assertEqual(rows, sorted((name, kind, "IRI", "ASHRAE 223P")
+                                      for name, (kind, _) in BMS_READINGS.items()))
+
+    def test_no_example_carries_a_223p_class(self):
+        held = self.applied(lambda cur: self.fetch(
+            cur, "SELECT c.name FROM public.metric_catalog c"
+                 "  JOIN public.ashrae223_vocabulary v ON v.semantic_id = c.semantic_id"
+                 " WHERE c.name = ANY(%s)", (ALL_EXAMPLES,)))
+        self.assertEqual(held, [])
 
     def test_every_mtconnect_row_carries_its_data_item_types_id(self):
         """
@@ -462,6 +486,98 @@ class TestProvenanceResolves(ExampleTestCase):
             with self.subTest(name=name):
                 self.assertEqual(found[name], 1, f"{name} does not resolve within {spec}")
 
+
+
+class TestTheReadingsMoveToTheirQuantityKinds(ExampleTestCase):
+    """
+    0172 on a database seeded before 223P became a reference: the five readings hold the 223P class
+    the seed gave them. Each probe puts them back on those ids, replays 0172 and rolls back.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.repoint = REPOINT_FILE.read_text(encoding="utf-8")
+
+    def seeded_with_classes(self, cur):
+        """The five rows as 1.0.1's seed left them, whether or not this database has them yet."""
+        for name, (_, sensor_class) in BMS_READINGS.items():
+            cur.execute(
+                "INSERT INTO public.metric_catalog (name, datatype, standard, semantic_id, semantic_id_type)"
+                " VALUES (%s, 10, 'ASHRAE 223P', %s, 'IRI')"
+                " ON CONFLICT (name) DO UPDATE SET semantic_id = EXCLUDED.semantic_id,"
+                "                                  semantic_id_type = 'IRI'", (name, sensor_class))
+
+    def ids(self, cur, names):
+        return dict(self.fetch(cur, "SELECT name, semantic_id FROM public.metric_catalog"
+                                    " WHERE name = ANY(%s)", (list(names),)))
+
+    def in_transaction(self, work):
+        conn = connect()
+        conn.autocommit = False
+        try:
+            with conn.cursor() as cur:
+                return work(cur)
+        finally:
+            conn.rollback()
+            conn.close()
+
+    def test_each_reading_moves_to_its_quantity_kind(self):
+        def probe(cur):
+            self.seeded_with_classes(cur)
+            cur.execute(self.repoint)
+            return self.ids(cur, BMS_READINGS)
+        self.assertEqual(self.in_transaction(probe),
+                         {name: kind for name, (kind, _) in BMS_READINGS.items()})
+
+    def test_an_id_an_operator_changed_is_left_alone(self):
+        def probe(cur):
+            self.seeded_with_classes(cur)
+            cur.execute("UPDATE public.metric_catalog SET semantic_id = 'urn:example:zone-air'"
+                        " WHERE name = 'BMS/ZONE_TEMPERATURE'")
+            # The right class on the wrong reading is an operator's choice too.
+            cur.execute("UPDATE public.metric_catalog SET semantic_id = %s WHERE name = 'BMS/ZONE_HUMIDITY'",
+                        (S223 + "TemperatureSensor",))
+            cur.execute(self.repoint)
+            return self.ids(cur, ["BMS/ZONE_TEMPERATURE", "BMS/ZONE_HUMIDITY", "BMS/STATIC_PRESSURE"])
+        self.assertEqual(self.in_transaction(probe), {
+            "BMS/ZONE_TEMPERATURE": "urn:example:zone-air",
+            "BMS/ZONE_HUMIDITY": S223 + "TemperatureSensor",
+            "BMS/STATIC_PRESSURE": BMS_READINGS["BMS/STATIC_PRESSURE"][0],
+        })
+
+    def test_a_metric_of_another_name_keeps_its_223p_class(self):
+        """One the Vocabulary page's Use made before 223P became a reference: not the seed's to move."""
+        def probe(cur):
+            cur.execute("INSERT INTO public.metric_catalog (name, datatype, standard, semantic_id, semantic_id_type)"
+                        " VALUES ('BMS/Fixture0172/TemperatureSensor', 10, 'ASHRAE 223P', %s, 'IRI')",
+                        (S223 + "TemperatureSensor",))
+            cur.execute(self.repoint)
+            return self.ids(cur, ["BMS/Fixture0172/TemperatureSensor"])
+        self.assertEqual(self.in_transaction(probe),
+                         {"BMS/Fixture0172/TemperatureSensor": S223 + "TemperatureSensor"})
+
+    def test_a_second_boot_changes_nothing(self):
+        """db-init replays 0172, then the example set, on every boot."""
+        def probe(cur):
+            self.seeded_with_classes(cur)
+            cur.execute(self.repoint)
+            cur.execute(self.sql)
+
+            def snapshot():
+                rows = self.fetch(cur, f"SELECT {ROW_COLUMNS} FROM public.metric_catalog"
+                                       " WHERE name = ANY(%s) ORDER BY name", (list(BMS_READINGS),))
+                receipts = self.fetch(cur, "SELECT count(*) FROM public.audit_trail"
+                                           " WHERE entity_type = 'metric_catalog'")[0][0]
+                return rows, receipts
+            first = snapshot()
+            cur.execute(self.repoint)
+            cur.execute(self.sql)
+            return first, snapshot()
+        first, second = self.in_transaction(probe)
+        self.assertEqual(second, first)
+        self.assertEqual({r[1]: r[11] for r in first[0]},
+                         {name: kind for name, (kind, _) in BMS_READINGS.items()})
 
 
 class TestConceptDefinitions(unittest.TestCase):

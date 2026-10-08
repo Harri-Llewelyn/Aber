@@ -443,7 +443,7 @@ Four properties worth knowing:
   inserted at all** rather than inserted with a guessed id — the inner join is the check. Retyping
   would create a second, unverified copy of an identity `docs/vocabularies.md` confirmed against
   machine-readable sources, and a typo would assert an interoperability that does not exist while
-  looking exactly like one that does.
+  looking exactly like one that does. The five 223P readings are the one exception, below.
 - **A replay changes nothing.** Every insert is `ON CONFLICT (name) DO NOTHING`, so a row an
   operator has edited or deprecated since is never written over, and a second boot writes no audit
   row. A row deleted by hand does come back on the next boot while the value is on.
@@ -463,8 +463,8 @@ Four properties worth knowing:
   catalog of the time, which already used `OEE/` and `MotionDevice/` — a parallel prefix would mean
   two permanent names for one concept, which is the collision the naming plan exists to prevent.
 - **Transliteration happens at authoring time, because it cannot happen later.** `0007` forbids
-  dots and hyphens, so the ASHRAE concept `Constituent-CO2` is registered as
-  `BMS/CO2_CONCENTRATION`. The join still uses the vocabulary's own unmodified key.
+  dots and hyphens, so the reading of the ASHRAE substance `Constituent-CO2` is registered as
+  `BMS/CO2_CONCENTRATION`.
 
 **An MTConnect metric's semantic id names its data item type (#457).** The original seed rows and
 the Add Metric form once built the id from the whole name (`…/mtconnect/v2.0/Axes/C/ANGLE`), which
@@ -477,6 +477,17 @@ earlier. It was an UPDATE because `semantic_id` is correctable in place. Only a 
 the name-built id was touched, and only when its type was in `mtconnect_vocabulary`; a NOTICE
 counted any left behind.
 `test_metric_catalog_seed.py` holds every MTConnect row to its type's id.
+
+**A 223P reading's semantic id is the QUDT quantity kind it reports (#461).** ASHRAE 223P is a
+reference here: its classes name equipment and substances, so the five `BMS/` example rows, which
+carried a sensor class, told an AAS consumer that a zone temperature was a temperature sensor. They
+carry QUDT quantity kinds now, such as `http://qudt.org/vocab/quantitykind/Temperature`; the five
+and the reasons are in [`../docs/vocabularies.md`](../docs/vocabularies.md#ashrae-223p). No QUDT
+vocabulary is seeded, so these ids are typed, and `scripts/check-docs-drift.mjs` check 47 holds them
+to migration `0172`. `0172` repoints a database that holds the old class ids, seeded by `0002` up
+to 1.0.1 and by this file since. It moves a row only when its name is one of the five and its id is
+still the class the seed gave it, so an id an operator changed stays. `test_metric_catalog_seed.py`
+holds the five ids, the repoint, an operator's id and the second boot.
 
 ### A semantic id is an IRI or an IRDI (archived migration 0145)
 

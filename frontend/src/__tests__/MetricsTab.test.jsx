@@ -1183,10 +1183,10 @@ describe('Metric builder — OPC UA points that share a browse name', () => {
   })
 })
 
-// 223P is the one vocabulary that names things rather than readings, so its prefill can say which
-// concept and which semantic id but not how the value is encoded. Before #455 that undefined
-// datatype was posted as-is (a NOT NULL violation the screen contradicted by showing "Double") and
-// the Standard selector offered 223P with no picker behind it.
+// 223P is the one vocabulary that names things rather than readings, and a reference here, so its
+// prefill says which concept but neither the semantic id nor how the value is encoded. Before #455
+// that undefined datatype was posted as-is (a NOT NULL violation the screen contradicted by showing
+// "Double") and the Standard selector offered 223P with no picker behind it.
 describe('Metric builder — ASHRAE 223P', () => {
   it('swaps the picker to concepts, offering classes and not relations', async () => {
     await openForm()
@@ -1212,13 +1212,16 @@ describe('Metric builder — ASHRAE 223P', () => {
     expect(groups).toContain('Equipment (1)')
   })
 
-  it('fills the group and semantic id from a concept and leaves the datatype to the operator', async () => {
+  it('fills the group from a concept and leaves the semantic id and the datatype to the operator', async () => {
     await openForm()
     fireEvent.change(standardSelect(), { target: { value: 'ASHRAE 223P' } })
     fireEvent.change(conceptSelect(), { target: { value: 'TemperatureSensor' } })
 
-    expect(semanticIdInput().value).toBe('http://data.ashrae.org/standard223#TemperatureSensor')
-    expect(referenceTypeSelect().value).toBe('IRI')
+    // A class names the sensor, not its reading, so nothing is suggested.
+    expect(semanticIdInput().value).toBe('')
+    expect(referenceTypeSelect().value).toBe('')
+    expect(screen.queryByText('Suggested')).toBeNull()
+    expect(useSuggestedButton()).toBeNull()
     expect(within(namePreview()).getByText('BMS/TemperatureSensor')).toBeTruthy()
 
     // Nothing chosen, and the control says so rather than reading "Double".
@@ -1227,12 +1230,14 @@ describe('Metric builder — ASHRAE 223P', () => {
     expect(addMetricButton().disabled).toBe(true)
   })
 
-  it('becomes addable once a datatype is chosen, and posts that datatype', async () => {
+  it('becomes addable once a datatype is chosen, and posts that datatype and the id typed', async () => {
     await openForm()
     api.post.mockResolvedValue({})
     fireEvent.change(standardSelect(), { target: { value: 'ASHRAE 223P' } })
     fireEvent.change(conceptSelect(), { target: { value: 'TemperatureSensor' } })
     fireEvent.change(datatypeSelect(), { target: { value: '10' } })
+    // The reading's own id, a QUDT quantity kind, as the seeded BMS metrics carry.
+    fireEvent.change(semanticIdInput(), { target: { value: 'http://qudt.org/vocab/quantitykind/Temperature' } })
 
     expect(screen.queryByText(/Choose a Sparkplug datatype/)).toBeNull()
     expect(addMetricButton().disabled).toBe(false)
@@ -1244,7 +1249,7 @@ describe('Metric builder — ASHRAE 223P', () => {
         name: 'BMS/TemperatureSensor',
         datatype: 10,
         standard: 'ASHRAE 223P',
-        semantic_id: 'http://data.ashrae.org/standard223#TemperatureSensor',
+        semantic_id: 'http://qudt.org/vocab/quantitykind/Temperature',
         semantic_id_type: 'IRI'
       })
     ))
@@ -1597,12 +1602,15 @@ describe('Metric builder — choosing a semantic id from the vocabularies', () =
     expect(screen.queryByRole('note')).toBeNull()
   })
 
-  it('leaves out 223P relations, which name no concept a metric measures', async () => {
+  it('offers no 223P concept, since a class names equipment rather than a reading', async () => {
     await openForm()
     openSearch()
-    search('hasProperty')
+    search('TemperatureSensor')
 
     expect(screen.queryByRole('list', { name: 'Matching concepts' })).toBeNull()
+    expect(screen.getByText(/Nothing matches “TemperatureSensor”/)).toBeTruthy()
+
+    search('hasProperty')
     expect(screen.getByText(/Nothing matches “hasProperty”/)).toBeTruthy()
   })
 
@@ -1746,6 +1754,8 @@ describe('Vocabulary handover — arriving from the Vocabulary page', () => {
     expect(standardSelect().value).toBe('ASHRAE 223P')
     expect(conceptSelect().value).toBe('TemperatureSensor')
     expect(within(namePreview()).getByText('BMS/TemperatureSensor')).toBeTruthy()
+    // Use starts a metric under the 223P group; the class is not adopted as its id.
+    expect(semanticIdInput().value).toBe('')
     expect(datatypeSelect().value).toBe('')
     expect(addMetricButton().disabled).toBe(true)
 

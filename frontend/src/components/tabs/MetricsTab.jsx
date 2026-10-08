@@ -70,7 +70,7 @@ const BLANK_METRIC = {
   // name, so `type` alone does not find the row.
   companionSpec: '',
   // AAS semanticId. The field shows the suggestion (derived from the MTConnect data item type, or
-  // `vocabSemanticId`, the id the chosen ISO 22400, OPC UA or 223P row carries) until the operator
+  // `vocabSemanticId`, the id the chosen ISO 22400 or OPC UA row carries) until the operator
   // types or picks their own pair, which `semanticIdOwn` holds; null means follow the suggestion.
   vocabSemanticId: '', semanticIdOwn: null,
   // Only set for standards whose vocabulary states it. MTConnect derives it from the data item
@@ -190,9 +190,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
   // Everything the semantic id picker offers, built once per read rather than on each keystroke.
   const semanticIdChoices = useMemo(() => semanticIdCandidates({
-    mtconnect: vocabulary, iso22400: isoVocabulary, opcua: opcuaVocabulary, ashrae223: s223Vocabulary,
+    mtconnect: vocabulary, iso22400: isoVocabulary, opcua: opcuaVocabulary,
     templates: templateElements
-  }), [vocabulary, isoVocabulary, opcuaVocabulary, s223Vocabulary, templateElements])
+  }), [vocabulary, isoVocabulary, opcuaVocabulary, templateElements])
 
   /**
    * Turn a suggested group name into the two fields the picker needs. A vocabulary can suggest a
@@ -1046,7 +1046,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                   className="form-control"
                   value={newMetric.type}
                   onChange={e => handleTypeChange(e.target.value)}
-                  title="The ASHRAE 223P concept this point is attached to. Selecting one fills in the group and the semantic id; the datatype and units stay yours to choose, because a concept names a thing, not a reading."
+                  title="The ASHRAE 223P concept this point is attached to. Selecting one fills in the group and the name; the datatype, units and semantic id stay yours to choose, because a concept names a thing, not a reading."
                 >
                   <option value="">— Select a concept —</option>
                   {ashraeSections.map(section => (
@@ -1207,7 +1207,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           metric={editTarget}
           usageCount={usageCountFor(editTarget.name)}
           suggestion={suggestionForMetric(editTarget, {
-            mtconnect: vocabulary, iso22400: isoVocabulary, opcua: opcuaVocabulary, ashrae223: s223Vocabulary
+            mtconnect: vocabulary, iso22400: isoVocabulary, opcua: opcuaVocabulary
           })}
           candidates={semanticIdChoices}
           onConfirm={handleEditSemanticId}
