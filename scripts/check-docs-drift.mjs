@@ -4065,6 +4065,55 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 49. The dashboard loads nothing from another origin on a page load.
+//
+// Its index.html and its stylesheets name no http://, https:// or protocol-relative URL in a
+// <link>, a <script src>, an @import or a url(). Every browser that opens a page would otherwise
+// contact that host, and a site with no internet route would get a different page.
+// deploy/k8s/README.md, "Outbound connections", says so. Comments are not read.
+// -------------------------------------------------------------------------------------------------
+{
+  const PAGES = [
+    'frontend/index.html',
+    ...allFiles.filter((f) => f.startsWith('frontend/src/') && f.endsWith('.css')),
+  ];
+  const ORIGIN = String.raw`["']?\s*(?:https?:)?//`;
+  const REFERENCES = [
+    ['<link>', new RegExp(String.raw`<link\b[^>]*\bhref\s*=\s*${ORIGIN}`, 'gi')],
+    ['<script src>', new RegExp(String.raw`<script\b[^>]*\bsrc\s*=\s*${ORIGIN}`, 'gi')],
+    ['@import', new RegExp(String.raw`@import\s+(?:url\(\s*)?${ORIGIN}`, 'gi')],
+    ['url()', new RegExp(String.raw`(?<!@import\s+)\burl\(\s*${ORIGIN}`, 'gi')],
+  ];
+  // A comment keeps its newlines, so a line number still points at the source.
+  const blank = (text) => text.replace(/<!--[\s\S]*?-->|\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '));
+
+  const offences = [];
+  for (const file of PAGES) {
+    const source = read(file);
+    const lines = source.split('\n');
+    const text = blank(source);
+    for (const [what, pattern] of REFERENCES) {
+      for (const m of text.matchAll(pattern)) {
+        const line = text.slice(0, m.index).split('\n').length;
+        offences.push(`${file}:${line} (${what}): ${lines[line - 1].trim().slice(0, 140)}`);
+      }
+    }
+  }
+
+  if (PAGES.length < 2) {
+    fail(`check 49 found ${PAGES.length} dashboard page(s) and stylesheet(s); the file list no longer matches`);
+  } else if (offences.length) {
+    fail(
+      'the dashboard loads something from another origin on every page:\n' +
+        [...new Set(offences)].map((o) => `        ${o}`).join('\n') +
+        '\n        (serve it from the frontend image instead, as frontend/src/assets/fonts/ does)'
+    );
+  } else {
+    pass(`the dashboard's index.html and ${PAGES.length - 1} stylesheet(s) load nothing from another origin`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 25. The runbook's inline Traefik manifest is deploy/k8s/traefik-config.yaml, which the dev loop
 // applies: an install from the registry has no checkout, so the runbook carries a copy.
 // -------------------------------------------------------------------------------------------------

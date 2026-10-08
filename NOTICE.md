@@ -5,8 +5,9 @@
 The MIT licence in [`LICENSE`](LICENSE) covers the work in this repository: the Helm chart, the SQL in [`timescaledb/`](timescaledb/) and
 [`supabase/migrations/`](supabase/migrations/), the frontend, the ingestion, playback and i3X
 services, the Node-RED flows, the Grafana dashboard definitions, the scripts and the documentation.
-The one exception is [`sparkplug_b.proto`](#sparkplug_bproto--eclipse-public-license-20), which
-keeps its own licence.
+The two exceptions are [`sparkplug_b.proto`](#sparkplug_bproto--eclipse-public-license-20) and
+[the dashboard's fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11), which keep their own
+licences.
 
 It does **not** cover the third-party software this configuration deploys. Those images are pulled
 from their own registries at deploy time under their own licences. **This repository redistributes
@@ -20,7 +21,7 @@ them. The MIT grant over this repository's own contents is unaffected by anythin
 
 ## `sparkplug_b.proto` — Eclipse Public License 2.0
 
-The one third-party file in this repository. It is Eclipse Tahu's Sparkplug B payload definition,
+One of the two third-party pieces in this repository. It is Eclipse Tahu's Sparkplug B payload definition,
 copyright Cirrus Link Solutions and others, under EPL-2.0, and its licence header is kept intact.
 The MIT licence above does not cover it. It differs from the current Tahu file only in its
 compile-instructions comment, which adds the Python command.
@@ -28,6 +29,21 @@ compile-instructions comment, which adds the Python command.
 The ingestion and i3X images compile it with `protoc` at build time, so both carry code generated
 from it; this file, in this repository, is its source. Upstream:
 [`github.com/eclipse-tahu/tahu`](https://github.com/eclipse-tahu/tahu), `sparkplug_b/sparkplug_b.proto`.
+
+## Outfit and JetBrains Mono — SIL Open Font License 1.1
+
+The dashboard's two typefaces. Their woff2 files are in
+[`frontend/src/assets/fonts/`](frontend/src/assets/fonts/), and the frontend image serves them, so
+both the repository and the image redistribute them.
+
+| Font | Copyright | Licence text |
+| :--- | :--- | :--- |
+| Outfit | 2021 The Outfit Project Authors ([`github.com/Outfitio/Outfit-Fonts`](https://github.com/Outfitio/Outfit-Fonts)) | [`outfit-OFL.txt`](frontend/src/assets/fonts/outfit-OFL.txt) |
+| JetBrains Mono | 2020 The JetBrains Mono Project Authors ([`github.com/JetBrains/JetBrainsMono`](https://github.com/JetBrains/JetBrainsMono)) | [`jetbrains-mono-OFL.txt`](frontend/src/assets/fonts/jetbrains-mono-OFL.txt) |
+
+They are Fontsource's variable-weight builds of the latin and latin-ext subsets, copied byte for
+byte. Each file carries its copyright and the licence's URL in its own metadata. The fonts' folder has a
+README naming where each file came from.
 
 ## TimescaleDB — Timescale License
 

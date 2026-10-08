@@ -1337,12 +1337,15 @@ that would, and where each is switched off:
   plugin catalogue page queries grafana.com when an administrator opens it.
 - Node-RED's editor loads the node catalogue from catalogue.nodered.org each time it opens. The
   palette manager's Install tab and its update badges read it.
-- The dashboard's fonts come from Google Fonts (#438).
 - Destinations a site configures itself, such as a remote cold archive or backup target.
 
 The edge functions fetch nothing at run time: they load their dependencies from the image. The image
 build resolves them against a lock file and boots every function with no network. A function that
 would fetch fails the build instead (`supabase/README.md`, *Edge function dependencies*).
+
+A dashboard page loads nothing from another origin. Its fonts are in the frontend image
+(`frontend/src/assets/fonts/`), and `scripts/check-docs-drift.mjs` fails if `index.html` or a
+stylesheet names another host.
 
 The dashboard's 3D viewer fetches nothing either. It decodes Draco- or KTX2-compressed models with
 decoders the dashboard serves itself, under `/decoders/`. By default `@google/model-viewer` fetches
