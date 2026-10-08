@@ -27,15 +27,19 @@
  * job is to **verify it against the NodeSet and fill in what the NodeSet is authoritative for**:
  *
  *   * the ObjectType named by `type` must exist in the target namespace;
- *   * it must declare a member variable whose BrowseName is `name`;
- *   * `datatype` is read from that member, never typed here;
+ *   * the variable at `browsePath` below it (default: `[name]`) must exist, each step a component
+ *     or property the NodeSet declares;
+ *   * `datatype` is read from that variable, never typed here;
+ *   * `node_id` and `semantic_id` are that variable's NodeId, written as the ExpandedNodeId
+ *     `nsu=<namespace URI>;i=<id>` through the NodeSet's NamespaceUris table: the identifier OPC UA
+ *     itself publishes, in the specification's own namespace;
  *   * the model's namespace URI, version and publication date must match the pins below.
  *
- * A rename, a retype or a version bump upstream therefore fails the build instead of silently
- * shipping a vocabulary that describes a specification nobody publishes any more. That is the
- * property the ⚠ VERIFY blocks ask for, and it is stronger than what a transcription can offer:
- * the seed's existing OPC UA header says the browse names "are transcribed and still want
- * confirming against those files", and for these four specs this script is that confirmation.
+ * A rename, a retype, a renumbering or a version bump upstream therefore fails the build or shows in
+ * the seed's diff, instead of silently shipping a vocabulary that describes a specification nobody
+ * publishes any more. Every opcua_vocabulary row comes from here; none is hand-written.
+ *
+ *   node scripts/generate-opcua-vocabulary.mjs --print-map   also prints each row's former id
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -52,8 +56,85 @@ import { COMMENT_BEGIN, COMMENT_END, tableCommentStatement } from './lib/opcua-v
 const REF = 'latest';
 const BASE = `https://raw.githubusercontent.com/OPCFoundation/UA-Nodeset/${REF}`;
 
-/** Written to the seed as-is. Only `datatype` is taken from the NodeSet. */
+/**
+ * Written to the seed as-is, except what the NodeSet supplies: `datatype` and the identifiers. A
+ * group whose description is null is registered by the hand-written metric_groups rows above the
+ * generated block, whose ids are fixed; the script checks that row exists.
+ */
 const SPECS = [
+  {
+    companionSpec: 'OPC 40001 Machinery',
+    namespaceUri: 'http://opcfoundation.org/UA/Machinery/',
+    path: 'Machinery/Opc.Ua.Machinery.NodeSet2.xml',
+    version: '1.04.1',
+    publicationDate: '2026-01-01T00:00:00Z',
+    groups: { Machine: null },
+    // Not here: OperationalTime, which no Machinery NodeSet declares. A machine's identification
+    // object is a MachineIdentificationType, which inherits all but ProductInstanceUri from
+    // MachineryItemIdentificationType and redeclares that one as mandatory.
+    entries: [
+      { group: 'Machine', type: 'MachineryItemIdentificationType', name: 'Manufacturer',
+        description: 'Name of the machine manufacturer.' },
+      { group: 'Machine', type: 'MachineryItemIdentificationType', name: 'Model',
+        description: 'Manufacturer-assigned model name of the machine.' },
+      { group: 'Machine', type: 'MachineryItemIdentificationType', name: 'SerialNumber',
+        description: 'Serial number uniquely identifying this machine instance for its manufacturer.' },
+      { group: 'Machine', type: 'MachineIdentificationType', name: 'ProductInstanceUri',
+        description: 'Globally unique URI for this machine instance. The closest OPC UA equivalent to an AAS globalAssetId, and the natural anchor when cross-referencing a shell.' },
+      { group: 'Machine', type: 'MachineryItemIdentificationType', name: 'SoftwareRevision',
+        description: 'Software or firmware revision of the machine.' },
+      { group: 'Machine', type: 'MachineryItemIdentificationType', name: 'YearOfConstruction',
+        description: 'Year the machine was built.' },
+      { group: 'Machine', type: 'MonitoringType', name: 'MachineryItemState',
+        browsePath: ['Status', 'MachineryItemState', 'CurrentState'],
+        description: 'Lifecycle state of the machine: Executing, NotExecuting, NotAvailable or OutOfService. The OPC UA analogue of the execution state a controller reports -- a discrete state, so a String metric rather than a numeric one.' },
+      { group: 'Machine', type: 'MonitoringType', name: 'MachineryOperationMode',
+        browsePath: ['Status', 'MachineryOperationMode', 'CurrentState'],
+        description: 'Operating mode of the machine: Processing, Setup, Maintenance or None.' },
+      { group: 'Machine', type: 'MachineryOperationCounterType', name: 'PowerOnDuration', unit: 'MILLISECOND',
+        description: 'Accumulated time the machine has been powered on. The specification types it as Duration, which OPC UA counts in milliseconds.' }
+    ]
+  },
+  {
+    companionSpec: 'OPC 40010 Robotics',
+    namespaceUri: 'http://opcfoundation.org/UA/Robotics/',
+    path: 'Robotics/Opc.Ua.Robotics.NodeSet2.xml',
+    version: '1.02',
+    publicationDate: '2025-09-08T00:00:00Z',
+    groups: { MotionDevice: null },
+    entries: [
+      { group: 'MotionDevice', type: 'AxisType', name: 'ActualPosition', browsePath: ['ParameterSet', 'ActualPosition'], unit: 'MILLIMETER',
+        description: 'Current position of an axis. Units follow the axis type -- MILLIMETER for a linear axis, DEGREE for a rotary one -- so the unit is a choice at metric-creation time, not a property of the browse name.' },
+      { group: 'MotionDevice', type: 'AxisType', name: 'ActualSpeed', browsePath: ['ParameterSet', 'ActualSpeed'], unit: 'MILLIMETER/SECOND',
+        description: 'Current speed of an axis. On a rotary axis this is the angular velocity; pick DEGREE/SECOND rather than MILLIMETER/SECOND for those.' },
+      { group: 'MotionDevice', type: 'AxisType', name: 'ActualAcceleration', browsePath: ['ParameterSet', 'ActualAcceleration'],
+        description: 'Current acceleration of an axis.' },
+      { group: 'MotionDevice', type: 'AxisType', name: 'MotionProfile',
+        description: 'Kind of motion the axis performs -- rotary, linear or spindle.' },
+      { group: 'MotionDevice', type: 'MotionDeviceType', name: 'SpeedOverride', browsePath: ['ParameterSet', 'SpeedOverride'], unit: 'PERCENT',
+        description: 'Operator speed override applied to programmed motion, as a percentage. The robotics counterpart of a machine tool feed-rate override.' },
+      { group: 'MotionDevice', type: 'MotionDeviceType', name: 'InControl', browsePath: ['ParameterSet', 'InControl'],
+        description: 'Whether the motion device is under control of its controller.' },
+      { group: 'MotionDevice', type: 'MotionDeviceType', name: 'OnPath', browsePath: ['ParameterSet', 'OnPath'],
+        description: 'Whether the motion device is on its programmed path.' },
+      { group: 'MotionDevice', type: 'MotionDeviceType', name: 'MotionDeviceCategory',
+        description: 'Kind of motion device -- articulated robot, cartesian robot, AGV and so on.' },
+      { group: 'MotionDevice', type: 'LoadType', name: 'Mass', unit: 'KILOGRAM',
+        description: 'Mass of a load carried by the motion device -- the payload weight, including the tool where the tool is modelled as part of the load.' },
+      { group: 'MotionDevice', type: 'SafetyStateType', name: 'EmergencyStop', browsePath: ['ParameterSet', 'EmergencyStop'],
+        description: 'Emergency stop state of the motion device. Note the sense: this asserts the stop is active, the inverse of a "safety OK" boolean.' },
+      { group: 'MotionDevice', type: 'SafetyStateType', name: 'ProtectiveStop', browsePath: ['ParameterSet', 'ProtectiveStop'],
+        description: 'Protective stop state -- a guard, light curtain or safety-rated sensor has halted motion.' },
+      { group: 'MotionDevice', type: 'SafetyStateType', name: 'OperationalMode', browsePath: ['ParameterSet', 'OperationalMode'],
+        description: 'Safety-relevant operating mode of the motion device -- automatic, manual reduced speed, manual high speed.' },
+      { group: 'MotionDevice', type: 'TaskControlType', name: 'TaskProgramName', browsePath: ['ParameterSet', 'TaskProgramName'],
+        description: 'Name of the task program currently loaded on the controller.' },
+      { group: 'MotionDevice', type: 'TaskControlType', name: 'ExecutionMode', browsePath: ['ParameterSet', 'ExecutionMode'],
+        description: 'Execution mode of the loaded task program -- continuous, step or cycle.' },
+      { group: 'MotionDevice', type: 'ControllerType', name: 'TotalPowerOnTime', browsePath: ['ParameterSet', 'TotalPowerOnTime'],
+        description: 'Accumulated controller power-on time. The specification types it as DurationString, an ISO 8601 duration such as P12DT3H, so it is text rather than a number of seconds.' }
+    ]
+  },
   {
     companionSpec: 'OPC 40501 Machine Tools',
     namespaceUri: 'http://opcfoundation.org/UA/MachineTool/',
@@ -71,10 +152,8 @@ const SPECS = [
     },
     entries: [
       { group: 'Channel', type: 'ChannelMonitoringType', name: 'FeedOverride', unit: 'PERCENT',
-        path: 'MachineTool/Monitoring/Channels/<Channel>/FeedOverride',
         description: 'Operator feed-rate override applied to the programmed feed on this channel, as a percentage. The machine-tool counterpart of Robotics SpeedOverride; a channel is one independent NC program stream, so a machine with two channels reports two of these.' },
       { group: 'Channel', type: 'ChannelMonitoringType', name: 'RapidOverride', unit: 'PERCENT',
-        path: 'MachineTool/Monitoring/Channels/<Channel>/RapidOverride',
         description: 'Operator override applied to rapid traverse moves on this channel, as a percentage. Separate from FeedOverride because controls override the two independently.' },
       { group: 'Channel', type: 'ChannelMonitoringType', name: 'ChannelState',
         description: 'Execution state of the channel. The MachineTool enumeration, whose values are Interrupted, Reset, Running and Waiting -- the closest OPC UA analogue of MTConnect Controller/EXECUTION.' },
@@ -236,10 +315,19 @@ const SEED = join(
   dirname(fileURLToPath(import.meta.url)),
   '..', 'supabase', 'migrations', '0002_seed_data.sql'
 );
-const VOCAB_BEGIN = '-- >>> BEGIN GENERATED opcua_vocabulary_companion_extensions';
-const VOCAB_END = '-- <<< END GENERATED opcua_vocabulary_companion_extensions';
-const GROUP_BEGIN = '-- >>> BEGIN GENERATED opcua_metric_groups_companion_extensions';
-const GROUP_END = '-- <<< END GENERATED opcua_metric_groups_companion_extensions';
+const VOCAB_BEGIN = '-- >>> BEGIN GENERATED opcua_vocabulary_rows';
+const VOCAB_END = '-- <<< END GENERATED opcua_vocabulary_rows';
+const GROUP_BEGIN = '-- >>> BEGIN GENERATED opcua_metric_groups';
+const GROUP_END = '-- <<< END GENERATED opcua_metric_groups';
+
+/** The dashboard's group suggestion per data point, which no opcua_vocabulary column carries. */
+const GROUPS_MODULE = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..', 'frontend', 'src', 'utils', 'opcuaGroups.generated.js'
+);
+
+/** Namespace index 0 of every NodeSet: the base OPC UA namespace, never listed in NamespaceUris. */
+const OPC_UA_NAMESPACE = 'http://opcfoundation.org/UA/';
 
 const sqlString = (value) => `'${String(value).replace(/'/g, "''")}'`;
 
@@ -273,6 +361,13 @@ function parseNodeSet(xml) {
     model.publicationDate = attrs.PublicationDate;
   }
 
+  // A NodeId's `ns=<index>` counts from this document's own table, so the same index names a
+  // different namespace in each file: Robotics is ns=3 in its NodeSet, Machinery ns=1 in its.
+  const table = xml.match(/<NamespaceUris>([\s\S]*?)<\/NamespaceUris>/);
+  const namespaceUris = table
+    ? [...table[1].matchAll(/<Uri>([^<]*)<\/Uri>/g)].map((m) => m[1].trim())
+    : [];
+
   const element = /<(UAObjectType|UAVariable|UADataType|UAObject|UAVariableType)\b([^>]*?)(\/)?>/g;
   let match;
   while ((match = element.exec(xml)) !== null) {
@@ -305,7 +400,22 @@ function parseNodeSet(xml) {
     }
     void full;
   }
-  return { nodes, byBrowseName, model, aliases };
+  return { nodes, byBrowseName, model, aliases, namespaceUris };
+}
+
+/**
+ * A NodeId as this document writes it (`ns=3;i=16662`, or `i=2255` in namespace 0) in the
+ * ExpandedNodeId string form of OPC 10000-6 5.3.1.11, `nsu=<namespace URI>;i=16662`, which holds
+ * outside the document. The identifier keeps its own type (`i=`, `s=`, `g=`, `b=`); `%` and `;` in
+ * the URI are percent-encoded, as that form requires.
+ */
+function expandedNodeId(nodeId, doc, where) {
+  const m = /^(?:ns=(\d+);)?([isgb])=(.+)$/.exec(nodeId || '');
+  if (!m) throw new Error(`${where}: ${nodeId} is not a NodeId this script can read`);
+  const index = Number(m[1] ?? 0);
+  const uri = index === 0 ? OPC_UA_NAMESPACE : doc.namespaceUris[index - 1];
+  if (!uri) throw new Error(`${where}: ${nodeId} names namespace ${index}, which NamespaceUris does not list`);
+  return `nsu=${uri.replace(/%/g, '%25').replace(/;/g, '%3B')};${m[2]}=${m[3]}`;
 }
 
 function readAttrs(text) {
@@ -327,6 +437,8 @@ const BUILT_IN = {
   'i=6': 'Int32', 'i=7': 'UInt32', 'i=8': 'Int64', 'i=9': 'UInt64', 'i=10': 'Float',
   'i=11': 'Double', 'i=12': 'String', 'i=13': 'DateTime', 'i=17': 'NodeId',
   'i=21': 'LocalizedText', 'i=26': 'Number', 'i=294': 'UtcTime',
+  // Double in milliseconds, and an ISO 8601 duration string.
+  'i=290': 'Duration', 'i=12879': 'DurationString',
   // The abstract Enumeration base, used where a variable accepts any enumeration member.
   'i=29': 'Enumeration'
 };
@@ -340,12 +452,12 @@ const STRUCTURE_BASE = 'i=22';
  *
  * ENUMERATIONS BECOME `String`. A specification-defined enumeration (ChannelState, PartQuality)
  * has no Sparkplug equivalent, and a device publishing one over Sparkplug B publishes the member
- * name as a string -- which is what the existing hand-written rows already assume when they type
- * MotionProfile as String. The enumeration's own name is named in the description instead, so the
+ * name as a string. The enumeration's own name is named in the description instead, so the
  * information is not lost.
  *
  * ABSTRACT `Number` BECOMES `Double`. `Number` is not instantiable; a device publishes a concrete
- * type, and Double is the only one that cannot lose range against the alternatives.
+ * type, and Double is the only one that cannot lose range against the alternatives. `Duration` is a
+ * Double and `DurationString` a String, so each becomes its base; the description says what it holds.
  *
  * STRUCTURES ARE REFUSED, AND A STRUCTURE STOPS THE BUILD. Treating any specification-defined
  * DataType as an enumeration holds for MachineTool and Additive and fails for OPC 30050, which
@@ -360,8 +472,8 @@ function resolveDataType(node, doc, where) {
   const raw = doc.aliases.get(declared) ?? declared;
   if (BUILT_IN[raw]) {
     const builtIn = BUILT_IN[raw];
-    if (builtIn === 'Number') return 'Double';
-    if (builtIn === 'Enumeration') return 'String';
+    if (builtIn === 'Number' || builtIn === 'Duration') return 'Double';
+    if (builtIn === 'Enumeration' || builtIn === 'DurationString') return 'String';
     return builtIn;
   }
   const target = doc.nodes.get(raw);
@@ -384,27 +496,33 @@ function resolveDataType(node, doc, where) {
   );
 }
 
-/** The ObjectType's own members, by BrowseName. Both HasComponent and HasProperty count. */
-function memberOf(objectType, name, doc, where) {
-  const found = [];
-  for (const ref of objectType.references) {
-    if (!ref.forward) continue;
-    if (ref.type !== 'HasComponent' && ref.type !== 'HasProperty') continue;
-    const target = doc.nodes.get(ref.target);
-    if (target && target.tag === 'UAVariable' && target.browseName === name) found.push(target);
-  }
-  if (found.length === 0) {
-    throw new Error(`${where}: ${objectType.browseName} declares no member variable named ${name}`);
-  }
-  if (found.length > 1) {
-    const types = new Set(found.map((f) => f.dataType));
-    if (types.size > 1) throw new Error(`${where}: ${name} is declared more than once with different DataTypes`);
-  }
-  return found[0];
+/**
+ * The variable at `path` below the ObjectType, one BrowseName per step. Each step is a component or
+ * property the NodeSet declares on the node before it, and must name exactly one node: the NodeId
+ * becomes the row's identifier, so a step that could mean two nodes stops the build.
+ */
+function memberAt(objectType, path, doc, where) {
+  let node = objectType;
+  path.forEach((name, step) => {
+    const found = node.references
+      .filter((ref) => ref.forward && (ref.type === 'HasComponent' || ref.type === 'HasProperty'))
+      .map((ref) => doc.nodes.get(ref.target))
+      .filter((target) => target && target.browseName === name &&
+        (step === path.length - 1 ? target.tag === 'UAVariable' : ['UAObject', 'UAVariable'].includes(target.tag)));
+    if (found.length !== 1) {
+      throw new Error(`${where}: ${node.browseName} declares ${found.length} members named ${name}, expected one ` +
+        `(path ${objectType.browseName}/${path.join('/')})`);
+    }
+    node = found[0];
+  });
+  return node;
 }
 
 const vocabRows = [];
 const groupRows = new Map();
+const groupsByPoint = new Map();
+const formerIds = [];
+const seenIds = new Map();
 const summary = [];
 
 for (const spec of SPECS) {
@@ -434,11 +552,18 @@ for (const spec of SPECS) {
     if (candidates.length !== 1) {
       throw new Error(`${where}: expected exactly one ObjectType named ${entry.type}, found ${candidates.length}`);
     }
-    const member = memberOf(candidates[0], entry.name, doc, where);
+    const member = memberAt(candidates[0], entry.browsePath ?? [entry.name], doc, where);
     const datatype = resolveDataType(member, doc, where);
-    // Derived, not issued: the OPC Foundation publishes the namespace URI, not this IRI.
-    const semanticId = `${spec.namespaceUri}${entry.name}`;
-    const nodeId = `nsu=${spec.namespaceUri};s=${entry.path ?? `${entry.type}/${entry.name}`}`;
+    // The id the specification publishes for this variable, as both the node and the concept.
+    const nodeId = expandedNodeId(member.nodeId, doc, where);
+    if (!nodeId.startsWith(`nsu=${spec.namespaceUri};`)) {
+      throw new Error(`${where}: ${nodeId} is outside ${spec.namespaceUri}; a row names a node its own specification declares`);
+    }
+    if (seenIds.has(nodeId)) throw new Error(`${where}: ${nodeId} is already ${seenIds.get(nodeId)}`);
+    seenIds.set(nodeId, where);
+    const semanticId = nodeId;
+    // What 0171 repoints: the namespace plus the name, the id this vocabulary carried before 1.2.0.
+    formerIds.push([`${spec.namespaceUri}${entry.name}`, semanticId]);
 
     vocabRows.push(
       `INSERT INTO public.opcua_vocabulary VALUES (${sqlString(entry.name)}, ` +
@@ -451,8 +576,10 @@ for (const spec of SPECS) {
       `  unit        = EXCLUDED.unit,\n` +
       `  semantic_id = EXCLUDED.semantic_id;`
     );
-    if (!spec.groups[entry.group]) throw new Error(`${where}: no description registered for group ${entry.group}`);
+    if (!(entry.group in spec.groups)) throw new Error(`${where}: no description registered for group ${entry.group}`);
     groupRows.set(entry.group, spec.groups[entry.group]);
+    if (!groupsByPoint.has(spec.companionSpec)) groupsByPoint.set(spec.companionSpec, new Map());
+    groupsByPoint.get(spec.companionSpec).set(entry.name, entry.group);
   }
   summary.push(`${spec.companionSpec}: ${spec.entries.length} rows from ${spec.path}`);
 }
@@ -467,8 +594,9 @@ for (const spec of SPECS) {
  *
  * Ids are derived from the name so re-running is stable and the diff stays empty; a random uuid
  * would rewrite every line on every run. `ON CONFLICT DO NOTHING` covers both the primary key and
- * uq_metric_groups_name_ci, so a group that already exists -- `Machine`, shared with OPC 40001 --
- * is left exactly as it is rather than being restated with this file's description.
+ * uq_metric_groups_name_ci, so a group that already exists is left exactly as it is rather than
+ * being restated with this file's description. `Machine` and `MotionDevice` are registered by the
+ * hand-written rows above the block, with the ids every database already holds.
  */
 const groupUuid = (name) => {
   // The salt these PRIMARY KEYS are derived from. Changing it changes every id this block seeds,
@@ -481,13 +609,6 @@ const groupUuid = (name) => {
     hex.slice(20, 32)
   ].join('-');
 };
-
-const groupStatements = [...groupRows.entries()]
-  .sort(([a], [b]) => a.localeCompare(b))
-  .map(([name, description]) =>
-    `INSERT INTO public.metric_groups (id, name, description, standard) VALUES ` +
-    `(${sqlString(groupUuid(name))}, ${sqlString(name)}, ${sqlString(description)}, 'OPC UA')\n` +
-    `ON CONFLICT DO NOTHING;`);
 
 function splice(seed, begin, end, header, body) {
   const beginAt = seed.indexOf(begin);
@@ -502,13 +623,30 @@ function splice(seed, begin, end, header, body) {
 // CRLF on Windows, and splicing an LF block in would digest over neither ending consistently.
 let seed = readFileSync(SEED, 'utf8').replace(/\r\n/g, '\n');
 
+for (const [name, description] of groupRows) {
+  if (description !== null) continue;
+  const quoted = name.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&');
+  const registered = new RegExp(`^INSERT INTO public\\.metric_groups VALUES \\('[^']+', '${quoted}', .*'OPC UA'\\)$`, 'm');
+  if (!registered.test(seed)) {
+    throw new Error(`group ${name} has no description here and no hand-written OPC UA metric_groups row in ${SEED}`);
+  }
+}
+
+const groupStatements = [...groupRows.entries()]
+  .filter(([, description]) => description !== null)
+  .sort(([a], [b]) => a.localeCompare(b))
+  .map(([name, description]) =>
+    `INSERT INTO public.metric_groups (id, name, description, standard) VALUES ` +
+    `(${sqlString(groupUuid(name))}, ${sqlString(name)}, ${sqlString(description)}, 'OPC UA')\n` +
+    `ON CONFLICT DO NOTHING;`);
+
 const vocabBody = vocabRows.join('\n');
 const vocabDigest = createHash('sha256').update(vocabBody).digest('hex').slice(0, 16);
 seed = splice(seed, VOCAB_BEGIN, VOCAB_END,
   `${VOCAB_BEGIN} -- ${vocabRows.length} rows, sha256:${vocabDigest}\n` +
   `-- GENERATED from the OPC Foundation NodeSet2 XML by scripts/generate-opcua-vocabulary.mjs.\n` +
-  `-- Do not edit these rows by hand: change ENTRIES in that script and re-run it. Browse names\n` +
-  `-- and datatypes are verified against the NodeSet; the selection, prose and units are curated.\n` +
+  `-- Do not edit these rows by hand: change ENTRIES in that script and re-run it. Browse names,\n` +
+  `-- datatypes and NodeIds are read from the NodeSet; the selection, prose and units are curated.\n` +
   `-- CI verifies the digest above.`,
   vocabBody);
 
@@ -519,7 +657,7 @@ seed = splice(seed, GROUP_BEGIN, GROUP_END,
   `-- GENERATED by scripts/generate-opcua-vocabulary.mjs. CI verifies the digest above.`,
   groupBody);
 
-// The table's COMMENT names every specification the seed holds, hand-written rows included.
+// The table's COMMENT names every specification the seed holds.
 seed = splice(seed, COMMENT_BEGIN, COMMENT_END,
   `${COMMENT_BEGIN}\n` +
   `-- GENERATED by scripts/generate-opcua-vocabulary.mjs from every opcua_vocabulary row in this file.`,
@@ -527,7 +665,27 @@ seed = splice(seed, COMMENT_BEGIN, COMMENT_END,
 
 writeFileSync(SEED, seed, 'utf8');
 
+// The dashboard's group suggestion for each data point, keyed as the table is.
+const groupsBody = [...groupsByPoint.keys()].sort().map((spec) => {
+  const names = [...groupsByPoint.get(spec).entries()].sort(([a], [b]) => a.localeCompare(b));
+  const key = (name) => (/^[A-Za-z_$][\w$]*$/.test(name) ? name : `'${name}'`);
+  return `  '${spec}': {\n${names.map(([name, group]) => `    ${key(name)}: '${group}'`).join(',\n')}\n  }`;
+}).join(',\n');
+const groupsDigest = createHash('sha256').update(groupsBody).digest('hex').slice(0, 16);
+writeFileSync(GROUPS_MODULE,
+  `// GENERATED by scripts/generate-opcua-vocabulary.mjs -- ${seenIds.size} points, sha256:${groupsDigest}\n` +
+  '// Do not edit: change ENTRIES in that script and re-run it. scripts/check-opcua-seed-sync.mjs\n' +
+  '// holds every key to an opcua_vocabulary row and every group to an OPC UA metric_groups row.\n' +
+  '//\n' +
+  '// The metric group Add Metric suggests for each OPC UA data point, by companion specification\n' +
+  '// and name. node_id is a NodeId, so no column of the row says it.\n' +
+  `export const OPCUA_GROUPS = {\n${groupsBody}\n}\n`, 'utf8');
+
 console.log(`wrote ${vocabRows.length} opcua_vocabulary rows and ${groupStatements.length} metric_groups rows`);
 console.log(`  opcua_vocabulary  sha256:${vocabDigest}`);
 console.log(`  metric_groups     sha256:${groupDigest}`);
+console.log(`  dashboard groups  sha256:${groupsDigest}`);
 for (const line of summary) console.log(`  ${line}`);
+if (process.argv.includes('--print-map')) {
+  for (const [former, current] of formerIds) console.log(`${former}\t${current}`);
+}

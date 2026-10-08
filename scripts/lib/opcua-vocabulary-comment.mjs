@@ -29,8 +29,8 @@ export function tableCommentStatement(seed, generatedSpecs) {
     `Reference data, not deployment state. The ${generated.join(', ')} rows are verified against the ` +
     `OPC Foundation NodeSet2 XML by scripts/generate-opcua-vocabulary.mjs` +
     (handWritten.length ? `; the ${handWritten.join(', ')} rows are hand-written. ` : '. ') +
-    'node_id holds a browse path, not a resolvable numeric NodeId. semantic_id is derived from the ' +
-    'published namespace URI plus the browse name, not issued by the OPC Foundation; MTConnect ids are ' +
-    'minted under aber.local instead.';
+    'node_id and semantic_id are both the ExpandedNodeId the specification\'s NodeSet publishes for the ' +
+    'data point (nsu=<namespace URI>;i=<id>), the identifier OPC UA itself issues. MTConnect issues no ' +
+    'identifiers, so its ids are minted under aber.local instead.';
   return `COMMENT ON TABLE public.opcua_vocabulary IS ${sqlString(text)};`;
 }
