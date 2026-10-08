@@ -54,3 +54,6 @@ __pycache__/
 # the file could not say which was true. It is the ignore.
 values-dev.yaml
 values-prod.yaml.example
+# Written by npm run setup and npm run try, holding a site's credentials. Never packaged.
+values-local.yaml
+values-try.yaml

@@ -24,7 +24,9 @@
  *
  * Two questions are asked, on a terminal only. The domain every host is published under, which is
  * what a browser and a Remote gateway both dial: `--domain=<base>` answers it from a script, and
- * without a terminal it is left at the chart's default. And the first administrator's email:
+ * without a terminal it is left at the chart's default. `localhost` is one machine with no
+ * enrolment (`npm run try` passes it); `*.localhost` and loopback addresses are refused. And the
+ * first administrator's email:
  * `--admin-email=<address>` answers it, and db-init creates that account with the password minted
  * here (migration 0163). Without one, nobody can sign in until it is set.
  *
@@ -153,8 +155,10 @@ function parseDomain(answer) {
   if (/^[a-z]+:\/\//.test(domain) || domain.includes('/') || domain.includes(':')) {
     return { error: `'${domain}' is a URL or carries a port. Give the base domain alone; the hosts and scheme are derived.` };
   }
+  // A single machine's domain, as values-dev.yaml and `npm run try` use it: no enrolment.
+  if (domain === 'localhost') return { domain };
   if (!DOMAIN_SHAPE.test(domain)) return { error: `'${domain}' is not a domain name.` };
-  if (domain === 'localhost' || domain.endsWith('.localhost') || domain.includes('127.0.0.1')) {
+  if (domain.endsWith('.localhost') || domain.includes('127.0.0.1')) {
     return { error: `'${domain}' resolves to this machine only. An appliance cannot dial it; give the name or <ip>.nip.io the plant network resolves, or leave it blank.` };
   }
   return { domain };
@@ -272,11 +276,11 @@ console.log(`   playbackKey   jti ${playbackKey.jti}`);
 console.log(`   Both valid ${SERVICE_KEY_DEFAULT_DAYS} days, until ${ingestionKey.expiresAt.toISOString().slice(0, 10)}.`);
 console.log('   `npm run keys:check` reports the remaining days; `npm run keys:rotate` re-signs both.');
 console.log('');
-if (domain) {
+if (domain && domain !== 'localhost') {
   console.log(`🌐 Every host is under ${domain}: browsers and Remote gateways dial it, and the broker`);
   console.log('   certificate carries mqtt.' + domain + ' once mosquitto.tls.enabled is on.');
 } else {
-  console.log('🌐 No domain was given, so the dev values\' localhost stays: this machine only, and');
+  console.log(`🌐 ${domain ? 'The domain is localhost' : 'No domain was given, so the dev values\' localhost stays'}: this machine only, and`);
   console.log('   REMOTE GATEWAYS CANNOT BE ENROLLED. Set global.publicBaseDomain in the file later.');
 }
 console.log(`   Gateways clone from the forge over SSH on port ${FORGE_SSH_PORT}; port 22 stays with this`);
