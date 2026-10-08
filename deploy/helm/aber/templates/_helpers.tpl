@@ -65,6 +65,17 @@ app.kubernetes.io/component: {{ .component }}
 app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 
+{{/*
+The labels on a StatefulSet's volumeClaimTemplates: the selector labels and nothing a release
+changes. Kubernetes refuses any change to a claim template once the StatefulSet exists, so the
+chart version, appVersion or global.commonLabels here fails every `helm upgrade`. The
+claim-templates pre-upgrade hook compares the live templates with these.
+Usage: (dict "ctx" $ "component" "timescaledb")
+*/}}
+{{- define "aber.claimTemplateLabels" -}}
+{{ include "aber.selectorLabels" . }}
+{{- end -}}
+
 {{- define "aber.secretName" -}}
 {{- if .Values.secrets.existingSecret -}}
 {{- .Values.secrets.existingSecret -}}

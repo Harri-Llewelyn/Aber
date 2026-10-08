@@ -914,8 +914,8 @@ coldArchive:
   # another building all serve it. Which one is the operator's decision and the code never knows.
   #
   # UNDER networkPolicy.enabled THIS NEEDS AN EGRESS RULE. The chart cannot express a peer outside
-  # the cluster, so add the endpoint to networkPolicy.extraEgress -- otherwise every export fails
-  # at connect time, on a schedule, at 03:15.
+  # the cluster, so list the endpoint in coldArchive.offsiteEgress below -- otherwise every export
+  # fails at connect time, on a schedule, at 03:15.
   s3:
     # This site's identity in every object key: site=<siteKey>/dataset=telemetry/v=1/...
     #
@@ -938,6 +938,11 @@ coldArchive:
     # MinIO and most self-hosted gateways address buckets by path; AWS, R2 and B2 take the
     # virtual-host form. Wrong, this fails as DNS resolution, which names nothing useful.
     pathStyle: false
+  # NetworkPolicy egress rules for the S3 endpoint, applied to this pod alone under
+  # networkPolicy.enabled. The endpoint is a page setting, so the chart cannot derive it. For example:
+  #   - to: [{ ipBlock: { cidr: 203.0.113.10/32 } }]
+  #     ports: [{ protocol: TCP, port: 443 }]
+  offsiteEgress: []
 
 ingestion:
   # Which role the daemon connects to the historian as. `ingest_writer` cannot UPDATE, DELETE or

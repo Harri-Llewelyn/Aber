@@ -110,6 +110,129 @@ class CaptureError(Exception):
 
 
 # ---------------------------------------------------------------------------------------------
+# The JSON encoding, as the daemon reads it
+# ---------------------------------------------------------------------------------------------
+# ingestion.py's parse_sparkplug_payload() reads a JSON body through json_payload(), and so do
+# decode_wire_payload() and dict_to_payload() here, so a recorded JSON message replays as what the
+# daemon stored from it. Defined here, not in the daemon, because this tool runs without the
+# daemon's database clients.
+
+# MIRRORED in i3x/i3x_service.py; test_i3x_service.py asserts the two copies agree, and both
+# suites read test-harness/fixtures/sparkplug-json-values.json.
+def json_metric_value(metric):
+    """
+    The (field, value, datatype) one JSON-encoded metric carries, as the protobuf encoding would
+    hold it: the first present of the six Sparkplug value keys, then a bare `value`, which is typed
+    by what it holds. An integer is stored as its two's complement in `int_value`, or `long_value`
+    when the key, a 64-bit datatype or its size needs 64 bits; a negative one with no datatype is
+    marked Int32 or Int64 so it reads back signed. A `float_value` is rounded to 32 bits.
+
+    (None, None, datatype) when no value key is present. ValueError when the value is not the JSON
+    type its key names or does not fit its field; the caller drops that metric, not its payload.
+    """
+    import struct
+
+    datatype = metric.get("datatype")
+    if not isinstance(datatype, int) or isinstance(datatype, bool) or not 0 <= datatype < 2**32:
+        datatype = None
+    for key in ("int_value", "long_value", "float_value", "double_value", "boolean_value",
+                "string_value", "value"):
+        value = metric.get(key)
+        if value is None:
+            continue
+        if key == "value" and (isinstance(value, bool) or not isinstance(value, int)):
+            key = {bool: "boolean_value", float: "double_value", str: "string_value"}.get(type(value))
+            if key is None:
+                raise ValueError("value %r is not a number, a boolean or a string" % (value,))
+        if key in ("int_value", "long_value", "value"):
+            if isinstance(value, float) and value.is_integer():
+                value = int(value)
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError("%s %r is not an integer" % (key, value))
+            wide = (key == "long_value" or datatype in (4, 8, 13)
+                    or (key == "value" and not -(2**31) <= value < 2**32))
+            bits = 64 if wide else 32
+            if not -(2 ** (bits - 1)) <= value < 2**bits:
+                raise ValueError("%s %d does not fit in %d bits" % (key, value, bits))
+            if value < 0 and datatype is None:
+                datatype = 4 if wide else 3
+            return ("long_value" if wide else "int_value"), value & ((1 << bits) - 1), datatype
+        if key in ("float_value", "double_value"):
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise ValueError("%s %r is not a number" % (key, value))
+            if key == "float_value":
+                try:
+                    value = struct.unpack("<f", struct.pack("<f", value))[0]
+                except OverflowError:
+                    raise ValueError("float_value %r does not fit in 32 bits" % (value,)) from None
+            return key, float(value), datatype
+        if not isinstance(value, bool if key == "boolean_value" else str):
+            raise ValueError("%s %r is not a %s" % (key, value, key.split("_")[0]))
+        return key, value, datatype
+    return None, None, datatype
+
+
+# What json_metric() raises for a metric the daemon drops while keeping the rest of its payload.
+JSON_METRIC_REFUSED = (AttributeError, TypeError, ValueError)
+
+
+def json_metric(m):
+    """
+    One JSON-encoded metric as the protobuf metric the daemon stores. Raises one of
+    JSON_METRIC_REFUSED for a metric it drops.
+    """
+    metric = sparkplug_b_pb2.Payload.Metric()
+    field, value, datatype = json_metric_value(m)
+    # An absent or null name is an alias-only metric, as i3X reads it. Left unset, as the protobuf
+    # encoding leaves it; the daemon reads `metric.name` as '' either way.
+    if m.get("name"):
+        metric.name = m["name"]
+    # Assigning the field is what makes HasField('alias') true, which resolve_metric_name() tests.
+    if m.get("alias") is not None:
+        metric.alias = int(m["alias"])
+    if field is not None:
+        setattr(metric, field, value)
+    if datatype is not None:
+        metric.datatype = datatype
+    # The metric's own reading time, which the protobuf path already honours: a report-by-exception
+    # refresh or a batched reading is filed when it was taken.
+    ts = m.get("timestamp")
+    if isinstance(ts, (int, float)) and not isinstance(ts, bool) and ts > 0:
+        metric.timestamp = int(ts)
+    return metric
+
+
+def json_payload(data, refused=None):
+    """
+    A decoded JSON Sparkplug body as the protobuf Payload the daemon reads from it.
+
+    A metric the daemon drops is left out, and appended to `refused` as (metric, error) when a list
+    is passed; the rest of the payload is kept. Raises where the daemon drops the whole message. An
+    absent payload clock stays absent: the daemon stamps the arrival time itself.
+    """
+    payload = sparkplug_b_pb2.Payload()
+    if "timestamp" in data:
+        payload.timestamp = int(data["timestamp"])
+    # The Factory+ payload marker. Nothing branches on it: the TOPIC identifies the asset.
+    if data.get("uuid"):
+        payload.uuid = str(data["uuid"])
+    # Only when present and numeric: a defaulted 0 would read as a wrap, and a JSON fleet is not
+    # exempt from gap detection.
+    seq = data.get("seq")
+    if isinstance(seq, (int, float)) and not isinstance(seq, bool):
+        payload.seq = int(seq) % 256
+    for m in data.get("metrics", []):
+        try:
+            metric = json_metric(m)
+        except JSON_METRIC_REFUSED as err:
+            if refused is not None:
+                refused.append((m, err))
+            continue
+        payload.metrics.add().CopyFrom(metric)
+    return payload
+
+
+# ---------------------------------------------------------------------------------------------
 # Payload conversion
 # ---------------------------------------------------------------------------------------------
 def payload_to_dict(payload):
@@ -153,58 +276,17 @@ def payload_to_dict(payload):
 
 def dict_to_payload(data):
     """
-    The inverse: a dict back to a protobuf Payload object.
+    The inverse: a dict back to a protobuf Payload object, read as the daemon reads the same dict
+    sent as JSON (json_payload()). A playback in either encoding therefore carries what the daemon
+    stored from the recording: a metric the daemon drops is dropped, and the rest of the message
+    is kept.
 
-    Every assignment is guarded on presence for the same HasField reason as above -- and on the
-    way in this also matters because the file may have been HAND EDITED, so an absent key is a
-    deliberate statement and must not be filled in with a zero.
+    An absent key stays absent, for the same HasField reason as above; the file may have been HAND
+    EDITED, so an absent key is a deliberate statement. A null payload clock counts as absent.
     """
-    payload = sparkplug_b_pb2.Payload()
-    if data.get("timestamp") is not None:
-        payload.timestamp = int(data["timestamp"])
-    if data.get("seq") is not None:
-        # Sparkplug's seq is a single byte that wraps. A hand-edited 300 is a typo, but taking it
-        # modulo rather than refusing matches what the daemon's own JSON fallback does with it.
-        payload.seq = int(data["seq"]) % 256
-    if data.get("uuid"):
-        payload.uuid = str(data["uuid"])
-
-    for m in data.get("metrics", []):
-        metric = payload.metrics.add()
-        if m.get("name") is not None:
-            metric.name = str(m["name"])
-        if m.get("alias") is not None:
-            metric.alias = int(m["alias"])
-        if m.get("timestamp") is not None:
-            metric.timestamp = int(m["timestamp"])
-        if m.get("datatype") is not None:
-            metric.datatype = int(m["datatype"])
-        if m.get("string_value") is not None:
-            metric.string_value = str(m["string_value"])
-        if m.get("double_value") is not None:
-            metric.double_value = float(m["double_value"])
-        if m.get("boolean_value") is not None:
-            metric.boolean_value = bool(m["boolean_value"])
-        if m.get("int_value") is not None:
-            value = int(m["int_value"])
-            # A negative one as parse_sparkplug_payload()'s JSON arm stores it: 32-bit two's
-            # complement, marked Int32 when no datatype is declared, so it reads back signed.
-            if -2 ** 31 <= value < 0:
-                value &= 0xFFFFFFFF
-                if m.get("datatype") is None:
-                    metric.datatype = 3
-            metric.int_value = value
-        if m.get("long_value") is not None:
-            value = int(m["long_value"])
-            # The same rule at 64 bits.
-            if -2 ** 63 <= value < 0:
-                value &= 0xFFFFFFFFFFFFFFFF
-                if m.get("datatype") is None:
-                    metric.datatype = 4
-            metric.long_value = value
-        if m.get("float_value") is not None:
-            metric.float_value = float(m["float_value"])
-    return payload
+    if "timestamp" in data and data["timestamp"] is None:
+        data = {key: value for key, value in data.items() if key != "timestamp"}
+    return json_payload(data)
 
 
 def dict_to_payload_bytes(data):
@@ -228,7 +310,8 @@ def decode_wire_payload(raw):
 
     Protobuf first, then JSON, in that order and for the daemon's reason: whatever the daemon
     would have made of these bytes is what the capture should record. A capture that decoded more
-    carefully than the daemon does would faithfully record traffic the daemon never ingested.
+    carefully than the daemon does would faithfully record traffic the daemon never ingested. The
+    JSON arm is the daemon's own json_payload(), so it raises where the daemon drops the message.
     """
     payload = sparkplug_b_pb2.Payload()
     try:
@@ -237,7 +320,7 @@ def decode_wire_payload(raw):
     except Exception:
         pass
     data = json.loads(raw.decode("utf-8"))
-    return dict_to_payload(data), ENCODING_JSON
+    return json_payload(data), ENCODING_JSON
 
 
 def encode_wire_payload(payload_dict, encoding):
