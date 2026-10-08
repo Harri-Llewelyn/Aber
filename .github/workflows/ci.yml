@@ -26,6 +26,7 @@ jobs:
   changes:
     name: Which Paths Changed
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       code: ${{ steps.classify.outputs.code }}
       playbook: ${{ steps.classify.outputs.playbook }}
@@ -124,6 +125,7 @@ jobs:
   frontend-build:
     name: Frontend Build & Test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # Ordering only -- there is no job-level `if`, so this job runs whatever the diff holds. One
     # step inside it reads `playbook`, and a step cannot see an output the job did not ask for.
     needs: changes
@@ -352,6 +354,7 @@ jobs:
   helm-chart:
     name: Helm Chart Lint & Render
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout Code
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -1412,6 +1415,7 @@ jobs:
   edge-function-auth-test:
     name: Edge Function & RLS Authorization Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: supabase/postgres:17.6.1.175
@@ -1446,11 +1450,14 @@ jobs:
           pip install jsonschema pytest pyyaml
 
       # `ingestion/*_pb2.py` is gitignored and built from sparkplug_b.proto at image build, so a fresh
-      # checkout has none.
+      # checkout has none. apt sets no deadline on a stalled mirror, so each attempt gets three minutes.
       - name: Generate Sparkplug B Protobuf Module
         run: |
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
+          for attempt in 1 2 3; do
+            timeout 180 sudo apt-get update -qq && timeout 180 sudo apt-get install -y -qq protobuf-compiler && break
+            echo "::warning::apt attempt $attempt stalled or failed"
+          done
+          protoc --version
           protoc --python_out=. sparkplug_b.proto
           cp sparkplug_b_pb2.py ingestion/
 
@@ -1557,10 +1564,14 @@ jobs:
           # Official AAS V3 schema validation in the live export checks below.
           pip install jsonschema
 
+      # apt sets no deadline on a stalled mirror, so each attempt gets three minutes.
       - name: Install Protobuf Compiler
         run: |
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
+          for attempt in 1 2 3; do
+            timeout 180 sudo apt-get update -qq && timeout 180 sudo apt-get install -y -qq protobuf-compiler && break
+            echo "::warning::apt attempt $attempt stalled or failed"
+          done
+          protoc --version
 
       - name: Generate Sparkplug B Protobuf Module
         run: |
