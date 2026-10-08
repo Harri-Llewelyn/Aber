@@ -607,29 +607,25 @@ const template = read(ENVOY_TEMPLATE).replace(/\r\n/g, '\n');
   }
 }
 
-// The template's text for one listener: from its `- name:` line to the next listener or the clusters.
-const listenerText = (name) => {
-  const start = template.search(new RegExp(`^    - name: ${name}$`, 'm'));
+/** The lines after the one equal to `first`, up to the first that `stop` matches. */
+const linesAfter = (lines, first, stop) => {
+  const start = lines.indexOf(first);
   if (start < 0) return '';
-  const rest = template.slice(start + 1);
-  const end = rest.search(/^ {4}- name: |^ {2}clusters:/m);
-  return end < 0 ? rest : rest.slice(0, end);
+  let end = start + 1;
+  while (end < lines.length && !stop.test(lines[end])) end += 1;
+  return lines.slice(start + 1, end).join('\n');
 };
+/** One listener's text: from its `- name:` line to the next listener or the clusters. */
+const listenerText = (name) => linesAfter(template.split('\n'), `    - name: ${name}`, /^ {4}- name: |^ {2}clusters:/);
 const gateway = listenerText('gateway');
 // Route names are kebab-case; filter, logger and header-matcher names have dots or quotes.
-const ROUTE_NAME = /^ *- name: ([a-z0-9-]+) *$/gm;
+const ROUTE_LINE = /^ *- name: ([a-z0-9-]+) *$/;
 const routesStart = gateway.indexOf('routes:');
 const filtersStart = gateway.indexOf('http_filters:');
-const routeNames = [...gateway.slice(routesStart, filtersStart).matchAll(ROUTE_NAME)].map((m) => m[1]);
+const routeLines = gateway.slice(routesStart, filtersStart).split('\n');
+const routeNames = routeLines.map((l) => (l.match(ROUTE_LINE) || [])[1]).filter(Boolean);
 /** One gateway route's text, from its `- name:` line to the next route's. */
-const routeText = (name) => {
-  const block = gateway.slice(routesStart, filtersStart);
-  const own = new RegExp(`^ *- name: ${name} *$`, 'm').exec(block);
-  if (!own) return '';
-  const rest = block.slice(own.index + own[0].length);
-  const next = rest.search(/^ *- name: [a-z0-9-]+ *$/m);
-  return next < 0 ? rest : rest.slice(0, next);
-};
+const routeText = (name) => linesAfter(routeLines.map((l) => l.trim()), `- name: ${name}`, ROUTE_LINE);
 
 // ---- 4. Every API route has a row in EXPECTED, and every row names a route. --------------------
 {
