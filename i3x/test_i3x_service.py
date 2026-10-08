@@ -2515,11 +2515,11 @@ class TestMetricsAreComponentsOfTheirDevice(_MetricSpace):
         self.assertEqual(metric["metadata"]["typeNamespaceUri"], MTCONNECT)
         self.assertEqual(metric["metadata"]["sourceTypeId"], MTCONNECT + "/DataItemType/POSITION")
         position = types[metric["typeElementId"]]
-        self.assertEqual(position["schema"], {"type": "number", "x-unit": "MILLIMETER",
+        self.assertEqual(position["schema"], {"type": ["number", "null"], "x-unit": "MILLIMETER",
                                               "description": "Linear position of X"})
         self.assertEqual(position["namespaceUri"], MTCONNECT)
         execution = types[objects["dev-one/Controller/EXECUTION"]["typeElementId"]]
-        self.assertEqual(execution["schema"], {"type": "string"})
+        self.assertEqual(execution["schema"], {"type": ["string", "null"]})
         # Every device carrying the metric shares the one type.
         self.assertEqual(objects["dev-two/Axes/X/POSITION"]["typeElementId"],
                          metric["typeElementId"])
@@ -2529,7 +2529,7 @@ class TestMetricsAreComponentsOfTheirDevice(_MetricSpace):
         types = {t["elementId"]: t for t in types}
         humidity = objects["dev-ext/Environmental/HUMIDITY"]
         self.assertEqual(humidity["typeElementId"], "i3x:type:sparkplug:Double")
-        self.assertEqual(types[humidity["typeElementId"]]["schema"], {"type": "number"})
+        self.assertEqual(types[humidity["typeElementId"]]["schema"], {"type": ["number", "null"]})
         # No catalog row and no DBIRTH seen since startup: nothing says what it is.
         count = objects["dev-ext/Vendor/COUNT"]
         self.assertEqual(count["typeElementId"], A.UNKNOWN_TYPE_ID)
@@ -2548,7 +2548,9 @@ class TestMetricsAreComponentsOfTheirDevice(_MetricSpace):
                     continue
                 value = i3x_service._current_value(objects, space, element_id)["value"]
                 if value is not None and "type" in served["schema"]:
-                    self.assertTrue(json_types[served["schema"]["type"]](value), (value, served))
+                    allowed = served["schema"]["type"]
+                    allowed = allowed if isinstance(allowed, list) else [allowed]
+                    self.assertTrue(any(json_types[t](value) for t in allowed), (value, served))
 
     def test_element_ids_are_unique_across_objects_and_types(self):
         _, objects, types = self.space()
@@ -2625,10 +2627,23 @@ class TestDevicesAreTypedByEveryAttachedSchema(_MetricSpace):
         self.assertEqual(objects["dev-three"]["typeElementId"], type_id)
         served = [t for t in types if t["elementId"] == type_id]
         self.assertEqual(len(served), 1, "one type for the set, not one per device")
-        rows = {s["id"]: s for s in _metric_rows()["schemas"]}
+        by_id = {t["elementId"]: t["schema"] for t in types}
+        position, execution, availability = (
+            A.metric_type_id(n) for n in ("Axes/X/POSITION", "Controller/EXECUTION", "OEE/AVAILABILITY")
+        )
+        # Each definition inlined, its catalog metrics referring to their types in the root's $defs.
         self.assertEqual(served[0]["schema"], {
             "type": "object",
-            "allOf": [rows[MILL]["schema_definition"], rows[OEE]["schema_definition"]],
+            "allOf": [
+                {"type": "object",
+                 "properties": {"Axes/X/POSITION": {"$ref": "#/$defs/i3x:type:metric:Axes~1X~1POSITION"},
+                                "Controller/EXECUTION": {"$ref": "#/$defs/i3x:type:metric:Controller~1EXECUTION"}},
+                 "required": ["Axes/X/POSITION"]},
+                {"type": "object",
+                 "properties": {"OEE/AVAILABILITY": {"$ref": "#/$defs/i3x:type:metric:OEE~1AVAILABILITY"}}},
+            ],
+            "$defs": {position: by_id[position], execution: by_id[execution],
+                      availability: by_id[availability]},
         })
         self.assertEqual(served[0]["displayName"], "Mill + OEE")
         self.assertEqual(served[0]["related"],
@@ -2650,7 +2665,7 @@ class TestDevicesAreTypedByEveryAttachedSchema(_MetricSpace):
         self.assertTrue(device["isExtended"])
         # From the DBIRTH datatype; `{}` where none was seen and the catalog has no row.
         self.assertEqual(device["metadata"]["schemaExtensions"],
-                         {"Environmental/HUMIDITY": {"type": "number"}, "Vendor/COUNT": {}})
+                         {"Environmental/HUMIDITY": {"type": ["number", "null"]}, "Vendor/COUNT": {}})
         self.assertEqual(device["metadata"]["system"], {"quarantined": True})
         self.assertNotIn("quarantined", device["metadata"], "a vendor key belongs in system")
 
@@ -2674,6 +2689,148 @@ class TestDevicesAreTypedByEveryAttachedSchema(_MetricSpace):
         _, objects, _ = self.space()
         self.assertEqual(objects["dev-bare"]["typeElementId"], A.UNTYPED_DEVICE_TYPE_ID)
         self.assertFalse(objects["dev-bare"]["isExtended"])
+
+
+try:
+    import jsonschema
+
+    HAVE_JSONSCHEMA = True
+except ImportError:  # CI's unit lane installs it; a bare checkout may not have it.
+    HAVE_JSONSCHEMA = False
+
+
+class TestTypesSayWhatTheCatalogHolds(_MetricSpace):
+    """
+    A metric type carries what its catalog row holds: `enum` from `permitted_values`, the category
+    and semantic id type beside the unit, and null in its type, since any Sparkplug metric can
+    arrive with `is_null`. A device's type refers to those types rather than restating them.
+    """
+
+    def rows(self):
+        rows = _metric_rows()
+        execution = rows["metric_catalog"][1]
+        execution.update(permitted_values=["ACTIVE", "READY", "STOPPED"], category="EVENT",
+                         semantic_id_type="IRI")
+        rows["metric_catalog"][0]["category"] = "SAMPLE"
+        # A hand-written property: its own title and description stay beside the reference.
+        rows["schemas"][0]["schema_definition"]["properties"]["Axes/X/POSITION"] = {
+            "type": "number", "title": "X", "description": "Front axis"}
+        rows["schemas"][0]["schema_definition"]["properties"]["Local/NOTE"] = {"type": "string"}
+        return rows
+
+    def types(self, rows=None):
+        _, _, types = self.space(rows or self.rows())
+        return {t["elementId"]: t for t in types}
+
+    def test_a_metric_type_says_what_its_catalog_row_holds(self):
+        execution = self.types()[A.metric_type_id("Controller/EXECUTION")]["schema"]
+        self.assertEqual(execution, {"type": ["string", "null"],
+                                     "enum": ["ACTIVE", "READY", "STOPPED", None],
+                                     "x-category": "EVENT", "x-semantic-id-type": "IRI"})
+        position = self.types()[A.metric_type_id("Axes/X/POSITION")]["schema"]
+        self.assertEqual(position["x-category"], "SAMPLE")
+        self.assertNotIn("enum", position, "a row with no permitted_values is unconstrained")
+        self.assertNotIn("x-semantic-id-type", position)
+
+    def test_every_metric_type_admits_null(self):
+        for type_id, served in self.types().items():
+            if not (type_id.startswith(A.METRIC_TYPE_PREFIX) or type_id.startswith(A.SPARKPLUG_TYPE_PREFIX)
+                    or type_id == A.UNKNOWN_TYPE_ID):
+                continue
+            with self.subTest(type=type_id):
+                schema = served["schema"]
+                self.assertTrue("type" not in schema or "null" in schema["type"], schema)
+                self.assertTrue("enum" not in schema or None in schema["enum"], schema)
+
+    def test_permitted_values_become_the_values_served_or_nothing(self):
+        string, int32, double, boolean, dataset = 12, 3, 10, 11, 16
+        for values, datatype, expected in (
+            (["A", "B"], string, ["A", "B", None]),
+            (["0", "-1", "+2"], int32, [0, -1, 2, None]),
+            (["1.5", "2"], double, [1.5, 2.0, None]),
+            (["true", "False"], boolean, [True, False, None]),
+            (["1", "two"], int32, None),
+            (["1.5"], int32, None),
+            (["nan"], double, None),
+            (["yes"], boolean, None),
+            (["A"], dataset, None),
+            (None, string, None),
+            ([], string, None),
+        ):
+            with self.subTest(values=values, datatype=datatype):
+                self.assertEqual(A.permitted_enum(values, datatype), expected)
+
+    def test_a_devices_properties_refer_to_their_metrics_types(self):
+        types = self.types()
+        mill = types[MILL]["schema"]
+        position, execution = A.metric_type_id("Axes/X/POSITION"), A.metric_type_id("Controller/EXECUTION")
+        self.assertEqual(mill["properties"], {
+            "Axes/X/POSITION": {"$ref": "#/$defs/i3x:type:metric:Axes~1X~1POSITION",
+                                "title": "X", "description": "Front axis"},
+            "Controller/EXECUTION": {"$ref": "#/$defs/i3x:type:metric:Controller~1EXECUTION"},
+            # No catalog row, so the schema's own word stands.
+            "Local/NOTE": {"type": "string"},
+        })
+        self.assertEqual(mill["$defs"], {position: types[position]["schema"],
+                                         execution: types[execution]["schema"]})
+        self.assertEqual(mill["required"], ["Axes/X/POSITION"])
+
+    def test_each_reference_is_a_json_pointer_to_the_type_it_names(self):
+        for type_id, served in self.types().items():
+            schema = served["schema"]
+            members = schema.get("allOf") or [schema]
+            for member in members:
+                for name, spec in (member.get("properties") or {}).items():
+                    if "$ref" not in spec:
+                        continue
+                    with self.subTest(type=type_id, property=name):
+                        pointer = spec["$ref"]
+                        self.assertTrue(pointer.startswith("#/"), pointer)
+                        node = schema
+                        for token in pointer[2:].split("/"):
+                            node = node[token.replace("~1", "/").replace("~0", "~")]
+                        self.assertEqual(node, self.types()[A.metric_type_id(name)]["schema"])
+
+    def test_the_schema_definitions_read_are_never_changed(self):
+        rows = self.rows()
+        before = json.loads(json.dumps([s["schema_definition"] for s in rows["schemas"]]))
+        space, _, _ = self.space(rows)
+        self.assertEqual([s["schema_definition"] for s in space["schemas"]], before)
+
+    def test_a_definition_with_its_own_defs_or_id_keeps_them(self):
+        catalog = {"Axes/X/POSITION": A.metric_type_from_catalog(_metric_rows()["metric_catalog"][0])}
+        own = {"properties": {"Axes/X/POSITION": {}}, "$defs": {"mine": {"type": "string"}}}
+        served = A.object_type_from_schema({"id": "s", "schema_definition": own}, catalog)["schema"]
+        self.assertEqual(set(served["$defs"]), {"mine", "i3x:type:metric:Axes/X/POSITION"})
+        broken = {"properties": {"Axes/X/POSITION": {}}, "$defs": ["not", "an", "object"]}
+        self.assertEqual(A.object_type_from_schema({"id": "s", "schema_definition": broken}, catalog)["schema"],
+                         broken, "a $defs that is not an object has nowhere to hold the types")
+        with_id = {"$id": "https://example.com/pump", "properties": {"Axes/X/POSITION": {}}}
+        plain = {"properties": {"Axes/X/POSITION": {}}}
+        both = A.schema_set_type([{"id": "a", "schema_definition": with_id},
+                                  {"id": "b", "schema_definition": plain}], catalog)["schema"]
+        self.assertEqual(both["allOf"][0], with_id, "its own resource, where #/$defs would not reach")
+        self.assertIn("$ref", both["allOf"][1]["properties"]["Axes/X/POSITION"])
+        self.assertIn("i3x:type:metric:Axes/X/POSITION", both["$defs"])
+
+    @unittest.skipUnless(HAVE_JSONSCHEMA, "jsonschema is not installed")
+    def test_every_type_is_valid_json_schema_and_its_references_resolve(self):
+        types = self.types()
+        for type_id, served in types.items():
+            for validator in (jsonschema.Draft202012Validator, jsonschema.Draft7Validator):
+                with self.subTest(type=type_id, draft=validator.__name__):
+                    validator.check_schema(served["schema"])
+        mill = jsonschema.Draft202012Validator(types[MILL]["schema"])
+        # A metric that arrived with is_null is null in the device's map, which its type admits.
+        self.assertEqual(list(mill.iter_errors(
+            {"Axes/X/POSITION": None, "Controller/EXECUTION": None, "Local/NOTE": "x"})), [])
+        self.assertEqual(list(mill.iter_errors({"Axes/X/POSITION": 1.5, "Controller/EXECUTION": "READY"})), [])
+        errors = list(mill.iter_errors({"Axes/X/POSITION": 1.0, "Controller/EXECUTION": "RUNNING"}))
+        self.assertEqual([e.validator for e in errors], ["enum"], "the reference is followed")
+        pair = types[A.schema_set_type_id([MILL, OEE])]["schema"]
+        self.assertEqual(list(jsonschema.Draft202012Validator(pair).iter_errors(
+            {"Axes/X/POSITION": 2.0, "OEE/AVAILABILITY": None})), [])
+        self.assertTrue(list(jsonschema.Draft202012Validator(pair).iter_errors({"OEE/AVAILABILITY": "x"})))
 
 
 # -------------------------------------------------------------------------------------------------

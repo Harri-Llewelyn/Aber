@@ -357,7 +357,8 @@ def _read_address_space(pg: PostgrestClient) -> dict:
     catalog = _read_relation(
         pg,
         "metric_catalog",
-        {"select": "name,datatype,description,units,standard,semantic_id,deprecated",
+        {"select": "name,datatype,description,units,standard,semantic_id,deprecated,"
+                   "permitted_values,category,semantic_id_type",
          "order": "name"},
     )
     schemas_by_device: Dict[str, List[str]] = {}
@@ -595,16 +596,20 @@ def _build_objects(space: dict) -> Dict[str, dict]:
 def _build_types(space: dict) -> List[dict]:
     """
     Every type an object can name: the synthetic ones, one per schema and per catalog metric, the
-    metric fallbacks, and one per distinct set of schemas some device carries.
+    metric fallbacks, and one per distinct set of schemas some device carries. A schema's property
+    that names a catalog metric refers to that metric's type.
     """
     types = list(A.SYNTHETIC_TYPES) + list(A.METRIC_FALLBACK_TYPES)
+    metric_types = {
+        row["name"]: A.metric_type_from_catalog(row) for row in space.get("metric_catalog", [])
+    }
     schemas_by_id = {}
     for schema in space["schemas"]:
-        types.append(A.object_type_from_schema(schema))
+        types.append(A.object_type_from_schema(schema, metric_types))
         schemas_by_id[schema["id"]] = schema
-    types.extend(A.metric_type_from_catalog(row) for row in space.get("metric_catalog", []))
+    types.extend(metric_types.values())
     for ids in sorted({ids for ids in _attached_schemas(space).values() if len(ids) > 1}):
-        types.append(A.schema_set_type([schemas_by_id[i] for i in ids]))
+        types.append(A.schema_set_type([schemas_by_id[i] for i in ids], metric_types))
     return types
 
 

@@ -197,14 +197,20 @@ paths:
         and untyped-device types that give the structural objects something to point at.
 
         The metric types, always served so every metric's `typeElementId` resolves:
-        * `i3x:type:metric:<name>` per `metric_catalog` row: a scalar schema from its Sparkplug
-          datatype, with `description` and the unit as `x-unit`, and its semantic id as
-          `sourceTypeId`;
-        * `i3x:type:sparkplug:<datatype>` for a metric the catalog lacks, by its DBIRTH datatype;
+        * `i3x:type:metric:<name>` per `metric_catalog` row: a nullable scalar schema from its
+          Sparkplug datatype, with `enum` from `permitted_values`, `description`, and the
+          unit, category and semantic id type as `x-unit`, `x-category` and
+          `x-semantic-id-type`; its semantic id is the `sourceTypeId`;
+        * `i3x:type:sparkplug:<datatype>` for a metric the catalog lacks, by its DBIRTH datatype,
+          nullable as well;
         * `UnknownType` (`i3x:type:unknown`), schema `{}`, when no datatype is known.
 
+        A schema's property that names a catalog metric refers to that metric's type with a
+        `$ref` into the schema's own `$defs`.
+
         And `i3x:type:schemas:<ids sorted, joined by +>` for each distinct set of schemas
-        attached to a device: `allOf` over their definitions, inlined.
+        attached to a device: `allOf` over their definitions, inlined, with one `$defs` at the
+        root for the metric types they refer to.
       parameters:
         - name: namespaceUri
           in: query
@@ -1140,10 +1146,18 @@ components:
         schema:
           type: object
           description: |
-            `schemas.schema_definition` verbatim — it already is a JSON Schema, so nothing is
-            translated. A metric type's is a scalar such as `{"type": "number", "x-unit":
-            "CELSIUS"}`; `UnknownType`'s is `{}`; a set of schemas' is `{"type": "object",
-            "allOf": [...]}` over their definitions.
+            `schemas.schema_definition` as written — it already is a JSON Schema — except that
+            each property naming a catalog metric is `{"$ref": "#/$defs/<metric type id>"}`
+            (`/` in the name written `~1`), with that metric type's schema in the type's own
+            `$defs`. A `$ref` inside `properties` reads as "is made up of".
+
+            A metric type's is a nullable scalar such as `{"type": ["number", "null"],
+            "x-unit": "CELSIUS", "x-category": "SAMPLE"}`: any metric can arrive with
+            `is_null`, and null means it reported no value. From its catalog row, `enum` is
+            `permitted_values` with `null` added, `x-unit` the unit, `x-category` the category
+            (`SAMPLE`, `EVENT` or `CONDITION`) and `x-semantic-id-type` `IRI` or `IRDI`.
+            `UnknownType`'s is `{}`. A set of schemas' is `{"type": "object", "allOf": [...],
+            "$defs": {...}}` over their definitions.
         related:
           type: object
           description: 'Only on a type synthesized for a set of schemas: `{relationshipType: InheritsFrom, types: [<schema ids>]}`, the schemas it is a kind of.'
@@ -1236,7 +1250,9 @@ components:
             lane or Unassigned `{deviceCount, description}`, a gateway `{status, sparkplugGroup,
             lastHeartbeat}`, or `null` with `GoodNoData` when it has no stored status. Counts are
             of devices or cells, never of children.
-            A metric sends its latest value, a bare scalar.
+            A metric sends its latest value, a bare scalar, or `null` (`GoodNoData`, or `Bad`
+            when its source is down) when it reported `is_null`; a device's map holds that
+            null under the metric's name, which its type declares nullable.
         quality: { $ref: '#/components/schemas/Quality' }
         timestamp: { type: string, format: date-time }
         components:

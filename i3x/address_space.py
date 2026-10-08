@@ -3,7 +3,8 @@ Projection of the platform's model onto the i3X 1.0 address space.
 
 i3X INTRODUCES NO NEW TYPE SYSTEM, which is why this is a projection rather than a schema.
 ObjectTypes ARE JSON Schema and `schemas.schema_definition` already stores JSON Schema, so a schema
-row is an ObjectType with no translation at all.
+row is an ObjectType. The one change on the way out is that a property naming a catalog metric
+refers to that metric's own type.
 
 The mappings that are decisions rather than mechanics -- elementId is `sparkplug_id` and displayName
 is `name`, so renaming an asset does not move it here; `parentId` is WHERE an asset is (its cell,
@@ -20,6 +21,7 @@ MQTT cache -- that cache has no RLS of its own.
 """
 from __future__ import annotations
 
+import math
 import re
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -267,15 +269,54 @@ def _schema_definition(row: dict) -> dict:
     return definition
 
 
-def object_type_from_schema(row: dict) -> dict:
-    """A `schemas` row is an ObjectType with no translation -- its definition IS JSON Schema."""
+def metric_type_ref(type_id: str) -> str:
+    """A `$ref` to a metric type in the referring schema's `$defs`: a JSON Pointer, `/` escaped."""
+    return "#/$defs/" + type_id.replace("~", "~0").replace("/", "~1")
+
+
+def _made_of_metrics(definition: dict, metric_types: Dict[str, dict], defs: Dict[str, dict]) -> dict:
+    """
+    `definition` with each property a catalog metric names replaced by a `$ref` to that metric's
+    type, which is added to `defs`; the guide reads a `$ref` inside `properties` as "is made up
+    of". The property keeps its own `title` and `description`. Other properties are untouched.
+    """
+    props = definition.get("properties")
+    if not metric_types or not isinstance(props, dict):
+        return definition
+    composed = {}
+    for name, spec in props.items():
+        metric_type = metric_types.get(name)
+        if metric_type is None:
+            composed[name] = spec
+            continue
+        ref = {"$ref": metric_type_ref(metric_type["elementId"])}
+        if isinstance(spec, dict):
+            ref.update((k, spec[k]) for k in ("title", "description") if k in spec)
+        composed[name] = ref
+        defs[metric_type["elementId"]] = metric_type["schema"]
+    return {**definition, "properties": composed}
+
+
+def object_type_from_schema(row: dict, metric_types: Optional[Dict[str, dict]] = None) -> dict:
+    """
+    A `schemas` row is an ObjectType: its definition IS JSON Schema. Each property that names a
+    catalog metric (`metric_types`, by name) refers to that metric's type, held in `$defs`.
+    """
+    definition, defs = _schema_definition(row), {}
+    schema = _made_of_metrics(definition, metric_types or {}, defs)
+    existing = schema.get("$defs", {})
+    if defs and isinstance(existing, dict):
+        schema = {**schema, "$defs": {**existing, **defs}}
+    elif defs:
+        # A `$defs` that is not an object has nowhere to put the types, so nothing refers to them.
+        schema = definition
     return {
         "elementId": row["id"],
         "displayName": row.get("schema_name") or row["id"],
         "namespaceUri": NS_LOCAL,
         "sourceTypeId": schema_source_type_id(row),
         "version": str(row.get("version") or "1"),
-        "schema": _schema_definition(row),
+        "schema": schema,
         "metadata": {
             "description": row.get("description") or row.get("change_description") or None,
             "status": row.get("status"),
@@ -291,22 +332,33 @@ def schema_set_type_id(schema_ids) -> str:
     return SCHEMA_SET_TYPE_PREFIX + "+".join(sorted(schema_ids))
 
 
-def schema_set_type(rows: List[dict]) -> dict:
+def schema_set_type(rows: List[dict], metric_types: Optional[Dict[str, dict]] = None) -> dict:
     """
     The type of every device carrying exactly these schemas: a kind of each, so `allOf` over their
-    definitions, inlined rather than referenced. `sourceTypeId` is its own id: no source namespace
-    defines the combination.
+    definitions, inlined rather than referenced. Their catalog metrics refer to the metric types in
+    this schema's own `$defs`, as on one schema's type. `sourceTypeId` is its own id: no source
+    namespace defines the combination.
     """
     ordered = sorted(rows, key=lambda row: row["id"])
     type_id = schema_set_type_id(row["id"] for row in ordered)
     names = [row.get("schema_name") or row["id"] for row in ordered]
+    defs: Dict[str, dict] = {}
+    # A definition with its own `$id` is a resource of its own, where `#/$defs` would not reach
+    # this schema's root, so it stays as written.
+    members = [
+        definition if "$id" in definition else _made_of_metrics(definition, metric_types or {}, defs)
+        for definition in (_schema_definition(row) for row in ordered)
+    ]
+    schema = {"type": "object", "allOf": members}
+    if defs:
+        schema["$defs"] = defs
     return {
         "elementId": type_id,
         "displayName": " + ".join(names),
         "namespaceUri": NS_LOCAL,
         "sourceTypeId": type_id,
         "version": "1.0.0",
-        "schema": {"type": "object", "allOf": [_schema_definition(row) for row in ordered]},
+        "schema": schema,
         "related": {"relationshipType": "InheritsFrom", "types": [row["id"] for row in ordered]},
         "metadata": {
             "description": "Every schema attached to the device: " + ", ".join(names) + ".",
@@ -350,7 +402,8 @@ _SPARKPLUG_TYPES = {
         "namespaceUri": NS_LOCAL,
         "sourceTypeId": name,
         "version": "1.0.0",
-        "schema": {"type": json_type},
+        # Nullable, as `scalar_schema` says why.
+        "schema": {"type": [json_type, "null"]},
     }
     for code, (name, json_type) in SPARKPLUG_SCALARS.items()
 }
@@ -389,9 +442,48 @@ def metric_type_namespace(semantic_id) -> str:
 
 
 def scalar_schema(datatype) -> dict:
-    """The JSON Schema of a value served for this Sparkplug datatype; `{}` when it has no scalar."""
+    """
+    The JSON Schema of a value served for this Sparkplug datatype; `{}` when it has no scalar.
+    Nullable, because any metric can arrive with `is_null`, which is served as null.
+    """
     scalar = SPARKPLUG_SCALARS.get(datatype)
-    return {"type": scalar[1]} if scalar else {}
+    return {"type": [scalar[1], "null"]} if scalar else {}
+
+
+_INTEGER_TEXT = re.compile(r"[+-]?\d+", re.ASCII)
+_BOOLEAN_TEXT = {"true": True, "false": False}
+
+
+def permitted_enum(values, datatype) -> Optional[list]:
+    """
+    A catalog row's `permitted_values` (text) as the values served for its datatype, with null,
+    which every metric admits. None when there are none, or when one does not convert: an `enum`
+    that no served value could match would reject every value of the metric.
+    """
+    scalar = SPARKPLUG_SCALARS.get(datatype)
+    if not scalar or not isinstance(values, list) or not values:
+        return None
+    out = []
+    for text in values:
+        if not isinstance(text, str):
+            return None
+        if scalar[1] == "string":
+            out.append(text)
+        elif scalar[1] == "integer" and _INTEGER_TEXT.fullmatch(text):
+            out.append(int(text))
+        elif scalar[1] == "boolean" and text.lower() in _BOOLEAN_TEXT:
+            out.append(_BOOLEAN_TEXT[text.lower()])
+        elif scalar[1] == "number":
+            try:
+                number = float(text)
+            except ValueError:
+                return None
+            if not math.isfinite(number):
+                return None
+            out.append(number)
+        else:
+            return None
+    return out + [None]
 
 
 def metric_type_id(name: str) -> str:
@@ -401,14 +493,21 @@ def metric_type_id(name: str) -> str:
 
 def metric_type_from_catalog(row: dict) -> dict:
     """
-    A `metric_catalog` row is the type of that metric on every device: a scalar derived from its
-    datatype, annotated with its description and unit, with its semantic id as `sourceTypeId`.
+    A `metric_catalog` row is the type of that metric on every device: a nullable scalar derived
+    from its datatype, its `permitted_values` as `enum`, annotated with its description, unit,
+    category and semantic id type, with its semantic id as `sourceTypeId`. Read only, never
+    written back to `schemas`.
     """
     schema = scalar_schema(row.get("datatype"))
+    permitted = permitted_enum(row.get("permitted_values"), row.get("datatype"))
+    if permitted is not None:
+        schema["enum"] = permitted
     if row.get("description"):
         schema["description"] = row["description"]
-    if row.get("units"):
-        schema["x-unit"] = row["units"]
+    for column, keyword in (("units", "x-unit"), ("category", "x-category"),
+                            ("semantic_id_type", "x-semantic-id-type")):
+        if row.get(column):
+            schema[keyword] = row[column]
     return {
         "elementId": metric_type_id(row["name"]),
         "displayName": row["name"],

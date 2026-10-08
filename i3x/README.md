@@ -38,7 +38,7 @@ worth adopting:
 
 | i3X concept | Already exists here as |
 | :--- | :--- |
-| ObjectType (a JSON Schema) | `schemas.schema_definition` — **the same thing**, no translation; a metric's is its `metric_catalog` row |
+| ObjectType (a JSON Schema) | `schemas.schema_definition` — **the same thing**, except that a property naming a catalog metric refers to that metric's type; a metric's is its `metric_catalog` row |
 | `elementId` (unique, persistent) | `sparkplug_id`; a metric's is `<sparkplug_id>/<metric name>`, the key of `telemetry` |
 | `displayName` (human-readable when practical) | `name` |
 | `isExtended` (publishes beyond its type) | Unmodelled, derived by `deviceTags.js` |
@@ -208,16 +208,45 @@ The mappings that are decisions rather than mechanics:
   never published is `GoodNoData` while its device is online. There is no metric-group level,
   because `Controller` and `Controller/EXECUTION` can both be metrics.
 
-  A metric's type is its catalog row, `i3x:type:metric:<name>`: a scalar schema from its
-  Sparkplug datatype, with the row's description and its unit as `x-unit`. A metric the catalog
-  lacks takes `i3x:type:sparkplug:<datatype>` from its DBIRTH datatype, else `UnknownType`.
-  `UnknownType`'s schema is `{}`, not the guide's `{"type": "object"}`: a metric's value is a
-  bare scalar, and a value must conform to its type (the suite's QRY-03).
+  A metric's type is its catalog row, `i3x:type:metric:<name>`, read at request time and never
+  written back. Its schema is a scalar from the row's Sparkplug datatype, with these keywords:
+
+  | Keyword | From the row |
+  | :--- | :--- |
+  | `enum` | `permitted_values`, converted to the values served for the datatype, with `null` added. Left out when one does not convert, since an enum no served value could match would reject them all |
+  | `description` | `description` |
+  | `x-unit` | `units` |
+  | `x-category` | `category`: `SAMPLE`, `EVENT` or `CONDITION` |
+  | `x-semantic-id-type` | `semantic_id_type`: `IRI` or `IRDI`. The id itself is the type's `sourceTypeId` |
+
+  A metric the catalog lacks takes `i3x:type:sparkplug:<datatype>` from its DBIRTH datatype, else
+  `UnknownType`. `UnknownType`'s schema is `{}`, not the guide's `{"type": "object"}`: a metric's
+  value is a bare scalar, and a value must conform to its type (the suite's QRY-03).
+- **Every metric type is nullable**, because the guide requires nullability to be declared, not
+  inferred: `{"type": ["number", "null"]}`, and likewise for each JSON type, catalog or fallback.
+  So is each `schemaExtensions` fragment. Any Sparkplug metric can arrive with `is_null`, and a
+  null value means the metric reported no value. The only other null is a datatype with no
+  scalar form (DataSet, Template, Bytes), whose `{}` schema admits it. Quality says the rest, by
+  the table below:
+  - a metric's own null value is `GoodNoData`, or `Bad` when its source is down, never `Good`;
+  - in a device's map the field is null, and the map's quality is the map's;
+  - a stored null in history is `GoodNoData`.
 - **A device is typed by every schema attached to it**, read from the `device_schemas` view as
   the dashboard, the AAS exporter and ingestion read it, not from `devices.schema_id` alone. One
   schema is its type. Several are one synthesized type per distinct set,
   `i3x:type:schemas:<ids sorted, joined by +>`, whose schema is `allOf` over their definitions,
-  inlined. `isExtended` is judged against the union of what they model. When it is true,
+  inlined.
+- **A device's type refers to its metrics' types.** Each property that names a catalog metric
+  becomes `{"$ref": "#/$defs/<metric type id>"}`, keeping the property's own `title` and
+  `description`, and the metric type's schema is copied into the type's `$defs`. The guide reads
+  a `$ref` inside `properties` as "is made up of" (`HasComponent`), which is what a device's
+  metrics are. The reference is a JSON Pointer, so `/` in a metric name is written `~1`:
+  `#/$defs/i3x:type:metric:Axes~1X~1POSITION`. Its last segment is the type's elementId, and it
+  resolves inside the schema it sits in, so a validator needs nothing else. A property with no
+  catalog row keeps the schema as written. On a set's type the `$defs` is at the root, beside
+  `allOf`. A definition with its own `$id` is left as written there, since `#/$defs` inside it
+  would name its own root. The `schemas` row itself is never changed.
+- **`isExtended` is judged against the union of what a device's schemas model.** When it is true,
   `metadata.schemaExtensions` gives each metric beyond them a JSON Schema fragment from its DBIRTH
   datatype. Vendor keys, `quarantined` among them, are under `metadata.system`.
 - **`quality` is derived at read time, by one rule.** `value_quality()` in `address_space.py`
