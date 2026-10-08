@@ -1292,10 +1292,11 @@ has two other ways in.
   withholds the password, so a password nobody has seen is the only unrecorded one there can be.
   GoTrue deletes the person's sessions when an administrator sets their password; an access token
   already issued lasts until it expires.
-- **Change Password**, in the account menu, is a person changing their own. The dashboard checks
-  the current password with a password grant sent straight to GoTrue, not through supabase-js, so
-  the stored session is not replaced, then calls `PUT /auth/v1/user`. GoTrue keeps that session and
-  ends the person's others. The chart leaves
+- **Change Password**, in the account menu, is a person changing their own. The dashboard sends the
+  current password with the new one in a single `PUT /auth/v1/user`, and GoTrue checks it
+  (`GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD`, always on), so an access token alone
+  cannot change a password. A recovery link's session and an invited account with no password yet
+  are exempt. GoTrue keeps that session and ends the person's others. The chart leaves
   `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION` off, which is what lets it work
   without a relay. Nothing here writes an audit row for it: GoTrue's own audit log
   (`auth.audit_log_entries`, `user_updated_password`) records it.

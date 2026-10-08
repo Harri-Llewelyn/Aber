@@ -99,6 +99,12 @@ spec:
             # Per-client rate limits key on this header's first address; empty skips every one.
             - name: GOTRUE_RATE_LIMIT_HEADER
               value: {{ .Values.supabaseAuth.rateLimitHeader | quote }}
+            # PUT /auth/v1/user sets a password only with the correct current_password, so an access
+            # token alone cannot change it. GoTrue exempts a recovery link's session and an account
+            # with no password yet (an invitation); Set New Password uses the admin API, which this
+            # does not touch.
+            - name: GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD
+              value: "true"
             # Password reset (frontend/src/pages/ResetPassword.jsx). The link's target must be on
             # the allow list, or GoTrue sends the browser to GOTRUE_SITE_URL and the dashboard opens
             # instead of the reset form. SMTP is optional: with no host a reset request fails and

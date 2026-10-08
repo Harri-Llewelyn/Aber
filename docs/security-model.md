@@ -167,16 +167,19 @@ people's accounts in GoTrue, and it is narrow by construction.
   writes `PASSWORD_SET` (email and method, no password). If that record fails, the answer is a 500
   that withholds the password: it was changed, nobody has seen it, and setting it again records it.
   So no password anyone holds was set without a row in the trail.
-- **A person's own password.** Change Password, in the account menu, checks the current password
-  with a password grant sent straight to GoTrue's token endpoint, outside supabase-js, so the
-  dashboard's stored session is not replaced. Then `PUT /auth/v1/user` sets the new one, at least
-  12 characters (the chart's rule for the first administrator; GoTrue's own minimum is 6). It works
-  without a relay because the chart leaves `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION`
-  off. GoTrue keeps the session that made the change and ends the person's others. No Audit Trail
-  row is written: GoTrue records `user_updated_password` in its own audit log
-  (`auth.audit_log_entries`). The current-password check is the dashboard's, not GoTrue's: any
-  valid session can call `PUT /auth/v1/user` without it, as it always could, because
-  `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD` is not set.
+- **A person's own password.** Change Password, in the account menu, sends the current password
+  with the new one in a single `PUT /auth/v1/user`, and GoTrue checks the current one before it
+  sets anything. The chart always sets `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD`,
+  so a request without it is refused (400 `current_password_required`, or
+  `current_password_mismatch` for a wrong one), and an access token taken from a browser cannot
+  change the password by itself. GoTrue exempts the two flows that have no current password: a
+  recovery link's session (*Forgot your password?*) and an account with no password yet (an
+  invitation's first). Set New Password uses the admin API, which the setting does not reach. The new
+  password needs at least 12 characters (the chart's rule for the first administrator; GoTrue's own
+  minimum is 6). It works without a relay because the chart leaves
+  `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION` off. GoTrue keeps the session that made
+  the change and ends the person's others. No Audit Trail row is written: GoTrue records
+  `user_updated_password` in its own audit log (`auth.audit_log_entries`).
 - **Machine identities are never people.** `list_people()` leaves them out, every function refuses
   them, and `refuse_role_for_machine_principal()` still refuses a role at the table.
 

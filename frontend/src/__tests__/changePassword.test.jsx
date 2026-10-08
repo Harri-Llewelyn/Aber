@@ -1,8 +1,8 @@
 /**
- * Change Password, for the signed-in person: the account-menu item, the dialog's rules, and the
- * order of the two calls. The current password is checked by a password grant sent straight to
- * GoTrue, never through supabase-js, so the dashboard's own session is not replaced; only then is
- * the new one set.
+ * Change Password, for the signed-in person: the account-menu item, the dialog's rules, and the one
+ * request that changes it. The current password travels with the new one in supabase-js's
+ * updateUser(), so GoTrue checks both together; the dialog sends no password grant of its own, and
+ * GoTrue's refusal codes come back as the dialog's sentences.
  */
 import React from 'react'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -40,20 +40,19 @@ const EMAIL = 'operator@site.test'
 const CURRENT = 'the-old-one-12'
 const NEXT = 'a-new-one-of-twenty'
 
-/** GoTrue's token endpoint: 200 for CURRENT, otherwise the 400 a wrong password gets. */
-function gotrue() {
-  return vi.fn(async (url, init) => {
-    const { password } = JSON.parse(init.body)
-    return password === CURRENT
-      ? new Response(JSON.stringify({ access_token: 'unused', refresh_token: 'unused' }), { status: 200 })
-      : new Response(JSON.stringify({ code: 400, error_code: 'invalid_credentials', msg: 'Invalid login credentials' }), { status: 400 })
-  })
+/**
+ * GoTrue's refusal of a password change, as supabase-js hands it back (AuthApiError's fields). Both
+ * current_password codes carry the same message, so only the code tells them apart.
+ */
+function refused(code, status = 400, message = 'Current password required when setting new password.') {
+  return { data: { user: null }, error: { code, status, message } }
 }
 
 let fetchMock
 beforeEach(() => {
   vi.clearAllMocks()
-  fetchMock = gotrue()
+  // The dialog calls no fetch of its own; the stub would record a password grant sent to GoTrue.
+  fetchMock = vi.fn(async () => new Response('{}', { status: 404 }))
   vi.stubGlobal('fetch', fetchMock)
   supabase.auth.updateUser.mockResolvedValue({ data: { user: { email: EMAIL } }, error: null })
 })
@@ -75,32 +74,42 @@ describe('the Change Password dialog', () => {
     return { dialog: screen.getByRole('dialog'), onClose, showToast }
   }
 
-  it('checks the current password with GoTrue first, then changes it, keeping this session', async () => {
+  it('sends the current password with the new one in a single update, keeping this session', async () => {
     const { dialog, onClose, showToast } = show()
     fill(dialog)
     fireEvent.click(submit(dialog))
 
-    await waitFor(() => expect(supabase.auth.updateUser).toHaveBeenCalledWith({ password: NEXT }))
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchMock.mock.calls[0]
-    expect(url).toBe('https://api.site.test/auth/v1/token?grant_type=password')
-    expect(JSON.parse(init.body)).toEqual({ email: EMAIL, password: CURRENT })
-    // Straight to GoTrue, not supabase-js's sign-in, which would replace the stored session.
+    await waitFor(() => expect(supabase.auth.updateUser).toHaveBeenCalledTimes(1))
+    expect(supabase.auth.updateUser).toHaveBeenCalledWith({ password: NEXT, current_password: CURRENT })
+    // No password grant: neither one sent straight to GoTrue nor supabase-js's sign-in.
+    expect(fetchMock).not.toHaveBeenCalled()
     expect(supabase.auth.signInWithPassword).not.toHaveBeenCalled()
-    expect(fetchMock.mock.invocationCallOrder[0]).toBeLessThan(supabase.auth.updateUser.mock.invocationCallOrder[0])
     await waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/password is changed/), 'success')
   })
 
-  it('changes nothing when the current password is wrong, and says so', async () => {
+  it('changes nothing when GoTrue says the current password is wrong, and says so', async () => {
+    supabase.auth.updateUser.mockResolvedValue(refused('current_password_mismatch'))
     const { dialog, onClose } = show()
     fill(dialog, { current: 'not-the-current-one' })
     fireEvent.click(submit(dialog))
 
-    expect(await within(dialog).findByText(/current password is not right/)).toBeInTheDocument()
-    expect(supabase.auth.updateUser).not.toHaveBeenCalled()
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Your current password is not right. Nothing was changed.')
+    expect(supabase.auth.updateUser).toHaveBeenCalledWith({ password: NEXT, current_password: 'not-the-current-one' })
     expect(onClose).not.toHaveBeenCalled()
     expect(within(dialog).getByLabelText('Current password')).toHaveValue('')
+  })
+
+  it.each([
+    ['current_password_required', 400, 'Current password required when setting new password.', 'Enter your current password.'],
+    ['same_password', 422, 'New password should be different from the old password.', 'The new password must be different from your current one.'],
+  ])("shows GoTrue refusing with %s as the dialog's own sentence", async (code, status, message, sentence) => {
+    supabase.auth.updateUser.mockResolvedValue(refused(code, status, message))
+    const { dialog, onClose } = show()
+    fill(dialog)
+    fireEvent.click(submit(dialog))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(sentence)
+    expect(onClose).not.toHaveBeenCalled()
   })
 
   it('shows GoTrue refusing the new password', async () => {
