@@ -716,10 +716,10 @@ Service, so one would have no consumer and would only add a second way for the p
 
 ### 6.1 Node-RED
 
-- `nodered_data` → PVC, `replicas: 1`, `strategy: Recreate`. Node-RED is a single-writer runtime and
-  persists editor sessions to `/data/.sessions.json` and the editor-user map to
-  `/data/.aber-editor-users.json`; both must survive a restart or a live Administrator
-  silently degrades to a read-only editor.
+- `nodered_data` → PVC, `replicas: 1`, `strategy: Recreate`. Node-RED is a single-writer runtime
+  whose flows and encrypted credentials live on the volume. One replica is also what the editor's
+  role re-check needs: each sign-in's GoTrue tokens are held in that process's memory
+  ([`node-red/README.md`](../node-red/README.md)), so a restart asks every editor to sign in again.
 - `node-red-init` becomes an **initContainer built from the same image as the main container**. This
   is not tidiness: `settingsAreCorrect()` *evaluates* `settings.js`, which `require`s
   `passport-oauth2`. An init container without it throws, concludes the settings are wrong, and

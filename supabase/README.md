@@ -1258,10 +1258,13 @@ The People tab on Access Control is Administrator only, and has two halves.
 - **Removing access is immediate for every role check.** `remove_person_access()` deletes the
   person's `user_roles` row, which `has_role()`, `has_authority()`, the edge functions and the token
   hook all read, and keeps the role in `access_removals` so restoring gives it back. The ban then
-  refuses sign-in and token refresh. A token issued before the ban stays valid until it expires
-  (`supabaseAuth.jwtExpiry`, 3600 s by default), with no role: it can read what any signed-in
-  account can, such as the registry tables, and nothing a role gates. `auth_pre_request()` does not
-  refuse it; that hook's subject denylist is for machine principals.
+  refuses sign-in and token refresh. A token issued before the ban is refused at the API too:
+  `auth_pre_request()` refuses a subject with a row in `access_removals` (`0170`), one primary-key
+  probe per request, as it refuses a withdrawn machine principal. Restoring access deletes the row,
+  so the same token is served again at once. Storage and Realtime verify the token themselves, so
+  there it lasts until it expires (`supabaseAuth.jwtExpiry`, 3600 s by default), reading what any
+  signed-in account can and nothing a role gates. What each other surface does is in
+  [`docs/security-model.md`](../docs/security-model.md#a-removed-person-keeps-what-a-session-already-holds).
 - **Two rules, under one lock.** Every act takes `SHARE ROW EXCLUSIVE` on `user_roles`, then
   refuses the caller's own role or access, and anything that would leave no Administrator who can
   sign in (a banned Administrator does not count). The lock is what stops two Administrators
@@ -1292,10 +1295,11 @@ has two other ways in.
   withholds the password, so a password nobody has seen is the only unrecorded one there can be.
   GoTrue deletes the person's sessions when an administrator sets their password; an access token
   already issued lasts until it expires.
-- **Change Password**, in the account menu, is a person changing their own. The dashboard checks
-  the current password with a password grant sent straight to GoTrue, not through supabase-js, so
-  the stored session is not replaced, then calls `PUT /auth/v1/user`. GoTrue keeps that session and
-  ends the person's others. The chart leaves
+- **Change Password**, in the account menu, is a person changing their own. The dashboard sends the
+  current password with the new one in a single `PUT /auth/v1/user`, and GoTrue checks it
+  (`GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD`, always on), so an access token alone
+  cannot change a password. A recovery link's session and an invited account with no password yet
+  are exempt. GoTrue keeps that session and ends the person's others. The chart leaves
   `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION` off, which is what lets it work
   without a relay. Nothing here writes an audit row for it: GoTrue's own audit log
   (`auth.audit_log_entries`, `user_updated_password`) records it.
@@ -3227,6 +3231,7 @@ refuses a missing or wrong token or secret.
 | [`nodered-userinfo`](functions/nodered-userinfo) | any mapped role | The same lookup in Node-RED's permission vocabulary. Only `Administrator` maps to `*`, which makes it the only gate on deploying a flow from the platform's Node-RED |
 | [`fplus-directory`](functions/fplus-directory) | any authenticated user | Factory+ Directory adapter — see below |
 | [`forge-membership`](functions/forge-membership) | `Administrator`, `Shopfloor_Manager` | The forge listener's `ext_authz` step: places the caller in the team their role warrants, refuses a role removed since the token was signed (`0094`) |
+| [`studio-admission`](functions/studio-admission) | `Administrator` | The studio listener's `ext_authz` step: refuses a role removed or changed since the token was signed, and sends a session GoTrue ended to the door's sign-out |
 | [`forge-signout`](functions/forge-signout) | the caller | Gitea's own sign-out link: ends every GoTrue session the caller holds, then the door's sign-out |
 | [`forge-events`](functions/forge-events) | **no Supabase role at all** | Gitea's push webhook, authorised on its HMAC; records the head of `main` on the gateway row (`0095`) |
 | [`grafana-alert-webhook`](functions/grafana-alert-webhook) | **no Supabase role at all** | Records a Grafana alert in `platform_alerts` — see below |
@@ -3931,24 +3936,31 @@ machine principals holding an `apikey`; this one admits a person holding a brows
 separation is the design rather than an implementation detail — a cookie-session filter on the API
 path would redirect every daemon in the stack to a login screen it cannot complete.
 
-Studio has no authentication of its own and connects as the database owner. Three filters supply
+Studio has no authentication of its own and connects as the database owner. Five filters supply
 what it lacks:
 
 | Filter | What it does | The thing worth knowing |
 | :--- | :--- | :--- |
 | `oauth2` | Runs the authorization-code flow against this stack's GoTrue and holds the session cookie | Needs **Envoy ≥ 1.34**: GoTrue requires PKCE and the filter could not send it before that release |
-| `jwt_authn` | Verifies the access token GoTrue signed | An **`oct` JWKS** — the HS256 secret, not a public key — and **no issuer check**, because GoTrue's OAuth access token carries no `iss` claim |
+| `jwt_authn` | Verifies the access token GoTrue signed, and forwards it for `ext_authz` | An **`oct` JWKS** — the HS256 secret, not a public key — and **no issuer check**, because GoTrue's OAuth access token carries no `iss` claim |
 | `rbac` | Requires `app_metadata.role == Administrator` | Reads the claim out of the verified payload; every persona can complete the flow, and only one gets through this |
+| `ext_authz` | Asks [`studio-admission`](functions/studio-admission) whether the caller is an Administrator **now** | GoTrue for the session, then `user_roles`, on every request. `failure_mode_allow`: a 5xx admits on the claim `rbac` checked; a 403 and a 302 to `/oauth2/signout` are honoured |
+| `header_mutation` | Removes `Authorization` before the request reaches Studio | Studio runs as the owner and needs no Supabase JWT, so it never sees one |
 
 **`0081` registers the client** — `c0ffee00-…-0003`, the third of the same shape after Grafana
 (`0002`) and Node-RED (archived `0006`) — with `client_secret_basic`, matching the filter's
 `auth_type: BASIC_AUTH`. GoTrue enforces the registered method exactly.
 
-**What differs from the other two clients is that there is no userinfo function, and there must not
-be.** Grafana and Node-RED call one because GoTrue's OIDC claims carry no `app_metadata`;
-`custom_access_token_hook` puts the role in the *access* token, and this listener verifies that
-token itself. The role arrives in the request rather than being fetched about it — one fewer edge
-function, and one fewer round trip per request.
+**The claim admits, and `user_roles` decides.** Grafana and Node-RED call a userinfo function because
+GoTrue's OIDC claims carry no `app_metadata`; `custom_access_token_hook` puts the role in the
+*access* token, and this listener verifies that token itself, so `rbac` refuses every other role
+without a round trip. The claim is what the role was when the token was signed, though, so
+`ext_authz` asks again on every request, as the forge's door does: a removed or demoted
+Administrator is refused on the next request rather than when the token expires (`0170` is the
+same rule at the API). A session GoTrue no longer has (Remove Access bans the account; Sign Out and
+a new password end its sessions) is a `302` to `/oauth2/signout`, which clears the cookies. The
+step fails open on a 5xx because the claim has already been checked, and an outage of the edge
+runtime or the API should not also take away the console that mends it.
 
 **`openid` is absent from the requested scope and must stay absent.** GoTrue refuses to mint an ID
 token while signing HS256 (`HS256 is not supported for ID token signing`), which is what the whole

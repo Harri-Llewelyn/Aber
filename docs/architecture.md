@@ -8,7 +8,7 @@ document: [`kubernetes-architecture.md`](kubernetes-architecture.md).
 > Where ACS ships bespoke microservices, Aber uses Supabase, TimescaleDB, Grafana and
 > Node-RED. The custom surface is one Python ingestion service — a daemon and the modules beside it:
 > the constraint engine, the metrics registry, capture and playback, the Directory and UNS publishers,
-> cold archival — nineteen edge functions, an i3X server and a React dashboard.
+> cold archival — twenty edge functions, an i3X server and a React dashboard.
 
 ---
 
@@ -36,7 +36,7 @@ flowchart TB
 
     subgraph Processing ["Ingestion & Serverless"]
         ING["Python Ingestion Engine<br/>identity - quarantine - binding"]
-        EF["Edge Functions<br/>approve-quarantine - aas-export - aas-api<br/>grafana-userinfo - nodered-userinfo - forge-membership - forge-signout - forge-events - forge-sweep - fplus-directory<br/>grafana-alert-webhook - enroll-gateway - gateway-bundle - gateway-install<br/>revoke-gateway-credential - gateway-credential - broker-inventory<br/>mint-service-token - manage-people"]
+        EF["Edge Functions<br/>approve-quarantine - aas-export - aas-api<br/>grafana-userinfo - nodered-userinfo - forge-membership - forge-signout - forge-events - forge-sweep - fplus-directory<br/>grafana-alert-webhook - enroll-gateway - gateway-bundle - gateway-install<br/>revoke-gateway-credential - gateway-credential - broker-inventory<br/>mint-service-token - manage-people - studio-admission"]
     end
 
     subgraph Supabase ["Supabase BaaS"]

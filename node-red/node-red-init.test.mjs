@@ -1,7 +1,8 @@
 /**
  * node-red-init against a seeded volume: the TLS reconcile adds one tls-config node and points
  * every broker at it; a managed broker node whose pair is missing stops the boot, while one built
- * in the editor is left alone with what its Security tab holds.
+ * in the editor is left alone with what its Security tab holds. And the settings.js it writes: an
+ * editor session keeps its permissions only while user_roles still grants them.
  *
  *   node --test node-red/node-red-init.test.mjs
  *
@@ -14,7 +15,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { after, describe, it } from 'node:test';
+import { after, afterEach, describe, it } from 'node:test';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'node-red-init.mjs');
@@ -180,3 +182,165 @@ describe('the broker credential pair', () => {
     assert.match(out, /the Secret that nodeRed\.gatewayCredentialsSecret names/);
   });
 });
+
+/**
+ * The settings.js a boot writes, loaded with stand-ins for the two modules it requires from the
+ * image (the OAuth strategy is only referenced; the JWT module only decodes here), and with fetch
+ * answered by `answer(url, init)`. Every fetch is recorded.
+ */
+function editorSettings(answer) {
+  const dir = volume(JSON.stringify(flow()));
+  const runtime = path.join(dir, 'no-runtime');
+  fs.mkdirSync(runtime, { recursive: true });
+  fs.writeFileSync(path.join(runtime, 'passport-oauth2.js'), 'module.exports = function OAuth2Strategy() {};\n');
+  fs.writeFileSync(path.join(runtime, 'jsonwebtoken.js'), `
+module.exports = {
+  decode(token) {
+    try { return JSON.parse(Buffer.from(String(token).split('.')[1], 'base64url').toString()); } catch { return null; }
+  },
+  verify() { throw new Error('not used here'); },
+};
+`);
+  run(dir);
+  for (const [name, value] of Object.entries(SETTINGS_ENV)) process.env[name] = value;
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), init });
+    const { status = 200, body = {} } = answer(String(url), init, calls.length) ?? {};
+    return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  };
+  const settings = createRequire(import.meta.url)(path.join(dir, 'settings.js'));
+  return { adminAuth: settings.adminAuth, calls };
+}
+
+const SETTINGS_ENV = {
+  NODERED_USERINFO_URL: 'http://gateway.test/functions/v1/nodered-userinfo',
+  NODERED_OAUTH_TOKEN_URL: 'http://gateway.test/auth/v1/oauth/token',
+  NODERED_OAUTH_CLIENT_ID: 'node-red-client',
+  NODERED_OAUTH_CLIENT_SECRET: 'node-red-client-credential',
+  SUPABASE_PUBLISHABLE_KEY: 'publishable-key',
+};
+const EMAIL = 'admin@site.test';
+const ADMIN_INFO = { sub: 'aaaaaaaa-0000-4000-8000-000000000001', email: EMAIL, supabase_role: 'Administrator', permissions: '*' };
+
+/** An access token that expires `seconds` from now; only its exp is read. */
+const accessToken = (name, seconds = 3600) =>
+  ['h', Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + seconds, n: name })).toString('base64url'), 's'].join('.');
+
+/** Signs `info` in through the strategy's verify, as Node-RED does after the OAuth callback. */
+function signIn(adminAuth, access, refresh) {
+  return new Promise((resolve, reject) => {
+    adminAuth.strategy.options.verify(access, refresh, {}, (err, profile) => (err ? reject(err) : resolve(profile)));
+  });
+}
+
+const originalFetch = globalThis.fetch;
+const originalNow = Date.now;
+/** Moves the clock `ms` forward for the rest of the test. */
+const later = (ms) => { const at = Date.now() + ms; Date.now = () => at; };
+
+describe("the editor's role, re-checked", () => {
+  afterEach(() => { globalThis.fetch = originalFetch; Date.now = originalNow; });
+
+  it('answers from the sign-in for a minute, then asks user_roles again and keeps a role still granted', async () => {
+    const { adminAuth, calls } = editorSettings(() => ({ body: ADMIN_INFO }));
+    const first = accessToken('first');
+    assert.equal((await signIn(adminAuth, first, 'refresh-1')).permissions, '*');
+    assert.equal(calls.length, 1);
+
+    assert.deepEqual(await adminAuth.users(EMAIL), { username: EMAIL, permissions: '*' });
+    assert.equal(calls.length, 1, 'within the minute, nothing is asked');
+
+    later(61000);
+    assert.deepEqual(await adminAuth.users(EMAIL), { username: EMAIL, permissions: '*' });
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].url, SETTINGS_ENV.NODERED_USERINFO_URL);
+    assert.equal(calls[1].init.headers.Authorization, `Bearer ${first}`, "the person's own token asks");
+  });
+
+  it('ends the session once user_roles no longer grants the permissions, and for a username it never signed in', async () => {
+    let removed = false;
+    const { adminAuth, calls } = editorSettings(() => ({ body: removed ? { ...ADMIN_INFO, permissions: undefined, supabase_role: null } : ADMIN_INFO }));
+    await signIn(adminAuth, accessToken('t'), 'refresh-1');
+    assert.equal(await adminAuth.users('someone-else@site.test'), null, 'a restart forgets every sign-in');
+    assert.equal(calls.length, 1);
+
+    removed = true;
+    later(61000);
+    assert.equal(await adminAuth.users(EMAIL), null);
+    later(1000);
+    assert.equal(await adminAuth.users(EMAIL), null, 'and stays ended without asking again');
+    assert.equal(calls.length, 2);
+  });
+
+  it('ends the session on a changed role too: the scope Node-RED enforces was fixed at sign-in', async () => {
+    let info = ADMIN_INFO;
+    const { adminAuth } = editorSettings(() => ({ body: info }));
+    await signIn(adminAuth, accessToken('t'), 'refresh-1');
+    info = { ...ADMIN_INFO, supabase_role: 'Shopfloor_Manager', permissions: 'read' };
+    later(61000);
+    assert.equal(await adminAuth.users(EMAIL), null);
+  });
+
+  it('refreshes an expiring token first, sending each refresh token once', async () => {
+    const fresh = [accessToken('second'), accessToken('third')];
+    const { adminAuth, calls } = editorSettings((url) => (url === SETTINGS_ENV.NODERED_OAUTH_TOKEN_URL
+      ? { body: { access_token: fresh.shift(), refresh_token: `refresh-${calls.length}`, token_type: 'bearer', expires_in: 3600 } }
+      : { body: ADMIN_INFO }));
+    await signIn(adminAuth, accessToken('first', 10), 'refresh-1');
+
+    later(61000);
+    assert.deepEqual(await adminAuth.users(EMAIL), { username: EMAIL, permissions: '*' });
+    const refresh = calls[1];
+    assert.equal(refresh.url, SETTINGS_ENV.NODERED_OAUTH_TOKEN_URL);
+    assert.equal(refresh.init.method, 'POST');
+    assert.deepEqual(Object.fromEntries(new URLSearchParams(String(refresh.init.body))), {
+      grant_type: 'refresh_token', refresh_token: 'refresh-1',
+      client_id: SETTINGS_ENV.NODERED_OAUTH_CLIENT_ID, client_secret: SETTINGS_ENV.NODERED_OAUTH_CLIENT_SECRET,
+    });
+    assert.match(calls[2].init.headers.Authorization, /^Bearer h\./);
+    assert.equal(calls.length, 3);
+
+    // An hour on, the rotated refresh token is the one sent.
+    later(3600000);
+    assert.deepEqual(await adminAuth.users(EMAIL), { username: EMAIL, permissions: '*' });
+    assert.equal(new URLSearchParams(String(calls[3].init.body)).get('refresh_token'), 'refresh-2');
+  });
+
+  it('ends the session when GoTrue refuses the refresh, as it does for a banned person', async () => {
+    const { adminAuth, calls } = editorSettings((url) => (url === SETTINGS_ENV.NODERED_OAUTH_TOKEN_URL
+      ? { status: 400, body: { error: 'invalid_grant', error_description: 'Invalid Refresh Token: User Banned' } }
+      : { body: ADMIN_INFO }));
+    await signIn(adminAuth, accessToken('first', 10), 'refresh-1');
+    later(61000);
+    assert.equal(await adminAuth.users(EMAIL), null);
+    assert.equal(calls.length, 2, 'no userinfo with a token that has run out');
+  });
+
+  it('asks once for a burst of requests', async () => {
+    const { adminAuth, calls } = editorSettings(() => ({ body: ADMIN_INFO }));
+    await signIn(adminAuth, accessToken('t'), 'refresh-1');
+    later(61000);
+    const answers = await Promise.all([1, 2, 3, 4, 5].map(() => adminAuth.users(EMAIL)));
+    assert.deepEqual(answers.map((a) => a?.permissions), ['*', '*', '*', '*', '*']);
+    assert.equal(calls.length, 2);
+  });
+
+  it('ends the session when user_roles cannot be asked, rather than rejecting', async () => {
+    const { adminAuth } = editorSettings(() => { throw new Error('socket hang up'); });
+    // The sign-in needs a working userinfo, so the failing one is put in place after it.
+    globalThis.fetch = async () => new Response(JSON.stringify(ADMIN_INFO), { status: 200 });
+    await signIn(adminAuth, accessToken('t'), 'refresh-1');
+    globalThis.fetch = async () => { throw new Error('socket hang up'); };
+    later(61000);
+    assert.equal(await adminAuth.users(EMAIL), null);
+  });
+
+  it('removes the username -> permissions file earlier settings persisted', () => {
+    const dir = volume(JSON.stringify(flow()));
+    fs.writeFileSync(path.join(dir, '.aber-editor-users.json'), JSON.stringify({ [EMAIL]: '*' }));
+    run(dir);
+    assert.equal(fs.existsSync(path.join(dir, '.aber-editor-users.json')), false);
+  });
+});
+

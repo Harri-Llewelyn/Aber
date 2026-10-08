@@ -26,9 +26,9 @@ People has a row of controls under the tabs, with **Refresh** and **Add Person**
 - Adding a person, changing a role, removing access, restoring it and setting a new password are each recorded in the Audit Trail. The record names the person and who made the change. It never holds a password.
 - A person changing their own password with **Change Password** is not in the Audit Trail. The sign-in service keeps its own record of it.
 
-**Sessions a removed person already has end on their own, not at once.** Their role goes straight away, so the dashboard refuses anything a role allows. An open dashboard session can still read what any signed-in person can, such as the device list, for up to an hour. Sessions in Node-RED, Grafana and Studio keep what they had until they expire, up to eight hours in Node-RED. They cannot sign in again. If they held Administrator, check Node-RED's flows and the Audit Trail afterwards.
+**A removed person loses their sessions within a minute, except in Grafana.** Their role goes straight away. An open dashboard gets nothing more from the database. Studio and the forge refuse their next request. Node-RED signs them out within a minute, and Grafana within the hour. They cannot sign in again. If they held Administrator, check Node-RED's flows, Grafana and the Audit Trail afterwards.
 
-**A new password does not end their sessions at once either.** Their old password stops working straight away. An open dashboard asks them to sign in again within the hour. Sessions in Node-RED, Grafana and Studio last until they expire. They keep their role meanwhile. To take their role away at once, use **Remove Access** instead.
+**A new password ends their other sessions, some of them later.** Their old password stops working straight away. Studio and the forge sign them out at their next request, and Node-RED within a minute. An open dashboard and Grafana ask them to sign in again within the hour. They keep their role meanwhile. To take their role away at once, use **Remove Access** instead.
 
 ## The other tabs
 

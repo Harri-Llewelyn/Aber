@@ -1,5 +1,6 @@
 """
-An Administrator adds people, sets their roles and passwords, and removes their access (0166, 0167).
+An Administrator adds people, sets their roles and passwords, and removes their access (0166, 0167,
+0170).
 
     python supabase/migrations/test_people_management.py
 
@@ -9,8 +10,9 @@ What is held here: that only an Administrator may list people or change one, tha
 identity is never a person, that an unknown person is a 404, that a person keeps exactly one role
 row however often it is set, that nobody changes their own role, access or password here, that the
 last Administrator who can sign in cannot be demoted or removed, that a removed person's password
-is not set, that the acts serialise on one lock, that each act is in the Audit Trail's security
-lane, attributed, with no password in it, and that nothing gives a self-registered account a role.
+is not set, that the API refuses a removed person's token until their access is restored (0170),
+that the acts serialise on one lock, that each act is in the Audit Trail's security lane,
+attributed, with no password in it, and that nothing gives a self-registered account a role.
 
 EVERY TEST ROLLS BACK. The acts write Audit Trail rows, and the audit table cannot be pruned.
 """
@@ -20,6 +22,7 @@ import unittest
 import uuid
 
 import psycopg2
+import psycopg2.errors
 
 DB_HOST = os.getenv("SUPABASE_DB_HOST", os.getenv("DB_HOST", "localhost"))
 DB_PORT = os.getenv("SUPABASE_DB_PORT", "54322")
@@ -378,6 +381,27 @@ class PeopleManagement(unittest.TestCase):
         self.assertEqual(self.role_rows(MANAGER_ID), ["Shopfloor_Manager"])
         self.assertEqual(self.people()[MANAGER_ID]["status"], "active")
         self.assertTrue(self.set_role(ADMIN_ID, MANAGER_ID, "Operator"))
+
+    def pre_request_refusal(self, sub):
+        """What PostgREST's db-pre-request hook says to a request whose token names `sub`: the
+        refusal's message, or None when the request is served."""
+        try:
+            self.call(sub, "SELECT public.auth_pre_request();")
+        except psycopg2.errors.InsufficientPrivilege as refused:
+            return refused.diag.message_primary
+        return None
+
+    def test_a_removed_persons_token_is_refused_until_access_is_restored(self):
+        self.assertIsNone(self.pre_request_refusal(MANAGER_ID))
+        self.remove(ADMIN_ID, MANAGER_ID)
+        removed = "this person's access has been removed"
+        self.assertEqual(self.pre_request_refusal(MANAGER_ID), removed)
+        self.assertEqual(self.pre_request_refusal(MANAGER_ID.upper()), removed)
+        # Nobody else: the Administrator who acted, a person with no role, a subject that is no uuid.
+        for other in (ADMIN_ID, NEWCOMER_ID, "not-a-uuid"):
+            self.assertIsNone(self.pre_request_refusal(other), other)
+        self.restore(ADMIN_ID, MANAGER_ID)
+        self.assertIsNone(self.pre_request_refusal(MANAGER_ID))
 
     def test_restoring_access_that_was_not_removed_is_refused(self):
         with self.assertRaises(psycopg2.Error) as refused:

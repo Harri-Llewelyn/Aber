@@ -35,19 +35,35 @@ The machine path is untouched, because `adminAuth.tokens` never goes through `Us
 is why a token-based test suite passes while the editor is unusable. Probe `GET /settings` with an
 *editor session token*, not just `/flows` with a Supabase token.
 
-### It must return `permissions`, and the map behind it must be persisted
+### It must return `permissions`, and it re-checks the role every minute
 
 `runtime/lib/api/settings.js` copies `permissions` off that object into the settings the editor
-reads, and the editor draws a **padlock on Deploy** when it is absent. Sessions persist to
-`/data/.sessions.json` and survive a restart; an in-memory map does not — so every
-a restart silently turned a live Administrator into a read-only editor while the
-API would still have accepted the deploy. It is not a logout, which would at least be visible.
+reads, and the editor draws a **padlock on Deploy** when it is absent.
 
-The last-resort branch returns a bare `{username}` for a session in neither the map nor the file.
-It keeps that session alive rather than logging everyone out, and it is safe because the
-permissions Node-RED *enforces* come from the token's stored scope (`needsPermission()` reads
-`{scope: token.scope}`), not from this object. Such a session renders read-only until the next
-sign-in — which is why `sessionExpiryTime` is 8h rather than Node-RED's 7-day default.
+What Node-RED *enforces* is not that object: `needsPermission()` reads the scope stored with the
+editor session at sign-in (`{scope: token.scope}`). So `users` cannot change a session's
+permissions, only refuse the session: `bearerStrategy` answers 401 when it returns null, and the
+editor asks the person to sign in again. Node-RED 5.0.7's `bearerStrategy` does not catch a
+rejection, so `users` never rejects; a rejected promise would leave the request hanging.
+
+`users` therefore re-checks. The strategy's `verify` keeps the person's own GoTrue access and
+refresh tokens in memory, by username, with the permissions the sign-in granted. At most once a
+minute per person, `users` asks `nodered-userinfo` again with that access token, refreshing it at
+GoTrue's token endpoint first when it is about to expire. The session ends when:
+
+- `user_roles` no longer maps to the permissions the sign-in granted. A demotion, a promotion and a
+  removed role all end it, because the stored scope cannot follow them.
+- GoTrue refuses the token or its refresh. A ban (Remove Access), a sign-out everywhere (the
+  dashboard's Sign Out) and a new password all end the GoTrue session behind it.
+- The check cannot be made. A role that cannot be confirmed is not one.
+- Node-RED restarted. The tokens are in memory only, so no refresh token is written to the data
+  volume every flow author can read. Every editor signs in again after a restart.
+
+One check runs at a time per person, so a page's burst of requests shares one answer, and the
+refresh token, which GoTrue rotates, is never sent twice. `sessionExpiryTime` stays at 8 hours: it
+bounds an idle session, and the re-check bounds a removed one. Settings v3 to v7 persisted a
+username-to-permissions map to `/data/.aber-editor-users.json` so a session outlived a restart;
+`node-red-init` deletes that file now.
 
 > **Asserting HTTP status is not enough anywhere in this file.** Both editor defects answered
 > `200` on the calls a status-only probe makes. `validate.py` check 7b therefore signs in for real
