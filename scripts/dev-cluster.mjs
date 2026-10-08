@@ -470,12 +470,18 @@ function portOpen (port) {
   })
 }
 
-export function freePort () {
-  return new Promise((resolve, reject) => {
-    const s = net.createServer()
-    s.on('error', reject)
-    s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)) })
-  })
+// A port the OS picks, but never one of the fixed forwards: Linux hands out 32768-60999, which holds
+// 54321-54323, and a relay's warm forward that took 54322 left the next relay nowhere to listen.
+export async function freePort () {
+  const fixed = new Set([...FORWARDS, ...MQTT_FORWARDS].map(f => f.local))
+  for (;;) {
+    const port = await new Promise((resolve, reject) => {
+      const s = net.createServer()
+      s.on('error', reject)
+      s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)) })
+    })
+    if (!fixed.has(port)) return port
+  }
 }
 
 function spawnForward (f, local) {
