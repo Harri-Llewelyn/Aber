@@ -794,6 +794,18 @@ jobs:
               else:
                   print(f"  ok  {src} -> {dst}:{port}  ({why})")
 
+          # Check 7b signs in at the browser-facing URLs, which the ingress controller serves: a
+          # namespace peer, so the pod-to-pod sets above cannot hold it.
+          to_controller = [t for d in docs
+                           if (d['spec'].get('podSelector') or {}).get('matchLabels', {}).get(COMP) == 'e2e-validate'
+                           for r in d['spec'].get('egress') or [] for t in r.get('to') or []
+                           if (t.get('namespaceSelector') or {}).get('matchLabels', {})
+                           .get('kubernetes.io/metadata.name') == 'kube-system']
+          if not to_controller:
+              errors.append("MISSING e2e-validate -> the ingress controller's namespace (kube-system): check 7b signs in through it")
+          else:
+              print("  ok  e2e-validate -> the ingress controller's namespace  (validate.py check 7b)")
+
           if errors:
               for e in errors:
                   print(f"::error::{e}")
@@ -1936,6 +1948,8 @@ jobs:
       - name: Set up k3d
         uses: ./.github/actions/install-k3d
 
+      # With NetworkPolicies on, as the install rehearsal has them, when the last release is 1.1.0 or
+      # later; the enforcement probes run after the upgrade.
       - name: Upgrade The Last Release To The Checkout (site-rehearsal upgrade)
         run: node scripts/site-rehearsal.mjs upgrade --cluster=aber-rehearsal --kubeconfig="$KUBECONFIG"
 

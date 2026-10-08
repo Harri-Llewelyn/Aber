@@ -22,9 +22,9 @@
  * `upgrade` also asserts the upgrade's db-init Job completed, which replays the migration chain
  * onto the last release's database; that every volume claim kept its uid, and a StatefulSet whose
  * claim templates changed was created again and owns its pods; and that the administrator signs in
- * before and after. `install` also asserts the policy layer is enforced: supabase-db answers a pod
- * labelled as db-init and not a pod no rule admits. `upgrade` leaves NetworkPolicies off, because a
- * last release may predate the edges its own hooks need.
+ * before and after. Both run with NetworkPolicies on and assert the layer is enforced: supabase-db
+ * answers a pod labelled as db-init and not a pod no rule admits. `upgrade` keeps them off from a
+ * release before 1.1.0, whose chart lacks the edges its own hooks need.
  *
  * The checkout's images are tagged <Chart.yaml version>-ci.<commit>, which no release carries, and
  * the checkout's chart is packaged with that as its version and appVersion, as release.yml packages
@@ -44,7 +44,7 @@ import {
   IMAGES, IMG_NS, buildImages, capture, die, ensureCertManager, ensureTraefikConfig, forwardReady,
   freePort, importImages, must, preflight, printRestartedContainers, run, sleep, step,
 } from './dev-cluster.mjs'
-import { CHART_REF, readChartVersion } from './lib/release-chart.mjs'
+import { CHART_REF, compareReleases, readChartVersion } from './lib/release-chart.mjs'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const NS = 'aber'
@@ -55,6 +55,9 @@ const DOMAIN = 'rehearsal.aber.test'
 const API_HOST = `api.${DOMAIN}`
 const ADMIN_EMAIL = `admin@${DOMAIN}`
 const DEMO = { email: 'admin@aber.local', password: 'aber123' }
+// The first release whose chart holds every edge its own hooks need under the policy layer. An
+// upgrade from an earlier one installs it with NetworkPolicies off, and upgrades with them off.
+const POLICY_EDGES_SINCE = '1.1.0'
 
 const argv = process.argv.slice(2)
 const mode = argv.find(a => !a.startsWith('--'))
@@ -481,11 +484,13 @@ async function checkSignIn () {
 async function rehearse () {
   const candidate = candidateVersion()
   const from = mode === 'upgrade' ? previousRelease() : null
+  const hardened = !from || compareReleases(from.version, POLICY_EDGES_SINCE) >= 0
   let before = null
   let hookLog = ''
   console.log(from
     ? `Upgrade rehearsal: ${from.tag}, as published, to the checkout as ${candidate}`
     : `Install rehearsal: the checkout as ${candidate}, as a new site`)
+  if (!hardened) console.log(`  NetworkPolicies off: ${from.tag} predates ${POLICY_EDGES_SINCE}, the first release with the edges its hooks need`)
 
   await phase(`values from ${from ? `${from.tag}'s` : "the checkout's"} setup.mjs`, () => writeValues(from?.tag))
   const nodeAddress = await phase(`cluster ${CLUSTER}`, async () => {
@@ -494,7 +499,7 @@ async function rehearse () {
     ensureCertManager()
     return address
   })
-  writeSiteValues(nodeAddress, !from)
+  writeSiteValues(nodeAddress, hardened)
   const chart = packageChart(candidate)
   const names = imagesToBuild(chart, candidate)
   await phase(`build the checkout's images as ${candidate}`, () => buildImages(candidate, names))
@@ -517,7 +522,7 @@ async function rehearse () {
     await phase(`helm install ${candidate}`, () => helm('install', chart, ['--create-namespace']))
   }
   await phase('every workload rolls out', rollOut)
-  if (!from) await phase('the NetworkPolicy layer is enforced', assertPolicyEnforced)
+  if (hardened) await phase('the NetworkPolicy layer is enforced', assertPolicyEnforced)
   if (before) await phase('the StatefulSets and their claims came through the upgrade', () => assertStatefulSetsCarried(before, hookLog))
   await phase('helm test', helmTest)
   await phase('every running pod is on the checkout\'s images', () => assertRunningImages(candidate))

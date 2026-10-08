@@ -335,6 +335,32 @@ spec:
         {{- end }}
         {{- end }}
 {{- end }}
+{{- if .Values.e2e.enabled }}
+---
+{{/*
+The validate Job reaching the ingress controller: check 7b signs in to Node-RED at the
+browser-facing URLs (nodered. and api.<publicBaseDomain>), which the controller serves. No port:
+the rule matches the controller's container port after the Service's DNAT, which differs by
+controller (8000/8443 for k3s's Traefik, 80/443 for ingress-nginx).
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-e2e-validate-to-ingress-controller" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" "e2e-validate") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" . "component" "e2e-validate") | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressControllerNamespace }}
+{{- end }}
 {{- if and .Values.mosquitto.enabled .Values.mosquitto.external.enabled }}
 ---
 {{/*
