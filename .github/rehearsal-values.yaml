@@ -81,3 +81,12 @@ timescaledb:
   image:
     repository: timescale/timescaledb
     tag: 2.29.2-pg17
+
+# --- The platform database on its upstream image ---------------------------------------------------
+# The rehearsal restores the platform database from the service's pg_dump too, so it needs no
+# pgBackRest and does not build the chart's supabase-db image; this is the image that one is built
+# FROM, and the one supabaseDb.image already pins for the Jobs.
+supabaseDb:
+  serverImage:
+    repository: supabase/postgres
+    tag: 17.6.1.175

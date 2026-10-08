@@ -1592,7 +1592,7 @@ jobs:
           cp sparkplug_b_pb2.py ingestion/
 
       # This job is disk-bound and the failure does not look like it. The runner starts with ~14 GB
-      # free; eleven built images, a second copy in the k3d node's containerd, and a dozen pulled images
+      # free; twelve built images, a second copy in the k3d node's containerd, and a dozen pulled images
       # do not fit. Below ~3.8 GB the kubelet evicts, and the cascade ends as `context deadline
       # exceeded` on `helm install`. Removing unused toolchains costs seconds. `|| true` on each: the
       # runner image changes between releases.
@@ -1616,7 +1616,7 @@ jobs:
 
       # THE SAME LOOP A DEVELOPER RUNS. scripts/dev-cluster.mjs creates the cluster (port 80 for
       # Traefik, 1883 and 8883 for the broker), installs cert-manager and the internal CA, builds the
-      # eleven images and imports them into the node -- verified in the node, since `k3d image import`
+      # twelve images and imports them into the node -- verified in the node, since `k3d image import`
       # can report success it did not achieve (docs/incidents.md) -- installs the chart with the dev
       # values plus broker TLS, the backup service and the in-cluster conformance Jobs, waits for
       # every hook and rollout and for the daemon to be subscribed, and runs `helm test`. With

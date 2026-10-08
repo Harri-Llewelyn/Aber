@@ -332,7 +332,8 @@ sb_query "SET ROLE authenticated; SELECT count(*) FROM public.telemetry WHERE ti
 # --- 5. Verify Vault decrypts ------------------------------------------------------------------
 # Every row present and none readable is what a root key other than the dump's looks like. The
 # key is on the data volume, not in the dump; the backup service carries it as vault-key-<stamp>,
-# and it goes onto the target's volume, with a server restart, BEFORE this script runs.
+# and it goes onto the target's volume, with a server restart, BEFORE this script runs. A physical
+# restore (scripts/restore-platform-db.mjs) brings the key back with the data directory instead.
 log "verifying Vault decrypts under this server's pgsodium root key"
 sb_query "SELECT count(decrypted_secret) FROM vault.decrypted_secrets" >/dev/null \
   || die "vault.decrypted_secrets cannot be read: this server's pgsodium root key is not the one the dump was encrypted under. Put the backup's vault-key file at /var/lib/postgresql/data/pgsodium_root.key, restart the server, and restore again (supabase/README.md, Backup and Recovery)."

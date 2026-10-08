@@ -81,6 +81,8 @@ export const IMAGES = [
   { name: 'backup-service', file: 'backup-service/Dockerfile', context: 'backup-service' },
   // The historian: timescale/timescaledb with pgBackRest, for timescaledb.physicalBackup.
   { name: 'timescaledb', file: 'timescaledb/Dockerfile', context: 'timescaledb' },
+  // The platform database: supabase/postgres with pgBackRest and tini, for supabaseDb.physicalBackup.
+  { name: 'supabase-db', file: 'supabase/db/Dockerfile', context: 'supabase/db' },
   { name: 'db-init', file: 'supabase/db-init/Dockerfile', context: 'supabase' },
   // Carries docs/openapi.yaml and docs/i3x-openapi.yaml, so a spec edit needs this rebuild.
   { name: 'swagger-ui', file: 'swagger-ui/Dockerfile', context: '.' },
@@ -382,6 +384,9 @@ async function installChart ({ tls, e2e, holdE2e = false }) {
     // backup was taken and WAL is being archived (timescaledb/test_physical_backup.py).
     '--set', 'timescaledb.physicalBackup.enabled=true', '--set', 'timescaledb.physicalBackup.repo.type=posix',
     '--set', 'timescaledb.physicalBackup.repo.posix.size=5Gi',
+    // The platform database's, under its own stanza on a claim of its own; the stack lane asserts the
+    // same (supabase/migrations/test_platform_physical_backup.py).
+    '--set', 'supabaseDb.physicalBackup.enabled=true', '--set', 'supabaseDb.physicalBackup.posix.size=5Gi',
     '--set', `secrets.forgeSweepSecret=${keptSecret('forgeSweepSecret')}`,
     // Empty leaves an archived gateway's broker credential working; the stack lane asserts it stops.
     '--set', `secrets.gatewayRevokeSecret=${keptSecret('gatewayRevokeSecret')}`]

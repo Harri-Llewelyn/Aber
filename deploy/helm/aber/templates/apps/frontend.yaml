@@ -58,6 +58,8 @@ window.__ABER_CONFIG__ = window.__ABER_CONFIG__ || {
   VITE_BACKUP_RETENTION_DAYS: %q,
   // true while timescaledb.physicalBackup is on: the Backups page shows the historian's own backup.
   VITE_HISTORIAN_PHYSICAL_BACKUP: %q,
+  // true while supabaseDb.physicalBackup is on: the Backups page shows the platform database's own backup.
+  VITE_PLATFORM_PHYSICAL_BACKUP: %q,
 };
 `
   (include "aber.supabaseUrl" .)
@@ -71,7 +73,8 @@ window.__ABER_CONFIG__ = window.__ABER_CONFIG__ || {
   .Values.supabaseStorage.captureBucket
   .Chart.AppVersion
   (.Values.backup.retentionDays | toString)
-  (include "aber.physicalBackupOn" .) -}}
+  (include "aber.physicalBackupOn" .)
+  (include "aber.platformBackupOn" .) -}}
 ---
 {{/*
 =================================================================================================

@@ -48,4 +48,6 @@ window.__ABER_CONFIG__ = window.__ABER_CONFIG__ || {
   VITE_BACKUP_RETENTION_DAYS: '',
   // 'true' while timescaledb.physicalBackup is on. Blank: the Backups page shows no historian row.
   VITE_HISTORIAN_PHYSICAL_BACKUP: '',
+  // 'true' while supabaseDb.physicalBackup is on. Blank: the Backups page shows no platform database row.
+  VITE_PLATFORM_PHYSICAL_BACKUP: '',
 };

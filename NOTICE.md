@@ -115,6 +115,7 @@ relying on any of them.
 | :--- | :--- | :--- |
 | `timescale/timescaledb:2.29.2-pg17` | Timescale License (core Apache 2.0) | `SHOW timescaledb.license` → `timescale` |
 | pgBackRest 2.57.0, added to that image as `ghcr.io/harri-llewelyn/aber/timescaledb` (`timescaledb/Dockerfile`) | MIT | `apk info -a pgbackrest` → `license: MIT` |
+| pgBackRest 2.57.0 and tini 0.19.0, added to `supabase/postgres:17.6.1.175` as `ghcr.io/harri-llewelyn/aber/supabase-db` (`supabase/db/Dockerfile`) | MIT | `apk info -a pgbackrest`, `apk info -a tini` → `license: MIT` |
 | `grafana/grafana:13.2.3` | AGPL-3.0 | `/usr/share/grafana/LICENSE` |
 | `prom/prometheus:v3.15.0` | Apache 2.0 | `/LICENSE` |
 | `eclipse-mosquitto:2.0.22` | EPL-2.0 / EDL-1.0 | `/usr/share/licenses/mosquitto/` |

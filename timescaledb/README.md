@@ -383,6 +383,12 @@ is its answer. All three gates are superuser only. The platform maps the three t
 tables (archived migration 0157), and `fdw_reader` may read them, granted in `roles.sql` because this file
 runs before `roles.sql` creates the role on a fresh volume.
 
+**The platform database has a copy.** Migration `0173` declares the runs table, the schedule table
+and the four functions the sidecar calls in the platform database, for its own pgBackRest stanza
+(`supabaseDb.physicalBackup`), with these bodies. `scripts/check-mirror-drift.mjs` fails when the
+two differ, so a change to a rule here is a new migration there too. The repository the two stanzas
+share is `timescaledb.physicalBackup.repo`.
+
 ## `roles.sql`
 
 **Each block is the authority on its role's reach.** Grants are re-issued and revokes re-issued

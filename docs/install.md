@@ -15,7 +15,7 @@ the [glossary](glossary.md).
 | :--- | :--- | :--- |
 | **Look at Aber** on your own computer | [*Try it*](#try-it): `npm run try`, the published release on [k3d](glossary.md#k3d) at `localhost` | nothing: the images are downloaded |
 | **Run Aber** for real, on a site | [*Run it on a site*](#run-it-on-a-site): the published release, installed on a [k3s](glossary.md#k3s) machine | nothing: the images are downloaded |
-| **Work on Aber's code** on a laptop | [*Develop on a laptop*](#develop-on-a-laptop): `npm run dev:up`, on [k3d](glossary.md#k3d) | all eleven images, from your checkout |
+| **Work on Aber's code** on a laptop | [*Develop on a laptop*](#develop-on-a-laptop): `npm run dev:up`, on [k3d](glossary.md#k3d) | all twelve images, from your checkout |
 
 **Never use the laptop route for a server other people can reach.** It installs `values-dev.yaml`,
 whose passwords and four demo accounts are published in git.

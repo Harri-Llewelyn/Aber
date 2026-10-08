@@ -6,9 +6,10 @@ The custom exporter queries, one ConfigMap per database.
 queries are concatenated into it rather than mounted alongside. That is why `common.yaml` appears
 twice below instead of being a ConfigMap of its own.
 
-THE HISTORIAN'S FILE IS THE LONGER ONE, and the difference is not stylistic: every query in
+EACH DATABASE HAS A FILE OF ITS OWN, and the difference is not stylistic: every query in
 `timescaledb-exporter/queries.yaml` reads `timescaledb_information` or the storage footprint view,
-neither of which exists on supabase-db. A custom-query file naming a missing relation does not fail
+neither of which exists on supabase-db, and `supabase-db-exporter/queries.yaml` reads the platform
+database's own physical backup runs. A custom-query file naming a missing relation does not fail
 the scrape -- the collector errors, the exporter keeps serving, and the series are simply absent --
 so each file is mounted only where its queries can run.
 
@@ -25,6 +26,7 @@ metadata:
 data:
   queries.yaml: |
 {{ .Files.Get "files/database-exporter/common.yaml" | indent 4 }}
+{{ .Files.Get "files/supabase-db-exporter/queries.yaml" | indent 4 }}
 {{- end }}
 {{- if .Values.timescaledb.enabled }}
 ---

@@ -126,7 +126,6 @@ when its node_exporter collectors run. check-docs-drift.mjs holds the list equal
       (list "supabase-envoy" $v.supabaseEnvoy.enabled $v.supabaseEnvoy.image)
       (list "supabase-auth" $v.supabaseAuth.enabled $v.supabaseAuth.image)
       (list "supabase-rest" $v.supabaseRest.enabled $v.supabaseRest.image)
-      (list "supabase-db" $v.supabaseDb.enabled $v.supabaseDb.image)
       (list "prometheus" $v.observability.enabled $v.observability.prometheus.image)
       (list "alloy" (and $v.observability.enabled $v.observability.alloy.hostMetrics) $v.observability.alloy.image)
       (list "gitea" $v.gitea.enabled $v.gitea.image) -}}
@@ -144,6 +143,7 @@ when its node_exporter collectors run. check-docs-drift.mjs holds the list equal
       (list "supabase-functions" $v.supabaseFunctions.enabled $v.supabaseFunctions.image)
       (list "ingestion" $v.ingestion.enabled $v.ingestion.image)
       (list "timescaledb" $v.timescaledb.enabled $v.timescaledb.image)
+      (list "supabase-db" $v.supabaseDb.enabled $v.supabaseDb.serverImage)
       (list "swagger-ui" $v.swaggerUi.enabled $v.swaggerUi.image) -}}
 {{- range $built -}}
 {{- if index . 1 -}}
@@ -1516,7 +1516,7 @@ archive-push and archive-get, and the backup sidecar's.
 {{- end -}}
 
 {{- define "aber.validatePhysicalBackup" -}}
-{{- if include "aber.physicalBackupOn" . -}}
+{{- if or (include "aber.physicalBackupOn" .) (include "aber.platformBackupOn" .) -}}
 {{- $b := .Values.timescaledb.physicalBackup -}}
 {{- if eq $b.repo.type "s3" -}}
 {{- $s := $b.repo.s3 -}}
@@ -1533,21 +1533,32 @@ archive-push and archive-get, and the backup sidecar's.
 {{- else if ne $b.repo.type "posix" -}}
 {{- fail (printf "\n\naber: timescaledb.physicalBackup.repo.type is %q; it is s3 or posix.\n" $b.repo.type) -}}
 {{- end -}}
+{{- end -}}
+{{- range $key, $on := dict "timescaledb" (include "aber.physicalBackupOn" .) "supabaseDb" (include "aber.platformBackupOn" .) -}}
+{{- if $on -}}
+{{- $b := (index $.Values $key).physicalBackup -}}
 {{- $h := int $b.hourUtc -}}{{- $d := int $b.fullOn -}}
 {{- if or (lt $h 0) (gt $h 23) (lt $d 0) (gt $d 6) -}}
-{{- fail (printf "\n\naber: timescaledb.physicalBackup.hourUtc is %v and fullOn is %v; they are 0-23 and 0-6 (0 = Sunday).\n" $b.hourUtc $b.fullOn) -}}
+{{- fail (printf "\n\naber: %s.physicalBackup.hourUtc is %v and fullOn is %v; they are 0-23 and 0-6 (0 = Sunday).\n" $key $b.hourUtc $b.fullOn) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
 
-{{/* pgbackrest.conf. Credentials are not in it: they arrive as PGBACKREST_* environment variables. */}}
-{{- define "aber.pgbackrestConf" -}}
-{{- $b := .Values.timescaledb.physicalBackup -}}
+{{/*
+pgbackrest.conf's [global] section: the shared repository (timescaledb.physicalBackup.repo) with one
+database's retention, parallelism, queue and spool. Credentials are not in it: they arrive as
+PGBACKREST_* environment variables.
+Usage: (dict "ctx" . "backup" <its physicalBackup values> "spool" "<spool path>")
+*/}}
+{{- define "aber.pgbackrestGlobalConf" -}}
+{{- $r := .ctx.Values.timescaledb.physicalBackup.repo -}}
+{{- $b := .backup -}}
 [global]
-repo1-type={{ $b.repo.type }}
+repo1-type={{ $r.type }}
 repo1-retention-full={{ int $b.retainFull }}
-{{- if eq $b.repo.type "s3" }}
-{{- $s := $b.repo.s3 }}
+{{- if eq $r.type "s3" }}
+{{- $s := $r.s3 }}
 {{- $u := urlParse $s.endpoint }}
 {{- $hostPort := splitList ":" $u.host }}
 repo1-path={{ $s.path }}
@@ -1570,11 +1581,16 @@ compress-type=zst
 process-max={{ int $b.processMax }}
 start-fast=y
 archive-async=y
-spool-path=/var/lib/postgresql/data/pgbackrest-spool
+spool-path={{ .spool }}
 archive-push-queue-max={{ $b.archiveQueueMax }}
 log-level-console=info
 log-level-file=off
 lock-path=/var/run/postgresql/pgbackrest-lock
+{{- end -}}
+
+{{/* The historian's pgbackrest.conf: the stanza `historian`. */}}
+{{- define "aber.pgbackrestConf" -}}
+{{ include "aber.pgbackrestGlobalConf" (dict "ctx" . "backup" .Values.timescaledb.physicalBackup "spool" "/var/lib/postgresql/data/pgbackrest-spool") }}
 
 [historian]
 pg1-path=/var/lib/postgresql/data/pgdata
@@ -1641,6 +1657,79 @@ pg1-database={{ .Values.timescaledb.database }}
 - name: pgbackrest-repo
   persistentVolumeClaim:
     claimName: {{ printf "%s-historian-backup" (include "aber.fullname" .) }}
+{{- else if .Values.timescaledb.physicalBackup.repo.s3.caSecret }}
+- name: pgbackrest-ca
+  secret:
+    secretName: {{ .Values.timescaledb.physicalBackup.repo.s3.caSecret }}
+    items:
+      - key: ca.crt
+        path: ca.crt
+{{- end }}
+{{- end -}}
+
+{{/*
+The platform database's physical backup (supabaseDb.physicalBackup): the same pgBackRest writing
+the repository above under the stanza `platform`. S3 is the same bucket and path; posix is a claim
+of its own, since a ReadWriteOnce volume cannot be mounted by both database pods. The credentials
+and the mounts are the historian's helpers (physicalBackupEnv, physicalBackupMounts).
+*/}}
+{{- define "aber.platformBackupOn" -}}
+{{- if and .Values.supabaseDb.enabled .Values.supabaseDb.physicalBackup.enabled }}true{{ end -}}
+{{- end -}}
+
+{{/*
+The data directory is the volume's mount point, so the spool cannot sit beside it as the
+historian's does: an emptyDir, which holds only archive-push's acknowledgements and the WAL
+archive-get fetches ahead during recovery.
+*/}}
+{{- define "aber.platformPgbackrestConf" -}}
+{{ include "aber.pgbackrestGlobalConf" (dict "ctx" . "backup" .Values.supabaseDb.physicalBackup "spool" "/var/spool/pgbackrest") }}
+
+[platform]
+pg1-path=/var/lib/postgresql/data
+pg1-socket-path=/var/run/postgresql
+pg1-user=supabase_admin
+pg1-database=postgres
+{{- end -}}
+
+{{/*
+The server flags that turn WAL archiving on. hot_standby=on so a server recovering to a moment
+answers the probes once it is consistent: the image's own file sets it off, and a recovery longer
+than the startup probe's five minutes would otherwise be killed part-way.
+*/}}
+{{- define "aber.platformBackupServerArgs" -}}
+- -c
+- archive_mode=on
+- -c
+- archive_command=pgbackrest --stanza=platform archive-push %p
+- -c
+- archive_timeout={{ int .Values.supabaseDb.physicalBackup.archiveTimeoutSeconds }}
+- -c
+- hot_standby=on
+{{- end -}}
+
+{{- define "aber.platformBackupVolumes" -}}
+- name: pgbackrest-conf
+  configMap:
+    name: {{ printf "%s-supabase-db-pgbackrest" (include "aber.fullname" .) }}
+    items:
+      - key: pgbackrest.conf
+        path: pgbackrest.conf
+- name: pgbackrest-script
+  configMap:
+    name: {{ printf "%s-supabase-db-pgbackrest" (include "aber.fullname" .) }}
+    defaultMode: 0555
+    items:
+      - key: platform-backup.sh
+        path: platform-backup.sh
+- name: pgsocket
+  emptyDir: {}
+- name: pgbackrest-spool
+  emptyDir: {}
+{{- if eq .Values.timescaledb.physicalBackup.repo.type "posix" }}
+- name: pgbackrest-repo
+  persistentVolumeClaim:
+    claimName: {{ printf "%s-platform-backup" (include "aber.fullname" .) }}
 {{- else if .Values.timescaledb.physicalBackup.repo.s3.caSecret }}
 - name: pgbackrest-ca
   secret:

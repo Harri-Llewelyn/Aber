@@ -78,6 +78,12 @@ const MIRRORS = [
     match: (name) => name.endsWith('.sh'),
     why: 'The schedule the historian backup sidecar runs (timescaledb.physicalBackup)',
   },
+  {
+    source: join('supabase', 'db', 'pgbackrest'),
+    dest: 'supabase-db-pgbackrest',
+    match: (name) => name.endsWith('.sh'),
+    why: 'The schedule the platform database backup sidecar runs (supabaseDb.physicalBackup)',
+  },
   // THE MIGRATIONS ARE NOT MIRRORED. They are baked into the db-init image by
   // supabase/db-init/Dockerfile and read from its filesystem, so the chart carries none of them.
   //

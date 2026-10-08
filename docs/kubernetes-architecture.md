@@ -1225,7 +1225,9 @@ snapshots, and neither database is replicated. `pg_dump -Fc` nightly, to a PVC t
 covers the platform database always, and the historian unless `timescaledb.physicalBackup` is on.
 With it on, the historian has pgBackRest full and differential backups and continuous WAL
 archiving instead, and the nightly dump skips it (`deploy/k8s/README.md`, *Backing up the
-historian*).
+historian*). `supabaseDb.physicalBackup` gives the platform database the same, under a stanza of
+its own in the same repository; there the dump carries on beside it, because a partial or
+cross-version restore needs one (*Backing up the platform database*).
 
 - **`--no-owner --no-privileges` are deliberately absent.** The role scaffolding is exactly what a
   restore needs: `supabase_auth_admin`, `authenticator` and `supabase_storage_admin` own objects, and
@@ -1239,9 +1241,17 @@ historian*).
   only. The backup service copies every backup, age-encrypted, to an S3 destination set on the
   Backups page (`supabase/README.md`, "An encrypted copy off site").
 - **The dump is logical, not PITR.** It recovers to the last nightly run and no finer; this is the
-  floor, said plainly so nobody mistakes it for the ceiling. The historian's physical backup, when
-  on, restores to any moment inside the retained backups; the platform database has no such path.
-  **Test a restore** — an untested backup is a belief, not a capability.
+  floor, said plainly so nobody mistakes it for the ceiling. Each database's physical backup, when
+  on, restores it to any moment inside the retained backups. **Test a restore** — an untested backup
+  is a belief, not a capability; `scripts/rehearse-historian-restore.mjs` and
+  `scripts/rehearse-platform-restore.mjs` rehearse each to a marked moment.
+- **One repository, a stanza per database.** A site configures one destination
+  (`timescaledb.physicalBackup.repo`). On S3 both stanzas share the bucket; a `posix` repository is a
+  claim per database, because a ReadWriteOnce volume cannot be mounted by both pods. Both images
+  install the same pgBackRest, and each stanza is written only by its own database's pod.
+- **Both database images run `tini` as PID 1.** Asynchronous `archive-push` leaves an orphan that a
+  postmaster as PID 1 would reap and read as a crashed backend, restarting the database on every
+  failed push (`supabase/db/README.md` has the measurement).
 
 ### 10.4 Secret management
 
@@ -1321,8 +1331,9 @@ oversights.
   `docs/gateway.md`, *The client's address*). There is no overall request ceiling, and the gateway
   does not limit `/rest/v1/`, `/functions/v1/` or a token refresh. Each gateway replica counts on
   its own. §7.1 covers the longer-term Gateway API question.
-- **The platform database's backup is a logical dump, not PITR** (§10.3). Its recovery floor is the
-  last nightly run; only the historian has a physical backup, and only when it is switched on.
+- **Point-in-time recovery is opt-in, per database** (§10.3). Each database's physical backup is off
+  by default, so a default install recovers to the last nightly dump and no finer. A site that turns
+  them on needs an off-site repository for them to outlive the node.
 
 ## 12. What the shared helpers decide
 

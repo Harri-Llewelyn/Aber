@@ -1,0 +1,82 @@
+# Custom queries for supabase-db's postgres_exporter only: the platform database's physical backup
+# (supabaseDb.physicalBackup), as timescaledb-exporter/queries.yaml reports the historian's. The
+# metric names differ from the historian's so one alert rule per database reads its own series.
+aber_platform_db_wal_archive:
+  # pg_stat_archiver, under pg_monitor. `enabled` is archive_mode, which supabaseDb.physicalBackup
+  # turns on; the Platform Database WAL Archiving and Backup Stale alerts are gated on it, so a
+  # stack without physical backup raises neither.
+  query: |
+    SELECT (current_setting('archive_mode') <> 'off')::int::bigint       AS enabled,
+           archived_count::bigint                                        AS archived_total,
+           failed_count::bigint                                          AS failed_total,
+           coalesce(extract(epoch FROM last_archived_time), 0)::float8   AS last_archived_time,
+           coalesce(extract(epoch FROM last_failed_time), 0)::float8     AS last_failed_time
+      FROM pg_stat_archiver
+  metrics:
+    - enabled:
+        usage: "GAUGE"
+        description: "1 while WAL archiving is on (supabaseDb.physicalBackup.enabled)"
+    - archived_total:
+        usage: "COUNTER"
+        description: "WAL segments archived since the statistics were last reset"
+    - failed_total:
+        usage: "COUNTER"
+        description: "Failed attempts to archive a WAL segment. PostgreSQL retries the same segment until it succeeds"
+    - last_archived_time:
+        usage: "GAUGE"
+        description: "Unix time of the last segment archived; 0 if none"
+    - last_failed_time:
+        usage: "GAUGE"
+        description: "Unix time of the last failed attempt; 0 if none. Later than last_archived_time means archiving is failing now"
+
+aber_platform_db_backup:
+  # public.physical_backup_runs, written by the backup sidecar (migration 0173); pg_monitor reads it
+  # through its own policy. A row per kind even before the first backup, so "never backed up" is a
+  # 0 rather than an absent series that an alert would read as OK.
+  query: |
+    SELECT k.kind::text                                                                   AS kind,
+           coalesce(extract(epoch FROM max(r.finished_at) FILTER (WHERE r.succeeded)), 0)::float8
+                                                                                          AS last_success_time,
+           coalesce(extract(epoch FROM max(r.finished_at) FILTER (WHERE NOT r.succeeded)), 0)::float8
+                                                                                          AS last_failure_time,
+           coalesce((SELECT b.backup_bytes FROM public.physical_backup_runs b
+                      WHERE b.kind = k.kind AND b.succeeded ORDER BY b.id DESC LIMIT 1), 0)::bigint
+                                                                                          AS last_bytes,
+           coalesce((SELECT b.repo_bytes FROM public.physical_backup_runs b
+                      WHERE b.succeeded AND b.kind <> 'check' ORDER BY b.id DESC LIMIT 1), 0)::bigint
+                                                                                          AS repository_bytes
+      FROM (VALUES ('full'), ('diff')) k(kind)
+      LEFT JOIN public.physical_backup_runs r ON r.kind = k.kind
+     GROUP BY k.kind
+  metrics:
+    - kind:
+        usage: "LABEL"
+        description: "full or diff"
+    - last_success_time:
+        usage: "GAUGE"
+        description: "Unix time the last backup of this kind finished; 0 if none has"
+    - last_failure_time:
+        usage: "GAUGE"
+        description: "Unix time the last failed backup of this kind finished; 0 if none has"
+    - last_bytes:
+        usage: "GAUGE"
+        description: "Bytes the last backup of this kind added to the repository, after compression"
+    - repository_bytes:
+        usage: "GAUGE"
+        description: "Bytes of every platform database backup the repository holds, WAL excluded"
+
+aber_platform_db_backup_clock:
+  # What the Platform Database Backup Stale alert measures from. Before the first backup succeeds
+  # there is no success to measure from, and counting from 0 would page the moment backup is switched
+  # on; the first recorded run is when it was switched on, and the server's start is when archiving
+  # took effect if the sidecar has recorded nothing yet.
+  query: |
+    SELECT extract(epoch FROM coalesce(
+             (SELECT max(finished_at) FROM public.physical_backup_runs
+               WHERE succeeded AND kind <> 'check'),
+             (SELECT min(started_at) FROM public.physical_backup_runs),
+             pg_postmaster_start_time()))::float8 AS since_time
+  metrics:
+    - since_time:
+        usage: "GAUGE"
+        description: "Unix time of the last successful backup; before the first, of the first recorded run, or of the server's start"

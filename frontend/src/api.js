@@ -1333,6 +1333,16 @@ const apiMethods = {
   },
 
   /**
+   * The platform database's own physical backup (0173), read locally: the columns
+   * historianBackupState() returns, without the request. Null when it cannot be read.
+   */
+  platformBackupState: async () => {
+    const { data, error } = await supabase.rpc('platform_backup_state');
+    if (error) throw new Error(error.message || 'Could not read the platform database\'s backup');
+    return (Array.isArray(data) ? data[0] : data) || null;
+  },
+
+  /**
    * Every stored capture, with the subject it was recorded from.
    *
    * Read from the table, not from storage: the row carries the note, the message count and the
