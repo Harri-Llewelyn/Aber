@@ -334,6 +334,16 @@ spec:
           env:
             {{- include "aber.secretEnv" (dict "name" "GF_SECURITY_ADMIN_USER" "secretName" $secretName "key" "GRAFANA_ADMIN_USER") | nindent 12 }}
             {{- include "aber.secretEnv" (dict "name" "GF_SECURITY_ADMIN_PASSWORD" "secretName" $secretName "key" "GRAFANA_ADMIN_PASSWORD") | nindent 12 }}
+            {{- if eq .Values.global.scheme "https" }}
+            # HTTPS only: Strict-Transport-Security as every other host sends it (aber.strictTransportSecurity),
+            # and the session cookie marked Secure. Grafana sends nosniff and X-Frame-Options by default.
+            - name: GF_SECURITY_STRICT_TRANSPORT_SECURITY
+              value: "true"
+            - name: GF_SECURITY_STRICT_TRANSPORT_SECURITY_MAX_AGE_SECONDS
+              value: {{ include "aber.hstsMaxAgeSeconds" . | quote }}
+            - name: GF_SECURITY_COOKIE_SECURE
+              value: "true"
+            {{- end }}
             # Read by grafana.ini as $__env{GRAFANA_OAUTH_CLIENT_SECRET}. The plaintext here must
             # match the base64url(sha256(...)) hash 0002_seed_data.sql wrote into auth.oauth_clients
             # -- both come from the same value, so rotating it means restarting db-init AND this.

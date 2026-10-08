@@ -421,6 +421,16 @@ GoTrue holds http. Nothing crashes; only sign-in breaks.
 {{- end -}}
 
 {{/*
+The Strict-Transport-Security value every host the chart serves sends when global.scheme is https,
+and empty otherwise (an empty header is not sent). One year; no includeSubDomains, because the
+hosts are siblings under publicBaseDomain and the site's other names are not the chart's to pin.
+*/}}
+{{- define "aber.hstsMaxAgeSeconds" -}}31536000{{- end -}}
+{{- define "aber.strictTransportSecurity" -}}
+{{- if eq .Values.global.scheme "https" -}}max-age={{ include "aber.hstsMaxAgeSeconds" . }}{{- end -}}
+{{- end -}}
+
+{{/*
 An Ingress with empty host: fields is accepted by the API server and then matches every request,
 so unrelated traffic reaches the dashboard while no intended hostname routes. Checked here rather
 than in ingress.yaml so validation runs in one ordered place.

@@ -1,17 +1,19 @@
 """
-GoTrue's sign-in limit is per client, through the path a browser takes, against a running stack.
+The sign-in limit is per client, through the path a browser takes, against a running stack.
 
-A probe pod sends wrong-password grants to api.<domain> through Traefik and the gateway until GoTrue
-refuses it with 429, then keeps sending five a second so its limit stays spent. While it does, the
-host signs in three times through the same Ingress, and each must succeed. The first half fails
-when GOTRUE_RATE_LIMIT_HEADER is empty (nothing is limited). The second half fails when Traefik's
-Service is on externalTrafficPolicy Cluster: both clients then arrive as the node's pod-network
-address and share the limit the probe is holding empty.
+A probe pod sends wrong-password grants to api.<domain> through Traefik and the gateway until it is
+refused with 429, then keeps sending five a second so its limit stays spent. While it does, the
+host signs in three times through the same Ingress, and each must succeed. The gateway's limit
+(supabaseEnvoy.signInRateLimit) refuses first, being the tighter; GoTrue's stands behind it on the
+same address, and both answer over_request_rate_limit. The first half fails when neither limits.
+The second half fails when Traefik's Service is on externalTrafficPolicy Cluster: both clients then
+arrive as the node's pod-network address and share the limit the probe is holding empty.
 
 The pod sends to the node's address, not Traefik's ClusterIP, because only that path is rewritten
 under Cluster; it runs in `default`, outside the release's NetworkPolicy. Its email has no account.
-The other suites sign in through the port-forward, where no forwarded header arrives and GoTrue
-skips the limit, so the bucket this spends is the pod's alone.
+The other suites sign in through the port-forward, which arrives from loopback and has only the
+gateway's total bucket, so the per-client bucket this spends is the pod's alone. The host's own
+bucket must not be spent in the minute before: three sign-ins need three of its ten.
 
     python supabase/test_auth_rate_limit.py
 """
@@ -28,7 +30,7 @@ PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 PASSWORD = os.getenv("ABER_SEED_PASSWORD", "aber123")
 # Where the host reaches Traefik: k3d publishes the node's :80 on loopback.
 INGRESS = os.getenv("INGRESS_TEST_ADDRESS", "127.0.0.1:80")
-# GoTrue's Token limiter allows a burst of 30 per client and refills one every two seconds.
+# More than either limit allows one client at once: the gateway's ten a minute, GoTrue's burst of 30.
 BURST_ATTEMPTS = 40
 HOLD_SECONDS = 20
 HOST_SIGN_INS = 3
@@ -127,8 +129,9 @@ class SignInLimitIsPerClientTestCase(unittest.TestCase):
         result = json.loads(logs.splitlines()[-1])
         codes = {int(k): v for k, v in result["codes"].items()}
         self.assertIn(429, codes,
-                      f"one client's wrong-password grants were never refused ({codes}): GoTrue is not "
-                      "rate-limiting sign-in. Is GOTRUE_RATE_LIMIT_HEADER set?")
+                      f"one client's wrong-password grants were never refused ({codes}): neither the "
+                      "gateway (supabaseEnvoy.signInRateLimit) nor GoTrue (GOTRUE_RATE_LIMIT_HEADER) "
+                      "is rate-limiting sign-in.")
         self.assertIn("over_request_rate_limit", result["limited"])
 
         refused = [(s, b[:160]) for s, b in host_results if s != 200]

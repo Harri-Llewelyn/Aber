@@ -143,6 +143,22 @@ spec:
                   exit 1
                   ;;
               esac
+              # Substituted as numbers into the gateway listener; anything else is a bootstrap Envoy refuses.
+              for name in SIGN_IN_LIMIT_PER_CLIENT SIGN_IN_LIMIT_TOTAL; do
+                eval "value=\$$name"
+                case "$value" in
+                  ''|0|*[!0-9]*)
+                    echo "$name must be a whole number of at least 1 (supabaseEnvoy.signInRateLimit in values.yaml). Got: $value" >&2
+                    exit 1
+                    ;;
+                esac
+              done
+              case "$XFF_TRUSTED_HOPS" in
+                ''|*[!0-9]*)
+                  echo "XFF_TRUSTED_HOPS must be a whole number (supabaseEnvoy.trustedProxyHops in values.yaml). Got: $XFF_TRUSTED_HOPS" >&2
+                  exit 1
+                  ;;
+              esac
 
               # The chart hands over origins as a JSON array of strings; Envoy takes a list of
               # string matchers. THE SPACE AFTER THE COLON IS REQUIRED: `{exact:"a"}` is a single scalar
@@ -222,6 +238,11 @@ spec:
                   -e "s|__GITEA_PUBLIC_URL__|$GITEA_PUBLIC_URL|g" \
                   -e "s|__GITEA_UPSTREAM_ADDRESS__|$GITEA_UPSTREAM_ADDRESS|g" \
                   -e "s|__SUPABASE_JWT_SECRET_B64URL__|$JWT_B64URL|g" \
+                  -e "s|__XFF_TRUSTED_HOPS__|$XFF_TRUSTED_HOPS|g" \
+                  -e "s|__SIGN_IN_LIMIT_PERCENT__|$SIGN_IN_LIMIT_PERCENT|g" \
+                  -e "s|__SIGN_IN_LIMIT_PER_CLIENT__|$SIGN_IN_LIMIT_PER_CLIENT|g" \
+                  -e "s|__SIGN_IN_LIMIT_TOTAL__|$SIGN_IN_LIMIT_TOTAL|g" \
+                  -e "s|__STRICT_TRANSPORT_SECURITY__|$STRICT_TRANSPORT_SECURITY|g" \
                   /template/envoy.yaml > /config/envoy.yaml
 
               # The leftover scan. Comments are excluded -- envoy.yaml's header documents the
@@ -248,6 +269,19 @@ spec:
             # chart does not serve: origin policy has one source or it has none.
             - name: ENVOY_CORS_ORIGINS
               value: {{ include "aber.corsOrigins" . | quote }}
+            # The API listener's client address and sign-in limit (values.yaml, supabaseEnvoy). `int`, so
+            # a large value renders as digits rather than in exponent form.
+            - name: XFF_TRUSTED_HOPS
+              value: {{ .Values.supabaseEnvoy.trustedProxyHops | int | quote }}
+            - name: SIGN_IN_LIMIT_PERCENT
+              value: {{ ternary "100" "0" .Values.supabaseEnvoy.signInRateLimit.enabled | quote }}
+            - name: SIGN_IN_LIMIT_PER_CLIENT
+              value: {{ .Values.supabaseEnvoy.signInRateLimit.perClientPerMinute | int | quote }}
+            - name: SIGN_IN_LIMIT_TOTAL
+              value: {{ .Values.supabaseEnvoy.signInRateLimit.totalPerMinute | int | quote }}
+            # All three listeners send it; empty, and so not sent, unless global.scheme is https.
+            - name: STRICT_TRANSPORT_SECURITY
+              value: {{ include "aber.strictTransportSecurity" . | quote }}
             # ------------------------------------------------------------------------------
             # The studio listener's inputs. See the listener in files/envoy/envoy.yaml.
             # ------------------------------------------------------------------------------

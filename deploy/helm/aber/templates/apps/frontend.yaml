@@ -172,6 +172,10 @@ spec:
             - name: http
               containerPort: 3000
               protocol: TCP
+          env:
+            # Substituted into nginx.conf at start; empty, and so not sent, unless global.scheme is https.
+            - name: ABER_STRICT_TRANSPORT_SECURITY
+              value: {{ include "aber.strictTransportSecurity" . | quote }}
           # Static files behind NGINX: readiness and liveness are the same question, and `/` is
           # served from disk with no upstream, so there is nothing cheaper or more meaningful to
           # probe. try_files falls back to index.html, so any path would answer -- `/` is honest.
