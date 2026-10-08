@@ -89,7 +89,7 @@ describe('the Change Password dialog', () => {
   })
 
   it('changes nothing when GoTrue says the current password is wrong, and says so', async () => {
-    supabase.auth.updateUser.mockResolvedValue(refused('current_password_mismatch'))
+    supabase.auth.updateUser.mockResolvedValue(refused('current_password_invalid'))
     const { dialog, onClose } = show()
     fill(dialog, { current: 'not-the-current-one' })
     fireEvent.click(submit(dialog))

@@ -175,7 +175,7 @@ people's accounts in GoTrue, and it is narrow by construction.
   with the new one in a single `PUT /auth/v1/user`, and GoTrue checks the current one before it
   sets anything. The chart always sets `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD`,
   so a request without it is refused (400 `current_password_required`, or
-  `current_password_mismatch` for a wrong one), and an access token taken from a browser cannot
+  `current_password_invalid` for a wrong one), and an access token taken from a browser cannot
   change the password by itself. GoTrue exempts the two flows that have no current password: a
   recovery link's session (*Forgot your password?*) and an account with no password yet (an
   invitation's first). Set New Password uses the admin API, which the setting does not reach. The new

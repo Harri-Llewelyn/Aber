@@ -23,7 +23,8 @@ export function newPasswordProblem(current, next, again) {
  */
 const REFUSALS = {
   current_password_required: 'Enter your current password.',
-  current_password_mismatch: 'Your current password is not right. Nothing was changed.',
+  // GoTrue's Go constant is ErrorCodeCurrentPasswordMismatch; the code it sends is this one.
+  current_password_invalid: 'Your current password is not right. Nothing was changed.',
   same_password: 'The new password must be different from your current one.',
 }
 
