@@ -630,7 +630,7 @@ def storage_snapshot():
 
 # The chunks a run wrote into: every telemetry chunk whose range ends after the run started.
 RUN_CHUNKS_SQL = """
-SELECT format('%%I.%%I', chunk_schema, chunk_name), range_start, range_end
+SELECT format('%%I.%%I', chunk_schema, chunk_name), range_start, range_end, is_compressed
   FROM timescaledb_information.chunks
  WHERE hypertable_name = 'telemetry' AND range_end > to_timestamp(%s)
  ORDER BY range_start
@@ -665,7 +665,14 @@ def compress_run_chunks(since):
             found = cursor.fetchall()
             if not found:
                 return {"error": "the run wrote no telemetry chunk"}
-            chunks = [name for name, _, _ in found]
+            chunks = [row[0] for row in found]
+            # compress_chunk(if_not_compressed) leaves a compressed chunk's newer rows as they are,
+            # so a chunk an earlier --compress run compressed would give a figure that is not this run's.
+            already = [row[0] for row in found if row[3]]
+            if already:
+                return {"error": f"{', '.join(already)} was already compressed before this run, so "
+                                 "compress_chunk() would leave the run's rows as they are. Measure in a "
+                                 "chunk the run starts: the next chunk interval, or a fresh stack."}
             cursor.execute("SELECT count(*)::bigint FROM telemetry WHERE time >= %s AND time < %s",
                            (found[0][1], found[-1][2]))
             (rows,) = cursor.fetchone()

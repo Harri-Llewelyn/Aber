@@ -555,6 +555,37 @@ class CompressionReportTest(unittest.TestCase):
     def test_no_compress_flag_adds_nothing(self):
         self.assertEqual(load_generator.compression_lines(None, metrics=10), [])
 
+    def test_a_chunk_already_compressed_is_not_measured(self):
+        executed = []
+
+        class Cursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def execute(self, sql, params=None):
+                executed.append(sql)
+
+            def fetchall(self):
+                return [("_timescaledb_internal._hyper_1_12_chunk", 0, 1, True)]
+
+        class Connection:
+            autocommit = False
+
+            def cursor(self):
+                return Cursor()
+
+            def close(self):
+                pass
+
+        from unittest import mock
+        with mock.patch.object(load_generator, "_historian", return_value=Connection()):
+            result = load_generator.compress_run_chunks(0)
+        self.assertIn("already compressed before this run", result["error"])
+        self.assertFalse(any("compress_chunk(" in sql for sql in executed))
+
 
 class UndeliveredTest(unittest.TestCase):
     """
