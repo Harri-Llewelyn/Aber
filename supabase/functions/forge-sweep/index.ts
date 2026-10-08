@@ -1,4 +1,5 @@
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
+import { serverError } from "../_shared/failure.ts";
 
 /**
  * The forge, reconciled on a timer. `forge-membership` places and removes people as they pass the
@@ -561,9 +562,19 @@ async function sweepPlatform(cfg: ForgeConfig, summary: Summary): Promise<boolea
 }
 
 /** The lease RPC failed, so whether another pass is running is unknown and none is started. */
-function leaseUnreadable(details: string): Response {
-  console.error(`forge-sweep: could not read the sweep lease: ${details}`);
-  return json({ error: "Could not read the sweep lease", details }, 502);
+function leaseUnreadable(req: Request, error: unknown): Response {
+  return serverError(req, "forge-sweep", error, { status: 502, error: "Could not read the sweep lease" });
+}
+
+/** A pass's counts, and its errors in full, for the log. */
+function tally(summary: Summary): string {
+  return `placed ${summary.placed.length}, removed ${summary.removed.length}, ` +
+    `hooked ${summary.hooked.length}, protected ${summary.protected.length}, ` +
+    `rekeyed ${summary.rekeyed.length}, revoked ${summary.revoked.length}, ` +
+    `archived ${summary.archived.length}, restored ${summary.restored.length}, ` +
+    `published ${summary.published.length}, recorded ${summary.recorded.length}, ` +
+    `warnings ${summary.warnings.length}, errors ${summary.errors.length}` +
+    (summary.errors.length ? `: ${summary.errors.join("; ")}` : "");
 }
 
 /** Never throws: the pass has already answered for itself, and a lease left held lapses. */
@@ -616,11 +627,11 @@ export default async function handler(req: Request): Promise<Response> {
     const renewed = LEASE_ID.test(named)
       ? await admin.rpc("renew_forge_sweep", { p_holder: named, p_seconds: LEASE_SECONDS })
       : { data: false, error: null };
-    if (renewed.error) return leaseUnreadable(renewed.error.message);
+    if (renewed.error) return leaseUnreadable(req, renewed.error);
     if (!renewed.data) return json({ error: "The lease named in x-sweep-lease is not held" }, 409);
   } else {
     const claimed = await admin.rpc("claim_forge_sweep", { p_seconds: LEASE_SECONDS });
-    if (claimed.error) return leaseUnreadable(claimed.error.message);
+    if (claimed.error) return leaseUnreadable(req, claimed.error);
     // 200, not an error status: pg_net records the status, and nothing failed. The pass holding
     // the lease, or the one its release queues, sees whatever this call was asked about.
     if (!claimed.data) {
@@ -639,9 +650,11 @@ export default async function handler(req: Request): Promise<Response> {
     const platform = await sweepPlatform(cfg, summary);
     await sweepRepositories(cfg, admin, platform, summary);
   } catch (err) {
-    const details = err instanceof Error ? err.message : String(err);
-    console.error(`forge-sweep: the sweep could not complete: ${details}`);
-    return json({ error: "The sweep could not complete", details, ...summary }, 502);
+    return serverError(req, "forge-sweep", err, {
+      status: 502,
+      error: "The sweep could not complete",
+      context: `the pass stopped after: ${tally(summary)}`,
+    });
   } finally {
     // Before the answer, so a caller that has it can claim at once.
     if (holder) await releaseLease(admin, holder);
@@ -654,17 +667,7 @@ export default async function handler(req: Request): Promise<Response> {
   const changed = summary.placed.length + summary.removed.length + summary.hooked.length + summary.protected.length +
     summary.rekeyed.length + summary.revoked.length + summary.archived.length + summary.restored.length +
     summary.published.length + summary.recorded.length;
-  if (changed || summary.errors.length) {
-    console.log(
-      `forge-sweep: placed ${summary.placed.length}, removed ${summary.removed.length}, ` +
-        `hooked ${summary.hooked.length}, protected ${summary.protected.length}, ` +
-        `rekeyed ${summary.rekeyed.length}, revoked ${summary.revoked.length}, ` +
-        `archived ${summary.archived.length}, restored ${summary.restored.length}, ` +
-        `published ${summary.published.length}, recorded ${summary.recorded.length}, ` +
-        `warnings ${summary.warnings.length}, errors ${summary.errors.length}` +
-        (summary.errors.length ? `: ${summary.errors.join("; ")}` : ""),
-    );
-  }
+  if (changed || summary.errors.length) console.log(`forge-sweep: ${tally(summary)}`);
   return json(summary, 200);
 }
 

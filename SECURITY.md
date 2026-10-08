@@ -56,21 +56,21 @@ referrers, which cosign 2 does not read: it answers "no signatures found".
 
 ```bash
 # The image signature, bound to this repository's release workflow at the tag it released from.
-cosign verify ghcr.io/harri-llewelyn/aber/ingestion:1.0.1 \
-  --certificate-identity https://github.com/Harri-Llewelyn/Aber/.github/workflows/release.yml@refs/tags/v1.0.1 \
+cosign verify ghcr.io/harri-llewelyn/aber/ingestion:1.0.2 \
+  --certificate-identity https://github.com/Harri-Llewelyn/Aber/.github/workflows/release.yml@refs/tags/v1.0.2 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 # The SBOM and the provenance, straight out of the registry.
-docker buildx imagetools inspect ghcr.io/harri-llewelyn/aber/ingestion:1.0.1 --format '{{json .SBOM.SPDX}}'
-docker buildx imagetools inspect ghcr.io/harri-llewelyn/aber/ingestion:1.0.1 --format '{{json .Provenance.SLSA}}'
+docker buildx imagetools inspect ghcr.io/harri-llewelyn/aber/ingestion:1.0.2 --format '{{json .SBOM.SPDX}}'
+docker buildx imagetools inspect ghcr.io/harri-llewelyn/aber/ingestion:1.0.2 --format '{{json .Provenance.SLSA}}'
 
 # What the SBOM lets you do that the image alone does not: ask today's vulnerability database
 # about a release built before the advisory existed, without pulling the image.
-docker buildx imagetools inspect ghcr.io/harri-llewelyn/aber/ingestion:1.0.1 --format '{{json .SBOM.SPDX}}' \
+docker buildx imagetools inspect ghcr.io/harri-llewelyn/aber/ingestion:1.0.2 --format '{{json .SBOM.SPDX}}' \
   > ingestion.spdx.json && trivy sbom ingestion.spdx.json
 ```
 
-The chart is verified the same way with `ghcr.io/harri-llewelyn/aber/aber:1.0.1`; it carries no
+The chart is verified the same way with `ghcr.io/harri-llewelyn/aber/aber:1.0.2`; it carries no
 SBOM or provenance of its own. The install-side commands, and the admission rule for a cluster that
 wants to refuse anything unsigned, are under **Install** in
 [`deploy/k8s/README.md`](deploy/k8s/README.md#verify-what-you-are-about-to-install).

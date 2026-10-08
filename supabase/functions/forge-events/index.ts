@@ -1,4 +1,5 @@
 import { serviceRoleClient } from "../_shared/serviceClient.ts";
+import { serverError } from "../_shared/failure.ts";
 
 /**
  * The forge says when `main` or `appliance` moved, and the gateway row remembers. Gitea delivers a
@@ -346,8 +347,10 @@ export default async function handler(req: Request): Promise<Response> {
     .select("id");
 
   if (error) {
-    console.error(`forge-events: could not record ${sha.slice(0, 12)} on ${sparkplugId}: ${error.message}`);
-    return json({ error: "Could not record the push", details: error.message }, 500);
+    return serverError(req, "forge-events", error, {
+      error: "Could not record the push",
+      context: `recording ${sha.slice(0, 12)} on ${sparkplugId}`,
+    });
   }
   if (!data || data.length === 0) {
     return json({ ignored: `no gateway has sparkplug id '${sparkplugId}'` }, 200);

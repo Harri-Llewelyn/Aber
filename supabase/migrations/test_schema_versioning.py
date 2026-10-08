@@ -261,6 +261,13 @@ class SchemaVersioningTestCase(unittest.TestCase):
         self.cur.execute("ROLLBACK TO SAVEPOINT expect_failure;")
         self.fail("expected the statement to raise, but it succeeded")
 
+    def assertNotFound(self, exc, message):
+        """raise_not_found() (0165): SQLSTATE PGRST, the JSON body PostgREST answers 404 with."""
+        self.assertEqual(exc.pgcode, "PGRST", str(exc))
+        body = json.loads(exc.diag.message_primary)
+        self.assertEqual((body["code"], body["message"]), ("P0002", message))
+        self.assertEqual(json.loads(exc.diag.message_detail), {"status": 404, "headers": {}})
+
 
 class TestImmutability(SchemaVersioningTestCase):
     """An active or archived version is frozen for app-facing roles."""
@@ -804,10 +811,11 @@ class TestPublish(SchemaVersioningTestCase):
 
     def test_publishing_an_unknown_schema_is_refused(self):
         self._act_as(ADMIN_USER_ID, "Administrator")
-        self.assertRaisesInStatement(
+        exc = self.assertRaisesInStatement(
             lambda: self._publish("00000000-0000-4000-8000-0000000000ff"),
             message_contains="not found",
         )
+        self.assertNotFound(exc, "schema 00000000-0000-4000-8000-0000000000ff not found")
 
 
 class TestTheRpcsDoNotGoAroundThePolicy(SchemaVersioningTestCase):
@@ -962,16 +970,14 @@ class TestDiscardingADraft(SchemaVersioningTestCase):
         self.assertEqual(err.pgcode, "42501")
 
     def test_a_missing_schema_is_refused_for_the_reason_it_is_wrong(self):
-        # P0002, not the SQL-standard 02000: `RAISE ... USING ERRCODE = 'no_data_found'` resolves
-        # the PL/pgSQL condition name, which carries its own SQLSTATE. The same code comes back
-        # from every other "row is not there" raise in this codebase, so a client that special-
-        # cases one of them handles all of them.
+        # Every "row is not there" raise goes through raise_not_found(), so the API answers 404
+        # with code P0002 for all of them, and a client that special-cases one handles them all.
         self._act_as(ADMIN_USER_ID, "Administrator")
         err = self.assertRaisesInStatement(
             lambda: self._discard("00000000-0000-4000-8000-0000000000ff"),
             message_contains="not found",
         )
-        self.assertEqual(err.pgcode, "P0002")
+        self.assertNotFound(err, "schema 00000000-0000-4000-8000-0000000000ff not found")
 
     def test_every_device_the_discard_detaches_is_counted_once(self):
         """

@@ -261,7 +261,7 @@ spec:
     - metadata:
         name: data
         labels:
-          {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 10 }}
+          {{- include "aber.claimTemplateLabels" (dict "ctx" . "component" $component) | nindent 10 }}
       spec:
         accessModes:
           - {{ .Values.supabaseDb.persistence.accessMode }}

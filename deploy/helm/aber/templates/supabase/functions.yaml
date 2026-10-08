@@ -180,6 +180,13 @@ spec:
                    503 to every notification and no alert reaches platform_alerts, while the rules
                    and the pod both report healthy. */}}
             {{- include "aber.secretEnv" (dict "name" "GRAFANA_ALERT_WEBHOOK_SECRET" "secretName" $secretName "key" "GRAFANA_ALERT_WEBHOOK_SECRET") | nindent 12 }}
+            {{- /* manage-people (the People tab). With a mail relay GoTrue sends an invitation, whose
+                   link lands on the form that sets a password (it is on GOTRUE_URI_ALLOW_LIST, in
+                   auth.yaml); without one the function mints a password the dashboard shows once. */}}
+            - name: AUTH_SMTP_CONFIGURED
+              value: {{ ternary "true" "false" (ne (.Values.supabaseAuth.smtp.host | default "") "") | quote }}
+            - name: AUTH_INVITE_REDIRECT_URL
+              value: {{ printf "%s/reset-password" (include "aber.frontendUrl" .) | quote }}
           # tcpSocket, NOT httpGet -- THIS RUNTIME EXPOSES NO HEALTH ROUTE. Verified against
           # supabase/edge-runtime:v1.77.0 by probing it directly:
           #

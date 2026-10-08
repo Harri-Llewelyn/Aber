@@ -21,6 +21,7 @@ import { corsHeaders } from "../_shared/cors.ts";
 // here would be outside that check. Cross-directory imports work (see _shared/roles.ts).
 import { isUuid } from "../approve-quarantine/isUuid.ts";
 import { gatewayKey } from "../_shared/gatewayKey.ts";
+import { serverError } from "../_shared/failure.ts";
 
 // Administrator alone: minting is an access-control act.
 const ALLOWED_ROLES = ["Administrator"];
@@ -184,8 +185,7 @@ export default async function handler(req: Request): Promise<Response> {
       revocation_scope: "postgrest",
     }, 200);
   } catch (err) {
-    console.error(`mint-service-token: ${err instanceof Error ? err.message : String(err)}`);
-    return jsonResponse({ error: "Internal server error" }, 500);
+    return serverError(req, "mint-service-token", err);
   }
 }
 

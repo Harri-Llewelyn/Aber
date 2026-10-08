@@ -63,9 +63,9 @@ COMMENT ON FUNCTION public.keep_gateway_credential(uuid, text) IS
   'gateway, replacing any earlier one, so show_gateway_credential() can show it again. Administrator '
   'or Shopfloor_Manager, the roles that may issue it.';
 
--- Administrator only. NO_DATA_FOUND when no copy is kept: a credential issued before 0164, or one
--- whose copy could not be written. PostgREST answers it 500, as it does every no_data_found here; the
--- dashboard shows the message.
+-- Administrator only. Not found (404 through PostgREST) when no copy is kept: a credential issued
+-- before 0164, or one whose copy could not be written; the dashboard shows the message.
+-- raise_not_found() is declared in 0165; plpgsql looks it up when the function runs.
 CREATE OR REPLACE FUNCTION public.show_gateway_credential(p_gateway_id uuid)
 RETURNS TABLE(mqtt_username text, password text, issued_at timestamptz)
 LANGUAGE plpgsql
@@ -93,9 +93,9 @@ BEGIN
    WHERE s.name = 'gateway_broker_password:' || p_gateway_id::text;
 
   IF v_password IS NULL THEN
-    RAISE EXCEPTION 'no copy of gateway %''s credential is kept; issue a new one to be able to show it again',
-      v_gateway.name
-      USING ERRCODE = 'no_data_found';
+    PERFORM public.raise_not_found(format(
+      'no copy of gateway %s''s credential is kept; issue a new one to be able to show it again',
+      v_gateway.name));
   END IF;
 
   -- The password itself is never in the row: who looked, at which gateway, and when.
@@ -122,7 +122,7 @@ GRANT EXECUTE ON FUNCTION public.show_gateway_credential(uuid) TO authenticated;
 
 COMMENT ON FUNCTION public.show_gateway_credential(uuid) IS
   'Administrator only: the kept copy of a Host or Simulated gateway''s broker credential, recording a '
-  'CREDENTIAL_SHOWN row in the Audit Trail each time. NO_DATA_FOUND when no copy is kept.';
+  'CREDENTIAL_SHOWN row in the Audit Trail each time. Not found (404) when no copy is kept.';
 
 -- The copy goes with the broker account: on archive (revoke_credential_on_decommission disables it)
 -- and on delete.

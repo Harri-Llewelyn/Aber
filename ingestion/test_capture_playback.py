@@ -211,6 +211,17 @@ class PayloadRoundTripTests(unittest.TestCase):
         self.assertEqual((b.int_value, b.datatype), (4294967291, 2))
         self.assertEqual((c.long_value, c.datatype), (2 ** 64 - 7, 4))
 
+    def test_a_metric_the_daemon_refuses_is_dropped_not_coerced(self):
+        # The file reads as the daemon reads JSON, in either encoding: the string "false" is not
+        # true, and a value too wide for its field costs that metric, not the message.
+        restored = capture.dict_to_payload({"metrics": [
+            {"name": "Flag", "boolean_value": "false"},
+            {"name": "Too_Wide", "int_value": 2 ** 32},
+            {"name": "Bare", "value": 2.5},
+        ]})
+        self.assertEqual([(m.name, m.WhichOneof("value")) for m in restored.metrics],
+                         [("Bare", "double_value")])
+
 
 class IdentityRewriteTests(unittest.TestCase):
 

@@ -589,9 +589,9 @@ export const SUITES = {
   'supabase/migrations/test_metric_catalog_seed.py': {
     lanes: ['db'],
     why:
-      "The vocabulary seed's PROVENANCE. A metric seeded with a missing or wrong semantic id " +
-      'breaks nothing at runtime -- it asserts an interoperability claim that is simply untrue, ' +
-      'which no other check would notice.',
+      "The example metrics' PROVENANCE, and that db-init replaying them changes nothing. A metric " +
+      'registered with a missing or wrong semantic id breaks nothing at runtime -- it asserts an ' +
+      'interoperability claim that is simply untrue, which no other check would notice.',
   },
   'supabase/migrations/test_anon_privilege_baseline.py': {
     lanes: ['db'],
@@ -613,6 +613,19 @@ export const SUITES = {
     why:
       'Who may keep and show a Host gateway\'s credential, that each showing is recorded without ' +
       'the password, and that the copy goes when the broker account does.',
+  },
+  'supabase/migrations/test_not_found_is_a_404.py': {
+    lanes: ['db'],
+    why:
+      'raise_not_found() (0165) raises the shape PostgREST answers 404 with, and no API role may ' +
+      'call it. A body PostgREST cannot parse would answer 500, the fault 0165 exists to remove.',
+  },
+  'supabase/migrations/test_people_management.py': {
+    lanes: ['db'],
+    why:
+      'Who may add people, set their roles and remove their access (0166): Administrator only, ' +
+      'never a machine identity, never your own, never the last Administrator who can sign in, ' +
+      'one role row per person, and every act attributed in the security lane.',
   },
   'supabase/migrations/test_credential_revocation.py': {
     lanes: ['db'],

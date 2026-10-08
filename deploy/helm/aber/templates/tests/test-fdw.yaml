@@ -40,6 +40,11 @@ spec:
   imagePullSecrets:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  {{- /* A new pod's first connection can be refused until the NetworkPolicy controller admits
+       it (k3s refused test-fdw's in the second it started), so wait as the hook Jobs do. */}}
+  initContainers:
+    {{- include "aber.waitForPostgres" (dict "ctx" . "name" "wait-for-supabase-db" "host" (include "aber.supabaseDb.host" .) "port" (include "aber.supabaseDb.port" .) "user" "postgres" "db" "postgres" "passwordKey" "POSTGRES_PASSWORD") | nindent 4 }}
+    {{- include "aber.waitForPostgres" (dict "ctx" . "name" "wait-for-timescaledb" "host" (include "aber.timescale.host" .) "port" (include "aber.timescale.port" .) "user" .Values.timescaledb.username "db" .Values.timescaledb.database "passwordKey" "DB_PASSWORD") | nindent 4 }}
   containers:
     - name: test-fdw
       image: "{{ .Values.supabaseDb.image.repository }}:{{ .Values.supabaseDb.image.tag }}"

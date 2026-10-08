@@ -16,6 +16,7 @@ foreign-data-wrapper view.
 | [`functions/`](functions) | Deno edge functions and the worker router |
 | [`envoy.yaml`](envoy.yaml) | API gateway routes, CORS, and the `apikey` check. **A template** |
 | [`seed.sql`](seed.sql) | Demo user accounts |
+| [`example-metrics.sql`](example-metrics.sql) | Example metric catalog, loaded only on request |
 
 ---
 
@@ -29,7 +30,7 @@ files that grew on top of *that* went back into the same two with a tail of one;
 | File | Contents |
 | :--- | :--- |
 | `0001_baseline_schema.sql` | Pure DDL. Tables, views, functions, triggers, policies, grants, the FDW, the Realtime publication |
-| `0002_seed_data.sql` | Pure DML. RBAC, vocabularies, metric catalogue, settings, secrets, cron, the Playback gateway, the Directory's image map |
+| `0002_seed_data.sql` | Pure DML. RBAC, vocabularies, metric groups, settings, secrets, cron, the Playback gateway, the Directory's image map |
 
 ### The squash before 1.0 has no tail
 
@@ -135,10 +136,11 @@ failing run rather than by inspection:
 ### Seeding is audited now
 
 The baseline creates every trigger before `0002` runs, so a fresh install records an `audit_trail`
-row with `actor_source = 'migration'` for each setting, metric and gateway the seed inserts, and
-for the seed's own updates to them. The chains before each squash recorded fewer, because their
-ordering seeded tables before the triggers on them existed: before 1.0, the metric catalogue's
-trigger arrived in `0143`, after `0002` had seeded it.
+row with `actor_source = 'migration'` for each setting and gateway the seed inserts, and for the
+seed's own updates to them. The example metrics, where they are loaded, are recorded the same way.
+The chains before each squash recorded fewer, because their ordering seeded tables before the
+triggers on them existed: before 1.0, the metric catalogue's trigger arrived in `0143`, after `0002`
+had seeded it.
 
 They are written **once, on first boot** — every statement is `ON CONFLICT`, so a replay matches no
 rows and adds nothing, and the count holds across restarts. Treat them as a receipt that the seed
@@ -262,6 +264,23 @@ down on the second. Every statement uses `CREATE TABLE IF NOT EXISTS`, `CREATE O
 
 The glob does **not** recurse, so `archive/` is never applied: the db-init image copies only the
 top-level `*.sql`, and `npm run test:db` applies only those.
+
+### Saying "not found" (`0165`)
+
+To say that a row does not exist, call `raise_not_found()` with the message:
+
+```sql
+PERFORM public.raise_not_found(format('proposal %s not found', p_proposal_id));
+```
+
+Do not raise `no_data_found` (SQLSTATE `P0002`). PostgREST answers the whole `P0` class with 500,
+so a mistyped id would look like a server fault. `raise_not_found()` raises PostgREST's custom
+error instead. The API answers **404**, and the body still carries code `P0002` and the message, so
+a supabase-js caller still sees `error.code === 'P0002'`.
+
+A caller that is not PostgREST, such as psql, a db-lane suite or psycopg, sees SQLSTATE `PGRST`.
+The error's message is that JSON body, and its detail is `{"status": 404, "headers": {}}`. No API role may
+execute `raise_not_found()`, so only a `SECURITY DEFINER` function owned by `postgres` can call it.
 
 ### Three defects the squash verification caught
 
@@ -391,16 +410,33 @@ already used. `gateways.last_heartbeat` is deliberately **not** deduplicated for
 `public.gateway_status` derives staleness from it, so a suppressed heartbeat would report a live
 gateway as `STALE`.
 
-### Metric catalog standards seed (archived migration 0018)
+### Example metrics
 
-`metric_catalog` is **curated, not accreted**: `ingestion.py` contains no reference to it at all,
-and the only insert path is the operator-facing form behind `POST /api/v1/metric-catalog`. Good
-property — but it means a mixed-standard fleet is registered by hand, one form at a time, and
+**A fresh install's catalog is empty.** `metric_catalog` records what a site's devices publish, so
+its rows are the operator's: `ingestion.py` contains no reference to it at all, and the only insert
+path is the Metrics page's form behind `POST /api/v1/metric-catalog`. `0002` seeds the vocabularies
+and the metric groups, so every standard semantic id is there when someone registers a metric.
 `name` is UNIQUE and IMMUTABLE, so the first row to claim a name owns it permanently along with
 whichever `standard` and `semantic_id` it was created with. Both flow into the AAS export, and the
 `semantic_id` into i3X as the `sourceTypeId` and namespace of the metric's type.
 
-`0018` front-runs that for the demonstrator's metric set. Three properties worth knowing:
+**The example set is opt-in.** [`example-metrics.sql`](example-metrics.sql) registers 44 metrics
+from the four vocabularies. db-init applies it after the migrations, and after `seed.sql`, only with
+`dbInit.exampleMetrics` on, which `values-dev.yaml` sets: `validate.py` and the AAS conformance
+fixture read the catalog rows of the names they publish, and the tutorial's laptop route finds
+`Systems/TEMPERATURE` registered. db-init runs it as `postgres` with no JWT, so
+`log_audit_trail_event()` records each insert as `migration`, as it does `0002`'s seed.
+
+**Up to 1.0.1, `0002` seeded 47 metrics on every install.** Fifteen were a snapshot of the
+development database taken at the squash, among them two local test entries (`safety_interlock`,
+`max_temp_threshold`) and a deprecated `OEE/PERFORMANCE` that replayed its rename to
+`OEE/EFFECTIVENESS`. The other 32 were the standards seed of archived migration `0018`. The example
+set keeps the standard metrics and drops the rest. No migration deletes the old rows from an install
+that has them: devices may already publish under those names, and the UNS bridge reads `units` from
+the catalog. An operator who does not want one deprecates it. `scripts/check-docs-drift.mjs`
+(check 12) fails if a migration inserts into `metric_catalog` again.
+
+Four properties worth knowing:
 
 - **Semantic ids are `SELECT`ed from the vocabulary tables, never typed.** Every row joins the
   vocabulary for its standard, so a metric whose concept is not in the vocabulary is **not
@@ -408,21 +444,24 @@ whichever `standard` and `semantic_id` it was created with. Both flow into the A
   would create a second, unverified copy of an identity `docs/vocabularies.md` confirmed against
   machine-readable sources, and a typo would assert an interoperability that does not exist while
   looking exactly like one that does.
-- **The taxonomy extends what `0002` seeded; it does not replace it.** One top-level segment per
-  standard, so a name cannot collide across standards by construction:
+- **A replay changes nothing.** Every insert is `ON CONFLICT (name) DO NOTHING`, so a row an
+  operator has edited or deprecated since is never written over, and a second boot writes no audit
+  row. A row deleted by hand does come back on the next boot while the value is on.
+  `test_metric_catalog_seed.py` applies the file twice inside a transaction and holds it to both.
+- **One top-level segment per standard**, so a name cannot collide across standards by
+  construction:
 
   | Segment | Standard |
   | :--- | :--- |
   | `Axes/` `Controller/` `Systems/` | MTConnect 2.x |
-  | `MotionDevice/` `Machine/` | OPC 40010 Robotics |
+  | `MotionDevice/` `Machine/` | OPC UA (OPC 40010 Robotics, OPC 40001 Machinery) |
   | `Energy/` | OPC 40001-4 Machinery Energy |
   | `BMS/` | ASHRAE 223P |
   | `OEE/` | ISO 22400 |
 
-  The plan behind this migration proposed `KPI/` and `Robotics/`. Both were rejected on contact
-  with the existing catalog, which already uses `OEE/` and `MotionDevice/` — a parallel prefix
-  would mean two permanent names for one concept, which is the collision the naming plan exists to
-  prevent, arriving from the direction of the plan itself.
+  The plan behind `0018` proposed `KPI/` and `Robotics/`. Both were rejected on contact with the
+  catalog of the time, which already used `OEE/` and `MotionDevice/` — a parallel prefix would mean
+  two permanent names for one concept, which is the collision the naming plan exists to prevent.
 - **Transliteration happens at authoring time, because it cannot happen later.** `0007` forbids
   dots and hyphens, so the ASHRAE concept `Constituent-CO2` is registered as
   `BMS/CO2_CONCENTRATION`. The join still uses the vocabulary's own unmodified key.
@@ -432,10 +471,11 @@ the Add Metric form once built the id from the whole name (`…/mtconnect/v2.0/A
 names one data item: `Axes/W/POSITION` could never share a concept with `Axes/X/POSITION`, and an
 AAS consumer grouping Properties by `semanticId` split them. Every MTConnect row now carries the
 vocabulary's concept id (`…/mtconnect/v2.0/DataItemType/ANGLE`), with the component path, instance
-and subType left to the name and `sub_type`. `0002` seeds that form, `mtconnectSemanticId()` derives
-it, and archived migration `0142` repointed a database seeded earlier. It was an UPDATE because
-`semantic_id` is correctable in place. Only a row still holding the name-built id was touched, and
-only when its type was in `mtconnect_vocabulary`; a NOTICE counted any left behind.
+and subType left to the name and `sub_type`. The example metrics carry that form,
+`mtconnectSemanticId()` derives it, and archived migration `0142` repointed a database seeded
+earlier. It was an UPDATE because `semantic_id` is correctable in place. Only a row still holding
+the name-built id was touched, and only when its type was in `mtconnect_vocabulary`; a NOTICE
+counted any left behind.
 `test_metric_catalog_seed.py` holds every MTConnect row to its type's id.
 
 ### A semantic id is an IRI or an IRDI (archived migration 0145)
@@ -465,8 +505,8 @@ Edit sends the pair to `metric_catalog` and nothing else, gated like Deprecate a
 `max_temp_threshold` with `https://aber.local/semantics/local/<name>`. Nothing outside the
 installation resolves either IRI, so neither named a concept, and on every fresh stack the schema
 builder marked both as mapped, the AAS export left them out of `unmapped_semantic_ids`, and the
-Metrics page's "—" cell for an unmapped metric never appeared (#547). `0002` seeds both with no
-id and no type, and `test_metric_catalog_seed.py` holds it there.
+Metrics page's "—" cell for an unmapped metric never appeared (#547). `0002` then seeded both with
+no id and no type; it seeds neither now, and no example metric is a local extension.
 
 ### Metric name format (archived migration 0007)
 
@@ -498,7 +538,7 @@ ALTER TABLE public.metric_catalog VALIDATE CONSTRAINT metric_catalog_name_format
 mirrors this expression so the operator is told at the form rather than by a `400` — the same
 keep-in-step obligation `deriveMetricGroup()` and `utils/sparkplugId.js` carry.
 
-Every seeded catalog name conforms, so the constraint validates cleanly on a fresh database.
+A fresh database has no catalog rows to validate, and every example metric's name conforms.
 
 ### The Sparkplug group is part of the address (archived migration 0008)
 
@@ -956,7 +996,8 @@ Every table has `ENABLE ROW LEVEL SECURITY`. The pattern is uniform and fail-clo
 | `audit_trail` (`security` lane) | `Administrator`, `Auditor` | **nobody** — see below (`0070`) |
 | `*_vocabulary` | `authenticated` | **no write policy at all** |
 | `roles`, `permissions`, `role_permissions` | `authenticated` | none |
-| `user_roles` | own row, or `Administrator` / `Shopfloor_Manager` | none |
+| `user_roles` | own row, or `Administrator` / `Shopfloor_Manager` | none — `set_person_role()` and the People functions (`0166`) |
+| `access_removals` | nobody — `list_people()` reads it for an `Administrator` | none — `remove_person_access()` and `restore_person_access()` (`0166`) |
 | `principal_permissions` | own row, or `Administrator` | none — `create_machine_principal()` is the only write path |
 | `machine_principals` | `Administrator`, `Auditor` | none — `create_machine_principal()` writes it with the identity (`0125`); `describe_machine_principal()` (`0126`) is the only path after |
 | `webhook_endpoints` | `Administrator` | **no write policy** |
@@ -1196,6 +1237,43 @@ revocation takes effect on the next query, not on the next token refresh.
 it — but **nothing authorises on that claim**. The edge functions were corrected during pre-beta
 remediation to read the table too, because falling back to the claim when no row was found inverted
 the meaning of a revocation.
+
+### People are added, given roles and removed from the dashboard (0166)
+
+The People tab on Access Control is Administrator only, and has two halves.
+
+- **The database half.** `list_people()` lists every `auth.users` account that is not a machine
+  principal, with its role and status (`active`, `invited` until the first sign-in, `removed`).
+  `set_person_role()` leaves exactly one `user_roles` row, updating the one there is, inserting
+  when there is none, and folding extras into one. `log_role_assignment()` records each change, an
+  update as well as an insert.
+- **The GoTrue half** is [`manage-people`](functions/manage-people), because GoTrue's admin API takes
+  the service-role key. It adds a person by invitation when `supabaseAuth.smtp.host` is set, and
+  otherwise with a 24-character password it mints, returns once, and never stores or logs. It bans
+  an account to remove access and lifts the ban to restore it. Each act calls a function in the
+  caller's session: `record_person_added()` after GoTrue created the account (if it refuses, the
+  account is deleted again), and `remove_person_access()` and `restore_person_access()` BEFORE
+  GoTrue changes anything, so their rules are decided first.
+- **Removing access is immediate for every role check.** `remove_person_access()` deletes the
+  person's `user_roles` row, which `has_role()`, `has_authority()`, the edge functions and the token
+  hook all read, and keeps the role in `access_removals` so restoring gives it back. The ban then
+  refuses sign-in and token refresh. A token issued before the ban stays valid until it expires
+  (`supabaseAuth.jwtExpiry`, 3600 s by default), with no role: it can read what any signed-in
+  account can, such as the registry tables, and nothing a role gates. `auth_pre_request()` does not
+  refuse it; that hook's subject denylist is for machine principals.
+- **Two rules, under one lock.** Every act takes `SHARE ROW EXCLUSIVE` on `user_roles`, then
+  refuses the caller's own role or access, and anything that would leave no Administrator who can
+  sign in (a banned Administrator does not count). The lock is what stops two Administrators
+  demoting each other at once.
+- **The record.** `PERSON_ADDED`, `ACCESS_REMOVED` and `ACCESS_RESTORED` are written on
+  `entity_type = 'user_roles'`, so they land in the person's lane in the security lane, beside the
+  `ROLE_GRANTED` and `ROLE_REVOKED` rows the trigger writes in the same transaction. None holds a
+  password.
+- **Ban, never delete.** `audit_trail.changed_by` references `auth.users`, and the trail names a
+  person through their account, so removing access keeps the account.
+
+`test_people_management.py` holds the database half; `manage-people/people_test.ts` holds the
+function against a stubbed GoTrue and PostgREST.
 
 ---
 
@@ -1725,10 +1803,9 @@ which the authority rule files as security, but `metric_catalog_select_authentic
 it is. `audit_domain_for()` is redeclared with `metric_catalog` in the asset arm, the same
 signature and return type; the baseline holds that form.
 
-A replay writes nothing: `0002`'s catalog inserts are `ON CONFLICT DO NOTHING`, and its unguarded
-`permitted_values` UPDATE writes the value the row holds, which the function's no-op rule drops. A
-restored seed row stays restored for the first of those reasons: no file re-asserts `deprecated`
-(`OEE/PERFORMANCE` is seeded deprecated and can be restored). The metric's lane is
+A replay writes nothing: no migration writes the catalog, and the example metrics' inserts are
+`ON CONFLICT DO NOTHING`. A deprecated or restored row stays as it was left for the same reason: no
+file re-asserts `deprecated`. The metric's lane is
 labelled from `name` in the snapshot and searchable by it; `audit_trail_page()` needs no change,
 and does not call a catalog row deleted (the catalog has no DELETE policy).
 `test_audit_trail_guard.py`, `test_audit_domain.py` and `test_role_permission_split.py` cover it.
@@ -2143,7 +2220,7 @@ a person, and the playback worker's is delivered to it.
 - **How long it lives.** Issuing a new credential replaces the copy. Archiving or deleting the
   gateway deletes it (`trg_gateways_forget_credential`), at the moment its broker account is disabled.
 - **No copy.** A credential issued before `0164`, or one whose copy could not be written, answers
-  `NO_DATA_FOUND`. Issuing a new one is the way back.
+  404 (not found). Issuing a new one is the way back.
 - **Why it is allowed.** Keeping these passwords recoverably is an accepted risk, in
   [`docs/security-model.md`](../docs/security-model.md#host-gateway-passwords-are-kept-and-administrators-can-see-them).
 
@@ -2417,8 +2494,8 @@ AWS, R2, B2 and MinIO releases from 2022 onward all do. An endpoint that rejects
 every upload with the chunk still in the hypertable — loudly, and losing nothing.
 
 **Under `networkPolicy.enabled` this needs an egress rule.** The chart cannot express a peer
-outside the cluster, so add the endpoint to `networkPolicy.extraEgress`. Without it every export
-fails at connect time, on a schedule, at 03:15.
+outside the cluster, so list the endpoint in `coldArchive.offsiteEgress`, which applies to the archive
+pod alone. Without it every export fails at connect time, on a schedule, at 03:15.
 
 #### The object key, and why each segment is there
 
@@ -3124,6 +3201,7 @@ refuses a missing or wrong token or secret.
 | [`gateway-credential`](functions/gateway-credential) | `Administrator`, `Shopfloor_Manager` | Mints a host-run gateway's broker credential and shows it once |
 | [`gateway-bundle`](functions/gateway-bundle) | `Administrator`, `Shopfloor_Manager`; `GET`: any signed-in user | The remote-gateway ZIP bundle or the one-liner, minting an enrolment token; `GET` is the readiness probe |
 | [`mint-service-token`](functions/mint-service-token) | `Administrator` | Signs a machine principal's token and shows it once |
+| [`manage-people`](functions/manage-people) | `Administrator` | Adds a person, removes their access or restores it, for the People tab (`0166`) |
 | [`enroll-gateway`](functions/enroll-gateway) | **no Supabase role at all** | An appliance redeeming its single-use enrolment token |
 | [`gateway-install`](functions/gateway-install) | **no Supabase role at all** | What the one-liner fetches, authorised by the enrolment token in `X-Enrolment-Token` |
 | [`revoke-gateway-credential`](functions/revoke-gateway-credential) | **no Supabase role at all** | Called by the database through pg_net; authorised by `GATEWAY_REVOKE_SECRET` in `x-revoke-secret` |
@@ -4320,7 +4398,7 @@ released version's playbook is immutable. It is a warning and not an error becau
 and no retry clears it: the sweep did what it was asked and declined only the one thing a released
 tag forbids, so `errors` stays what an operator watches for a forge that could not be reached or a
 key that could not be re-registered. Bump the version, or on a development forge delete the
-tag (`DELETE /repos/platform/gateway-platform/tags/v<appVersion>`, `v1.0.0` today, as the machine
+tag (`DELETE /repos/platform/gateway-platform/tags/v<appVersion>` as the machine
 account) and let the next sweep recreate it.
 
 **What enrolment adds.** Before `main` is protected it seeds `platform.yml` beside the incident
@@ -5607,9 +5685,10 @@ Every vocabulary must satisfy all nine, and CI checks five of them:
 3. `metric_groups` rows registered in the migration, carrying `standard` provenance.
 4. `NOTIFY pgrst, 'reload schema'`.
 5. A migration is not mirrored into the chart: it ships in the db-init image. If the change also
-   touches a file the chart mirrors (`seed.sql`, `storage-policies.sql`, `envoy.yaml`, `grafana/`,
-   `timescaledb/`), `node scripts/sync-helm-chart-files.mjs` run and committed (CI checks it with
-   `--check`).
+   touches a file the chart mirrors (`seed.sql`, `example-metrics.sql`, `storage-policies.sql`,
+   `envoy.yaml`, `grafana/`, `timescaledb/`), `node scripts/sync-helm-chart-files.mjs` run and
+   committed (CI checks it with `--check`). A renamed or re-keyed concept also needs its row in
+   `example-metrics.sql` checked: the join inserts nothing for a concept it cannot find.
 6. Migration header carries a ⚠ VERIFY block naming what was and was not confirmed against the
    source document. **Seeds are transcriptions**; generate them from the machine-readable source
    rather than typing them, and say which source.
@@ -5630,6 +5709,9 @@ db-init applies it only with `supabaseAuth.demoAccounts` on, which `values-dev.y
 the dev loop, CI and `validate.py` have their personas and a site has none. Where it runs, it runs
 after the migrations on every install and upgrade, against a persistent volume, so every statement
 in it has to be repeatable on a database that already holds these rows.
+
+[`example-metrics.sql`](example-metrics.sql) is the other opt-in file, applied after it under the
+same rules with `dbInit.exampleMetrics` on: see [*Example metrics*](#example-metrics).
 
 ### A site's first administrator (0163)
 

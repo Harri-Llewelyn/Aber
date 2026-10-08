@@ -1,10 +1,10 @@
 # Release: publish the eleven images this repository builds, then the Helm chart, to GHCR over OCI.
 # Images first, chart last, and the chart job `needs` them: the chart names the images at
 # `Chart.AppVersion`, and a chart published before its images installs successfully into eleven
-# ImagePullBackOffs. The `v*` tag is the single source of version: it stamps the image tags, the
-# chart `version` and `appVersion` in this run, and Chart.yaml's committed values serve only the
-# untagged path. No `latest` tag is pushed, so a chart release can only run the images built beside
-# it. linux/amd64 only: an arm64 cluster should build locally with the commands in
+# ImagePullBackOffs. The `v*` tag stamps the image tags, the chart `version` and `appVersion` in
+# this run, and the commit it points at must already carry that version in Chart.yaml (checked
+# before anything is built). No `latest` tag is pushed, so a chart release can only run the images
+# built beside it. linux/amd64 only: an arm64 cluster should build locally with the commands in
 # deploy/k8s/README.md. Credentials are the built-in GITHUB_TOKEN with `packages: write`. GHCR
 # links each package to this repository, and a package takes the repository's visibility.
 #
@@ -29,7 +29,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish, without the leading v (e.g. 1.0.2)'
+        description: 'Version to publish, without the leading v (e.g. 1.0.3)'
         required: true
         type: string
       dry_run:
@@ -101,6 +101,28 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "push=$PUSH"       >> "$GITHUB_OUTPUT"
           echo "Releasing $VERSION (push=$PUSH)"
+
+      # A checkout of the tag must be the release it names: docs/install.md's commands, the chart a
+      # checkout renders, and the install `npm run setup` prints all read Chart.yaml's version. The
+      # artefacts would carry the tag's version regardless, so a dry run only warns.
+      - name: Verify Chart.yaml Names This Version
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+          PUSH: ${{ steps.resolve.outputs.push }}
+        run: |
+          set -eu
+          chart=$(sed -n 's/^version:[[:space:]]*//p' deploy/helm/aber/Chart.yaml | tr -d "\"' ")
+          app=$(sed -n 's/^appVersion:[[:space:]]*//p' deploy/helm/aber/Chart.yaml | tr -d "\"' ")
+          if [ "$chart" = "$VERSION" ] && [ "$app" = "$VERSION" ]; then
+            echo "Chart.yaml names $VERSION"
+            exit 0
+          fi
+          msg="Chart.yaml has version '$chart' and appVersion '$app', and this release is $VERSION. Tag a commit that sets both to $VERSION (deploy/k8s/README.md, Publishing a release)."
+          if [ "$PUSH" = "true" ]; then
+            echo "::error::$msg"
+            exit 1
+          fi
+          echo "::warning::$msg"
 
       - name: Set up Node
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0

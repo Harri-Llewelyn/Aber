@@ -897,6 +897,150 @@ paths:
                     created_at:   { type: string, format: date-time }
         '403': { description: Role is neither Administrator nor Auditor. }
 
+  /rest/v1/rpc/list_people:
+    post:
+      tags: [Auth]
+      summary: List every person, with their role and whether they can sign in
+      description: |
+        For the People tab on Access Control (`0166`). One row per `auth.users` account that is not
+        a machine principal. Administrator only.
+
+        `status` is `removed` while the person's access is removed (here or by a GoTrue ban),
+        `invited` until they first sign in, and `active` after. `sign_in_blocked` says whether
+        GoTrue bans the account now; `removed` with `false` means the ban still has to be made.
+      responses:
+        '200':
+          description: Every person, by email.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    user_id:         { type: string, format: uuid }
+                    email:           { type: string, nullable: true }
+                    role:            { type: string, nullable: true, enum: [Administrator, Shopfloor_Manager, Operator, Auditor] }
+                    status:          { type: string, enum: [active, invited, removed] }
+                    sign_in_blocked: { type: boolean }
+                    role_on_restore: { type: string, nullable: true, description: The role restoring access gives back. }
+                    invited_at:      { type: string, format: date-time, nullable: true }
+                    last_sign_in_at: { type: string, format: date-time, nullable: true }
+                    created_at:      { type: string, format: date-time, nullable: true }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /rest/v1/rpc/set_person_role:
+    post:
+      tags: [Auth]
+      summary: Give a person one of the four roles
+      description: |
+        Leaves the person exactly one `user_roles` row. `log_role_assignment()` records the change
+        as `ROLE_GRANTED` in the Audit Trail's security lane, naming the caller. Administrator only.
+
+        Refused, with the reason in the message: your own role (403); a machine identity (400);
+        a person whose access is removed, until it is restored (400, `P0001`); and a change that
+        would leave no Administrator who can sign in (400, `P0001`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_user_id, p_role]
+              properties:
+                p_user_id: { type: string, format: uuid }
+                p_role:    { type: string, enum: [Administrator, Shopfloor_Manager, Operator, Auditor] }
+      responses:
+        '200':
+          description: Whether the role changed; `false` when the person already held it.
+          content:
+            application/json:
+              schema: { type: boolean }
+        '400': { description: 'Unknown role, a machine identity, a removed person, or the last Administrator.' }
+        '403': { description: 'Not an Administrator, or your own role.' }
+        '404': { description: 'No such person (`P0002`).' }
+
+  /rest/v1/rpc/record_person_added:
+    post:
+      tags: [Auth]
+      summary: Give a just-created account its role and record who added it
+      description: |
+        Called by `/functions/v1/manage-people` in the caller's session, after GoTrue created or
+        invited the account. Gives the role and writes a `PERSON_ADDED` row (email, role and
+        method, never a password). Refuses an account that has signed in or is more than an hour
+        old. Administrator only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_user_id, p_role, p_invited]
+              properties:
+                p_user_id: { type: string, format: uuid }
+                p_role:    { type: string, enum: [Administrator, Shopfloor_Manager, Operator, Auditor] }
+                p_invited: { type: boolean, description: True for an invitation, false for a password shown once. }
+      responses:
+        '204': { description: Recorded. }
+        '400': { description: 'Unknown role, a machine identity, or not a new account.' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 'No such account (`P0002`).' }
+
+  /rest/v1/rpc/remove_person_access:
+    post:
+      tags: [Auth]
+      summary: Remove a person's role, before their account is banned
+      description: |
+        Called by `/functions/v1/manage-people` in the caller's session, BEFORE it bans the account
+        in GoTrue. Deletes the person's `user_roles` row, so every role check refuses them at once,
+        keeps the role to give back, and writes `ACCESS_REMOVED`. Refuses your own access and the
+        last Administrator who can sign in. Administrator only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_user_id]
+              properties:
+                p_user_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Whether access was removed now; `false` when it already was.
+          content:
+            application/json:
+              schema: { type: boolean }
+        '400': { description: 'A machine identity, or the last Administrator who can sign in.' }
+        '403': { description: 'Not an Administrator, or your own access.' }
+        '404': { description: 'No such person (`P0002`).' }
+
+  /rest/v1/rpc/restore_person_access:
+    post:
+      tags: [Auth]
+      summary: Give back a removed person's role, before the ban is lifted
+      description: |
+        Called by `/functions/v1/manage-people` in the caller's session, BEFORE it lifts the GoTrue
+        ban. Gives back the role kept at removal and writes `ACCESS_RESTORED`. Refuses your own
+        access and a person whose access is not removed. Administrator only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_user_id]
+              properties:
+                p_user_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The role the person holds now, or null.
+          content:
+            application/json:
+              schema: { type: string, nullable: true }
+        '400': { description: 'A machine identity, or access that is not removed.' }
+        '403': { description: 'Not an Administrator, or your own access.' }
+        '404': { description: 'No such person (`P0002`).' }
+
   # ------------------------------------------------------------ Registry ----
   /rest/v1/asset_config:
     get:
@@ -999,8 +1143,9 @@ paths:
           content:
             application/json:
               schema: { type: object, description: 'The created draft row as JSON.' }
-        '400': { description: The parent already has an open draft, or does not exist. }
+        '400': { description: The parent already has an open draft. }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /rest/v1/rpc/publish_schema_version:
     post:
@@ -1030,6 +1175,7 @@ paths:
               schema: { type: object }
         '400': { description: The target is not a draft. }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /rest/v1/device_submodels:
     get:
@@ -1230,8 +1376,9 @@ paths:
         Eight KPI definitions. Reference data on the same terms as the MTConnect vocabulary.
 
         **ISO 22400-2 calls the second OEE factor *Effectiveness*, not Performance.**
-        `OEE/PERFORMANCE` is deprecated and superseded by `OEE/EFFECTIVENESS`; both carry the
-        same `semantic_id`, which is why the index on it is deliberately not unique.
+        A metric for it is named after the KPI, as the example `OEE/EFFECTIVENESS` is. The index
+        on `metric_catalog.semantic_id` is deliberately not unique: a deprecated metric and its
+        replacement carry the same id.
 
         `kpi_id` is the ISO **symbol**, not a clause number — none are asserted, because the
         standard is paywalled and they could not be checked.
@@ -1905,6 +2052,7 @@ paths:
               schema: { type: object }
         '400': { description: 'The patch violates a constraint on the target, or names a column that is not proposable.' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /rest/v1/rpc/reject_proposal:
     post:
@@ -1930,6 +2078,7 @@ paths:
         '200': { description: Rejected. }
         '400': { description: No reason given. }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /rest/v1/rpc/withdraw_proposal:
     post:
@@ -1952,6 +2101,7 @@ paths:
       responses:
         '200': { description: Withdrawn. }
         '403': { description: Not the proposer. }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /rest/v1/rpc/list_proposer_names:
     post:
@@ -2273,6 +2423,8 @@ paths:
         '400': { description: 'Missing or malformed `device_id`.' }
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Forbidden: insufficient privileges.' }
+        '404': { description: 'No device has that `device_id` or `merge_into_device_id`. The body is `{"error": "Device not found"}`.' }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /functions/v1/gateway-bundle:
     get:
@@ -2306,6 +2458,7 @@ paths:
                           nullable: true
                           description: Why an appliance could not use it, or null.
         '401': { description: Missing or invalid Authorization header. }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
     post:
       tags: [Edge Functions]
       summary: Download a Remote gateway's bootstrap bundle (ZIP)
@@ -2366,6 +2519,7 @@ paths:
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Forbidden: requires Administrator or Shopfloor_Manager.' }
         '404': { description: No such gateway. }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
         '503':
           description: >-
             `SUPABASE_PUBLIC_URL` is unset or names an in-stack address, or the bundle template is
@@ -2456,7 +2610,19 @@ paths:
         '400': { description: '`gateway_id` malformed, absent, or naming a Remote or archived gateway.' }
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Forbidden: requires Administrator or Shopfloor_Manager.' }
-        '500': { description: The credential service is not configured for this deployment. }
+        '500':
+          description: >-
+            The credential service is not configured for this deployment.
+            Otherwise an unexpected failure, as a `FunctionError`.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/FunctionError'
+                  - type: object
+                    description: The configuration error. `details`, when present, names the unset variable.
+                    properties: { error: { type: string }, details: { type: string } }
         '503':
           description: >-
             The broker credential service is unreachable or refused. Nothing was changed — no
@@ -2553,7 +2719,73 @@ paths:
             token is returned even though one was signed.
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Forbidden: requires Administrator.' }
-        '500': { description: '`JWT_SECRET` is not set, so this worker cannot sign.' }
+        '500':
+          description: >-
+            `JWT_SECRET` is not set, so this worker cannot sign.
+            Otherwise an unexpected failure, as a `FunctionError`.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/FunctionError'
+                  - type: object
+                    description: The configuration error. `details`, when present, names the unset variable.
+                    properties: { error: { type: string }, details: { type: string } }
+
+  /functions/v1/manage-people:
+    post:
+      tags: [Edge Functions]
+      summary: Add a person, remove their access, or restore it
+      description: |
+        The GoTrue half of the People tab (`0166`). A function because GoTrue's admin API takes the
+        service-role key, which is not in the database. Requires `Administrator`, checked here
+        before any admin call and again by the database function each act calls in the caller's
+        session, which also writes the audit row.
+
+        - **`add`**: with a mail relay (`supabaseAuth.smtp.host`), GoTrue sends an invitation whose
+          link lands on the form that sets a password. Without one, the account is created with a
+          24-character password minted here, returned once in `password`, and never stored or
+          logged. `record_person_added()` then gives the role; if it refuses, the account is
+          deleted again.
+        - **`remove`**: `remove_person_access()` first, so its rules are decided before GoTrue
+          changes anything, then a ban (`ban_duration` `876000h`). The account is never deleted.
+        - **`restore`**: `restore_person_access()`, then the ban is lifted.
+
+        Your own access is refused (403).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:  { type: string, enum: [add, remove, restore] }
+                email:   { type: string, format: email, description: '`add` only.' }
+                role:    { type: string, enum: [Administrator, Shopfloor_Manager, Operator, Auditor], description: '`add` only.' }
+                user_id: { type: string, format: uuid, description: '`remove` and `restore`.' }
+      responses:
+        '200':
+          description: 'Done. Sent with `Cache-Control: no-store`.'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id:  { type: string, format: uuid }
+                  email:    { type: string, description: '`add`.' }
+                  role:     { type: string, nullable: true, description: '`add`, and the role `restore` gave back.' }
+                  invited:  { type: boolean, description: '`add`: true when an invitation was sent.' }
+                  password: { type: string, description: '`add` without a mail relay only. Shown once; nothing keeps a copy.' }
+                  access:   { type: string, enum: [removed, active], description: '`remove` and `restore`.' }
+        '400': { description: 'Malformed request, an unknown role, or the database refused the person.' }
+        '401': { description: Missing or invalid Authorization header. }
+        '403': { description: 'Requires Administrator; or your own access.' }
+        '404': { description: No such person. }
+        '409': { description: 'The address is already in use, the last Administrator, or access in the other state.' }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
+        '502': { description: 'The database act was done but GoTrue did not ban or lift the ban; repeat it.' }
 
   /functions/v1/revoke-gateway-credential:
     post:
@@ -2611,6 +2843,7 @@ paths:
             The `x-revoke-secret` header is missing or wrong. No detail about which — a response
             distinguishing the two is a hint.
         '405': { description: Method not allowed. }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
         '502': { description: The credential service refused the revocation. }
         '503':
           description: >-
@@ -2679,7 +2912,19 @@ paths:
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Forbidden: requires Administrator.' }
         '405': { description: Method not allowed. }
-        '500': { description: The credential service is not configured on this deployment. }
+        '500':
+          description: >-
+            The credential service is not configured on this deployment.
+            Otherwise an unexpected failure, as a `FunctionError`.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/FunctionError'
+                  - type: object
+                    description: The configuration error. `details`, when present, names the unset variable.
+                    properties: { error: { type: string }, details: { type: string } }
         '503': { description: The credential service is unreachable, or could not read the broker. }
 
   /functions/v1/enroll-gateway:
@@ -2765,6 +3010,7 @@ paths:
             indistinguishable — reporting which would let an enumerator learn that a token value
             once existed.
         '405': { description: Method not allowed. }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
         '503':
           description: >-
             Enrolment is unconfigured, or the broker credential service could not be reached. Check
@@ -2824,6 +3070,7 @@ paths:
           description: The token is not valid. Unknown, expired, spent and archived are indistinguishable.
         '404':
           description: A `file` this route does not serve.
+        '500': { $ref: '#/components/responses/FunctionFailure' }
         '503':
           description: The installer is not available on this deployment; `details` says why.
 
@@ -2886,7 +3133,7 @@ paths:
           headers:
             X-AAS-Stats:
               schema: { type: string }
-              description: 'JSON counts (submodels, elements, unmapped semantic ids) — the only channel a binary body leaves for them. For `bundle`, a `bundle` object with the row counts of each part, `truncated`, `not_included`, and `stored` with the `bucket`, `object_key`, `sha256` and `export_id` of the copy, or `reason` when it was not stored.'
+              description: 'JSON counts (submodels, elements, unmapped semantic ids) — the only channel a binary body leaves for them. For `bundle`, a `bundle` object with the row counts of each part, `truncated`, `not_included`, and `stored` with the `bucket`, `object_key`, `sha256` and `export_id` of the copy, or, when it was not stored, a fixed `reason` and the `request_id` the error was logged under.'
           content:
             application/json:
               schema:
@@ -2902,6 +3149,7 @@ paths:
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Role is outside the allow-list, or `format=bundle` without `audit_trail:read`; the bundle refusal names the Audit Trail.' }
         '404': { description: No such device. }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /functions/v1/aas-api:
     get:
@@ -2936,6 +3184,7 @@ paths:
                   served: { type: array, items: { type: string } }
                   note: { type: string }
         '401': { description: Missing or invalid Authorization header. }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/aas-api/description:
     get:
@@ -2969,6 +3218,7 @@ paths:
                 type: object
                 properties:
                   profiles: { type: array, items: { type: string } }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/aas-api/shells:
     get:
@@ -3012,6 +3262,7 @@ paths:
                   result: { type: array, items: { type: object } }
         '400': { description: Non-positive `limit`. }
         '401': { description: Missing or invalid Authorization header. }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/aas-api/shells/{aasIdentifier}:
     get:
@@ -3041,6 +3292,7 @@ paths:
         '400': { description: Identifier is not valid base64url. }
         '401': { description: Missing or invalid Authorization header. }
         '404': { description: No such shell. A *submodel* identifier is refused here too, even though it names a device that exists. }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/aas-api/shells/{aasIdentifier}/submodel-refs:
     get:
@@ -3058,6 +3310,7 @@ paths:
             application/json: { schema: { type: object } }
         '401': { description: Missing or invalid Authorization header. }
         '404': { description: No such shell. }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/aas-api/shells/{aasIdentifier}/asset-information:
     get:
@@ -3078,6 +3331,7 @@ paths:
             application/json: { schema: { type: object } }
         '401': { description: Missing or invalid Authorization header. }
         '404': { description: No such shell. }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/aas-api/shells/{aasIdentifier}/submodels/{submodelIdentifier}:
     get:
@@ -3108,6 +3362,7 @@ paths:
         '400': { description: Either identifier is not valid base64url. }
         '401': { description: Missing or invalid Authorization header. }
         '404': { description: No such shell, or that shell does not carry that submodel. }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/aas-api/submodels/{submodelIdentifier}/submodel-elements:
     get:
@@ -3132,6 +3387,7 @@ paths:
         '400': { description: Identifier is not valid base64url. }
         '401': { description: Missing or invalid Authorization header. }
         '404': { description: No such submodel. }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/aas-api/submodels:
     get:
@@ -3157,6 +3413,7 @@ paths:
             application/json: { schema: { type: object } }
         '400': { description: Non-positive `limit`. }
         '401': { description: Missing or invalid Authorization header. }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/aas-api/submodels/{submodelIdentifier}:
     get:
@@ -3186,6 +3443,7 @@ paths:
         '400': { description: Identifier is not valid base64url. }
         '401': { description: Missing or invalid Authorization header. }
         '404': { description: No such submodel. }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/aas-api/submodels/{submodelIdentifier}/submodel-elements/{idShortPath}:
     get:
@@ -3216,6 +3474,7 @@ paths:
             application/json: { schema: { type: object } }
         '401': { description: Missing or invalid Authorization header. }
         '404': { description: No element at that path. }
+        '500': { $ref: '#/components/responses/AasFailure' }
 
   /functions/v1/fplus-directory:
     get:
@@ -3248,6 +3507,7 @@ paths:
           description: |
             No route. Invoked under `/functions/v1/` the handler still works, but the documented
             entry points are the unprefixed ones.
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /ping:
     get:
@@ -3275,6 +3535,7 @@ paths:
                     type: string
                     example: 11ad7b32-1d32-4c4a-b0c9-fa049208939a
                     description: The Factory+ Sparkplug payload marker this deployment's births carry.
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /v1/device:
     get:
@@ -3296,6 +3557,7 @@ paths:
             application/json:
               schema: { type: array, items: { type: string, format: uuid } }
         '401': { description: 'No bearer token. Enforced by the function, not by the gateway.' }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /v1/device/{instance_uuid}:
     get:
@@ -3318,6 +3580,7 @@ paths:
         '400': { description: Not an RFC4122 UUID. }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { description: No such device. }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /v1/address/{group_id}/{node_id}:
     get:
@@ -3353,6 +3616,7 @@ paths:
         '400': { description: Malformed address. }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { description: No edge node at that address. }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /v1/schema:
     get:
@@ -3384,6 +3648,7 @@ paths:
                         name: { type: string }
                         version: { type: integer }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /v1/schema/{schema_uuid}:
     get:
@@ -3430,6 +3695,7 @@ paths:
         '400': { description: Not an RFC4122 UUID. }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { description: No such schema, or none the caller's policies let it read. }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /v1/service:
     get:
@@ -3459,6 +3725,7 @@ paths:
                         url: { type: string }
                         online: { type: boolean }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /functions/v1/grafana-alert-webhook:
     post:
@@ -3532,6 +3799,7 @@ paths:
         '400': { description: 'Body is not valid JSON.' }
         '401': { description: 'Missing, malformed or incorrect bearer secret.' }
         '405': { description: 'Method other than POST.' }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
         '503': { description: 'GRAFANA_ALERT_WEBHOOK_SECRET is not configured; refusing to accept alerts.' }
 
   /functions/v1/forge-events:
@@ -3573,6 +3841,7 @@ paths:
           description: Recorded (`recorded` names the gateway and the commit) or ignored (`ignored` says why).
         '401':
           description: The signature is missing or does not verify.
+        '500': { $ref: '#/components/responses/FunctionFailure' }
         '503':
           description: GITEA_WEBHOOK_SECRET is not configured; nothing is accepted.
   /functions/v1/forge-membership:
@@ -3601,8 +3870,11 @@ paths:
           description: No bearer token at all.
         '403':
           description: The caller's role does not open the forge. Any team membership they held has been removed.
+        '500': { $ref: '#/components/responses/FunctionFailure' }
         '502':
           description: The forge could not be reached or refused the placement. The listener lets the request through.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
         '503':
           description: This deployment has no forge configured, or the role lookup failed. The listener lets the request through.
   /functions/v1/forge-sweep:
@@ -3665,10 +3937,13 @@ paths:
           description: The secret is missing or wrong.
         '409':
           description: The lease named in `x-sweep-lease` is not held, because it was released or lapsed and was taken over.
+        '500': { $ref: '#/components/responses/FunctionFailure' }
         '502':
           description: >-
             The forge could not be reached or the organisation could not be read, or the lease could
             not be read; nothing further was attempted.
+          headers: { X-Request-Id: { $ref: '#/components/headers/RequestId' } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/FunctionError' } } }
         '503':
           description: FORGE_SWEEP_SECRET is not configured, or this deployment has no forge.
   /functions/v1/forge-signout:
@@ -3690,6 +3965,7 @@ paths:
       responses:
         '302':
           description: Always. `Location` is the door's `/oauth2/signout`. The caller's sessions have been revoked if a usable token was presented.
+        '500': { $ref: '#/components/responses/FunctionFailure' }
   /functions/v1/grafana-userinfo:
     get:
       tags: [Edge Functions]
@@ -3724,6 +4000,7 @@ paths:
                   name: { type: string }
                   role: { type: string, enum: [Admin, Editor, Viewer], description: Absent when the Supabase role could not be mapped. }
         '401': { description: Missing or invalid Authorization header. }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
   /functions/v1/nodered-userinfo:
     get:
@@ -3760,6 +4037,7 @@ paths:
                   supabase_role: { type: string, nullable: true, example: Administrator }
                   permissions: { type: string, enum: ['*', read], description: Absent when the role could not be mapped. }
         '401': { description: Missing or invalid Authorization header. }
+        '500': { $ref: '#/components/responses/FunctionFailure' }
 
 components:
 
@@ -3816,6 +4094,61 @@ components:
       description: Missing or invalid credentials.
     Forbidden:
       description: Authenticated, but the role is not permitted. RLS policies fail closed.
+    NotFound:
+      description: |
+        A row the call names does not exist: the proposal, the schema, or the asset a proposal
+        targets. `code` is `P0002`, as the database raised it, and `message` says which row.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              code: { type: string, example: P0002 }
+              message: { type: string, example: proposal 7fffffff-0000-4000-8000-00000000dead not found }
+              details: { type: string, nullable: true }
+              hint: { type: string, nullable: true }
+
+    FunctionFailure:
+      description: |
+        The function failed, and nothing the caller sends differently would help. The body is a
+        fixed sentence and a request id, and `X-Request-Id` carries the same id. The error itself is
+        logged under that id (`supabase/functions/README.md`, *Finding the cause*), never returned.
+        Every function answers this way when the router cannot start it, with `error` reading
+        `Failed to invoke '<name>'`.
+      headers:
+        X-Request-Id: { $ref: '#/components/headers/RequestId' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/FunctionError' }
+    AasFailure:
+      description: |
+        The function failed, in the AAS specification's error shape: `text` is a fixed sentence and
+        `correlationId` the request id, which `X-Request-Id` carries too. The error is logged under
+        that id. When the router cannot start the function, the body is a `FunctionError` instead.
+      headers:
+        X-Request-Id: { $ref: '#/components/headers/RequestId' }
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              messages:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    messageType: { type: string, example: Error }
+                    text: { type: string, example: The request failed on the server. }
+                    code: { type: string, example: '500' }
+                    correlationId: { type: string, description: The request id. }
+                    timestamp: { type: string, format: date-time }
+
+  headers:
+    RequestId:
+      description: >-
+        The request id: the one the request carried, when it was 8 to 128 letters, digits, `.`,
+        `_` or `-` (the gateway sends a UUID), otherwise a new UUID.
+      schema: { type: string, example: 3f6c1b52-8a0e-4d6f-9b1e-2c7d5a4e9f10 }
 
   schemas:
 
@@ -4195,7 +4528,8 @@ components:
           type: string
           enum: [INSERT, UPDATE, DELETE, SCHEMA_REJECTION, CREDENTIAL_ISSUED, CREDENTIAL_SHOWN, TOKEN_MINTED, TOKEN_REVOKED,
                  PRINCIPAL_REVOKED, PRINCIPAL_REINSTATED, PRINCIPAL_DESCRIBED, PROPOSAL_APPLIED, EXPORTED,
-                 PROPOSAL_EXPIRED, ROLE_GRANTED, ROLE_REVOKED, FLOW_DEPLOYED, BACKUP_REQUESTED,
+                 PROPOSAL_EXPIRED, ROLE_GRANTED, ROLE_REVOKED, PERSON_ADDED, ACCESS_REMOVED, ACCESS_RESTORED,
+                 FLOW_DEPLOYED, BACKUP_REQUESTED,
                  BACKUP_CANCELLED, BACKUP_RELEASED, BACKUP_TAKEN, BACKUP_FAILED, BACKUP_PRUNED]
           description: >-
             What happened. The audit trigger on each audited table writes `INSERT`, `UPDATE` and
@@ -4771,6 +5105,22 @@ components:
           type: array
           items: { type: string, format: uuid }
           description: 'Resolved through the `device_schemas` view, so join rows and `devices.schema_id` agree.'
+
+    FunctionError:
+      type: object
+      description: >-
+        What an edge function answers when it fails unexpectedly. Nothing in it is taken from the
+        error, which is logged under `request_id`.
+      required: [error, request_id]
+      properties:
+        error:
+          type: string
+          description: A fixed sentence, `The request failed on the server.` unless the path names what failed.
+          example: Could not generate the bundle
+        request_id:
+          type: string
+          description: The same id as the `X-Request-Id` header. An operator finds the error in the logs by it.
+          example: 3f6c1b52-8a0e-4d6f-9b1e-2c7d5a4e9f10
 
     Link:
       type: object
