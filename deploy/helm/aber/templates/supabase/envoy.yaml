@@ -269,16 +269,17 @@ spec:
             # chart does not serve: origin policy has one source or it has none.
             - name: ENVOY_CORS_ORIGINS
               value: {{ include "aber.corsOrigins" . | quote }}
-            # The API listener's client address and sign-in limit (values.yaml, supabaseEnvoy). `int`, so
-            # a large value renders as digits rather than in exponent form.
+            # The API listener's client address and sign-in limit (values.yaml, supabaseEnvoy). Read
+            # through dig with values.yaml's defaults, because `helm upgrade --reuse-values` from a
+            # release without these keys carries none; `int`, so a large value renders as digits.
             - name: XFF_TRUSTED_HOPS
-              value: {{ .Values.supabaseEnvoy.trustedProxyHops | int | quote }}
+              value: {{ dig "trustedProxyHops" 1 .Values.supabaseEnvoy | int | quote }}
             - name: SIGN_IN_LIMIT_PERCENT
-              value: {{ ternary "100" "0" .Values.supabaseEnvoy.signInRateLimit.enabled | quote }}
+              value: {{ ternary "100" "0" (dig "signInRateLimit" "enabled" true .Values.supabaseEnvoy) | quote }}
             - name: SIGN_IN_LIMIT_PER_CLIENT
-              value: {{ .Values.supabaseEnvoy.signInRateLimit.perClientPerMinute | int | quote }}
+              value: {{ dig "signInRateLimit" "perClientPerMinute" 10 .Values.supabaseEnvoy | int | quote }}
             - name: SIGN_IN_LIMIT_TOTAL
-              value: {{ .Values.supabaseEnvoy.signInRateLimit.totalPerMinute | int | quote }}
+              value: {{ dig "signInRateLimit" "totalPerMinute" 120 .Values.supabaseEnvoy | int | quote }}
             # All three listeners send it; empty, and so not sent, unless global.scheme is https.
             - name: STRICT_TRANSPORT_SECURITY
               value: {{ include "aber.strictTransportSecurity" . | quote }}

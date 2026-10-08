@@ -329,6 +329,18 @@ The upgrade changes no device: a schema set in the column stays attached. An API
 the column keeps working, and should move to `rpc/set_device_schemas`. The column is removed no
 sooner than 1.2.0 ([`releases.md`](releases.md#deprecation)).
 
+### After 1.1.0, a proxy in front of Traefik is counted in `trustedProxyHops`
+
+After 1.1.0, the gateway limits password sign-ins per client address, and works out the address
+itself. It reads `X-Forwarded-For` from the right, past `supabaseEnvoy.trustedProxyHops` proxies:
+1 by default, for Traefik.
+
+**Before upgrading**, a site with a proxy of its own in front of Traefik sets `trustedProxyHops: 2`.
+That is a proxy named in Traefik's `forwardedHeaders.trustedIPs`
+([`deploy/k8s/README.md`](../deploy/k8s/README.md#first-traefik-keeps-each-clients-address)).
+Without it, every client is the proxy's address, and the whole site shares ten sign-ins a minute.
+A site with no such proxy has nothing to do.
+
 ---
 
 ## Backups
