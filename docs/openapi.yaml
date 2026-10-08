@@ -1370,7 +1370,7 @@ paths:
         * **Restore** — `{"deprecated": false, "superseded_by": null}`, sent by
           `POST /api/v1/metric-catalog/{id}/restore`. The pointer is cleared with the flag:
           a current metric that still named a replacement would be current and replaced at once.
-        * **Edit** — `{"semantic_id": "<id>" | null, "semantic_id_type": "IRI" | "IRDI" | null}`,
+        * **Edit** — `{"semantic_id": "<id>" | null, "semantic_id_type": "IRI" | "IRDI" | "ExpandedNodeId" | null}`,
           sent by `PUT /api/v1/metric-catalog/{id}`. Only the pair, with the type NULL whenever the
           id is. A semantic id is an assertion about the metric, not part of what a device
           publishes, so it is corrected in place; every shell exported from a schema that models the
@@ -1470,15 +1470,15 @@ paths:
       tags: [Registry]
       summary: Read the OPC UA companion-specification data points
       description: |
-        76 data points from six companion specifications: OPC 40001 (Machinery), OPC 40001-4
+        75 data points from six companion specifications: OPC 40001 (Machinery), OPC 40001-4
         (Machinery Energy), OPC 40010 (Robotics), OPC 30050 (PackML), OPC 40501 (Machine Tools)
         and OPC 40540 (Additive Manufacturing).
 
-        **`node_id` is a browse path, not a numeric NodeId** — `nsu=<ns>;s=<BrowsePath>`. The
-        numeric ids live in each spec's NodeSet2 XML. The Machinery and Robotics rows were
-        transcribed by hand; the other three are generated from the NodeSets by
-        `scripts/generate-opcua-vocabulary.mjs`, which verifies each browse name and reads its
-        datatype from the specification.
+        **`node_id` and `semantic_id` are the ExpandedNodeId the specification publishes** —
+        `nsu=<namespace URI>;i=<id>`, the NodeId its NodeSet2 XML declares for the data point.
+        Every row is generated from the NodeSets by `scripts/generate-opcua-vocabulary.mjs`, which
+        verifies each browse name and reads its datatype and NodeId from the specification. Before
+        1.2.0 `node_id` was a browse path and `semantic_id` the namespace URI plus the name.
       parameters:
         - $ref: '#/components/parameters/Select'
         - $ref: '#/components/parameters/Order'
@@ -4300,10 +4300,11 @@ components:
     SemanticIdType:
       type: string
       nullable: true
-      enum: [IRI, IRDI]
+      enum: [IRI, IRDI, ExpandedNodeId]
       description: |
-        Which kind of AAS Reference `semantic_id` is: an IRI (a URL or URN) or an IRDI (an ECLASS
-        or IEC CDD code). CHECK-constrained (`0145`); both export as an `ExternalReference`.
+        Which kind of AAS Reference `semantic_id` is: an IRI (a URL or URN), an IRDI (an ECLASS
+        or IEC CDD code) or an ExpandedNodeId (an OPC UA node, `nsu=<namespace URI>;i=<id>`).
+        CHECK-constrained (`0001`); all three export as an `ExternalReference`.
         `ModelReference` was withdrawn because the exporter cannot emit one. **Never
         half-populated**: the dashboard writes the pair together, with the type NULL whenever the
         id is.
@@ -4855,13 +4856,13 @@ components:
       type: object
       readOnly: true
       properties:
-        name: { type: string, example: OverridePercent }
-        companion_spec: { type: string, example: OPC 40010 }
-        node_id: { type: string, description: 'A BROWSE PATH, not a numeric NodeId — `nsu=<ns>;s=<BrowsePath>`.' }
+        name: { type: string, example: SpeedOverride }
+        companion_spec: { type: string, example: OPC 40010 Robotics }
+        node_id: { type: string, example: 'nsu=http://opcfoundation.org/UA/Robotics/;i=16365', description: 'The ExpandedNodeId the specification''s NodeSet declares for the data point.' }
         description: { type: string, nullable: true }
         datatype: { type: string, nullable: true }
         unit: { type: string, nullable: true }
-        semantic_id: { type: string, nullable: true, description: 'The companion spec''s own namespace URI plus browse name — derived from something the OPC Foundation publishes, but still not a concept URI it registers.' }
+        semantic_id: { type: string, nullable: true, description: 'The same ExpandedNodeId as `node_id`: the identifier OPC UA issues for the concept. A metric carrying it has `semantic_id_type` ExpandedNodeId.' }
 
     ASHRAE223Concept:
       type: object

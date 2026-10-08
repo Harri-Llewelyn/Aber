@@ -165,9 +165,10 @@ paths:
 
         MTConnect and ISO 22400 ids are minted here, so their namespaces are local
         (`https://aber.local/semantics/mtconnect/v2.0`, `https://aber.local/semantics/iso22400`).
-        An OPC UA or ASHRAE 223P id is the standard's own, and a scalar type adapted from it is an
-        in-exact implementation of that namespace, marked as the i3X guide asks with a
-        `projection` suffix: `http://opcfoundation.org/UA/Machinery/?projection=i3X`,
+        An OPC UA id is the ExpandedNodeId its NodeSet publishes (`nsu=<namespace URI>;i=<id>`),
+        in the namespace after `nsu=`; an ASHRAE 223P id is the ontology's own. A scalar type
+        adapted from either is an in-exact implementation of that namespace, marked as the i3X
+        guide asks with a `projection` suffix: `http://opcfoundation.org/UA/Machinery/?projection=i3X`,
         `http://data.ashrae.org/standard223?projection=i3X`. A namespace no served type
         belongs to is never listed.
       responses:
@@ -1179,9 +1180,9 @@ components:
             "x-unit": "CELSIUS", "x-category": "SAMPLE"}`: any metric can arrive with
             `is_null`, and null means it reported no value. From its catalog row, `x-unit` is
             the unit, `x-category` the category (`SAMPLE`, `EVENT` or `CONDITION`),
-            `x-semantic-id-type` `IRI` or `IRDI`, and `x-permitted-values` the values the
-            catalog lists for the metric. That list is advisory, never `enum`: a value outside
-            it is accepted, served, and flagged out of vocabulary on the dashboard.
+            `x-semantic-id-type` `IRI`, `IRDI` or `ExpandedNodeId`, and `x-permitted-values`
+            the values the catalog lists for the metric. That list is advisory, never `enum`: a
+            value outside it is accepted, served, and flagged out of vocabulary on the dashboard.
             `UnknownType`'s is `{}`. A set of schemas' is `{"type": "object", "allOf": [...],
             "$defs": {...}}` over their definitions.
         related:

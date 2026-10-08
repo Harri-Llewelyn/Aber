@@ -30,17 +30,18 @@ import {
 const NAMEPLATE_TEMPLATE_ID = 'https://admin-shell.io/idta/nameplate/3/0/Nameplate';
 
 /**
- * Which nameplate fields a device can answer for itself, and the OPC UA concept that answers them.
- * Mirrors the exporter's resolution order (a published value wins over a stored one). Keyed by
+ * Which nameplate fields a device can answer for itself, and the OPC 40001 Machinery concept that
+ * answers them, by its ExpandedNodeId. Mirrors OPC_MACHINERY and the exporter's resolution order in
+ * supabase/functions/_shared/aas/shell.ts (a published value wins over a stored one). Keyed by
  * `device_nameplate` column.
  */
 const NAMEPLATE_PUBLISHED_BY = new Map([
-  ['uri_of_the_product', 'http://opcfoundation.org/UA/Machinery/ProductInstanceUri'],
-  ['manufacturer_name', 'http://opcfoundation.org/UA/Machinery/Manufacturer'],
-  ['manufacturer_product_designation', 'http://opcfoundation.org/UA/Machinery/Model'],
-  ['serial_number', 'http://opcfoundation.org/UA/Machinery/SerialNumber'],
-  ['year_of_construction', 'http://opcfoundation.org/UA/Machinery/YearOfConstruction'],
-  ['software_version', 'http://opcfoundation.org/UA/Machinery/SoftwareRevision']
+  ['uri_of_the_product', 'nsu=http://opcfoundation.org/UA/Machinery/;i=6015'],
+  ['manufacturer_name', 'nsu=http://opcfoundation.org/UA/Machinery/;i=6002'],
+  ['manufacturer_product_designation', 'nsu=http://opcfoundation.org/UA/Machinery/;i=6008'],
+  ['serial_number', 'nsu=http://opcfoundation.org/UA/Machinery/;i=6003'],
+  ['year_of_construction', 'nsu=http://opcfoundation.org/UA/Machinery/;i=6004'],
+  ['software_version', 'nsu=http://opcfoundation.org/UA/Machinery/;i=6011']
 ]);
 
 const mapDeviceRow = (d, gateway, location) => {
@@ -2131,7 +2132,7 @@ const apiMethods = {
 
     if (path.startsWith('/api/v1/opcua-vocabulary')) {
       // Reference data (seeded by 0002_seed_data.sql). Ordered by spec then name so the panel's
-      // sections arrive already grouped. `node_id` is a browse path, not a numeric NodeId.
+      // sections arrive already grouped. `node_id` and `semantic_id` are the same ExpandedNodeId.
       const { data, error } = await supabase
         .from('opcua_vocabulary')
         .select('*')

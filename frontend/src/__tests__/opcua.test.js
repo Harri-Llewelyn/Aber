@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
-  browsePath, suggestedGroup, sparkplugDatatypeFor, categoryFor,
+  suggestedGroup, sparkplugDatatypeFor, categoryFor,
   dataPoints, dataPointByName, opcuaSections, opcuaPrefill, dataPointTooltip
 } from '../utils/opcua'
+import { OPCUA_GROUPS } from '../utils/opcuaGroups.generated'
 import { STANDARDS } from '../utils/standards'
 import { composeMetricName, deriveMetricGroup } from '../utils/metricGroup'
 
@@ -10,54 +11,49 @@ import { composeMetricName, deriveMetricGroup } from '../utils/metricGroup'
 const vocabulary = [
   {
     name: 'ActualPosition', companion_spec: 'OPC 40010 Robotics',
-    node_id: 'nsu=http://opcfoundation.org/UA/Robotics/;s=MotionDevice/Axes/Axis/ActualPosition',
+    node_id: 'nsu=http://opcfoundation.org/UA/Robotics/;i=16662',
     datatype: 'Double', unit: 'MILLIMETER', description: 'Current position of an axis.',
-    semantic_id: 'http://opcfoundation.org/UA/Robotics/ActualPosition'
+    semantic_id: 'nsu=http://opcfoundation.org/UA/Robotics/;i=16662'
   },
   {
     name: 'EmergencyStop', companion_spec: 'OPC 40010 Robotics',
-    node_id: 'nsu=http://opcfoundation.org/UA/Robotics/;s=MotionDevice/SafetyStates/SafetyState/EmergencyStop',
+    node_id: 'nsu=http://opcfoundation.org/UA/Robotics/;i=15882',
     datatype: 'Boolean', unit: null, description: 'Emergency stop state.',
-    semantic_id: 'http://opcfoundation.org/UA/Robotics/EmergencyStop'
+    semantic_id: 'nsu=http://opcfoundation.org/UA/Robotics/;i=15882'
   },
   {
     name: 'Manufacturer', companion_spec: 'OPC 40001 Machinery',
-    node_id: 'nsu=http://opcfoundation.org/UA/Machinery/;s=Machine/Identification/Manufacturer',
+    node_id: 'nsu=http://opcfoundation.org/UA/Machinery/;i=6002',
     datatype: 'LocalizedText', unit: null, description: 'Name of the machine manufacturer.',
-    semantic_id: 'http://opcfoundation.org/UA/Machinery/Manufacturer'
+    semantic_id: 'nsu=http://opcfoundation.org/UA/Machinery/;i=6002'
   },
   {
-    name: 'OperationalTime', companion_spec: 'OPC 40001 Machinery',
-    node_id: 'nsu=http://opcfoundation.org/UA/Machinery/;s=Machine/MachineryBuildingBlocks/OperationCounters/OperationalTime',
-    datatype: 'Double', unit: 'SECOND', description: 'Accumulated operational time.',
-    semantic_id: 'http://opcfoundation.org/UA/Machinery/OperationalTime'
+    name: 'PowerOnDuration', companion_spec: 'OPC 40001 Machinery',
+    node_id: 'nsu=http://opcfoundation.org/UA/Machinery/;i=6079',
+    datatype: 'Double', unit: 'MILLISECOND', description: 'Accumulated time the machine has been powered on.',
+    semantic_id: 'nsu=http://opcfoundation.org/UA/Machinery/;i=6079'
   }
 ]
 
-describe('ExpandedNodeId parsing', () => {
-  it('reads the browse path from the node id', () => {
-    const nodeId = vocabulary[0].node_id
-    expect(browsePath(nodeId)).toBe('MotionDevice/Axes/Axis/ActualPosition')
-  })
-
-  it('keeps the whole path, including the slashes inside it', () => {
-    // The identifier is everything after `s=` -- a greedy match, since a browse path contains the
-    // same separator the metric names use.
-    expect(browsePath(vocabulary[3].node_id))
-      .toBe('Machine/MachineryBuildingBlocks/OperationCounters/OperationalTime')
-  })
-
-  it('returns empty rather than throwing on a malformed or absent node id', () => {
-    expect(browsePath(null)).toBe('')
-    expect(browsePath('')).toBe('')
-    expect(browsePath('i=1234')).toBe('')
-  })
-})
-
 describe('suggestedGroup', () => {
-  it('takes the first browse path segment, so the group comes from the data not a hardcoded map', () => {
+  it('reads the group the generator files the point under', () => {
     expect(suggestedGroup(vocabulary[0])).toBe('MotionDevice')
     expect(suggestedGroup(vocabulary[2])).toBe('Machine')
+  })
+
+  it('tells apart a name two specifications share', () => {
+    expect(suggestedGroup({ name: 'Manufacturer', companion_spec: 'OPC 40540 Additive Manufacturing' }))
+      .toBe('Feedstock')
+    expect(suggestedGroup({ name: 'Mass', companion_spec: 'OPC 40001-4 Machinery Energy' })).toBe('Energy')
+    expect(suggestedGroup({ name: 'Mass', companion_spec: 'OPC 40010 Robotics' })).toBe('MotionDevice')
+  })
+
+  it('files every generated point under a one-segment group', () => {
+    for (const [spec, points] of Object.entries(OPCUA_GROUPS)) {
+      for (const [name, group] of Object.entries(points)) {
+        expect(group, `${spec} ${name}`).toMatch(/^[A-Za-z][A-Za-z0-9_]*$/)
+      }
+    }
   })
 
   it('agrees with the group the composed name will actually derive', () => {
@@ -70,7 +66,8 @@ describe('suggestedGroup', () => {
     }
   })
 
-  it('suggests nothing when there is no browse path to read', () => {
+  it('suggests nothing for a point the generator does not know', () => {
+    expect(suggestedGroup({ name: 'OperationalTime', companion_spec: 'OPC 40001 Machinery' })).toBe('')
     expect(suggestedGroup({ node_id: null })).toBe('')
     expect(suggestedGroup(null)).toBe('')
   })
@@ -132,7 +129,7 @@ describe('opcuaSections', () => {
     const sections = opcuaSections(seeded.map((companion_spec, i) => ({
       name: `Point${i}`,
       companion_spec,
-      node_id: `nsu=http://example.invalid/;s=Thing/Point${i}`,
+      node_id: `nsu=http://example.invalid/;i=${i}`,
       datatype: 'Double'
     })))
     expect(sections.map(s => s.title)).toEqual(seeded)
@@ -146,12 +143,12 @@ describe('dataPointByName', () => {
   it('disambiguates a name that appears in more than one companion spec', () => {
     const shared = [
       ...vocabulary,
-      { name: 'Manufacturer', companion_spec: 'OPC 40010 Robotics', node_id: 'nsu=x;s=MotionDevice/Manufacturer', datatype: 'String' }
+      { name: 'Manufacturer', companion_spec: 'OPC 40010 Robotics', node_id: 'nsu=http://opcfoundation.org/UA/Robotics/;i=16351', datatype: 'String' }
     ]
     expect(dataPointByName(shared, 'OPC 40001 Machinery', 'Manufacturer').node_id)
-      .toContain('Machine/Identification/Manufacturer')
+      .toBe('nsu=http://opcfoundation.org/UA/Machinery/;i=6002')
     expect(dataPointByName(shared, 'OPC 40010 Robotics', 'Manufacturer').node_id)
-      .toContain('MotionDevice/Manufacturer')
+      .toBe('nsu=http://opcfoundation.org/UA/Robotics/;i=16351')
   })
 
   it('falls back to the first match when no spec is given', () => {
@@ -173,7 +170,7 @@ describe('opcuaPrefill', () => {
       units: 'MILLIMETER',
       datatype: 10,
       category: 'SAMPLE',
-      semanticId: 'http://opcfoundation.org/UA/Robotics/ActualPosition',
+      semanticId: 'nsu=http://opcfoundation.org/UA/Robotics/;i=16662',
       standard: STANDARDS.OPCUA
     })
   })
@@ -192,8 +189,8 @@ describe('opcuaPrefill', () => {
 })
 
 describe('dataPointTooltip', () => {
-  it('shows where the point lives, which is what disambiguates two identical names', () => {
-    expect(dataPointTooltip(vocabulary[2])).toContain('Machine/Identification/Manufacturer')
+  it('names the node, which is what disambiguates two identical names', () => {
+    expect(dataPointTooltip(vocabulary[2])).toContain('NodeId: nsu=http://opcfoundation.org/UA/Machinery/;i=6002')
   })
 
   it('degrades to the bare name when there is nothing else to say', () => {

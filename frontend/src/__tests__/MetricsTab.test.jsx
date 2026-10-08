@@ -48,15 +48,15 @@ const ISO_VOCABULARY = [
 const OPCUA_VOCABULARY = [
   {
     name: 'ActualPosition', companion_spec: 'OPC 40010 Robotics',
-    node_id: 'nsu=http://opcfoundation.org/UA/Robotics/;s=MotionDevice/Axes/Axis/ActualPosition',
+    node_id: 'nsu=http://opcfoundation.org/UA/Robotics/;i=16662',
     datatype: 'Double', unit: 'MILLIMETER', description: 'Current position of an axis.',
-    semantic_id: 'http://opcfoundation.org/UA/Robotics/ActualPosition'
+    semantic_id: 'nsu=http://opcfoundation.org/UA/Robotics/;i=16662'
   },
   {
     name: 'Manufacturer', companion_spec: 'OPC 40001 Machinery',
-    node_id: 'nsu=http://opcfoundation.org/UA/Machinery/;s=Machine/Identification/Manufacturer',
+    node_id: 'nsu=http://opcfoundation.org/UA/Machinery/;i=6002',
     datatype: 'LocalizedText', unit: null, description: 'Name of the machine manufacturer.',
-    semantic_id: 'http://opcfoundation.org/UA/Machinery/Manufacturer'
+    semantic_id: 'nsu=http://opcfoundation.org/UA/Machinery/;i=6002'
   }
 ]
 
@@ -535,11 +535,11 @@ describe('Edit Metric — correcting a semantic id', () => {
     expect(modal.getByRole('combobox', { name: 'Reference Type' }).value).toBe('IRI')
   })
 
-  it('offers IRI and IRDI only', async () => {
+  it('offers IRI, IRDI and ExpandedNodeId only', async () => {
     await setup()
     const modal = openEdit('Controller/EXECUTION')
     const options = [...modal.getByRole('combobox', { name: 'Reference Type' }).querySelectorAll('option')]
-    expect(options.map(o => o.value)).toEqual(['', 'IRI', 'IRDI'])
+    expect(options.map(o => o.value)).toEqual(['', 'IRI', 'IRDI', 'ExpandedNodeId'])
   })
 
   it('says how many schemas model the metric, as Deprecate does', async () => {
@@ -1062,7 +1062,7 @@ describe('Metric builder — vocabulary prefill', () => {
     expect(unitsSelect().value).toBe('HOUR')
   })
 
-  it('derives an OPC UA data point’s group from its browse path', async () => {
+  it('fills in an OPC UA data point’s group from its vocabulary entry', async () => {
     await openForm()
     fireEvent.change(standardSelect(), { target: { value: 'OPC UA' } })
     fireEvent.change(
@@ -1071,7 +1071,7 @@ describe('Metric builder — vocabulary prefill', () => {
     )
 
     expect(within(namePreview()).getByText('MotionDevice/ActualPosition')).toBeTruthy()
-    expect(semanticIdInput().value).toBe('http://opcfoundation.org/UA/Robotics/ActualPosition')
+    expect(semanticIdInput().value).toBe('nsu=http://opcfoundation.org/UA/Robotics/;i=16662')
     // MotionDevice is not in this deployment's group registry, so it arrives pre-typed under
     // "+ New group…" rather than as a select value with no option behind it.
     expect(screen.getByPlaceholderText('e.g. Hydraulic').value).toBe('MotionDevice')
@@ -1085,7 +1085,7 @@ describe('Metric builder — vocabulary prefill', () => {
       { target: { value: 'OPC 40001 Machinery::Manufacturer' } }
     )
 
-    expect(semanticIdInput().value).toBe('http://opcfoundation.org/UA/Machinery/Manufacturer')
+    expect(semanticIdInput().value).toBe('nsu=http://opcfoundation.org/UA/Machinery/;i=6002')
     expect(within(namePreview()).getByText('Machine/Manufacturer')).toBeTruthy()
   })
 
@@ -1116,19 +1116,19 @@ describe('Metric builder — vocabulary prefill', () => {
 describe('Metric builder — OPC UA points that share a browse name', () => {
   const AM_MANUFACTURER = {
     name: 'Manufacturer', companion_spec: 'OPC 40540 Additive Manufacturing',
-    node_id: 'nsu=http://opcfoundation.org/UA/AdditiveManufacturing/;s=FeedstockType/Manufacturer',
+    node_id: 'nsu=http://opcfoundation.org/UA/AdditiveManufacturing/;i=6011',
     datatype: 'String', unit: null, description: 'Manufacturer of the feedstock.',
-    semantic_id: 'http://opcfoundation.org/UA/AdditiveManufacturing/Manufacturer'
+    semantic_id: 'nsu=http://opcfoundation.org/UA/AdditiveManufacturing/;i=6011'
   }
   const AM_KEY = 'OPC 40540 Additive Manufacturing::Manufacturer'
   const groupSelect = () => screen.getByTitle(/The component this metric belongs to/)
   const dataPointSelect = () => screen.getByTitle(/OPC UA companion specification data point/)
 
-  // FeedstockType is registered, so the prefill selects it as a group rather than typing it new.
+  // Feedstock is registered, so the prefill selects it as a group rather than typing it new.
   const mockVocabularies = () => api.get.mockImplementation((path) => Promise.resolve(
     path.startsWith('/api/v1/opcua-vocabulary') ? [...OPCUA_VOCABULARY, AM_MANUFACTURER]
       : path.startsWith('/api/v1/metric-groups')
-        ? [...routes['/api/v1/metric-groups'], { group_uuid: 'g7', name: 'FeedstockType', standard: 'OPC UA' }]
+        ? [...routes['/api/v1/metric-groups'], { group_uuid: 'g7', name: 'Feedstock', standard: 'OPC UA' }]
         : (routes[Object.keys(routes).find(r => path.startsWith(r))] || [])))
 
   const chooseSecondManufacturer = async () => {
@@ -1142,17 +1142,17 @@ describe('Metric builder — OPC UA points that share a browse name', () => {
     await chooseSecondManufacturer()
 
     expect(dataPointSelect().value).toBe(AM_KEY)
-    expect(within(namePreview()).getByText('FeedstockType/Manufacturer')).toBeTruthy()
+    expect(within(namePreview()).getByText('Feedstock/Manufacturer')).toBeTruthy()
     expect(semanticIdInput().value).toBe(AM_MANUFACTURER.semantic_id)
   })
 
   it('keeps the point and its suggested id when the group is set back to the point\'s own', async () => {
     await chooseSecondManufacturer()
     fireEvent.change(groupSelect(), { target: { value: '' } })
-    fireEvent.change(groupSelect(), { target: { value: 'FeedstockType' } })
+    fireEvent.change(groupSelect(), { target: { value: 'Feedstock' } })
 
     expect(dataPointSelect().value).toBe(AM_KEY)
-    expect(within(namePreview()).getByText('FeedstockType/Manufacturer')).toBeTruthy()
+    expect(within(namePreview()).getByText('Feedstock/Manufacturer')).toBeTruthy()
     expect(semanticIdInput().value).toBe(AM_MANUFACTURER.semantic_id)
     expect(screen.getByText('Suggested')).toBeTruthy()
   })
@@ -1294,9 +1294,10 @@ describe('Metric builder — semantic id', () => {
     expect(screen.getByRole('button', { name: 'Add' }).disabled).toBe(false)
   })
 
-  it('offers IRI and IRDI only', async () => {
+  it('offers IRI, IRDI and ExpandedNodeId only', async () => {
     await openForm()
-    expect([...referenceTypeSelect().querySelectorAll('option')].map(o => o.value)).toEqual(['', 'IRI', 'IRDI'])
+    expect([...referenceTypeSelect().querySelectorAll('option')].map(o => o.value))
+      .toEqual(['', 'IRI', 'IRDI', 'ExpandedNodeId'])
   })
 
   it('says an Administrator can correct the id later with Edit, not that anyone can', async () => {
@@ -1389,7 +1390,7 @@ describe('Metric builder — MTConnect semantic id derivation', () => {
       screen.getByTitle(/OPC UA companion specification data point/),
       { target: { value: 'OPC 40010 Robotics::ActualPosition' } }
     )
-    expect(semanticIdInput().value).toBe('http://opcfoundation.org/UA/Robotics/ActualPosition')
+    expect(semanticIdInput().value).toBe('nsu=http://opcfoundation.org/UA/Robotics/;i=16662')
   })
 })
 
@@ -1534,7 +1535,7 @@ describe('Metric builder — choosing a semantic id from the vocabularies', () =
 
     const listed = options().map(o => o.textContent)
     expect(listed.some(t => t.includes('ManufacturerName') && t.includes('IDTA Digital Nameplate 3.0') && t.includes(MANUFACTURER_NAME))).toBe(true)
-    expect(listed.some(t => t.includes('Manufacturer') && t.includes('OPC UA') && t.includes('http://opcfoundation.org/UA/Machinery/Manufacturer'))).toBe(true)
+    expect(listed.some(t => t.includes('Manufacturer') && t.includes('OPC UA') && t.includes('nsu=http://opcfoundation.org/UA/Machinery/;i=6002'))).toBe(true)
   })
 
   it('sets the id and the reference type the template records, and closes', async () => {

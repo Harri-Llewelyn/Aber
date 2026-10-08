@@ -18,12 +18,13 @@ const HELP = {
     + 'which is legitimate.'
 }
 
-const TYPE_HELP = 'How to read the id: IRI for a URL or URN, IRDI for an ECLASS or IEC CDD code. '
-  + 'Guessed from what you type; change it if the guess is wrong.'
+const TYPE_HELP = 'How to read the id: IRI for a URL or URN, IRDI for an ECLASS or IEC CDD code, '
+  + 'ExpandedNodeId for an OPC UA node (nsu=…;i=…). Guessed from what you type; change it if the '
+  + 'guess is wrong.'
 
 const PLACEHOLDER = {
   schema: 'e.g. https://admin-shell.io/idta/nameplate/3/0/Nameplate',
-  metric: 'e.g. http://opcfoundation.org/UA/Machinery/Manufacturer'
+  metric: 'e.g. nsu=http://opcfoundation.org/UA/Machinery/;i=6002'
 }
 
 const LABEL_ROW = { display: 'flex', alignItems: 'center', marginBottom: '7px' }
@@ -120,7 +121,7 @@ export function SemanticIdField({
           )}
         </div>
 
-        <div style={{ flex: '0 0 140px' }}>
+        <div style={{ flex: '0 0 160px' }}>
           <div style={LABEL_ROW}>
             {readOnly
               ? <span className="form-label" style={LABEL}>Reference Type</span>

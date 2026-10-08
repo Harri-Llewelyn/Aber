@@ -488,7 +488,7 @@ chain into a model that one text column cannot carry. The two forms offered it a
 what it meant, so the first operator to pick it would have published a wrong shell. It can come
 back once something emits it, as a reference to a `ConceptDescription` in the same Environment.
 
-`0145` narrowed both CHECKs to IRI and IRDI, and the baseline declares them so.
+`0145` narrowed both CHECKs to IRI and IRDI. `0171` added `ExpandedNodeId`, below.
 `idta_submodel_templates` already allowed only the two. `test_metric_catalog_seed.py` holds both
 CHECKs to refusing `ModelReference`.
 
@@ -498,6 +498,28 @@ Edit sends the pair to `metric_catalog` and nothing else, gated like Deprecate a
 `metric_catalog_update_privileged` for anyone but an Administrator. A draft schema's pair, which
 `fork_schema()` copies from its parent, is edited in the draft editor and saved with the draft.
 `log_audit_trail_event()` already records both as UPDATEs, so neither needed a trigger change.
+
+### An OPC UA concept carries the id OPC UA publishes (`0171`)
+
+**`semantic_id_type` gains `ExpandedNodeId`.** Every `opcua_vocabulary` row now carries the NodeId
+its NodeSet declares, `nsu=<namespace URI>;i=<id>`, as `node_id` and `semantic_id`. It is neither
+an IRI nor an IRDI, and the exporter writes it as the same one-key `GlobalReference`. Before
+`0171` the ids were `<namespace URI><name>`, which the OPC Foundation never issued
+([`docs/vocabularies.md`](../docs/vocabularies.md)).
+
+**The baseline declares the third value, not `0171`.** `0001` replays first on every boot and
+drops a CHECK whose definition differs from its own, then adds its own. A CHECK widened in a later
+file is therefore narrowed again on the next boot, and the re-add fails on the first row holding
+the new value. So both CHECKs in `0001` name the three values, and its guard compares against
+that text.
+
+**`0171` moves what the platform holds.** A catalog metric or a schema whose semantic id is
+exactly a former id takes the new one, typed `ExpandedNodeId`. The map is read from the rows `0002`
+has just written: a former id was a row's namespace followed by its name. An id an Administrator
+typed in another form is left alone. The vocabulary row `0002` no longer writes, OPC 40001
+Machinery `OperationalTime`, is removed; a metric carrying its former id keeps it. A replay moves
+nothing. `test_metric_catalog_seed.py` holds all of this, and replays `0001`'s CHECK blocks over a
+row typed `ExpandedNodeId`.
 
 ### A local extension carries no minted id (archived migration 0149)
 

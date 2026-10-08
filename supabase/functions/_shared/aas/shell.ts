@@ -44,6 +44,20 @@ export const MODEL_BUCKET = Deno.env.get("STORAGE_MODEL_BUCKET") ?? "asset-3d-mo
 export const NAMEPLATE_TEMPLATE_ID = "https://admin-shell.io/idta/nameplate/3/0/Nameplate";
 
 /**
+ * The OPC 40001 Machinery identification members a device can publish a nameplate value under, by
+ * the ExpandedNodeId opcua_vocabulary carries for each: a catalog metric with that semantic id
+ * answers the field. Check 46 of scripts/check-docs-drift.mjs holds each id to its seed row.
+ */
+export const OPC_MACHINERY = {
+  Manufacturer: "nsu=http://opcfoundation.org/UA/Machinery/;i=6002",
+  Model: "nsu=http://opcfoundation.org/UA/Machinery/;i=6008",
+  SerialNumber: "nsu=http://opcfoundation.org/UA/Machinery/;i=6003",
+  ProductInstanceUri: "nsu=http://opcfoundation.org/UA/Machinery/;i=6015",
+  SoftwareRevision: "nsu=http://opcfoundation.org/UA/Machinery/;i=6011",
+  YearOfConstruction: "nsu=http://opcfoundation.org/UA/Machinery/;i=6004",
+} as const;
+
+/**
  * Cap on a model bundled into an AASX: what may be held in memory, deflated and concatenated inside
  * one edge worker, as opposed to the bucket's storage limit. Over the cap the export falls back to
  * the URL reference, which is still a valid shell.
@@ -565,15 +579,14 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     });
   };
 
-  const OPC_MACHINERY = "http://opcfoundation.org/UA/Machinery/";
   const nameplateProps = [
-    nameplateProperty("URIOfTheProduct", nameplate?.uri_of_the_product, `${OPC_MACHINERY}ProductInstanceUri`),
-    nameplateProperty("ManufacturerName", nameplate?.manufacturer_name, `${OPC_MACHINERY}Manufacturer`),
+    nameplateProperty("URIOfTheProduct", nameplate?.uri_of_the_product, OPC_MACHINERY.ProductInstanceUri),
+    nameplateProperty("ManufacturerName", nameplate?.manufacturer_name, OPC_MACHINERY.Manufacturer),
     // Falls back to the device's own name, which is the only designation that always exists.
     nameplateProperty(
       "ManufacturerProductDesignation",
       nameplate?.manufacturer_product_designation ?? device.name,
-      `${OPC_MACHINERY}Model`,
+      OPC_MACHINERY.Model,
     ),
     nameplateProperty("ManufacturerProductType", nameplate?.manufacturer_product_type),
     // SERIAL_NUMBER by name is the pre-semantic-id fallback: the demo schema publishes it under
@@ -581,13 +594,13 @@ export function buildEnvironment(record: DeviceRecord): BuiltShell {
     nameplateProperty(
       "SerialNumber",
       nameplate?.serial_number ?? valueFor("SERIAL_NUMBER"),
-      `${OPC_MACHINERY}SerialNumber`,
+      OPC_MACHINERY.SerialNumber,
     ),
-    nameplateProperty("YearOfConstruction", nameplate?.year_of_construction, `${OPC_MACHINERY}YearOfConstruction`),
+    nameplateProperty("YearOfConstruction", nameplate?.year_of_construction, OPC_MACHINERY.YearOfConstruction),
     nameplateProperty("DateOfManufacture", nameplate?.date_of_manufacture),
     nameplateProperty("HardwareVersion", nameplate?.hardware_version),
     nameplateProperty("FirmwareVersion", nameplate?.firmware_version ?? valueFor("Controller/FIRMWARE")),
-    nameplateProperty("SoftwareVersion", nameplate?.software_version, `${OPC_MACHINERY}SoftwareRevision`),
+    nameplateProperty("SoftwareVersion", nameplate?.software_version, OPC_MACHINERY.SoftwareRevision),
     nameplateProperty("CountryOfOrigin", nameplate?.country_of_origin),
 
     // Factory+ concepts. No semanticId, because IDTA defines none for them and inventing one

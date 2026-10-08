@@ -1012,7 +1012,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     ? `${chosenDataPoint.companion_spec}${OPCUA_KEY_SEP}${chosenDataPoint.name}`
                     : ''}
                   onChange={e => handleTypeChange(e.target.value)}
-                  title="The OPC UA companion specification data point. Selecting one fills in its group from the browse path, its datatype and its semantic id."
+                  title="The OPC UA companion specification data point. Selecting one fills in its group, its datatype and its semantic id."
                 >
                   <option value="">— Select a data point —</option>
                   {/* Says why it is empty: a group no companion specification covers yields

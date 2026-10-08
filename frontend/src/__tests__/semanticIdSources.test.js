@@ -11,17 +11,17 @@ const MTCONNECT = [
 const ISO22400 = [
   { name: 'AVAILABILITY', category: 'OEE', semantic_id: 'https://aber.local/semantics/iso22400/AVAILABILITY' }
 ]
-// Two companion specifications define `Manufacturer`; the first browse-path segment tells them apart.
+// Two companion specifications define `Manufacturer`; the group each is filed under tells them apart.
 const OPCUA = [
   {
     name: 'Manufacturer', companion_spec: 'OPC 40001 Machinery',
-    node_id: 'nsu=http://opcfoundation.org/UA/Machinery/;s=Machine/Identification/Manufacturer',
-    semantic_id: 'http://opcfoundation.org/UA/Machinery/Manufacturer'
+    node_id: 'nsu=http://opcfoundation.org/UA/Machinery/;i=6002',
+    semantic_id: 'nsu=http://opcfoundation.org/UA/Machinery/;i=6002'
   },
   {
-    name: 'Manufacturer', companion_spec: 'OPC 40010 Robotics',
-    node_id: 'nsu=http://opcfoundation.org/UA/Robotics/;s=MotionDevice/Identification/Manufacturer',
-    semantic_id: 'http://opcfoundation.org/UA/Robotics/Manufacturer'
+    name: 'Manufacturer', companion_spec: 'OPC 40540 Additive Manufacturing',
+    node_id: 'nsu=http://opcfoundation.org/UA/AdditiveManufacturing/;i=6011',
+    semantic_id: 'nsu=http://opcfoundation.org/UA/AdditiveManufacturing/;i=6011'
   }
 ]
 const ASHRAE223 = [
@@ -75,9 +75,9 @@ describe('suggestionForMetric', () => {
 
   it('tells OPC UA points with one browse name apart by the group', () => {
     expect(suggested({ name: 'Machine/Manufacturer', standard: 'OPC UA' }))
-      .toBe('http://opcfoundation.org/UA/Machinery/Manufacturer')
-    expect(suggested({ name: 'MotionDevice/Manufacturer', metric_group: 'MotionDevice', standard: 'OPC UA' }))
-      .toBe('http://opcfoundation.org/UA/Robotics/Manufacturer')
+      .toBe('nsu=http://opcfoundation.org/UA/Machinery/;i=6002')
+    expect(suggested({ name: 'Feedstock/Manufacturer', metric_group: 'Feedstock', standard: 'OPC UA' }))
+      .toBe('nsu=http://opcfoundation.org/UA/AdditiveManufacturing/;i=6011')
     // No group to choose by, and two ids: no suggestion rather than a guess.
     expect(suggested({ name: 'Manufacturer', standard: 'OPC UA' })).toBeNull()
   })
@@ -101,7 +101,7 @@ describe('semanticIdCandidates', () => {
   })
 
   it('keeps both OPC UA points that share a browse name, told apart by their spec', () => {
-    expect(byLabel('Manufacturer').map(c => c.detail).sort()).toEqual(['OPC 40001 Machinery', 'OPC 40010 Robotics'])
+    expect(byLabel('Manufacturer').map(c => c.detail).sort()).toEqual(['OPC 40001 Machinery', 'OPC 40540 Additive Manufacturing'])
   })
 
   it('takes a template element\'s recorded reference type and lists it under its template', () => {
@@ -137,8 +137,8 @@ describe('searchSemanticIdCandidates', () => {
   })
 
   it('needs every word, and caps the list while counting the rest', () => {
-    expect(searchSemanticIdCandidates(candidates, 'manufacturer robotics').matches.map(c => c.detail))
-      .toEqual(['OPC 40010 Robotics'])
+    expect(searchSemanticIdCandidates(candidates, 'manufacturer additive').matches.map(c => c.detail))
+      .toEqual(['OPC 40540 Additive Manufacturing'])
     const capped = searchSemanticIdCandidates(candidates, 'http', { limit: 2 })
     expect(capped.matches).toHaveLength(2)
     expect(capped.total).toBeGreaterThan(2)
