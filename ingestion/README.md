@@ -1432,7 +1432,7 @@ still open. This is the one place it is written down; other pages link here.
 | :--- | :--- | :--- | :--- |
 | **1** | Gateway to broker: the link drops, or the broker restarts | The edge node. The [appliance](#store-and-forward-on-the-appliance-loss-1) keeps its readings on disk and replays them as historical. Any other edge node: what its vendor does; a sequence gap makes the daemon ask for a rebirth, which restates current values | What the appliance's buffer cannot hold, which is reported. A link that dies without closing is noticed only at the keepalive, so the appliance sends again what it published in that window. A third-party edge node that does not buffer loses the gap |
 | **2** | Across a daemon restart or upgrade | The edge node again, [the Sparkplug way](#a-daemon-restart-loss-2): the death certificate says the host is offline, a conformant edge node configured with this primary host buffers until the next birth, then replays with `is_historical`. The daemon receives until the stream is quiet before it stops | A third-party edge node that ignores STATE and does not buffer loses the gap, by design |
-| **3** | A connected daemon that falls behind | Nothing yet. The broker sheds for a slow subscriber past 1,000 queued packets, and *Broker Shedding Messages* says so | Design work with [#397](https://github.com/Harri-Llewelyn/Aber/issues/397) and [#398](https://github.com/Harri-Llewelyn/Aber/issues/398) |
+| **3** | A connected daemon that falls behind | The broker queues up to 20,000 messages for it (`max_queued_messages`), which holds the rebirth after a restart ([below](#a-daemon-restart-loss-2)). Past that it sheds, and *Broker Shedding Messages* says so | A daemon that stays behind. Design work with [#397](https://github.com/Harri-Llewelyn/Aber/issues/397), [#398](https://github.com/Harri-Llewelyn/Aber/issues/398) and [#791](https://github.com/Harri-Llewelyn/Aber/issues/791) |
 
 **Sparkplug puts the buffer at the edge, and Aber stays conformant.** Sparkplug 3.0.0 requires
 NBIRTH, DBIRTH, NDATA, DDATA, DDEATH, NCMD and DCMD at QoS 0 (`tck-id-topics-ddata-mqtt` and its
@@ -1468,6 +1468,17 @@ image pull.
 - **Upgrade below the knee.** After the birth the edge nodes replay alongside live traffic; the
   appliance paces its replay to 50 readings a second after a random delay of up to 30 s, so a fleet
   does not arrive at once.
+- **The broker holds the rebirth.** When the new daemon says it is online, every edge node births
+  at once, an NBIRTH and a DBIRTH per device, and resumes live data. The daemon records each birth
+  with two PostgREST calls on its receive thread, about 70 a second, so for a few seconds it falls
+  behind. The broker queues up to 20,000 messages for it (`max_queued_messages`,
+  [`mosquitto/mosquitto.conf`](../mosquitto/mosquitto.conf)). With Mosquitto's default of 1,000 it
+  shed what followed, DBIRTHs included, and each gap made the daemon ask for another rebirth: a
+  restart lost 1.1 % of readings at 500 msg/s and 3.9 % at 1,000. With 20,000 the same restarts,
+  and one held down for 156 s, lost nothing
+  ([`test-harness/README.md`](../test-harness/README.md#restarts-under-load)). Taking the births off
+  the receive thread, so the queue is a margin rather than the mechanism, is
+  [#791](https://github.com/Harri-Llewelyn/Aber/issues/791).
 
 ### Store and forward on the appliance (loss 1)
 

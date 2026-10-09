@@ -231,7 +231,8 @@ up, not the sustained rate.
   readings taken meanwhile are buffered in memory (`LOADGEN_BUFFER_LIMIT_MESSAGES`, two million
   DDATA by default) and replayed with `is_historical` after the next birth, at up to a fifth of the
   step's rate. Before stopping, the run waits up to 15 minutes for the buffers to empty. So a
-  restart run measures the conformant path, not a broker queue.
+  restart run measures the conformant path: the edge nodes hold the gap, and the broker's queue
+  holds only the rebirth after it ([Restarts under load](#restarts-under-load)).
 
 ### Results
 
@@ -452,6 +453,36 @@ statements; most are RPCs, whose bodies it cannot see.
 
 **Left as it is.** Realtime's change poll (`realtime.list_changes`, about 4 ms, several times a
 second) is upstream's price for the dashboard's live updates, over a seven-table publication.
+
+#### Restarts under load
+
+Measured 2026-10-09 on the k3d development node, with the fleet above (8 gateways, 400 devices, 10
+metrics a message) and `--restart-ingestion-at 60`. Every run below buffered and replayed every
+reading taken while the host was offline, with none dropped from a full buffer.
+
+| Run | Broker queue | Gap | Buffered and replayed | Broker shed | Lost |
+| :--- | :--- | ---: | ---: | ---: | ---: |
+| `50x240` | 1,000 (Mosquitto's default) | 5 s | 232 DDATA | 0 | 0 |
+| `500x300` | 1,000 | 5 s | 2,371 DDATA | 1,672 | 16,720 readings (1.1 %) |
+| `1000x300` | 1,000 | 8 s | 4,779 DDATA | 11,604 | 115,840 readings (3.9 %) |
+| `500x500`, `--restart-hold 150` | 1,000 | 155 s | 76,562 DDATA | 1,362 | 13,620 readings (0.5 %) |
+| `500x300` | 20,000 | 8 s | 2,416 DDATA | 0 | 0 |
+| `1000x300` | 20,000 | 6 s | 4,643 DDATA | 0 | 0 |
+| `500x500`, `--restart-hold 150` | 20,000 | 156 s | 76,601 DDATA | 0 | 0 |
+
+**What the default queue lost was the rebirth.** Every node births at once when the new daemon says
+it is online, and the daemon records births at about 70 a second on its receive thread. The broker
+shed for it within a second or two of the births, DBIRTHs included. Each gap then made the daemon ask
+for another rebirth, three rounds at 1,000 msg/s. What the broker shed equals what was lost, to
+within a message. The broker now queues 20,000 messages
+([`ingestion/README.md`, "Loss model"](../ingestion/README.md#loss-model)); its peak working set did
+not move (24.8 MiB, against 25.2 at the default). Taking the births off the receive thread is
+[#791](https://github.com/Harri-Llewelyn/Aber/issues/791).
+
+**The first restart run, before the shutdown was fixed, lost 960 readings at 50 msg/s.** The daemon's
+signal handler blocked the network loop in a 2 s wait for its death certificate's acknowledgement,
+which that loop could not read. That run also held a persistent broker session, which Sparkplug
+forbids for a host and which is gone.
 
 #### Not measured
 

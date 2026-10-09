@@ -547,7 +547,8 @@ CALL refresh_continuous_aggregate('telemetry_5m', '<start>', '<end>');
 CALL refresh_continuous_aggregate('telemetry_1h', '<start>', '<end>');
 ```
 
-A window older than a rollup's retention is not refreshed.
+A window older than a rollup's retention is not refreshed. Doing this without a person is
+[#788](https://github.com/Harri-Llewelyn/Aber/issues/788).
 
 ---
 

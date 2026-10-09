@@ -112,6 +112,12 @@ re-run.
   reaches a gateway watching `spBv1.0/STATE/#` within a second. A gateway that buffers on STATE
   acts on that, so the readings it takes from then on wait on the gateway rather than being sent to
   a host that is gone ([`ingestion/README.md`, "Loss model"](../ingestion/README.md#loss-model)).
+- **A connected client may fall 20,000 messages behind** (`max_queued_messages`) before the broker
+  drops what follows; Mosquitto's default is 1,000. The default shed the rebirth that follows a
+  restart of ingestion: 1.1 % of readings at 500 msg/s, 3.9 % at 1,000. With 20,000 the same
+  restarts lost nothing and the broker's peak working set did not move
+  ([`test-harness/README.md`, "Restarts under load"](../test-harness/README.md#restarts-under-load)).
+  It is a queue for a client that is connected, not a session, so the host's clean session stands.
 - Refusal is still silent at QoS 0. The `Not authorized` reason code rides on PUBACK, which does
   not exist at QoS 0 under either protocol version, and Sparkplug B requires QoS 0 for every
   data and command message. A gateway publishing under the wrong edge node learns nothing from the broker by
