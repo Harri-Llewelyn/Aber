@@ -176,8 +176,8 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
 # enrolled gateway, and one class that acts as the appliance: it pushes with the key it enrolled
 # with and asserts the branch rules (appliance taken, main and every other branch refused, no
 # force-push). GITEA_WEBHOOK_SECRET is the release Secret's value (the one the edge runtime
-# holds); GITEA_TEST_SSH is the forge's SSH address from this host (the dev loop forwards it to
-# ssh://git@127.0.0.1:2222). Each class skips without its own.
+# holds); GITEA_TEST_SSH is the forge's SSH address from this host (the dev loop publishes it, or
+# forwards it on an older cluster, at ssh://git@127.0.0.1:2222). Each class skips without its own.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=... \
   GITEA_TEST_SSH=ssh://git@127.0.0.1:2222 python supabase/functions/forge-events/test_forge_events.py
 

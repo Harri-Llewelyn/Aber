@@ -167,7 +167,7 @@ spec:
       {{- end }}
       # M5. grafana/grafana runs as uid/gid 472 -- NOT 1000, which is the mistake to make here.
       securityContext:
-        {{- toYaml .Values.grafana.podSecurityContext | nindent 8 }}
+        {{- include "aber.podSecurityContext" .Values.grafana.podSecurityContext | nindent 8 }}
       initContainers:
         {{/*
           Renders the datasource template, exactly as the gateway's config is rendered and for the same
@@ -232,6 +232,10 @@ spec:
               readOnly: true
             - name: datasources
               mountPath: /datasources
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             requests: { cpu: 10m, memory: 32Mi }
             limits: { memory: 64Mi }
@@ -291,6 +295,10 @@ spec:
               readOnly: true
             - name: alerting
               mountPath: /alerting
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             requests: { cpu: 10m, memory: 32Mi }
             limits: { memory: 64Mi }
@@ -319,6 +327,10 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/grafana
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             requests: { cpu: 10m, memory: 32Mi }
             limits: { memory: 64Mi }
@@ -398,6 +410,10 @@ spec:
             periodSeconds: 20
             timeoutSeconds: 5
             failureThreshold: 4
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             {{- toYaml .Values.grafana.resources | nindent 12 }}
           volumeMounts:

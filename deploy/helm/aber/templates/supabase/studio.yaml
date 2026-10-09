@@ -38,6 +38,9 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: studio
           image: "{{ .Values.supabaseStudio.image.repository }}:{{ .Values.supabaseStudio.image.tag }}"
@@ -110,6 +113,10 @@ spec:
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             {{- toYaml .Values.supabaseStudio.resources | nindent 12 }}
           volumeMounts:

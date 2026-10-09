@@ -1,5 +1,6 @@
 // =================================================================================================
-// scripts/try.mjs, scripts/lib/k3d.mjs and the localhost half of scripts/setup.mjs
+// scripts/try.mjs, scripts/lib/k3d.mjs, the localhost half of scripts/setup.mjs, and the dev loop's
+// cluster ports and forwards (scripts/dev-cluster.mjs)
 //
 // The parts that need no cluster: which tools are missing and what the message says, who holds a
 // port, the arguments, the version read, the install the trial runs, and the values file setup
@@ -19,6 +20,7 @@ import {
 } from './lib/k3d.mjs';
 import { CHART_REF, chartVersionOf, compareReleases, readChartVersion } from './lib/release-chart.mjs';
 import { CONTEXT, DEFAULT_ADMIN_EMAIL, VALUES, adminFrom, installArgs, parseArgs } from './try.mjs';
+import { clusterCreateArgs, wantedForwards } from './dev-cluster.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -79,12 +81,39 @@ test('a port held by another cluster, a container or a program says which', () =
   assert.match(portTakenMessage(80, []), /another program/);
 });
 
-test('a trial cluster publishes the dev loop\'s ports', () => {
+test('a trial cluster publishes the shared ports, and not the forge\'s SSH port', () => {
   const args = createClusterArgs('aber-try', ['--kubeconfig-switch-context=false']);
+  assert.deepEqual(CLUSTER_PORTS, [80, 1883, 8883]);
   for (const p of CLUSTER_PORTS) assert.ok(args.includes(`${p}:${p}@loadbalancer`), `port ${p}`);
+  assert.ok(!args.includes('2222:2222@loadbalancer'));
   assert.deepEqual(args.slice(0, 3), ['cluster', 'create', 'aber-try']);
   assert.equal(args.at(-1), '--wait');
   assert.ok(args.includes('--kubeconfig-switch-context=false'));
+});
+
+test('a dev cluster also publishes the forge\'s SSH port, the one values-dev.yaml gives gitea-external', () => {
+  const args = clusterCreateArgs('aber');
+  for (const p of CLUSTER_PORTS) assert.ok(args.includes(`${p}:${p}@loadbalancer`), `port ${p}`);
+  const port = readFileSync(join(REPO, 'deploy/helm/aber/values-dev.yaml'), 'utf8')
+    .match(/^gitea:\n {2}ssh:\n {4}external:\n {6}port: (\d+)$/m)?.[1];
+  assert.ok(port, 'values-dev.yaml sets gitea.ssh.external.port');
+  assert.ok(args.includes(`${port}:${port}@loadbalancer`), `port ${port}`);
+  assert.deepEqual(args.slice(0, 3), ['cluster', 'create', 'aber']);
+  assert.equal(args.at(-1), '--wait');
+});
+
+test('dev:forward forwards a load-balancer port only where the cluster does not publish it', () => {
+  const locals = (opts) => wantedForwards(opts).map((f) => f.local);
+  const forge = (opts) => wantedForwards(opts).find((f) => f.local === 2222);
+  // A cluster created before the load balancer published 2222: the forward stands in.
+  assert.deepEqual(forge({ tls: true, published: () => false }), { local: 2222, service: 'gitea', remote: 22, what: 'the forge over SSH' });
+  assert.ok(locals({ tls: true, published: () => false }).includes(1883));
+  // A cluster `up` creates: the load balancer has 1883, 8883 and 2222, so none is forwarded.
+  const published = (p) => [80, 1883, 8883, 2222].includes(p);
+  for (const p of [1883, 8883, 2222]) assert.ok(!locals({ tls: true, published }).includes(p), `port ${p}`);
+  assert.ok(locals({ tls: true, published }).includes(9001));
+  assert.ok(!locals({ tls: false, published: () => false }).includes(8883));
+  assert.ok(locals({ tls: false, published }).includes(54322));
 });
 
 test('k3d and docker output are read', () => {

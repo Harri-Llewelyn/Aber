@@ -160,6 +160,9 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: frontend
           # BUILT WITH VITE_RUNTIME_CONFIG=true:
@@ -203,6 +206,13 @@ spec:
             periodSeconds: 20
             timeoutSeconds: 3
             failureThreshold: 4
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              # The nginx master runs as root: it chowns its temp directories to the nginx user
+              # and drops to that user for the workers.
+              add: ["CHOWN", "SETGID", "SETUID"]
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
           volumeMounts:

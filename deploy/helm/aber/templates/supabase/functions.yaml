@@ -41,6 +41,9 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: edge-runtime
           # BUILT FROM supabase/functions/Dockerfile, not pulled. The functions and the Remote
@@ -216,6 +219,10 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             {{- toYaml .Values.supabaseFunctions.resources | nindent 12 }}
           {{- if .Values.ingress.tls.enabled }}

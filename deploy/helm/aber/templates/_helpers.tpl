@@ -111,6 +111,17 @@ boot, studio is Zod-coupled to a postgres-meta version, node-red is what setting
 {{- end -}}
 
 {{/*
+A pod securityContext built from a component's `podSecurityContext` value, with the RuntimeDefault
+seccomp profile every pod in the chart runs under unless that value names its own.
+
+  securityContext:
+    {{- include "aber.podSecurityContext" .Values.gitea.podSecurityContext | nindent 8 }}
+*/}}
+{{- define "aber.podSecurityContext" -}}
+{{- toYaml (merge (deepCopy (. | default dict)) (dict "seccompProfile" (dict "type" "RuntimeDefault"))) -}}
+{{- end -}}
+
+{{/*
 The image serving each Directory row, as JSON keyed by component, for db-init to record in
 directory_services.image (archived migration 0140). Rendered by the same expression as each workload's own
 image:, and a component the chart does not deploy is left out so its row is cleared; Alloy only
@@ -862,6 +873,10 @@ Usage: (dict "ctx" . "image" "<repo:tag>" "pullPolicy" "IfNotPresent" "user" "po
     - name: tls
       mountPath: /etc/aber/postgres/tls
       readOnly: true
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
   resources:
     requests: { cpu: 10m, memory: 16Mi }
     limits: { memory: 64Mi }
@@ -922,6 +937,10 @@ database out of service. Whether it works is the scrape's question.
     - name: exporter-queries
       mountPath: /etc/postgres-exporter
       readOnly: true
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
   resources:
     {{- toYaml $m.resources | nindent 4 }}
 {{- end -}}
@@ -1175,6 +1194,10 @@ template and kubeconform all passed.
         sleep 3
       done
       echo "{{ .describe }} is ready"
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
 {{- end -}}
 
 {{/*
@@ -1207,6 +1230,10 @@ refused connection; optional describe names what is waited for.
         sleep 3
       done
       echo "{{ .describe | default (printf "%s is accepting queries" .host) }} — ready"
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
 {{- end -}}
 
 {{/*

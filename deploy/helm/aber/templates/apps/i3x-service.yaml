@@ -48,6 +48,8 @@ spec:
         runAsNonRoot: true
         runAsUser: 10001
         fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         {{/*
           The broker port follows the SAME switch as the client env below and as the NetworkPolicy

@@ -44,6 +44,9 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         {{/*
           Waits on storage-api's OWN readiness, not just on the database.
@@ -88,6 +91,10 @@ spec:
             - name: script
               mountPath: /app
               readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             requests: { cpu: 50m, memory: 64Mi }
             limits: { memory: 256Mi }

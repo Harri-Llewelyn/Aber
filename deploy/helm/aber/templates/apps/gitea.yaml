@@ -262,7 +262,7 @@ spec:
       # fsGroup 1000 to match USER_UID/USER_GID below. A storage class that ignores fsGroup gives
       # "permission denied" on a volume that mounted perfectly -- global.storageClass says so too.
       securityContext:
-        {{- toYaml .Values.gitea.podSecurityContext | nindent 8 }}
+        {{- include "aber.podSecurityContext" .Values.gitea.podSecurityContext | nindent 8 }}
       initContainers:
         {{/*
           The administrator, created once and then left alone.
@@ -314,6 +314,13 @@ spec:
               readOnly: true
             - name: data
               mountPath: /data
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              # Root, as the image's setup scripts expect: they rewrite app.ini and the git user's
+              # .ssh, owned by git (uid 1000), chown what they create to it, and run gitea as git.
+              add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]
           resources:
             requests: { cpu: 10m, memory: 64Mi }
             limits: { memory: 256Mi }
@@ -355,6 +362,14 @@ spec:
             periodSeconds: 20
             timeoutSeconds: 5
             failureThreshold: 4
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              # s6 runs as root. Its setup does what the init container's does; Gitea runs as git;
+              # sshd binds 22, chroots its pre-auth child and switches to git for each clone; KILL
+              # lets the supervisor deliver SIGTERM to Gitea so SQLite closes cleanly on a stop.
+              add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "KILL", "NET_BIND_SERVICE", "SETGID", "SETUID", "SYS_CHROOT"]
           resources:
             {{- toYaml .Values.gitea.resources | nindent 12 }}
           volumeMounts:

@@ -59,6 +59,9 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         {{/*
           Waits on storage-api, not on the database. The database has been up since db-init; what
@@ -88,6 +91,10 @@ spec:
             - name: sql
               mountPath: /sql
               readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             requests: { cpu: 50m, memory: 64Mi }
             limits: { memory: 256Mi }

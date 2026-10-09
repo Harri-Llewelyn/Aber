@@ -29,6 +29,9 @@ spec:
   imagePullSecrets:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
   {{- /* A new pod's first connection can be refused until the NetworkPolicy controller admits
        it (k3s refused test-fdw's in the second it started), so wait as the hook Jobs do. */}}
   initContainers:
@@ -89,6 +92,10 @@ spec:
           echo 'PASS: both databases refuse plaintext, verify under the chart CA, and hold no plaintext backend from beyond loopback.'
       volumeMounts:
         {{- include "aber.dbClientCaMount" . | nindent 8 }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
       resources:
         requests: { cpu: 50m, memory: 64Mi }
         limits: { memory: 256Mi }

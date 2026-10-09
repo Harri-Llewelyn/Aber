@@ -65,6 +65,9 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         {{- include "aber.waitForPostgres" (dict "ctx" . "name" "wait-for-supabase-db" "host" (include "aber.supabaseDb.host" .) "port" (include "aber.supabaseDb.port" .) "user" "postgres" "db" "postgres" "passwordKey" "POSTGRES_PASSWORD") | nindent 8 }}
         {{- if .Values.supabaseAuth.enabled }}
@@ -389,6 +392,10 @@ spec:
             - name: seed
               mountPath: /seed
               readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             requests: { cpu: 100m, memory: 128Mi }
             limits: { memory: 512Mi }

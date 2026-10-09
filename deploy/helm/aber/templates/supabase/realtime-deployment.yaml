@@ -53,6 +53,9 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         {{/*
           Waits for the `_realtime` SCHEMA, not just for the database. Realtime runs its own
@@ -82,6 +85,10 @@ spec:
                 sleep 3
               done
               echo "_realtime schema exists"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             requests: { cpu: 10m, memory: 32Mi }
             limits: { memory: 128Mi }
@@ -200,6 +207,12 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              # /app/run.sh runs the migrations as nobody through sudo.
+              add: ["SETGID", "SETUID"]
           resources:
             {{- toYaml .Values.realtime.resources | nindent 12 }}
           {{- if .Values.postgresTls.enabled }}

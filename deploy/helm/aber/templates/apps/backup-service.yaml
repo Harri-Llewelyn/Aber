@@ -107,6 +107,9 @@ spec:
                       - mosquitto
                       {{- end }}
       {{- end }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: backup-service
           image: {{ include "aber.image" (dict "ctx" . "image" .Values.backupService.image) | quote }}
@@ -162,6 +165,13 @@ spec:
               port: healthz
             initialDelaySeconds: 30
             periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              # Archives the forge's and the broker's volumes, whose files belong to uids 1000 and
+              # 1883, some at 0600.
+              add: ["DAC_OVERRIDE"]
           resources:
             {{- toYaml .Values.backupService.resources | nindent 12 }}
           volumeMounts:

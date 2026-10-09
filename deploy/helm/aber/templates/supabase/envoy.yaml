@@ -111,6 +111,9 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         - name: render-config
           image: alpine:3.24
@@ -350,6 +353,10 @@ spec:
               mountPath: /template
             - name: config
               mountPath: /config
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
       containers:
         - name: envoy
           image: "{{ .Values.supabaseEnvoy.image.repository }}:{{ .Values.supabaseEnvoy.image.tag }}"
@@ -390,6 +397,13 @@ spec:
               port: {{ .Values.supabaseEnvoy.metrics.port }}
             initialDelaySeconds: 15
             periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              # The image's entrypoint starts as root, hands /dev/stdout and /dev/stderr to the
+              # envoy user and drops to it.
+              add: ["CHOWN", "SETGID", "SETUID"]
           {{- with .Values.supabaseEnvoy.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
