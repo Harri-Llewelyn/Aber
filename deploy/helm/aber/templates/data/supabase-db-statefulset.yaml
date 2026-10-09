@@ -121,7 +121,7 @@ spec:
       {{- end }}
       # M5. Same reasoning as TimescaleDB; this image's postgres is uid 100, gid 101 (values.yaml).
       securityContext:
-        {{- toYaml .Values.supabaseDb.podSecurityContext | nindent 8 }}
+        {{- include "aber.podSecurityContext" .Values.supabaseDb.podSecurityContext | nindent 8 }}
       containers:
         - name: supabase-db
           image: {{ include "aber.image" (dict "image" .Values.supabaseDb.serverImage "ctx" .) | quote }}
@@ -231,12 +231,14 @@ spec:
             failureThreshold: 6
           # The entrypoint starts as root: it chowns the data and socket directories (CHOWN, and
           # DAC_OVERRIDE and FOWNER to walk and chmod what postgres owns), then gosu drops to
-          # postgres (SETUID, SETGID). The server itself runs with none of them.
+          # postgres (SETUID, SETGID). tini, as root, forwards the stop signal to it (KILL);
+          # without KILL tini exits on EPERM and the server is killed, not shut down. The server
+          # itself runs with none of them.
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
-              drop: [ALL]
-              add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+              drop: ["ALL"]
+              add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "KILL", "SETGID", "SETUID"]
           resources:
             {{- toYaml .Values.supabaseDb.resources | nindent 12 }}
           volumeMounts:
@@ -277,7 +279,7 @@ spec:
             runAsNonRoot: true
             allowPrivilegeEscalation: false
             capabilities:
-              drop: [ALL]
+              drop: ["ALL"]
           resources:
             {{- toYaml .Values.supabaseDb.physicalBackup.resources | nindent 12 }}
           volumeMounts:

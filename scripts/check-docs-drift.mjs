@@ -4269,8 +4269,6 @@ function edgeFunctionNames() {
 {
   const TEMPLATES = 'deploy/helm/aber/templates/';
   const RUNBOOK = 'deploy/k8s/README.md';
-  // Templates not hardened yet. Delete an entry once its pods and containers carry the settings.
-  const PENDING = new Set(['data/supabase-db-statefulset.yaml']);
   const BASELINE = new Set(['AUDIT_WRITE', 'CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'FSETID', 'KILL', 'MKNOD',
     'NET_BIND_SERVICE', 'SETFCAP', 'SETGID', 'SETPCAP', 'SETUID', 'SYS_CHROOT']);
   const indent = (l) => l.match(/^ */)[0].length;
@@ -4291,7 +4289,6 @@ function edgeFunctionNames() {
   let containers = 0;
   let pods = 0;
   for (const f of files) {
-    const rel = f.slice(TEMPLATES.length);
     // Template comments are blanked with their line breaks kept, so the line numbers stay true.
     const lines = read(f).replace(/\{\{-?\s*\/\*[\s\S]*?\*\/\s*-?\}\}/g, (c) => c.replace(/[^\n]/g, '')).split('\n');
     const faults = [];
@@ -4334,13 +4331,8 @@ function edgeFunctionNames() {
         faults.push(`${f}:${i + 1}: the pod sets no seccompProfile of type RuntimeDefault`);
       }
     });
-    if (PENDING.has(rel)) {
-      if (!faults.length) bad.push(`${f} carries the settings now: delete it from check 51's PENDING`);
-    } else {
-      bad.push(...faults);
-    }
+    bad.push(...faults);
   }
-  for (const p of PENDING) if (!files.includes(TEMPLATES + p)) bad.push(`check 51's PENDING names ${TEMPLATES}${p}, which does not exist`);
 
   // The runbook's table: container names in backticks before any parenthesis, capabilities in backticks.
   const runbook = read(RUNBOOK);

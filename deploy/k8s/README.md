@@ -1403,6 +1403,7 @@ container gets back only the capabilities its process was shown to need, each na
 | `assemble-config` (mosquitto) | `CHOWN`, `DAC_OVERRIDE`, `FOWNER` | It reads the plugin's document (uid 1883, mode 0600) and writes its replacement owned by 1883. |
 | `certificate-reload` (mosquitto, broker TLS only) | `KILL` | It sends SIGHUP to the broker, which runs as another uid. |
 | `timescaledb` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `SETGID`, `SETUID` | The entrypoint fixes the data directory's owner and mode, then drops to postgres (uid 70). tini forwards the stop signal to it. |
+| `supabase-db` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `SETGID`, `SETUID` | The same, for postgres at uid 100. |
 | `gitea-init` (gitea) | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID`, `SETUID` | The image's setup rewrites `app.ini` and the git user's `.ssh`, and runs `gitea` as git (uid 1000). |
 | `gitea` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `NET_BIND_SERVICE`, `SETGID`, `SETUID`, `SYS_CHROOT` | The same setup. sshd binds port 22 and chroots its pre-authentication child, and s6 delivers SIGTERM to Gitea. |
 | `backup-service` | `DAC_OVERRIDE` | It archives the forge's and the broker's volumes, whose files belong to other uids, some at 0600. |

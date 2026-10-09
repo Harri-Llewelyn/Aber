@@ -77,6 +77,5 @@
   "KSV-0109 ConfigMap/aber-grafana-config": "Names a password or token field (a template, a script or seed SQL column names) and holds no secret value.",
   "KSV-0109 ConfigMap/aber-mosquitto-scripts": "Names a password or token field (a template, a script or seed SQL column names) and holds no secret value.",
   "KSV-0109 ConfigMap/aber-timescaledb-maintenance": "Names a password or token field (a template, a script or seed SQL column names) and holds no secret value.",
-  "KSV-0118 container/supabase-db": "No securityContext: tracked in #419.",
   "KSV-0121 daemonset/alloy": "Alloy reads the node's /, /proc and /sys, read-only, to export host metrics; the DaemonSet exists for that."
 }

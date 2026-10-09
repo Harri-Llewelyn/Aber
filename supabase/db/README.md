@@ -76,11 +76,14 @@ asynchronous push fails after `archive.info` was read:
 - **`wal_compression` is `supabaseDb.walCompression`**, `lz4` by default as on the historian. It is a
   server flag (`-c`), so `ALTER SYSTEM` cannot override it. Measuring the other setting needs a
   restart with the value changed.
-- **The server container keeps five capabilities.** The upstream entrypoint starts as root: it
+- **The server container keeps six capabilities.** The upstream entrypoint starts as root: it
   `chown`s the data and socket directories (`CHOWN`), walks and `chmod`s directories `postgres`
   already owns (`DAC_OVERRIDE`, `FOWNER`), and `gosu` drops to `postgres` (`SETUID`, `SETGID`).
-  Measured: the server starts on an empty root-owned volume with exactly these five and
-  `no-new-privileges`. After the drop the postmaster's effective set is empty (`CapEff: 0`).
+  `tini` stays root and forwards the stop signal to the server (`KILL`). Measured: the server
+  starts on an empty root-owned volume with the first five and `no-new-privileges`, and after the
+  drop the postmaster's effective set is empty (`CapEff: 0`). Without `KILL`, `docker stop` ends
+  in `[FATAL tini (1)] Unexpected error when forwarding signal: 'Operation not permitted'` and the
+  server is killed. With it, the server logs `received fast shutdown request` and exits 0.
 - **The sidecar runs as `postgres` (100:101) with no capabilities.** A backup reads the data
   directory, which that user owns, and connects over the shared socket directory as
   `supabase_admin`, the image's superuser, whom its `pg_hba` trusts on the socket. `postgres` is not

@@ -557,7 +557,7 @@ node scripts/rehearse-platform-restore.mjs --fill-mib 2048                      
 ### Results
 
 Measured 2026-10-08 against containers of the image itself, not a cluster: the server under `tini`
-with the chart's five capabilities and the sidecar's own script, on a posix repository in a local
+with the entrypoint's five start-up capabilities and the sidecar's own script, on a posix repository in a local
 volume. On a 23 MB database the full backup took 5 s, the restore 6 s and recovery 4 s. The
 marker before the target came back and the one after it did not, the Vault secret decrypted under
 the restored key, and the server promoted onto timeline 2. The cluster rehearsal's figures go here
