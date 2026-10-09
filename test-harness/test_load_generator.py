@@ -218,6 +218,13 @@ class PacingTest(unittest.TestCase):
     def test_a_publisher_that_is_ahead_is_never_asked_for_a_negative_number(self):
         self.assertEqual(load_generator.pace(0.5, 100, 60), (0, 0))
 
+    def test_a_rate_below_one_a_second_still_sends(self):
+        """3.3 msg/s across 8 publishers is 0.41 each: the message due is sent, not abandoned."""
+        self.assertEqual(load_generator.pace(3.0, 0.4125, 0), (1, 0))
+
+    def test_a_slow_publisher_that_stalled_sends_one_and_abandons_the_rest(self):
+        self.assertEqual(load_generator.pace(100.0, 0.4125, 0), (1, 40))
+
 
 class VerdictTest(unittest.TestCase):
     def test_a_growing_queue_names_the_writer_and_the_rate(self):

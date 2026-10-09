@@ -93,10 +93,12 @@ def pace(elapsed, rate, sent):
     measures neither the target nor the limit, and the shortfall is itself the finding.
     """
     due = int(elapsed * rate) - sent
-    if due <= rate * BACKLOG_LIMIT_SECONDS:
+    # At least one may wait: below one message a second, the next is always older than the limit
+    # by the time it falls due, and a publisher that kept none would send nothing.
+    keep = max(int(rate * BACKLOG_LIMIT_SECONDS), 1)
+    if due <= keep:
         return max(due, 0), 0
-    abandoned = due - int(rate * BACKLOG_LIMIT_SECONDS)
-    return due - abandoned, abandoned
+    return keep, due - keep
 
 # The metric set every synthetic device declares at birth. Names, not aliases: a name-carrying
 # payload is the larger and slower of the two wire forms, so an envelope measured on it holds for
