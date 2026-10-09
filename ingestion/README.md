@@ -1430,7 +1430,7 @@ still open. This is the one place it is written down; other pages link here.
 
 | | Where | What holds it | What is still lost |
 | :--- | :--- | :--- | :--- |
-| **1** | Gateway to broker: the link drops, or the broker restarts | The edge node. The [appliance](#store-and-forward-on-the-appliance-loss-1) keeps its readings on disk and replays them as historical. Any other edge node: what its vendor does; a sequence gap makes the daemon ask for a rebirth, which restates current values | What the appliance's buffer cannot hold, and the messages already on the wire when the link failed. Both are reported. A third-party edge node that does not buffer loses the gap |
+| **1** | Gateway to broker: the link drops, or the broker restarts | The edge node. The [appliance](#store-and-forward-on-the-appliance-loss-1) keeps its readings on disk and replays them as historical. Any other edge node: what its vendor does; a sequence gap makes the daemon ask for a rebirth, which restates current values | What the appliance's buffer cannot hold, which is reported. A link that dies without closing is noticed only at the keepalive, so the appliance sends again what it published in that window. A third-party edge node that does not buffer loses the gap |
 | **2** | Across a daemon restart or upgrade | The edge node again, [the Sparkplug way](#a-daemon-restart-loss-2): the death certificate says the host is offline, a conformant edge node configured with this primary host buffers until the next birth, then replays with `is_historical`. The daemon receives until the stream is quiet before it stops | A third-party edge node that ignores STATE and does not buffer loses the gap, by design |
 | **3** | A connected daemon that falls behind | Nothing yet. The broker sheds for a slow subscriber past 1,000 queued packets, and *Broker Shedding Messages* says so | Design work with [#397](https://github.com/Harri-Llewelyn/Aber/issues/397) and [#398](https://github.com/Harri-Llewelyn/Aber/issues/398) |
 
@@ -1474,9 +1474,12 @@ image pull.
 The appliance is a Sparkplug 3.0.0 edge node configured with this site's primary host, which it is
 given at enrolment. Its flow buffers device readings to `/data/buffer` while it cannot deliver: the
 broker is unreachable, or `spBv1.0/STATE/<host_id>` says the primary host is offline, in which case
-it publishes its NDEATH, disconnects and connects again with the next bdSeq. After its next birth it
-replays them with `is_historical` set on every metric, paced to 50 readings a second after a random
-delay of up to 30 s, and reports the outage. It publishes Sparkplug B protobuf. The flow, its limits
+it publishes its NDEATH, disconnects and connects again with the next bdSeq. When it finds the link
+dead, it also buffers what it published in the last 1.5 keepalives and 15 s, which QoS 0 may have
+delivered into nothing; a copy that did arrive meets the historian's `ON CONFLICT DO NOTHING`. After
+its next birth it replays them with `is_historical` set on every metric, paced to 50 readings a
+second after a random delay of up to 30 s, and reports the outage. It publishes Sparkplug B
+protobuf. The flow, its limits
 and how it writes the files are in
 [`docs/remote-gateways.md`](../docs/remote-gateways.md#when-the-platform-cannot-be-reached). What the
 daemon does with it:
@@ -1693,7 +1696,7 @@ the line, so a drop counter appearing there at all is still the signal.
 | `aber_ingestion_sequence_replayed_total` | `edge_node` | Historical messages out of the live seq run, left out of gap detection. |
 | `aber_ingestion_gateway_outages_total` | `edge_node`, `buffering` | Outages the gateway reported after reconnecting. |
 | `aber_ingestion_gateway_outage_seconds_total` | `edge_node` | Their total length. |
-| `aber_ingestion_gateway_outage_readings_buffered_total` / `_dropped_total` | `edge_node` | Readings buffered to replay, and readings **dropped and never recorded**. Nothing else counts the second. |
+| `aber_ingestion_gateway_outage_readings_buffered_total` / `_dropped_total` | `edge_node` | Readings buffered to replay (an appliance's include those it sent again after finding its link dead), and readings **dropped and never recorded**. Nothing else counts the second. |
 | `aber_ingestion_gateway_outage_last_seconds`, `_last_readings_buffered`, `_last_readings_dropped`, `_last_buffering`, `_reported_timestamp_seconds` | `edge_node` | Gauges: the last report, and when it arrived. What the alert and the dashboard table read. |
 | `aber_ingestion_gateway_outage_reports_rejected_total` | — | Outage reports refused as unusable. |
 | `aber_ingestion_alias_unresolved_total` | — | An alias arrived with no known name. Normal briefly after a restart, pending a rebirth; sustained means a node is not re-birthing. |

@@ -481,7 +481,7 @@ function compareWithHistorian (output, restart) {
     console.log(`  gap     ${restart.seconds.toFixed(0)} s from the restart to the new daemon subscribed`);
   }
   console.log(`  edge    primary host ${totals.primary_host || '(none: the edge nodes did not wait for one)'}; ` +
-    `${totals.sessions_restarted} session(s) restarted on an offline STATE`);
+    `${totals.sessions_restarted} session(s) restarted, ${totals.host_departures ?? 0} of them on an offline STATE`);
   console.log(`          ${(totals.ddata_buffered * each).toLocaleString()} readings buffered, ` +
     `${(totals.ddata_replayed * each).toLocaleString()} replayed with is_historical, ` +
     `${(totals.ddata_dropped_from_buffer * each).toLocaleString()} dropped from a full buffer, ` +

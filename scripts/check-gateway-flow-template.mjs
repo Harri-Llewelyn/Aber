@@ -224,20 +224,20 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
     // Anything wired into the heartbeat can delay or fail it, and a gateway that stops beating is
     // reported STALE and then OFFLINE. A host-metric collector writes to a cache the heartbeat
     // reads instead of being chained into its path. The rebirth handler and store and forward are
-    // the other feeders: each asks for an NBIRTH of its own -- when a host asks, and when the broker
-    // session is new -- beside the injects rather than between them.
+    // the other feeders, and the only two that ask for an NBIRTH: store and forward once a session,
+    // the rebirth handler when the host asks. An inject of its own would be a second each start.
     const feeds = flow.filter((n) => (n.wires || []).some((port) => port.includes(HEARTBEAT))).map((n) => n.id).sort();
-    const expected = ['aber-birth-tick', 'aber-cmd', 'aber-data-tick', 'aber-sf'];
+    const expected = ['aber-cmd', 'aber-data-tick', 'aber-sf'];
     if (JSON.stringify(feeds) !== JSON.stringify(expected)) {
       fail(
-        `the heartbeat is fed by [${feeds.join(', ')}]; expected only its two injects, the rebirth handler and store and forward `
+        `the heartbeat is fed by [${feeds.join(', ')}]; expected only its NDATA inject, the rebirth handler and store and forward `
         + `[${expected.join(', ')}].\n`
         + '         Anything else on that path can delay or fail the heartbeat, and a gateway that\n'
         + '         stops beating is reported STALE and then OFFLINE -- a worse failure than any\n'
         + '         metric it could be collecting.'
       );
     } else {
-      pass('the heartbeat is driven by its two injects, the rebirth handler and store and forward, and nothing else');
+      pass('the heartbeat is driven by its NDATA inject, the rebirth handler and store and forward, and nothing else');
     }
   }
 
@@ -407,7 +407,8 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
     const refreshed = toBroker(rbe, { payload: refresh.payload });
     expect('a refresh republishes every metric', refreshed[0] && names(refreshed[0]),
       ['CycleCount', 'Properties/Manufacturer', 'Running', 'Temperature']);
-    toBroker(heartbeat, { payload: 'NBIRTH' });
+    // A second NBIRTH in a session is published only as the answer to the host's rebirth request.
+    toBroker(heartbeat, { payload: 'NBIRTH', rebirth: true });
     expect('after an NBIRTH the refresh re-births the device', kinds(toBroker(rbe, { payload: 'refresh' })), ['DBIRTH#1']);
     expect('a new metric name needs a new birth', kinds(toBroker(rbe, { payload: { device: 'press-01', metrics: { Vibration: 1.5 } } })), ['DBIRTH#2']);
     expect('a malformed reading is refused, not published', toBroker(rbe, { payload: { device: 'a/b', metrics: {} } }), []);
@@ -433,7 +434,8 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
       const NCMD_FALSE = hex('0880d8c1a28c34121a0a144e6f646520436f6e74726f6c2f52656269727468200b70001807');
 
       const asked = runAll(cmd, { topic: NCMD, payload: DAEMON_NCMD });
-      expect('the daemon\'s NCMD asks the heartbeat for an NBIRTH', asked[0] && asked[0].map((m) => m.payload), ['NBIRTH']);
+      expect('the daemon\'s NCMD asks the heartbeat for an NBIRTH, marked as the rebirth it answers',
+        asked[0] && asked[0].map((m) => [m.payload, m.rebirth]), [['NBIRTH', true]]);
       const [births, refreshes] = runAll(heartbeat, asked[0][0]);
       expect('the NBIRTH restarts the seq', kinds(live(births)), ['NBIRTH#0']);
       expect('and asks publish by exception for a refresh', refreshes.map((m) => m.payload), ['refresh']);
@@ -560,15 +562,18 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
       [['Outage/Started_At', true], ['Outage/Ended_At', true], ['Outage/Readings_Buffered', true],
         ['Outage/Readings_Dropped', true], ['Outage/Buffering', true]]);
     expect('every metric carries a timestamp', birth && birth.metrics.every((x) => x.timestamp > 0), true);
+    const startedAt = clock.t;
     expect('live: a reading is published at once, on the next seq', kinds(pubs(g(ddata(1, clock.t)))), ['DDATA#1']);
     clock.t += 1000;
-    const startedAt = clock.t;
-    expect('a dropped link stops the broker node retrying with the old will', actions(g(DISCONNECTED)), ['disconnect']);
+    const dead = g(DISCONNECTED);
+    expect('a dropped link stops the broker node retrying with the old will', actions(dead), ['disconnect']);
+    expect('what was published within the keepalive window is buffered again: the link may have been dead',
+      dead[1].map((m) => [m.filename, JSON.parse(m.payload).metrics.map((x) => x.double_value)]), [[SEGMENT_1, [1]]]);
     const kept = g(ddata(2, clock.t + 100));
     expect('a reading is then appended to a segment, not published',
       [kept[0].length, kept[1].map((m) => m.filename)], [0, [SEGMENT_1]]);
     clock.t += 1000;
-    const lines = [kept[1][0].payload, g(ddata(3, clock.t))[1][0].payload];
+    const lines = [dead[1][0], kept[1][0], g(ddata(3, clock.t))[1][0]].filter(Boolean).map((m) => m.payload);
     expect('a heartbeat is dropped while there is no session, and takes no seq', g(NDATA())[0], []);
     clock.t += 5000;
     const again = g({ sf: 'tick' });
@@ -581,8 +586,8 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
     const rebirth = pubs(g(NBIRTH()))[0];
     expect('which restarts the seq and carries the new bdSeq', rebirth && [rebirth.seq, metric(rebirth, 'bdSeq').long_value], [0, 1]);
     const beat = pubs(g(NDATA()))[0];
-    expect('the next heartbeat reports the outage, on the next seq', [kinds([beat]), outage(beat)],
-      [['NDATA#1'], { Started_At: startedAt, Ended_At: endedAt, Readings_Buffered: 2, Readings_Dropped: 0, Buffering: true }]);
+    expect('the next heartbeat reports the outage from the oldest reading sent again, counting it', [kinds([beat]), outage(beat)],
+      [['NDATA#1'], { Started_At: startedAt, Ended_At: endedAt, Readings_Buffered: 3, Readings_Dropped: 0, Buffering: true }]);
     expect('the report rides three node messages, then stops',
       [pubs(g(NDATA()))[0], pubs(g(NDATA()))[0], pubs(g(NDATA()))[0]].map((m) => Boolean(outage(m))), [true, true, false]);
     clock.t += 2000;
@@ -591,9 +596,34 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
     g({ sf: 'segment', segment: g.sf().queue[0].n, filename: SEGMENT_1, payload: `${lines.join('\n')}\n` });
     const replayed = g({ sf: 'tick' });
     expect('the replay publishes every buffered reading, oldest first, each flagged is_historical',
-      pubs(replayed).flatMap((m) => m.metrics.map((x) => [x.double_value, Boolean(x.is_historical)])), [[2, true], [3, true]]);
+      pubs(replayed).flatMap((m) => m.metrics.map((x) => [x.double_value, Boolean(x.is_historical)])), [[1, true], [2, true], [3, true]]);
     expect('in one message per device, continuing the live seq', kinds(pubs(replayed)), ['DDATA#5']);
     expect('and the replayed segment is deleted', replayed[4].map((m) => m.filename), [SEGMENT_1]);
+
+    // Only the window is sent again: 1.5 keepalives and the margin, 60 s at the defaults.
+    const win = makeGate();
+    up(win);
+    win(NBIRTH());
+    win(ddata(10, clock.t));
+    clock.t += 61000;
+    win(ddata(11, clock.t));
+    clock.t += 1000;
+    expect('a reading published before the window is not sent again',
+      win(DISCONNECTED)[1].map((m) => JSON.parse(m.payload).metrics[0].double_value), [11]);
+
+    // One NBIRTH a session: a second only answers the host's Node Control/Rebirth.
+    const once = makeGate({ GATEWAY_PRIMARY_HOST_ID: HOST });
+    up(once);
+    expect('two online STATEs before the birth ask the heartbeat once',
+      [once(STATE(true, 1000))[5].length, once(STATE(true, 1001))[5].length], [1, 0]);
+    expect('the NBIRTH asked for is published', kinds(pubs(once(NBIRTH()))), ['NBIRTH#0']);
+    expect('a second in the same session is not, whatever sent it', pubs(once(NBIRTH())), []);
+    expect('one answering the host\'s rebirth request is, and restarts the seq',
+      kinds(pubs(once(Object.assign(NBIRTH(), { rebirth: true })))), ['NBIRTH#0']);
+    const unanswered = makeGate();
+    up(unanswered);
+    clock.t += 11000;
+    expect('a birth asked for and never answered is asked for again', unanswered({ sf: 'tick' })[5].map((m) => m.payload), ['NBIRTH']);
 
     // With a primary host: the NBIRTH waits for its STATE, and its going offline ends the session.
     const h = makeGate({ GATEWAY_PRIMARY_HOST_ID: HOST });
@@ -605,7 +635,9 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
     h(NBIRTH());
     expect('then readings are published', kinds(pubs(h(ddata(4, clock.t)))), ['DDATA#1']);
     expect('a death older than the birth it follows is a previous session\'s, and ignored', actions(h(STATE(false, 999))), []);
-    expect('a valid offline STATE disconnects (the broker node sends the NDEATH first)', actions(h(STATE(false, 1000))), ['disconnect']);
+    const offline = h(STATE(false, 1000));
+    expect('a valid offline STATE disconnects (the broker node sends the NDEATH first)', actions(offline), ['disconnect']);
+    expect('and sends nothing again: the link was alive', offline[1], []);
     expect('and readings wait on disk', [h(ddata(5, clock.t))[1].length, h.sf().queue.length], [1, 1]);
     clock.t += 5000;
     const next = h({ sf: 'tick' }).flatMap((r) => r).find((m) => m.action === 'connect');
@@ -614,23 +646,24 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
     expect('nor on the retained offline STATE', h(STATE(false, 1000))[5], []);
     expect('only when the host is back', h(STATE(true, 2000))[5].map((m) => m.payload), ['NBIRTH']);
 
-    // A CONNECT that never becomes a session is abandoned, and the next has the next bdSeq.
+    // An attempt that never connected sent no CONNECT packet, so its bdSeq is not used up.
     const slow = makeGate();
     slow({ sf: 'tick' });
     slow({ sf: 'state', error: 'ENOENT' });
     slow({ sf: 'state', error: 'ENOENT' });
     slow({ sf: 'tick' });
     clock.t += 16000;
-    expect('a CONNECT with no session after 15 s is abandoned', actions(slow({ sf: 'tick' })), ['disconnect']);
+    expect('an attempt with no session after 15 s is abandoned', actions(slow({ sf: 'tick' })), ['disconnect']);
     clock.t += 5000;
     const retried = slow({ sf: 'tick' })[0].find((m) => m.action === 'connect');
-    expect('and the next carries the next bdSeq', retried && decodeSparkplug(retried.broker.will.payload).metrics[0].long_value, 1);
-    expect('a redeploy starts the session again', (() => {
+    expect('and the next attempt carries the same bdSeq: none reached the broker',
+      retried && decodeSparkplug(retried.broker.will.payload).metrics[0].long_value, 0);
+    expect('once a CONNECT is accepted, a redeploy starts the next session with the next bdSeq', (() => {
       slow(CONNECTED);
       slow({ sf: 'start' });
       const after = slow({ sf: 'tick' })[0].find((m) => m.action === 'connect');
       return after && decodeSparkplug(after.broker.will.payload).metrics[0].long_value;
-    })(), 2);
+    })(), 1);
 
     // A full buffer drops its oldest segment and counts it.
     const small = makeGate({}, gateNode.func
@@ -689,6 +722,7 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
     keep(before({ sf: 'state', error: 'ENOENT' }));
     keep(before({ sf: 'state', error: 'ENOENT' }));
     keep(before({ sf: 'tick' }));
+    keep(before(CONNECTED));
     keep(before(ddata(8, clock.t)));
     clock.t += 6000;
     keep(before({ sf: 'tick' }));
@@ -702,8 +736,15 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
     expect('a restart restores the buffered segment and the outage in progress',
       [after.sf().queue.length, Boolean(after.sf().outage)], [1, true]);
     const resumed = after({ sf: 'tick' })[0].find((m) => m.action === 'connect');
-    expect('and goes on from the bdSeq it had reached',
+    expect('and goes on past the bdSeq its last accepted CONNECT used',
       resumed && decodeSparkplug(resumed.broker.will.payload).metrics[0].long_value, 1);
+    const unused = makeGate();
+    unused({ sf: 'tick' });
+    unused({ sf: 'state', filename: latest.filename, payload: JSON.stringify(Object.assign(JSON.parse(latest.payload), { bdSeqUsed: false })) });
+    unused({ sf: 'state', error: 'ENOENT' });
+    const reused = unused({ sf: 'tick' })[0].find((m) => m.action === 'connect');
+    expect('while one no broker accepted is used again',
+      reused && decodeSparkplug(reused.broker.will.payload).metrics[0].long_value, 0);
 
     // The wire, byte for byte. These are what the daemon's protobuf module (sparkplug_b_pb2)
     // serialises for the same values, so the encoder here is checked against the reader there.
@@ -753,6 +794,8 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
     const node = (id) => byId[id] || {};
     expect('the broker node speaks MQTT 3.1.1 with a clean session, and does not connect on its own',
       [broker.protocolVersion, broker.cleansession, broker.autoConnect, broker.willTopic], ['4', true, false, '']);
+    const keepaliveS = (gateNode.func.match(/const KEEPALIVE_S = (\d+);/) || [])[1];
+    expect('its keepalive is the one store and forward sizes the re-send window by', broker.keepalive, keepaliveS);
     expect('commands and the primary host\'s STATE are subscribed at QoS 1',
       ['aber-ncmd-in', 'aber-dcmd-in', 'aber-state-in'].map((id) => node(id).qos), ['1', '1', '1']);
     expect('only store and forward is wired to the broker node, so one place stamps the seq',

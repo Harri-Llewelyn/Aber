@@ -739,6 +739,31 @@ class EdgeNodeTest(unittest.TestCase):
         self.assertEqual((will.kwargs["qos"], will.kwargs["retain"]), (1, False))
         self.assertTrue(publisher.client.connect.call_args.kwargs["clean_start"])
 
+    def test_bdseq_advances_only_past_a_connect_a_broker_accepted(self):
+        publisher = _publisher(devices=1, primary_host_id="Site")
+        publisher.client = mock.MagicMock()
+        wills = []
+        publisher.client.will_set.side_effect = lambda topic, payload, qos, retain: wills.append(payload[1])
+        publisher.client.connect.side_effect = OSError("no route to host")
+        with mock.patch.object(load_generator, "node_death", lambda bdseq, timestamp_ms=None: ("NDEATH", bdseq)), \
+                mock.patch.object(load_generator.time, "sleep"):
+            # The first session was accepted, then the link dropped and two attempts failed at TCP.
+            publisher._on_connect(publisher.client, None, {}, 0)
+            publisher._reconnect()
+            publisher._reconnect()
+            self.assertEqual(wills, [1, 1], "an attempt that never reached the broker keeps its bdSeq")
+            publisher.client.connect.side_effect = None
+            publisher._reconnect()
+            publisher._on_connect(publisher.client, None, {}, 0)
+            publisher._reconnect()
+        self.assertEqual(wills, [1, 1, 1, 2])
+        self.assertEqual(publisher.sessions, 2, "one per session that ended, not per attempt")
+
+    def test_a_refused_connack_does_not_count_as_accepted(self):
+        publisher = _publisher(devices=1)
+        publisher._on_connect(mock.MagicMock(), None, {}, 5)
+        self.assertFalse(publisher._next_bdseq())
+
     def test_a_full_buffer_drops_the_oldest_and_counts_it(self):
         publisher = _publisher(devices=1, primary_host_id="Site", buffer_limit=2)
         for _ in range(3):

@@ -520,9 +520,11 @@ class Publisher(threading.Thread):
         # The first and last DDATA reading time taken, for the historian comparison.
         self.first_ms = None
         self.last_ms = None
-        # The Sparkplug session: the bdSeq of the current CONNECT, whether this node has birthed in
-        # it, and the primary host as STATE last described it.
+        # The Sparkplug session: the bdSeq of the current CONNECT, whether a broker accepted a
+        # CONNECT carrying it, whether this node has birthed in it, and the primary host as STATE
+        # last described it.
         self.bdseq = 0
+        self._bdseq_used = False
         self.birthed = False
         self.sessions = 0
         # Sessions ended by the primary host's death certificate: one per daemon restart.
@@ -578,23 +580,8 @@ class Publisher(threading.Thread):
             )
             self.client.tls_insecure_set(False)
 
-        def on_connect(client, _userdata, _flags, reason_code, _properties=None):
-            if getattr(reason_code, "value", reason_code) == 0:
-                # Before the NBIRTH, at QoS 1 (tck-id-message-flow-edge-node-ncmd-subscribe).
-                subscriptions = [(self._topic("NCMD"), 1)]
-                if self.primary_host_id:
-                    subscriptions.append((f"spBv1.0/STATE/{self.primary_host_id}", 1))
-                client.subscribe(subscriptions)
-                self.connected.set()
-
-        def on_disconnect(_client, _userdata, reason_code, _properties=None):
-            self.connected.clear()
-            self.birthed = False
-            if getattr(reason_code, "value", reason_code) != 0:
-                self._dropped.set()
-
-        self.client.on_connect = on_connect
-        self.client.on_disconnect = on_disconnect
+        self.client.on_connect = self._on_connect
+        self.client.on_disconnect = self._on_disconnect
         self.client.on_message = self._on_message
         self._open()
         if not self.connected.wait(timeout=30):
@@ -607,6 +594,35 @@ class Publisher(threading.Thread):
                 f"The primary host '{self.primary_host_id}' did not say it is online on "
                 f"spBv1.0/STATE/{self.primary_host_id} within 30 s; is ingestion running?"
             )
+
+    def _on_connect(self, client, _userdata, _flags, reason_code, _properties=None):
+        if getattr(reason_code, "value", reason_code) == 0:
+            # A CONNACK accepted this CONNECT, so the next one carries the next bdSeq.
+            self._bdseq_used = True
+            # Before the NBIRTH, at QoS 1 (tck-id-message-flow-edge-node-ncmd-subscribe).
+            subscriptions = [(self._topic("NCMD"), 1)]
+            if self.primary_host_id:
+                subscriptions.append((f"spBv1.0/STATE/{self.primary_host_id}", 1))
+            client.subscribe(subscriptions)
+            self.connected.set()
+
+    def _on_disconnect(self, _client, _userdata, reason_code, _properties=None):
+        self.connected.clear()
+        self.birthed = False
+        if getattr(reason_code, "value", reason_code) != 0:
+            self._dropped.set()
+
+    def _next_bdseq(self):
+        """
+        The bdSeq for the next CONNECT: one more than the last a broker accepted
+        (tck-id-topics-nbirth-bdseq-increment). An attempt that failed before the broker answered
+        sent no CONNECT packet, so its value is still unused. Returns whether it advanced.
+        """
+        if not self._bdseq_used:
+            return False
+        self.bdseq = (self.bdseq + 1) % 256
+        self._bdseq_used = False
+        return True
 
     def _wait_for_host(self, timeout):
         deadline = time.time() + timeout
@@ -665,20 +681,25 @@ class Publisher(threading.Thread):
             pass
         self.client.disconnect()
         self.client.loop_stop()
-        self.bdseq = (self.bdseq + 1) % 256
-        self.sessions += 1
-        self._open()
+        if self._next_bdseq():
+            self.sessions += 1
+        try:
+            self._open()
+        except Exception:  # noqa: BLE001 -- the broker is away; _reconnect tries again
+            self._dropped.set()
+            return
         self.connected.wait(timeout=30)
 
     def _reconnect(self):
         """
-        A connection that dropped: connect again with the next bdSeq, rather than letting paho
-        reconnect with the old Last Will (tck-id-message-flow-edge-node-birth-publish-will-message-payload-bdSeq).
+        A connection that dropped, or an attempt that failed: connect again, rather than letting
+        paho reconnect with the old Last Will. The bdSeq advances only past a CONNECT a broker
+        accepted (tck-id-message-flow-edge-node-birth-publish-will-message-payload-bdSeq).
         """
         self._dropped.clear()
         self.client.loop_stop()
-        self.bdseq = (self.bdseq + 1) % 256
-        self.sessions += 1
+        if self._next_bdseq():
+            self.sessions += 1
         try:
             self._open()
         except Exception:  # noqa: BLE001 -- the broker is away; try again on the next pass
@@ -1471,6 +1492,7 @@ def main():
         "ddata_dropped_from_buffer": sum(p.buffer_dropped for p in publishers),
         "ddata_still_buffered": sum(len(p.buffer) for p in publishers),
         "sessions_restarted": sum(p.sessions for p in publishers),
+        "host_departures": sum(p.host_departures for p in publishers),
         "primary_host": PRIMARY_HOST_ID or None,
         "first_ms": min((p.first_ms for p in stamps), default=None),
         "last_ms": max((p.last_ms for p in stamps), default=None),

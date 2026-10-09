@@ -160,7 +160,9 @@ message seems to vanish, check the edge-node segment of your topic first.
 1. The broker becomes unreachable, or the platform says its ingestion service is offline. In the
    second case the appliance ends its session and connects again, as Sparkplug requires of an edge
    node that waits for its primary host (`GATEWAY_PRIMARY_HOST_ID`, given at enrolment).
-2. Device readings are written to `/data/buffer` instead of being sent.
+2. Device readings are written to `/data/buffer` instead of being sent. A link that dies without
+   closing is noticed only at the keepalive (30 s, within 45 s), so the readings sent in the last
+   minute are written there too; the platform ignores the copies that did arrive.
 3. Both come back and the appliance births again. The readings are sent again in the order they
    were taken, marked as replayed, so the platform files each at the time it was read.
 4. The next heartbeats report the outage: when it started and ended, and how many readings were kept
@@ -174,7 +176,11 @@ nothing, and the platform is still told what each outage cost.
 Heartbeats are not kept: they say the gateway is alive now. The gateway shows OFFLINE as soon as its
 link drops, because the broker sends its last will (an NDEATH) on its behalf. Each connection's
 NDEATH carries the next birth-death sequence number (bdSeq), so the platform pairs it with the
-birth it ends.
+birth it ends. The number advances only when the broker accepted a connection, and there is one
+NBIRTH a connection unless the platform asks for a rebirth.
+
+If you change the broker node's keepalive, set `KEEPALIVE_S` at the top of **store and forward** to
+the same value: it sizes the window of readings sent again after a dead link.
 
 ## Changing this appliance's flow
 

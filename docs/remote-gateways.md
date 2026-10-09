@@ -457,6 +457,12 @@ cost. Everything its flow publishes passes through one node, **store and forward
    for the primary host -- each device reading is appended to a file under `/data/buffer` on the
    appliance instead of being published. Heartbeats and births are not buffered: they say what is
    true now. Every new session births the node and every device again.
+   **A link that dies without closing** -- a cable pulled, a router rebooted -- is noticed only at
+   the MQTT keepalive, within 45 s at the broker node's 30 s. QoS 0 has no acknowledgement, so
+   whatever was published in that time went nowhere. Store and forward keeps every reading it
+   published in the last minute (1.5 keepalives and a 15 s margin) in memory, and when the link
+   is found dead it writes them to the buffer too. The copies that did arrive are ignored by
+   ingestion, whose historian key is (time, device, metric) `ON CONFLICT DO NOTHING`.
 2. **After the next birth,** the readings are replayed with `is_historical` set on every metric, in
    timestamp order, oldest file first. Ingestion files each at the time it was read, and checks it
    against quarantine and the gateway binding exactly as it checks live data.
@@ -467,7 +473,10 @@ cost. Everything its flow publishes passes through one node, **store and forward
 **Store and forward also holds the Sparkplug session.** The broker node does not connect on its
 own: store and forward asks it to, and every CONNECT carries an NDEATH with the next bdSeq, as the
 Last Will (QoS 1, not retained) and as the message published before a deliberate disconnect. The
-NBIRTH repeats that bdSeq and declares every node metric, null until it is known. The broker node
+bdSeq advances once a CONNECT has been accepted: an attempt that failed before the broker answered
+sent no CONNECT, so the next attempt carries the same value. The NBIRTH repeats that bdSeq and
+declares every node metric, null until it is known. There is one NBIRTH a session; another is
+published only to answer the platform's `Node Control/Rebirth`. The broker node
 speaks MQTT 3.1.1 with a clean session: Node-RED's MQTT 5 disconnect carries reason code 0, which
 Sparkplug's `tck-id-payloads-ndeath-will-message-publisher-disconnect-mqtt50` does not allow, and
 under 3.1.1 the NDEATH before the DISCONNECT is what it asks. Commands are subscribed at QoS 1.
@@ -483,6 +492,7 @@ repository, like any flow change ([§11](#11-proposing-a-flow)):
 | `MAX_BYTES` | 256 MiB | Disk the buffer may use. When it is full the oldest file is deleted, and its readings are counted as dropped. |
 | `MAX_AGE_DAYS` | 7 | Readings older than this are dropped rather than replayed. It matches `ingestion.historicalMaxAgeSeconds`, past which ingestion refuses them. |
 | `REPLAY_READINGS_PER_SECOND` | 50 | The replay's pace, after a random start delay of up to 30 s. |
+| `KEEPALIVE_S` | 30 | Must equal the broker node's keepalive. What was published in the last 1.5 x `KEEPALIVE_S` + `RESEND_MARGIN_S` (15) is buffered again when the link is found dead. |
 | `BUFFER_ENABLED` | `true` | `false` keeps nothing, and still reports what each outage cost. |
 
 **Why the replay is slow.** After a platform outage every appliance replays at once. Together they
@@ -501,8 +511,9 @@ short by a restart starts its file again; ingestion's `ON CONFLICT DO NOTHING` a
 
 **What it cannot see.** Nothing acknowledges a replayed reading once it is written, so a replay the
 broker sheds or ingestion drops is lost, and counted there rather than by the appliance
-([`ingestion/README.md`, "Loss model"](../ingestion/README.md#loss-model), loss 3). Messages
-already on the wire when the link fails are lost too; the sequence gap they leave is reported.
+([`ingestion/README.md`, "Loss model"](../ingestion/README.md#loss-model), loss 3). A link that
+stays silently dead for longer than the re-send window, 1.5 keepalives and the margin, loses what
+was published before the window; the broker node's keepalive makes that 45 s at most.
 
 #### The outage report
 
@@ -512,9 +523,9 @@ reserved on node-level messages.
 
 | Metric | Type | Meaning |
 | :--- | :--- | :--- |
-| `Outage/Started_At` | DateTime (13), epoch ms | When the node stopped being able to deliver |
+| `Outage/Started_At` | DateTime (13), epoch ms | When the node stopped being able to deliver. After a link found dead, when the oldest reading it sent again was published |
 | `Outage/Ended_At` | DateTime (13), epoch ms | When it could again |
-| `Outage/Readings_Buffered` | Double | Readings written to the buffer during the outage |
+| `Outage/Readings_Buffered` | Double | Readings written to the buffer during the outage, including those sent again after a link found dead, some of which may have arrived |
 | `Outage/Readings_Dropped` | Double | Readings the outage cost: never buffered, evicted from a full buffer, too old to keep, or torn |
 | `Outage/Buffering` | Boolean | `false` when the node keeps nothing, so every reading in the window is lost |
 
