@@ -122,9 +122,9 @@ The table uses two example fleets:
 | Storage (models, captures, area plans, exports) | a 10 Gi volume; a capture is at most 100 MiB | by use | by use |
 | Logical backups | `backup.retentionDays` (14), on a 20 Gi volume | the platform database, and the historian unless physical backup is on | the platform database; the historian is physical at this size |
 | Historian physical backup repository | `physicalBackup.retainFull` (2) full backups, the differentials after the older one, and the WAL since it | ~16 GB | ~2 TB, most of it WAL |
-| Unarchived WAL, while archiving is failing | `physicalBackup.archiveQueueMax` (8 GiB), on the historian's volume | ~90 MB an hour | ~27 GB an hour |
-| Platform database physical backup (its `platform` stanza) | `supabaseDb.physicalBackup.retainFull` (2) full backups, the differentials after the older one, and the WAL since it | ⟨WAL-S⟩ | ⟨WAL-F⟩ |
-| Platform database WAL unarchived, while archiving is failing | `supabaseDb.physicalBackup.archiveQueueMax` (4 GiB), on the platform database's volume | ⟨RATE-S⟩ an hour | ⟨RATE-F⟩ an hour |
+| Unarchived WAL, while archiving is failing | `physicalBackup.archiveQueueMax` (8 GiB), on the historian's volume | ~1 GB an hour | ~27 GB an hour |
+| Platform database physical backup (its `platform` stanza) | `supabaseDb.physicalBackup.retainFull` (2) full backups, the differentials after the older one, and the WAL since it | ~1.2 GB | ~1.7 GB |
+| Platform database WAL unarchived, while archiving is failing | `supabaseDb.physicalBackup.archiveQueueMax` (4 GiB), on the platform database's volume | ~1 GB an hour | ~1 GB an hour |
 
 **The physical backup's repository is mostly WAL at fleet scale.** These figures come from the
 restore rehearsal (*Backing up the historian*). A full backup was 7.7 to 9.7 % of the database
@@ -134,11 +134,20 @@ compression and rollup writes it causes later. The table's figures assume the ro
 retention, a full backup every week, and two fulls kept.
 
 **The platform database's WAL was measured under the load generator.** At 1,000 msg/s with
-`supabaseDb.walCompression: lz4`, `supabase-db` wrote **⟨X⟩ MiB of WAL an hour**, against **⟨Y⟩ MiB
-an hour** with no load. Its stanza grew by **⟨Z⟩ MiB an hour** after pgBackRest's zstd. The method
-was `pg_current_wal_lsn()` sampled before and after a timed load run, on ⟨DATE⟩. A segment is
-archived every `archiveTimeoutSeconds` (60) while anything is written, and a segment switched early
-compresses to almost nothing, so size the repository from bytes, not from the segment count.
+`supabaseDb.walCompression: lz4`, `supabase-db` wrote **28 MiB of WAL an hour**, against **2.8 MiB
+an hour** with no load and 20 MiB an hour at S's 3.3 msg/s. Its stanza grew by **5.0 MiB an hour**
+after pgBackRest's zstd at 1,000 msg/s, and by 3.4 MiB an hour at S. The method was `pg_stat_wal`
+sampled before and after timed load runs on the development node, on 2026-10-09. The repository
+rows above are two weeks of that growth plus two full backups.
+
+**On disk, unarchived WAL is a segment a minute, whatever the load.** `archiveTimeoutSeconds` (60)
+switches to a new 16 MiB segment every minute while anything is written, on both databases. So
+`pg_current_wal_lsn()` advanced by about 1 GB an hour even with no load, and that is what piles up
+on the volume while archiving fails. The platform database's `archiveQueueMax` (4 GiB) therefore
+holds about four hours of failed archiving. After that, pgBackRest drops segments and the archive
+has a gap until the next backup. *Platform Database WAL Archiving Failing* fires after ten
+minutes. A segment switched early compresses to almost nothing, so size a repository from its
+stanza's growth, not from the segment count.
 
 **The rollups are still most of the historian, compressed.** At S the steady state is about 16 GB
 of rollups beside 2 GB of raw. That fits the default 20 Gi volume with little to spare, so set
@@ -1794,7 +1803,8 @@ Skip that runbook's root key and `restore-databases.sh` steps: the databases are
 ([`test-harness/README.md`](../../test-harness/README.md), *Restoring the platform database*): seed,
 back up, write, mark the time, write again, wipe the volume, restore to the mark. The platform
 database is small beside the historian, so a restore is mostly the server's start and the WAL since
-the last daily backup.
+the last daily backup. On 2026-10-09 a 57 MB database restored in 7 s and recovered in 16 s,
+replaying 31.8 MiB of WAL, 25 s from the decision to a writable database.
 
 - **A repository that holds another database's `platform` stanza** makes the sidecar's archive check
   fail, as it does for the historian. Restore into the empty volume with the script above, or give
