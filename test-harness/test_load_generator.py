@@ -760,6 +760,14 @@ class RestartTest(unittest.TestCase):
     def test_a_counter_that_grew_is_not(self):
         self.assertFalse(load_generator.counters_reset(self.sample(40), self.sample(9000)))
 
+    def test_a_death_certificate_is_a_restart_after_the_new_daemon_counts_past_the_old(self):
+        # The 50 msg/s run: restarted 60 s into a 240 s step, so the new daemon ends the step with
+        # the larger count and only the edge nodes' ended sessions say what happened.
+        self.assertTrue(load_generator.daemon_restarted(self.sample(3000), self.sample(9000), host_departures=8))
+
+    def test_no_death_certificate_and_a_grown_counter_is_no_restart(self):
+        self.assertFalse(load_generator.daemon_restarted(self.sample(3000), self.sample(9000), host_departures=0))
+
     def test_the_step_says_the_daemon_restarted(self):
         restarted = step(target_rate=500, written_per_second=480, daemon_restarted=True)
         self.assertIn("THE DAEMON RESTARTED", load_generator.step_note(restarted, [restarted]))

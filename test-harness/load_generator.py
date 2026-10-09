@@ -364,6 +364,15 @@ def counters_reset(before, after):
     return total(after) < total(before)
 
 
+def daemon_restarted(before, after, host_departures):
+    """
+    Whether the daemon restarted between two samples. Its counter going backwards says so only
+    while the new daemon has counted less than the old one; a death certificate that ended an edge
+    node's session says so however long the new daemon has run.
+    """
+    return host_departures > 0 or counters_reset(before, after)
+
+
 def broker_dropped_total():
     """
     Messages the broker discarded rather than delivered, or None when it cannot be asked.
@@ -514,6 +523,8 @@ class Publisher(threading.Thread):
         self.bdseq = 0
         self.birthed = False
         self.sessions = 0
+        # Sessions ended by the primary host's death certificate: one per daemon restart.
+        self.host_departures = 0
         self._state_lock = threading.Lock()
         self._host_online = False
         self._host_ts = None
@@ -645,6 +656,7 @@ class Publisher(threading.Thread):
         """
         self._host_left.clear()
         self.birthed = False
+        self.host_departures += 1
         try:
             self.client.publish(self._topic("NDEATH"), node_death(self.bdseq), qos=1).wait_for_publish(2)
         except Exception:  # noqa: BLE001 -- the will covers a death that never left
@@ -1040,6 +1052,7 @@ def run_step(publishers, rate, duration, settle):
     taken_at_sample = sum(p.taken for p in publishers)
     abandoned_at_sample = sum(p.abandoned for p in publishers)
     rebirths_at_sample = sum(p.rebirths for p in publishers)
+    departures_at_sample = sum(p.host_departures for p in publishers)
     depths = []
     deadline = time.time() + max(duration - settle, 1.0)
     while time.time() < deadline:
@@ -1052,7 +1065,7 @@ def run_step(publishers, rate, duration, settle):
     broker_after = broker_dropped_total()
     depth_start = before.get("aber_ingestion_write_queue_depth")
     # A new daemon counts from zero, so this step's figures are its counts since it started.
-    restarted = counters_reset(before, after)
+    restarted = daemon_restarted(before, after, sum(p.host_departures for p in publishers) - departures_at_sample)
     if restarted:
         before = Sample({}, {}, before.at)
     published = sum(p.published for p in publishers) - sent_at_sample
