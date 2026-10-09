@@ -740,7 +740,7 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
       resumed && decodeSparkplug(resumed.broker.will.payload).metrics[0].long_value, 1);
     const unused = makeGate();
     unused({ sf: 'tick' });
-    unused({ sf: 'state', filename: latest.filename, payload: JSON.stringify(Object.assign(JSON.parse(latest.payload), { bdSeqUsed: false })) });
+    unused({ sf: 'state', filename: latest.filename, payload: JSON.stringify({ ...JSON.parse(latest.payload), bdSeqUsed: false }) });
     unused({ sf: 'state', error: 'ENOENT' });
     const reused = unused({ sf: 'tick' })[0].find((m) => m.action === 'connect');
     expect('while one no broker accepted is used again',
