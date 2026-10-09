@@ -201,6 +201,9 @@ spec:
               value: {{ .Values.ingestion.healthIntervalSeconds | quote }}
             {{- /* Device liveness and Sparkplug rebirth; the e2e validator is given the same block. */}}
             {{- include "aber.ingestionWindowsEnv" . | nindent 12 }}
+            # How old a replayed (is_historical) reading may be (values.yaml).
+            - name: TELEMETRY_MAX_HISTORICAL_AGE_SECONDS
+              value: {{ .Values.ingestion.historicalMaxAgeSeconds | int | quote }}
             {{/*
               The Sparkplug primary host id. The render already failed above if it is empty, so
               this is never the daemon's own SystemExit in practice -- an operator meets the

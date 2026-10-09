@@ -55,6 +55,8 @@ python ingestion/test_uns_publish.py
 # clock would produce two valid-looking messages a subscriber cannot match. Also that a host id
 # which is not one topic level is refused rather than published where the broker grants nothing.
 python ingestion/test_primary_host.py
+python ingestion/test_host_connection.py
+python ingestion/test_historical_replay.py
 python ingestion/test_dockerfile_copies.py
 python ingestion/test_audit_write_dedup.py
 python ingestion/test_payload_conformance.py
@@ -85,6 +87,9 @@ python supabase/test_auth_rate_limit.py
 # write since the daemon started, and a saturated stack and a generator that cannot push hard
 # enough both show as a shortfall against target.
 python test-harness/test_load_generator.py
+# Its Sparkplug payloads, read back with the real protobuf module: bdSeq on the NBIRTH and NDEATH,
+# no seq on the NDEATH, a timestamp on every metric, and is_historical on a replay.
+python test-harness/test_load_generator_payloads.py
 # The broker verdict the stack suites read a credential from: a timeout is retried and is never a
 # refusal, so a slow runner neither fails a working credential nor passes a revocation.
 python test-harness/test_stack_exec.py

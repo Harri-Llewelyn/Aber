@@ -444,13 +444,296 @@
     },
     {
       "type": "row",
+      "title": "Gateway Outages",
+      "id": 18,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Outage Readings: Buffered, Replayed, Dropped, Refused",
+      "description": "What gateways could not deliver, in their own words and the daemon's. Buffered and dropped are reported by each gateway after an outage; replayed is what arrived flagged is_historical; refused is a replay older than ingestion.historicalMaxAgeSeconds. Dropped and refused readings were never recorded. See ingestion/README.md, \"Loss model\".",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (edge_node) (increase(aber_ingestion_gateway_outage_readings_dropped_total[$__rate_interval]))",
+          "legendFormat": "{{edge_node}} dropped"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (edge_node) (increase(aber_ingestion_gateway_outage_readings_buffered_total[$__rate_interval]))",
+          "legendFormat": "{{edge_node}} buffered"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (edge_node) (increase(aber_ingestion_historical_readings_total[$__rate_interval]))",
+          "legendFormat": "{{edge_node}} replayed"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (edge_node) (increase(aber_ingestion_timestamps_rejected_total{reason=\"historical_too_old\"}[$__rate_interval]))",
+          "legendFormat": "{{edge_node}} refused as too old"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 60,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 20,
+      "type": "table",
+      "title": "Last Outage by Gateway",
+      "description": "The last outage each gateway reported since the daemon started: how long, what it buffered and dropped, and whether it buffers at all. A gateway that does not buffer loses everything it reads while it cannot deliver.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "aber_ingestion_gateway_outage_last_seconds",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "aber_ingestion_gateway_outage_last_readings_buffered",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "aber_ingestion_gateway_outage_last_readings_dropped",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "aber_ingestion_gateway_outage_last_buffering",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "aber_ingestion_gateway_outage_reported_timestamp_seconds * 1000",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "pod": true,
+              "namespace": true
+            },
+            "renameByName": {
+              "edge_node": "Gateway",
+              "Value #A": "Outage",
+              "Value #B": "Buffered",
+              "Value #C": "Dropped",
+              "Value #D": "Buffers",
+              "Value #E": "Reported"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Outage"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Reported"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Buffers"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "no"
+                      },
+                      "1": {
+                        "text": "yes"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Dropped"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 1
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Reported",
+            "desc": true
+          }
+        ]
+      }
+    },
+    {
+      "type": "row",
       "title": "Continuous Aggregates",
       "id": 7,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 32
       },
       "collapsed": false,
       "panels": []
@@ -468,7 +751,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 24
+        "y": 33
       },
       "targets": [
         {
@@ -521,7 +804,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 24
+        "y": 33
       },
       "targets": [
         {
@@ -547,7 +830,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 41
       }
     },
     {
@@ -563,7 +846,7 @@
         "h": 5,
         "w": 6,
         "x": 0,
-        "y": 33
+        "y": 42
       },
       "targets": [
         {
@@ -613,7 +896,7 @@
         "h": 5,
         "w": 6,
         "x": 6,
-        "y": 33
+        "y": 42
       },
       "targets": [
         {
@@ -663,7 +946,7 @@
         "h": 5,
         "w": 6,
         "x": 12,
-        "y": 33
+        "y": 42
       },
       "targets": [
         {
@@ -716,7 +999,7 @@
         "h": 5,
         "w": 6,
         "x": 18,
-        "y": 33
+        "y": 42
       },
       "targets": [
         {
@@ -767,7 +1050,7 @@
         "h": 9,
         "w": 10,
         "x": 0,
-        "y": 38
+        "y": 47
       },
       "targets": [
         {
@@ -817,7 +1100,7 @@
         "h": 9,
         "w": 14,
         "x": 10,
-        "y": 38
+        "y": 47
       },
       "targets": [
         {

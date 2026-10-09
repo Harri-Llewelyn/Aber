@@ -3,9 +3,10 @@ Unit tests for the Sparkplug primary-host STATE certificates (`ingestion/primary
 
 NO BROKER: a fake MQTT client records the will it was given and every publish. What is guarded:
 
-  * THE BIRTH AND DEATH TIMESTAMPS MATCH. Sparkplug 3.0.0 requires both certificates of one
-    connection to carry the time that connection was established, so a subscriber can pair them.
-    That is the whole reason register_will() returns a value instead of each half reading a clock.
+  * THE BIRTH CARRIES THE WILL'S TIMESTAMP. Sparkplug 3.0.0 requires the birth to match the will
+    registered with the CONNECT before it, so a subscriber can pair them. That is the whole reason
+    register_will() returns a value instead of each half reading a clock. A death published on a
+    shutdown carries the time of the shutdown instead, and never an earlier one than the birth's.
   * THE WILL IS REGISTERED, RETAINED, AT QoS 1 -- the one place this daemon departs from QoS 0,
     because a gateway connecting later must learn the current state without waiting for a
     transition it already missed.
@@ -38,6 +39,9 @@ class FakePublishInfo:
 
     def wait_for_publish(self, timeout=None):  # noqa: ARG002
         self.waited = True
+
+    def is_published(self):
+        return self.waited
 
 
 class FakeClient:
@@ -93,13 +97,20 @@ class PrimaryHostStateTests(unittest.TestCase):
         client = FakeClient()
         ts = primary_host.register_will(client, host_id=HOST_ID, now_ms=1_700_000_000_000)
         primary_host.announce_online(client, ts, host_id=HOST_ID)
-        primary_host.announce_offline(client, ts, host_id=HOST_ID)
+        primary_host.announce_offline(client, ts, host_id=HOST_ID, now_ms=ts + 60_000)
 
         death = client.published[-1]
         self.assertEqual(death["topic"], TOPIC)
         self.assertTrue(death["retain"])
         self.assertEqual(death["qos"], 1)
-        self.assertEqual(json.loads(death["payload"]), {"online": False, "timestamp": ts})
+        # tck-id-host-topic-phid-death-payload-timestamp-disconnect-with-no-disconnect-packet: the
+        # time of the disconnect, not the CONNECT's.
+        self.assertEqual(json.loads(death["payload"]), {"online": False, "timestamp": ts + 60_000})
+
+    def test_a_clock_stepped_back_does_not_date_the_death_before_the_birth(self):
+        client = FakeClient()
+        primary_host.announce_offline(client, 1_700_000_000_000, host_id=HOST_ID, now_ms=1_600_000_000_000)
+        self.assertEqual(json.loads(client.published[-1]["payload"])["timestamp"], 1_700_000_000_000)
 
     def test_offline_never_raises(self):
         """On the signal path a broker that has already gone must not stop the drain."""

@@ -3106,6 +3106,14 @@ paths:
                   sparkplug_group: { type: string, example: Aber }
                   mqtt_host: { type: string, example: broker.plant.example }
                   mqtt_tls_port: { type: integer, example: 8883 }
+                  primary_host_id:
+                    type: string
+                    nullable: true
+                    example: plant1
+                    description: >-
+                      The site's Sparkplug primary host. The appliance births only once
+                      `spBv1.0/STATE/<id>` says it is online, and buffers readings while it is not.
+                      Null when the deployment names none.
                   mqtt_username: { type: string, description: Equal to `sparkplug_id`. }
                   mqtt_password: { type: string, description: Returned once and not recoverable. }
                   ca_cert:

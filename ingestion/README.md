@@ -945,9 +945,11 @@ Rows are keyed by **`sparkplug_id`**, never by name, so a rename never breaks a 
 - **A sanity window on device-supplied timestamps** — `TELEMETRY_MAX_AGE_SECONDS` (24 h) and
   `TELEMETRY_MAX_FUTURE_SECONDS` (5 min). Deliberately asymmetric: late data is normal (a gateway
   buffers through an outage and flushes on reconnect), whereas data from the future is always a
-  clock fault. Out-of-window metrics are **rejected, not clamped** — clamping would relabel a
-  reading as having happened at a time it did not, and would pile every sample from a broken clock
-  onto one timestamp where the primary key collapses them anyway.
+  clock fault. A metric flagged `is_historical`, a replay, may be as old as
+  `TELEMETRY_MAX_HISTORICAL_AGE_SECONDS` (7 days) instead; see [Loss model](#loss-model).
+  Out-of-window metrics are **rejected, not clamped** — clamping would relabel a reading as having
+  happened at a time it did not, and would pile every sample from a broken clock onto one timestamp
+  where the primary key collapses them anyway. Each refusal is counted by edge node and reason.
 
 ### The historian writer
 
@@ -1346,27 +1348,44 @@ return; before this it watched a permanently empty topic and fell back to whatev
 chose. The broker's roles had granted every gateway read of that subtree from the beginning
 (`mosquitto/dynsec-roles.json`), so the promise was already made — nothing kept it (issue #149).
 
-**The birth and the death carry the same timestamp.** Sparkplug 3.0.0 pairs the two certificates of
-one connection by the time that connection was established, which is why `register_will()` returns
-the timestamp rather than each half reading its own clock.
+**The birth carries the will's timestamp.** Sparkplug 3.0.0 pairs the birth with the will registered
+in the CONNECT before it (`tck-id-operational-behavior-host-application-connect-birth-payload`),
+which is why `register_will()` returns the timestamp rather than each half reading its own clock.
 
-**QoS 1 and retained**, the one place this daemon departs from the QoS 0 it uses everywhere else. A
-gateway connecting later must learn the current state immediately rather than waiting for a
-transition it has already missed.
+**QoS 1 and retained**, as Sparkplug 3.0.0 requires of both certificates. A gateway connecting later
+must learn the current state immediately rather than waiting for a transition it has already
+missed.
 
-**A shutdown publishes the death certificate itself, and the will fires too.** `_drain_and_exit()`
-publishes `online: false` first, before the historian drain, so a gateway hears it at the *start*
-of the shutdown rather than up to `TELEMETRY_SHUTDOWN_DRAIN_SECONDS` later when the socket closes.
-The path then ends in `os._exit(0)` and never sends a `DISCONNECT`, so the broker treats the close
-as ungraceful and publishes the will as well — measured on the dev cluster, where a rollout yields
-**two** `online: false` messages.
+**A shutdown publishes the death certificate first, then keeps receiving.** On SIGTERM the signal
+handler only sets a flag; `_drain_and_exit()` runs on the main thread while paho's network thread
+goes on reading. In order:
 
-They are byte-identical, timestamp included, so a subscriber sees one state repeated rather than
-two events. The duplicate is kept rather than suppressed with a `disconnect()` before exit: that
-would make the broker discard the will, which is tidier only while the explicit publish succeeds
-— and if it did not, the topic would be left saying `online: true` for as long as the daemon
-stayed down. A repeated death certificate costs nothing; an absent one is the fault this exists to
-fix.
+1. **`online: false`, stamped with the time of the shutdown**, at QoS 1, confirmed within 2 s.
+   Sparkplug 3.0.0 requires a host that disconnects intentionally to publish its death first
+   (`tck-id-operational-behavior-host-application-termination`) with the current time
+   (`tck-id-host-topic-phid-death-payload-timestamp-disconnect-with-no-disconnect-packet`). The
+   stamp is never earlier than the birth's, so a clock stepped back cannot make an edge node
+   discard it as a previous session's.
+2. **Receive until quiet.** An edge node that buffers on STATE stops publishing when it hears the
+   death, and what it sent before then is still in flight. The daemon keeps taking messages until
+   none has arrived for `TELEMETRY_SHUTDOWN_QUIET_SECONDS` (0.5 s), at most
+   `TELEMETRY_SHUTDOWN_RECEIVE_SECONDS` (5 s), and logs a warning if the stream never went quiet.
+3. **Stop the network loop**, then drain the historian writer for up to
+   `TELEMETRY_SHUTDOWN_DRAIN_SECONDS`, then exit.
+
+No `DISCONNECT` is sent. Sparkplug makes it optional after the death message
+(`tck-id-operational-behavior-host-application-disconnect-intentional`), and without one the broker
+also publishes the will when the process exits: a rollout yields **two** `online: false` messages.
+The will carries the CONNECT's timestamp, older than the first, so an edge node that judges STATE by
+timestamp ignores it; either way the host is offline. A `DISCONNECT` would make the broker discard
+the will, which is tidier only while the explicit publish succeeds. If it did not, the topic would
+be left saying `online: true` for as long as the daemon stayed down.
+
+**One session, no queue.** The daemon connects as Sparkplug requires of a host application: Clean
+Start true and no Session Expiry Interval (`tck-id-message-flow-phid-sparkplug-clean-session-50`),
+an empty client id, and no Will Delay Interval, so the broker publishes the will the moment the
+connection closes. Nothing is queued for it while it is away; edge nodes hold what it would have
+missed ([Loss model](#loss-model)).
 
 ### This daemon is the single primary host
 
@@ -1404,6 +1423,125 @@ booleans on a topic the broker already grants every gateway read of.
 
 ---
 
+## Loss model
+
+Where a reading can be lost between a machine and the historian, what holds it now, and what is
+still open. This is the one place it is written down; other pages link here.
+
+| | Where | What holds it | What is still lost |
+| :--- | :--- | :--- | :--- |
+| **1** | Gateway to broker: the link drops, or the broker restarts | The edge node. The [appliance](#store-and-forward-on-the-appliance-loss-1) keeps its readings on disk and replays them as historical. Any other edge node: what its vendor does; a sequence gap makes the daemon ask for a rebirth, which restates current values | What the appliance's buffer cannot hold, and the messages already on the wire when the link failed. Both are reported. A third-party edge node that does not buffer loses the gap |
+| **2** | Across a daemon restart or upgrade | The edge node again, [the Sparkplug way](#a-daemon-restart-loss-2): the death certificate says the host is offline, a conformant edge node configured with this primary host buffers until the next birth, then replays with `is_historical`. The daemon receives until the stream is quiet before it stops | A third-party edge node that ignores STATE and does not buffer loses the gap, by design |
+| **3** | A connected daemon that falls behind | Nothing yet. The broker sheds for a slow subscriber past 1,000 queued packets, and *Broker Shedding Messages* says so | Design work with [#397](https://github.com/Harri-Llewelyn/Aber/issues/397) and [#398](https://github.com/Harri-Llewelyn/Aber/issues/398) |
+
+**Sparkplug puts the buffer at the edge, and Aber stays conformant.** Sparkplug 3.0.0 requires
+NBIRTH, DBIRTH, NDATA, DDATA, DDEATH, NCMD and DCMD at QoS 0 (`tck-id-topics-ddata-mqtt` and its
+neighbours), and a host application to connect with Clean Start true and a Session Expiry Interval
+of 0 (`tck-id-message-flow-phid-sparkplug-clean-session-50`). So neither a QoS 1 data path nor a
+broker session that queues for the daemon is available. What the specification provides instead
+is STATE: an edge node configured with a primary host births only once that host says it is online
+(`tck-id-message-flow-edge-node-birth-publish-phid-wait`), ends its session when it goes offline
+(`tck-id-operational-behavior-edge-node-termination-host-offline`), and may replay what it held
+with `is_historical` set. The daemon subscribes at QoS 1, which no rule constrains for a host
+application and which changes nothing for data: delivery is capped at the publisher's QoS.
+
+### A daemon restart (loss 2)
+
+The gap is the time from SIGTERM to the new daemon's birth certificate. `Recreate` stops the old
+pod before the new one starts, so it is the shutdown, scheduling and start, and on an upgrade the
+image pull.
+
+- **The edge node buffers through it.** The death certificate goes first, before anything else in
+  the shutdown. An appliance hears it, publishes its NDEATH, disconnects and connects again with
+  the next bdSeq, and keeps its readings on disk until the new daemon's `online: true`; then it
+  births and replays ([Store and forward](#store-and-forward-on-the-appliance-loss-1)). The load
+  generator does the same, which is what a restart run measures.
+- **What was already sent is still received.** Between the death certificate and the edge node
+  hearing it, readings are in flight. The daemon keeps receiving until none has arrived for 0.5 s
+  ([The Primary Host](#the-primary-host-and-the-state-every-gateway-watches)), and the historian
+  writer drains what it accepted.
+- **A third-party edge node that does not buffer loses the gap, by design.** Sparkplug leaves the
+  choice to the edge node; the daemon cannot hold its readings for it without leaving the
+  specification. Configure such a node with this site's primary host id
+  (`ingestion.primaryHostId`) and enable its store and forward if it has one. The sequence
+  counters do not see this loss ([below](#the-sequence-counters-are-a-lower-bound-and-that-is-inherent)).
+- **Upgrade below the knee.** After the birth the edge nodes replay alongside live traffic; the
+  appliance paces its replay to 50 readings a second after a random delay of up to 30 s, so a fleet
+  does not arrive at once.
+
+### Store and forward on the appliance (loss 1)
+
+The appliance is a Sparkplug 3.0.0 edge node configured with this site's primary host, which it is
+given at enrolment. Its flow buffers device readings to `/data/buffer` while it cannot deliver: the
+broker is unreachable, or `spBv1.0/STATE/<host_id>` says the primary host is offline, in which case
+it publishes its NDEATH, disconnects and connects again with the next bdSeq. After its next birth it
+replays them with `is_historical` set on every metric, paced to 50 readings a second after a random
+delay of up to 30 s, and reports the outage. It publishes Sparkplug B protobuf. The flow, its limits
+and how it writes the files are in
+[`docs/remote-gateways.md`](../docs/remote-gateways.md#when-the-platform-cannot-be-reached). What the
+daemon does with it:
+
+- **`is_historical` is read on both encodings**: the protobuf field, and `"is_historical": true` on a
+  JSON metric (`capture.json_metric()`).
+- **A historical reading has its own age bound**, `TELEMETRY_MAX_HISTORICAL_AGE_SECONDS` (7 days,
+  `ingestion.historicalMaxAgeSeconds`), matching the appliance buffer's maximum age. A live reading is
+  still held to 24 hours. A refusal is counted in `aber_ingestion_timestamps_rejected_total` with
+  `reason` `too_old`, `historical_too_old` or `too_new`, and the *Readings Refused for Their
+  Timestamp* alert fires on any.
+- **Every other check is the same.** A replayed DDATA meets the quarantine, archive and binding
+  checks in `process_ddata()` before its metrics are looked at, and schema enforcement after, as a
+  live one does: a replay for a quarantined device, or through a gateway the device is not bound to,
+  is dropped and counted under the same reasons.
+- **A replay says nothing about now.** A message whose every metric is historical does not set its
+  device ONLINE, its rows are not republished on the UNS (whose retained topics are current
+  values), and a historical node message sets no gateway status, health or clock offset.
+- **A replay out of order is not a gap.** The appliance stamps its seq as it publishes, so its
+  replay is in sequence and checked like any message. A historical message from another edge node
+  whose seq is not the next one, a replay under the seq it was first given, is counted in
+  `aber_ingestion_sequence_replayed_total` and leaves the live run's expectation where it was: no
+  gap, no rebirth.
+- **The outage report.** After an outage, the appliance's next three node messages carry
+  `Outage/Started_At` and `Outage/Ended_At` (epoch ms), `Outage/Readings_Buffered`,
+  `Outage/Readings_Dropped` and `Outage/Buffering` (false for an appliance set not to buffer). Every
+  NBIRTH declares them, null when there is no report (`tck-id-topics-nbirth-metric-reqs`); a null is
+  neither counted nor refused. The `Outage/` prefix is reserved on node-level messages. The daemon counts each report once per (edge
+  node, start), from a registered gateway only, into the `aber_ingestion_gateway_outage_*` series,
+  and logs it. Node metrics are never stored as telemetry. The *Gateway Outage Lost Readings* alert
+  fires for an hour after a report with any reading dropped. Any edge node may send the same report.
+- **Readings more than 25 hours late reach the raw table but not the rollups.** The continuous
+  aggregates refresh 25 hours back (`timescaledb/aggregates.sql`), so a longer outage's replay is
+  missing from `telemetry_1m`, `_5m` and `_1h` until that range is refreshed by hand
+  ([`docs/remote-gateways.md`](../docs/remote-gateways.md#late-data-after-an-outage)).
+
+### What paho 1.6.1 cannot promise
+
+paho 1.6.1 acknowledges a QoS 1 message when `on_message` returns, not when its row is written: the
+acknowledgement follows the hand-off to the writer's in-memory queue, or the `write_queue_full` drop
+after the put timeout. `manual_ack` arrived in paho 2.0. Data arrives at QoS 0 and is never
+acknowledged; for the QoS 1 messages (deaths and STATE) it means *reached the daemon*, never
+*written*. An acknowledgement after the commit, an explicit inflight window as backpressure, and
+the gateway's overflow policy are the measurement campaign with #397 and #398.
+
+### Measuring it
+
+```bash
+node scripts/load-test.mjs up --gateways 8 --devices-per-gateway 50
+node scripts/load-test.mjs run --plan 500x300 --restart-ingestion-at 60
+```
+
+The generator's edge nodes are configured with the site's primary host, as an appliance is: they
+birth once STATE says it is online, buffer while it is not, and replay with `is_historical` after
+the next birth. The second command restarts the ingestion Deployment 60 s into the step, as an
+upgrade does, and times it to the new daemon's `Subscribed` line. After the run it counts the rows
+the historian holds for the fleet between the first and the last reading the generator took, and
+compares the two; it also prints how many readings were buffered, replayed, dropped from a full
+buffer and still buffered at the end. `VERDICT: the restart of ingestion under load lost nothing`
+is the pass. The step that contains the restart is marked in the generator's table, because the
+daemon's counters start again from zero. `--restart-hold 150` scales ingestion to zero for 150 s
+instead, a gap like a slow image pull: the edge nodes hold 150 s of readings and replay them.
+
+---
+
 ## Configuration
 
 Read from the environment. **There are no default credentials**: the daemon refuses to start
@@ -1419,6 +1557,7 @@ published default is a silent security downgrade, and the failure mode is silenc
 | `DB_PASSWORD` | **required** | Unless `TIMESCALEDB_URL` is set |
 | `SUPABASE_URL` | `http://127.0.0.1:54321` | |
 | `SUPABASE_PUBLISHABLE_KEY` / `SUPABASE_INGESTION_KEY` | **required** | The gateway's `apikey` and the `Service_Ingestor` bearer (`secrets.ingestionKey`). Without either the daemon exits rather than running fail-open; it never holds the service-role key |
+| `TELEMETRY_MAX_HISTORICAL_AGE_SECONDS` | `604800` (7 days) | How old an `is_historical` reading may be. `ingestion.historicalMaxAgeSeconds` — see [Loss model](#loss-model) |
 | `DEVICE_OFFLINE_TIMEOUT_SECONDS` | `300` | Silence after which a device is marked OFFLINE. `0` disables the watchdog |
 | `DEVICE_WATCHDOG_INTERVAL_SECONDS` | `30` | Sweep interval |
 | `REBIRTH_REQUEST_INTERVAL_SECONDS` | `300` | Minimum gap between rebirth requests to one edge node |
@@ -1429,7 +1568,9 @@ published default is a silent security downgrade, and the failure mode is silenc
 | `TELEMETRY_BATCH_MAX_MESSAGES` | `500` | Messages per historian transaction, at most — see [The historian writer](#the-historian-writer) |
 | `TELEMETRY_QUEUE_MAX_MESSAGES` | `10000` | Messages the writer may hold. Full means backpressure for the put timeout, then a counted drop |
 | `TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS` | `5` | How long a full queue holds the callback thread before dropping |
-| `TELEMETRY_SHUTDOWN_DRAIN_SECONDS` | `8` | How long a SIGTERM waits for the queue to drain. Inside the pod's termination grace period |
+| `TELEMETRY_SHUTDOWN_RECEIVE_SECONDS` | `5` | After the death certificate on a SIGTERM, how long the daemon may go on receiving what edge nodes sent before they heard it — see [The Primary Host](#the-primary-host-and-the-state-every-gateway-watches) |
+| `TELEMETRY_SHUTDOWN_QUIET_SECONDS` | `0.5` | It stops receiving sooner once no message has arrived for this long |
+| `TELEMETRY_SHUTDOWN_DRAIN_SECONDS` | `8` | How long a SIGTERM then waits for the writer's queue to drain. The three, with the 2 s death certificate, stay inside the pod's 30 s termination grace period |
 | `INGESTION_STATS_INTERVAL` | `60` | Seconds between `STATS` log lines. `0` disables the reporter |
 | `INGESTION_METRICS_PORT` | `9108` | Prometheus endpoint. `0` disables it — see [Metrics](#metrics) |
 | `LOG_LEVEL` | `INFO` | Any level name; an unrecognised one falls back to `INFO` |
@@ -1546,7 +1687,15 @@ the line, so a drop counter appearing there at all is still the signal.
 | `aber_ingestion_metrics_written_total` | — | Metric samples written to the historian. |
 | `aber_ingestion_messages_written_total` | — | DDATA messages whose telemetry the historian committed. Divided by `aber_ingestion_write_seconds_count` it is messages per transaction: 1 while the writer keeps up, rising as it batches. |
 | `aber_ingestion_messages_dropped_total` | `reason` | **Telemetry that was NOT recorded.** Under report-by-exception nothing restates it. See the reasons below. |
-| `aber_ingestion_timestamps_rejected_total` | `edge_node` | A metric's timestamp fell outside the sanity window. The message was still processed; that metric was **refused rather than clamped** and cannot be recovered. The label names the appliance, which is almost always a clock rather than a device — read it beside the gauge below. |
+| `aber_ingestion_timestamps_rejected_total` | `edge_node`, `reason` | A metric's timestamp fell outside the sanity window. The message was still processed; that metric was **refused rather than clamped** and cannot be recovered. `too_new` and `too_old` are live readings, almost always a clock rather than a device — read them beside the gauge below. `historical_too_old` is a replay older than `TELEMETRY_MAX_HISTORICAL_AGE_SECONDS`. |
+| `aber_ingestion_timestamps_rejected_at_seconds` | `edge_node`, `reason` | Gauge: when the last refusal happened. What the alert reads, since a counter born at its first value shows Prometheus no increase. |
+| `aber_ingestion_historical_readings_total` | `edge_node` | Replayed (`is_historical`) readings accepted. Set it against the buffered count the same gateway reported. |
+| `aber_ingestion_sequence_replayed_total` | `edge_node` | Historical messages out of the live seq run, left out of gap detection. |
+| `aber_ingestion_gateway_outages_total` | `edge_node`, `buffering` | Outages the gateway reported after reconnecting. |
+| `aber_ingestion_gateway_outage_seconds_total` | `edge_node` | Their total length. |
+| `aber_ingestion_gateway_outage_readings_buffered_total` / `_dropped_total` | `edge_node` | Readings buffered to replay, and readings **dropped and never recorded**. Nothing else counts the second. |
+| `aber_ingestion_gateway_outage_last_seconds`, `_last_readings_buffered`, `_last_readings_dropped`, `_last_buffering`, `_reported_timestamp_seconds` | `edge_node` | Gauges: the last report, and when it arrived. What the alert and the dashboard table read. |
+| `aber_ingestion_gateway_outage_reports_rejected_total` | — | Outage reports refused as unusable. |
 | `aber_ingestion_alias_unresolved_total` | — | An alias arrived with no known name. Normal briefly after a restart, pending a rebirth; sustained means a node is not re-birthing. |
 | `aber_ingestion_integer_datatype_unknown_total` | — | An integer arrived whose datatype neither the message nor a birth since startup declared, and was stored unsigned. A negative signed reading among them is recorded as a large positive number. Sustained means a publisher that never declares datatypes. |
 | `aber_ingestion_sequence_gaps_total` | `edge_node` | **A message was lost between the edge node and the historian.** The only loss signal RBE offers. |
@@ -1613,9 +1762,10 @@ Two things that are *not* gaps and never increment either counter — the 255 �
 specification, and the first message seen after a restart, which has no baseline. Counting the
 second would fire at every node on every deploy, which is how an alert becomes ignored.
 
-**A restart is itself lossy, and this makes it visible.** Messages published while the daemon is
-down are not replayed, so the first gap after a deploy is real telemetry that was never recorded.
-That is worth knowing rather than smoothing away.
+**A restart is not a gap, whatever it lost.** An edge node that buffers on STATE births again after
+the restart and replays in sequence; one that does not loses what it published meanwhile, and these
+counters cannot see it, because the first message after the restart has no baseline. The
+[Loss model](#loss-model) says which edge nodes lose what.
 
 ### First three things to check on a non-zero gap counter
 
@@ -1647,6 +1797,8 @@ looks wrong.
 | Historian unreachable | `aber_ingestion_db_connected == 0` | 2m | Telemetry is being dropped now. Short `for`, because the daemon already retries internally. |
 | Broker shedding messages | `sum(increase(broker_publish_messages_dropped[5m])) > 0` | 1m | **Zero is the steady state.** A shed message never reached the daemon, so the drop rule cannot see it. Broker-wide: Message loss rising beside it places the loss on the historian path. |
 | Message loss | `rate(aber_ingestion_sequence_gaps_total[15m]) > 0` | 15m | Any increase is worth a warning: it is evidence a change was never recorded. A *sustained* rate — say `> 0.1/s` for 15m — is a page. |
+| Readings refused for their timestamp | `time() - aber_ingestion_timestamps_rejected_at_seconds < 900` | 1m | Any refusal is a reading lost. Per edge node and reason, so a clock fault (`too_new`, `too_old`) reads apart from an outage longer than the platform keeps (`historical_too_old`). A gauge, not a counter, so the first refusal fires it. |
+| Gateway outage lost readings | `aber_ingestion_gateway_outage_last_readings_dropped > 0`, gated on the report being under an hour old | 1m | **Above zero, because the appliance counts exactly**: there is no noise floor to filter, and a dropped reading is lost with nothing else reporting it. An outage that buffered everything does not fire. An hour keeps it in view without alerting on a report for ever. |
 | Historian writer saturating | `sum(rate(aber_ingestion_write_seconds_sum[5m])) > 0.5` | 10m | The writer thread's occupancy, read straight off the histogram. Half is the warning: the daemon keeps up, and a burst or a slower historian takes it the rest of the way. Queue depth is deliberately not the trigger — it moves only once the writer is already behind, and a full queue's drops reach the drop rule anyway. |
 | Gateway clock skew | `abs(aber_ingestion_gateway_clock_offset_seconds) > 60`, gated on the measurement being under 300s old | 15m | **Well inside the sanity window on purpose.** Past +5m the telemetry is discarded; this fires while it is still being accepted and silently misfiled, which is the failure worth catching. The staleness gate is what stops a powered-down appliance alerting forever on the clock it had when it left. |
 

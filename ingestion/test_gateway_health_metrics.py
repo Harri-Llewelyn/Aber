@@ -132,6 +132,16 @@ class ExtractGatewayHealthTests(unittest.TestCase):
             FakeMetric("bdSeq", int_value=7),
         ), {})
 
+    def test_a_metric_declared_null_is_neither_recorded_nor_rejected(self):
+        # An NBIRTH declares every metric its node will send, null until it is known.
+        with self.assertNoLogs(level="WARNING"):
+            got = health(
+                FakeMetric("Disk_Free_Bytes", is_null=True),
+                FakeMetric("Agent_Version", is_null=True),
+                FakeMetric("Uptime_s", int_value=12),
+            )
+        self.assertEqual(got, {"uptime_seconds": 12})
+
     def test_a_rejected_metric_does_not_discard_its_neighbours(self):
         got = health(
             FakeMetric("Disk_Free_Bytes", long_value=-1),

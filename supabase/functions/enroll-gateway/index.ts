@@ -63,6 +63,7 @@ export default async function handler(req: Request): Promise<Response> {
   const credentialToken = Deno.env.get("MQTT_CREDENTIAL_SERVICE_TOKEN") ?? "";
   const mqttHost = Deno.env.get("MQTT_PUBLIC_HOST") ?? "";
   const mqttTlsPort = Number.parseInt(Deno.env.get("MQTT_PUBLIC_TLS_PORT") ?? "8883", 10);
+  const primaryHostId = (Deno.env.get("PRIMARY_HOST_ID") ?? "").trim();
 
   // Configuration is checked before the token is touched: a misconfigured deployment must not
   // consume an appliance's one-shot token. 503 with a named cause, and the bundle stays valid.
@@ -330,6 +331,9 @@ export default async function handler(req: Request): Promise<Response> {
     sparkplug_group: identity.sparkplug_group,
     mqtt_host: mqttHost,
     mqtt_tls_port: mqttTlsPort,
+    // The Sparkplug primary host the appliance waits for before it births, and whose offline STATE
+    // ends its session; null when the deployment names none.
+    primary_host_id: primaryHostId || null,
     // The username is the sparkplug_id and cannot be anything else: the gateway's broker role
     // confines it to spBv1.0/+/+/<username>/#, and verify_gateway_binding() compares the same
     // segment against the gateway row.

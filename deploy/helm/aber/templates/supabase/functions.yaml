@@ -162,6 +162,10 @@ spec:
               value: {{ include "aber.mqttPublicHost" . | quote }}
             - name: MQTT_PUBLIC_TLS_PORT
               value: {{ .Values.supabaseFunctions.gatewayEnrolment.mqttPublicTlsPort | int64 | quote }}
+            {{- /* The site's Sparkplug primary host. Enrolment hands it to an appliance, which then
+                   births only while the ingestion daemon's STATE says it is online. */}}
+            - name: PRIMARY_HOST_ID
+              value: {{ include "aber.primaryHostId" . | quote }}
             {{- /* The credential-issuing sidecar, addressed through its own Service -- NOT the
                    broker's. It publishes no external route and a NetworkPolicy admits only this
                    Deployment; see templates/messaging/gateway-credential.yaml. */}}

@@ -403,16 +403,36 @@ How it works: a Sparkplug edge node has one standard way to find out whether any
 consuming what it publishes. It watches a retained message on `spBv1.0/STATE/<host_id>`. The
 ingestion daemon is this site's **primary host application**. When it connects, it publishes
 `{"online": true, …}`, retained. It registers `{"online": false, …}` as its MQTT Last Will, so the
-broker announces its death even if it is killed outright.
+broker announces its death even if it is killed outright, the moment the connection closes. On a
+shutdown it publishes the death itself first, then keeps receiving until what gateways sent before
+they heard it has arrived. It holds no broker session between connections, as Sparkplug 3.0.0
+requires of a host application, so nothing is queued for it while it is away: an edge node that
+buffers while the host is offline holds it instead
+([`ingestion/README.md`, "Loss model"](../ingestion/README.md#loss-model)).
 
-**An appliance built from the bundle does not need configuring for this.** Its flows do not read
-STATE. The daemon's own rebirth poller and device watchdog cover a consumer that goes away, for
-devices that behave the way Aber expects.
+**An appliance built from the bundle is given the id at enrolment.** `bootstrap.mjs` writes it to
+`/data/gateway.env` as `GATEWAY_PRIMARY_HOST_ID`, and the appliance behaves as Sparkplug 3.0.0
+requires of an edge node configured with a primary host: it births only once
+`spBv1.0/STATE/<id>` says the host is online, and when a valid offline STATE arrives it publishes
+its NDEATH, disconnects and connects again, buffering device readings until its next birth
+([When the platform cannot be reached](#when-the-platform-cannot-be-reached)).
 
-**Third-party equipment is the reason this exists.** A compliant Sparkplug gateway watches STATE and
-decides for itself whether to keep publishing, buffer, or re-birth when the host returns. Give it the
-id above wherever its vendor asks for a primary host, and it will do that. Give it nothing, and it
-watches a topic that is never written, then falls back to whatever its vendor chose.
+**An appliance enrolled before this has no primary host.** It births as soon as it is connected and
+buffers only while the broker is unreachable, so a restart of ingestion loses what it publishes
+meanwhile. Re-enrol it, or give it the id by hand from the bundle's directory, with `plant1`
+replaced by the value of `ingestion.primaryHostId`:
+
+```
+docker compose exec node-red sh -c "echo \"export GATEWAY_PRIMARY_HOST_ID='plant1'\" >> /data/gateway.env"
+docker compose restart node-red
+```
+
+**Third-party equipment is the other reason this exists.** A compliant Sparkplug gateway watches
+STATE and decides for itself whether to keep publishing, buffer, or re-birth when the host returns.
+Give it the id above wherever its vendor asks for a primary host, and it will do that. Give it
+nothing, and it watches a topic that is never written, then falls back to whatever its vendor
+chose. A gateway that buffers should replay with `is_historical` set on each metric, and can report
+what an outage cost in [the appliance's format](#the-outage-report).
 
 | Where | What it is |
 | :--- | :--- |
@@ -427,6 +447,96 @@ it for `mqtt.<domain>`, `mosquitto.external.loadBalancerIP` and whatever `mosqui
 appliance has to be re-enrolled.** If the certificate does not name the address gateways dial,
 verification fails at every appliance while in-cluster clients verify it perfectly. Aber then reports
 itself healthy while the fleet is silently off.
+
+### When the platform cannot be reached
+
+An appliance keeps its readings while it cannot deliver them, and says afterwards what the outage
+cost. Everything its flow publishes passes through one node, **store and forward**:
+
+1. **While no reading can be delivered** -- the broker is unreachable, or the appliance is waiting
+   for the primary host -- each device reading is appended to a file under `/data/buffer` on the
+   appliance instead of being published. Heartbeats and births are not buffered: they say what is
+   true now. Every new session births the node and every device again.
+2. **After the next birth,** the readings are replayed with `is_historical` set on every metric, in
+   timestamp order, oldest file first. Ingestion files each at the time it was read, and checks it
+   against quarantine and the gateway binding exactly as it checks live data.
+3. **The next three heartbeats report the outage:** when it started and ended, and how many readings
+   were buffered and dropped. Ingestion counts the report, shows it on the *Gateway Outages* row of
+   *Stack & Ingestion Health*, and fires *Gateway Outage Lost Readings* if any were dropped.
+
+**Store and forward also holds the Sparkplug session.** The broker node does not connect on its
+own: store and forward asks it to, and every CONNECT carries an NDEATH with the next bdSeq, as the
+Last Will (QoS 1, not retained) and as the message published before a deliberate disconnect. The
+NBIRTH repeats that bdSeq and declares every node metric, null until it is known. The broker node
+speaks MQTT 3.1.1 with a clean session: Node-RED's MQTT 5 disconnect carries reason code 0, which
+Sparkplug's `tck-id-payloads-ndeath-will-message-publisher-disconnect-mqtt50` does not allow, and
+under 3.1.1 the NDEATH before the DISCONNECT is what it asks. Commands are subscribed at QoS 1.
+Everything the flow publishes is Sparkplug B protobuf, encoded in store and forward; the rest of the
+flow builds plain objects. A local broker bridged to the centre would hold the will on the
+appliance instead, which is why the buffer is in the flow.
+
+The limits are constants at the top of **store and forward**. Change them in the gateway's own
+repository, like any flow change ([§11](#11-proposing-a-flow)):
+
+| Constant | Default | What it bounds |
+| :--- | :--- | :--- |
+| `MAX_BYTES` | 256 MiB | Disk the buffer may use. When it is full the oldest file is deleted, and its readings are counted as dropped. |
+| `MAX_AGE_DAYS` | 7 | Readings older than this are dropped rather than replayed. It matches `ingestion.historicalMaxAgeSeconds`, past which ingestion refuses them. |
+| `REPLAY_READINGS_PER_SECOND` | 50 | The replay's pace, after a random start delay of up to 30 s. |
+| `BUFFER_ENABLED` | `true` | `false` keeps nothing, and still reports what each outage cost. |
+
+**Why the replay is slow.** After a platform outage every appliance replays at once. Together they
+must stay under what the historian writes, about 12,000 readings a second at the measured knee,
+alongside live traffic. Fifty readings a second each keeps a hundred appliances at 5,000. A replay
+beyond that is not refused at the appliance: the historian's queue fills, and ingestion drops what
+it cannot write, under *Telemetry Being Dropped*. Raise the pace only with the fleet's size in mind.
+
+**How the files are written.** A function node has no file access, so Node-RED's own file nodes do
+the writing. Each file is append-only, one message a line. A line torn by a power cut does not
+parse, and is counted as dropped; every line before it is whole. The list of files alternates
+between two state files that carry a generation number, and the newer one that parses is read at
+start, so a torn write loses at most the last few seconds of bookkeeping. Nothing is `fsync`'d, so a
+power cut can lose what the kernel had not yet written to disk, a few seconds at most. A replay cut
+short by a restart starts its file again; ingestion's `ON CONFLICT DO NOTHING` absorbs the repeats.
+
+**What it cannot see.** Nothing acknowledges a replayed reading once it is written, so a replay the
+broker sheds or ingestion drops is lost, and counted there rather than by the appliance
+([`ingestion/README.md`, "Loss model"](../ingestion/README.md#loss-model), loss 3). Messages
+already on the wire when the link fails are lost too; the sequence gap they leave is reported.
+
+#### The outage report
+
+After an outage, the next three node messages (NBIRTH or NDATA) carry these metrics. Ingestion
+counts a report once per edge node and start. Any edge node may send it; the `Outage/` prefix is
+reserved on node-level messages.
+
+| Metric | Type | Meaning |
+| :--- | :--- | :--- |
+| `Outage/Started_At` | DateTime (13), epoch ms | When the node stopped being able to deliver |
+| `Outage/Ended_At` | DateTime (13), epoch ms | When it could again |
+| `Outage/Readings_Buffered` | Double | Readings written to the buffer during the outage |
+| `Outage/Readings_Dropped` | Double | Readings the outage cost: never buffered, evicted from a full buffer, too old to keep, or torn |
+| `Outage/Buffering` | Boolean | `false` when the node keeps nothing, so every reading in the window is lost |
+
+#### Late data after an outage
+
+A live reading more than 24 hours old is refused. A reading flagged `is_historical` may be up to
+`ingestion.historicalMaxAgeSeconds` old (7 days), the appliance buffer's maximum age. Each refusal
+is counted per gateway with its reason, and *Readings Refused for Their Timestamp* fires on it.
+
+**A replay more than 25 hours late reaches the raw table, but not the rollups.** The rollups refresh
+25 hours back, so `telemetry_1m`, `telemetry_5m` and `telemetry_1h` lack it, and anything reading
+them shows the outage as a gap; anything reading the raw table sees it. To bring it into the
+rollups, refresh the outage's window on the historian, using the start and end the outage report
+gave:
+
+```sql
+CALL refresh_continuous_aggregate('telemetry_1m', '<start>', '<end>');
+CALL refresh_continuous_aggregate('telemetry_5m', '<start>', '<end>');
+CALL refresh_continuous_aggregate('telemetry_1h', '<start>', '<end>');
+```
+
+A window older than a rollup's retention is not refreshed.
 
 ---
 
@@ -581,9 +691,9 @@ with the time the heartbeat arrived:
   ahead**, which is the direction that corrupts data;
 * the **Gateway Clock Skew** alert, at a minute of drift sustained for fifteen;
 * past **+5 minutes**, the telemetry is not written at all. It is refused rather than clamped, and
-  counted per gateway by `aber_ingestion_timestamps_rejected_total{edge_node}`. The backward
-  tolerance is a full day, because an appliance flushing a buffered outage is sending legitimate
-  late data.
+  counted per gateway by `aber_ingestion_timestamps_rejected_total{edge_node, reason="too_new"}`.
+  The backward tolerance is a full day for a live reading, and seven days for one an appliance
+  replays after an outage ([late data after an outage](#late-data-after-an-outage)).
 
 **Nothing on the platform corrects it, deliberately.** Rewriting a device's timestamps centrally would
 swap a visible clock fault for an invisible one. It would also destroy the only evidence that the
@@ -955,6 +1065,12 @@ Run `docker compose ps`. If `bootstrap` exited non-zero, `node-red` will not hav
 
 **The gateway is `ONLINE` but its devices are not.**
 They are in the quarantine queue awaiting approval (§10). That is the design, not a fault.
+
+**`Gateway Outage Lost Readings` fired.**
+The gateway reported an outage that dropped readings. They were never recorded. The *Gateway
+Outages* row of *Stack & Ingestion Health* shows the window. *Buffers* reading `no` means
+`BUFFER_ENABLED` is off; otherwise the buffer filled, or the outage outlasted `MAX_AGE_DAYS`. Raise
+`MAX_BYTES` if the appliance has the disk ([when the platform cannot be reached](#when-the-platform-cannot-be-reached)).
 
 ---
 

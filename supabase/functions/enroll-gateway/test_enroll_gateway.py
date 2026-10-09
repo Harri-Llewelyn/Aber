@@ -258,6 +258,9 @@ class TestSuccessfulEnrolment(EnrollGatewayBase):
         self.assertTrue(payload["mqtt_host"])
         self.assertNotIn(payload["mqtt_host"], ("mosquitto", "localhost", "127.0.0.1"))
         self.assertEqual(payload["mqtt_tls_port"], 8883)
+        # The primary host the appliance waits for: the chart's ingestion.primaryHostId, one topic
+        # level, so the appliance's subscription to spBv1.0/STATE/<id> is the daemon's topic.
+        self.assertRegex(payload["primary_host_id"], r"^[^/+#\s]+$")
 
         # CREDENTIAL. base64url, the alphabet the credential service enforces as an injection
         # boundary; returned exactly once and unrecoverable thereafter.

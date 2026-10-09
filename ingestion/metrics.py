@@ -130,6 +130,9 @@ COUNTER_MAP = {
     # Appliance health (archived migration 0035).
     "gateway_health_metrics_rejected": (
         "aber_ingestion_gateway_health_rejected_total", {}),
+    # Outage reports an edge node sent that could not be used.
+    "gateway_outage_reports_rejected": (
+        "aber_ingestion_gateway_outage_reports_rejected_total", {}),
     # The UNS bridge (uns_publish.py): topics written, and readings not republished by reason.
     # The reasons are uns_publish.SKIP_REASONS; test_uns_publish.py holds the two lists together.
     "uns_published": ("aber_ingestion_uns_published_total", {}),
@@ -176,11 +179,51 @@ HELP = {
     "aber_ingestion_messages_dropped_total":
         "Messages refused, by reason. Any non-zero value is telemetry that was NOT recorded.",
     "aber_ingestion_timestamps_rejected_total":
-        "Metrics whose timestamp fell outside the sanity window, BY EDGE NODE; the message itself "
-        "was still processed. This telemetry was refused rather than clamped and cannot be "
-        "recovered. Read it beside aber_ingestion_gateway_clock_offset_seconds for the same "
-        "appliance: a rising count there is almost always a clock that has drifted past the "
-        "window rather than anything about the device.",
+        "Metrics whose timestamp fell outside the sanity window, BY EDGE NODE AND REASON; the "
+        "message itself was still processed. This telemetry was refused rather than clamped and "
+        "cannot be recovered. too_new and too_old are live readings: read them beside "
+        "aber_ingestion_gateway_clock_offset_seconds for the same appliance, since a rising count "
+        "is almost always a clock that has drifted past the window. historical_too_old is a "
+        "replayed reading older than TELEMETRY_MAX_HISTORICAL_AGE_SECONDS: an outage longer than "
+        "the platform keeps.",
+    "aber_ingestion_timestamps_rejected_at_seconds":
+        "When each edge node last had a reading refused for its timestamp, by reason, as unix "
+        "seconds. What the Readings Refused alert reads: a counter that first appears at its first "
+        "refusal shows Prometheus no increase.",
+    "aber_ingestion_historical_readings_total":
+        "Readings flagged is_historical that were accepted, by edge node: an edge node replaying "
+        "what it buffered while it could not deliver. Compare with "
+        "aber_ingestion_gateway_outage_readings_buffered_total for the same node.",
+    "aber_ingestion_sequence_replayed_total":
+        "Historical messages whose seq was not the next one, by edge node: a replay sent under the "
+        "seq it was first given. Left out of gap detection, so not counted as loss and not "
+        "answered with a rebirth.",
+    "aber_ingestion_gateway_outages_total":
+        "Outages edge nodes reported after reconnecting, by edge node and whether it buffers. An "
+        "outage is a window in which the node could not deliver: no broker, or no primary host.",
+    "aber_ingestion_gateway_outage_seconds_total":
+        "Total length of the outages each edge node reported, in seconds.",
+    "aber_ingestion_gateway_outage_readings_buffered_total":
+        "Readings edge nodes buffered during reported outages, to replay as historical.",
+    "aber_ingestion_gateway_outage_readings_dropped_total":
+        "Readings edge nodes DROPPED during reported outages: evicted from a full buffer, too old to "
+        "replay, or never buffered because the node does not buffer. Never recorded and not "
+        "recoverable; nothing else on the platform counts them.",
+    "aber_ingestion_gateway_outage_reported_timestamp_seconds":
+        "When each edge node's last outage report arrived, as unix seconds. Read the "
+        "aber_ingestion_gateway_outage_last_* gauges BESIDE it: they hold the last report forever.",
+    "aber_ingestion_gateway_outage_last_seconds":
+        "The length of the last outage each edge node reported, in seconds.",
+    "aber_ingestion_gateway_outage_last_readings_buffered":
+        "Readings the last reported outage buffered, per edge node.",
+    "aber_ingestion_gateway_outage_last_readings_dropped":
+        "Readings the last reported outage dropped, per edge node. What the Gateway Outage Lost "
+        "Readings alert reads.",
+    "aber_ingestion_gateway_outage_last_buffering":
+        "1 when the edge node's last outage report says it buffers, 0 when it says it does not.",
+    "aber_ingestion_gateway_outage_reports_rejected_total":
+        "Outage reports refused as unusable: no start or end, a window that is not in the past, or "
+        "a negative count. The heartbeat that carried one still landed.",
     "aber_ingestion_alias_unresolved_total":
         "Metrics carrying an alias with no known name, pending a rebirth.",
     "aber_ingestion_integer_datatype_unknown_total":
@@ -328,6 +371,15 @@ TYPES = {
     # exactly what a clock being corrected looks like.
     "aber_ingestion_gateway_clock_offset_seconds": "gauge",
     "aber_ingestion_gateway_clock_measured_timestamp_seconds": "gauge",
+    # The last outage each appliance reported, and when; and when each edge node last had a
+    # reading refused. Gauges because the alerts must see the first event, which a counter born at
+    # its first value does not show as an increase.
+    "aber_ingestion_gateway_outage_reported_timestamp_seconds": "gauge",
+    "aber_ingestion_gateway_outage_last_seconds": "gauge",
+    "aber_ingestion_gateway_outage_last_readings_buffered": "gauge",
+    "aber_ingestion_gateway_outage_last_readings_dropped": "gauge",
+    "aber_ingestion_gateway_outage_last_buffering": "gauge",
+    "aber_ingestion_timestamps_rejected_at_seconds": "gauge",
 }
 
 

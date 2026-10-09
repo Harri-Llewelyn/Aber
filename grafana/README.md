@@ -345,8 +345,28 @@ so NoData means it never has. Ten minutes against a 30s loop is twenty consecuti
 
 Warning, `for: 15m`, per edge node. A Sparkplug sequence gap is the only loss signal there is
 under report-by-exception. Per edge node so that one flapping gateway is distinguishable from
-plant-wide loss. Messages published while the daemon is down are not replayed, so a deploy
-produces a real gap at every node; fifteen minutes rides that out.
+plant-wide loss. A broker restart produces a real gap at every node, and fifteen minutes rides
+that out. A daemon restart produces none: the first message after it has no baseline, and an edge
+node that buffers on STATE births again and replays in sequence. One that does not buffer loses
+the gap without a count ([Loss model](../ingestion/README.md#loss-model)).
+
+### Readings Refused for Their Timestamp (`aber-ingestion-timestamps-refused`)
+
+Warning, `for: 1m`, per edge node and reason, for fifteen minutes after the last refusal. Any refusal
+is a reading that was not recorded. `too_new` and `too_old` are a gateway clock outside the sanity
+window, the step past *Gateway Clock Skew*; `historical_too_old` is a replay older than
+`ingestion.historicalMaxAgeSeconds`, an outage longer than the platform keeps. It reads
+`aber_ingestion_timestamps_rejected_at_seconds`, a gauge, because a counter that first appears at
+its first refusal shows Prometheus no increase, and the first refusal is the one worth hearing about.
+
+### Gateway Outage Lost Readings (`aber-gateway-outage-loss`)
+
+Warning, `for: 1m`, per edge node, for an hour after an outage report with any reading dropped. The
+gateway reports each outage after reconnecting, and a dropped reading is lost with nothing else
+counting it. The threshold is zero because the appliance counts exactly: there is no noise floor,
+and an outage that buffered everything does not fire. Gated on the report's age, since the gauges
+hold the last report for ever. What to do is in
+[`docs/remote-gateways.md`](../docs/remote-gateways.md#13-troubleshooting).
 
 ### Gateway Clock Skew (`aber-gateway-clock-skew`)
 

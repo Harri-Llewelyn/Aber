@@ -10,7 +10,8 @@ Fixtures and suites that need the assembled stack rather than a module.
 | :--- | :--- |
 | [`Dockerfile`](Dockerfile) | The `test-runner` image: the ingestion image plus `jsonschema`, the AAS suites and the load generator |
 | [`load_generator.py`](load_generator.py) | Synthetic Sparkplug load, and the report that says what gave way |
-| [`test_load_generator.py`](test_load_generator.py) | The generator's arithmetic — the part that decides what a run reports — and its Sparkplug `seq` and rebirth answer |
+| [`test_load_generator.py`](test_load_generator.py) | The generator's arithmetic — the part that decides what a run reports — and its behaviour as a Sparkplug edge node: `seq`, rebirth, primary host, buffer and replay |
+| [`test_load_generator_payloads.py`](test_load_generator_payloads.py) | Its Sparkplug payloads, read back with the real protobuf module: bdSeq, NDEATH without `seq`, a timestamp on every metric, `is_historical` |
 | [`test_log_pipeline.py`](test_log_pipeline.py) | A drop is countable in Prometheus *and* readable in Loki, for the same device |
 | [`aas_fixture.py`](aas_fixture.py) | The device both AAS suites provision and assert against |
 | [`stack_exec.py`](stack_exec.py) | Reaching into the stack's own processes — `kubectl exec`, a Service taken off the network |
@@ -73,6 +74,16 @@ Two options change what a run does, and both are off by default:
   figure. The chunks are those whose range ends after the run started. On a development stack
   that is usually the current chunk, with whatever else was written in its range, so the figures
   are the chunks', over all their rows. Later writes into a compressed chunk still land.
+
+- **`--restart-ingestion-at <seconds>`** restarts the ingestion Deployment that long into the first
+  step, as an upgrade does, and times it to the new daemon's `Subscribed` line. After the run it
+  counts the rows the historian holds for the fleet between the first and the last reading taken,
+  and prints readings taken, stored and lost, and how many the edge nodes buffered, replayed and
+  dropped. Use one step below the knee (`--plan 500x300`). The step containing the restart is
+  marked, because the daemon's counters start again from zero; the comparison is the measurement.
+  `--restart-hold <seconds>` scales ingestion to zero for that long instead, so the edge nodes hold
+  that many seconds of readings. [`ingestion/README.md`, "Loss
+  model"](../ingestion/README.md#loss-model) is what it measures.
 
 `--compress` is the generator's, not a `down --compress-before-purge` on the launcher: the figure
 belongs in the run's report, beside the uncompressed one, and the generator already holds the
@@ -214,6 +225,13 @@ up, not the sustained rate.
   broker sheds, the daemon sees the gaps, counts them and asks for rebirths, throttled per node by
   `REBIRTH_REQUEST_INTERVAL_SECONDS`. Until 2026-10-08 the generator sent no `seq`, so that path
   went untested through a run that shed 56,871 messages.
+* **Each publisher waits for the primary host, as an appliance does.** The Job passes the chart's
+  `ingestion.primaryHostId`. Every CONNECT carries an NDEATH will with the next bdSeq; the NBIRTH
+  waits for `online: true` on `spBv1.0/STATE/<id>`; a valid offline STATE ends the session, and the
+  readings taken meanwhile are buffered in memory (`LOADGEN_BUFFER_LIMIT_MESSAGES`, two million
+  DDATA by default) and replayed with `is_historical` after the next birth, at up to a fifth of the
+  step's rate. Before stopping, the run waits up to 15 minutes for the buffers to empty. So a
+  restart run measures the conformant path, not a broker queue.
 
 ### Results
 

@@ -63,7 +63,7 @@ appliance** until the next approved deploy overwrites it.
 
 ## The sample flow
 
-Three things:
+Four things:
 
 - **a heartbeat every 30 seconds**, which is what keeps this gateway reported ONLINE. Leave it, or
   replace it with something that beats at least as often — the dashboard calls a gateway `STALE`
@@ -76,6 +76,9 @@ Three things:
   refresh is each device's proof of life, and it must stay well inside the platform's 300-second
   device-offline timeout.
 - **`▶ SEND A DEVICE READING`**, which sends an example reading for a machine called `press-01`.
+- **`store and forward`**, which everything above publishes through. It holds the Sparkplug
+  session, encodes every message as Sparkplug B protobuf, and keeps readings on this appliance
+  while the platform cannot be reached; see below.
 
 The example is worth clicking, because it is the whole onboarding model:
 
@@ -149,6 +152,29 @@ A message published under any *other* edge node is **dropped by the broker witho
 `mosquitto_pub` exits 0, and nothing arrives. That is deliberate: it is what stops one gateway
 forging another's telemetry, and it is enforced independently of anything in this flow. If a
 message seems to vanish, check the edge-node segment of your topic first.
+
+## When the platform cannot be reached
+
+**Readings wait on this appliance's disk, and nothing is lost unless the buffer fills.**
+
+1. The broker becomes unreachable, or the platform says its ingestion service is offline. In the
+   second case the appliance ends its session and connects again, as Sparkplug requires of an edge
+   node that waits for its primary host (`GATEWAY_PRIMARY_HOST_ID`, given at enrolment).
+2. Device readings are written to `/data/buffer` instead of being sent.
+3. Both come back and the appliance births again. The readings are sent again in the order they
+   were taken, marked as replayed, so the platform files each at the time it was read.
+4. The next heartbeats report the outage: when it started and ended, and how many readings were kept
+   and dropped. The platform alerts if any were dropped.
+
+The buffer holds up to 256 MiB and seven days. When it is full, the oldest readings are dropped and
+counted. To change either limit, edit the constants at the top of **store and forward** and propose
+the change like any other ([below](#changing-this-appliances-flow)). `BUFFER_ENABLED = false` keeps
+nothing, and the platform is still told what each outage cost.
+
+Heartbeats are not kept: they say the gateway is alive now. The gateway shows OFFLINE as soon as its
+link drops, because the broker sends its last will (an NDEATH) on its behalf. Each connection's
+NDEATH carries the next birth-death sequence number (bdSeq), so the platform pairs it with the
+birth it ends.
 
 ## Changing this appliance's flow
 

@@ -107,9 +107,14 @@ re-run.
   the same bytes through `-m` are accepted. Every caller therefore puts the command on argv,
   where a password is visible to the container's own process list for the request's duration,
   the exposure `mosquitto_passwd -b` has always had.
+- **The ingestion daemon's will is prompt.** Opened as the daemon opens it (a clean session, a
+  retained QoS 1 will with no Will Delay Interval) and killed outright, its death certificate
+  reaches a gateway watching `spBv1.0/STATE/#` within a second. A gateway that buffers on STATE
+  acts on that, so the readings it takes from then on wait on the gateway rather than being sent to
+  a host that is gone ([`ingestion/README.md`, "Loss model"](../ingestion/README.md#loss-model)).
 - Refusal is still silent at QoS 0. The `Not authorized` reason code rides on PUBACK, which does
   not exist at QoS 0 under either protocol version, and Sparkplug B requires QoS 0 for every
-  message type. A gateway publishing under the wrong edge node learns nothing from the broker by
+  data and command message. A gateway publishing under the wrong edge node learns nothing from the broker by
   construction, so delivery stays the only way to assert this policy.
 
 ## The document, and who writes it

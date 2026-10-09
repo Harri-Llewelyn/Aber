@@ -4093,6 +4093,32 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 48. An appliance keeps readings exactly as long as ingestion accepts them as historical.
+//
+// The appliance drops buffered readings older than MAX_AGE_DAYS and counts them as lost; ingestion
+// refuses a replayed reading older than TELEMETRY_MAX_HISTORICAL_AGE_SECONDS. If the appliance kept
+// longer, it would replay readings ingestion refuses; if shorter, it would drop ones ingestion takes.
+// -------------------------------------------------------------------------------------------------
+{
+  const flow = JSON.parse(read('forge/gateway-platform/appliance/flows.template.json'));
+  const gate = (flow.find((n) => n.id === 'aber-sf') || {}).func || '';
+  const days = Number((gate.match(/const MAX_AGE_DAYS = (\d+);/) || [])[1]);
+  const chart = Number((read('deploy/helm/aber/values.yaml').match(/\n {2}historicalMaxAgeSeconds: (\d+)/) || [])[1]);
+  const daemon = (read('ingestion/ingestion.py')
+    .match(/TELEMETRY_MAX_HISTORICAL_AGE_SECONDS = int\(\s*os\.getenv\("TELEMETRY_MAX_HISTORICAL_AGE_SECONDS", str\(([\d *]+)\)\)\)/) || [])[1];
+  const daemonSeconds = daemon ? daemon.split('*').reduce((p, f) => p * Number(f.trim()), 1) : NaN;
+  if (!Number.isFinite(days) || !Number.isFinite(chart) || !Number.isFinite(daemonSeconds)) {
+    fail('check 48 could not read MAX_AGE_DAYS (store and forward), ingestion.historicalMaxAgeSeconds or '
+      + "the daemon's TELEMETRY_MAX_HISTORICAL_AGE_SECONDS default");
+  } else if (days * 86400 !== chart || chart !== daemonSeconds) {
+    fail(`the appliance keeps buffered readings ${days} day(s), the chart accepts historical readings for `
+      + `${chart} s and the daemon's default is ${daemonSeconds} s; they must agree`);
+  } else {
+    pass(`the appliance buffer, the chart and the daemon all keep historical readings ${days} days`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 24. The Directory's image map names the same components in the migration and the chart.
 //
 // `record_directory_images()`'s `served_by` rows say which component serves each chart-managed

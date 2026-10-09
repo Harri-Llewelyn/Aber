@@ -300,11 +300,11 @@ class TimestampRejectionLabelTests(unittest.TestCase):
         # the same increment. Exporting both would give a scraper two ways to count one rejection.
         registry.count("metrics_rejected_timestamp", 7)
         registry.count_labelled(
-            "aber_ingestion_timestamps_rejected_total", {"edge_node": NODE}, 7)
+            "aber_ingestion_timestamps_rejected_total", {"edge_node": NODE, "reason": "too_old"}, 7)
         samples = self.samples(registry.render())
         self.assertNotIn("aber_ingestion_timestamps_rejected_total 7.0", samples)
         self.assertIn(
-            'aber_ingestion_timestamps_rejected_total{edge_node="%s"} 7.0' % NODE, samples)
+            'aber_ingestion_timestamps_rejected_total{edge_node="%s",reason="too_old"} 7.0' % NODE, samples)
 
     def test_it_is_not_reported_as_an_unmapped_counter(self):
         # The catch-all means "metrics.py has fallen behind ingestion.py". Letting this fall into
@@ -319,7 +319,7 @@ class TimestampRejectionLabelTests(unittest.TestCase):
         # it. Dropping that is how the omission would quietly become a loss.
         registry.count("metrics_rejected_timestamp", 7)
         registry.count_labelled(
-            "aber_ingestion_timestamps_rejected_total", {"edge_node": NODE}, 7)
+            "aber_ingestion_timestamps_rejected_total", {"edge_node": NODE, "reason": "too_old"}, 7)
         self.assertEqual(7, registry.counter_snapshot()["metrics_rejected_timestamp"])
 
     def test_the_reason_for_the_omission_is_recorded_beside_the_name(self):
@@ -327,9 +327,9 @@ class TimestampRejectionLabelTests(unittest.TestCase):
 
     def test_the_labelled_series_names_the_edge_node(self):
         registry.count_labelled(
-            "aber_ingestion_timestamps_rejected_total", {"edge_node": NODE}, 3)
+            "aber_ingestion_timestamps_rejected_total", {"edge_node": NODE, "reason": "too_old"}, 3)
         self.assertIn(
-            'aber_ingestion_timestamps_rejected_total{edge_node="%s"} 3.0' % NODE,
+            'aber_ingestion_timestamps_rejected_total{edge_node="%s",reason="too_old"} 3.0' % NODE,
             self.samples(registry.render()))
 
     def test_the_message_total_omission_still_holds(self):

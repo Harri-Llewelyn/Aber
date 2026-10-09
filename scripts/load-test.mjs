@@ -4,6 +4,7 @@
  *
  *   node scripts/load-test.mjs up   --gateways 8 --devices-per-gateway 50
  *   node scripts/load-test.mjs run  --plan 100x90,250x90,500x90,1000x90 [--soak 1200] [--compress]
+ *   node scripts/load-test.mjs run  --plan 500x300 --restart-ingestion-at 60 [--restart-hold 150]
  *   node scripts/load-test.mjs down [--purge-telemetry]
  *   node scripts/load-test.mjs status
  *
@@ -14,8 +15,16 @@
  *
  * The fleet is marked `is_simulated`, which is what that column means: telemetry generated rather
  * than observed. See test-harness/README.md for the method and what the run measures.
+ *
+ * `--restart-ingestion-at S` restarts the ingestion Deployment S seconds into the first step, as an
+ * upgrade does, and afterwards compares the readings the generator took with the rows the historian
+ * holds for the fleet between the first and the last of them (ingestion/README.md, "Loss model").
+ * The generator's edge nodes wait for the primary host as an appliance does: while the daemon's
+ * STATE is offline they buffer, and after it is back they birth again and replay with is_historical.
+ * `--restart-hold H` scales the Deployment to zero for H seconds instead, a long gap such as an
+ * image pull, so the buffers hold H seconds of readings.
  */
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -270,6 +279,13 @@ function run () {
   const settle = Number(option('settle', '15'));
   const soak = Number(option('soak', '0'));
   const compress = flag('compress');
+  const restartAt = option('restart-ingestion-at') === null ? null : Number(option('restart-ingestion-at'));
+  if (restartAt !== null && !(Number.isFinite(restartAt) && restartAt > 0)) {
+    die('--restart-ingestion-at must be a number of seconds after the first step starts');
+  }
+  const hold = Number(option('restart-hold', '0'));
+  if (!(Number.isFinite(hold) && hold >= 0)) die('--restart-hold must be a number of seconds, 0 or more');
+  if (hold && restartAt === null) die('--restart-hold needs --restart-ingestion-at');
   if (!/^\s*\d+(\.\d+)?x\d+(\.\d+)?(\s*,\s*\d+(\.\d+)?x\d+(\.\d+)?)*\s*$/.test(plan)) {
     die(`--plan '${plan}' must be <rate>x<seconds> steps, comma separated`);
   }
@@ -338,8 +354,17 @@ function run () {
   }
 
   step('Load run (the generator streams its own report)');
-  spawnSync('kubectl', ['-n', NAMESPACE, 'logs', '-f', `job/${JOB}`], { stdio: 'inherit' });
+  if (restartAt === null) {
+    spawnSync('kubectl', ['-n', NAMESPACE, 'logs', '-f', `job/${JOB}`], { stdio: 'inherit' });
+    return finish(seconds);
+  }
+  return streamWithRestart(restartAt, hold).then(({ output, restart }) => {
+    finish(seconds);
+    compareWithHistorian(output, restart);
+  });
+}
 
+function finish (seconds) {
   const finished = kubectl(['wait', '--for=condition=complete', `job/${JOB}`,
     `--timeout=${Math.ceil(seconds / 60) + 20}m`]);
   if (finished.status !== 0) {
@@ -350,6 +375,121 @@ function run () {
     `\nThe Job is kept for its output: kubectl -n ${NAMESPACE} logs job/${JOB}\n` +
     '  node scripts/load-test.mjs down   to take the fleet away\n'
   );
+}
+
+/** A command run to completion without blocking the log stream. */
+function runAsync (cmd, args) {
+  return new Promise((done) => {
+    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (c) => { stdout += c; });
+    child.stderr.on('data', (c) => { stderr += c; });
+    child.on('close', (status) => done({ status, stdout, stderr }));
+  });
+}
+
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+
+/**
+ * Restart the ingestion Deployment as an upgrade does (Recreate: the old pod stops, then the new one
+ * starts), or with `hold` keep it at zero that many seconds, and time it to the line the new daemon
+ * logs once it is subscribed.
+ */
+async function restartIngestion (hold) {
+  const started = Date.now();
+  if (hold) {
+    console.log(`\n=== Stopping the ingestion Deployment for ${hold} s (${new Date(started).toISOString()})`);
+    const down = await runAsync('kubectl', ['-n', NAMESPACE, 'scale', 'deployment/ingestion', '--replicas=0']);
+    if (down.status !== 0) return { error: `scaling to 0 failed: ${down.stderr.trim()}` };
+    await sleep(hold * 1000);
+    const up = await runAsync('kubectl', ['-n', NAMESPACE, 'scale', 'deployment/ingestion', '--replicas=1']);
+    if (up.status !== 0) return { error: `scaling back to 1 failed: ${up.stderr.trim()}` };
+  } else {
+    console.log(`\n=== Restarting the ingestion Deployment (${new Date(started).toISOString()})`);
+    const restarted = await runAsync('kubectl', ['-n', NAMESPACE, 'rollout', 'restart', 'deployment/ingestion']);
+    if (restarted.status !== 0) return { error: `rollout restart failed: ${restarted.stderr.trim()}` };
+  }
+  while (Date.now() - started < 600_000 + hold * 1000) {
+    await sleep(2000);
+    const pods = await runAsync('kubectl', ['-n', NAMESPACE, 'get', 'pods',
+      '-l', 'app.kubernetes.io/component=ingestion', '-o',
+      'jsonpath={range .items[*]}{.metadata.name}{" "}{.metadata.creationTimestamp}{"\\n"}{end}']);
+    const fresh = pods.stdout.split('\n').map((l) => l.trim().split(' '))
+      .filter(([name, created]) => name && Date.parse(created) >= started - 1000);
+    for (const [name] of fresh) {
+      const logs = await runAsync('kubectl', ['-n', NAMESPACE, 'logs', name]);
+      if (logs.stdout.includes("Subscribed to 'spBv1.0/#'")) {
+        const seconds = (Date.now() - started) / 1000;
+        console.log(`=== The new daemon (${name}) is subscribed, ${seconds.toFixed(0)} s after the restart ` +
+          '(to within the 2 s poll)\n');
+        return { pod: name, seconds };
+      }
+    }
+  }
+  return { error: 'the new ingestion pod did not log that it subscribed within 10 minutes' };
+}
+
+/** Stream the generator's output, and restart ingestion `restartAt` seconds into its first step. */
+function streamWithRestart (restartAt, hold) {
+  return new Promise((done) => {
+    const logs = spawn('kubectl', ['-n', NAMESPACE, 'logs', '-f', `job/${JOB}`],
+      { stdio: ['ignore', 'pipe', 'inherit'] });
+    let output = '';
+    let restart = null;
+    let timer = null;
+    logs.stdout.on('data', (chunk) => {
+      process.stdout.write(chunk);
+      output += chunk;
+      if (!timer && output.includes('Step: ')) {
+        timer = setTimeout(() => { restart = restartIngestion(hold); }, restartAt * 1000);
+      }
+    });
+    logs.on('close', async () => {
+      if (timer && !restart) clearTimeout(timer);
+      done({ output, restart: restart ? await restart : { error: 'the run ended before the restart was due' } });
+    });
+  });
+}
+
+/** Readings the generator took, against the rows the historian holds for the fleet in that window. */
+function compareWithHistorian (output, restart) {
+  step('Readings sent against readings stored');
+  const line = output.split('\n').find((l) => l.startsWith('TOTALS '));
+  if (!line) die('the generator printed no TOTALS line, so there is nothing to compare (is its image from this checkout?)');
+  const totals = JSON.parse(line.slice('TOTALS '.length));
+  if (restart?.error) console.log(`  the restart: ${restart.error}`);
+  if (!Number.isFinite(totals.first_ms) || !Number.isFinite(totals.last_ms)) die('the generator published no DDATA');
+  const ids = rows(psql(
+    'SELECT d.sparkplug_id FROM devices d JOIN gateways g ON g.id = d.gateway_id ' +
+    `WHERE g.name LIKE '${LIKE}' AND d.sparkplug_id IS NOT NULL`
+  )).map(([id]) => id).filter((id) => /^[A-Za-z0-9]+$/.test(id));
+  const counted = historian(
+    `SELECT count(*) FROM telemetry WHERE asset_id IN (${ids.map((id) => `'${id}'`).join(',')}) ` +
+    `AND time >= to_timestamp(${totals.first_ms} / 1000.0) AND time <= to_timestamp(${totals.last_ms} / 1000.0)`
+  );
+  const stored = counted === null ? NaN : Number(counted);
+  if (!Number.isFinite(stored)) die('the historian did not answer the count');
+  // Every reading the edge nodes took, whether published at once or buffered and replayed.
+  const sent = totals.readings_taken;
+  const lost = sent - stored;
+  const each = totals.metrics_per_message;
+  console.log(`  taken   ${sent.toLocaleString()} readings (${totals.ddata_taken.toLocaleString()} DDATA x ${each})`);
+  console.log(`  stored  ${stored.toLocaleString()}`);
+  console.log(`  lost    ${lost.toLocaleString()} (${sent ? ((100 * lost) / sent).toFixed(3) : '0'} %)`);
+  if (restart?.seconds !== undefined) {
+    console.log(`  gap     ${restart.seconds.toFixed(0)} s from the restart to the new daemon subscribed`);
+  }
+  console.log(`  edge    primary host ${totals.primary_host || '(none: the edge nodes did not wait for one)'}; ` +
+    `${totals.sessions_restarted} session(s) restarted on an offline STATE`);
+  console.log(`          ${(totals.ddata_buffered * each).toLocaleString()} readings buffered, ` +
+    `${(totals.ddata_replayed * each).toLocaleString()} replayed with is_historical, ` +
+    `${(totals.ddata_dropped_from_buffer * each).toLocaleString()} dropped from a full buffer, ` +
+    `${(totals.ddata_still_buffered * each).toLocaleString()} still buffered at the end`);
+  console.log(lost === 0
+    ? '\nVERDICT: the restart of ingestion under load lost nothing.'
+    : `\nVERDICT: ${lost.toLocaleString()} readings were lost across the restart.`);
+  if (lost !== 0) process.exitCode = 1;
 }
 
 // -------------------------------------------------------------------------------------------
@@ -432,9 +572,11 @@ if (!commands[command]) {
     'Usage: node scripts/load-test.mjs <up|run|down|status> [options]\n\n' +
     '  up    --gateways N --devices-per-gateway M [--prefix LOADGEN] [--password ...]\n' +
     '  run   --plan 100x90,250x90 [--metrics-per-message 10] [--settle 15] [--soak SECONDS] [--compress]\n' +
+    '        [--restart-ingestion-at SECONDS [--restart-hold SECONDS]]\n' +
     '  down  [--purge-telemetry]\n' +
     '  status\n'
   );
   process.exit(2);
 }
-commands[command]();
+const result = commands[command]();
+if (result instanceof Promise) result.catch((err) => die(err.stack || String(err)));
