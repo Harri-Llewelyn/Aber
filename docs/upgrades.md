@@ -24,6 +24,15 @@ It applies from 1.0.0 onwards. An install older than that is reinstalled rather 
   [*Values from `npm run setup` before 1.0.2*](#values-from-npm-run-setup-before-102-lack-the-i3x-broker-password).
 - **NetworkPolicies on, and a cold archive in object storage?** Add its endpoint first: see
   [*From 1.1.0, the cold archive's endpoint is listed*](#from-110-the-cold-archives-endpoint-is-listed-under-networkpolicies).
+- **A proxy of your own in front of Traefik, or a Traefik that loses each client's address?** Set
+  the sign-in limit first: see [*a proxy in front of Traefik*](#from-120-a-proxy-in-front-of-traefik-is-counted-in-trustedproxyhops)
+  and [*a site where Traefik loses the client's address*](#from-120-a-site-where-traefik-loses-the-clients-address-raises-perclientperminute).
+- **On `https`?** Make sure people's devices trust the site's root certificate first: see
+  [*an `https` site tells browsers to use only HTTPS*](#from-120-an-https-site-tells-browsers-to-use-only-https).
+- **Pinned `supabaseDb.image.tag` to run another server build?** Set `supabaseDb.serverImage`
+  first: see [*the platform database runs Aber's own image*](#from-120-the-platform-database-runs-abers-own-image).
+- **An admission webhook that injects sidecars?** Check each tolerates the runtime's default seccomp
+  profile: see [*every container drops the capabilities it does not need*](#from-120-every-container-drops-the-capabilities-it-does-not-need).
 
 ### The command
 
@@ -329,9 +338,9 @@ The upgrade changes no device: a schema set in the column stays attached. An API
 the column keeps working, and should move to `rpc/set_device_schemas`. The column is removed no
 sooner than 1.2.0 ([`releases.md`](releases.md#deprecation)).
 
-### After 1.1.0, a proxy in front of Traefik is counted in `trustedProxyHops`
+### From 1.2.0, a proxy in front of Traefik is counted in `trustedProxyHops`
 
-After 1.1.0, the gateway limits password sign-ins per client address, and works out the address
+From 1.2.0, the gateway limits password sign-ins per client address, and works out the address
 itself. It reads `X-Forwarded-For` from the right, past `supabaseEnvoy.trustedProxyHops` proxies:
 1 by default, for Traefik.
 
@@ -340,6 +349,34 @@ That is a proxy named in Traefik's `forwardedHeaders.trustedIPs`
 ([`deploy/k8s/README.md`](../deploy/k8s/README.md#first-traefik-keeps-each-clients-address)).
 Without it, every client is the proxy's address, and the whole site shares ten sign-ins a minute.
 A site with no such proxy has nothing to do.
+
+### From 1.2.0, a site where Traefik loses the client's address raises `perClientPerMinute`
+
+The same limit, ten password sign-ins a minute from each client address, also binds GoTrue's own
+limits to that address. Where Traefik cannot keep each client's address, every client arrives as
+one, and the whole site shares those ten. That is a k3s cluster whose Traefik Service is not on
+`externalTrafficPolicy: Local`
+([`deploy/k8s/README.md`](../deploy/k8s/README.md#first-traefik-keeps-each-clients-address)), and a
+site that set `supabaseAuth.rateLimitHeader: ""` because the address cannot be kept.
+
+**Before upgrading**, apply that step. Where the address still cannot be kept, set
+`supabaseEnvoy.signInRateLimit.perClientPerMinute` to the same value as `totalPerMinute` (120 by
+default). On k3s this prints `Local` where there is nothing to do:
+
+```bash
+kubectl -n kube-system get svc traefik -o jsonpath='{.spec.externalTrafficPolicy}'
+```
+
+### From 1.2.0, an `https` site tells browsers to use only HTTPS
+
+With `global.scheme: https`, the dashboard, the API, Grafana, Studio and the forge send
+`Strict-Transport-Security: max-age=31536000`. A browser that has seen it refuses plain HTTP to that
+host for a year, and turns a certificate warning there into an error nobody can click past.
+
+**Before upgrading**, make sure the devices people use trust the site's root certificate
+([`deploy/k8s/README.md`](../deploy/k8s/README.md#3-distribute-the-root-certificate)). From then on,
+install a new root on them before you replace the CA, and do not move the site back to `http`. The
+header follows `global.scheme` and has no key of its own. A site on `http` has nothing to do.
 
 ### From 1.2.0, an OPC UA semantic id is the ExpandedNodeId OPC UA publishes
 
