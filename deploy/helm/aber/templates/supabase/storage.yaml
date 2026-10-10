@@ -87,7 +87,7 @@ spec:
       {{- end }}
       # M5. Node-based image running as uid/gid 1000; local-path hands over a root-owned directory.
       securityContext:
-        {{- toYaml .Values.supabaseStorage.podSecurityContext | nindent 8 }}
+        {{- include "aber.podSecurityContext" .Values.supabaseStorage.podSecurityContext | nindent 8 }}
       initContainers:
         {{/*
           supabase_storage_admin HAS NO PASSWORD until db-roles-init sets one. Without it
@@ -166,6 +166,10 @@ spec:
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 4
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             {{- toYaml .Values.supabaseStorage.resources | nindent 12 }}
           volumeMounts:

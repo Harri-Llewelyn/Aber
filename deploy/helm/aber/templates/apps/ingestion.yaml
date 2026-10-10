@@ -62,6 +62,9 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         {{/*
           Waits for the API gateway, which is how EVERY device lookup is made (SUPABASE_URL is
@@ -103,6 +106,10 @@ spec:
                 sleep 3
               done
               echo "telemetry hypertable exists"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             requests: { cpu: 10m, memory: 32Mi }
             limits: { memory: 128Mi }
@@ -285,6 +292,10 @@ spec:
 
             Liveness above still restarts a wedged daemon, which is the failure Kubernetes can fix.
           */}}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             {{- toYaml .Values.ingestion.resources | nindent 12 }}
           {{- $brokerTls := and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients }}

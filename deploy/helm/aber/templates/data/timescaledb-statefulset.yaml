@@ -111,7 +111,7 @@ spec:
       # OnRootMismatch skips a recursive chgrp on every restart once ownership is already correct,
       # which matters as the historian grows.
       securityContext:
-        {{- toYaml .Values.timescaledb.podSecurityContext | nindent 8 }}
+        {{- include "aber.podSecurityContext" .Values.timescaledb.podSecurityContext | nindent 8 }}
       containers:
         - name: timescaledb
           image: {{ include "aber.image" (dict "image" .Values.timescaledb.image "ctx" .) | quote }}
@@ -213,6 +213,13 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              # The entrypoint starts as root, fixes the data directory's owner and mode and drops
+              # to postgres (uid 70) through gosu; tini, as root, forwards the stop signal to it.
+              add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "KILL", "SETGID", "SETUID"]
           resources:
             {{- toYaml .Values.timescaledb.resources | nindent 12 }}
           volumeMounts:
@@ -243,6 +250,8 @@ spec:
             runAsGroup: 70
             runAsNonRoot: true
             allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           env:
             - name: POSTGRES_USER
               value: {{ .Values.timescaledb.username | quote }}

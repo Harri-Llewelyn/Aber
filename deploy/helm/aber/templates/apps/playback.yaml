@@ -54,6 +54,9 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         {{/*
           The worker reads its capture out of Storage through the API gateway, so it has to be up.
@@ -102,6 +105,10 @@ spec:
               value: {{ .Values.playback.pollIntervalSeconds | quote }}
             - name: PYTHONUNBUFFERED
               value: "1"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             {{- toYaml .Values.playback.resources | nindent 12 }}
           volumeMounts:

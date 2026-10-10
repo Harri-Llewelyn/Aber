@@ -88,20 +88,21 @@ export const IMAGES = [
   { name: 'test-runner', file: 'test-harness/Dockerfile', context: '.', args: [`INGESTION_IMAGE=${IMG_NS}/ingestion:VERSION`] },
 ]
 
+// The forge's SSH port on the host, values-dev.yaml's gitea.ssh.external.port: the clone URLs `up`
+// hands appliances name it, and the load balancer of a cluster `up` creates publishes it.
+const FORGE_SSH_PORT = 2222
+
 // The host ports the suites default to, forwarded to the Services that stand behind them, so every
 // host-side tool -- validate.py, the stack lane, the provisioning scripts -- keeps its defaults.
-// MQTT is not here: the k3d load balancer publishes 1883 and 8883 when the cluster was created
-// with those ports, and a forward is added below only when it was not. The two databases are
-// relayed, a forward per connection: `openRelay` says why.
+// MQTT and the forge's SSH are in LB_FORWARDS below instead: the k3d load balancer publishes them
+// when the cluster was created with those ports, and a forward is added only when it was not. The
+// two databases are relayed, a forward per connection: `openRelay` says why.
 const FORWARDS = [
   { local: 5433, service: 'timescaledb', remote: 5432, what: 'historian', relay: true },
   { local: 54322, service: 'supabase-db', remote: 5432, what: 'Supabase Postgres', relay: true },
   { local: 54321, service: 'supabase-envoy', remote: 8000, what: 'Supabase API (the gateway)' },
   { local: 54323, service: 'supabase-envoy', remote: 8001, what: 'Studio, behind the gateway login' },
   { local: 3003, service: 'supabase-envoy', remote: 8002, what: 'the forge, behind the gateway' },
-  // The forge over SSH, which the appliance suites push to with a deploy key. gitea-external (2222
-  // in values-dev.yaml) is not published on the host, so this goes to the in-cluster Service.
-  { local: 2222, service: 'gitea', remote: 22, what: 'the forge over SSH' },
   { local: 1880, service: 'node-red', remote: 1880, what: 'Node-RED' },
   { local: 3002, service: 'grafana', remote: 3000, what: 'Grafana' },
   { local: 3000, service: 'frontend', remote: 3000, what: 'the dashboard' },
@@ -112,10 +113,14 @@ const FORWARDS = [
   { local: 9108, service: 'ingestion-metrics', remote: 9108, what: 'ingestion metrics' },
   { local: 12345, service: 'alloy', remote: 12345, what: 'Alloy' },
 ]
-const MQTT_FORWARDS = [
+// Forwarded only when the load balancer does not publish the port. A cluster created before it
+// published the forge's SSH port gets the forward to the in-cluster Service, which the appliance
+// suites push to with a deploy key.
+const LB_FORWARDS = [
   { local: 1883, service: 'mosquitto', remote: 1883, what: 'MQTT' },
   { local: 8883, service: 'mosquitto', remote: 8883, what: 'MQTTS', tlsOnly: true },
   { local: 9001, service: 'mosquitto', remote: 9001, what: 'MQTT over WebSockets' },
+  { local: FORGE_SSH_PORT, service: 'gitea', remote: 22, what: 'the forge over SSH' },
 ]
 
 const c = { dim: s => `\x1b[2m${s}\x1b[0m`, red: s => `\x1b[31m${s}\x1b[0m`,
@@ -192,13 +197,19 @@ function clusterExists () {
   return JSON.parse(r.out || '[]').some(cl => cl.name === CLUSTER)
 }
 
+// `k3d cluster create` for the dev loop: the shared ports (80 for Traefik, 1883 and 8883 for the
+// broker's LoadBalancer) and FORGE_SSH_PORT for gitea-external, which appliances on the LAN clone
+// from. The trial hands appliances no address, so the port is not in the shared list.
+export function clusterCreateArgs (name = CLUSTER) {
+  return createClusterArgs(name, ['--port', `${FORGE_SSH_PORT}:${FORGE_SSH_PORT}@loadbalancer`])
+}
+
 function ensureCluster () {
   step(`cluster ${CLUSTER}`)
   if (clusterExists()) {
     console.log(`  exists`)
   } else {
-    // Port 80 is Traefik; 1883 and 8883 are the broker's LoadBalancer, for appliances on the LAN.
-    must('k3d', createClusterArgs(CLUSTER), 'k3d could not create the cluster')
+    must('k3d', clusterCreateArgs(), 'k3d could not create the cluster')
   }
   // k3d writes the API endpoint as host.docker.internal on Windows and macOS, which some adapters
   // resolve to an address nothing answers on. Loopback always works: the port is published there.
@@ -473,7 +484,7 @@ function portOpen (port) {
 // A port the OS picks, but never one of the fixed forwards: Linux hands out 32768-60999, which holds
 // 54321-54323, and a relay's warm forward that took 54322 left the next relay nowhere to listen.
 export async function freePort () {
-  const fixed = new Set([...FORWARDS, ...MQTT_FORWARDS].map(f => f.local))
+  const fixed = new Set([...FORWARDS, ...LB_FORWARDS].map(f => f.local))
   for (;;) {
     const port = await new Promise((resolve, reject) => {
       const s = net.createServer()
@@ -563,12 +574,13 @@ async function openRelay (f) {
   return { close: () => { closed = true; servers.forEach(s => s.close()); for (const ch of live) ch.kill() } }
 }
 
+// The forwards to open: every fixed one, and each load-balancer port the cluster does not publish.
+export function wantedForwards ({ tls, published }) {
+  return [...FORWARDS, ...LB_FORWARDS.filter(f => (tls || !f.tlsOnly) && !published(f.local))]
+}
+
 async function openForwards ({ tls }) {
-  const wanted = [...FORWARDS]
-  for (const f of MQTT_FORWARDS) {
-    if (f.tlsOnly && !tls) continue
-    if (!lbPublishes(f.local)) wanted.push(f)
-  }
+  const wanted = wantedForwards({ tls, published: lbPublishes })
   const handles = []
   const close = () => handles.forEach(h => h.close())
   const opened = []
@@ -674,9 +686,9 @@ function testEnvironment () {
     REBIRTH_REQUEST_INTERVAL_SECONDS: daemon.REBIRTH_REQUEST_INTERVAL_SECONDS,
     // The forge's door is an OAuth flow whose registered callback is the Ingress host.
     GITEA_TEST_URL: process.env.GITEA_TEST_URL || `http://git.${domain}`,
-    // Where a suite that acts as an appliance clones and pushes from this host; the clone URL
-    // enrolment hands out names the forge's own address, which only the cluster network reaches.
-    GITEA_TEST_SSH: 'ssh://git@127.0.0.1:2222',
+    // Where a suite that acts as an appliance clones and pushes from this host: the load
+    // balancer's port on a cluster `up` created, the forward on an older one.
+    GITEA_TEST_SSH: `ssh://git@127.0.0.1:${FORGE_SSH_PORT}`,
     LOKI_TEST_URL: 'http://127.0.0.1:3100',
     PROMETHEUS_TEST_URL: 'http://127.0.0.1:9090',
     // Skips would otherwise read as passes: here the seed and both stores are guaranteed.
@@ -905,6 +917,7 @@ function status () {
   API        http://api.${base}/         Node-RED  http://nodered.${base}/
   forge      http://git.${base}/         docs      http://docs.${base}/
   MQTT       ${lbPublishes(1883) ? '127.0.0.1:1883' : 'not published by the load balancer; `forward` opens it'}
+  forge SSH  ${lbPublishes(FORGE_SSH_PORT) ? `127.0.0.1:${FORGE_SSH_PORT}` : 'not published by the load balancer, so appliances cannot clone; `forward` opens it for this machine'}
   next       node scripts/dev-cluster.mjs test | forward | reset | down`)
 }
 

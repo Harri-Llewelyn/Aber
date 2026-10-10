@@ -44,6 +44,9 @@ spec:
           imagePullSecrets:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          securityContext:
+            seccompProfile:
+              type: RuntimeDefault
           containers:
             - name: cold-archive
               image: {{ include "aber.image" (dict "image" .Values.ingestion.image "ctx" $) | quote }}
@@ -75,6 +78,10 @@ spec:
                 {{- include "aber.secretEnv" (dict "name" "SUPABASE_INGESTION_KEY" "secretName" $secretName "key" "SUPABASE_INGESTION_KEY") | nindent 16 }}
                 - name: PYTHONUNBUFFERED
                   value: "1"
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
               resources:
                 {{- toYaml .Values.coldArchive.resources | nindent 16 }}
               {{- if .Values.postgresTls.enabled }}

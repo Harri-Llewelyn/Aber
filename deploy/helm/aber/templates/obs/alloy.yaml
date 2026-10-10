@@ -451,6 +451,9 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ printf "%s-alloy" $fullname }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: alloy
           image: "{{ $cfg.image.repository }}:{{ $cfg.image.tag }}"
@@ -458,7 +461,9 @@ spec:
           args:
             - run
             - --server.http.listen-addr=0.0.0.0:12345
-            - --storage.path=/var/lib/alloy/data
+            # Not under /var/lib/alloy: the image keeps it 0770 for uid 473, and root without
+            # DAC_OVERRIDE cannot enter it.
+            - --storage.path=/var/lib/alloy-data
             # Alloy reports which components it runs to Grafana Labs unless told not to.
             - --disable-reporting
             - /etc/alloy/config.alloy
@@ -482,6 +487,11 @@ spec:
               port: http
             periodSeconds: 20
             failureThreshold: 4
+          # Root without a capability: the host files it reads read-only belong to root.
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             {{- toYaml $cfg.resources | nindent 12 }}
           volumeMounts:
@@ -489,7 +499,7 @@ spec:
               mountPath: /etc/alloy
               readOnly: true
             - name: data
-              mountPath: /var/lib/alloy/data
+              mountPath: /var/lib/alloy-data
             {{- if $cfg.hostMetrics }}
             - name: host-proc
               mountPath: /host/proc

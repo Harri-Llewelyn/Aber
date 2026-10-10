@@ -171,6 +171,7 @@ k3d cluster create aber \
   --port "80:80@loadbalancer" \
   --port "1883:1883@loadbalancer" \
   --port "8883:8883@loadbalancer" \
+  --port "2222:2222@loadbalancer" \
   --k3s-arg "--disable=metrics-server@server:0" \
   --wait
 ```
@@ -181,6 +182,9 @@ through its real path, rather than by port-forwarding straight to a Service.
 `--port 1883:1883@loadbalancer` and `8883:8883@loadbalancer` do the same for the
 `mosquitto-external` LoadBalancer. A gateway on the LAN (MQTTS on 8883), or a simulator on the
 host, then reaches the broker at the host's address.
+
+`--port 2222:2222@loadbalancer` does the same for `gitea-external`, the forge's SSH, which a gateway
+clones its flows from. The dev values put it on 2222.
 
 To tear the cluster down, run `k3d cluster delete aber`. It deletes the PVCs too: right for a
 throwaway cluster, and never what you want on k3s.
@@ -1368,6 +1372,41 @@ them from www.gstatic.com; `Model3DViewer.jsx` points it at the dashboard's copi
 
 An administrator can turn on Node-RED's update notifications in its User Settings. The runtime then
 keeps that choice over `settings.js`.
+
+### Security contexts
+
+Every pod runs under the container runtime's default seccomp profile (`seccompProfile:
+RuntimeDefault`). Every container sets `allowPrivilegeEscalation: false` and drops every Linux
+capability. That covers init containers, hook Jobs, CronJobs and the `helm test` pods too. A
+container gets back only the capabilities its process was shown to need, each named beside its
+`securityContext`:
+
+| Container (pod) | Added back | Why |
+|---|---|---|
+| `frontend`, `swagger-ui` | `CHOWN`, `SETGID`, `SETUID` | The nginx master runs as root. It chowns its temp directories to `nginx` and drops to that user for the workers. |
+| `envoy` (supabase-envoy) | `CHOWN`, `SETGID`, `SETUID` | The image's entrypoint hands `/dev/stdout` and `/dev/stderr` to the envoy user, then drops to it. |
+| `realtime` (supabase-realtime) | `SETGID`, `SETUID` | `/app/run.sh` runs the migrations as `nobody` through `sudo`. Its start logs `sudo: unable to send audit message: Operation not permitted`, which is harmless. |
+| `mosquitto` | `CHOWN`, `SETGID`, `SETUID` | The entrypoint hands `/mosquitto` to uid 1883, so the broker can save its plugin document on any storage class. The broker then starts as root and drops to that uid. |
+| `assemble-config` (mosquitto) | `CHOWN`, `DAC_OVERRIDE`, `FOWNER` | It reads the plugin's document (uid 1883, mode 0600) and writes its replacement owned by 1883. |
+| `certificate-reload` (mosquitto, broker TLS only) | `KILL` | It sends SIGHUP to the broker, which runs as another uid. |
+| `timescaledb` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `SETGID`, `SETUID` | The entrypoint fixes the data directory's owner and mode, then drops to postgres (uid 70). tini forwards the stop signal to it. |
+| `gitea-init` (gitea) | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID`, `SETUID` | The image's setup rewrites `app.ini` and the git user's `.ssh`, and runs `gitea` as git (uid 1000). |
+| `gitea` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `NET_BIND_SERVICE`, `SETGID`, `SETUID`, `SYS_CHROOT` | The same setup. sshd binds port 22 and chroots its pre-authentication child, and s6 delivers SIGTERM to Gitea. |
+| `backup-service` | `DAC_OVERRIDE` | It archives the forge's and the broker's volumes, whose files belong to other uids, some at 0600. |
+
+Each of these is in the Pod Security Standards' *baseline* set. **Alloy is the exception to
+baseline**: it mounts the node's `/`, `/proc` and `/sys` read-only, as `hostPath` volumes, for the
+host metrics. It drops every capability, and reads those files as root, which owns them.
+
+What happens if a capability is missing: the container exits at start with `Operation not
+permitted`, or, for `KILL`, a stop takes the whole grace period and the process is killed rather
+than shut down. What to do: add it back in that container's `securityContext`, and say why.
+
+Two steps of #419 follow. Each image this repository builds gets a non-root `USER`, matched by
+`runAsNonRoot` and `runAsUser` in the chart. Then each root filesystem becomes read-only, one
+workload at a time, with an `emptyDir` for what the process writes. Until then the containers run as
+their images' users, several as root, and `scripts/lint/config-allowlist.json` lists those
+findings against #419.
 
 ### PDBs and HPAs
 

@@ -63,6 +63,9 @@ spec:
             - {{ printf "%s.%s" $sub $.Values.global.publicBaseDomain | quote }}
             {{- end }}
       {{- end }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         {{/*
           WAITS FOR THE MIGRATIONS TO FINISH -- not for the gateway, and not for one table.
@@ -254,6 +257,10 @@ spec:
             {{- end }}
             - name: PYTHONUNBUFFERED
               value: "1"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             {{- toYaml .Values.e2e.resources | nindent 12 }}
           {{- $brokerTls := and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients }}
