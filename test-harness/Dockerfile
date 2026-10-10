@@ -38,7 +38,7 @@
 # name. The default is the last released tag rather than a floating one: left to drift, a bare
 # build here would silently extend a DIFFERENT ingestion image than the one the chart deploys, and
 # the suite would then be testing a stack it is not running beside.
-ARG INGESTION_IMAGE=ghcr.io/harri-llewelyn/aber/ingestion:1.1.0
+ARG INGESTION_IMAGE=ghcr.io/harri-llewelyn/aber/ingestion:1.2.0
 FROM ${INGESTION_IMAGE}
 
 # The ingestion image's WORKDIR is /app and it holds ingestion.py, validate.py and
