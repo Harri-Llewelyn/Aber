@@ -341,6 +341,105 @@ That is a proxy named in Traefik's `forwardedHeaders.trustedIPs`
 Without it, every client is the proxy's address, and the whole site shares ten sign-ins a minute.
 A site with no such proxy has nothing to do.
 
+### From 1.2.0, an OPC UA semantic id is the ExpandedNodeId OPC UA publishes
+
+Up to 1.1.x, an OPC UA vocabulary id was the companion specification's namespace URI followed by the
+data point's name, for example `http://opcfoundation.org/UA/Machinery/Manufacturer`. The OPC
+Foundation never issued those. From 1.2.0 each is the ExpandedNodeId the specification's NodeSet
+publishes, for example `nsu=http://opcfoundation.org/UA/Machinery/;i=6002`, with the Reference Type
+`ExpandedNodeId` (#458).
+
+The upgrade moves every catalog metric and schema whose semantic id is **exactly** a former id, so
+nothing on the platform needs an edit. What it cannot reach:
+
+- **An AAS shell exported to another system** keeps the old ids until you export it again. A
+  consumer matching concepts by semantic id treats the two as different concepts until then.
+- **An id copied by hand** into a flow, a query or a document. The Vocabulary page shows each data
+  point's new id, and the 1.2.0 release notes list every former id beside it.
+- **An id typed in another form** (a trailing `/`, other case) is not moved. Open the metric on the
+  Metrics page, choose **Edit**, and pick the concept again with **Search vocabularies**.
+
+Machinery `OperationalTime` is gone from the vocabulary, because no Machinery NodeSet declares it.
+A metric carrying its former id keeps it. Two suggested units change for new metrics only: Machinery
+`PowerOnDuration` is counted in milliseconds, and Robotics `TotalPowerOnTime` is a `String`.
+
+### From 1.2.0, the five example BMS metrics carry QUDT quantity kinds
+
+`BMS/ZONE_TEMPERATURE`, `BMS/ZONE_HUMIDITY`, `BMS/CO2_CONCENTRATION`, `BMS/STATIC_PRESSURE` and
+`BMS/SUPPLY_AIR_FLOW` carried ASHRAE 223P sensor classes as semantic ids, which tell an AAS consumer
+that a reading is a sensor. From 1.2.0 they carry the QUDT quantity kind of what they report, such as
+`http://qudt.org/vocab/quantitykind/Temperature` (#461).
+
+Every install first made with 1.0.0 or 1.0.1 has these rows, and a later one has them only where
+`dbInit.exampleMetrics` was on. The upgrade moves each row whose id is still the one the seed gave
+it, and keeps an id you changed. A system that matched the old ids in an exported shell should
+match the new ones. In i3X these five types move from the 223P namespace to the local one. The
+dashboard no longer offers a 223P class as a semantic id.
+
+### From 1.2.0, the platform database runs Aber's own image
+
+The `supabase-db` server now runs `supabaseDb.serverImage`, `ghcr.io/harri-llewelyn/aber/supabase-db`
+at the chart's version. It is the pinned `supabase/postgres` with pgBackRest and `tini` added, as the
+historian runs `aber/timescaledb` (#443). `supabaseDb.image` stays the client image the chart's Jobs
+use.
+
+- **A site that moved `supabaseDb.image.tag`** to run another server build must now build that image
+  itself and set `supabaseDb.serverImage`.
+- **A cluster that cannot reach GHCR, or an arm64 one,** builds and imports one more image
+  ([`deploy/k8s/README.md`](../deploy/k8s/README.md), *Images you must build*).
+- **The upgrade restarts `supabase-db`**, and `timescaledb` too where `databaseMetrics` is on.
+  `wal_compression` becomes `lz4` on every install (`supabaseDb.walCompression`).
+
+Point-in-time recovery for the platform database (`supabaseDb.physicalBackup`) is off by default.
+Turning it on restarts `supabase-db`. It writes to the historian's repository under a stanza of its
+own. Under `networkPolicy.enabled`, an S3 endpoint needs a `networkPolicy.extraEgress` rule for the
+`supabase-db` pod.
+
+### From 1.2.0, every container drops the capabilities it does not need
+
+Every pod runs under `seccompProfile: RuntimeDefault`. Every container refuses privilege escalation,
+drops every Linux capability, and gets back only what its process needs (#419, phase one of three;
+[`deploy/k8s/README.md`](../deploy/k8s/README.md), *Security contexts*). The upgrade rolls every
+workload once.
+
+- **A sidecar injected by an admission webhook** (a service mesh, a secrets agent) now runs under the
+  pod's seccomp profile. One that needs a syscall the runtime's default profile blocks fails after the
+  upgrade. Give it its own `seccompProfile` in the injector's template.
+- **`kubectl exec` has the container's capabilities only.** `ping`, a `chown` of another user's file
+  or a `kill` of another user's process now fail with `Operation not permitted`. Use `kubectl debug`.
+- **A namespace enforcing Pod Security *baseline*** now admits every Aber pod except Alloy, whose
+  read-only `hostPath` mounts of the node's `/`, `/proc` and `/sys` baseline refuses.
+
+### From 1.2.0, an appliance buffers through outages once it runs the new flow
+
+An appliance now keeps its readings on disk while it cannot deliver them, and replays them afterwards,
+as a Sparkplug edge node configured with the primary host (#308,
+[`remote-gateways.md`](remote-gateways.md#when-the-platform-cannot-be-reached)). An appliance
+already enrolled runs the flow in its own forge repository, so nothing changes on it until:
+
+- **its flow is updated**, through an approved pull request that takes the new sample flow
+  (`forge/gateway-platform/appliance/flows.template.json`), merged with any site changes; or it is
+  re-enrolled from a new bundle; **and**
+- **it knows the primary host id.** A new bundle writes `GATEWAY_PRIMARY_HOST_ID` into
+  `/data/gateway.env`. An older appliance has none and buffers only while the broker is unreachable,
+  so a restart of ingestion still loses its readings
+  ([`remote-gateways.md`](remote-gateways.md#the-third-value-the-primary-host-id) says how to add it).
+
+**An appliance's messages are now Sparkplug B protobuf, not JSON.** Ingestion reads both. A site tool
+that subscribes to an appliance's topics and parses JSON must decode protobuf instead.
+
+A third-party gateway keeps its readings through an ingestion restart only if it buffers on STATE.
+Configure it with the site's primary host id (`ingestion.primaryHostId`) and turn on its store and
+forward if it has one ([`ingestion/README.md`](../ingestion/README.md#loss-model)).
+
+### The upgrade to 1.2.0 restarts the broker once
+
+The broker now queues up to 20,000 messages for a connected client that falls behind
+(`max_queued_messages`; Mosquitto's default is 1,000). After a restart of ingestion, every edge node
+births at once, and the default queue shed that rebirth: a restart lost 1.1 % of readings at
+500 msg/s and 3.9 % at 1,000 (#399, #791). The new line restarts the broker on this upgrade. An
+appliance running the new flow buffers through that restart; other clients reconnect.
+
 ---
 
 ## Backups
