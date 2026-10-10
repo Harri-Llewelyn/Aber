@@ -122,7 +122,9 @@ The table uses two example fleets:
 | Storage (models, captures, area plans, exports) | a 10 Gi volume; a capture is at most 100 MiB | by use | by use |
 | Logical backups | `backup.retentionDays` (14), on a 20 Gi volume | the platform database, and the historian unless physical backup is on | the platform database; the historian is physical at this size |
 | Historian physical backup repository | `physicalBackup.retainFull` (2) full backups, the differentials after the older one, and the WAL since it | ~16 GB | ~2 TB, most of it WAL |
-| Unarchived WAL, while archiving is failing | `physicalBackup.archiveQueueMax` (8 GiB), on the historian's volume | ~90 MB an hour | ~27 GB an hour |
+| Unarchived WAL, while archiving is failing | `physicalBackup.archiveQueueMax` (8 GiB), on the historian's volume | ~1 GB an hour | ~27 GB an hour |
+| Platform database physical backup (its `platform` stanza) | `supabaseDb.physicalBackup.retainFull` (2) full backups, the differentials after the older one, and the WAL since it | ~1.2 GB | ~1.7 GB |
+| Platform database WAL unarchived, while archiving is failing | `supabaseDb.physicalBackup.archiveQueueMax` (4 GiB), on the platform database's volume | ~1 GB an hour | ~1 GB an hour |
 
 **The physical backup's repository is mostly WAL at fleet scale.** These figures come from the
 restore rehearsal (*Backing up the historian*). A full backup was 7.7 to 9.7 % of the database
@@ -130,6 +132,22 @@ after pgBackRest's zstd. Those synthetic values compress better than real ones, 
 on 25 %. Every raw row cost about **760 bytes of WAL, 140 in the repository**, counting the
 compression and rollup writes it causes later. The table's figures assume the rollups at their full
 retention, a full backup every week, and two fulls kept.
+
+**The platform database's WAL was measured under the load generator.** At 1,000 msg/s with
+`supabaseDb.walCompression: lz4`, `supabase-db` wrote **28 MiB of WAL an hour**, against **2.8 MiB
+an hour** with no load and 20 MiB an hour at S's 3.3 msg/s. Its stanza grew by **5.0 MiB an hour**
+after pgBackRest's zstd at 1,000 msg/s, and by 3.4 MiB an hour at S. The method was `pg_stat_wal`
+sampled before and after timed load runs on the development node, on 2026-10-09. The repository
+rows above are two weeks of that growth plus two full backups.
+
+**On disk, unarchived WAL is a segment a minute, whatever the load.** `archiveTimeoutSeconds` (60)
+switches to a new 16 MiB segment every minute while anything is written, on both databases. So
+`pg_current_wal_lsn()` advanced by about 1 GB an hour even with no load, and that is what piles up
+on the volume while archiving fails. The platform database's `archiveQueueMax` (4 GiB) therefore
+holds about four hours of failed archiving. After that, pgBackRest drops segments and the archive
+has a gap until the next backup. *Platform Database WAL Archiving Failing* fires after ten
+minutes. A segment switched early compresses to almost nothing, so size a repository from its
+stanza's growth, not from the segment count.
 
 **The rollups are still most of the historian, compressed.** At S the steady state is about 16 GB
 of rollups beside 2 GB of raw. That fits the default 20 Gi volume with little to spare, so set
@@ -206,7 +224,7 @@ adds the stack lane: the test suites that need a running stack. These are the sa
 k8s-validation job runs, repeatable on a laptop.
 
 ```bash
-npm run dev:up        # cluster if absent, cert-manager and the internal CA, the eleven images built
+npm run dev:up        # cluster if absent, cert-manager and the internal CA, the twelve images built
                       # and imported, helm upgrade --install with values-dev.yaml, every hook and
                       # rollout waited for, the daemon subscribed, helm test
 npm run dev:test      # validate.py and the stack lane from the host, through port-forwards
@@ -327,7 +345,7 @@ limits off. Also set `supabaseEnvoy.signInRateLimit.perClientPerMinute` to the s
 
 ### A. From the published chart (no image builds)
 
-This path builds nothing: the chart and the eleven images this repository builds are published to
+This path builds nothing: the chart and the twelve images this repository builds are published to
 GHCR as OCI artefacts. Helm reads OCI registries directly, so there is no `helm repo add`, and no
 index to go stale. A clone of the release tag supplies only `npm run setup` and the manifests in
 this directory.
@@ -453,7 +471,7 @@ exported Asset Administration Shell is `supabaseFunctions.aas.baseIri` plus the 
 `sparkplug_id`. Once a shell has left the site, whoever imported it holds those identifiers.
 Changing the IRI would then give every asset a new identity.
 
-The eleven built images resolve automatically to the chart's `appVersion`, which the release sets
+The twelve built images resolve automatically to the chart's `appVersion`, which the release sets
 equal to the chart version. Chart 1.1.0 can only pull images 1.1.0, so there is nothing to line up
 by hand and no `latest` tag to drift onto.
 
@@ -472,7 +490,7 @@ ISSUER=https://token.actions.githubusercontent.com
 
 # The chart you are about to install, then every image it will pull.
 cosign verify ghcr.io/harri-llewelyn/aber/aber:$V --certificate-identity "$ID" --certificate-oidc-issuer "$ISSUER"
-for i in edge-runtime ingestion node-red frontend i3x-service gateway-credential backup-service timescaledb db-init swagger-ui test-runner; do
+for i in edge-runtime ingestion node-red frontend i3x-service gateway-credential backup-service timescaledb supabase-db db-init swagger-ui test-runner; do
   cosign verify ghcr.io/harri-llewelyn/aber/$i:$V --certificate-identity "$ID" --certificate-oidc-issuer "$ISSUER"
 done
 ```
@@ -538,7 +556,7 @@ done
 
 Do not use `--wait` here either, for the reason given above. This is exactly what CI does.
 
-This still **pulls** the eleven built images from GHCR, at the `appVersion` in `Chart.yaml`. A
+This still **pulls** the twelve built images from GHCR, at the `appVersion` in `Chart.yaml`. A
 checkout does not mean a local build. To run your own images, build them under the reference the
 chart asks for. Then make them available to the cluster, with `k3d image import` or a push to your
 own registry. `pullPolicy` is `IfNotPresent`, so a local image with that exact name and tag wins
@@ -561,7 +579,7 @@ ingestion:
 ```
 
 Do this for a hotfix, a bisect or an air-gapped mirror. Do not use it to run one component a
-release ahead of the rest. The eleven images are built and tested together, and mixing them causes
+release ahead of the rest. The twelve images are built and tested together, and mixing them causes
 failures that surface days later on whichever component was *not* changed.
 
 ## Verify
@@ -1006,7 +1024,7 @@ kubectl -n aber get pvc          # delete deliberately, never as cleanup habit
 
 ### Images you must build
 
-Eleven images are built from this repository, not pulled from a vendor. **They are published** to
+Twelve images are built from this repository, not pulled from a vendor. **They are published** to
 `ghcr.io/harri-llewelyn/aber/`, so an ordinary install needs none of this: the chart pulls them at
 its own `appVersion`.
 
@@ -1067,6 +1085,10 @@ docker build -f backup-service/Dockerfile       -t $NS/backup-service:$V backup-
 # the server's container (archive_command, restore_command) and in its backup sidecar.
 docker build -f timescaledb/Dockerfile          -t $NS/timescaledb:$V timescaledb
 
+# The platform database -- supabase/postgres with pgBackRest and tini as PID 1, which
+# supabaseDb.physicalBackup runs inside the server's container and in its backup sidecar.
+docker build -f supabase/db/Dockerfile          -t $NS/supabase-db:$V supabase/db
+
 # The API documentation site — THE SPECS, baked in. swaggerapi/swagger-ui with docs/openapi.yaml
 # and docs/i3x-openapi.yaml copied to the document root; context is the repository root, where they
 # live. They travel in the image for the same reason the migrations do: swagger-ui is their only
@@ -1091,7 +1113,7 @@ docker build -f supabase/db-init/Dockerfile      -t $NS/db-init:$V supabase
 docker build -f test-harness/Dockerfile --build-arg INGESTION_IMAGE=$NS/ingestion:$V \
                                                 -t $NS/test-runner:$V .
 
-for i in edge-runtime ingestion node-red frontend i3x-service gateway-credential backup-service timescaledb db-init swagger-ui test-runner; do
+for i in edge-runtime ingestion node-red frontend i3x-service gateway-credential backup-service timescaledb supabase-db db-init swagger-ui test-runner; do
   k3d image import $NS/$i:$V -c <cluster>   # or push to your registry
 done
 ```
@@ -1101,7 +1123,7 @@ done
 ## Publishing a release
 
 [`.github/workflows/release.yml`](../../.github/workflows/release.yml) runs when you push a `v*`
-tag. It publishes the eleven images and then the chart, to GHCR over OCI.
+tag. It publishes the twelve images and then the chart, to GHCR over OCI.
 
 **Set the version first, in a pull request.** It sets `Chart.yaml`'s `version` and `appVersion` to
 the release, and every place that names the current release:
@@ -1119,7 +1141,7 @@ install.
 **Rehearse it.** Go to Actions → Release → *Run workflow* on `main`, give the version, and leave
 `dry_run` ticked. Everything builds, the chart is packaged, and every check runs, but nothing is
 pushed. A dry run also checks the ingestion chain's attestations, from the OCI archives it builds
-into. The other nine images produce theirs only when pushing.
+into. The other ten images produce theirs only when pushing.
 
 **Rehearse the upgrade from the last release.** The pull request's *Upgrade From The Last Release
 (k3d)* job does it, and `npm run rehearse:upgrade` does the same on a laptop. It installs the last
@@ -1390,6 +1412,7 @@ container gets back only the capabilities its process was shown to need, each na
 | `assemble-config` (mosquitto) | `CHOWN`, `DAC_OVERRIDE`, `FOWNER` | It reads the plugin's document (uid 1883, mode 0600) and writes its replacement owned by 1883. |
 | `certificate-reload` (mosquitto, broker TLS only) | `KILL` | It sends SIGHUP to the broker, which runs as another uid. |
 | `timescaledb` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `SETGID`, `SETUID` | The entrypoint fixes the data directory's owner and mode, then drops to postgres (uid 70). tini forwards the stop signal to it. |
+| `supabase-db` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `SETGID`, `SETUID` | The same, for postgres at uid 100. |
 | `gitea-init` (gitea) | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID`, `SETUID` | The image's setup rewrites `app.ini` and the git user's `.ssh`, and runs `gitea` as git (uid 1000). |
 | `gitea` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `NET_BIND_SERVICE`, `SETGID`, `SETUID`, `SYS_CHROOT` | The same setup. sshd binds port 22 and chroots its pre-authentication child, and s6 delivers SIGTERM to Gitea. |
 | `backup-service` | `DAC_OVERRIDE` | It archives the forge's and the broker's volumes, whose files belong to other uids, some at 0600. |
@@ -1535,8 +1558,9 @@ kubectl -n aber scale deploy/supabase-realtime --replicas=1
 - **`audit_trail` is the reason this matters most**. Telemetry can be re-derived from a rebirth; an
   append-only audit trail cannot.
 - **This is a logical dump, not PITR.** It recovers to the last nightly run, not to any moment you
-  choose (point-in-time recovery). The historian has a physical backup for that (*Backing up the
-  historian*, below); the platform database does not.
+  choose (point-in-time recovery). Each database can also have a physical backup for that, off by
+  default (*Backing up the historian* and *Backing up the platform database*, below). The dump stays
+  either way: a partial restore and a restore into another PostgreSQL version need it.
 
 **Test a restore.** Until you have restored a backup, you do not know that it works.
 
@@ -1655,7 +1679,9 @@ recovery to replay the WAL and promote onto a new timeline. Readings written aft
 gone, and ingestion carries on from now.
 
 After losing the whole stack: install the chart with the same `physicalBackup` values, restore the
-historian, then run `scripts/restore-databases.sh` for the platform database.
+historian, then restore the platform database. Use `scripts/restore-platform-db.mjs` where its
+physical backup is on (*Backing up the platform database*, below), and
+`scripts/restore-databases.sh` otherwise.
 
 **How long a restore takes.** A restore has two parts:
 
@@ -1682,6 +1708,107 @@ own size; the rehearsal takes `--devices` and `--days`.
   reinstalled onto an empty volume and pointed at the old repository. The new database has a
   different system identifier. An empty volume usually means a restore is wanted, so restore into it
   with the script above. Otherwise, give the new historian its own `repo.s3.path`.
+
+#### Backing up the platform database
+
+The platform database can have the same **physical** backup as the historian. pgBackRest takes a
+full backup weekly and a differential daily, and archives every WAL segment as it is written. A
+restore can then reach any moment inside the retained backups, not only the last nightly dump. That
+matters most for `audit_trail`: nothing can rebuild it, and a nightly dump can lose a day of it.
+
+**It writes to the historian's repository, under a stanza of its own** (`platform`), so a site
+configures one destination. Set the repository as in *Backing up the historian*, then switch this
+on:
+
+```yaml
+timescaledb:
+  physicalBackup:
+    repo:                   # the shared repository; timescaledb.physicalBackup.enabled may stay off
+      type: s3
+      s3:
+        endpoint: https://s3.eu-west-2.amazonaws.com
+        region: eu-west-2
+        bucket: aber-historian-backup
+        existingSecret: historian-backup
+supabaseDb:
+  physicalBackup:
+    enabled: true
+```
+
+- **Turning it on restarts the platform database**, because `archive_mode` is read at start. Every
+  service that uses it reconnects. The sidecar takes a full backup as soon as db-init has run.
+- **One repository, two stanzas.** On `s3` both databases share the bucket, the path and the
+  Secret. On `posix` each has a claim of its own, because a ReadWriteOnce volume cannot be mounted
+  by both database pods: `supabaseDb.physicalBackup.posix` sizes the platform database's.
+- **The nightly logical dump carries on**, and **Take a backup** on the Backups page still dumps the
+  platform database. A dump is what a partial restore needs.
+- **The repository holds pgsodium's root key.** It is a file in the data directory, so every backup
+  carries it. On `s3` it is encrypted with `REPO_CIPHER_PASS`, like every other file. Keep a `posix`
+  repository as private as the backup volume, which holds the same key.
+- **Under `networkPolicy.enabled`, the endpoint needs a rule** in `networkPolicy.extraEgress` for
+  the `supabase-db` pod too.
+
+**What runs** is the historian's arrangement. The server archives each WAL segment through
+`archive_command`, asynchronously, when it fills or after `archiveTimeoutSeconds` (60). The
+`pgbackrest` sidecar in the `supabase-db` pod takes the daily backup at `hourUtc`, and a full one on
+`fullOn`. It records each run in `public.physical_backup_runs` (`0173`). A missed hour is taken
+late, once, and a failed run counts as the attempt. The image runs `tini` as PID 1, so a failed push
+cannot crash the server (`supabase/db/README.md`).
+
+Two alerts watch it:
+
+- **Platform Database Backup Stale**: no successful backup for 36 hours.
+- **Platform Database WAL Archiving Failing**: the last attempt failed, and nothing has been
+  archived for 10 minutes. After `archiveQueueMax` (4 GiB) of unarchived WAL, pgBackRest drops it,
+  and a restore cannot cross the gap.
+
+**The Backups page shows it** on a Platform database line, beside the historian's: the last backup
+with its type and label, when the next is due, the repository's size and the last failure with
+pgBackRest's reason. From a shell:
+
+```bash
+kubectl -n aber exec supabase-db-0 -c pgbackrest -- pgbackrest --stanza=platform info
+kubectl -n aber exec supabase-db-0 -c pgbackrest -- /bin/sh /opt/aber/platform-backup.sh full
+```
+
+**Restore.** Use `scripts/restore-platform-db.mjs`:
+
+```bash
+node scripts/restore-platform-db.mjs --info                                  # what the repository holds
+node scripts/restore-platform-db.mjs                                         # the latest archived moment
+node scripts/restore-platform-db.mjs --target "2026-09-23 14:05:00+00"       # a moment
+node scripts/restore-platform-db.mjs --set 20260920-010002F                  # one backup, no WAL after it
+```
+
+The script stops the platform database and restores its data directory in a pod built from the
+sidecar's own spec. It then starts the database and waits for recovery to replay the WAL and
+promote.
+
+- **Everything written after the target is gone**: audit trail rows, settings, sign-ins and
+  sessions. A browser whose session is newer signs in again.
+- **There is no key step.** pgsodium's root key comes back with the data directory, so Vault
+  decrypts. The script checks that it does, and stops with the reason if it does not.
+- **Realtime is restarted**, because its replication slot is never in a physical backup. PostgREST is
+  asked to reload its schema.
+- **The historian is not touched.** To bring both databases back to one moment, restore each to the
+  same `--target`.
+
+After losing the whole stack: install the chart with the same `physicalBackup` values, restore each
+database with its script, then the storage objects, the forge and the broker from the backup
+service's backup ([`../../supabase/README.md`](../../supabase/README.md#backups-from-the-dashboard-archived-migration-0101)).
+Skip that runbook's root key and `restore-databases.sh` steps: the databases are already back.
+
+**How long a restore takes.** Rehearsed on the development node with
+`scripts/rehearse-platform-restore.mjs`
+([`test-harness/README.md`](../../test-harness/README.md), *Restoring the platform database*): seed,
+back up, write, mark the time, write again, wipe the volume, restore to the mark. The platform
+database is small beside the historian, so a restore is mostly the server's start and the WAL since
+the last daily backup. On 2026-10-09 a 57 MB database restored in 7 s and recovered in 16 s,
+replaying 31.8 MiB of WAL, 25 s from the decision to a writable database.
+
+- **A repository that holds another database's `platform` stanza** makes the sidecar's archive check
+  fail, as it does for the historian. Restore into the empty volume with the script above, or give
+  both databases a new `repo.s3.path`.
 
 #### Rehearsing the restore, weekly and by hand
 

@@ -5103,8 +5103,11 @@ Ten things about these dumps are not obvious and each has bitten someone:
 - **`audit_trail` is why this matters most.** Telemetry can be re-derived from a rebirth; an
   append-only audit trail cannot.
 
-**This is not PITR.** Recovery is to the last run and no finer. A real RPO wants WAL archiving or
-pgBackRest.
+**A dump is not PITR.** Recovery from one is to the last run and no finer. Point-in-time recovery is
+pgBackRest's, per database and off by default: `timescaledb.physicalBackup` for the historian and
+`supabaseDb.physicalBackup` for this database (*Point-in-time recovery for the platform database
+(0173)*, below). The dumps carry on beside it: a dump is what a partial restore and a restore into
+another PostgreSQL version need.
 
 **The log store is deliberately not in tier 1.** Loki's PVC holds thirty days of container logs
 and is not a database of record, so `backup-databases.sh` does not touch it and is not expected to.
@@ -5124,6 +5127,32 @@ on disk and are not the same kind of thing, which is why those two are in tier 1
 (`backup.includeBroker`, `backup.ca`) and the log store is not. A tier 2 snapshot does capture the
 log store, because it captures the machine, but that is a side effect rather than a promise and no
 retention story should be built on it.
+
+### Point-in-time recovery for the platform database (0173)
+
+`supabaseDb.physicalBackup` gives this database the historian's physical backup: pgBackRest in the
+server's image (`supabase/db/`), a full backup weekly and a differential daily from a sidecar, and
+every WAL segment archived as it is written. The archive goes to the historian's repository under the
+stanza `platform`. The runbook is in
+[`deploy/k8s/README.md`](../deploy/k8s/README.md#backing-up-the-platform-database); the image's
+reasoning is in [`db/README.md`](db/README.md).
+
+`0173` gives this database the historian's record of its runs, under the same names and with the
+same bodies as `timescaledb/physical_backup.sql`: `physical_backup_runs`, the one-row
+`physical_backup_schedule`, and the functions the sidecar calls (`physical_backup_record()`,
+`physical_backup_missed_slot()`, `physical_backup_type()`, `physical_backup_record_schedule()`).
+The tables are empty while backup is off. RLS is on, and no API role reaches either table or any of
+the four functions. `pg_monitor` may read the runs, through a policy of its own, for the database
+exporter behind Platform Database Backup Stale. `scripts/check-mirror-drift.mjs` holds each body
+equal to the historian's.
+
+**A physical restore needs no key step, and that is the difference from the runbook below.**
+pgsodium's root key is a file in the data directory (`pgsodium_root.key`, written by the chart's
+`pgsodium_getkey.sh`), so pgBackRest backs it up with the rows it encrypts. `restore-databases.sh`
+is unchanged: its step 5 still checks Vault after a logical restore, where the key travels separately
+as `vault-key-<stamp>.txt`. `scripts/restore-platform-db.mjs` makes the same check after a physical
+restore, and `scripts/rehearse-platform-restore.mjs` asserts that a Vault secret written before the
+backup decrypts to its plaintext after a restore onto an empty volume.
 
 ### Backups from the dashboard (archived migration 0101)
 
@@ -5226,6 +5255,18 @@ so the page shows that backup on a line of its own. The chart tells the page whe
   (`physical_backup_claim_request()`), takes a differential and records it; the first run recorded
   after the claim is the request's answer, which the page shows. One request waits at a time, and a
   failure to ask is logged and never fails the platform backup, which keeps the two backups apart.
+
+**The platform database on the Backups page (0173).** While `supabaseDb.physicalBackup` is on, the
+page shows this database's own physical backup on a Platform database line beside the historian's.
+The chart tells the page whether to (`VITE_PLATFORM_PHYSICAL_BACKUP`).
+
+- **The read is local.** `platform_backup_state()` reads `physical_backup_runs` and
+  `physical_backup_schedule` in this database and returns the columns `historian_backup_state()`
+  returns, without the request, so the page applies one rule to both lines. Administrator only,
+  checked in its body. An Administrator gets a row of NULLs before the sidecar has recorded
+  anything, which the page shows as no backup yet, not as a database it cannot read.
+- **Take a backup asks nothing of it.** The service's dump already covers this database, so there is
+  no request table here.
 
 **Retention is decided once, here.** A scheduled backup is pruned by the service once it is older
 than `BACKUP_RETENTION_DAYS`; the files go first and `backup_forget()` removes the row and writes

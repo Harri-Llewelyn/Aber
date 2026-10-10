@@ -1,7 +1,7 @@
 import React from 'react'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { BackupsTab, BACKUP_STALE_HOURS, historianState, keptBecause } from '../components/tabs/BackupsTab'
+import { BackupsTab, BACKUP_STALE_HOURS, physicalBackupState, keptBecause } from '../components/tabs/BackupsTab'
 import { nextHistorianBackup } from '../utils/historianBackupSchedule'
 import { tabIsVisible, TABS, groupedNav } from '../navigation'
 
@@ -30,7 +30,8 @@ vi.mock('../api', async () => {
       requestBackup: vi.fn(),
       cancelBackupJob: vi.fn(),
       releaseBackup: vi.fn(),
-      historianBackupState: vi.fn()
+      historianBackupState: vi.fn(),
+      platformBackupState: vi.fn()
     }
   }
 })
@@ -112,6 +113,7 @@ beforeEach(() => {
     endpoint: '', region: '', bucket: '', prefix: '', access_key_id: '', recipient: '', path_style: false, credentialSet: false
   })
   api.historianBackupState.mockResolvedValue(null)
+  api.platformBackupState.mockResolvedValue(null)
   delete globalThis.__ABER_CONFIG__
 })
 
@@ -817,6 +819,98 @@ describe('the historian row', () => {
   })
 })
 
+describe('the platform database row', () => {
+  const physical = (flags = {}) => {
+    globalThis.__ABER_CONFIG__ = { VITE_PLATFORM_PHYSICAL_BACKUP: 'true', ...flags }
+  }
+  const row = () => screen.queryByTestId('platform-row')
+  const line = () => screen.queryByTestId('platform-state')
+  /** The platform database backing itself up daily at 01:00 UTC, full on Sundays, last good an hour ago. */
+  const CURRENT = {
+    hour_utc: 1, full_on: 0, first_recorded_at: hoursAgo(24 * 20),
+    last_attempt_at: hoursAgo(1), last_success_at: hoursAgo(1), last_success_kind: 'full',
+    last_success_label: '20261004-010002F', last_full_at: hoursAgo(1),
+    repo_bytes: 40 * 1024 * 1024, last_failure_at: null, last_failure_kind: null, last_failure_detail: null
+  }
+
+  it('is absent, and never read, while the platform database has no physical backup', async () => {
+    renderTab()
+    await screen.findByTestId('run-j-1')
+    expect(row()).toBeNull()
+    expect(line()).toBeNull()
+    expect(api.platformBackupState).not.toHaveBeenCalled()
+  })
+
+  it('shows a current backup with its type, label and repository, without a request, and no line', async () => {
+    physical()
+    api.platformBackupState.mockResolvedValue(CURRENT)
+    renderTab()
+    const strip = await screen.findByTestId('platform-row')
+    expect(strip).toHaveTextContent('Platform database')
+    expect(strip).toHaveTextContent('Last backup 1h ago, full')
+    expect(strip).toHaveTextContent('20261004-010002F')
+    expect(strip).toHaveTextContent('40.0 MiB in the repository')
+    expect(strip).not.toHaveTextContent('Requested')
+    expect(line()).toBeNull()
+    expect(api.historianBackupState).not.toHaveBeenCalled()
+  })
+
+  it('says a platform database never backed up has no backup yet, not that it cannot be read', async () => {
+    physical()
+    api.platformBackupState.mockResolvedValue(Object.fromEntries(Object.keys(CURRENT).map(k => [k, null])))
+    renderTab()
+    expect(await screen.findByTestId('platform-row')).toHaveTextContent('No backup yet')
+    expect(row()).toHaveTextContent('Next: not known yet')
+    expect(line()).toBeNull()
+  })
+
+  it('reports a failure with pgBackRest\'s reason under its own name, and whole in its panel', async () => {
+    physical()
+    const reason = 'ERROR: [039]: HTTP request failed with 403 (Forbidden)'
+    api.platformBackupState.mockResolvedValue({ ...CURRENT, last_failure_at: hoursAgo(0.5), last_failure_kind: 'diff', last_failure_detail: reason })
+    renderTab()
+    const state = await screen.findByTestId('platform-state')
+    expect(state).toHaveClass('callout-danger')
+    expect(state).toHaveTextContent("The platform database's last backup failed")
+
+    fireEvent.click(screen.getByTestId('platform-row'))
+    const open = panel()
+    expect(open).toHaveAttribute('aria-label', expect.stringMatching(/platform database backup details/))
+    expect(within(open).getByText(reason)).toBeInTheDocument()
+    expect(open).toHaveTextContent('Daily at 01:00 UTC: a full backup on Sundays')
+  })
+
+  it(`reports a last success older than ${BACKUP_STALE_HOURS} hours, naming where to look`, async () => {
+    physical()
+    api.platformBackupState.mockResolvedValue({ ...CURRENT, last_success_at: hoursAgo(BACKUP_STALE_HOURS + 2), last_attempt_at: hoursAgo(BACKUP_STALE_HOURS + 2) })
+    renderTab()
+    const state = await screen.findByTestId('platform-state')
+    expect(state).toHaveTextContent(`No platform database backup has succeeded in ${BACKUP_STALE_HOURS} hours`)
+    expect(state).toHaveTextContent('kubectl -n aber logs supabase-db-0 -c pgbackrest')
+  })
+
+  it('stands beside the historian, each opening its own panel, and keeps the platform backup whole', async () => {
+    physical({ VITE_HISTORIAN_PHYSICAL_BACKUP: 'true' })
+    api.platformBackupState.mockResolvedValue(CURRENT)
+    api.historianBackupState.mockResolvedValue({ ...CURRENT, last_success_label: 'H1', request_at: null })
+    renderTab()
+    const platform = await screen.findByTestId('platform-row')
+    const historian = await screen.findByTestId('historian-row')
+    expect(platform.compareDocumentPosition(historian) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    fireEvent.click(historian)
+    expect(panel()).toHaveAttribute('aria-label', expect.stringMatching(/historian backup details/))
+    fireEvent.click(platform)
+    expect(panel()).toHaveAttribute('aria-label', expect.stringMatching(/platform database backup details/))
+    expect(historian).toHaveAttribute('aria-pressed', 'false')
+
+    // Take a backup still dumps the platform database: only the historian leaves the dump.
+    const modal = openDialog()
+    expect(modal).toHaveTextContent('the platform database')
+    expect(modal).not.toHaveTextContent('the historian,')
+  })
+})
+
 describe('when the historian is next backed up', () => {
   const at = (iso) => new Date(iso).getTime()
   // Saturday 3 October 2026, 09:00 UTC.
@@ -844,8 +938,8 @@ describe('when the historian is next backed up', () => {
   })
 
   it('reads unreachable from no row, and nothing from a historian that is off', () => {
-    expect(historianState(null)).toEqual({ kind: 'unreachable' })
-    expect(historianState(undefined)).toBeNull()
+    expect(physicalBackupState(null)).toEqual({ kind: 'unreachable' })
+    expect(physicalBackupState(undefined)).toBeNull()
   })
 })
 

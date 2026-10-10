@@ -45,6 +45,9 @@ export const RUNTIME_SETTING_NAMES = [
   // 'true' while timescaledb.physicalBackup is on: the Backups page shows the historian's own
   // backup, and says it is unreachable when it cannot be read.
   'VITE_HISTORIAN_PHYSICAL_BACKUP',
+  // 'true' while supabaseDb.physicalBackup is on: the Backups page shows the platform database's
+  // own backup beside the historian's.
+  'VITE_PLATFORM_PHYSICAL_BACKUP',
 ];
 
 /**
@@ -65,6 +68,7 @@ const BUILD_TIME_SETTINGS = {
   VITE_RELEASE_VERSION: import.meta.env.VITE_RELEASE_VERSION,
   VITE_BACKUP_RETENTION_DAYS: import.meta.env.VITE_BACKUP_RETENTION_DAYS,
   VITE_HISTORIAN_PHYSICAL_BACKUP: import.meta.env.VITE_HISTORIAN_PHYSICAL_BACKUP,
+  VITE_PLATFORM_PHYSICAL_BACKUP: import.meta.env.VITE_PLATFORM_PHYSICAL_BACKUP,
 };
 
 /**

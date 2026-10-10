@@ -1,0 +1,41 @@
+{{- /*
+The platform database's physical backup (supabaseDb.physicalBackup): pgBackRest's configuration and
+the sidecar's schedule, mounted into the supabase-db pod, and the volume a posix repository lives
+on. The schedule is mirrored from ./supabase/db/pgbackrest by scripts/sync-helm-chart-files.mjs.
+*/ -}}
+{{- if include "aber.platformBackupOn" . }}
+{{- $script := .Files.Get "files/supabase-db-pgbackrest/platform-backup.sh" }}
+{{- if not $script }}
+{{- fail "\n\naber: files/supabase-db-pgbackrest/platform-backup.sh is missing.\n\nMirror it from ./supabase/db/pgbackrest with:  node scripts/sync-helm-chart-files.mjs\n" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-supabase-db-pgbackrest" (include "aber.fullname" .) }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" "supabase-db") | nindent 4 }}
+data:
+  pgbackrest.conf: |
+    {{- include "aber.platformPgbackrestConf" . | nindent 4 }}
+  platform-backup.sh: |
+{{ $script | indent 4 }}
+{{- if eq .Values.timescaledb.physicalBackup.repo.type "posix" }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ printf "%s-platform-backup" (include "aber.fullname" .) }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" "supabase-db") | nindent 4 }}
+  annotations:
+    # Survives `helm uninstall`: that is when the backups are most likely to be wanted.
+    "helm.sh/resource-policy": keep
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- include "aber.storageClass" (dict "ctx" . "component" .Values.supabaseDb.physicalBackup.posix) | nindent 2 }}
+  resources:
+    requests:
+      storage: {{ .Values.supabaseDb.physicalBackup.posix.size }}
+{{- end }}
+{{- end }}

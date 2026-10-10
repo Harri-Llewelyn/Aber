@@ -524,6 +524,16 @@ export const SUITES = {
       'is refused a value the service could not use and whose view counts how long the newest backup ' +
       'has gone without one.',
   },
+  'supabase/migrations/test_platform_physical_backup.py': {
+    lanes: ['db', 'stack'],
+    why:
+      "0173's record of the platform database's physical backup. In the db lane: the sidecar's " +
+      "schedule rules, declared with the historian's bodies (a missed slot taken late, once; a full " +
+      'on its weekday or when the newest is over a week old), the one-row schedule, ' +
+      'platform_backup_state() for Administrators only, and no API role reaching the runs or the ' +
+      'gates. In the stack lane, with supabaseDb.physicalBackup on: a backup recorded where Platform ' +
+      'Database Backup Stale reads, the repository agreeing, WAL archived, and tini as PID 1.',
+  },
   'supabase/migrations/test_system_settings_rls.py': {
     lanes: ['db'],
     why:

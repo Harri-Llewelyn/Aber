@@ -32,8 +32,9 @@ WHAT IS WORTH BACKING UP, AND WHAT IS NOT:
 pg_restore. A plain dump can only be replayed whole, which on the historian is not a realistic
 recovery.
 
-A LOGICAL DUMP IS NOT A PITR SOLUTION: it recovers to the last nightly run and no finer. A real RPO
-wants pgBackRest or WAL archiving to object storage. This is the floor, not the ceiling.
+A LOGICAL DUMP IS NOT A PITR SOLUTION: it recovers to the last nightly run and no finer. Each
+database's physicalBackup (pgBackRest, off by default) is the finer recovery point; this is the floor,
+not the ceiling.
 
 `--no-owner --no-privileges` are DELIBERATELY ABSENT. supabase_auth_admin, authenticator and
 supabase_storage_admin own objects and RLS policies reference roles by name, so a dump stripped of

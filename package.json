@@ -36,7 +36,7 @@
     "keys:check": "node scripts/rotate-service-keys.mjs --check",
     "keys:rotate": "node scripts/rotate-service-keys.mjs",
     "aas:push-basyx": "node scripts/aas-push-basyx.mjs",
-    "//dev": "The development loop on a local k3d cluster (deploy/k8s/README.md, The development loop). up: cluster if absent, cert-manager, the eleven images built and imported, helm upgrade --install, every hook and rollout waited for, helm test. test: validate.py and the stack lane from the host through port-forwards on the ports the suites default to. reset: a blank stack on the same cluster and images.",
+    "//dev": "The development loop on a local k3d cluster (deploy/k8s/README.md, The development loop). up: cluster if absent, cert-manager, the twelve images built and imported, helm upgrade --install, every hook and rollout waited for, helm test. test: validate.py and the stack lane from the host through port-forwards on the ports the suites default to. reset: a blank stack on the same cluster and images.",
     "dev:up": "node scripts/dev-cluster.mjs up",
     "dev:test": "node scripts/dev-cluster.mjs test",
     "dev:forward": "node scripts/dev-cluster.mjs forward",

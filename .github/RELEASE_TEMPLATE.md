@@ -40,7 +40,7 @@ ghcr.io/harri-llewelyn/aber/aber  <version>   (chart)
 ```
 
 <!--
-  The eleven images publish at the same version. The release workflow's job summary lists them; paste
+  The twelve images publish at the same version. The release workflow's job summary lists them; paste
   it here so a pull can be checked against the release. The DIGESTS file inside the attached
   aber-<version>-sbom.tar.gz names each by the digest its signature is over.
 -->

@@ -532,3 +532,37 @@ The third was found by reading the rule against the first; the rest by running i
 * **The stale alert would page the moment backup was switched on.** With no successful backup the
   last-success time is 0; the alert now counts from when backup was switched on until the first
   full completes, which at fleet scale takes hours.
+
+## Restoring the platform database
+
+[`scripts/rehearse-platform-restore.mjs`](../scripts/rehearse-platform-restore.mjs) is the same
+rehearsal for `supabase-db` (`supabaseDb.physicalBackup`). It seeds a schema of its own
+(`rehearsal`, with `--fill-mib` of padding rows to rehearse a larger database) and a Vault secret
+whose plaintext only the run knows. It takes a full backup through the sidecar, writes one row
+before a target moment and one after it, and empties the data volume, pgsodium's root key with it.
+Then it restores to the target with
+[`scripts/restore-platform-db.mjs`](../scripts/restore-platform-db.mjs). It passes only if the first
+marker is back and the second is not, the secret decrypts to its plaintext under the root key the
+backup carried, the full backup is in the restored run record, and recovery promoted onto a new
+timeline. It removes the schema and the secret afterwards.
+
+It is destructive: it wipes the platform database, sign-ins included. A development stack, never a
+site.
+
+```bash
+node scripts/rehearse-platform-restore.mjs --out platform-rehearsal.json         # the database as it is
+node scripts/rehearse-platform-restore.mjs --fill-mib 2048                       # 2 GiB larger
+```
+
+### Results
+
+Measured 2026-10-08 against containers of the image itself, not a cluster: the server under `tini`
+with the entrypoint's five start-up capabilities and the sidecar's own script, on a posix
+repository in a local volume. On a 23 MB database the full backup took 5 s, the restore 6 s and
+recovery 4 s. The marker before the target came back and the one after it did not, the Vault secret
+decrypted under the restored key, and the server promoted onto timeline 2.
+
+On the k3d development node on 2026-10-09: a 57 MB platform database, a full backup in 3.3 s
+(5.4 MiB in the repository), the restore in 7 s and recovery in 16 s, replaying 31.8 MiB of WAL to
+the target. That was 25 s from the decision to restore to a writable database. All five checks
+passed, and the sidecar's archive check succeeded on the new timeline.

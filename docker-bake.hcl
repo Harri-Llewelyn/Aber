@@ -12,7 +12,7 @@
 # failed to apply, a registry-shaped name would fall through to a pull (the 403 this file exists to
 # avoid); an unqualified one fails loudly as `pull access denied`.
 #
-# The other eight images are independent and are built by docker/build-push-action in release.yml
+# The other ten images are independent and are built by docker/build-push-action in release.yml
 # with the same labels and attestations; this file holds only the two that need each other.
 #
 #   VERSION=1.2.3 docker buildx bake ingestion-chain                 # build, no output

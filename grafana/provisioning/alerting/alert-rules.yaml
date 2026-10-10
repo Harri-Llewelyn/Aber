@@ -2044,3 +2044,116 @@ groups:
               datasource:
                 type: __expr__
                 uid: __expr__
+
+      # Platform Database Backup Stale: Historian Backup Stale for supabase-db, gated on its
+      # archive_mode, with the same clock series.
+      - uid: aber-db-platform-backup-stale
+        title: Platform Database Backup Stale
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          entity_type: platform
+        annotations:
+          summary: >-
+            The platform database has had no successful physical backup for
+            {{ humanizeDuration $values.B.Value }}. A point-in-time restore can reach no later than
+            the last one plus the WAL archived after it. The Backups page shows the last failure's
+            reason. The sidecar's log has the rest: kubectl -n aber logs supabase-db-0 -c pgbackrest
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                (time() - max(aber_platform_db_backup_clock_since_time))
+                and on () (max(aber_platform_db_wal_archive_enabled) == 1)
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [129600]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # Platform Database WAL Archiving Failing: Historian WAL Archiving Failing for supabase-db. The
+      # last archive attempt failed and nothing has succeeded since, for 10m.
+      - uid: aber-db-platform-wal-archiving
+        title: Platform Database WAL Archiving Failing
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          entity_type: platform
+        annotations:
+          summary: >-
+            The platform database has not archived WAL for {{ humanizeDuration $values.B.Value }}
+            and its last attempt failed. Unarchived WAL accumulates on its data volume until
+            archiveQueueMax, after which it is dropped. Usually the repository endpoint or its
+            credentials: kubectl -n aber logs supabase-db-0 -c supabase-db | grep archive
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                (time() - max(aber_platform_db_wal_archive_last_archived_time))
+                and on () (max(aber_platform_db_wal_archive_last_failed_time) > max(aber_platform_db_wal_archive_last_archived_time))
+                and on () (max(aber_platform_db_wal_archive_enabled) == 1)
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              datasource:
+                type: __expr__
+                uid: __expr__

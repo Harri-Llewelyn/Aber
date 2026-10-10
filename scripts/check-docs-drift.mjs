@@ -582,7 +582,7 @@ function edgeFunctionNames() {
   ].map((m) => m[1]);
   const unique = [...new Set(built)];
   // Bumped deliberately rather than derived: the count is the check.
-  const EXPECTED = 11;
+  const EXPECTED = 12;
   if (unique.length !== EXPECTED) {
     fail(
       `expected ${EXPECTED} chart images with an empty tag (built here, resolved from appVersion); ` +
@@ -1078,6 +1078,13 @@ function edgeFunctionNames() {
       '(0072). RLS on with no policy and the anon/authenticated grants revoked -- it is bootstrap ' +
       'state read by psql, and the only readers are db-init and the e2e-validate Job init ' +
       'container, both of which connect as postgres rather than over PostgREST',
+    physical_backup_runs:
+      "the platform database's own pgBackRest runs (0173), written by the backup sidecar as the " +
+      'superuser. RLS on, nothing granted to anon/authenticated/service_role, and only pg_monitor may ' +
+      'read it, for the exporter; the Backups page reads platform_backup_state(), Administrator-only',
+    physical_backup_schedule:
+      "one row holding the hour and weekday the platform database's backup sidecar started with (0173). " +
+      'RLS on with no policy and nothing granted to an API role; read through platform_backup_state()',
     roles: 'RBAC internals — managed by migrations and Studio, not an app-facing endpoint',
     permissions: 'RBAC internals',
     role_permissions: 'RBAC internals',
@@ -4318,6 +4325,49 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 50. The platform database's physical backup names one stanza and one base everywhere.
+//
+// The stanza is `platform` in the chart's archive_command and pgbackrest.conf, the sidecar's
+// schedule and both restore scripts; a script naming another restores nothing and says the
+// repository is empty. And the restore rehearsal runs the upstream platform image rather than
+// building the chart's (.github/rehearsal-values.yaml), so, as check 26 holds the historian's, it has
+// to be the one supabase/db/Dockerfile is built FROM. Check 18 holds that FROM to supabaseDb.image.
+// -------------------------------------------------------------------------------------------------
+{
+  const STANZA = 'platform';
+  const sites = {
+    'deploy/helm/aber/templates/_helpers.tpl': [
+      /define "aber\.platformBackupServerArgs"[\s\S]*?archive_command=pgbackrest --stanza=(\w+) archive-push/,
+      /define "aber\.platformPgbackrestConf"[\s\S]*?\n\[(\w+)\]\n/,
+    ],
+    'supabase/db/pgbackrest/platform-backup.sh': [/^STANZA=(\w+)$/m],
+    'scripts/restore-platform-db.mjs': [/^const STANZA = '(\w+)';$/m],
+    'scripts/rehearse-platform-restore.mjs': [/'--stanza=(\w+)'/],
+  };
+  const offences = [];
+  for (const [file, patterns] of Object.entries(sites)) {
+    for (const re of patterns) {
+      const m = read(file).match(re);
+      if (!m) offences.push(`${file} no longer matches ${re}; check 50 cannot see its stanza`);
+      else if (m[1] !== STANZA) offences.push(`${file} names the stanza ${m[1]}, not ${STANZA}`);
+    }
+  }
+  const from = read('supabase/db/Dockerfile').match(/^FROM\s+(\S+):(\S+)/m);
+  const rehearsal = read('.github/rehearsal-values.yaml')
+    .match(/^supabaseDb:\s*\n\s+serverImage:\s*\n\s+repository:\s*(\S+)\s*\n\s+tag:\s*(\S+)/m);
+  if (!from || !rehearsal) {
+    offences.push('could not read the platform base from supabase/db/Dockerfile and .github/rehearsal-values.yaml');
+  } else if (from[1] !== rehearsal[1] || from[2] !== rehearsal[2]) {
+    offences.push(`the restore rehearsal runs ${rehearsal[1]}:${rehearsal[2]}, but the platform image is built FROM ${from[1]}:${from[2]}`);
+  }
+  if (offences.length) {
+    fail('the platform database\'s physical backup disagrees with itself:\n' + offences.map((o) => `        ${o}`).join('\n'));
+  } else {
+    pass(`the platform database's stanza is ${STANZA} in all ${Object.keys(sites).length} places, and the rehearsal runs its base (${from[2]})`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 25. The runbook's inline Traefik manifest is deploy/k8s/traefik-config.yaml, which the dev loop
 // applies: an install from the registry has no checkout, so the runbook carries a copy.
 // -------------------------------------------------------------------------------------------------
@@ -4346,8 +4396,6 @@ function edgeFunctionNames() {
 {
   const TEMPLATES = 'deploy/helm/aber/templates/';
   const RUNBOOK = 'deploy/k8s/README.md';
-  // Templates not hardened yet. Delete an entry once its pods and containers carry the settings.
-  const PENDING = new Set(['data/supabase-db-statefulset.yaml']);
   const BASELINE = new Set(['AUDIT_WRITE', 'CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'FSETID', 'KILL', 'MKNOD',
     'NET_BIND_SERVICE', 'SETFCAP', 'SETGID', 'SETPCAP', 'SETUID', 'SYS_CHROOT']);
   const indent = (l) => l.match(/^ */)[0].length;
@@ -4368,7 +4416,6 @@ function edgeFunctionNames() {
   let containers = 0;
   let pods = 0;
   for (const f of files) {
-    const rel = f.slice(TEMPLATES.length);
     // Template comments are blanked with their line breaks kept, so the line numbers stay true.
     const lines = read(f).replace(/\{\{-?\s*\/\*[\s\S]*?\*\/\s*-?\}\}/g, (c) => c.replace(/[^\n]/g, '')).split('\n');
     const faults = [];
@@ -4411,13 +4458,8 @@ function edgeFunctionNames() {
         faults.push(`${f}:${i + 1}: the pod sets no seccompProfile of type RuntimeDefault`);
       }
     });
-    if (PENDING.has(rel)) {
-      if (!faults.length) bad.push(`${f} carries the settings now: delete it from check 51's PENDING`);
-    } else {
-      bad.push(...faults);
-    }
+    bad.push(...faults);
   }
-  for (const p of PENDING) if (!files.includes(TEMPLATES + p)) bad.push(`check 51's PENDING names ${TEMPLATES}${p}, which does not exist`);
 
   // The runbook's table: container names in backticks before any parenthesis, capabilities in backticks.
   const runbook = read(RUNBOOK);

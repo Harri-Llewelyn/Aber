@@ -335,6 +335,9 @@ timescaledb:
     archiveQueueMax: 8GiB
     # Parallel compression and transfer processes during backup and restore.
     processMax: 2
+    # THE SHARED PHYSICAL-BACKUP REPOSITORY: supabaseDb.physicalBackup writes the platform
+    # database's backups here too, under its own stanza, whether or not this one is enabled. s3 is
+    # one bucket and path for both; posix is a claim per database (supabaseDb.physicalBackup.posix).
     repo:
       # s3: an object store off site, the one that survives losing the site. posix: a volume in
       # this cluster, which survives a dropped table and a corrupted data directory and not the
@@ -377,6 +380,16 @@ timescaledb:
 
 supabaseDb:
   enabled: true
+  # The server's image, built from supabase/db/Dockerfile: `image` below with pgBackRest added, and
+  # tini as PID 1, which physicalBackup needs inside the server's container. Runs the server, its
+  # backup sidecar and the certificate-reload sidecar, whether or not physicalBackup is on.
+  serverImage:
+    repository: ghcr.io/harri-llewelyn/aber/supabase-db
+    tag: ""
+    pullPolicy: IfNotPresent
+  # The upstream image serverImage is built FROM, and the psql and pg_dump client the chart's Jobs
+  # and init containers run against this server. check-docs-drift.mjs holds every Dockerfile built
+  # FROM it to this tag.
   image:
     repository: supabase/postgres
     tag: 17.6.1.175
@@ -386,11 +399,49 @@ supabaseDb:
     size: 20Gi
     storageClass: ""
     accessMode: ReadWriteOnce
+  # Compression of full-page images in the WAL (off, pglz, lz4, zstd), as timescaledb.walCompression.
+  # Fewer WAL bytes to archive and to keep, at no measured cost on the historian.
+  walCompression: lz4
   # supabase/postgres:17.6.1.175 is Alpine; its `postgres` user is uid 100 / gid 101. Same
   # caveat as timescaledb: the entrypoint chowns, so this matters only with `runAsUser`.
   podSecurityContext:
     fsGroup: 101
     fsGroupChangePolicy: OnRootMismatch
+  # --- Physical backup (pgBackRest) -------------------------------------------------------------
+  # The platform database recovers to a moment, not only to the last nightly dump: a full backup
+  # weekly, a differential daily, and every WAL segment archived as it is written. The repository is
+  # the historian's, timescaledb.physicalBackup.repo, under a stanza of its own (`platform`), so a
+  # site configures one destination; see deploy/k8s/README.md, "Backing up the platform database".
+  #
+  # Turning it on restarts the platform database (archive_mode is read at start) and takes a full
+  # backup once db-init has run. The nightly logical dump carries on beside it: it is what a partial
+  # or cross-version restore needs.
+  physicalBackup:
+    enabled: false
+    # As timescaledb.physicalBackup: the hour (UTC, 0-23) of the daily backup, and the weekday
+    # (0 = Sunday) it is a full one.
+    hourUtc: 1
+    fullOn: 0
+    # Full backups kept, each with the differentials and the WAL taken after it.
+    retainFull: 2
+    # A WAL segment is archived when it fills or after this many seconds, whichever is first, so
+    # this bounds how much a restore can lose on a quiet database.
+    archiveTimeoutSeconds: 60
+    # WAL waiting to be pushed, beyond which pgBackRest drops it rather than filling the data
+    # volume; a drop leaves a gap no restore can cross until the next backup. The data volume needs
+    # this much free. Platform Database WAL Archiving Failing fires at 10 minutes.
+    archiveQueueMax: 4GiB
+    # Parallel compression and transfer processes during backup and restore.
+    processMax: 2
+    # repo.type posix only: the platform database's own claim. A ReadWriteOnce volume cannot be
+    # mounted by both database pods, so each keeps its repository on its own; s3 shares the bucket.
+    posix:
+      size: 20Gi
+      storageClass: ""
+    # The sidecar that takes the scheduled backups.
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { memory: 512Mi }
   resources:
     requests:
       cpu: 250m

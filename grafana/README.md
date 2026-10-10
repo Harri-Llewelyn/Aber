@@ -597,3 +597,20 @@ repository endpoint and its credentials.
 This rule can fire only because the historian image runs `tini` as PID 1 (`timescaledb/Dockerfile`).
 With the postmaster as PID 1 a failed asynchronous push read as a crashed backend, and each
 crash-restart reset `pg_stat_archiver`, the counters this rule compares.
+
+### Platform Database Backup Stale (`aber-db-platform-backup-stale`)
+
+Critical, `for: 0s`, over 36 hours: *Historian Backup Stale* for `supabase-db`, when
+`supabaseDb.physicalBackup` is on. Its sidecar records each run in the platform database's own
+`physical_backup_runs` (0173), and the exporter on that pod reads it as `pg_monitor`. Gated with
+`and on () aber_platform_db_wal_archive_enabled == 1`, so a stack without the platform database's
+physical backup never raises it, whatever the historian's is set to. The clock,
+`aber_platform_db_backup_clock_since_time`, is the historian's rule: the last success; before the
+first, the first recorded run; before that, the server's start, so switching backup on does not page.
+
+### Platform Database WAL Archiving Failing (`aber-db-platform-wal-archiving`)
+
+Critical, `for: 10m`: *Historian WAL Archiving Failing* for `supabase-db`, read from its
+`pg_stat_archiver`. Unarchived WAL fills the platform database's volume until
+`supabaseDb.physicalBackup.archiveQueueMax`, after which pgBackRest drops it. Its image runs `tini`
+as PID 1 for the historian's reason, measured on this image too (`supabase/db/README.md`).

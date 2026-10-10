@@ -55,6 +55,16 @@ A line above it appears only when the answer is no. It uses the same 36 hours as
 
 **Take a backup** does not wait for the historian. The main backup completes on its own, and the Historian line shows the request and then its result. The Grafana alert **Historian Backup Stale** fires on the same 36 hours. Restoring the historian is done from a shell, following the runbook.
 
+## The platform database's own backup
+
+Where the platform database has its own physical backup too, a **Platform database** line sits above the Historian line. The platform database holds everything but the readings: the assets, the accounts, the settings and the audit trail.
+
+- The line shows the same things as the Historian line: the last backup, when the next is due, and how much the repository holds.
+- It has no request. **Take a backup** already includes the platform database, so it asks this backup for nothing.
+- The warnings are the historian's: **The platform database's last backup failed**, and **No platform database backup has succeeded in 36 hours**. The Grafana alert **Platform Database Backup Stale** fires on the same 36 hours.
+
+With this backup the platform database can be restored to any moment, not just to the last backup. Restoring it is done from a shell, following the runbook.
+
 ## What the list shows
 
 The list shows every run the service has finished, newest first. Runs are never deleted, so the list is the full history.
