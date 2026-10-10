@@ -88,6 +88,9 @@ spec:
             # The fallback for a fixture gateway row carrying no group of its own.
             - name: SPARKPLUG_GROUP
               value: {{ include "aber.sparkplugGroup" . | quote }}
+            # The primary host the fixture edge nodes wait for, and buffer through, as an appliance does.
+            - name: PRIMARY_HOST_ID
+              value: {{ include "aber.primaryHostId" . | quote }}
             - name: LOADGEN_PREFIX
               value: {{ .Values.loadTest.prefix | quote }}
             {{/*

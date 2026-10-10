@@ -32,9 +32,9 @@ nothing by doing so. The playback worker cannot announce itself either -- it aut
 gateway it replays (playback_worker.py), so it holds the shared `gateway` role, which grants read
 on this subtree and no write anywhere in it.
 
-QoS 1 AND RETAINED, which is the one place this daemon departs from the QoS 0 it uses everywhere
-else. A gateway connecting later must learn the current state immediately rather than waiting for
-a transition it already missed, and that is what retain is for.
+QoS 1 AND RETAINED, as Sparkplug 3.0.0 requires of both certificates. A gateway connecting later
+must learn the current state immediately rather than waiting for a transition it already missed,
+and that is what retain is for.
 """
 import json
 import os
@@ -99,10 +99,10 @@ def register_will(client, host_id=PRIMARY_HOST_ID, now_ms=None):
     will set afterwards is registered for a session that has not started and the broker publishes
     nothing when this one dies.
 
-    THE RETURNED TIMESTAMP IS THE BIRTH'S TOO. Sparkplug 3.0.0 requires the birth and death
-    certificates of one connection to carry the SAME timestamp, both being the time the connection
-    was established, so that a subscriber can pair them. That is why this returns a value rather
-    than each half taking its own clock reading.
+    THE RETURNED TIMESTAMP IS THE BIRTH'S TOO. Sparkplug 3.0.0 requires the birth to carry the
+    timestamp of the will registered with the CONNECT before it (tck-id-operational-behavior-host-
+    application-connect-birth-payload), so that a subscriber can pair them. That is why this
+    returns a value rather than each half taking its own clock reading.
     """
     topic = state_topic(host_id)
     timestamp_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
@@ -126,43 +126,46 @@ def announce_online(client, timestamp_ms, host_id=PRIMARY_HOST_ID):
     logger.info("Sparkplug primary host '%s' is ONLINE (retained on %s).", host_id, topic)
 
 
-def announce_offline(client, timestamp_ms, host_id=PRIMARY_HOST_ID):
+def announce_offline(client, connected_at_ms, host_id=PRIMARY_HOST_ID, now_ms=None):
     """
-    Publish the death certificate on a shutdown this daemon asked for.
+    Publish the death certificate on a shutdown this daemon asked for. Returns whether the broker
+    acknowledged it.
 
-    SAYING IT OURSELVES IS THE POINT. The daemon's SIGTERM path ends in `os._exit(0)` and never
-    sends a DISCONNECT, so the broker does in fact also fire the will -- measured on the dev
-    cluster, where a rollout produces TWO `online: false` messages. They are byte-identical,
-    timestamp included, because both come from the value registered at connect, so a subscriber
-    sees one state repeated rather than two events.
+    SAYING IT OURSELVES IS THE POINT. Sparkplug 3.0.0 requires a host that disconnects
+    intentionally to publish its Death message first (tck-id-operational-behavior-host-application-
+    termination), stamped with the time of the disconnect (tck-id-host-topic-phid-death-payload-
+    timestamp-disconnect-with-no-disconnect-packet); a DISCONNECT after it is optional, and the
+    daemon sends none. Never earlier than `connected_at_ms`, the birth's timestamp, so a clock
+    stepped back cannot make an edge node discard it as a previous session's.
 
-    The duplicate is kept deliberately rather than suppressed with a `disconnect()` before exit. A
+    So the broker fires the will as well when the process exits: a rollout produces TWO `online:
+    false` messages. The will carries the CONNECT's timestamp, older than this one, so an edge node
+    that judges STATE by timestamp ignores it, and either way the host is offline. A plain
     DISCONNECT would make the broker discard the will, which is tidier only while the publish below
-    succeeds; if it did not, the topic would be left saying `online: true` for as long as the
-    daemon stayed down. A repeated death certificate costs nothing and an absent one is the whole
-    fault this module exists to fix.
+    succeeds; if it did not, the topic would be left saying `online: true` for as long as the daemon
+    stayed down.
 
-    What this buys over the will alone is ORDER: it goes out at the start of the shutdown, before
-    the historian drain, so a gateway hears it then rather than up to
-    TELEMETRY_SHUTDOWN_DRAIN_SECONDS later when the socket finally closes.
+    What this buys over the will alone is ORDER: it goes out at the start of the shutdown, while
+    the network thread is still receiving, so a gateway that buffers on STATE stops publishing
+    before the daemon stops reading.
 
-    Best effort and never raises: this runs on the signal path, where the telemetry already
-    accepted is the thing worth protecting.
+    Best effort and never raises: the telemetry already accepted is the thing worth protecting.
     """
     try:
         topic = state_topic(host_id)
-        info = client.publish(topic, payload=state_payload(False, timestamp_ms), qos=1, retain=True)
-        # QoS 1 is only delivered once the loop runs, and the loop is about to stop. A short wait,
-        # not an unbounded one: a broker that has already gone is why this cannot raise.
-        try:
-            info.wait_for_publish(timeout=2)
-        except (TypeError, ValueError):
-            # paho 1.6.1's wait_for_publish takes no timeout on some builds; the publish is already
-            # queued either way and the will covers the case where it never leaves.
-            pass
-        logger.info("Sparkplug primary host '%s' is OFFLINE (retained on %s).", host_id, topic)
+        now_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
+        stamp = max(now_ms, int(connected_at_ms))
+        info = client.publish(topic, payload=state_payload(False, stamp), qos=1, retain=True)
+        # The network thread delivers the PUBACK. Bounded: a broker that has already gone is why
+        # this cannot raise, and the will covers a publish that never left.
+        info.wait_for_publish(timeout=2)
+        acknowledged = bool(info.is_published())
+        logger.info("Sparkplug primary host '%s' is OFFLINE (retained on %s%s).", host_id, topic,
+                    "" if acknowledged else "; not yet acknowledged, the will follows on exit")
+        return acknowledged
     except Exception as e:  # noqa: BLE001 -- see the docstring
         logger.warning(
             "Could not publish the primary host death certificate on shutdown: %s. The broker's "
             "will covers an unclean exit, but a gateway may see this host as online until then.", e,
         )
+        return False

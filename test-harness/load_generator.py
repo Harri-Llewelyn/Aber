@@ -14,6 +14,7 @@ NOT playback either: playback replays one capture at the capture's own timestamp
 See test-harness/README.md for the method and the measured envelope.
 """
 import argparse
+import collections
 import json
 import os
 import random
@@ -50,6 +51,12 @@ LOADGEN_PREFIX = os.getenv("LOADGEN_PREFIX", "LOADGEN")
 # Only for a gateway row carrying no group of its own. Same env and same default as the
 # daemon reads, so the generator addresses a device exactly where the daemon expects it.
 DEFAULT_SPARKPLUG_GROUP = os.getenv("SPARKPLUG_GROUP", "Aber")
+# The primary host every publisher waits for and buffers through, as an appliance does. The chart's
+# ingestion.primaryHostId; empty runs the fleet as edge nodes with no primary host, which publish
+# into an outage and lose it.
+PRIMARY_HOST_ID = os.getenv("PRIMARY_HOST_ID", "").strip()
+# A publisher's buffer, in messages; the oldest is dropped beyond it, and counted.
+BUFFER_LIMIT_MESSAGES = int(os.getenv("LOADGEN_BUFFER_LIMIT_MESSAGES", "2000000"))
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
@@ -86,10 +93,12 @@ def pace(elapsed, rate, sent):
     measures neither the target nor the limit, and the shortfall is itself the finding.
     """
     due = int(elapsed * rate) - sent
-    if due <= rate * BACKLOG_LIMIT_SECONDS:
+    # At least one may wait: below one message a second, the next is always older than the limit
+    # by the time it falls due, and a publisher that kept none would send nothing.
+    keep = max(int(rate * BACKLOG_LIMIT_SECONDS), 1)
+    if due <= keep:
         return max(due, 0), 0
-    abandoned = due - int(rate * BACKLOG_LIMIT_SECONDS)
-    return due - abandoned, abandoned
+    return keep, due - keep
 
 # The metric set every synthetic device declares at birth. Names, not aliases: a name-carrying
 # payload is the larger and slower of the two wire forms, so an envelope measured on it holds for
@@ -200,6 +209,8 @@ def _set_value(metric, value):
 
 
 REBIRTH_METRIC_NAME = "Node Control/Rebirth"
+# Sparkplug's Int64, which bdSeq must be.
+INT64 = 4
 
 
 class SequenceCounter:
@@ -226,51 +237,77 @@ def asks_for_rebirth(payload):
     return any(m.name == REBIRTH_METRIC_NAME and m.boolean_value for m in payload.metrics)
 
 
+def _metric(payload, name, timestamp_ms):
+    """A metric with its name and its timestamp, which Sparkplug requires on every metric."""
+    metric = payload.metrics.add()
+    metric.name = name
+    metric.timestamp = timestamp_ms
+    return metric
+
+
 def device_birth(asset_id, asset_name, metric_names, timestamp_ms, seq):
     """A DBIRTH declaring the metric set. Asset_ID is the cross-check against the topic."""
     payload = sparkplug_b_pb2.Payload()
     payload.timestamp = timestamp_ms
     payload.seq = seq
-    identity = payload.metrics.add()
-    identity.name = "Asset_ID"
-    identity.string_value = asset_id
-    identity.datatype = 12
-    name_hint = payload.metrics.add()
-    name_hint.name = "Asset_Name"
-    name_hint.string_value = asset_name
-    name_hint.datatype = 12
+    _set_value(_metric(payload, "Asset_ID", timestamp_ms), asset_id)
+    _set_value(_metric(payload, "Asset_Name", timestamp_ms), asset_name)
     for name in metric_names:
-        metric = payload.metrics.add()
-        metric.name = name
-        metric.timestamp = timestamp_ms
-        _set_value(metric, 0.0)
+        _set_value(_metric(payload, name, timestamp_ms), 0.0)
     return payload.SerializeToString()
 
 
-def node_birth(timestamp_ms, seq):
-    """An NBIRTH. Node topics carry no device, so there is no Asset_ID to declare."""
+def node_birth(timestamp_ms, seq, bdseq):
+    """
+    An NBIRTH: the bdSeq of the CONNECT it follows, and `Node Control/Rebirth`, which Sparkplug
+    requires of every NBIRTH. Node topics carry no device, so there is no Asset_ID to declare.
+    """
     payload = sparkplug_b_pb2.Payload()
     payload.timestamp = timestamp_ms
     payload.seq = seq
-    metric = payload.metrics.add()
-    metric.name = "bdSeq"
-    metric.timestamp = timestamp_ms
-    metric.long_value = 0
-    metric.datatype = 8
+    metric = _metric(payload, "bdSeq", timestamp_ms)
+    metric.datatype = INT64
+    metric.long_value = bdseq
+    _set_value(_metric(payload, REBIRTH_METRIC_NAME, timestamp_ms), False)
     return payload.SerializeToString()
 
 
-def device_data(metric_names, timestamp_ms, rng, seq):
-    """A DDATA carrying one value per declared metric. No Asset_ID: the topic is authoritative."""
+def node_death(bdseq, timestamp_ms=None):
+    """An NDEATH: the bdSeq of its CONNECT, and no seq. The Last Will, and the intentional one."""
+    payload = sparkplug_b_pb2.Payload()
+    payload.timestamp = int(time.time() * 1000) if timestamp_ms is None else timestamp_ms
+    metric = _metric(payload, "bdSeq", payload.timestamp)
+    metric.datatype = INT64
+    metric.long_value = bdseq
+    return payload.SerializeToString()
+
+
+def device_data(metric_names, timestamp_ms, values, seq, historical=False):
+    """
+    A DDATA carrying one value per declared metric. No Asset_ID: the topic is authoritative. A
+    replay of what was buffered is flagged is_historical on every metric.
+    """
     payload = sparkplug_b_pb2.Payload()
     payload.timestamp = timestamp_ms
     payload.seq = seq
-    for name in metric_names:
-        metric = payload.metrics.add()
-        metric.name = name
-        metric.timestamp = timestamp_ms
-        _set_value(metric, rng.uniform(0.0, 1000.0))
+    for name, value in zip(metric_names, values):
+        metric = _metric(payload, name, timestamp_ms)
+        _set_value(metric, value)
+        if historical:
+            metric.is_historical = True
     return payload.SerializeToString()
+
+
+def host_state(raw):
+    """A STATE payload as (online, timestamp), or None when it is not one."""
+    try:
+        data = json.loads(raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw)
+        online, stamp = data["online"], data["timestamp"]
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return None
+    if not isinstance(online, bool) or not isinstance(stamp, (int, float)) or isinstance(stamp, bool):
+        return None
+    return online, stamp
 
 
 # -------------------------------------------------------------------------------------------
@@ -306,6 +343,36 @@ def scrape():
     """One reading of the daemon's metrics endpoint."""
     with urllib.request.urlopen(METRICS_URL, timeout=15) as response:
         return parse_exposition(response.read().decode("utf-8"))
+
+
+def scrape_patiently(timeout=600.0):
+    """
+    scrape(), retried while the endpoint is away: a restart of the daemon (load-test.mjs
+    --restart-ingestion-at) takes it down for the length of the gap.
+    """
+    deadline = time.time() + timeout
+    while True:
+        try:
+            return scrape()
+        except Exception:
+            if time.time() >= deadline:
+                raise
+            time.sleep(2)
+
+
+def counters_reset(before, after):
+    """Whether the daemon restarted between two samples: its message counter went backwards."""
+    total = lambda sample: sum(sample.labelled.get("aber_ingestion_messages_total", {}).values())  # noqa: E731
+    return total(after) < total(before)
+
+
+def daemon_restarted(before, after, host_departures):
+    """
+    Whether the daemon restarted between two samples. Its counter going backwards says so only
+    while the new daemon has counted less than the old one; a death certificate that ended an edge
+    node's session says so however long the new daemon has run.
+    """
+    return host_departures > 0 or counters_reset(before, after)
 
 
 def broker_dropped_total():
@@ -405,18 +472,26 @@ class Publisher(threading.Thread):
     off the critical path -- a single connection's socket writes would be measured instead of the
     stack.
 
-    It behaves as an edge node towards the daemon: one `seq` across its births and data, and an
-    NCMD `Node Control/Rebirth` answered with a fresh NBIRTH and DBIRTH set. Every publish happens
-    on this thread (or before it starts), so `seq` reaches the wire in order.
+    A SPARKPLUG 3.0.0 EDGE NODE CONFIGURED WITH A PRIMARY HOST (PRIMARY_HOST_ID), as the appliance
+    is. Every CONNECT carries an NDEATH Last Will with the next bdSeq, and the NBIRTH repeats it.
+    It births only once STATE says the primary host is online; while it is not, readings are
+    buffered rather than published. When a valid offline STATE arrives it publishes its NDEATH,
+    disconnects and connects again (tck-id-operational-behavior-edge-node-termination-host-offline),
+    and once the host is back it births and replays the buffer with is_historical set, paced so the
+    replay adds at most `replay_share` of the step's rate. One `seq` runs across births and data,
+    and an NCMD `Node Control/Rebirth` is answered with a fresh NBIRTH and DBIRTH set. Every
+    publish happens on this thread (or before it starts), so `seq` reaches the wire in order.
     """
 
-    def __init__(self, gateway, devices, metric_names, group_id):
+    def __init__(self, gateway, devices, metric_names, group_id, replay_share=0.2,
+                 buffer_limit=BUFFER_LIMIT_MESSAGES, primary_host_id=None):
         super().__init__(name=f"pub-{gateway['sparkplug_id']}", daemon=True)
         self.gateway = gateway
         self.devices = devices
         self.metric_names = metric_names
         self.group_id = group_id
         self.node_id = gateway["sparkplug_id"]
+        self.primary_host_id = PRIMARY_HOST_ID if primary_host_id is None else primary_host_id
         self.client = mqtt.Client(
             client_id=f"loadgen-{self.node_id}", protocol=mqtt.MQTTv5, clean_session=None
         )
@@ -424,6 +499,8 @@ class Publisher(threading.Thread):
         self.rng = random.Random(self.node_id)
         # The rate this publisher is currently holding, messages per second. Set by the driver.
         self.target_rate = 0.0
+        # DDATA taken (published live or buffered), and DDATA put on the wire (live or replayed).
+        self.taken = 0
         self.published = 0
         self.publish_errors = 0
         # Messages the pacer gave up on rather than repaying as a burst. Non-zero means this
@@ -440,6 +517,53 @@ class Publisher(threading.Thread):
         # One timestamp per device, never repeating: telemetry is keyed (time, asset_id,
         # metric_name) ON CONFLICT DO NOTHING, so a repeated millisecond silently loses its rows.
         self._last_ms = {}
+        # The first and last DDATA reading time taken, for the historian comparison.
+        self.first_ms = None
+        self.last_ms = None
+        # The Sparkplug session: the bdSeq of the current CONNECT, whether a broker accepted a
+        # CONNECT carrying it, whether this node has birthed in it, and the primary host as STATE
+        # last described it.
+        self.bdseq = 0
+        self._bdseq_used = False
+        self.birthed = False
+        self.sessions = 0
+        # Sessions ended by the primary host's death certificate: one per daemon restart.
+        self.host_departures = 0
+        self._state_lock = threading.Lock()
+        self._host_online = False
+        self._host_ts = None
+        self._host_left = threading.Event()
+        # Set on paho's thread when the connection drops without being asked to.
+        self._dropped = threading.Event()
+        # Readings taken while the host could not receive them: (asset_id, stamp, values).
+        self.buffer = collections.deque()
+        self.buffer_limit = buffer_limit
+        self.buffered = 0
+        self.replayed = 0
+        self.buffer_dropped = 0
+        self.replay_share = replay_share
+        self._replay_rate = 0.0
+        self._replay_budget = 0.0
+        self._replay_clock = time.perf_counter()
+
+    # -- the connection --------------------------------------------------------------------------
+
+    def _topic(self, msg_type, device=None):
+        return "/".join(["spBv1.0", self.group_id, msg_type, self.node_id] + ([device] if device else []))
+
+    def _open(self):
+        """
+        CONNECT with the NDEATH for this bdSeq as the Last Will: QoS 1, not retained. A new
+        connection hears the host again before it births; the last timestamp is kept for the
+        comparison STATE is judged by.
+        """
+        self.client.will_set(self._topic("NDEATH"), node_death(self.bdseq), qos=1, retain=False)
+        self.connected.clear()
+        with self._state_lock:
+            self._host_online = False
+        # Clean Start, and no session expiry: Sparkplug asks it of every client.
+        self.client.connect(MQTT_HOST, MQTT_PORT, keepalive=60, clean_start=True)
+        self.client.loop_start()
 
     def connect(self):
         self.client.username_pw_set(self.node_id, LOADGEN_PASSWORD)
@@ -456,20 +580,133 @@ class Publisher(threading.Thread):
             )
             self.client.tls_insecure_set(False)
 
-        def on_connect(client, _userdata, _flags, reason_code, _properties=None):
-            if getattr(reason_code, "value", reason_code) == 0:
-                client.subscribe(f"spBv1.0/{self.group_id}/NCMD/{self.node_id}", qos=0)
-                self.connected.set()
-
-        self.client.on_connect = on_connect
-        self.client.on_message = self._on_command
-        self.client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
-        self.client.loop_start()
+        self.client.on_connect = self._on_connect
+        self.client.on_disconnect = self._on_disconnect
+        self.client.on_message = self._on_message
+        self._open()
         if not self.connected.wait(timeout=30):
             raise SystemExit(
                 f"Gateway {self.node_id} did not connect to {MQTT_HOST}:{MQTT_PORT}. The account is "
                 "issued by `scripts/load-test.mjs up`; a wrong LOADGEN_PASSWORD refuses here."
             )
+        if self.primary_host_id and not self._wait_for_host(30):
+            raise SystemExit(
+                f"The primary host '{self.primary_host_id}' did not say it is online on "
+                f"spBv1.0/STATE/{self.primary_host_id} within 30 s; is ingestion running?"
+            )
+
+    def _on_connect(self, client, _userdata, _flags, reason_code, _properties=None):
+        if getattr(reason_code, "value", reason_code) == 0:
+            # A CONNACK accepted this CONNECT, so the next one carries the next bdSeq.
+            self._bdseq_used = True
+            # Before the NBIRTH, at QoS 1 (tck-id-message-flow-edge-node-ncmd-subscribe).
+            subscriptions = [(self._topic("NCMD"), 1)]
+            if self.primary_host_id:
+                subscriptions.append((f"spBv1.0/STATE/{self.primary_host_id}", 1))
+            client.subscribe(subscriptions)
+            self.connected.set()
+
+    def _on_disconnect(self, _client, _userdata, reason_code, _properties=None):
+        self.connected.clear()
+        self.birthed = False
+        if getattr(reason_code, "value", reason_code) != 0:
+            self._dropped.set()
+
+    def _next_bdseq(self):
+        """
+        The bdSeq for the next CONNECT: one more than the last a broker accepted
+        (tck-id-topics-nbirth-bdseq-increment). An attempt that failed before the broker answered
+        sent no CONNECT packet, so its value is still unused. Returns whether it advanced.
+        """
+        if not self._bdseq_used:
+            return False
+        self.bdseq = (self.bdseq + 1) % 256
+        self._bdseq_used = False
+        return True
+
+    def _wait_for_host(self, timeout):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.host_online():
+                return True
+            time.sleep(0.05)
+        return False
+
+    def host_online(self):
+        with self._state_lock:
+            return self._host_online or not self.primary_host_id
+
+    def deliverable(self):
+        """Whether a reading taken now may be published: connected, born, and the host online."""
+        return self.connected.is_set() and self.birthed and self.host_online()
+
+    def _on_message(self, client, userdata, message):
+        if message.topic.startswith("spBv1.0/STATE/"):
+            self._on_state(message)
+        else:
+            self._on_command(client, userdata, message)
+
+    def _on_state(self, message):
+        """
+        The configured primary host's STATE, on paho's thread. Only its own id counts
+        (tck-id-message-flow-edge-node-birth-publish-phid-wait-id), and only a timestamp at least the
+        previous one (-phid-wait-timestamp); a valid offline ends a session this node is in.
+        """
+        if message.topic.rsplit("/", 1)[-1] != self.primary_host_id:
+            return
+        state = host_state(message.payload)
+        if state is None:
+            return
+        online, stamp = state
+        with self._state_lock:
+            if self._host_ts is not None and stamp < self._host_ts:
+                return
+            self._host_ts = stamp
+            self._host_online = online
+        if not online and self.birthed:
+            self._host_left.set()
+
+    def _restart_session(self):
+        """
+        The primary host went offline while this node was born: publish the NDEATH, disconnect,
+        and connect again with the next bdSeq (tck-id-operational-behavior-edge-node-intentional-
+        disconnect-ndeath, -termination-host-offline-reconnect). The NBIRTH waits for the host.
+        """
+        self._host_left.clear()
+        self.birthed = False
+        self.host_departures += 1
+        try:
+            self.client.publish(self._topic("NDEATH"), node_death(self.bdseq), qos=1).wait_for_publish(2)
+        except Exception:  # noqa: BLE001 -- the will covers a death that never left
+            pass
+        self.client.disconnect()
+        self.client.loop_stop()
+        if self._next_bdseq():
+            self.sessions += 1
+        try:
+            self._open()
+        except Exception:  # noqa: BLE001 -- the broker is away; _reconnect tries again
+            self._dropped.set()
+            return
+        self.connected.wait(timeout=30)
+
+    def _reconnect(self):
+        """
+        A connection that dropped, or an attempt that failed: connect again, rather than letting
+        paho reconnect with the old Last Will. The bdSeq advances only past a CONNECT a broker
+        accepted (tck-id-message-flow-edge-node-birth-publish-will-message-payload-bdSeq).
+        """
+        self._dropped.clear()
+        self.client.loop_stop()
+        if self._next_bdseq():
+            self.sessions += 1
+        try:
+            self._open()
+        except Exception:  # noqa: BLE001 -- the broker is away; try again on the next pass
+            self._dropped.set()
+            time.sleep(1)
+
+    # -- publishing -------------------------------------------------------------------------------
 
     def _next_ms(self, asset_id):
         now = int(time.time() * 1000)
@@ -489,17 +726,22 @@ class Publisher(threading.Thread):
         return True
 
     def births(self):
-        """NBIRTH, then a DBIRTH per device. Returns how many births were published."""
+        """
+        NBIRTH, then a DBIRTH per device, once the primary host is online (tck-id-message-flow-
+        edge-node-birth-publish-phid-wait). Returns how many births were published.
+        """
+        if not self.host_online():
+            return 0
         stamp = int(time.time() * 1000)
-        self._send("NBIRTH", f"spBv1.0/{self.group_id}/NBIRTH/{self.node_id}",
-                   lambda seq: node_birth(stamp, seq))
+        self._send("NBIRTH", self._topic("NBIRTH"), lambda seq: node_birth(stamp, seq, self.bdseq))
         for device in self.devices:
             asset_id, name = device["sparkplug_id"], device["name"]
             self._send(
-                "DBIRTH", f"spBv1.0/{self.group_id}/DBIRTH/{self.node_id}/{asset_id}",
+                "DBIRTH", self._topic("DBIRTH", asset_id),
                 lambda seq, a=asset_id, n=name: device_birth(
                     a, n, self.metric_names, self._next_ms(a), seq),
             )
+        self.birthed = True
         return len(self.devices) + 1
 
     def _on_command(self, _client, _userdata, message):
@@ -522,12 +764,25 @@ class Publisher(threading.Thread):
         return True
 
     def publish_one(self):
+        """Take one reading: published when the host can receive it, buffered when it cannot."""
         device = self.devices[self._cursor % len(self.devices)]
         self._cursor += 1
         asset_id = device["sparkplug_id"]
+        stamp = self._next_ms(asset_id)
+        values = [self.rng.uniform(0.0, 1000.0) for _ in self.metric_names]
+        self.taken += 1
+        self.first_ms = stamp if self.first_ms is None else self.first_ms
+        self.last_ms = stamp
+        if not self.deliverable():
+            if len(self.buffer) >= self.buffer_limit:
+                self.buffer.popleft()
+                self.buffer_dropped += 1
+            self.buffer.append((asset_id, stamp, values))
+            self.buffered += 1
+            return True
         sent = self._send(
-            "DDATA", f"spBv1.0/{self.group_id}/DDATA/{self.node_id}/{asset_id}",
-            lambda seq: device_data(self.metric_names, self._next_ms(asset_id), self.rng, seq),
+            "DDATA", self._topic("DDATA", asset_id),
+            lambda seq: device_data(self.metric_names, stamp, values, seq),
         )
         if not sent:
             self.publish_errors += 1
@@ -535,15 +790,46 @@ class Publisher(threading.Thread):
         self.published += 1
         return True
 
+    def replay_some(self):
+        """
+        Replay buffered readings oldest first, flagged is_historical, at most `replay_share` of the
+        last step's rate (10 a second at least). Returns how many were sent.
+        """
+        now = time.perf_counter()
+        self._replay_budget = min(self._replay_budget + (now - self._replay_clock) * self._replay_rate,
+                                  max(self._replay_rate, 1.0))
+        self._replay_clock = now
+        sent = 0
+        while self.buffer and self._replay_budget >= 1 and self.deliverable():
+            asset_id, stamp, values = self.buffer[0]
+            if not self._send("DDATA", self._topic("DDATA", asset_id),
+                              lambda seq: device_data(self.metric_names, stamp, values, seq,
+                                                      historical=True)):
+                break
+            self.buffer.popleft()
+            self._replay_budget -= 1
+            self.replayed += 1
+            self.published += 1
+            sent += 1
+        return sent
+
     def run(self):
         """
         Hold `target_rate` by publishing whatever the elapsed time says is due.
 
         Due-count pacing rather than sleep-per-message: a 1 ms sleep cannot express 2000 messages
-        per second. `pace()` decides what is due and what is too old to send.
+        per second. `pace()` decides what is due and what is too old to send. The session work --
+        a host that left, a birth owed, a rebirth asked for, a buffer to replay -- runs between.
         """
         while not self._stop.is_set():
+            if self._dropped.is_set():
+                self._reconnect()
+            if self._host_left.is_set():
+                self._restart_session()
+            if not self.birthed and self.connected.is_set():
+                self.births()
             self.answer_rebirth()
+            self.replay_some()
             rate = self.target_rate
             if rate <= 0:
                 time.sleep(0.005)
@@ -565,13 +851,19 @@ class Publisher(threading.Thread):
         self._epoch = time.perf_counter()
         self._sent_this_step = 0
         self.target_rate = rate
+        self._replay_rate = max(10.0, rate * self.replay_share)
 
     def end_step(self):
         self.target_rate = 0.0
         return self._sent_this_step
 
     def stop(self):
+        """An intentional disconnect: the NDEATH first (tck-id-operational-behavior-edge-node-intentional-disconnect-ndeath)."""
         self._stop.set()
+        try:
+            self.client.publish(self._topic("NDEATH"), node_death(self.bdseq), qos=1).wait_for_publish(2)
+        except Exception:  # noqa: BLE001 -- the will covers it
+            pass
         self.client.loop_stop()
         try:
             self.client.disconnect()
@@ -737,6 +1029,18 @@ def soaked(step, steps):
     return any(s.get("soak") and held(s) and s["target_rate"] >= step["target_rate"] for s in steps)
 
 
+def drain_buffers(publishers, timeout=900.0):
+    """Wait, taking nothing, until every publisher has replayed its buffer. Returns what is left."""
+    deadline = time.time() + timeout
+    left = sum(len(p.buffer) for p in publishers)
+    if left:
+        log(f"Replaying {left:,} buffered message(s) before the run is counted...")
+    while left and time.time() < deadline:
+        time.sleep(2)
+        left = sum(len(p.buffer) for p in publishers)
+    return left
+
+
 def drain(timeout=300.0):
     """Wait, publishing nothing, until the writer's queue is empty. Returns the last depth read."""
     deadline = time.time() + timeout
@@ -765,11 +1069,13 @@ def run_step(publishers, rate, duration, settle):
         publisher.begin_step(per_publisher)
 
     time.sleep(settle)
-    before = scrape()
+    before = scrape_patiently()
     broker_before = broker_dropped_total()
     sent_at_sample = sum(p.published for p in publishers)
+    taken_at_sample = sum(p.taken for p in publishers)
     abandoned_at_sample = sum(p.abandoned for p in publishers)
     rebirths_at_sample = sum(p.rebirths for p in publishers)
+    departures_at_sample = sum(p.host_departures for p in publishers)
     depths = []
     deadline = time.time() + max(duration - settle, 1.0)
     while time.time() < deadline:
@@ -778,9 +1084,15 @@ def run_step(publishers, rate, duration, settle):
             depths.append(scrape().get("aber_ingestion_write_queue_depth"))
         except Exception:
             pass
-    after = scrape()
+    after = scrape_patiently()
     broker_after = broker_dropped_total()
+    depth_start = before.get("aber_ingestion_write_queue_depth")
+    # A new daemon counts from zero, so this step's figures are its counts since it started.
+    restarted = daemon_restarted(before, after, sum(p.host_departures for p in publishers) - departures_at_sample)
+    if restarted:
+        before = Sample({}, {}, before.at)
     published = sum(p.published for p in publishers) - sent_at_sample
+    taken = sum(p.taken for p in publishers) - taken_at_sample
     abandoned = sum(p.abandoned for p in publishers) - abandoned_at_sample
     rebirths = sum(p.rebirths for p in publishers) - rebirths_at_sample
     for publisher in publishers:
@@ -804,11 +1116,12 @@ def run_step(publishers, rate, duration, settle):
         if value - dropped_before.get(reason, 0.0) > 0
     }
 
-    achieved = published / window if window else 0.0
+    # Readings taken, not messages published: an outage buffers rather than publishes, and that is
+    # not the generator falling short.
+    achieved = taken / window if window else 0.0
     # Saturation is the queue ending deep AND deeper than it started: a deep queue that is draining
     # is the previous step being paid off, not this step failing.
     depth_end = after.get("aber_ingestion_write_queue_depth")
-    depth_start = before.get("aber_ingestion_write_queue_depth")
     saturated = depth_end > QUEUE_SATURATED_DEPTH and depth_end > depth_start
     generator_limited = achieved < rate * PUBLISH_SHORTFALL_TOLERANCE and not saturated
 
@@ -844,6 +1157,7 @@ def run_step(publishers, rate, duration, settle):
         "rebirths": rebirths,
         "saturated": saturated,
         "generator_limited": generator_limited,
+        "daemon_restarted": restarted,
     }
 
 
@@ -938,6 +1252,9 @@ def step_note(step, steps):
         note += f"; broker shed {step['broker_dropped']:,}"
     if step.get("sequence_gaps") or step.get("rebirths"):
         note += f"; seq gaps {step.get('sequence_gaps', 0)}, rebirths {step.get('rebirths', 0)}"
+    if step.get("daemon_restarted"):
+        note += ("; THE DAEMON RESTARTED in this step, so received and undelivered count the new "
+                 "daemon only (the TOTALS line is the measurement)")
     return note
 
 
@@ -1059,6 +1376,10 @@ def main():
         "--compress", action="store_true",
         help="compress_chunk() the chunks the run wrote and report compressed bytes a row",
     )
+    parser.add_argument(
+        "--replay-share", type=float, default=0.2,
+        help="the share of a step's rate a publisher may add to replay what it buffered (10/s at least)",
+    )
     parser.add_argument("--report", default="", help="write the report as JSON to this path")
     arguments = parser.parse_args()
 
@@ -1085,7 +1406,7 @@ def main():
     publishers = []
     for gateway, devices in fleet:
         group = gateway.get("sparkplug_group") or DEFAULT_SPARKPLUG_GROUP
-        publisher = Publisher(gateway, devices, metric_names, group)
+        publisher = Publisher(gateway, devices, metric_names, group, replay_share=arguments.replay_share)
         publisher.connect()
         publishers.append(publisher)
     log(f"{len(publishers)} publishers connected to {MQTT_HOST}:{MQTT_PORT}.")
@@ -1132,12 +1453,15 @@ def main():
             results.append(dict(run_step(publishers, target["target_rate"], arguments.soak,
                                          arguments.settle), soak=True))
             _log_step(results[-1])
+        # What the fleet buffered through an outage is replayed before the run is counted.
+        drain_buffers(publishers)
     finally:
         for publisher in publishers:
             publisher.stop()
 
     # After the publishers stop: the queue drains into chunks that are only then written.
     time.sleep(10)
+    drain()
     after_storage = storage_snapshot()
     compression = compress_run_chunks(run_started) if arguments.compress else None
     if arguments.compress and compression is None:
@@ -1156,6 +1480,23 @@ def main():
         "verdict": verdict(results),
     }
     print(render(report))
+    # One line for scripts/load-test.mjs, which counts what the historian holds for the fleet
+    # between the first and last reading time and compares it with what was sent.
+    stamps = [p for p in publishers if p.first_ms is not None]
+    print("TOTALS " + json.dumps({
+        "ddata_taken": sum(p.taken for p in publishers),
+        "metrics_per_message": len(metric_names),
+        "readings_taken": sum(p.taken for p in publishers) * len(metric_names),
+        "ddata_buffered": sum(p.buffered for p in publishers),
+        "ddata_replayed": sum(p.replayed for p in publishers),
+        "ddata_dropped_from_buffer": sum(p.buffer_dropped for p in publishers),
+        "ddata_still_buffered": sum(len(p.buffer) for p in publishers),
+        "sessions_restarted": sum(p.sessions for p in publishers),
+        "host_departures": sum(p.host_departures for p in publishers),
+        "primary_host": PRIMARY_HOST_ID or None,
+        "first_ms": min((p.first_ms for p in stamps), default=None),
+        "last_ms": max((p.last_ms for p in stamps), default=None),
+    }, separators=(",", ":")), flush=True)
     if arguments.report:
         with open(arguments.report, "w", encoding="utf-8") as handle:
             json.dump(report, handle, indent=2)

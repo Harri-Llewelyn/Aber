@@ -393,6 +393,25 @@ const enrolment = await enrol();
 log(`enrolled as ${enrolment.sparkplug_id} (group ${enrolment.sparkplug_group})`);
 log(`broker: ${enrolment.mqtt_host}:${enrolment.mqtt_tls_port} over MQTTS`);
 
+/**
+ * The site's Sparkplug primary host. With one named, store and forward births only once
+ * spBv1.0/STATE/<id> says the platform is online, and buffers readings while it is not. One topic
+ * level (the chart refuses '/', '+', '#' and whitespace), and it goes into a shell file between
+ * single quotes, so a quote is refused rather than escaped: the appliance then runs without a
+ * primary host, buffering only while the broker cannot be reached. A platform older than this
+ * field sends none, with the same result.
+ */
+const PRIMARY_HOST_ID = /^[^/+#\s']{1,128}$/.test(String(enrolment.primary_host_id ?? ''))
+  ? enrolment.primary_host_id : '';
+if (PRIMARY_HOST_ID) {
+  log(`primary host: ${PRIMARY_HOST_ID} (births wait for spBv1.0/STATE/${PRIMARY_HOST_ID})`);
+} else {
+  log(enrolment.primary_host_id
+    ? `WARNING: the platform named a primary host this appliance cannot use ('${enrolment.primary_host_id}'); `
+      + 'running without one, so readings are buffered only while the broker cannot be reached.'
+    : 'the platform named no primary host; readings are buffered only while the broker cannot be reached.');
+}
+
 // 1. The CA. Written before anything else that depends on it, so a failure here is unambiguous.
 mkdirSync(join(DATA_DIR, 'certs'), { recursive: true });
 writeFileSync(CA_PATH, enrolment.ca_cert, { mode: 0o644 });
@@ -527,6 +546,8 @@ writeFileSync(
     `export GATEWAY_MQTT_TLS_PORT='${enrolment.mqtt_tls_port}'`,
     `export GATEWAY_SPARKPLUG_ID='${enrolment.sparkplug_id}'`,
     `export GATEWAY_SPARKPLUG_GROUP='${enrolment.sparkplug_group}'`,
+    // Read by store and forward: births wait for this host's online STATE. Empty is none.
+    `export GATEWAY_PRIMARY_HOST_ID='${PRIMARY_HOST_ID}'`,
     // Read by the flow's `build node-level message` function through env.get(), and reported on
     // the heartbeat. See the block above for why it is resolved here rather than in the flow.
     `export GATEWAY_AGENT_VERSION='${SAFE_AGENT_VERSION}'`,

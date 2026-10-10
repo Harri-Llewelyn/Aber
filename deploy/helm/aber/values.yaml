@@ -1042,6 +1042,12 @@ ingestion:
   deviceWatchdogIntervalSeconds: 30
   # Rate limit on NCMD rebirth requests, per edge node.
   rebirthRequestIntervalSeconds: 300
+  # How old a reading flagged is_historical -- an edge node replaying what it buffered during an
+  # outage -- may be and still be written. Live readings stay at 24 hours. Matches the appliance
+  # buffer's maximum age (flows.template.json, `store and forward`). Readings more than 25 hours
+  # late reach raw telemetry but not the rollups until they are refreshed
+  # (docs/remote-gateways.md, "Late data").
+  historicalMaxAgeSeconds: 604800
   # The Sparkplug primary host application id. REQUIRED, and deliberately without a default: this
   # is the name a third-party gateway is configured to watch on `spBv1.0/STATE/<id>` to learn
   # whether the historian is consuming, so it belongs to the site rather than to this chart, and a

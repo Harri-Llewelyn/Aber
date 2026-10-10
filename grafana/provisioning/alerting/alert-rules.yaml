@@ -855,8 +855,8 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # Sparkplug Message Loss: seq gaps per edge node, for 15m, which rides out the gap every deploy
-      # produces.
+      # Sparkplug Message Loss: seq gaps per edge node, for 15m, which rides out the gap a broker
+      # restart produces.
       - uid: aber-ingestion-sequence-gaps
         title: Sparkplug Message Loss
         condition: C
@@ -882,6 +882,117 @@ groups:
                 type: prometheus
                 uid: prometheus
               expr: rate(aber_ingestion_sequence_gaps_total[15m])
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # Readings Refused for Their Timestamp: a refusal in the last 15m, per edge node and reason,
+      # read off when it last happened, since a counter born at its first value shows no increase.
+      - uid: aber-ingestion-timestamps-refused
+        title: Readings Refused for Their Timestamp
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: gateway
+        annotations:
+          summary: >-
+            Edge node {{ $labels.edge_node }} sent readings the platform refused for their timestamp
+            ({{ $labels.reason }}), so they were not recorded. too_new or too_old means the
+            gateway's clock is wrong; historical_too_old means it replayed an outage older than the
+            platform keeps (ingestion.historicalMaxAgeSeconds). See docs/remote-gateways.md.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: time() - aber_ingestion_timestamps_rejected_at_seconds
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [900]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # Gateway Outage Lost Readings: an outage report with any reading dropped, for an hour after it
+      # arrived. The appliance counts exactly, so there is no noise floor to filter.
+      - uid: aber-gateway-outage-loss
+        title: Gateway Outage Lost Readings
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: gateway
+        annotations:
+          summary: >-
+            Edge node {{ $labels.edge_node }} reported an outage in which it dropped readings: they
+            were never recorded and cannot be recovered. Its buffer was full or switched off, or the
+            outage outlasted what it keeps. The Gateway Outages row of the Stack & Ingestion Health
+            dashboard has the window and the counts; see docs/remote-gateways.md.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                aber_ingestion_gateway_outage_last_readings_dropped
+                and on(edge_node)
+                (time() - aber_ingestion_gateway_outage_reported_timestamp_seconds < 3600)
               instant: true
           - refId: B
             datasourceUid: __expr__

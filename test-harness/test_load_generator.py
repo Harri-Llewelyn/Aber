@@ -218,6 +218,13 @@ class PacingTest(unittest.TestCase):
     def test_a_publisher_that_is_ahead_is_never_asked_for_a_negative_number(self):
         self.assertEqual(load_generator.pace(0.5, 100, 60), (0, 0))
 
+    def test_a_rate_below_one_a_second_still_sends(self):
+        """3.3 msg/s across 8 publishers is 0.41 each: the message due is sent, not abandoned."""
+        self.assertEqual(load_generator.pace(3.0, 0.4125, 0), (1, 0))
+
+    def test_a_slow_publisher_that_stalled_sends_one_and_abandons_the_rest(self):
+        self.assertEqual(load_generator.pace(100.0, 0.4125, 0), (1, 40))
+
 
 class VerdictTest(unittest.TestCase):
     def test_a_growing_queue_names_the_writer_and_the_rate(self):
@@ -370,29 +377,33 @@ class _RecordingClient:
         self.sent = []
         self.fail = False
 
-    def publish(self, topic, payload):
+    def publish(self, topic, payload, qos=0):
         if self.fail:
             return _Published(rc=4)
         self.sent.append((topic, payload))
         return _Published()
 
 
-def _publisher(devices=2):
+def _publisher(devices=2, primary_host_id="", buffer_limit=1000):
     publisher = load_generator.Publisher(
         {"sparkplug_id": "gwy000000000000000000001", "name": "LOADGEN_Gateway_001"},
         [{"sparkplug_id": f"dev{i:021d}", "name": f"LOADGEN_Device_{i:04d}"} for i in range(devices)],
         load_generator.METRIC_NAMES[:2],
         "Aber",
+        buffer_limit=buffer_limit,
+        primary_host_id=primary_host_id,
     )
     publisher.client = _RecordingClient()
+    publisher.connected.set()
     return publisher
 
 
 # The payload builders need the real sparkplug_b_pb2; these hand back the seq they were given.
 _BUILDERS = {
-    "node_birth": lambda timestamp_ms, seq: ("NBIRTH", seq),
+    "node_birth": lambda timestamp_ms, seq, bdseq: ("NBIRTH", seq),
     "device_birth": lambda asset_id, asset_name, metric_names, timestamp_ms, seq: ("DBIRTH", seq),
-    "device_data": lambda metric_names, timestamp_ms, rng, seq: ("DDATA", seq),
+    "device_data": lambda metric_names, timestamp_ms, values, seq, historical=False: (
+        ("DDATA", seq, "historical") if historical else ("DDATA", seq)),
 }
 
 
@@ -648,6 +659,150 @@ class TimestampTest(unittest.TestCase):
         for _ in range(200):
             publisher._next_ms("dev-a")
         self.assertLess(publisher._next_ms("dev-b"), publisher._last_ms["dev-a"])
+
+
+class EdgeNodeTest(unittest.TestCase):
+    """
+    The generator behaves as a Sparkplug edge node configured with a primary host, as the appliance
+    does, so a restart of ingestion under load measures the conformant path: births wait for STATE,
+    readings taken while the host is away are buffered and take no seq, and the replay is flagged
+    is_historical and continues the seq.
+    """
+
+    def setUp(self):
+        patches = [mock.patch.object(load_generator, name, fn) for name, fn in _BUILDERS.items()]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    @staticmethod
+    def state(publisher, online, stamp, host="Site"):
+        publisher._on_state(types.SimpleNamespace(
+            topic=f"spBv1.0/STATE/{host}", payload=('{"online": %s, "timestamp": %d}' % (
+                "true" if online else "false", stamp)).encode()))
+
+    def test_without_a_primary_host_it_births_and_publishes(self):
+        publisher = _publisher(devices=1)
+        self.assertEqual(publisher.births(), 2)
+        publisher.publish_one()
+        self.assertEqual([p for _, p in publisher.client.sent], [("NBIRTH", 0), ("DBIRTH", 1), ("DDATA", 2)])
+
+    def test_it_waits_for_the_primary_host_and_buffers_meanwhile(self):
+        publisher = _publisher(devices=1, primary_host_id="Site")
+        self.assertEqual(publisher.births(), 0, "no NBIRTH before STATE says the host is online")
+        publisher.publish_one()
+        self.assertEqual(publisher.client.sent, [])
+        self.assertEqual((publisher.buffered, len(publisher.buffer)), (1, 1))
+
+    def test_once_the_host_is_online_it_births_then_replays_historical_on_the_same_seq_run(self):
+        publisher = _publisher(devices=1, primary_host_id="Site")
+        publisher.publish_one()
+        publisher.publish_one()
+        self.state(publisher, True, 1000)
+        publisher.births()
+        publisher._replay_rate = 1000.0
+        publisher._replay_budget = 10.0
+        self.assertEqual(publisher.replay_some(), 2)
+        publisher.publish_one()
+        self.assertEqual([p for _, p in publisher.client.sent], [
+            ("NBIRTH", 0), ("DBIRTH", 1), ("DDATA", 2, "historical"), ("DDATA", 3, "historical"), ("DDATA", 4)])
+        self.assertEqual((publisher.replayed, publisher.taken), (2, 3))
+
+    def test_only_the_configured_host_and_a_timestamp_not_older_count(self):
+        publisher = _publisher(primary_host_id="Site")
+        self.state(publisher, True, 1000, host="Someone-Else")
+        self.assertFalse(publisher.host_online())
+        self.state(publisher, True, 1000)
+        self.state(publisher, False, 999)
+        self.assertTrue(publisher.host_online(), "a death older than the birth is a previous session's")
+
+    def test_a_valid_offline_while_born_ends_the_session(self):
+        publisher = _publisher(primary_host_id="Site")
+        self.state(publisher, True, 1000)
+        publisher.births()
+        self.state(publisher, False, 1000)
+        self.assertTrue(publisher._host_left.is_set())
+        self.assertFalse(publisher.deliverable())
+
+    def test_a_new_connection_hears_the_host_again_before_it_births(self):
+        publisher = _publisher(devices=1, primary_host_id="Site")
+        self.state(publisher, True, 1000)
+        publisher.client = mock.MagicMock()
+        with mock.patch.object(load_generator, "node_death", lambda bdseq, timestamp_ms=None: ("NDEATH", bdseq)):
+            publisher._open()
+        self.assertFalse(publisher.host_online())
+        self.state(publisher, True, 999)
+        self.assertFalse(publisher.host_online(), "an older STATE is a previous session's")
+        self.state(publisher, True, 1000)
+        self.assertTrue(publisher.host_online())
+        will = publisher.client.will_set.call_args
+        self.assertEqual((will.kwargs["qos"], will.kwargs["retain"]), (1, False))
+        self.assertTrue(publisher.client.connect.call_args.kwargs["clean_start"])
+
+    def test_bdseq_advances_only_past_a_connect_a_broker_accepted(self):
+        publisher = _publisher(devices=1, primary_host_id="Site")
+        publisher.client = mock.MagicMock()
+        wills = []
+        publisher.client.will_set.side_effect = lambda topic, payload, qos, retain: wills.append(payload[1])
+        publisher.client.connect.side_effect = OSError("no route to host")
+        with mock.patch.object(load_generator, "node_death", lambda bdseq, timestamp_ms=None: ("NDEATH", bdseq)), \
+                mock.patch.object(load_generator.time, "sleep"):
+            # The first session was accepted, then the link dropped and two attempts failed at TCP.
+            publisher._on_connect(publisher.client, None, {}, 0)
+            publisher._reconnect()
+            publisher._reconnect()
+            self.assertEqual(wills, [1, 1], "an attempt that never reached the broker keeps its bdSeq")
+            publisher.client.connect.side_effect = None
+            publisher._reconnect()
+            publisher._on_connect(publisher.client, None, {}, 0)
+            publisher._reconnect()
+        self.assertEqual(wills, [1, 1, 1, 2])
+        self.assertEqual(publisher.sessions, 2, "one per session that ended, not per attempt")
+
+    def test_a_refused_connack_does_not_count_as_accepted(self):
+        publisher = _publisher(devices=1)
+        publisher._on_connect(mock.MagicMock(), None, {}, 5)
+        self.assertFalse(publisher._next_bdseq())
+
+    def test_a_full_buffer_drops_the_oldest_and_counts_it(self):
+        publisher = _publisher(devices=1, primary_host_id="Site", buffer_limit=2)
+        for _ in range(3):
+            publisher.publish_one()
+        self.assertEqual((len(publisher.buffer), publisher.buffer_dropped), (2, 1))
+
+    def test_a_state_payload_is_read_or_refused(self):
+        self.assertEqual(load_generator.host_state(b'{"online": true, "timestamp": 5}'), (True, 5))
+        for raw in (b"not json", b'{"online": "yes", "timestamp": 5}', b'{"online": true}'):
+            self.assertIsNone(load_generator.host_state(raw))
+
+
+class RestartTest(unittest.TestCase):
+    """
+    load-test.mjs --restart-ingestion-at restarts the daemon mid-step, and its counters start again
+    from zero. Read naively the step reports negative rates; it must instead be recognised and
+    said, because the historian comparison, not the step table, is the measurement then.
+    """
+
+    def sample(self, ddata):
+        return load_generator.parse_exposition(f'aber_ingestion_messages_total{{msg_type="ddata"}} {ddata}')
+
+    def test_a_counter_that_went_backwards_is_a_restart(self):
+        self.assertTrue(load_generator.counters_reset(self.sample(9000), self.sample(40)))
+
+    def test_a_counter_that_grew_is_not(self):
+        self.assertFalse(load_generator.counters_reset(self.sample(40), self.sample(9000)))
+
+    def test_a_death_certificate_is_a_restart_after_the_new_daemon_counts_past_the_old(self):
+        # The 50 msg/s run: restarted 60 s into a 240 s step, so the new daemon ends the step with
+        # the larger count and only the edge nodes' ended sessions say what happened.
+        self.assertTrue(load_generator.daemon_restarted(self.sample(3000), self.sample(9000), host_departures=8))
+
+    def test_no_death_certificate_and_a_grown_counter_is_no_restart(self):
+        self.assertFalse(load_generator.daemon_restarted(self.sample(3000), self.sample(9000), host_departures=0))
+
+    def test_the_step_says_the_daemon_restarted(self):
+        restarted = step(target_rate=500, written_per_second=480, daemon_restarted=True)
+        self.assertIn("THE DAEMON RESTARTED", load_generator.step_note(restarted, [restarted]))
 
 
 if __name__ == "__main__":

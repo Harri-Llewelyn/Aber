@@ -68,6 +68,9 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "MQTT_CREDENTIAL_SERVICE_TOKEN",
     "MQTT_PUBLIC_HOST",
     "MQTT_PUBLIC_TLS_PORT",
+    // The site's Sparkplug primary host, handed to the appliance so it births only while the
+    // platform's STATE says it is online. Unset, an appliance is enrolled without one.
+    "PRIMARY_HOST_ID",
     "GITEA_INTERNAL_URL",
     "GITEA_MACHINE_USER",
     "GITEA_MACHINE_PASSWORD",

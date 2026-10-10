@@ -123,6 +123,11 @@ TELEMETRY_QUEUE_PUT_TIMEOUT_SECONDS = float(os.getenv("TELEMETRY_QUEUE_PUT_TIMEO
 TELEMETRY_BATCH_MAX_MESSAGES = int(os.getenv("TELEMETRY_BATCH_MAX_MESSAGES", "500"))
 # How long a SIGTERM waits for the queue to drain. Inside the pod's termination grace period.
 TELEMETRY_SHUTDOWN_DRAIN_SECONDS = float(os.getenv("TELEMETRY_SHUTDOWN_DRAIN_SECONDS", "8"))
+# After the death certificate on a shutdown, receiving continues until no message has arrived for
+# QUIET seconds, at most RECEIVE: what edge nodes sent before they heard it. With the drain and the
+# death certificate's acknowledgement, inside the pod's 30 s termination grace period.
+TELEMETRY_SHUTDOWN_RECEIVE_SECONDS = float(os.getenv("TELEMETRY_SHUTDOWN_RECEIVE_SECONDS", "5"))
+TELEMETRY_SHUTDOWN_QUIET_SECONDS = float(os.getenv("TELEMETRY_SHUTDOWN_QUIET_SECONDS", "0.5"))
 
 # Seconds between directory refresh passes (see refresh_directory_caches). 0 disables the thread
 # and every cache miss costs a round trip, as it did before the thread existed.
@@ -395,6 +400,17 @@ REASON_GATEWAY_MISMATCH = "GATEWAY_MISMATCH"
 # a clock fault, so the forward tolerance covers NTP skew only.
 TELEMETRY_MAX_AGE_SECONDS = 24 * 60 * 60   # 24 hours behind now
 TELEMETRY_MAX_FUTURE_SECONDS = 5 * 60      # 5 minutes ahead of now
+# A reading flagged is_historical is an edge node replaying what it buffered while it could not
+# deliver, so it may be older: as old as the appliance's own buffer keeps (flows.template.json,
+# MAX_AGE_DAYS). ingestion.historicalMaxAgeSeconds in the chart.
+TELEMETRY_MAX_HISTORICAL_AGE_SECONDS = int(
+    os.getenv("TELEMETRY_MAX_HISTORICAL_AGE_SECONDS", str(7 * 24 * 60 * 60)))
+
+# Why a reading's timestamp was refused, as the `reason` label of
+# aber_ingestion_timestamps_rejected_total.
+TIMESTAMP_TOO_OLD = "too_old"
+TIMESTAMP_HISTORICAL_TOO_OLD = "historical_too_old"
+TIMESTAMP_TOO_NEW = "too_new"
 
 # Recorded on devices.identity_source.
 SOURCE_SPARKPLUG_ID = "sparkplug_id"
@@ -835,12 +851,20 @@ def check_message_sequence(group_id, edge_node_id, msg_type, payload, client=Non
     `seq` skipping is the only evidence, and a rebirth re-declares every metric at its current
     value. NDEATH is excluded (a Last Will carries bdSeq, not a live seq). The expectation resyncs
     on a gap so one drop does not become a permanent alarm.
+
+    A REPLAY OUT OF ORDER IS NOT A GAP. A message whose every metric is historical and whose seq is
+    not the next one -- an edge node resending what it buffered under the seq it was first given --
+    is counted apart and leaves the expectation where the live run had it. A rebirth would restate
+    current values, not the replayed readings. A replay sent in sequence, as the appliance's is,
+    is checked like any message.
     """
     if msg_type == "NDEATH" or not payload.HasField("seq"):
         return True
 
     seq = payload.seq % 256
     key = alias_key(group_id, edge_node_id)
+    replay = msg_type in ("DDATA", "NDATA") and all_historical(payload)
+    out_of_run = False
 
     with _seq_lock:
         # Per the specification NBIRTH restarts the run at zero, so it is a resynchronisation
@@ -850,7 +874,17 @@ def check_message_sequence(group_id, edge_node_id, msg_type, payload, client=Non
             return True
 
         previous = _last_seq.get(key)
-        _last_seq[key] = seq
+        out_of_run = replay and previous is not None and seq != (previous + 1) % 256
+        if not out_of_run:
+            _last_seq[key] = seq
+
+    if out_of_run:
+        count_labelled("aber_ingestion_sequence_replayed_total", {"edge_node": edge_node_id})
+        logger.debug(
+            "Historical %s seq %d from edge node '%s' is out of the live run (expected %d); a "
+            "replay, not a gap.", msg_type, seq, edge_node_id, (previous + 1) % 256
+        )
+        return True
 
     # No baseline yet -- this daemon started mid-run. Adopting the observed value is right;
     # calling it a gap would fire a rebirth at every node on every restart.
@@ -1380,16 +1414,53 @@ def start_directory_refresher():
 # -----------------------------------------------------------------------------
 # Sparkplug B Ingestion Handlers
 # -----------------------------------------------------------------------------
-def _timestamp_is_sane(dt: datetime, now: datetime = None) -> bool:
+def timestamp_refusal(dt: datetime, historical: bool = False, now: datetime = None):
     """
-    True if `dt` falls inside the telemetry sanity window.
+    Why `dt` falls outside the telemetry sanity window, as a TIMESTAMP_* reason, or None when it
+    is inside.
 
-    A value far outside it is a clock fault or a forgery: it would land outside retention, in a
-    compressed chunk that rejects the write, or far enough ahead to distort every axis.
+    A value far outside it is a clock fault or a forgery: it would land outside retention, or far
+    enough ahead to distort every axis. A historical reading may be older, up to
+    TELEMETRY_MAX_HISTORICAL_AGE_SECONDS; the future bound is the same for both.
     """
     now = now or datetime.now(timezone.utc)
     delta = (dt - now).total_seconds()
-    return -TELEMETRY_MAX_AGE_SECONDS <= delta <= TELEMETRY_MAX_FUTURE_SECONDS
+    if delta > TELEMETRY_MAX_FUTURE_SECONDS:
+        return TIMESTAMP_TOO_NEW
+    if historical:
+        return TIMESTAMP_HISTORICAL_TOO_OLD if -delta > TELEMETRY_MAX_HISTORICAL_AGE_SECONDS else None
+    return TIMESTAMP_TOO_OLD if -delta > TELEMETRY_MAX_AGE_SECONDS else None
+
+def _timestamp_is_sane(dt: datetime, now: datetime = None) -> bool:
+    """True if a live reading at `dt` falls inside the telemetry sanity window."""
+    return timestamp_refusal(dt, False, now) is None
+
+def is_historical(metric) -> bool:
+    """Whether a metric is flagged is_historical: replayed by its edge node, not read just now."""
+    has_field = getattr(metric, "HasField", None)
+    try:
+        return bool(has_field and has_field("is_historical") and metric.is_historical)
+    except (AttributeError, ValueError):
+        return False
+
+def is_null(metric) -> bool:
+    """
+    Whether a metric is flagged is_null: declared, with no value yet. An NBIRTH declares every
+    metric its node will send (tck-id-topics-nbirth-metric-reqs), so one not known yet is null.
+    """
+    has_field = getattr(metric, "HasField", None)
+    try:
+        return bool(has_field and has_field("is_null") and metric.is_null)
+    except (AttributeError, ValueError):
+        return False
+
+def all_historical(payload) -> bool:
+    """
+    Whether every metric in a message is historical: a replay, which says nothing about the
+    present -- not a device's liveness, a gateway's status or health, nor its clock.
+    """
+    metrics = list(getattr(payload, "metrics", None) or ())
+    return bool(metrics) and all(is_historical(m) for m in metrics)
 
 def verify_gateway_binding(device: dict, gateway_wire_id: str, group_id: str = None):
     """
@@ -1912,7 +1983,8 @@ def extract_gateway_health(group_id, edge_node_id, payload):
         # an appliance as reporting nothing at all.
         name = resolve_metric_name(group_id, edge_node_id, metric)
         mapping = GATEWAY_HEALTH_METRICS.get(name)
-        if not mapping:
+        # A null is declared and not yet known: nothing to record, and nothing wrong.
+        if not mapping or is_null(metric):
             continue
         column, kind = mapping
 
@@ -2068,6 +2140,156 @@ def gateway_clock_gauge_snapshot() -> dict:
     with _gateway_clock_gauges_lock:
         return {node: dict(values) for node, values in _gateway_clock_gauges.items()}
 
+# -----------------------------------------------------------------------------
+# Outage reports: what an edge node could not deliver, in its own words
+# -----------------------------------------------------------------------------
+# After it reconnects, an edge node reports the outage on a node-level message, under a reserved
+# name prefix: when delivery stopped and resumed, how many readings it buffered (and replays as
+# historical), and how many it dropped. The appliance repeats a report on a few heartbeats, since
+# the message is QoS 0; it is counted once per (edge node, start). Node metrics are never stored
+# as telemetry, so these reach only the counters, the gauges and the log.
+OUTAGE_METRIC_PREFIX = "Outage/"
+OUTAGE_STARTED_AT = "Outage/Started_At"
+OUTAGE_ENDED_AT = "Outage/Ended_At"
+OUTAGE_READINGS_BUFFERED = "Outage/Readings_Buffered"
+OUTAGE_READINGS_DROPPED = "Outage/Readings_Dropped"
+OUTAGE_BUFFERING = "Outage/Buffering"
+
+# The last report per edge node, exported at scrape time. Gauges rather than only counters: the
+# alert must see a report the moment it lands, and a counter born at its first value shows no
+# increase to Prometheus. Written only after resolve_gateway() matched, as the health gauges are.
+OUTAGE_REPORTED_GAUGE = "aber_ingestion_gateway_outage_reported_timestamp_seconds"
+OUTAGE_GAUGES = {
+    "seconds": "aber_ingestion_gateway_outage_last_seconds",
+    "buffered": "aber_ingestion_gateway_outage_last_readings_buffered",
+    "dropped": "aber_ingestion_gateway_outage_last_readings_dropped",
+    "buffering": "aber_ingestion_gateway_outage_last_buffering",
+}
+_gateway_outage_gauges = {}
+_gateway_outage_counted = {}
+_gateway_outage_lock = threading.Lock()
+_outage_rejected_warned = {}
+
+# When each edge node last had a reading refused for its timestamp, by reason, for the alert;
+# the counter beside it carries the totals.
+TIMESTAMP_REFUSED_AT_GAUGE = "aber_ingestion_timestamps_rejected_at_seconds"
+_timestamp_refused_at = {}
+_timestamp_refused_lock = threading.Lock()
+
+def record_timestamp_refusals(edge_node_id, reasons, at=None):
+    """Note that `edge_node_id` just had readings refused for each of `reasons`."""
+    at = time.time() if at is None else at
+    with _timestamp_refused_lock:
+        for reason in reasons:
+            _timestamp_refused_at[(edge_node_id, reason)] = at
+
+def timestamp_refusal_gauge_snapshot() -> dict:
+    """{(edge_node, reason): unix seconds}, a copy."""
+    with _timestamp_refused_lock:
+        return dict(_timestamp_refused_at)
+
+def _reject_outage_report(edge_node_id, why):
+    count("gateway_outage_reports_rejected")
+    if _throttled(_outage_rejected_warned, edge_node_id or "", HEALTH_REJECT_WARN_INTERVAL_SECONDS):
+        logger.warning(
+            "Edge node '%s' sent an unusable outage report (%s). It is not counted; the heartbeat "
+            "that carried it is unaffected.", edge_node_id, why
+        )
+
+def extract_outage_report(group_id, edge_node_id, payload, now_ms=None):
+    """
+    The outage report a node-level payload carries, as a dict, or None when it carries none or
+    one that cannot be used (refused and counted). Timestamps are epoch milliseconds.
+    """
+    found = {}
+    for metric in payload.metrics:
+        name = resolve_metric_name(group_id, edge_node_id, metric)
+        # An NBIRTH declares the report null when there is none to give.
+        if name and name.startswith(OUTAGE_METRIC_PREFIX) and not is_null(metric):
+            found[name] = metric
+    if not found:
+        return None
+
+    def number(name):
+        metric = found.get(name)
+        if metric is None:
+            return None
+        raw = _numeric_metric_value(group_id, edge_node_id, metric, name)
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if value == value and value not in (float("inf"), float("-inf")) else None
+
+    started, ended = number(OUTAGE_STARTED_AT), number(OUTAGE_ENDED_AT)
+    buffered, dropped = number(OUTAGE_READINGS_BUFFERED), number(OUTAGE_READINGS_DROPPED)
+    now_ms = time.time() * 1000 if now_ms is None else now_ms
+    if started is None or ended is None:
+        _reject_outage_report(edge_node_id, "%s and %s are both required, as epoch milliseconds"
+                              % (OUTAGE_STARTED_AT, OUTAGE_ENDED_AT))
+        return None
+    if not 0 < started <= ended <= now_ms + TELEMETRY_MAX_FUTURE_SECONDS * 1000:
+        _reject_outage_report(edge_node_id, "the window %r to %r is not a past interval"
+                              % (started, ended))
+        return None
+    if any(v is not None and v < 0 for v in (buffered, dropped)):
+        _reject_outage_report(edge_node_id, "a reading count is negative")
+        return None
+
+    buffering = found.get(OUTAGE_BUFFERING)
+    return {
+        "started_ms": int(started),
+        "ended_ms": int(ended),
+        "buffered": int(buffered or 0),
+        "dropped": int(dropped or 0),
+        # Absent is "not said", which is read as buffering: only an explicit false says it was off.
+        "buffering": not (buffering is not None and buffering.HasField("boolean_value")
+                          and not buffering.boolean_value),
+    }
+
+def record_outage_report(edge_node_id, report, at=None):
+    """
+    Count one outage report, once per (edge node, start), and keep it for the next scrape. Returns
+    True when it was counted, False for a repeat.
+    """
+    at = time.time() if at is None else at
+    with _gateway_outage_lock:
+        if _gateway_outage_counted.get(edge_node_id) == report["started_ms"]:
+            return False
+        _gateway_outage_counted[edge_node_id] = report["started_ms"]
+        seconds = (report["ended_ms"] - report["started_ms"]) / 1000.0
+        _gateway_outage_gauges[edge_node_id] = {
+            OUTAGE_GAUGES["seconds"]: seconds,
+            OUTAGE_GAUGES["buffered"]: report["buffered"],
+            OUTAGE_GAUGES["dropped"]: report["dropped"],
+            OUTAGE_GAUGES["buffering"]: 1 if report["buffering"] else 0,
+            OUTAGE_REPORTED_GAUGE: at,
+        }
+
+    node = {"edge_node": edge_node_id}
+    count_labelled("aber_ingestion_gateway_outages_total",
+                   dict(node, buffering="on" if report["buffering"] else "off"))
+    count_labelled("aber_ingestion_gateway_outage_seconds_total", node, seconds)
+    count_labelled("aber_ingestion_gateway_outage_readings_buffered_total", node, report["buffered"])
+    count_labelled("aber_ingestion_gateway_outage_readings_dropped_total", node, report["dropped"])
+
+    started = datetime.fromtimestamp(report["started_ms"] / 1000.0, timezone.utc).isoformat()
+    ended = datetime.fromtimestamp(report["ended_ms"] / 1000.0, timezone.utc).isoformat()
+    lossy = report["dropped"] or not report["buffering"]
+    (logger.warning if lossy else logger.info)(
+        "GATEWAY OUTAGE: edge node '%s' could not deliver from %s to %s (%.0fs). %d reading(s) "
+        "buffered and replayed as historical, %d DROPPED and never recorded.%s",
+        edge_node_id, started, ended, seconds, report["buffered"], report["dropped"],
+        "" if report["buffering"] else " This gateway does not buffer, so everything it read in "
+        "that window is lost.",
+    )
+    return True
+
+def gateway_outage_gauge_snapshot() -> dict:
+    """A copy, safe to read while the paho callback thread is writing."""
+    with _gateway_outage_lock:
+        return {node: dict(values) for node, values in _gateway_outage_gauges.items()}
+
 def _reject_health(edge_node_id, metric_name, reason):
     """Drop one health metric, loudly enough to find and quietly enough to live with."""
     count("gateway_health_metrics_rejected")
@@ -2100,7 +2322,10 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
         return
 
     status = "OFFLINE" if msg_type == "NDEATH" else "ONLINE"
-    for metric in payload.metrics:
+    # A replayed node message is the outage's, not the present's: its status, health and clock say
+    # nothing now. It still arrived now, so it is a heartbeat.
+    replay = msg_type != "NDEATH" and all_historical(payload)
+    for metric in ([] if replay else payload.metrics):
         # Resolved, not read raw: NDATA is a DATA message and may carry its status metric by
         # alias alone, in which case a raw `metric.name` test never matches and the gateway's
         # own reported status is silently replaced by the one inferred from the message type.
@@ -2155,13 +2380,17 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
     # NDEATH excluded here, beside the msg_type the rest of this function branches on; see
     # record_gateway_clock_offset(). After the registration check, before health because this does
     # not depend on the appliance reporting anything.
-    if msg_type != "NDEATH":
+    if msg_type != "NDEATH" and not replay:
         record_gateway_clock_offset(edge_node_id, payload, heartbeat_dt)
+        # After the registration check, so a forged edge node id cannot add a series.
+        report = extract_outage_report(group_id, edge_node_id, payload)
+        if report:
+            record_outage_report(edge_node_id, report)
 
     # After the registration check: an unregistered node is dropped either way, and validating its
     # metrics first would log rejections for nothing. `health_reported_at` is stamped by the gate,
     # only when the health object is non-empty, so NULL means "does not report health".
-    health = extract_gateway_health(group_id, edge_node_id, payload)
+    health = {} if replay else extract_gateway_health(group_id, edge_node_id, payload)
     if health:
         # The scrapeable half, for the readings that need a trend rather than a current value.
         record_gateway_health_gauges(edge_node_id, health, heartbeat_dt)
@@ -2368,6 +2597,8 @@ class PendingWrite(NamedTuple):
     payload_dt: datetime
     group_id: str
     client: object
+    # The rows the UNS republishes; None means all of `rows`.
+    live_rows: list = None
 
 def _write_batch(cur, batch):
     """The statements for one transaction: the asset rows, then every telemetry row."""
@@ -2413,7 +2644,8 @@ def _after_commit(item):
     # After the commit, so the UNS carries only what the historian recorded. Off by default,
     # never raises, and timed into its own histogram (uns_publish.py).
     uns_publish.publish_ddata(
-        item.client, supabase_client, item.device, item.group_id, item.rows,
+        item.client, supabase_client, item.device, item.group_id,
+        item.rows if item.live_rows is None else item.live_rows,
         count=count, observe=observe_uns_seconds,
     )
 
@@ -2555,17 +2787,58 @@ class TelemetryWriter:
 
 _writer = TelemetryWriter(TELEMETRY_QUEUE_MAX_MESSAGES, TELEMETRY_BATCH_MAX_MESSAGES)
 
-def _drain_and_exit(signum, frame):
-    """SIGTERM and SIGINT: say this host is going, write what was accepted, then exit."""
-    # FIRST, while the broker connection is still up. A gateway that reacts to the host going away
-    # should hear it at the start of the shutdown, not after a drain that may take
-    # TELEMETRY_SHUTDOWN_DRAIN_SECONDS; and a clean DISCONNECT makes the broker discard the will,
-    # so this publish is the only thing that will ever say it.
-    if _primary_host_client is not None and _primary_host_timestamp_ms is not None:
-        primary_host.announce_offline(_primary_host_client, _primary_host_timestamp_ms)
+# Set by SIGTERM or SIGINT; main() waits on it and runs the shutdown off the signal frame, while
+# the network thread is still receiving.
+_shutdown_requested = threading.Event()
+_shutdown_signum = None
+
+# When the last message arrived (monotonic), for the shutdown's quiet window.
+_last_message_at = 0.0
+
+def _request_shutdown(signum, frame):
+    """SIGTERM and SIGINT: ask main() to shut down. Nothing else may run in a signal frame."""
+    global _shutdown_signum
+    _shutdown_signum = signum
+    _shutdown_requested.set()
+
+def _receive_until_quiet(max_seconds=None, quiet_seconds=None):
+    """
+    Let the network thread go on receiving until no message has arrived for `quiet_seconds`, at
+    most `max_seconds`. Returns whether the stream went quiet.
+    """
+    max_seconds = TELEMETRY_SHUTDOWN_RECEIVE_SECONDS if max_seconds is None else max_seconds
+    quiet_seconds = TELEMETRY_SHUTDOWN_QUIET_SECONDS if quiet_seconds is None else quiet_seconds
+    deadline = time.monotonic() + max_seconds
+    while True:
+        now = time.monotonic()
+        if now - _last_message_at >= quiet_seconds:
+            return True
+        if now >= deadline:
+            return False
+        time.sleep(min(0.05, deadline - now))
+
+def _drain_and_exit(client, signum):
+    """
+    The shutdown: say this host is going, take in what edge nodes sent before they heard it, write
+    what was accepted, then exit. On the main thread, with the network thread still running.
+    """
+    # FIRST. A buffering edge node stops publishing and keeps its readings from the moment it hears
+    # this, so everything it sent before then must still be received.
+    if client is not None and _primary_host_timestamp_ms is not None:
+        primary_host.announce_offline(client, _primary_host_timestamp_ms)
+    quiet = _receive_until_quiet()
+    if not quiet:
+        logger.warning(
+            "Still receiving %.0fs after the death certificate; stopping. A gateway that does not "
+            "buffer on STATE loses what it publishes from here.", TELEMETRY_SHUTDOWN_RECEIVE_SECONDS,
+        )
+    # Then stop receiving. No DISCONNECT: Sparkplug makes it optional after the death message, and
+    # without one the broker also publishes the will when the process exits.
+    if client is not None:
+        client.loop_stop()
 
     queued = _writer.depth()
-    logger.info("Signal %d: draining %d queued historian write(s) before exit.", signum, queued)
+    logger.info("Signal %d: draining %d queued historian write(s) before exit.", signum or 0, queued)
     if not _writer.stop(TELEMETRY_SHUTDOWN_DRAIN_SECONDS):
         logger.warning(
             "Historian writer did not drain within %.0fs; %d message(s) lost.",
@@ -2651,8 +2924,9 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         return
 
     # After the binding check, not before: a message from a publisher we have just refused to
-    # believe is not evidence that the real device is alive. The data is stored either way.
-    if accept_device_data(device, group_id, gateway_wire_id, client):
+    # believe is not evidence that the real device is alive, and nor is a replay of what it read
+    # during an outage. The data is stored either way.
+    if not all_historical(payload) and accept_device_data(device, group_id, gateway_wire_id, client):
         mark_device_seen(device, group_id, gateway_wire_id)
 
     asset_id = device["sparkplug_id"]
@@ -2682,7 +2956,11 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     # Every metric decided here; nothing is written here. Failure granularity is per message:
     # the writer's transaction rolls a message back whole.
     rows = []
-    rejected_timestamps = 0
+    # The rows the UNS republishes: live readings only, since its topics are retained current
+    # values and a replay would overwrite them with old ones.
+    live_rows = []
+    historical_rows = 0
+    rejected_timestamps = {}
     unresolved_aliases = 0
     for metric in payload.metrics:
         # `observed` and `dropped` are filled alongside the loop's own decisions, never by a second
@@ -2713,15 +2991,19 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
             metric_dt = payload_dt
 
         # Reject rather than clamp: clamping relabels a reading to a time it did not happen, and
-        # piles every sample from a broken clock onto one timestamp.
-        if not _timestamp_is_sane(metric_dt):
-            rejected_timestamps += 1
+        # piles every sample from a broken clock onto one timestamp. A replayed reading has the
+        # longer historical bound; every check after this one is the same as for a live reading.
+        historical = is_historical(metric)
+        refusal = timestamp_refusal(metric_dt, historical)
+        if refusal:
+            rejected_timestamps[refusal] = rejected_timestamps.get(refusal, 0) + 1
             dropped.append((
                 metric_name,
                 "timestamp_out_of_window",
-                "timestamp %s is outside the sanity window (-%ds/+%ds)" % (
+                "%stimestamp %s is outside the sanity window (-%ds/+%ds)" % (
+                    "historical " if historical else "",
                     metric_dt.isoformat(),
-                    TELEMETRY_MAX_AGE_SECONDS,
+                    TELEMETRY_MAX_HISTORICAL_AGE_SECONDS if historical else TELEMETRY_MAX_AGE_SECONDS,
                     TELEMETRY_MAX_FUTURE_SECONDS,
                 ),
             ))
@@ -2806,20 +3088,31 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
 
         observed.append((metric_name, value_kind, metric_value))
 
-        rows.append(
-            (metric_dt, asset_id, metric_name, val_double, val_string, val_bool)
-        )
+        row = (metric_dt, asset_id, metric_name, val_double, val_string, val_bool)
+        rows.append(row)
+        if historical:
+            historical_rows += 1
+        else:
+            live_rows.append(row)
 
     # Counted beside the warnings that name them. What was written is counted by the writer,
     # after the commit.
-    count("metrics_rejected_timestamp", rejected_timestamps)
-    # The same event labelled by edge node, which is what makes it actionable; this is the series
-    # that is exported. `metrics_rejected_timestamp` stays beside its warning and reads back under
-    # that flat name in the STATS line, summed from this series rather than exported twice
-    # (metrics.py, EXPORTED_LABELLED_INSTEAD).
+    total_rejected = sum(rejected_timestamps.values())
+    count("metrics_rejected_timestamp", total_rejected)
+    # The same event labelled by edge node and reason, which is what makes it actionable; this is
+    # the series that is exported. `metrics_rejected_timestamp` stays beside its warning and reads
+    # back under that flat name in the STATS line, summed from this series rather than exported
+    # twice (metrics.py, EXPORTED_LABELLED_INSTEAD).
+    for reason, refused in rejected_timestamps.items():
+        count_labelled(
+            "aber_ingestion_timestamps_rejected_total",
+            {"edge_node": gateway_wire_id, "reason": reason}, refused
+        )
+    if rejected_timestamps:
+        record_timestamp_refusals(gateway_wire_id, rejected_timestamps)
+    # Accepted replayed readings, set against what the edge node reports it buffered.
     count_labelled(
-        "aber_ingestion_timestamps_rejected_total",
-        {"edge_node": gateway_wire_id}, rejected_timestamps
+        "aber_ingestion_historical_readings_total", {"edge_node": gateway_wire_id}, historical_rows
     )
     count("metrics_unresolved_alias", unresolved_aliases)
     count("metrics_rejected_schema", rejected_schema)
@@ -2836,12 +3129,16 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                 unresolved_aliases, asset_id, gateway_wire_id
             )
 
-    if rejected_timestamps:
+    if total_rejected:
         logger.warning(
-            "Rejected %d metric(s) for asset '%s' with timestamps outside the sanity "
-            "window (-%ds/+%ds). Check the gateway's clock.",
-            rejected_timestamps, asset_id,
-            TELEMETRY_MAX_AGE_SECONDS, TELEMETRY_MAX_FUTURE_SECONDS
+            "Rejected %d metric(s) for asset '%s' via edge node '%s' with timestamps outside the "
+            "sanity window (%s; live -%ds, historical -%ds, both +%ds). A future or a live "
+            "too_old timestamp is the gateway's clock; historical_too_old is a replay older than "
+            "the platform keeps.",
+            total_rejected, asset_id, gateway_wire_id,
+            ", ".join("%s %d" % item for item in sorted(rejected_timestamps.items())),
+            TELEMETRY_MAX_AGE_SECONDS, TELEMETRY_MAX_HISTORICAL_AGE_SECONDS,
+            TELEMETRY_MAX_FUTURE_SECONDS,
         )
 
     if rejected_schema:
@@ -2857,7 +3154,7 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     _writer.submit(PendingWrite(
         wire_id=wire_id, device=device, asset_id=asset_id, asset_name=asset_name, rows=rows,
         observed=observed, dropped=dropped, modelled=modelled, payload_dt=payload_dt,
-        group_id=group_id or DEFAULT_SPARKPLUG_GROUP, client=client,
+        group_id=group_id or DEFAULT_SPARKPLUG_GROUP, client=client, live_rows=live_rows,
     ))
 
 # Whether the daemon is subscribed. `aber_ingestion_db_connected` answers the same question for
@@ -2873,6 +3170,15 @@ _mqtt_subscribed = False
 _primary_host_timestamp_ms = None
 _primary_host_client = None
 
+# QoS 1: Sparkplug 3.0.0 sets no QoS for a host application's subscription. Data arrives at the QoS
+# 0 it is published at; an NDEATH and a STATE certificate, QoS 1, arrive acknowledged.
+SUBSCRIBE_QOS = 1
+
+# A clean session, as Sparkplug 3.0.0 requires of a host application:
+# tck-id-message-flow-phid-sparkplug-clean-session-50, Clean Start true and no Session Expiry
+# Interval (0). The broker keeps nothing for this daemon between connections.
+HOST_SESSION = {"clean_start": True}
+
 def on_connect(client, userdata, flags, rc, properties=None):
     """
     Subscribe once the broker has accepted the connection.
@@ -2884,7 +3190,7 @@ def on_connect(client, userdata, flags, rc, properties=None):
     global _mqtt_subscribed
     if rc == 0:
         logger.info("Connected to MQTT Broker successfully.")
-        client.subscribe("spBv1.0/#")
+        client.subscribe("spBv1.0/#", qos=SUBSCRIBE_QOS)
         _mqtt_subscribed = True
         logger.info("Subscribed to 'spBv1.0/#'")
         # AFTER the subscribe, not before: the birth certificate says this host is consuming, and
@@ -3010,6 +3316,8 @@ def resolve_wire_identity(parts, payload):
     return topic_id, None
 
 def on_message(client, userdata, msg):
+    global _last_message_at
+    _last_message_at = time.monotonic()
     parts = msg.topic.split('/')
     if len(parts) < 4 or parts[0] != 'spBv1.0':
         return
@@ -3415,6 +3723,15 @@ def scrape_time_series():
         for metric, value in values.items():
             series[(metric, (("edge_node", edge_node),))] = value
 
+    # The last outage each appliance reported, beside when it reported it.
+    for edge_node, values in gateway_outage_gauge_snapshot().items():
+        for metric, value in values.items():
+            series[(metric, (("edge_node", edge_node),))] = value
+
+    # When each edge node last had a reading refused for its timestamp, by reason.
+    for (edge_node, reason), at in timestamp_refusal_gauge_snapshot().items():
+        series[(TIMESTAMP_REFUSED_AT_GAUGE, (("edge_node", edge_node), ("reason", reason)))] = at
+
     return series
 
 def start_metrics_endpoint():
@@ -3477,16 +3794,7 @@ def main():
         )
         raise SystemExit(1)
 
-    # MQTT 5 with paho-mqtt 1.6.1's v1 callback API; paho 2.x would force CallbackAPIVersion.
-    # The daemon is on v5 because the platform is. The broker's DISCONNECT reason is discarded by
-    # paho 1.6.1 before on_disconnect() sees it (see there).
-    client = mqtt.Client(protocol=mqtt.MQTTv5)
-    client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
-    # Before connect(), necessarily: paho applies the TLS context when the socket is opened.
-    configure_mqtt_tls(client)
-    client.on_connect = on_connect
-    client.on_disconnect = on_disconnect
-    client.on_message = on_message
+    client = build_mqtt_client()
 
     # BEFORE connect() and before any background thread, so an unusable host id stops the daemon
     # while it is still doing nothing. paho applies the will when the CONNECT packet is built, so
@@ -3552,22 +3860,47 @@ def main():
         reconcile_capture=not capture_reconciled,
     )
 
-    # On the main thread, where signal handlers must be installed.
-    signal.signal(signal.SIGTERM, _drain_and_exit)
-    signal.signal(signal.SIGINT, _drain_and_exit)
+    # On the main thread, where signal handlers must be installed. They only set an Event.
+    signal.signal(signal.SIGTERM, _request_shutdown)
+    signal.signal(signal.SIGINT, _request_shutdown)
 
-    while True:
+    connected = False
+    while not _shutdown_requested.is_set():
         try:
             logger.info("Connecting to MQTT Broker at %s:%s...", MQTT_HOST, MQTT_PORT)
-            # `clean_start=True` is v5's clean_session. No session expiry interval is set: Sparkplug's
-            # NDEATH is the Last Will, and a surviving session would delay it.
-            client.connect(MQTT_HOST, MQTT_PORT, 60, clean_start=True)
+            # No Will Delay Interval: the death certificate is published the moment the
+            # connection closes. paho keeps these arguments for every reconnect.
+            client.connect(MQTT_HOST, MQTT_PORT, 60, **HOST_SESSION)
+            connected = True
             break
         except Exception as e:
             logger.warning("MQTT Broker connection failed: %s. Retrying in 2 seconds...", e)
-            time.sleep(2)
+            _shutdown_requested.wait(2)
 
-    client.loop_forever()
+    # The network loop on a thread of its own, reconnecting as loop_forever() does, so the shutdown
+    # runs on this thread while messages are still being received.
+    if connected:
+        client.loop_start()
+    while not _shutdown_requested.wait(1.0):
+        pass
+    _drain_and_exit(client if connected else None, _shutdown_signum)
+
+def build_mqtt_client():
+    """
+    The daemon's MQTT client, before its will is registered and before it connects.
+
+    MQTT 5 with paho-mqtt 1.6.1's v1 callback API; paho 2.x would force CallbackAPIVersion. The
+    broker's DISCONNECT reason is discarded by paho 1.6.1 before on_disconnect() sees it (see
+    there). No client id: the broker assigns one, which a clean session does not need to keep.
+    """
+    client = mqtt.Client(protocol=mqtt.MQTTv5)
+    client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
+    # Before connect(), necessarily: paho applies the TLS context when the socket is opened.
+    configure_mqtt_tls(client)
+    client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
+    client.on_message = on_message
+    return client
 
 if __name__ == "__main__":
     main()

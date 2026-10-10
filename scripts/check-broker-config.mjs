@@ -13,8 +13,9 @@
  * roles, the environment and a seeded stored document, so the reconcile of stored clients, the
  * hash transplant and a second idempotent run are exercised. The plugin's control API is then
  * driven through mosquitto_rr the way the credential service drives it: issue, re-issue, disable,
- * re-enable, with a live session held across the two that drop one. The TLS listener is checked
- * when a certificate can be produced.
+ * re-enable, with a live session held across the two that drop one. The ingestion daemon's
+ * connection is opened as the daemon opens it, and its will must fire the moment it dies. The TLS
+ * listener is checked when a certificate can be produced.
  *
  * The chart's principal list is held to PLATFORM_PRINCIPALS from source, with or without Docker.
  * Everything else requires Docker, and skips with a clear message without it.
@@ -845,6 +846,30 @@ try {
         ok.push('disabling an account that does not exist is refused with "not found"');
       } else {
         problems.push(`disabling an unknown account answered ${JSON.stringify(unknown).slice(0, 120)}`);
+      }
+
+      // 8. The ingestion daemon's connection, opened as the daemon opens it: a clean session with no
+      // expiry (Sparkplug 3.0.0, tck-id-message-flow-phid-sparkplug-clean-session-50), QoS 1, and the
+      // death certificate as a retained QoS 1 will with no Will Delay Interval. Killed outright, its
+      // will must reach a gateway watching STATE at once, which is what a buffering gateway acts on.
+      {
+        const DEATH = 'FP-STATE-DEATH';
+        const watched = '/tmp/state-watch.txt';
+        docker(['exec', '-d', r.name, 'sh', '-c',
+          `mosquitto_sub -V mqttv5 -i aber-ingestion-check -q 1 -u aber_ingestion -P ${ACCOUNTS.aber_ingestion} `
+          + `-t 'spBv1.0/#' --will-topic '${stateTopic}' --will-payload '${DEATH}' --will-qos 1 --will-retain `
+          + '> /dev/null 2>&1']);
+        docker(['exec', '-d', r.name, 'sh', '-c',
+          `mosquitto_sub -u ${GATEWAY_A} -P ${ACCOUNTS[GATEWAY_A]} -t 'spBv1.0/STATE/#' -W 20 > ${watched} 2>&1`]);
+        docker(['exec', r.name, 'sleep', '2']);
+        docker(['exec', r.name, 'pkill', '-9', '-f', 'aber-ingestion-check']);
+        docker(['exec', r.name, 'sleep', '1']);
+        if ((docker(['exec', r.name, 'cat', watched]).stdout || '').includes(DEATH)) {
+          ok.push('the daemon\'s will (no Will Delay Interval) reaches a STATE watcher within a second of its connection dying');
+        } else {
+          problems.push('the death certificate did not arrive within a second of the daemon\'s connection dying; '
+            + 'a gateway that buffers on STATE would go on publishing to a host that is gone');
+        }
       }
     }
   }

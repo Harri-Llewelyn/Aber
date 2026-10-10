@@ -187,6 +187,25 @@ export const SUITES = {
       'host id that is not one topic level is refused rather than published where nothing is ' +
       'granted, and the shutdown publish never raises on the signal path. A fake client; no broker.',
   },
+  'ingestion/test_host_connection.py': {
+    lanes: ['unit'],
+    why:
+      'How the daemon connects and leaves, as a Sparkplug 3.0.0 host application, read off a local ' +
+      'socket as the bytes the broker acts on: a clean session with no expiry, a retained QoS 1 ' +
+      'death certificate with NO Will Delay Interval, a QoS 1 subscription; and a shutdown that ' +
+      'publishes the death certificate first and keeps receiving until the stream is quiet. A ' +
+      'regression is silent: a dead daemon reads as alive, or a restart loses what edge nodes sent ' +
+      'before they heard it.',
+  },
+  'ingestion/test_historical_replay.py': {
+    lanes: ['unit'],
+    why:
+      'Readings an edge node replays after an outage, and the outage report it sends. A replay ' +
+      'must reach the historian under its own age bound on both encodings, and must not set a ' +
+      'device ONLINE, overwrite the UNS\x27s retained current values, or read as a sequence gap; ' +
+      'a refusal and a lossy outage must be counted where the alerts read them. Each of these ' +
+      'fails silently: data missing or mis-filed with nothing reporting it.',
+  },
   'ingestion/test_dockerfile_copies.py': {
     lanes: ['unit'],
     why:
@@ -921,6 +940,15 @@ export const SUITES = {
       'holds the per-device millisecond rule: telemetry is keyed (time, asset_id, metric_name) ' +
       'ON CONFLICT DO NOTHING, so a repeated stamp loses its rows while the write path still ' +
       'counts them.',
+  },
+  'test-harness/test_load_generator_payloads.py': {
+    lanes: ['unit'],
+    why:
+      'The load generator\x27s Sparkplug payloads, built with the real protobuf module and read ' +
+      'back: the NBIRTH carries the CONNECT\x27s bdSeq and Node Control/Rebirth, the NDEATH carries ' +
+      'bdSeq and no seq, every metric is timestamped, and a replay flags is_historical. The ' +
+      'generator stands in for a conformant edge node in every restart run, so a payload that ' +
+      'is not one would measure something other than what the platform meets.',
   },
   'test-harness/test_stack_exec.py': {
     lanes: ['unit'],

@@ -199,6 +199,10 @@ def json_metric(m):
     ts = m.get("timestamp")
     if isinstance(ts, (int, float)) and not isinstance(ts, bool) and ts > 0:
         metric.timestamp = int(ts)
+    # A reading replayed from an edge node's buffer. Only a JSON `true` sets it, as only a set
+    # protobuf field does on the other path.
+    if m.get("is_historical") is True:
+        metric.is_historical = True
     return metric
 
 
@@ -264,6 +268,8 @@ def payload_to_dict(payload):
             entry["timestamp"] = int(m.timestamp)
         if m.HasField("datatype"):
             entry["datatype"] = int(m.datatype)
+        if m.HasField("is_historical") and m.is_historical:
+            entry["is_historical"] = True
         # Exactly one value field is set on a well-formed metric, but a capture must not assume
         # that of traffic it did not generate: whatever is set is what gets written down.
         for field in VALUE_FIELDS:
