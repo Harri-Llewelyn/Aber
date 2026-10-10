@@ -1,35 +1,20 @@
 /**
  * The OPC UA companion-specification vocabulary, from `opcua_vocabulary`. A data point is
- * positional: the companion spec supplies a browse path, so group and type derive from the row and
- * only the instance (which axis) is left to the operator. `node_id` holds a browse path in
- * ExpandedNodeId string form, not a numeric NodeId; the numeric identifiers live in the published
- * NodeSet2 XML, which is not vendored.
+ * positional: group and type derive from the row, and only the instance (which axis) is left to the
+ * operator. `node_id` and `semantic_id` are both the ExpandedNodeId the specification's NodeSet
+ * publishes, `nsu=<namespace URI>;i=<id>`.
  */
 
 import { STANDARDS } from './standards'
-
-/** Namespace/identifier separator in the ExpandedNodeId string form `nsu=<ns>;s=<path>`. */
-const NODE_ID_PATH = /(?:^|;)s=(.+)$/
+import { OPCUA_GROUPS } from './opcuaGroups.generated'
 
 /**
- * The browse path out of an ExpandedNodeId string, or '' when it carries none:
- * `nsu=http://opcfoundation.org/UA/Robotics/;s=MotionDevice/Axes/Axis/ActualPosition` becomes
- * `MotionDevice/Axes/Axis/ActualPosition`.
- */
-export function browsePath(nodeId) {
-  const match = NODE_ID_PATH.exec((nodeId || '').trim())
-  return match ? match[1].trim() : ''
-}
-
-/**
- * The metric group a data point implies: the first segment of its browse path, derived from the
- * data so a new vocabulary row needs no code change.
+ * The metric group a data point implies, which scripts/generate-opcua-vocabulary.mjs records beside
+ * each row it seeds. '' for a row it does not know.
  */
 export function suggestedGroup(entry) {
-  const path = browsePath(entry?.node_id)
-  if (!path) return ''
-  const first = path.split('/')[0]
-  return first || ''
+  if (!entry?.name) return ''
+  return OPCUA_GROUPS[entry.companion_spec]?.[entry.name] || ''
 }
 
 /**
@@ -98,9 +83,8 @@ export function opcuaSections(vocabulary) {
 
 /**
  * The Add Metric form state a data point implies. The instance is left empty, since which axis is
- * the part the specification cannot know. Deeper path segments are dropped: only the first is
- * load-bearing for grouping. `companionSpec` travels with the name because two specifications can
- * define the same browse name.
+ * the part the specification cannot know. `companionSpec` travels with the name because two
+ * specifications can define the same browse name.
  */
 export function opcuaPrefill(entry) {
   if (!entry) return null
@@ -117,10 +101,10 @@ export function opcuaPrefill(entry) {
   }
 }
 
-/** One-line summary for a data point chip's tooltip: what it is, then where it lives. */
+/** One-line summary for a data point chip's tooltip: what it is, then the node it names. */
 export function dataPointTooltip(entry) {
   if (!entry) return ''
-  const path = browsePath(entry.node_id)
-  const bits = [entry.description, path ? `Browse path: ${path}` : null].filter(Boolean)
+  const node = (entry.node_id || '').trim()
+  const bits = [entry.description, node ? `NodeId: ${node}` : null].filter(Boolean)
   return bits.length ? `${entry.name} — ${bits.join(' · ')}` : entry.name
 }

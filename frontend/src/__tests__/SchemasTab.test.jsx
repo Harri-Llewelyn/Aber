@@ -310,10 +310,10 @@ describe('the builder says why it will not save', () => {
     expect(screen.getByRole('button', { name: /What a semantic ID is for/ })).toBeTruthy()
   })
 
-  it('offers IRI and IRDI only, and types an IEC CDD id as an IRDI', async () => {
+  it('offers IRI, IRDI and ExpandedNodeId only, and types an IEC CDD id as an IRDI', async () => {
     await openBuilder()
     const type = screen.getByRole('combobox', { name: 'Reference Type' })
-    expect([...type.querySelectorAll('option')].map(o => o.value)).toEqual(['', 'IRI', 'IRDI'])
+    expect([...type.querySelectorAll('option')].map(o => o.value)).toEqual(['', 'IRI', 'IRDI', 'ExpandedNodeId'])
 
     fireEvent.change(screen.getByRole('textbox', { name: /Semantic ID/ }), { target: { value: '0112/2///61987#ABA565#009' } })
     expect(type.value).toBe('IRDI')
@@ -325,5 +325,18 @@ describe('the builder says why it will not save', () => {
       '/api/v1/schemas',
       expect.objectContaining({ semantic_id: '0112/2///61987#ABA565#009', semantic_id_type: 'IRDI' })
     ))
+  })
+})
+
+describe('the builder reads an OPC UA id', () => {
+  it('types an ExpandedNodeId as one', async () => {
+    renderTab()
+    await waitForRegistry()
+    fireEvent.click(screen.getByRole('button', { name: /Build Schema from Catalog/ }))
+    await waitFor(() => expect(screen.getByLabelText(/Schema Name/)).toBeTruthy())
+
+    fireEvent.change(screen.getByRole('textbox', { name: /Semantic ID/ }),
+      { target: { value: 'nsu=http://opcfoundation.org/UA/Machinery/;i=1012' } })
+    expect(screen.getByRole('combobox', { name: 'Reference Type' }).value).toBe('ExpandedNodeId')
   })
 })

@@ -48,12 +48,13 @@ export const STANDARD_OPTIONS = [
 
 /**
  * The AAS (IEC 63278) Reference types `semantic_id_type` may take. Mirrors the CHECK constraints
- * 0145_a_semantic_id_is_an_iri_or_an_irdi.sql leaves on `schemas` and `metric_catalog`; keep them in
- * step. Both export as an ExternalReference, which is all the exporter can emit.
+ * 0001 declares on `schemas` and `metric_catalog`; keep them in step. All three export as an
+ * ExternalReference, which is all the exporter can emit. An ExpandedNodeId is an OPC UA node,
+ * `nsu=<namespace URI>;i=<id>`.
  */
-export const SEMANTIC_ID_TYPES = ['IRI', 'IRDI']
+export const SEMANTIC_ID_TYPES = ['IRI', 'IRDI', 'ExpandedNodeId']
 
-/** The type to assume for a semantic id that looks like a URL. Every seeded catalog id is one. */
+/** The type to assume for a semantic id that looks like a URL. Every MTConnect id is one. */
 export const DEFAULT_SEMANTIC_ID_TYPE = 'IRI'
 
 /**
@@ -114,14 +115,22 @@ const IRDI = String.raw`\d{4}(?:[-/][A-Za-z0-9_]*)*#[A-Za-z0-9_]+(?:-[A-Za-z0-9_
 const IRDI_PATH = new RegExp(`^${IRDI}(?:/${IRDI})*$`)
 
 /**
- * Best guess at which kind of AAS Reference an identifier is. Conservative: it recognises the two
- * unambiguous shapes and leaves the rest to the operator.
+ * An OPC UA ExpandedNodeId in its string form with the namespace URI (OPC 10000-6 5.3.1.11):
+ * `nsu=<namespace URI>;` then one identifier, numeric, string, GUID or opaque. The `ns=<index>`
+ * form is left out: an index means something only on the server that assigned it.
+ */
+const EXPANDED_NODE_ID = /^nsu=[^;]+;[isgb]=.+$/
+
+/**
+ * Best guess at which kind of AAS Reference an identifier is. Conservative: it recognises the
+ * three unambiguous shapes and leaves the rest to the operator.
  */
 export function inferSemanticIdType(value) {
   const v = (value || '').trim()
   if (!v) return ''
   if (/^https?:\/\//i.test(v) || /^urn:/i.test(v)) return 'IRI'
   if (IRDI_PATH.test(v)) return 'IRDI'
+  if (EXPANDED_NODE_ID.test(v)) return 'ExpandedNodeId'
   return ''
 }
 

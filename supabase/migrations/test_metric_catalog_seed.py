@@ -22,6 +22,9 @@ is shared by every suite, so a count here would read their fixtures.
 
 TestConceptDefinitions holds `concept_definitions` (0169), the vocabularies' own text the AAS
 exporter defines a concept by, to its precedence and its grants.
+
+TestOpcUaConceptsCarryTheirExpandedNodeId holds the OPC UA ids to the ExpandedNodeId form and 0171's
+move onto them, replayed.
 """
 import os
 import pathlib
@@ -324,11 +327,11 @@ class TestWhatStaysCorrectable(ExampleTestCase):
                 self.assertIn("immutable", str(error))
 
 
-class TestReferenceTypesAreIriAndIrdi(unittest.TestCase):
+class TestReferenceTypesAreIriIrdiAndExpandedNodeId(unittest.TestCase):
     """
-    `schemas.semantic_id_type` and `metric_catalog.semantic_id_type` admit IRI and IRDI only: the
-    exporter emits every id as an ExternalReference, which a ModelReference is not. Each probe runs
-    in its own transaction and is rolled back.
+    `schemas.semantic_id_type` and `metric_catalog.semantic_id_type` admit IRI, IRDI and
+    ExpandedNodeId only: the exporter emits every id as an ExternalReference, which a ModelReference
+    is not. Each probe runs in its own transaction and is rolled back.
     """
 
     CONSTRAINTS = (("schemas", "schemas_semantic_id_type_valid"),
@@ -367,7 +370,7 @@ class TestReferenceTypesAreIriAndIrdi(unittest.TestCase):
                         cur.execute(self.INSERTS[table], ("ModelReference",))
                     cur.execute("ROLLBACK TO SAVEPOINT probe")
                     # The same row with a type still allowed goes in, so the refusal was the type.
-                    for allowed in ("IRI", "IRDI"):
+                    for allowed in ("IRI", "IRDI", "ExpandedNodeId"):
                         cur.execute("SAVEPOINT probe")
                         cur.execute(self.INSERTS[table], (allowed,))
                         cur.execute("ROLLBACK TO SAVEPOINT probe")
@@ -575,6 +578,130 @@ class TestConceptDefinitions(unittest.TestCase):
         options = self.in_transaction(lambda cur: self.fetch(
             cur, "SELECT reloptions FROM pg_class WHERE oid = 'public.concept_definitions'::regclass"))
         self.assertIn("security_invoker=true", options[0][0] or [])
+
+
+class TestOpcUaConceptsCarryTheirExpandedNodeId(unittest.TestCase):
+    """
+    Every `opcua_vocabulary` row names its node by the ExpandedNodeId its NodeSet publishes, as
+    node_id and semantic_id both (0002). 0171 moves a metric or a schema still carrying a former id,
+    `<namespace URI><name>`, and removes a row 0002 no longer writes; replayed, it moves nothing.
+    0001's guarded CHECKs replay over a row typed ExpandedNodeId without narrowing it. Each probe
+    runs in its own transaction and is rolled back.
+    """
+
+    MIGRATIONS = pathlib.Path(__file__).resolve().parent
+    MACHINERY = "http://opcfoundation.org/UA/Machinery/"
+    ROBOTICS = "http://opcfoundation.org/UA/Robotics/"
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            connect().close()
+        except psycopg2.OperationalError as exc:
+            raise unittest.SkipTest(f"cannot reach Supabase Postgres ({exc}); is the stack up?")
+        cls.migration_0171 = next(cls.MIGRATIONS.glob("0171_*.sql")).read_text(encoding="utf-8")
+        baseline = (cls.MIGRATIONS / "0001_baseline_schema.sql").read_text(encoding="utf-8")
+        # The guarded CHECK blocks exactly as 0001 replays them on every boot.
+        cls.baseline_checks = [
+            re.search(r"DO \$c\$ BEGIN\n(?:(?!END \$c\$;).)*?conname = '%s'.*?END \$c\$;" % name, baseline, re.S).group(0)
+            for name in ("metric_catalog_semantic_id_type_valid", "schemas_semantic_id_type_valid")
+        ]
+
+    def in_transaction(self, work):
+        """Run `work(cur)` on a fresh connection and roll everything back."""
+        conn = connect()
+        conn.autocommit = False
+        try:
+            with conn.cursor() as cur:
+                return work(cur)
+        finally:
+            conn.rollback()
+            conn.close()
+
+    @staticmethod
+    def fetch(cur, sql, params=None):
+        cur.execute(sql, params or ())
+        return cur.fetchall()
+
+    def current_id(self, cur, spec, name):
+        return self.fetch(cur, "SELECT semantic_id FROM public.opcua_vocabulary"
+                               " WHERE companion_spec = %s AND name = %s", (spec, name))[0][0]
+
+    def test_every_row_carries_its_expanded_node_id_as_both_ids(self):
+        rows = self.in_transaction(lambda cur: self.fetch(
+            cur, "SELECT companion_spec, name, node_id, semantic_id FROM public.opcua_vocabulary"))
+        self.assertGreater(len(rows), 0)
+        namespaces = {}
+        for spec, name, node_id, semantic_id in rows:
+            with self.subTest(spec=spec, name=name):
+                self.assertRegex(semantic_id, r"^nsu=[^;]+;[isgb]=[^;]+$")
+                self.assertEqual(node_id, semantic_id)
+                namespaces.setdefault(spec, set()).add(semantic_id.split(";")[0])
+        for spec, seen in namespaces.items():
+            self.assertEqual(len(seen), 1, f"{spec} names nodes in {sorted(seen)}")
+
+    def test_0171_moves_a_former_id_and_a_replay_moves_nothing(self):
+        def probe(cur):
+            cur.execute("INSERT INTO public.metric_catalog (name, datatype, standard, semantic_id, semantic_id_type)"
+                        " VALUES ('Fixture0171/Manufacturer', 12, 'OPC UA', %s, 'IRI'),"
+                        "        ('Fixture0171/Gone', 10, 'OPC UA', %s, 'IRI'),"
+                        "        ('Fixture0171/Typed', 12, 'OPC UA', %s, 'IRI')",
+                        (self.MACHINERY + "Manufacturer", self.MACHINERY + "OperationalTime",
+                         self.MACHINERY + "Manufacturer/"))
+            cur.execute("INSERT INTO public.schemas (schema_name, schema_definition, semantic_id, semantic_id_type)"
+                        " VALUES ('Fixture0171_Schema', '{\"type\": \"object\"}'::jsonb, %s, 'IRI')",
+                        (self.ROBOTICS + "Mass",))
+            cur.execute(self.migration_0171)
+            first = self.fetch(cur, "SELECT name, semantic_id, semantic_id_type FROM public.metric_catalog"
+                                    " WHERE name LIKE 'Fixture0171/%%' ORDER BY name")
+            schema = self.fetch(cur, "SELECT semantic_id, semantic_id_type FROM public.schemas"
+                                     " WHERE schema_name = 'Fixture0171_Schema'")
+            trail = "SELECT count(*) FROM public.audit_trail WHERE entity_type = 'metric_catalog'"
+            before = self.fetch(cur, trail)[0][0]
+            cur.execute(self.migration_0171)
+            second = self.fetch(cur, "SELECT name, semantic_id, semantic_id_type FROM public.metric_catalog"
+                                     " WHERE name LIKE 'Fixture0171/%%' ORDER BY name")
+            return (first, schema, second, self.fetch(cur, trail)[0][0] - before,
+                    self.current_id(cur, "OPC 40001 Machinery", "Manufacturer"),
+                    self.current_id(cur, "OPC 40010 Robotics", "Mass"))
+
+        first, schema, second, written, manufacturer, mass = self.in_transaction(probe)
+        self.assertEqual(first, [
+            ("Fixture0171/Gone", self.MACHINERY + "OperationalTime", "IRI"),
+            ("Fixture0171/Manufacturer", manufacturer, "ExpandedNodeId"),
+            ("Fixture0171/Typed", self.MACHINERY + "Manufacturer/", "IRI"),
+        ])
+        self.assertEqual(schema, [(mass, "ExpandedNodeId")])
+        self.assertEqual(second, first, "a replay of 0171 moved a row")
+        self.assertEqual(written, 0, "a replay of 0171 wrote to metric_catalog")
+
+    def test_0171_removes_a_row_0002_no_longer_writes(self):
+        def probe(cur):
+            cur.execute("INSERT INTO public.opcua_vocabulary (name, companion_spec, node_id, semantic_id)"
+                        " VALUES ('OperationalTime', 'OPC 40001 Machinery', %s, %s)",
+                        ("nsu=" + self.MACHINERY + ";s=Machine/OperationalTime", self.MACHINERY + "OperationalTime"))
+            cur.execute(self.migration_0171)
+            return self.fetch(cur, "SELECT count(*) FROM public.opcua_vocabulary WHERE name = 'OperationalTime'")[0][0]
+        self.assertEqual(self.in_transaction(probe), 0)
+
+    def test_the_baseline_checks_replay_over_an_expanded_node_id(self):
+        """0001 drops a CHECK whose definition differs from its own, so its own must admit the type."""
+        def probe(cur):
+            cur.execute("INSERT INTO public.metric_catalog (name, datatype, semantic_id, semantic_id_type)"
+                        " VALUES ('Fixture0171/Replay', 12, %s, 'ExpandedNodeId')",
+                        ("nsu=" + self.MACHINERY + ";i=6002",))
+            cur.execute("INSERT INTO public.schemas (schema_name, schema_definition, semantic_id, semantic_id_type)"
+                        " VALUES ('Fixture0171_Replay', '{\"type\": \"object\"}'::jsonb, %s, 'ExpandedNodeId')",
+                        ("nsu=" + self.ROBOTICS + ";i=6723",))
+            oids = "SELECT oid FROM pg_constraint WHERE conname IN" \
+                   " ('metric_catalog_semantic_id_type_valid', 'schemas_semantic_id_type_valid') ORDER BY conname"
+            before = self.fetch(cur, oids)
+            for block in self.baseline_checks:
+                cur.execute(block)
+            return before, self.fetch(cur, oids)
+        before, after = self.in_transaction(probe)
+        self.assertEqual(len(before), 2)
+        self.assertEqual(after, before, "0001's replay dropped and re-added a semantic_id_type CHECK")
 
 
 if __name__ == "__main__":

@@ -11955,7 +11955,7 @@ END) STORED,
     CONSTRAINT metric_catalog_category_valid CHECK (((category IS NULL) OR (category = ANY (ARRAY['SAMPLE'::text, 'EVENT'::text, 'CONDITION'::text])))),
     CONSTRAINT metric_catalog_name_format CHECK ((name ~ '^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*$'::text)),
     CONSTRAINT metric_catalog_permitted_values_shape CHECK (((permitted_values IS NULL) OR ((cardinality(permitted_values) > 0) AND (array_position(permitted_values, NULL::text) IS NULL) AND (''::text <> ALL (permitted_values))))),
-    CONSTRAINT metric_catalog_semantic_id_type_valid CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text]))))
+    CONSTRAINT metric_catalog_semantic_id_type_valid CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text, 'ExpandedNodeId'::text]))))
 );
 
 
@@ -12051,14 +12051,14 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'metric_catalog_semantic_id_type_valid'
                 AND conrelid = 'public.metric_catalog'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY[''IRI''::text, ''IRDI''::text]))))') THEN
+                AND pg_get_constraintdef(oid) <> 'CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY[''IRI''::text, ''IRDI''::text, ''ExpandedNodeId''::text]))))') THEN
     ALTER TABLE public.metric_catalog DROP CONSTRAINT metric_catalog_semantic_id_type_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'metric_catalog_semantic_id_type_valid'
                     AND conrelid = 'public.metric_catalog'::regclass) THEN
     ALTER TABLE public.metric_catalog
-        ADD CONSTRAINT metric_catalog_semantic_id_type_valid CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text]))));
+        ADD CONSTRAINT metric_catalog_semantic_id_type_valid CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text, 'ExpandedNodeId'::text]))));
   END IF;
 END $c$;
 
@@ -12070,7 +12070,7 @@ COMMENT ON COLUMN public.metric_catalog.semantic_id IS 'AAS (IEC 63278) semantic
 --
 
 -- COLUMN metric_catalog.semantic_id_type :: COMMENT
-COMMENT ON COLUMN public.metric_catalog.semantic_id_type IS 'Which kind of AAS Reference semantic_id is: IRI or IRDI. Both export as an ExternalReference.';
+COMMENT ON COLUMN public.metric_catalog.semantic_id_type IS 'Which kind of AAS Reference semantic_id is: IRI, IRDI, or ExpandedNodeId (an OPC UA node, nsu=<namespace URI>;i=<id>). All three export as an ExternalReference with one GlobalReference key.';
 
 --
 
@@ -13025,7 +13025,7 @@ CREATE TABLE IF NOT EXISTS public.schemas (
     status character varying(20) DEFAULT 'active'::character varying NOT NULL,
     change_description text,
     CONSTRAINT schemas_parent_not_self CHECK (((parent_schema_id IS NULL) OR (parent_schema_id <> id))),
-    CONSTRAINT schemas_semantic_id_type_valid CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text])))),
+    CONSTRAINT schemas_semantic_id_type_valid CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text, 'ExpandedNodeId'::text])))),
     CONSTRAINT schemas_status_valid CHECK (((status)::text = ANY (ARRAY[('draft'::character varying)::text, ('active'::character varying)::text, ('archived'::character varying)::text]))),
     CONSTRAINT schemas_version_lineage_coherent CHECK ((((version = 1) AND (parent_schema_id IS NULL)) OR ((version > 1) AND (parent_schema_id IS NOT NULL)))),
     CONSTRAINT schemas_version_positive CHECK ((version >= 1))
@@ -13081,14 +13081,14 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'schemas_semantic_id_type_valid'
                 AND conrelid = 'public.schemas'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY[''IRI''::text, ''IRDI''::text]))))') THEN
+                AND pg_get_constraintdef(oid) <> 'CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY[''IRI''::text, ''IRDI''::text, ''ExpandedNodeId''::text]))))') THEN
     ALTER TABLE public.schemas DROP CONSTRAINT schemas_semantic_id_type_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
                   WHERE conname = 'schemas_semantic_id_type_valid'
                     AND conrelid = 'public.schemas'::regclass) THEN
     ALTER TABLE public.schemas
-        ADD CONSTRAINT schemas_semantic_id_type_valid CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text]))));
+        ADD CONSTRAINT schemas_semantic_id_type_valid CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY['IRI'::text, 'IRDI'::text, 'ExpandedNodeId'::text]))));
   END IF;
 END $c$;
 
@@ -13148,7 +13148,7 @@ COMMENT ON COLUMN public.schemas.semantic_id IS 'AAS semanticId for the Submodel
 --
 
 -- COLUMN schemas.semantic_id_type :: COMMENT
-COMMENT ON COLUMN public.schemas.semantic_id_type IS 'Which kind of AAS Reference semantic_id is: IRI or IRDI. Both export as an ExternalReference.';
+COMMENT ON COLUMN public.schemas.semantic_id_type IS 'Which kind of AAS Reference semantic_id is: IRI, IRDI, or ExpandedNodeId (an OPC UA node, nsu=<namespace URI>;i=<id>). All three export as an ExternalReference with one GlobalReference key.';
 
 --
 

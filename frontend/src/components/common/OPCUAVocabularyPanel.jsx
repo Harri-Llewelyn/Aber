@@ -1,5 +1,5 @@
 import React from 'react'
-import { opcuaSections, dataPointTooltip, browsePath } from '../../utils/opcua'
+import { opcuaSections, dataPointTooltip } from '../../utils/opcua'
 import { STANDARDS } from '../../utils/standards'
 
 /**
@@ -49,14 +49,19 @@ export function opcuaVocabularyTab({ vocabulary, catalog, onUsePoint }) {
           <>
             {' '}As in MTConnect: <span className="mono">ActualPosition</span> becomes{' '}
             <span className="mono">MotionDevice/J1/ActualPosition</span> once you say which axis.
-            The group comes from the browse path, which is already{' '}
-            <span className="mono">/</span>-delimited.
+            Choosing a point fills in its group too.
           </>
         )
       },
       {
-        label: 'These are browse paths, not NodeIds.',
-        body: " The numeric identifiers live in each spec's NodeSet2 file and must be looked up there before wiring a real OPC UA client."
+        label: 'Each point carries its NodeId.',
+        body: (
+          <>
+            {' '}<span className="mono">nsu=&lt;namespace&gt;;i=&lt;id&gt;</span> is the ExpandedNodeId
+            the specification's NodeSet publishes for the point. It is the point's semantic id too,
+            and an OPC UA client finds the same node by it.
+          </>
+        )
       }
     ],
     sections,
@@ -66,7 +71,7 @@ export function opcuaVocabularyTab({ vocabulary, catalog, onUsePoint }) {
     metaFor: item => item.point.datatype || '',
     // Every point is a metric in its own right, unlike MTConnect where components and units are
     // name fragments rather than observations.
-    isActionable: item => !!browsePath(item.point.node_id) || !!item.point.name,
+    isActionable: item => !!item.point.name,
     onUse: onUsePoint ? (item => onUsePoint(item.point)) : undefined
   }
 }

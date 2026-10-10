@@ -2742,6 +2742,14 @@ class TestTypesSayWhatTheCatalogHolds(_MetricSpace):
         self.assertNotIn("x-permitted-values", position, "a row with no permitted_values lists none")
         self.assertNotIn("x-semantic-id-type", position)
 
+    def test_an_opc_ua_metric_type_carries_its_expanded_node_id(self):
+        node = "nsu=http://opcfoundation.org/UA/Machinery/;i=6002"
+        served = A.metric_type_from_catalog({"name": "Machine/Manufacturer", "datatype": 12,
+                                             "semantic_id": node, "semantic_id_type": "ExpandedNodeId"})
+        self.assertEqual(served["sourceTypeId"], node)
+        self.assertEqual(served["schema"]["x-semantic-id-type"], "ExpandedNodeId")
+        self.assertEqual(served["namespaceUri"], "http://opcfoundation.org/UA/Machinery/?projection=i3X")
+
     def test_no_type_constrains_a_metric_to_its_permitted_values(self):
         # Ingestion accepts a value outside them and the dashboard flags it as out of vocabulary,
         # so this server serves it, and a type that refused it would be violated by its own value.
@@ -4761,9 +4769,12 @@ class TestNamespaces(unittest.TestCase):
                             "https://aber.local/semantics/mtconnect/v2.0"),
         "OEE/OEE": ("https://aber.local/semantics/iso22400/OEE",
                     "https://aber.local/semantics/iso22400"),
-        "Machine/OperatingMode": (MACHINERY + "MachineryOperationMode",
-                                  MACHINERY + "?projection=i3X"),
-        "Energy/Pressure": (MACHINERY + "Energy/Pressure", MACHINERY + "Energy/?projection=i3X"),
+        "Machine/OperatingMode": ("nsu=" + MACHINERY + ";i=6092", MACHINERY + "?projection=i3X"),
+        "Energy/Pressure": ("nsu=" + MACHINERY + "Energy/;i=6021", MACHINERY + "Energy/?projection=i3X"),
+        "Server/State": ("nsu=http://opcfoundation.org/UA/;i=2259", "http://opcfoundation.org/UA/?projection=i3X"),
+        # The form OPC UA ids took before 1.2.0: an IRI the OPC Foundation never issued.
+        "Machine/OperationalTime": (MACHINERY + "OperationalTime", A.NS_LOCAL),
+        "Vendor/NODE": ("nsu=http://vendor.example/UA/;i=7", A.NS_LOCAL),
         "BMS/ZONE_TEMPERATURE": ("http://data.ashrae.org/standard223#TemperatureSensor",
                                  "http://data.ashrae.org/standard223?projection=i3X"),
         "Vendor/READING": ("https://example.com/ns/reading", A.NS_LOCAL),

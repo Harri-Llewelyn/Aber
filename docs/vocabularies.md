@@ -77,11 +77,13 @@ before proposing a change:
 - The AAS exporter emits `ExternalReference` / `GlobalReference` for every semantic id and
   **ignores `semantic_id_type`** (`semanticReference()` in
   [`supabase/functions/_shared/aas/shell.ts`](../supabase/functions/_shared/aas/shell.ts)) —
-  correct AAS V3 for IRIs and IRDIs alike, so IRDIs export with no code change. `semantic_id_type`
-  is validation metadata here, not export input, and it is IRI or IRDI only: `ModelReference` was
-  withdrawn by `0145`, because a ModelReference is a typed key chain into a model that one text
-  column cannot hold and the exporter cannot emit. The form infers IRDI for any ISO/IEC 11179-6
-  shape, the IEC CDD `0112/2///61987#ABA565#009` and an ECLASS pair joined by `/` included.
+  correct AAS V3 for IRIs and IRDIs alike, so IRDIs export with no code change, and so do OPC UA
+  ExpandedNodeIds, which the IDTA and OPC Foundation mapping also writes as `GlobalReference`
+  values. `semantic_id_type` is validation metadata here, not export input, and it is IRI, IRDI or
+  ExpandedNodeId only: `ModelReference` was withdrawn by `0145`, because a ModelReference is a typed
+  key chain into a model that one text column cannot hold and the exporter cannot emit. The form
+  infers IRDI for any ISO/IEC 11179-6 shape, the IEC CDD `0112/2///61987#ABA565#009` and an ECLASS
+  pair joined by `/` included, and ExpandedNodeId for `nsu=<namespace URI>;i=<id>`.
   **Each id also gets a `ConceptDescription`** in the
   Environment (`buildConceptDescriptions()`, #460), because most resolve nowhere (`aber.local`, an
   operator's IRDI). Its IEC 61360 content carries the concept's name, a definition,
@@ -133,6 +135,8 @@ against the IDTA content hub, the ISA/ANSI webstore and the open223 project.
 
 | Standard | Verified identity | Namespace / semanticId base |
 |---|---|---|
+| Machinery | **OPC 40001-1** v1.04.1, 2026-01-01 | `http://opcfoundation.org/UA/Machinery/` |
+| Robotics | **OPC 40010-1** v1.02, 2025-09-08 | `http://opcfoundation.org/UA/Robotics/` |
 | Machine Tools | **OPC 40501-1** v1.02.0, 2024-11-01 | `http://opcfoundation.org/UA/MachineTool/` |
 | Additive Manufacturing | **OPC 40540** v1.0.0, 2025-02-01 — **not 40450** | `http://opcfoundation.org/UA/AdditiveManufacturing/` |
 | Energy | **OPC 40001-4** *Machinery Part 4: Energy Management* v1.00, 2025-11-01 | `http://opcfoundation.org/UA/Machinery/Energy/` |
@@ -144,6 +148,8 @@ The generator pins the NodeSet paths. Upstream capitalises `NodeSet2` and `Nodes
 inconsistently, and the Additive path 404s if you guess it:
 
 ```
+Machinery/Opc.Ua.Machinery.NodeSet2.xml
+Robotics/Opc.Ua.Robotics.NodeSet2.xml
 MachineTool/Opc.Ua.MachineTool.NodeSet2.xml
 AdditiveManufacturing/Opc.Ua.AdditiveManufacturing.Nodeset2.xml
 Machinery/Energy/Opc.Ua.Machinery.Energy.NodeSet2.xml
@@ -168,13 +174,27 @@ concept IRIs. The state model is also published as the OPC UA companion specific
 30050**, whose NodeSet carries the full state model and per-state descriptions under the MIT
 licence, so PackML is read from a published source rather than transcribed.
 
-**An OPC UA semantic id is derived from a published namespace, not issued.** Every
-`opcua_vocabulary` id, generated or hand-written, is the specification's namespace URI plus the
-member's browse name, for example
-`http://opcfoundation.org/UA/PackML/MachSpeed`. The OPC Foundation publishes the namespace,
-not that IRI, and nothing resolves it. MTConnect takes the opposite stance: its ids are minted
-under `https://aber.local/semantics/mtconnect/v2.0/`, because an IRI under mtconnect.org would
-claim an identifier MTConnect never issued. The `opcua_vocabulary` table comment says the same.
+**An OPC UA semantic id is the ExpandedNodeId the specification publishes (#458, decided
+2026-10-08).** Every `opcua_vocabulary` row carries the NodeId its NodeSet declares for the data
+point, written with the namespace URI rather than a server's namespace index:
+`nsu=http://opcfoundation.org/UA/PackML/;i=219` for PackML `MachSpeed`. It is both `node_id` and
+`semantic_id`, and `semantic_id_type` is `ExpandedNodeId`. OPC UA now follows the rule the
+MTConnect ids were written to: no fabricated IRI. Until 1.2.0 the ids were the namespace URI plus
+the browse name, `http://opcfoundation.org/UA/PackML/MachSpeed`, an IRI the OPC Foundation never
+issued and nothing resolves. MTConnect issues no identifiers at all, so its ids stay minted under
+`https://aber.local/semantics/mtconnect/v2.0/`; an IRI under mtconnect.org would claim one
+MTConnect never issued.
+
+- **Why the ExpandedNodeId.** It is the one identifier OPC UA itself issues for a concept, and an
+  OPC UA client finds the same node by it. The IDTA and OPC Foundation *OPC UA for Asset
+  Administration Shell* mapping writes ExpandedNodeId strings as `GlobalReference` values, which
+  is the key the exporter already emits for every semantic id.
+- **Why not keep the derived IRI and say so.** That was the 1.0 position (#662). A consumer of an
+  AAS shell cannot tell a derived IRI from an issued one, and the reason the derived form was
+  chosen, that the NodeSets were not read, stopped holding when the generator began reading them.
+- **What moved.** `0171` repointed every catalog metric and schema that carried a former id
+  exactly, and removed OPC 40001 Machinery `OperationalTime`, which no Machinery NodeSet declares.
+  The AAS Digital Nameplate join, i3X's metric-type namespaces and the dashboard read the new form.
 
 **ASHRAE 223P's ontology declares its own licence.** The standard is in public review, but the
 ontology is openly published under Apache-2.0, asserted in-band by the rights holder:
@@ -198,7 +218,7 @@ in a derived work, and every licence was read rather than assumed:
 
 | Source | Licence | Asserted by |
 |---|---|---|
-| OPC 40501-1, 40540, 40001-4, 30050 NodeSets | OPC Foundation MIT License 1.00 | file header |
+| OPC 40001-1, 40010-1, 40501-1, 40540, 40001-4, 30050 NodeSets | OPC Foundation MIT License 1.00 | file header |
 | IDTA 02006-3-0-1 Digital Nameplate | free IDTA publication | IDTA content hub |
 | ASHRAE 223P ontology | Apache-2.0 | `dcterms:license` in the ontology |
 
@@ -206,23 +226,33 @@ As with MTConnect's Apache-2.0, a licence covers the *vocabulary*, not a conform
 
 ## OPC UA companion specifications
 
-`opcua_vocabulary` holds six companion specifications. OPC 40001 Machinery and OPC 40010 Robotics
-are hand-written rows. The four read from NodeSets — OPC 40501 Machine Tools, OPC 40540 Additive
-Manufacturing, OPC 40001-4 Machinery Energy and OPC 30050 PackML — are generated by
-`scripts/generate-opcua-vocabulary.mjs` into marked blocks in `0002_seed_data.sql`, with their
-`metric_groups` rows, and `scripts/check-opcua-seed-sync.mjs` verifies them in CI. The generator
-also writes the table's `COMMENT`, naming every specification the seed holds, and the check
-recomputes it, so a specification added by hand cannot leave the comment behind.
+`opcua_vocabulary` holds six companion specifications, every row read from its NodeSet: OPC 40001
+Machinery, OPC 40010 Robotics, OPC 40501 Machine Tools, OPC 40540 Additive Manufacturing, OPC
+40001-4 Machinery Energy and OPC 30050 PackML. `scripts/generate-opcua-vocabulary.mjs` writes them
+into marked blocks in `0002_seed_data.sql`, with their `metric_groups` rows, and
+`scripts/check-opcua-seed-sync.mjs` verifies them in CI. The generator also writes the table's
+`COMMENT`, naming every specification the seed holds, and the check recomputes it, so a
+specification added by hand cannot leave the comment behind. The check also refuses an
+`opcua_vocabulary` row written outside the generated block.
 
 - **The seed is curated, not dumped.** The NodeSets carry almost no descriptions — MachineTool
   declares 356 variables of which 18 have one, Machinery/Energy has 87 and none — so a bulk
   extraction would have produced hundreds of rows with a NULL description, and `VocabularyPanel`
   searches the tooltip as well as the name. The generator instead *verifies* a curated entry list
-  against the NodeSet and reads the datatype from it, failing if an ObjectType, a member or the
-  pinned specification version is not what it expects. Each entry names the ObjectType that
-  declares the member directly, so the generator never has to walk nested components.
-- **The rows live in `0002_seed_data.sql`, not a migration of their own,** beside the hand-written
-  `opcua_vocabulary` rows, as the MTConnect generator does with its vocabulary.
+  against the NodeSet and reads the datatype and the NodeId from it, failing if an ObjectType, a
+  member or the pinned specification version is not what it expects. Each entry names an
+  ObjectType and the browse path below it, one declared component or property per step, such as
+  Robotics `AxisType` → `ParameterSet` → `ActualPosition`. A step that names two nodes stops the
+  build, because the NodeId becomes the row's identifier.
+- **The NodeId is translated, not copied.** A NodeSet writes `ns=3;i=16662`, where `3` indexes
+  that file's own `NamespaceUris` table. The generator writes `nsu=<that URI>;i=16662`, which means
+  the same node outside the file, and refuses a node outside the row's own specification.
+- **The dashboard's group for each point is generated too.** `node_id` used to be a browse path,
+  and the Add Metric form took a point's group from its first segment. The generator now writes
+  each entry's curated group to `frontend/src/utils/opcuaGroups.generated.js`, and the check holds
+  it to the rows and to the `metric_groups` the seed registers under OPC UA.
+- **The rows live in `0002_seed_data.sql`, not a migration of their own,** as the MTConnect
+  generator does with its vocabulary.
 - **`companion_spec` spellings follow the existing `OPC 40001 Machinery` shape** and are permanent:
   `enforce_metric_group_spelling()` fixes the first spelling of the matching `metric_groups` rows.
 - **`standard` stays `'OPC UA'`**, so no new `STANDARDS` entry was needed in the frontend.
@@ -393,3 +423,4 @@ filing it in `opcua_vocabulary` would misstate its provenance.
 | Which datatypes can the form create? | Double, Boolean and String; OPC UA integers become Double |
 | Which group do 223P metrics file under? | **`BMS`**, the one group registered under ASHRAE 223P (#456) |
 | Should the platform COMPUTE ISO 22400 KPIs? | **No.** They arrive as published metrics — the `OEE/*` rows in `metric_catalog` are that route. Not one of the eight registered formulas is computable from the catalogued metrics, and moving the arithmetic to Grafana or Node-RED does not change that. Was a roadmap item; retired |
+| What is an OPC UA semantic id? | **The ExpandedNodeId the NodeSet publishes**, `nsu=<namespace URI>;i=<id>`, as `node_id` and `semantic_id` both, typed `ExpandedNodeId`. Not `<namespace URI><name>`, an IRI the OPC Foundation never issued (#458) |

@@ -4,6 +4,7 @@ import {
   conceptIdsFor,
   type DeviceRecord,
   loadDeviceRecord,
+  OPC_MACHINERY,
   referencedSemanticIds,
 } from "./shell.ts";
 
@@ -192,4 +193,40 @@ Deno.test("loadDeviceRecord reads concept_definitions once, for the ids the shel
   assert.equal(reads.length, 1);
   assert.equal(reads[0].filters, [["semantic_id", conceptIdsFor(rows)]]);
   assert.equal(loaded?.definitions.map((d) => d.semantic_id), [`${S223}TemperatureSensor`]);
+});
+
+Deno.test("a metric carrying a Machinery ExpandedNodeId answers its nameplate field", () => {
+  const rows = record(DEFINED);
+  rows.config = [
+    { metric_name: "Machine/Manufacturer", val_string: "Published GmbH" },
+    { metric_name: "Machine/SerialNumber", val_string: "SN-PUBLISHED" },
+  ];
+  rows.catalog = [
+    ...rows.catalog,
+    metric("Machine/Manufacturer", OPC_MACHINERY.Manufacturer, "Manufacturer", { datatype: 12, units: null }),
+    // The former IRI joins nothing, so the operator's value stands.
+    metric("Machine/SerialNumber", "http://opcfoundation.org/UA/Machinery/SerialNumber", "Serial", {
+      datatype: 12,
+      units: null,
+    }),
+  ];
+  rows.nameplate = { manufacturer_name: "Acme", serial_number: "SN-STORED" };
+  // deno-lint-ignore no-explicit-any
+  const nameplate = (buildEnvironment(rows).submodels as any[])
+    .find((s) => s.idShort === "DigitalNameplate").submodelElements;
+  // deno-lint-ignore no-explicit-any
+  const field = (idShort: string) => nameplate.find((e: any) => e.idShort === idShort);
+  assert.equal(
+    [field("ManufacturerName").value, field("ManufacturerName").description[0].text],
+    ["Published GmbH", "Published by the device at DBIRTH."],
+  );
+  assert.equal(field("SerialNumber").value, "SN-STORED");
+});
+
+Deno.test("the nameplate's OPC UA ids are Machinery ExpandedNodeIds", () => {
+  for (const id of Object.values(OPC_MACHINERY)) {
+    if (!/^nsu=http:\/\/opcfoundation\.org\/UA\/Machinery\/;i=\d+$/.test(id)) {
+      throw new Error(`${id} is not a Machinery ExpandedNodeId`);
+    }
+  }
 });

@@ -44,10 +44,11 @@ ON CONFLICT (name) DO NOTHING;
 
 -- OPC UA companion specifications: robotics, machinery and energy (14 rows). Joined on
 -- (companion_spec, name), the vocabulary's key, since `Mass` and `Temperature` appear under more
--- than one specification. `concept` is the browse name the semantic id comes from.
+-- than one specification. `concept` is the browse name the semantic id comes from, and the id is
+-- the ExpandedNodeId the specification publishes for it.
 INSERT INTO public.metric_catalog (name, datatype, description, category, units, standard,
                                    semantic_id, semantic_id_type)
-SELECT s.name, s.datatype, s.description, s.category, s.units, 'OPC UA', v.semantic_id, 'IRI'
+SELECT s.name, s.datatype, s.description, s.category, s.units, 'OPC UA', v.semantic_id, 'ExpandedNodeId'
   FROM (VALUES
     ('MotionDevice/ActualPosition', 10, 'Current tool-centre-point position', 'SAMPLE', 'MILLIMETER', 'OPC 40010 Robotics', 'ActualPosition'),
     ('MotionDevice/ActualSpeed', 10, 'Current tool-centre-point speed', 'SAMPLE', 'MILLIMETER/SECOND', 'OPC 40010 Robotics', 'ActualSpeed'),
@@ -59,7 +60,7 @@ SELECT s.name, s.datatype, s.description, s.category, s.units, 'OPC UA', v.seman
      'SAMPLE', 'PERCENT', 'OPC 40010 Robotics', 'SpeedOverride'),
     ('Machine/OperationalMode', 12, 'Operational mode of the motion device', 'EVENT', NULL, 'OPC 40010 Robotics', 'OperationalMode'),
     ('Machine/SpeedOverride', 10, 'Operator speed override', 'SAMPLE', 'PERCENT', 'OPC 40010 Robotics', 'SpeedOverride'),
-    ('Machine/OperatingMode', 12, 'Machine operating mode -- Processing, Setup, Maintenance or Normal. OPC 40001 calls this browse name MachineryOperationMode; the semantic id binds this metric to that concept.',
+    ('Machine/OperatingMode', 12, 'Machine operating mode -- Processing, Setup, Maintenance or None. OPC 40001 calls this browse name MachineryOperationMode; the semantic id binds this metric to that concept.',
      'EVENT', NULL, 'OPC 40001 Machinery', 'MachineryOperationMode'),
     ('Energy/Pressure', 10, 'Compressed-air supply pressure', 'SAMPLE', 'PASCAL', 'OPC 40001-4 Machinery Energy', 'Pressure'),
     ('Energy/Temperature', 10, 'Coolant or medium temperature', 'SAMPLE', 'CELSIUS', 'OPC 40001-4 Machinery Energy', 'Temperature'),

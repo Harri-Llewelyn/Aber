@@ -186,14 +186,16 @@ The mappings that are decisions rather than mechanics:
   metric's type is its `metric_catalog` row, whose semantic id says where the concept is defined:
   - MTConnect and ISO 22400 ids are minted here, so their namespaces are local:
     `https://aber.local/semantics/mtconnect/v2.0` and `https://aber.local/semantics/iso22400`.
-  - An OPC UA id is `<companion spec namespace><BrowseName>` and an ASHRAE 223P id is the
-    ontology's own. A scalar type adapted from one is an in-exact implementation of that
-    namespace, which the guide marks with a `projection` suffix:
+  - An OPC UA id is the ExpandedNodeId its NodeSet publishes, `nsu=<namespace URI>;i=<id>`,
+    whose namespace is the URI after `nsu=`, and an ASHRAE 223P id is the ontology's own. A
+    scalar type adapted from one is an in-exact implementation of that namespace, which the guide
+    marks with a `projection` suffix:
     `http://opcfoundation.org/UA/Machinery/?projection=i3X`,
     `http://data.ashrae.org/standard223?projection=i3X`. The bare URI would claim the standard
     defined the type.
   - An id under any other authority, or none, is local, and so are the per-datatype metric types
-    and `UnknownType`.
+    and `UnknownType`. So is an `http://opcfoundation.org/UA/...` IRI: the OPC Foundation issues
+    none, and the platform's OPC UA ids took that form only before 1.2.0.
 
   `GET /namespaces` lists exactly the namespaces the served types use; `test_i3x_service.py`
   holds it to that.
@@ -216,7 +218,7 @@ The mappings that are decisions rather than mechanics:
   | `description` | `description` |
   | `x-unit` | `units` |
   | `x-category` | `category`: `SAMPLE`, `EVENT` or `CONDITION` |
-  | `x-semantic-id-type` | `semantic_id_type`: `IRI` or `IRDI`. The id itself is the type's `sourceTypeId` |
+  | `x-semantic-id-type` | `semantic_id_type`: `IRI`, `IRDI` or `ExpandedNodeId`. The id itself is the type's `sourceTypeId` |
   | `x-permitted-values` | `permitted_values`, converted to the values served for the datatype. Left out when the row has none, or when one does not convert |
 
   **`x-permitted-values` is advisory, not a constraint.** It lists the values the catalog gives

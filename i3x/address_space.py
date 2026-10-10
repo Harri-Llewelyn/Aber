@@ -419,6 +419,9 @@ _LOCAL_STANDARD_NAMESPACES = {
     "https://aber.local/semantics/iso22400": "ISO 22400 (Aber ids)",
 }
 _OPCUA_NAMESPACE_ROOT = "http://opcfoundation.org/UA/"
+# An OPC UA id is an ExpandedNodeId, `nsu=<namespace URI>;<i|s|g|b>=<identifier>` (OPC 10000-6
+# 5.3.1.11), whose `%` and `;` in the URI are percent-encoded.
+_EXPANDED_NODE_ID = re.compile(r"nsu=([^;]+);[isgb]=.+", re.S)
 _ASHRAE_223P_NAMESPACE = "http://data.ashrae.org/standard223#"
 _ASHRAE_223P_PROJECTION = "http://data.ashrae.org/standard223" + PROJECTION_SUFFIX
 
@@ -426,16 +429,19 @@ _ASHRAE_223P_PROJECTION = "http://data.ashrae.org/standard223" + PROJECTION_SUFF
 def metric_type_namespace(semantic_id) -> str:
     """
     The namespace a catalog metric's semantic id is defined in, and so its type's. An OPC UA id is
-    `<companion spec namespace><BrowseName>`, so the namespace is the id up to its last `/`. An id
-    under any other authority, or none, is local: never a namespace in someone else's name.
+    an ExpandedNodeId, which names its namespace: the URI after `nsu=`. An id under any other
+    authority, or none, is local: never a namespace in someone else's name.
     """
     if not isinstance(semantic_id, str) or not semantic_id:
         return NS_LOCAL
     for uri in _LOCAL_STANDARD_NAMESPACES:
         if semantic_id.startswith(uri + "/"):
             return uri
-    if semantic_id.startswith(_OPCUA_NAMESPACE_ROOT) and not any(c in semantic_id for c in "?#"):
-        return semantic_id[: semantic_id.rindex("/") + 1] + PROJECTION_SUFFIX
+    node = _EXPANDED_NODE_ID.fullmatch(semantic_id)
+    if node:
+        namespace = node.group(1).replace("%3B", ";").replace("%3b", ";").replace("%25", "%")
+        if namespace.startswith(_OPCUA_NAMESPACE_ROOT) and not any(c in namespace for c in "?#"):
+            return namespace + PROJECTION_SUFFIX
     if semantic_id.startswith(_ASHRAE_223P_NAMESPACE):
         return _ASHRAE_223P_PROJECTION
     return NS_LOCAL

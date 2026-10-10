@@ -23,10 +23,10 @@ describe('standards registry', () => {
     expect(values).toContain(STANDARDS.OPCUA)
   })
 
-  it('mirrors the CHECK constraints on semantic_id_type (archived migration 0145)', () => {
+  it('mirrors the CHECK constraints on semantic_id_type (0001)', () => {
     // ModelReference is withdrawn: the exporter emits every id as an ExternalReference, and one
     // text column cannot carry a ModelReference's typed key chain.
-    expect(SEMANTIC_ID_TYPES).toEqual(['IRI', 'IRDI'])
+    expect(SEMANTIC_ID_TYPES).toEqual(['IRI', 'IRDI', 'ExpandedNodeId'])
     expect(SEMANTIC_ID_TYPES).toContain(DEFAULT_SEMANTIC_ID_TYPE)
   })
 })
@@ -184,5 +184,23 @@ describe('mtconnectVocabularySemanticId', () => {
 
   it('returns empty for an empty name', () => {
     expect(mtconnectVocabularySemanticId('DATA_ITEM_TYPE', '')).toBe('')
+  })
+})
+
+describe('inferSemanticIdType for OPC UA', () => {
+  it('recognises the ExpandedNodeId an OPC UA vocabulary row carries', () => {
+    expect(inferSemanticIdType('nsu=http://opcfoundation.org/UA/Machinery/;i=6002')).toBe('ExpandedNodeId')
+    expect(inferSemanticIdType('nsu=http://opcfoundation.org/UA/;s=Server/State')).toBe('ExpandedNodeId')
+  })
+
+  it('leaves a namespace index, which only its own server can read, to the operator', () => {
+    expect(inferSemanticIdType('ns=1;i=6002')).toBe('')
+    expect(inferSemanticIdType('nsu=http://opcfoundation.org/UA/Machinery/')).toBe('')
+    expect(inferSemanticIdType('nsu=http://opcfoundation.org/UA/Machinery/;x=6002')).toBe('')
+  })
+
+  it('retypes an IRI replaced by an ExpandedNodeId', () => {
+    expect(followSemanticIdType('http://opcfoundation.org/UA/Machinery/Manufacturer', 'IRI',
+      'nsu=http://opcfoundation.org/UA/Machinery/;i=6002')).toBe('ExpandedNodeId')
   })
 })

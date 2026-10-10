@@ -26,15 +26,15 @@ vi.mock('../api', async () => {
 const OPCUA_VOCABULARY = [
   {
     name: 'ActualPosition', companion_spec: 'OPC 40010 Robotics',
-    node_id: 'nsu=http://opcfoundation.org/UA/Robotics/;s=MotionDevice/Axes/Axis/ActualPosition',
+    node_id: 'nsu=http://opcfoundation.org/UA/Robotics/;i=16662',
     datatype: 'Double', unit: 'MILLIMETER', description: 'Current position of an axis.',
-    semantic_id: 'http://opcfoundation.org/UA/Robotics/ActualPosition'
+    semantic_id: 'nsu=http://opcfoundation.org/UA/Robotics/;i=16662'
   },
   {
     name: 'Manufacturer', companion_spec: 'OPC 40001 Machinery',
-    node_id: 'nsu=http://opcfoundation.org/UA/Machinery/;s=Machine/Identification/Manufacturer',
+    node_id: 'nsu=http://opcfoundation.org/UA/Machinery/;i=6002',
     datatype: 'LocalizedText', unit: null, description: 'Name of the machine manufacturer.',
-    semantic_id: 'http://opcfoundation.org/UA/Machinery/Manufacturer'
+    semantic_id: 'nsu=http://opcfoundation.org/UA/Machinery/;i=6002'
   }
 ]
 
