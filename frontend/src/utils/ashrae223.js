@@ -68,9 +68,9 @@ export function ashrae223Sections(vocabulary) {
 }
 
 /**
- * The Add Metric form state a concept implies. `datatype` is absent: a 223P concept says what a
- * thing is, not what type its reading has, and datatype is the one field that cannot be corrected
- * afterwards.
+ * The Add Metric form state a concept implies. 223P is a reference here: a class names the thing a
+ * point is attached to, not the reading, so the prefill carries no semantic id. `datatype` is
+ * absent for the same reason, and datatype is the one field that cannot be corrected afterwards.
  */
 export function ashrae223Prefill(concept) {
   if (!concept) return null
@@ -80,7 +80,6 @@ export function ashrae223Prefill(concept) {
     units: '',
     datatype: undefined,
     category: undefined,
-    semanticId: concept.semantic_id || '',
     standard: STANDARDS.ASHRAE223,
     description: concept.description || ''
   }

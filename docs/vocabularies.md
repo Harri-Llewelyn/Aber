@@ -90,10 +90,11 @@ before proposing a change:
   `metric_catalog.units` as `unit` (MTConnect UnitEnum names as free text; `unitId` is unset) and a
   `dataType` derived from the Sparkplug datatype. **The definition is the vocabulary's own text**
   wherever one defines the id. `concept_definitions` (`0169`) unions the IDTA, ASHRAE 223P, OPC UA
-  and ISO 22400 descriptions, in that order of precedence. So 223P's `TemperatureSensor` is
-  defined by 223P, not by "Zone air temperature", the description of the one BMS metric carrying
-  it. MTConnect stores no definitions yet, so its ids, like any id an Administrator typed, take the
-  catalog description only when every live metric carrying the id agrees on it. The POSITION
+  and ISO 22400 descriptions, in that order of precedence. So a 223P class such as
+  `TemperatureSensor` is defined by 223P, not by the description of a metric carrying it.
+  MTConnect stores no definitions yet, so its ids, like the QUDT quantity kinds the example 223P
+  readings carry and any id an Administrator typed, take the catalog description only when every
+  live metric carrying the id agrees on it. The POSITION
   metrics describe their own axes, so that concept's definition defers to MTConnect instead. A new
   standard's ids are covered with no code change; its definitions need an arm in the view.
 
@@ -101,8 +102,9 @@ before proposing a change:
 
 Three decisions shape every metric the form creates from a vocabulary, whatever the standard:
 
-- **A metric's semantic id names the concept, not the metric.** ISO 22400, OPC UA and 223P take
-  the vocabulary row's id. An MTConnect metric takes its data item type's id,
+- **A metric's semantic id names the concept, not the metric.** ISO 22400 and OPC UA take the
+  vocabulary row's id, and 223P, a reference here, gives none. An MTConnect metric takes its data
+  item type's id,
   `…/mtconnect/v2.0/DataItemType/<TYPE>`, so `Axes/X/POSITION` and `Axes/W/POSITION` share one;
   the component path, instance and subType stay in the name and `sub_type` (#457). A custom
   MTConnect type is a local extension and gets no id.
@@ -143,6 +145,7 @@ against the IDTA content hub, the ISA/ANSI webstore and the open223 project.
 | Digital Nameplate | **IDTA 02006-3-0-1**, Oct 2025 | `https://admin-shell.io/idta/nameplate/3/0/Nameplate` |
 | PackML | **OPC 30050** *OPC UA for PackML* v1.01, 2020-10-08 — **the ISA document is not needed** | `http://opcfoundation.org/UA/PackML/` |
 | ASHRAE 223P | ontology `v1.0.0-2026`, **Apache-2.0**; the *standard* is still in public review | `http://data.ashrae.org/standard223#` |
+| QUDT quantity kinds | *QUDT Quantity Kind Vocabulary* **3.5.2**; five IRIs cited, nothing seeded | `http://qudt.org/vocab/quantitykind/` |
 
 The generator pins the NodeSet paths. Upstream capitalises `NodeSet2` and `Nodeset2`
 inconsistently, and the Additive path 404s if you guess it:
@@ -221,6 +224,7 @@ in a derived work, and every licence was read rather than assumed:
 | OPC 40001-1, 40010-1, 40501-1, 40540, 40001-4, 30050 NodeSets | OPC Foundation MIT License 1.00 | file header |
 | IDTA 02006-3-0-1 Digital Nameplate | free IDTA publication | IDTA content hub |
 | ASHRAE 223P ontology | Apache-2.0 | `dcterms:license` in the ontology |
+| QUDT quantity kinds (five IRIs cited, not seeded) | CC BY 4.0, attribution to QUDT.org | `dcterms:rights` in the vocabulary's graph metadata |
 
 As with MTConnect's Apache-2.0, a licence covers the *vocabulary*, not a conformance claim.
 
@@ -376,10 +380,58 @@ filing it in `opcua_vocabulary` would misstate its provenance.
   seed-sync check and every `git diff` of that file rely on.
 - **Only the `s223:` namespace is seeded.** The ontology `owl:imports` QUDT
   (`http://qudt.org/3.2.1/shacl/qudt-all`) for quantity kinds and units. Following it would pull in
-  a second vocabulary several times the size, under a licence that would need its own check. Units
-  come from MTConnect's `units` vocabulary.
+  a second vocabulary several times the size, under its own licence (CC BY 4.0). Units come from
+  MTConnect's `units` vocabulary; the example readings cite QUDT quantity kinds without seeding
+  them.
 - **Browsable without a BMS adapter.** Per-point tagging over BACnet is the long pole, and the
   vocabulary does not wait for it.
+
+**223P is a reference here, not a source of metric semantic ids (#461).** A 223P class names
+equipment or a substance, not a reading. In 223P a reading is a `QuantifiableObservableProperty`
+with a QUDT quantity kind (`qudt:hasQuantityKind`), observed by a sensor. So
+`TemperatureSensor` as the semantic id of a Property whose value is 21.4 tells an AAS consumer the
+Property is a sensor. The dashboard therefore offers no 223P class as an id: `ashrae223Prefill()`
+fills none, and neither the suggestion nor *Search vocabularies* lists one. Use on the Vocabulary
+page starts a metric in the `BMS` group, named after the class, and the operator supplies the
+datatype, the units and the id. A class shows as in use when a 223P metric is named after it.
+`check-docs-drift.mjs` check 47 holds the prefill and the example set to this.
+
+**The five example readings carry the published QUDT quantity kind of what each reports**, as
+`http://qudt.org/vocab/quantitykind/<Kind>` with `semantic_id_type` `IRI`. Each IRI was
+dereferenced on 2026-10-08 and is defined by QUDT 3.5.2's quantity-kind vocabulary, none
+deprecated. Each kind is the one the pinned 223P ontology's sensor class admits for that reading,
+and QUDT lists the metric's unit among the kind's units (`unit:PERCENT_RH` for the humidity's
+`PERCENT`):
+
+| Metric | Unit | Quantity kind | Why this kind |
+| :--- | :--- | :--- | :--- |
+| `BMS/ZONE_TEMPERATURE` | `CELSIUS` | `Temperature` | the only kind 223P's `TemperatureSensor` admits |
+| `BMS/ZONE_HUMIDITY` | `PERCENT` | `RelativeHumidity` | `HumiditySensor` admits it or `AbsoluteHumidity`, and the reading is relative |
+| `BMS/CO2_CONCENTRATION` | `PARTS/MILLION` | `MoleFraction` | see below |
+| `BMS/STATIC_PRESSURE` | `PASCAL` | `Pressure` | `PressureSensor` admits `Pressure` or `GaugePressure` only, so QUDT's narrower `StaticPressure` would fail its shape; `GaugePressure` claims a reference to atmosphere the metric does not state |
+| `BMS/SUPPLY_AIR_FLOW` | `LITER/SECOND` | `VolumeFlowRate` | the kind `FlowSensor` names as typical |
+
+**CO2 is a `MoleFraction`.** QUDT lists `unit:PPM` under `DimensionlessRatio`, `MoleFraction` and
+`AmountOfSubstanceFraction`; `VolumeFraction` does not list it. 223P's `ConcentrationSensor`
+names `MoleFraction` among the kinds a concentration may take, and the Guideline 36 example model
+on `models.open223.info` gives its *Zone CO2 Concentration* `MoleFraction` in `unit:PPM`. The
+pinned ontology's Guideline 36 `Zone` shape asks for `DimensionlessRatio` with `ofConstituent
+Constituent-CO2`. `MoleFraction` is a narrower kind of `DimensionlessRatio` (`skos:broader`), so a
+consumer following QUDT reaches the shape's kind; `DimensionlessRatio` alone would give CO2 the id
+of every percentage, since the constituent has nowhere to go here.
+
+**QUDT is cited, not seeded.** It is CC BY 4.0 (attribution to QUDT.org), and no QUDT vocabulary is
+imported: the five ids are typed in `example-metrics.sql`, the one place that file does not take
+an id from a vocabulary table, so its inner join does not check them. Check 47 holds them to the
+pairs migration `0172` repoints an install to. That install holds the old 223P class ids, seeded by
+`0002` up to 1.0.1 and by the example set since, and `0172` moves a row only while its id is still
+the seed's. An AAS export defines these ids from the catalog description, as for any id no
+vocabulary holds. i3X files their types in the local namespace, since `metric_type_namespace()`
+has no case for QUDT.
+
+**The full model waits for a BMS adapter:** a QUDT quantity-kind vocabulary of its own, with its
+provenance, and a second field saying what a point is attached to (its 223P class). Until then the
+class lives only in a metric's name.
 
 ---
 
@@ -417,10 +469,11 @@ filing it in `opcua_vocabulary` would misstate its provenance.
 | PackML as its own standard, or under OPC UA? | **Under OPC UA** (`companion_spec = OPC 30050 PackML`) — it is what the NodeSet was read from, and it avoids a table, a panel and a mirror module |
 | Digital Nameplate version | IDTA 02006 **3.0** |
 | Seed 223P before the standard is published? | **Yes**, from `223p.ttl` `v1.0.0-2026`, with the migration header stating it is pre-publication |
-| Does 223P follow the QUDT import? | **No** — separate vocabulary, separate licence, and units are already covered |
+| Does 223P follow the QUDT import? | **No** — no QUDT vocabulary is imported: separate vocabulary, separate licence (CC BY 4.0), and units are already covered. The five example 223P readings cite QUDT quantity-kind IRIs as their semantic ids instead, typed (#461) |
 | Is OPC 34100 (ECM) seeded too? | **No** — only Machinery/Energy; ECM is recorded as a dependency |
 | Which `category` does a non-MTConnect metric get? | MTConnect's: `SAMPLE`, `EVENT` or `CONDITION`, translated per standard; 223P leaves it null |
 | Which datatypes can the form create? | Double, Boolean and String; OPC UA integers become Double |
 | Which group do 223P metrics file under? | **`BMS`**, the one group registered under ASHRAE 223P (#456) |
+| Is a 223P class a metric's semantic id? | **No.** 223P is a reference: a class names equipment, not a reading. Use starts a metric under `BMS` with no id, and the example readings carry QUDT quantity kinds (#461) |
 | Should the platform COMPUTE ISO 22400 KPIs? | **No.** They arrive as published metrics — the `OEE/*` rows in `metric_catalog` are that route. Not one of the eight registered formulas is computable from the catalogued metrics, and moving the arithmetic to Grafana or Node-RED does not change that. Was a roadmap item; retired |
 | What is an OPC UA semantic id? | **The ExpandedNodeId the NodeSet publishes**, `nsu=<namespace URI>;i=<id>`, as `node_id` and `semantic_id` both, typed `ExpandedNodeId`. Not `<namespace URI><name>`, an IRI the OPC Foundation never issued (#458) |

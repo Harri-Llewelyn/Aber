@@ -223,6 +223,40 @@ describe('Vocabulary page — a click hands off to the Metrics page', () => {
     fireEvent.click(relation)
     expect(onUseEntry).not.toHaveBeenCalled()
   })
+
+  it('says 223P is a reference: a class starts a metric and is not its semantic id', async () => {
+    renderTab()
+    await ready()
+
+    fireEvent.click(standardTab(/ASHRAE 223P/))
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'About the ASHRAE 223P vocabulary' }))
+    const tip = screen.getByRole('tooltip')
+    expect(within(tip).getByText('A reference, not a source of ids.')).toBeTruthy()
+    expect(tip.textContent).toMatch(/starts a metric in the BMS group, named after it, with no semantic id/)
+  })
+
+  it('ticks a 223P class that a 223P metric is named after, and not a local metric using the word', async () => {
+    // No 223P metric carries a class's id any more, so the name decides; under the standard only,
+    // because 223P's names are ordinary words.
+    const withCatalog = (catalog) => api.get.mockImplementation((path) => Promise.resolve(
+      path.startsWith('/api/v1/metric-catalog') ? catalog
+        : routes[Object.keys(routes).find(r => path.startsWith(r))] || []))
+    const sensorHead = () =>
+      card().getByRole('button', { name: /^Sensor/ }).closest('.vocab-section-head')
+
+    withCatalog([{ name: 'Lab/TemperatureSensor', standard: null, semantic_id: null }])
+    const { unmount } = renderTab()
+    await ready()
+    fireEvent.click(standardTab(/ASHRAE 223P/))
+    expect(within(sensorHead()).queryByText(/in use/)).toBeNull()
+    unmount()
+
+    withCatalog([{ name: 'BMS/AHU1/TemperatureSensor', standard: 'ASHRAE 223P', semantic_id: null }])
+    renderTab()
+    await ready()
+    fireEvent.click(standardTab(/ASHRAE 223P/))
+    expect(within(sensorHead()).getByText('1 in use')).toBeTruthy()
+  })
 })
 
 describe('Vocabulary page — the pointer to Metrics', () => {

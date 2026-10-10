@@ -67,10 +67,14 @@ describe('suggestionForMetric', () => {
     expect(suggested({ name: 'Axes/X/WOBBLE', standard: 'MTConnect' })).toBeNull()
   })
 
-  it('takes the row id for ISO 22400 and ASHRAE 223P', () => {
+  it('takes the row id for ISO 22400', () => {
     expect(suggested({ name: 'OEE/Line1/AVAILABILITY', standard: 'ISO 22400' }))
       .toBe('https://aber.local/semantics/iso22400/AVAILABILITY')
-    expect(suggested({ name: 'BMS/Fan', standard: 'ASHRAE 223P' })).toBe('http://data.ashrae.org/standard223#Fan')
+  })
+
+  it('suggests no 223P class: 223P is a reference, and a class names equipment, not a reading', () => {
+    expect(suggested({ name: 'BMS/Fan', standard: 'ASHRAE 223P' })).toBeNull()
+    expect(suggested({ name: 'BMS/AHU1/Fan', metric_group: 'BMS', standard: 'ASHRAE 223P' })).toBeNull()
   })
 
   it('tells OPC UA points with one browse name apart by the group', () => {
@@ -111,9 +115,10 @@ describe('semanticIdCandidates', () => {
     expect(templateSource(TEMPLATES[0])).toBe('IDTA Digital Nameplate 3.0')
   })
 
-  it('leaves out 223P relations', () => {
+  it('offers no 223P concept, class or relation, though given the vocabulary', () => {
+    expect(byLabel('Fan')).toEqual([])
     expect(byLabel('has property')).toEqual([])
-    expect(byLabel('Fan')).toHaveLength(1)
+    expect(candidates.filter(c => c.standard === 'ASHRAE 223P')).toEqual([])
   })
 })
 

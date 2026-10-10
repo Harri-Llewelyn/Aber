@@ -3,12 +3,13 @@ import { ashrae223Sections, conceptTooltip, isMetricConcept } from '../../utils/
 import { STANDARDS } from '../../utils/standards'
 
 /**
- * The ASHRAE 223P tab of the Vocabulary page. 223P names a thing (`Fan`,
- * `Damper`, `Sensor`), not a reading, so a selected concept names what the point is attached to and
- * the operator still says what is measured and in what type. In use is decided on semantic id
- * alone: 223P's names are ordinary English words that collide with local naming. Relations are
- * listed, since they are part of the standard, but cannot be clicked: the Metrics page's Concept picker
- * does not offer them either, and the two follow the one rule in `isMetricConcept()`.
+ * The ASHRAE 223P tab of the Vocabulary page. 223P is a reference here: a class (`Fan`, `Damper`,
+ * `Sensor`) names the thing a point is attached to, not a reading, so Use starts a metric in the BMS
+ * group, named after the class, with no semantic id. A class is in use when an ASHRAE 223P metric is
+ * named after it or a metric carries its id; a name counts only under the standard, because 223P's
+ * names are ordinary English words that collide with local naming. Relations are listed, since they
+ * are part of the standard, but cannot be clicked: the Metrics page's Concept picker does not offer
+ * them either, and the two follow the one rule in `isMetricConcept()`.
  */
 export function ashrae223VocabularyTab({ vocabulary, catalog, onUseConcept }) {
   const sections = ashrae223Sections(vocabulary).map(s => ({
@@ -21,8 +22,14 @@ export function ashrae223VocabularyTab({ vocabulary, catalog, onUseConcept }) {
   }))
 
   const semanticIds = new Set()
+  const nameTokens = new Set()
   for (const metric of catalog || []) {
     if (metric?.semantic_id) semanticIds.add(metric.semantic_id)
+    // The last segment of a 223P metric's name: `BMS/AHU1/Fan` -> `Fan`.
+    if (metric?.standard === STANDARDS.ASHRAE223 && metric?.name) {
+      const parts = metric.name.split('/')
+      nameTokens.add(parts[parts.length - 1])
+    }
   }
 
   return {
@@ -39,12 +46,12 @@ export function ashrae223VocabularyTab({ vocabulary, catalog, onUseConcept }) {
     ),
     notes: [
       {
-        label: 'These name things, not readings.',
+        label: 'A reference, not a source of ids.',
         body: (
           <>
-            {' '}Unlike the other tabs: <span className="mono">Fan</span> is a class of equipment,
-            not a measurement, so selecting one says what a point is attached to and leaves what is
-            measured to you.
+            {' '}<span className="mono">Fan</span> names equipment, not a reading. Clicking a class
+            starts a metric in the BMS group, named after it, with no semantic id. You choose the
+            datatype, units and id, such as a QUDT quantity kind.
           </>
         )
       },
@@ -54,7 +61,8 @@ export function ashrae223VocabularyTab({ vocabulary, catalog, onUseConcept }) {
       }
     ],
     sections,
-    isUsed: item => !!item.concept.semantic_id && semanticIds.has(item.concept.semantic_id),
+    isUsed: item =>
+      (!!item.concept.semantic_id && semanticIds.has(item.concept.semantic_id)) || nameTokens.has(item.concept.name),
     tooltipFor: item => conceptTooltip(item.concept),
     metaFor: item => (item.concept.concept_kind === 'Class' ? '' : item.concept.concept_kind),
     isActionable: item => isMetricConcept(item.concept),

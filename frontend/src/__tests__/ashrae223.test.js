@@ -107,12 +107,12 @@ describe('ashrae223Prefill', () => {
     expect(ashrae223Prefill(vocabulary[0]).group).toBe(ASHRAE223_GROUP)
   })
 
-  it('carries the ASHRAE semantic id and the standard', () => {
-    expect(ashrae223Prefill(vocabulary[0])).toMatchObject({
-      type: 'Fan',
-      semanticId: 'http://data.ashrae.org/standard223#Fan',
-      standard: STANDARDS.ASHRAE223
-    })
+  it('carries the standard and no semantic id, because 223P is a reference here', () => {
+    // A class names the equipment, not the reading: `Fan` as the id of a speed reading would tell an
+    // AAS consumer the value is a fan.
+    const prefill = ashrae223Prefill(vocabulary[0])
+    expect(prefill).toMatchObject({ type: 'Fan', standard: STANDARDS.ASHRAE223 })
+    expect(prefill).not.toHaveProperty('semanticId')
   })
 
   it('leaves datatype and category unset, because a concept does not imply either', () => {

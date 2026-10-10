@@ -10,7 +10,6 @@ import {
 } from './standards'
 import { kpiByName } from './iso22400'
 import { suggestedGroup } from './opcua'
-import { conceptByName, metricConcepts } from './ashrae223'
 
 /**
  * An MTConnect data item type's suggestion: its concept id, shared by every metric of that type.
@@ -45,7 +44,7 @@ export function vocabularySuggestion(standard, entryName, semanticId) {
  * suggests (`suggestedGroup()`). `null` for a local extension, or an entry the vocabulary no
  * longer holds.
  */
-export function suggestionForMetric(metric, { mtconnect, iso22400, opcua, ashrae223 } = {}) {
+export function suggestionForMetric(metric, { mtconnect, iso22400, opcua } = {}) {
   const segments = (metric?.name || '').split('/')
   if (metric?.sub_type && segments.length > 1 && segments[segments.length - 1] === metric.sub_type) {
     segments.pop()
@@ -66,8 +65,7 @@ export function suggestionForMetric(metric, { mtconnect, iso22400, opcua, ashrae
       const ids = new Set((grouped.length > 0 ? grouped : named).map(p => p.semantic_id))
       return ids.size === 1 ? vocabularySuggestion(STANDARDS.OPCUA, type, [...ids][0]) : null
     }
-    case STANDARDS.ASHRAE223:
-      return vocabularySuggestion(STANDARDS.ASHRAE223, type, conceptByName(ashrae223, type)?.semantic_id)
+    // ASHRAE 223P is a reference here: its classes name equipment, not readings, so it suggests no id.
     default:
       return null
   }
@@ -79,12 +77,12 @@ export const templateSource = (row) =>
 
 /**
  * Every concept the picker offers, as `{ standard, label, semanticId, semanticIdType, detail }`:
- * MTConnect data item types, ISO 22400 KPIs, OPC UA data points, the ASHRAE 223P concepts a metric
- * can attach to, and the IDTA template elements. A template records its element's reference type;
- * a vocabulary id is typed by its shape. MTConnect ids are derived, so choosing a metric's own type
- * here gives exactly its suggestion.
+ * MTConnect data item types, ISO 22400 KPIs, OPC UA data points and the IDTA template elements.
+ * No ASHRAE 223P class: 223P is a reference here, and a class names equipment, not a reading. A
+ * template records its element's reference type; a vocabulary id is typed by its shape. MTConnect
+ * ids are derived, so choosing a metric's own type here gives exactly its suggestion.
  */
-export function semanticIdCandidates({ mtconnect, iso22400, opcua, ashrae223, templates } = {}) {
+export function semanticIdCandidates({ mtconnect, iso22400, opcua, templates } = {}) {
   const candidates = []
   const add = (standard, label, semanticId, semanticIdType, detail) => {
     const id = (semanticId || '').trim()
@@ -100,9 +98,6 @@ export function semanticIdCandidates({ mtconnect, iso22400, opcua, ashrae223, te
   }
   for (const k of iso22400 || []) add(STANDARDS.ISO22400, k.name, k.semantic_id, '', k.description)
   for (const p of opcua || []) add(STANDARDS.OPCUA, p.name, p.semantic_id, '', p.companion_spec)
-  for (const c of metricConcepts(ashrae223)) {
-    add(STANDARDS.ASHRAE223, c.label || c.name, c.semantic_id, '', c.subclass_of ? `Subclass of ${c.subclass_of}` : '')
-  }
   for (const t of templates || []) add(templateSource(t), t.id_short, t.semantic_id, t.semantic_id_type, t.description)
   return candidates
 }
