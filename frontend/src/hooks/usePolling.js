@@ -4,6 +4,9 @@ import { reportRefreshSucceeded, reportRefreshFailed, FAILURE_ABORTED, FAILURE_S
 /** The longest wait between polls after failures. */
 const MAX_BACKOFF_MS = 30000;
 
+/** Back online, each poll runs within this, spread so the pages' polls do not all land at once. */
+export const ONLINE_RETRY_JITTER_MS = 1000;
+
 /**
  * Custom polling hook with AbortController support, error catching, and exponential backoff. Each
  * outcome is reported to lib/connectionState, which is how the page says it has stopped updating.
@@ -27,7 +30,7 @@ export function usePolling(callback, intervalMs = 3000, enabled = true) {
 
     const executePoll = async () => {
       if (isCancelled) return;
-      // Null while a poll is in flight, which is how retryNow tells waiting from running.
+      // Null while a poll is in flight, which is how pollSoon tells waiting from running.
       timeoutId = null;
 
       if (abortController) {
@@ -58,19 +61,20 @@ export function usePolling(callback, intervalMs = 3000, enabled = true) {
       }
     };
 
-    // Back online: a poll waiting out a backoff runs now instead of up to 30 seconds later.
-    const retryNow = () => {
-      if (isCancelled || !timeoutId || currentDelay === intervalMs) return;
+    // Back online: poll within a second rather than at the next turn, which with Realtime on is up
+    // to a minute away, so the first success clears the strip. A poll in flight is left to finish.
+    const pollSoon = () => {
+      if (isCancelled || !timeoutId) return;
       clearTimeout(timeoutId);
-      executePoll();
+      timeoutId = setTimeout(executePoll, Math.random() * ONLINE_RETRY_JITTER_MS);
     };
-    window.addEventListener('online', retryNow);
+    window.addEventListener('online', pollSoon);
 
     executePoll();
 
     return () => {
       isCancelled = true;
-      window.removeEventListener('online', retryNow);
+      window.removeEventListener('online', pollSoon);
       if (timeoutId) clearTimeout(timeoutId);
       if (abortController) abortController.abort();
     };

@@ -1,13 +1,14 @@
 import { renderHook } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { usePolling } from '../hooks/usePolling'
+import { usePolling, ONLINE_RETRY_JITTER_MS } from '../hooks/usePolling'
 import {
   CONNECTION_SESSION_ENDED,
   CONNECTION_STALE,
   STALE_AFTER_MS,
   getConnectionSnapshot,
   reportRealtimeStatus,
-  resetConnectionState
+  resetConnectionState,
+  watchBrowserConnectivity
 } from '../lib/connectionState'
 import { refreshInterval } from '../constants'
 
@@ -22,6 +23,7 @@ describe('usePolling hook', () => {
   afterEach(() => {
     resetConnectionState()
     vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   it('executes poll callback on interval when enabled', async () => {
@@ -96,27 +98,70 @@ describe('usePolling hook', () => {
     expect(getConnectionSnapshot().failing).toBe(false)
   })
 
-  it('polls at once when the browser comes back online during a backoff', async () => {
+  it('polls within the jitter when the browser comes back online during a backoff', async () => {
     const callback = vi.fn().mockRejectedValueOnce(networkError).mockResolvedValue({})
 
     renderHook(() => usePolling(callback, 1000, true))
     await vi.advanceTimersByTimeAsync(100)
     expect(callback).toHaveBeenCalledTimes(1)
 
+    // The backoff alone would wait until 1500 ms.
     window.dispatchEvent(new Event('online'))
-    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(ONLINE_RETRY_JITTER_MS)
     expect(callback).toHaveBeenCalledTimes(2)
     expect(getConnectionSnapshot().failing).toBe(false)
   })
 
-  it('ignores coming online when it is not backing off', async () => {
+  // A short offline spell leaves no poll in a backoff, and with Realtime on the next turn is up to a
+  // minute away. Coming back online must not wait for it.
+  it('polls on coming back online with no poll in a backoff, and the success clears the strip', async () => {
+    const stopWatching = watchBrowserConnectivity()
     const callback = vi.fn().mockResolvedValue({})
-
-    renderHook(() => usePolling(callback, 1000, true))
-    await vi.advanceTimersByTimeAsync(100)
-    window.dispatchEvent(new Event('online'))
-    await vi.advanceTimersByTimeAsync(0)
+    renderHook(() => usePolling(callback, refreshInterval(true), true))
+    await vi.advanceTimersByTimeAsync(5000)
     expect(callback).toHaveBeenCalledTimes(1)
+
+    window.dispatchEvent(new Event('offline'))
+    expect(getConnectionSnapshot().failing).toBe(true)
+    await vi.advanceTimersByTimeAsync(STALE_AFTER_MS)
+    expect(getConnectionSnapshot().status).toBe(CONNECTION_STALE)
+
+    window.dispatchEvent(new Event('online'))
+    await vi.advanceTimersByTimeAsync(ONLINE_RETRY_JITTER_MS)
+    expect(callback).toHaveBeenCalledTimes(2)
+    expect(getConnectionSnapshot().failing).toBe(false)
+
+    // Back on its own schedule afterwards: no extra poll before the interval.
+    await vi.advanceTimersByTimeAsync(refreshInterval(true) - ONLINE_RETRY_JITTER_MS - 1)
+    expect(callback).toHaveBeenCalledTimes(2)
+    stopWatching()
+  })
+
+  it('spreads the polls over the jitter rather than firing them together', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.6)
+    const callback = vi.fn().mockResolvedValue({})
+    renderHook(() => usePolling(callback, refreshInterval(true), true))
+    await vi.advanceTimersByTimeAsync(100)
+
+    window.dispatchEvent(new Event('online'))
+    await vi.advanceTimersByTimeAsync(599)
+    expect(callback).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(callback).toHaveBeenCalledTimes(2)
+  })
+
+  it('leaves a poll in flight to finish when the browser comes back online', async () => {
+    let resolve
+    const callback = vi.fn(() => new Promise((r) => { resolve = r }))
+    renderHook(() => usePolling(callback, refreshInterval(true), true))
+    expect(callback).toHaveBeenCalledTimes(1)
+
+    window.dispatchEvent(new Event('online'))
+    await vi.advanceTimersByTimeAsync(ONLINE_RETRY_JITTER_MS)
+    expect(callback).toHaveBeenCalledTimes(1)
+    resolve({})
+    await vi.advanceTimersByTimeAsync(0)
+    expect(getConnectionSnapshot().failing).toBe(false)
   })
 
   // The steady state of a Realtime outage with REST up: the 60 s reconcile poll keeps working.

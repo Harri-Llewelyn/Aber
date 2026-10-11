@@ -272,8 +272,10 @@ tab; the strip is the signal that matters, because full screen and pinned tabs h
 - **Two flags, each cleared only by its own kind of success.** A poll that fails with a network
   error, a 5xx or a PostgREST connection error, or the browser's `offline` event, sets the refresh
   flag; the next poll that succeeds clears it. A channel's `CHANNEL_ERROR` or `TIMED_OUT` sets the
-  Realtime flag; only `SUBSCRIBED` clears it. Coming back online clears nothing by itself, but a
-  poll waiting out its backoff runs at once.
+  Realtime flag; only `SUBSCRIBED` clears it. Coming back online clears nothing by itself, but
+  every waiting poll then runs within `ONLINE_RETRY_JITTER_MS` (1 second, spread at random so the
+  pages' polls do not land together) instead of at its next turn, which with Realtime on is up to a
+  minute away; the first success clears the strip.
 - **The refresh flag counts at once; the Realtime flag only once no poll has succeeded for
   `REALTIME_RECONCILE_WINDOW_MS` (90 seconds).** Every Realtime page pairs its channel with a
   60-second reconcile poll (`refreshInterval(true)`), which keeps bringing data while the channel is
@@ -698,7 +700,7 @@ has already been told.
 
 ## Testing
 
-Vitest with globals enabled and a jsdom environment. **3,849 tests across 162 files** at the last count (2026-10-11).
+Vitest with globals enabled and a jsdom environment. **3,851 tests across 162 files** at the last count (2026-10-11).
 
 The suite treats an unhandled promise rejection as a defect, not noise — Vitest reports them
 separately and they can mask real failures.
