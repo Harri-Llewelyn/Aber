@@ -1426,8 +1426,10 @@ writable root against #419.
 
 ### Users
 
-Every image this repository builds ends with a numeric, non-root `USER`. The chart runs each one as
-that user and sets `runAsNonRoot: true`, so the kubelet refuses to start the container as root.
+Every image this repository builds, except `supabase-db` (below), ends with a non-root `USER`. It is
+a number in every Dockerfile but `node-red/Dockerfile`, which names its base's user. The chart runs
+each image as the uid in the table and sets `runAsNonRoot: true`, so the kubelet refuses to start
+the container as root.
 Containers that share a pod with one, such as the `wait-for-*` init containers, run as the same
 user. `scripts/check-docs-drift.mjs` (check 56) holds the Dockerfiles, the chart and this table
 together.
