@@ -16,6 +16,9 @@
  * Options:  --no-build          reuse the images already built (`up`)
  *           --only=a,b          build and import only these images (`up`)
  *           --no-tls            skip cert-manager, the broker's TLS listener and the databases' TLS (`up`)
+ *           --network-policy    install with the NetworkPolicy layer on (networkPolicy.enabled), as
+ *                               values-prod.yaml.example has it; k3s's kube-system holds DNS and
+ *                               Traefik, which the namespace values default to (`up`, `reset`)
  *           --e2e               also run the in-cluster conformance Jobs (`up`, `test`); when `up`
  *                               upgrades a release, the Jobs are created suspended and start once
  *                               every workload has rolled out, so they test the new pods
@@ -380,9 +383,10 @@ function keptSecret (key) {
   return releaseValues().secrets?.[key] || crypto.randomBytes(32).toString('hex')
 }
 
-async function installChart ({ tls, e2e, holdE2e = false }) {
+async function installChart ({ tls, e2e, holdE2e = false, networkPolicy = false }) {
   const domain = option('domain') || 'localhost'
-  step(`helm upgrade --install ${RELEASE} on ${domain} (${tls ? 'broker TLS on' : 'no TLS'}${e2e ? ', e2e Jobs on' : ''})`)
+  step(`helm upgrade --install ${RELEASE} on ${domain} (${tls ? 'broker TLS on' : 'no TLS'}` +
+    `${networkPolicy ? ', NetworkPolicies on' : ''}${e2e ? ', e2e Jobs on' : ''})`)
   must('node', ['scripts/sync-helm-chart-files.mjs'], 'the chart files are not mirrored')
   if (!capture('kubectl', ['get', 'namespace', NS]).ok) must('kubectl', ['create', 'namespace', NS], 'namespace')
   const sets = ['--set', `global.publicBaseDomain=${domain}`,
@@ -425,6 +429,15 @@ async function installChart ({ tls, e2e, holdE2e = false }) {
   if (tls) sets.push('--set', 'mosquitto.tls.enabled=true', '--set', 'postgresTls.enabled=true',
     // The CA the two listeners are issued from joins the backup (ensureCertManager names it).
     '--set', 'backup.ca.secretName=aber-ca-key-pair')
+  if (networkPolicy) {
+    sets.push('--set', 'networkPolicy.enabled=true',
+      // The off-site destination the backup service's suite starts for itself, a MinIO in a
+      // namespace of its own (backup-service/test_backup_service.py, test_08); a site lists its own.
+      '--set-json', `backupService.offsiteEgress=${JSON.stringify([{
+        to: [{ namespaceSelector: { matchLabels: { 'kubernetes.io/metadata.name': 'rehearsal-offsite' } } }],
+        ports: [{ protocol: 'TCP', port: 9000 }],
+      }])}`)
+  }
   if (e2e) {
     // The validate Job follows browser-facing URLs, which resolve to the pod itself under the dev
     // domain; hostAliases point them at Traefik instead.
@@ -787,7 +800,7 @@ async function up () {
   // install has no older pods for them to meet, and creates them running, as CI's does.
   const upgrade = capture('helm', ['status', RELEASE, '-n', NS]).ok
   const holdE2e = flag('e2e') && upgrade
-  await installChart({ tls, e2e: flag('e2e'), holdE2e })
+  await installChart({ tls, e2e: flag('e2e'), holdE2e, networkPolicy: flag('network-policy') })
   // Only an upgrade has pods older than the images just imported. After an install every pod
   // started from them, and a restart would only interrupt the e2e Jobs already running.
   if (upgrade && !flag('no-build')) {
@@ -901,7 +914,7 @@ async function reset () {
   // The chart keeps its claims on uninstall by design (helm.sh/resource-policy: keep); a reset is
   // the one time they go. The namespace goes with them so nothing else lingers either.
   run('kubectl', ['delete', 'namespace', NS, '--ignore-not-found', '--timeout=5m'])
-  await installChart({ tls: !flag('no-tls'), e2e: flag('e2e') })
+  await installChart({ tls: !flag('no-tls'), e2e: flag('e2e'), networkPolicy: flag('network-policy') })
   await waitForStack()
   helmTest()
   status()

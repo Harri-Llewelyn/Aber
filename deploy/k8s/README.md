@@ -258,6 +258,8 @@ Its other options:
 - `--no-build` reuses the images already in the node.
 - `--only=ingestion` rebuilds a subset.
 - `--e2e` adds the in-cluster conformance Jobs.
+- `--network-policy` turns the NetworkPolicy layer on, as a site's values do. CI's k8s-validation
+  runs with it.
 
 On an upgrade, `up` sets `e2e.suspend` and starts the Jobs only once every workload has rolled out.
 That way they test the new pods, not the ones being replaced. Helm creates those Jobs during the
@@ -1300,6 +1302,13 @@ does not exempt kubelet probes from ingress policy. Add an ingress allow from th
 - `supabase-db → node-red:1880`. A webhook to Node-RED goes there **directly**, not through the
   gateway. pg_net has no retries and no dead-letter queue (DLQ), so blocking this flow drops every
   notification silently.
+
+**With `ingress.tls.enabled`, the edge functions reach the ingress controller.** Before the gateway
+dialog offers the one-liner, `gateway-bundle` fetches the root certificate from the dashboard's
+public host, over plain HTTP, as a fresh appliance does. A rule admits the controller's namespace on
+ports 80 and 8000, its HTTP port for ingress-nginx and for k3s's Traefik. If that host resolves to an
+address outside the cluster, allow it with `networkPolicy.extraEgress`. Blocked, the dialog offers
+only the bundle, and says the root could not be fetched.
 
 **The forge's login depends on a policy, so it gets one whether or not you enable this layer.** With
 `gitea.enabled: true`, the chart renders **one** NetworkPolicy even when

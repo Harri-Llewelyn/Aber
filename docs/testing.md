@@ -498,6 +498,12 @@ npm run dev:test -- --filter=i3x
 **`validate.py` runs in-cluster as a Job (`e2e.enabled`) and from the host through the dev loop's
 port-forwards**, and the two agreeing is the wiring check.
 
+**CI runs the lane with the NetworkPolicy layer on** (`dev-cluster up --e2e --network-policy`), as
+`values-prod.yaml.example` has it. A flow the chart's edge list does not name is dropped at its
+destination, and nothing logs a policy decision, so this is where a missing edge shows. `npm run
+dev:up -- --network-policy` does the same on a laptop. Without the flag the layer stays off, which
+is the chart's default.
+
 ### What validate.py leaves behind
 
 Nothing, when its check 16 passes. The run deletes what it created: the Directory rows its `SEEDED`
@@ -728,7 +734,7 @@ CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs nine jobs:
 | **frontend-build** | Vitest, the mirrored-logic drift guards, production bundle |
 | **helm-chart** | `helm lint`, render, API-schema validation, chart guard rails |
 | **edge-function-auth-test** | Auth ladders and RLS against a real Postgres |
-| **k8s-validation** | k3d cluster through `dev-cluster up --e2e`: `helm test`, `validate.py` in-cluster, the stack lane through port-forwards, the i3X conformance suite, ingress assertions |
+| **k8s-validation** | k3d cluster through `dev-cluster up --e2e --network-policy`: `helm test`, `validate.py` in-cluster, the stack lane through port-forwards, the i3X conformance suite, ingress assertions, all with NetworkPolicies on |
 | **site-install-rehearsal** | `site-rehearsal install` on k3d: the checkout installed as a new site, with values from `setup.mjs`, never `values-dev.yaml` (*The install and upgrade rehearsals*, below) |
 | **upgrade-rehearsal** | `site-rehearsal upgrade` on k3d: the last release installed as published, then `helm upgrade` to the checkout with the same values |
 | **secret-scan** | gitleaks over every commit in a full clone and the working tree, on every push |
@@ -814,9 +820,17 @@ an edge admits, is answered, and one no rule admits is not. Together with the re
 this shows that every flow the install or upgrade, its hook Jobs, `helm test` and the sign-in
 through Traefik need is admitted on k3s, and that nothing else is. **It cannot show** whether the API-server rules
 are right: k3s does not filter a pod's traffic to the node it runs on, which is where the API server
-is. Nor can it show flows the install never exercises, such as the cold archive at 03:15, the
-backups, `e2e.enabled` or gateways from outside the cluster. And it shows k3s's policy controller
-only, not Calico's or Cilium's.
+is. Nor can it show flows the install never exercises, such as the cold archive at 03:15 or
+gateways from outside the cluster. And it shows k3s's policy controller only, not Calico's or
+Cilium's. k8s-validation covers more of those flows: it runs `validate.py`, the AAS export suite,
+the stack lane (backups and the playback replay among it) and the i3X conformance suite with the
+layer on.
+
+**No CI job installs with the layer off**, though that is the chart's default and what most sites
+run. The helm-chart job's render checks hold that default: with the layer off, the forge's policy
+is the only one rendered. Every developer's `npm run dev:up` installs without the layer. A second,
+smaller k3d job with the layer off would cost another cluster's minutes on every push, for a
+configuration that differs from the one CI runs only in its NetworkPolicy objects.
 
 Measured on a 16 GB laptop with the image builds cached, `install` took 8 minutes with
 NetworkPolicies on and `upgrade` 7½ to 12½, most of the spread in pulling the published images. CI builds every image

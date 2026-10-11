@@ -53,6 +53,7 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "supabase-db"        "to" "timescaledb"        "port" 5432 "why" "postgres_fdw -- public.telemetry (M2)")
   (dict "from" "ingestion"          "to" "timescaledb"        "port" 5432 "why" "telemetry writes")
   (dict "from" "grafana"            "to" "timescaledb"        "port" 5432 "why" "the historian datasource")
+  (dict "from" "grafana"            "to" "supabase-db"        "port" 5432 "why" "the Supabase datasource, as grafana_reader: the storage footprint and the Gateway Fleet Health dashboard")
 
   (dict "from" "supabase-db"        "to" $gw      "port" 8000 "why" "pg_net: edge functions and REST called from SQL")
   (dict "from" "supabase-db"        "to" "node-red"           "port" 1880 "why" "pg_net: WEBHOOKS to a site's flows, direct, no retries/DLQ")
@@ -360,6 +361,38 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressControllerNamespace }}
+{{- end }}
+{{- if and .Values.supabaseFunctions.enabled .Values.ingress.tls.enabled }}
+---
+{{/*
+The functions reaching the ingress controller: gateway-bundle offers the one-liner only once
+ABER_CA_URL, plain HTTP on the dashboard's public host, answers as a fresh appliance's stage 0
+would, and that host resolves to the controller. Its HTTP container port after the Service's
+DNAT: 8000 for k3s's Traefik, 80 for ingress-nginx. A host that resolves outside the cluster
+needs networkPolicy.extraEgress instead.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-supabase-functions-to-ingress-controller" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" "supabase-functions") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" . "component" "supabase-functions") | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressControllerNamespace }}
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 8000
 {{- end }}
 {{- if and .Values.mosquitto.enabled .Values.mosquitto.external.enabled }}
 ---
