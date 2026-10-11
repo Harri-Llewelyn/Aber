@@ -165,7 +165,7 @@ export const VALID_TABS = [
 // Realtime rollout flag and the polling intervals paired with it. REALTIME_ENABLED gates every
 // supabase.channel() subscription; off, the tabs fall back to the 3s poll. With Realtime on,
 // polling becomes a reconciliation loop rather than the refresh mechanism, and it is kept because
-// Realtime has no replay and usePolling carries the 401 stop and backoff (hooks/useRealtimeTable.js).
+// Realtime has no replay and usePolling carries the backoff (hooks/useRealtimeTable.js).
 export const REALTIME_ENABLED = readFlag('VITE_ENABLE_REALTIME');
 export const POLL_INTERVAL_MS = 3000;
 const RECONCILE_INTERVAL_MS = 60000;

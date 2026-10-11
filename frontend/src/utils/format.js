@@ -21,8 +21,14 @@ export function formatDateTime(ts) {
   const d = toDate(ts)
   if (!d) return NO_VALUE
   const date = d.toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', year: 'numeric' })
-  const time = d.toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit', hour12: false })
-  return `${date}, ${time}`
+  return `${date}, ${formatClockTime(d)}`
+}
+
+/** "14:30", the time part of `formatDateTime`, in the viewer's time zone. Fallback "—". */
+export function formatClockTime(ts) {
+  const d = toDate(ts)
+  if (!d) return NO_VALUE
+  return d.toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
 /** "29 Sept 2026" in the viewer's time zone. Fallback "—". */
