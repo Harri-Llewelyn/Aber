@@ -1304,6 +1304,24 @@ Studio's advisor keeps listing it. `audit_domain_for()` and `proposable_columns(
 each runs once per written row, about 3 µs a call more in a PL/pgSQL loop, and nothing reads
 through them. The historian's `telemetry_gapfill()` is PL/pgSQL, never inlined, and pinned too.
 
+**A policy calls it in a sub-select (0177).** `has_role()` and `has_authority()` are SECURITY
+DEFINER SQL, which the planner never inlines. In a predicate that also names a column, a bare call
+runs once for every row scanned; written `(SELECT public.has_role(...))` it is an initplan that runs
+once per statement, with the same answer because both are STABLE. The same goes for `auth.uid()`.
+0177 rewrote the eight policies that mixed the two, the Audit Trail's two among them. On a test
+database holding 5,062 trail rows, three in ten in the security lane (median of nine runs):
+
+| read | before | after |
+| :--- | ---: | ---: |
+| `count(*)` of the trail, no role | 431 ms | 2.2 ms |
+| `count(*)` of the trail, Shopfloor_Manager | 71 ms | 2.1 ms |
+| `audit_trail_page(200)`, Shopfloor_Manager | 80 ms | 6.6 ms |
+| `audit_trail_page(200)`, Administrator | 86 ms | 11 ms |
+| `count(*)` of 5,000 change proposals, no role | 66 ms | 0.6 ms |
+
+Studio's advisor (lint 0003) sees only the `auth.uid()` half of this, so a new policy wraps every
+`auth.uid()`, `has_role()` and `has_authority()` call whether the advisor asks or not.
+
 ### People are added, given roles and removed from the dashboard (0166)
 
 The People tab on Access Control is Administrator only, and has two halves.

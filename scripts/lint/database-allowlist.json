@@ -1,11 +1,6 @@
 {
   "splinter": {
     "anon_security_definer_function_executable_public_auth_pre_request_": "PostgREST's db-pre-request hook: it runs for every request before the role is considered, so anon must execute it (0001 re-grants it after its sweep).",
-    "auth_rls_init_plan_public_change_proposals_change_proposals_insert_proposer": "Tracked in #386.",
-    "auth_rls_init_plan_public_change_proposals_change_proposals_select_own_or_approver": "Tracked in #386.",
-    "auth_rls_init_plan_public_change_proposals_change_proposals_update_own_open": "Tracked in #386.",
-    "auth_rls_init_plan_public_principal_permissions_principal_permissions_select_own_or_admin": "Tracked in #386.",
-    "auth_rls_init_plan_public_user_roles_user_roles_select_own_or_privileged": "Tracked in #386.",
     "authenticated_security_definer_function_executable_public_approve_proposal_p_proposal_id uuid": "An RPC endpoint: authenticated calls it on purpose, and it gates its caller in its own body (has_role, has_authority or a require_*_caller check). Add a new one only once that is true.",
     "authenticated_security_definer_function_executable_public_archive_credential_is_set_": "An RPC endpoint: authenticated calls it on purpose, and it gates its caller in its own body (has_role, has_authority or a require_*_caller check). Add a new one only once that is true.",
     "authenticated_security_definer_function_executable_public_auth_pre_request_": "An RPC endpoint: authenticated calls it on purpose, and it gates its caller in its own body (has_role, has_authority or a require_*_caller check). Add a new one only once that is true.",
