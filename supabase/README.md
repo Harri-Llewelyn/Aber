@@ -190,7 +190,7 @@ whatever the target: `auth.users`, `auth.sessions`, `auth.refresh_tokens`, `stor
 detector aborts one side. With a writer updating an area every 2 ms during the replay, db-init's
 `0001` died on a deadlock in 6 of 9 replays when each statement committed alone, and in 2 of 9 with
 one transaction per table, which takes those locks 56 times per boot instead of 207. db-init
-retries a deadlock twice. The writer lost one or two updates per replay either way. Re-creating
+retries a deadlock twice. The writer lost up to three updates per replay to a deadlock before, and one or two after. Re-creating
 only what changed would take none of these locks on a boot that changes nothing.
 
 ### Seeding is audited now
