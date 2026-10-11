@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   STALE_AFTER_MS,
+  REALTIME_RECONCILE_WINDOW_MS,
   FAILURE_ABORTED,
   FAILURE_SESSION,
   FAILURE_UNREACHABLE,
@@ -17,6 +18,7 @@ import {
   subscribeToConnection,
   resetConnectionState
 } from '../lib/connectionState'
+import { refreshInterval } from '../constants'
 
 /**
  * The shared connection state behind the strip under the top bar: what marks it failing, what
@@ -180,7 +182,8 @@ describe('the connection state', () => {
   })
 
   describe('Realtime', () => {
-    it('marks failing on CHANNEL_ERROR and clears on SUBSCRIBED', () => {
+    // With no refresh to vouch for the data, a channel failure counts at once.
+    it('marks failing on CHANNEL_ERROR when nothing has refreshed, and clears on SUBSCRIBED', () => {
       reportRealtimeStatus('CHANNEL_ERROR')
       expect(getConnectionSnapshot().failing).toBe(true)
       vi.advanceTimersByTime(STALE_AFTER_MS)
@@ -207,9 +210,98 @@ describe('the connection state', () => {
       expect(getConnectionSnapshot().failing).toBe(true)
     })
 
-    it('is cleared by a poll that works, as well as by SUBSCRIBED', () => {
-      reportRealtimeStatus('CHANNEL_ERROR')
+    it('sits a little above the 60-second reconcile poll every Realtime page pairs with', () => {
+      expect(REALTIME_RECONCILE_WINDOW_MS).toBe(90000)
+      expect(REALTIME_RECONCILE_WINDOW_MS).toBeGreaterThan(refreshInterval(true))
+    })
+
+    // The reconcile poll still brings data, so "Not updating" would be false. Showing for 50 s and
+    // hiding for 10 s each cycle would be worse than either steady state on a wall display.
+    it('never shows while Realtime is down and the reconcile poll keeps working', () => {
+      const seen = []
+      const unsubscribe = subscribeToConnection((s) => seen.push(s.failing))
       reportRefreshSucceeded()
+      reportRealtimeStatus('CHANNEL_ERROR')
+
+      for (let cycle = 0; cycle < 6; cycle++) {
+        // The channel keeps retrying and failing between polls.
+        for (let t = 0; t < 6; t++) {
+          vi.advanceTimersByTime(10000)
+          reportRealtimeStatus(t % 2 ? 'TIMED_OUT' : 'CHANNEL_ERROR')
+          expect(getConnectionSnapshot().failing).toBe(false)
+        }
+        reportRefreshSucceeded()
+      }
+      vi.advanceTimersByTime(REALTIME_RECONCILE_WINDOW_MS - 1)
+      expect(getConnectionSnapshot().failing).toBe(false)
+      expect(seen).not.toContain(true)
+      unsubscribe()
+    })
+
+    it('shows when Realtime is down and the polls are failing too', () => {
+      reportRefreshSucceeded()
+      reportRealtimeStatus('CHANNEL_ERROR')
+      reportRefreshFailed(networkError)
+      vi.advanceTimersByTime(STALE_AFTER_MS)
+      expect(status()).toBe(CONNECTION_STALE)
+    })
+
+    // A page whose channel has no paired poll, or whose poll has stopped reporting.
+    it('shows once Realtime is down and no refresh has worked for the window', () => {
+      reportRefreshSucceeded()
+      const lastGood = Date.now()
+      reportRealtimeStatus('CHANNEL_ERROR')
+
+      vi.advanceTimersByTime(REALTIME_RECONCILE_WINDOW_MS - 1)
+      expect(getConnectionSnapshot().failing).toBe(false)
+      vi.advanceTimersByTime(1)
+      expect(getConnectionSnapshot().failing).toBe(true)
+      expect(status()).toBe(CONNECTION_OK)
+
+      // The threshold counts from when it became failing, and "since" is the last good refresh.
+      vi.advanceTimersByTime(STALE_AFTER_MS - 1)
+      expect(status()).toBe(CONNECTION_OK)
+      vi.advanceTimersByTime(1)
+      expect(getConnectionSnapshot()).toEqual({ status: CONNECTION_STALE, failing: true, since: lastGood })
+    })
+
+    it('counts the window from the channel failing when that is later than the last refresh', () => {
+      reportRefreshSucceeded()
+      vi.advanceTimersByTime(REALTIME_RECONCILE_WINDOW_MS + 5000)
+      reportRealtimeStatus('CHANNEL_ERROR')
+      expect(getConnectionSnapshot().failing).toBe(true)
+      vi.advanceTimersByTime(STALE_AFTER_MS)
+      expect(status()).toBe(CONNECTION_STALE)
+    })
+
+    it('does not clear a refresh failure on SUBSCRIBED alone', () => {
+      reportRefreshFailed(networkError)
+      reportRealtimeStatus('SUBSCRIBED')
+      vi.advanceTimersByTime(STALE_AFTER_MS)
+      expect(status()).toBe(CONNECTION_STALE)
+
+      reportRealtimeStatus('SUBSCRIBED')
+      expect(status()).toBe(CONNECTION_STALE)
+      reportRefreshSucceeded()
+      expect(status()).toBe(CONNECTION_OK)
+    })
+
+    it('does not clear the Realtime flag on a refresh alone: it only keeps it from showing', () => {
+      reportRealtimeStatus('CHANNEL_ERROR')
+      vi.advanceTimersByTime(STALE_AFTER_MS)
+      expect(status()).toBe(CONNECTION_STALE)
+
+      reportRefreshSucceeded()
+      expect(status()).toBe(CONNECTION_OK)
+      expect(getConnectionSnapshot().failing).toBe(false)
+
+      // Still down, and nothing has refreshed since: it counts again once the window passes.
+      vi.advanceTimersByTime(REALTIME_RECONCILE_WINDOW_MS + STALE_AFTER_MS)
+      expect(status()).toBe(CONNECTION_STALE)
+
+      reportRealtimeStatus('SUBSCRIBED')
+      expect(status()).toBe(CONNECTION_OK)
+      vi.advanceTimersByTime(REALTIME_RECONCILE_WINDOW_MS * 3)
       expect(getConnectionSnapshot().failing).toBe(false)
     })
   })

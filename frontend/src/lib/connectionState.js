@@ -8,6 +8,13 @@
 /** How long a failure must last before anything is shown, so one dropped request never flashes. */
 export const STALE_AFTER_MS = 10000
 
+/**
+ * How long a Realtime failure is tolerated while refreshes keep working. A little above the 60 s
+ * reconcile poll that every Realtime page pairs with (refreshInterval(true) in constants.js), so a
+ * channel that is down while the poll still brings data never shows the strip.
+ */
+export const REALTIME_RECONCILE_WINDOW_MS = 90000
+
 /** What `reportRefreshFailed` sorts an error into. */
 export const FAILURE_ABORTED = 'aborted'
 export const FAILURE_SESSION = 'session'
@@ -34,16 +41,37 @@ const UNREACHABLE_CODE = /^(PGRST00\d|08[0-9A-Z]{3}|57P0[123])$/
 const SESSION_CODE = /^PGRST30[123]$/
 const SESSION_MESSAGE = /jwt expired|jwserror|bad_jwt/i
 
-let failingSince = null
+// Two flags, each cleared only by its own kind of success. A refresh failure counts at once. A
+// Realtime failure counts only once no refresh has worked for REALTIME_RECONCILE_WINDOW_MS: the
+// reconcile poll still brings data meanwhile, and "Not updating" would be false.
+let refreshFailingSince = null
+let realtimeFailingSince = null
 let lastRefreshAt = null
 let sessionEnded = false
-let shownTimer = null
+let timer = null
 const listeners = new Set()
-let snapshot = computeSnapshot()
+let snapshot = computeSnapshot(Date.now())
 
-function computeSnapshot() {
+/** When a Realtime failure starts to count: the later of the failure and the window's end. */
+function realtimeCountsFrom() {
+  if (realtimeFailingSince === null) return null
+  return lastRefreshAt === null
+    ? realtimeFailingSince
+    : Math.max(realtimeFailingSince, lastRefreshAt + REALTIME_RECONCILE_WINDOW_MS)
+}
+
+/** When the connection became failing under the rule above, or null while it is not. */
+function failingSinceAt(now) {
+  const realtime = realtimeCountsFrom()
+  const candidates = [refreshFailingSince, realtime !== null && realtime <= now ? realtime : null]
+    .filter((t) => t !== null)
+  return candidates.length ? Math.min(...candidates) : null
+}
+
+function computeSnapshot(now) {
+  const failingSince = failingSinceAt(now)
   if (failingSince === null) return { status: CONNECTION_OK, failing: false, since: null }
-  const shown = Date.now() - failingSince >= STALE_AFTER_MS
+  const shown = now - failingSince >= STALE_AFTER_MS
   return {
     status: !shown ? CONNECTION_OK : sessionEnded ? CONNECTION_SESSION_ENDED : CONNECTION_STALE,
     failing: true,
@@ -52,27 +80,33 @@ function computeSnapshot() {
   }
 }
 
-function emit() {
-  const next = computeSnapshot()
-  if (next.status === snapshot.status && next.failing === snapshot.failing && next.since === snapshot.since) return
-  snapshot = next
-  for (const fn of listeners) fn(snapshot)
+/** The next moment the snapshot can change with no report to prompt it, or null. */
+function nextChangeAt(now) {
+  const realtime = realtimeCountsFrom()
+  const failingSince = failingSinceAt(now)
+  const candidates = [
+    realtime !== null && realtime > now ? realtime : null,
+    failingSince !== null && failingSince + STALE_AFTER_MS > now ? failingSince + STALE_AFTER_MS : null
+  ].filter((t) => t !== null)
+  return candidates.length ? Math.min(...candidates) : null
 }
 
-function markFailing() {
-  if (failingSince === null) {
-    failingSince = Date.now()
-    // Re-evaluated once the failure is old enough to show; nothing else would emit at that moment.
-    shownTimer = setTimeout(() => { shownTimer = null; emit() }, STALE_AFTER_MS)
+/** Recompute, tell the listeners if anything changed, and wake again at the next change. */
+function reevaluate() {
+  const now = Date.now()
+  const next = computeSnapshot(now)
+  if (next.status !== snapshot.status || next.failing !== snapshot.failing || next.since !== snapshot.since) {
+    snapshot = next
+    for (const fn of listeners) fn(snapshot)
   }
-  emit()
+  if (timer) { clearTimeout(timer); timer = null }
+  const at = nextChangeAt(now)
+  if (at !== null) timer = setTimeout(reevaluate, at - now)
 }
 
-function clearFailing() {
-  failingSince = null
-  sessionEnded = false
-  if (shownTimer) { clearTimeout(shownTimer); shownTimer = null }
-  emit()
+function markRefreshFailing() {
+  if (refreshFailingSince === null) refreshFailingSince = Date.now()
+  reevaluate()
 }
 
 /**
@@ -100,10 +134,15 @@ export function classifyRefreshError(err) {
   return FAILURE_OTHER
 }
 
-/** A refresh worked: the page is current again. */
+/**
+ * A refresh worked: the page is current again. Clears a refresh failure, and keeps a Realtime
+ * failure from counting for the next REALTIME_RECONCILE_WINDOW_MS without clearing it.
+ */
 export function reportRefreshSucceeded() {
   lastRefreshAt = Date.now()
-  clearFailing()
+  refreshFailingSince = null
+  sessionEnded = false
+  reevaluate()
 }
 
 /**
@@ -115,26 +154,32 @@ export function reportRefreshFailed(err) {
   if (kind === FAILURE_SESSION) {
     // Set before marking, so a failure already old enough to show switches message at once.
     sessionEnded = true
-    markFailing()
+    markRefreshFailing()
   } else if (kind === FAILURE_UNREACHABLE) {
-    markFailing()
+    markRefreshFailing()
   }
   return kind
 }
 
-/** A Realtime channel's subscribe status. CLOSED is a channel being removed, and says nothing. */
+/**
+ * A Realtime channel's subscribe status. An error or a timeout sets the Realtime flag and only
+ * SUBSCRIBED clears it; CLOSED is a channel being removed, and says nothing.
+ */
 export function reportRealtimeStatus(status) {
-  if (status === 'SUBSCRIBED') clearFailing()
-  else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') markFailing()
+  if (status === 'SUBSCRIBED') realtimeFailingSince = null
+  else if ((status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') && realtimeFailingSince === null) {
+    realtimeFailingSince = Date.now()
+  } else return
+  reevaluate()
 }
 
 /**
- * Follow the browser's own view of the network: offline marks the connection failing at once.
- * Coming back online clears nothing; the next refresh that works does. Returns the cleanup.
+ * Follow the browser's own view of the network: offline marks refreshes failing at once. Coming
+ * back online clears nothing; the next refresh that works does. Returns the cleanup.
  */
 export function watchBrowserConnectivity(target = window) {
-  const onOffline = () => markFailing()
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) markFailing()
+  const onOffline = () => markRefreshFailing()
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) markRefreshFailing()
   target.addEventListener('offline', onOffline)
   return () => target.removeEventListener('offline', onOffline)
 }
@@ -154,9 +199,9 @@ export function subscribeToConnection(fn) {
  * cannot show the moment someone signs in. Keeps the listeners, which belong to mounted readers.
  */
 export function resetConnectionState() {
-  failingSince = null
+  refreshFailingSince = null
+  realtimeFailingSince = null
   lastRefreshAt = null
   sessionEnded = false
-  if (shownTimer) { clearTimeout(shownTimer); shownTimer = null }
-  emit()
+  reevaluate()
 }

@@ -269,10 +269,18 @@ shows `common/ConnectionStrip.jsx` under the top bar once a failure has lasted
 `STALE_AFTER_MS` (10 seconds). The tab title then leads with "Not updating · ", for a background
 tab; the strip is the signal that matters, because full screen and pinned tabs hide the title.
 
-- **What marks it failing:** a poll that fails with a network error, a 5xx or a PostgREST
-  connection error; a channel's `CHANNEL_ERROR` or `TIMED_OUT`; the browser's `offline` event. The
-  first poll that succeeds, or a channel's `SUBSCRIBED`, clears it. Coming back online clears
-  nothing by itself, but a poll waiting out its backoff runs at once.
+- **Two flags, each cleared only by its own kind of success.** A poll that fails with a network
+  error, a 5xx or a PostgREST connection error, or the browser's `offline` event, sets the refresh
+  flag; the next poll that succeeds clears it. A channel's `CHANNEL_ERROR` or `TIMED_OUT` sets the
+  Realtime flag; only `SUBSCRIBED` clears it. Coming back online clears nothing by itself, but a
+  poll waiting out its backoff runs at once.
+- **The refresh flag counts at once; the Realtime flag only once no poll has succeeded for
+  `REALTIME_RECONCILE_WINDOW_MS` (90 seconds).** Every Realtime page pairs its channel with a
+  60-second reconcile poll (`refreshInterval(true)`), which keeps bringing data while the channel is
+  down, so "Not updating" would be false. Letting each poll clear a Realtime failure instead made
+  the strip show for 50 seconds and hide for 10 in every cycle, which on a wall display is worse
+  than either steady state. The threshold counts from when the connection became failing under
+  this rule; "since" is still the last refresh that worked.
 - **What does not:** a 4xx other than 401. The server answered, so the connection is not the
   problem, and a page that never loads for one role should not claim the network is down.
 - **The status is mostly gone by the time an error reaches a poll.** supabase-js returns a
@@ -690,7 +698,7 @@ has already been told.
 
 ## Testing
 
-Vitest with globals enabled and a jsdom environment. **3,676 tests across 152 files** at the last count (2026-10-03).
+Vitest with globals enabled and a jsdom environment. **3,849 tests across 162 files** at the last count (2026-10-11).
 
 The suite treats an unhandled promise rejection as a defect, not noise — Vitest reports them
 separately and they can mask real failures.

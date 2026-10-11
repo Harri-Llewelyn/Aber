@@ -6,8 +6,10 @@ import {
   CONNECTION_STALE,
   STALE_AFTER_MS,
   getConnectionSnapshot,
+  reportRealtimeStatus,
   resetConnectionState
 } from '../lib/connectionState'
+import { refreshInterval } from '../constants'
 
 const networkError = { message: 'TypeError: Failed to fetch', details: '', hint: '', code: '' }
 
@@ -115,6 +117,21 @@ describe('usePolling hook', () => {
     window.dispatchEvent(new Event('online'))
     await vi.advanceTimersByTimeAsync(0)
     expect(callback).toHaveBeenCalledTimes(1)
+  })
+
+  // The steady state of a Realtime outage with REST up: the 60 s reconcile poll keeps working.
+  it('keeps the strip away while Realtime is down and a 60-second poll keeps working', async () => {
+    const callback = vi.fn().mockResolvedValue({})
+    renderHook(() => usePolling(callback, refreshInterval(true), true))
+    await vi.advanceTimersByTimeAsync(0)
+    reportRealtimeStatus('CHANNEL_ERROR')
+
+    for (let i = 0; i < 50; i++) {
+      await vi.advanceTimersByTimeAsync(5000)
+      if (i % 3 === 0) reportRealtimeStatus('TIMED_OUT')
+      expect(getConnectionSnapshot().failing).toBe(false)
+    }
+    expect(callback.mock.calls.length).toBeGreaterThan(4)
   })
 
   it('reports nothing for a poll that settles after unmount', async () => {
