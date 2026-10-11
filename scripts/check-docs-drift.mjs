@@ -979,6 +979,56 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 59. No replayed DROP leaves a gap a request can fall into. A policy or trigger dropped and
+// re-created in separate transactions leaves a reader an empty table and a write no trigger for a
+// moment on every boot, so each DROP POLICY or DROP TRIGGER sits between BEGIN and COMMIT with
+// its CREATE. And 0001 never drops the historian's server, which would take the telemetry views.
+// -------------------------------------------------------------------------------------------------
+{
+  const dir = 'supabase/migrations';
+  // Released before the rule, and not edited since. Each entry says why its gap is tolerable.
+  const BARE_PAIRS_RELEASED = {
+    '0164_a_host_gateways_credential_can_be_shown_again.sql':
+      'one trigger; a gateway archived or deleted in the gap keeps the credential it would have forgotten',
+    '0168_every_schema_attached_to_a_device_counts.sql':
+      'one audit trigger; a schema attached or detached in the gap leaves no audit row',
+    '0173_the_platform_database_recovers_to_a_moment.sql':
+      'one policy, read by pg_monitor alone; the exporter misses at most one scrape',
+  };
+  const files = readdirSync(join(REPO, dir)).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  const bare = [];
+  for (const name of files) {
+    if (name in BARE_PAIRS_RELEASED) continue;
+    const lines = read(`${dir}/${name}`).split('\n');
+    let open = false;
+    lines.forEach((line, i) => {
+      if (/^BEGIN;\s*$/.test(line)) open = true;
+      else if (/^COMMIT;\s*$/.test(line)) open = false;
+      const drop = /^DROP (POLICY|TRIGGER) IF EXISTS (\S+) ON (\S+);/.exec(line);
+      if (!drop) return;
+      const create = new RegExp(`^CREATE (?:OR REPLACE )?(?:CONSTRAINT )?${drop[1]} ${drop[2].replace(/[.*+?^$(){}|[\]\\]/g, '\\$&')}\\b`);
+      let committed = !open;
+      for (let j = i + 1; j < lines.length && !committed; j++) {
+        if (create.test(lines[j])) break;
+        if (/^COMMIT;\s*$/.test(lines[j])) committed = true;
+      }
+      if (committed) bare.push(`${name}:${i + 1} ${drop[1]} ${drop[2]} ON ${drop[3]}`);
+    });
+  }
+  const dropsServer = /^\s*DROP SERVER\b/im.test(read(`${dir}/0001_baseline_schema.sql`));
+  for (const b of bare) {
+    fail(`${b} is dropped and re-created in separate transactions: wrap the table's DROP/CREATE pairs in BEGIN; ... COMMIT;`);
+  }
+  if (dropsServer) fail('0001 drops the historian\'s foreign server, which takes every telemetry view with it until section 4 rebuilds them; alter it in place');
+  for (const f of Object.keys(BARE_PAIRS_RELEASED)) {
+    if (!files.includes(f)) fail(`BARE_PAIRS_RELEASED names ${f}, which is not an applied migration; delete the entry`);
+  }
+  if (!bare.length && !dropsServer) {
+    pass('every replayed policy and trigger DROP commits with its CREATE, and 0001 alters the historian\'s server in place');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 9e. The baseline makes the audit trail's monthly partitions before its default partition and
 // before any trigger. On a first install the stack writes while db-init is still running; an
 // audited row that reaches the default for a month with no partition stops that partition from

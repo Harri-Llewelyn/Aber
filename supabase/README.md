@@ -165,6 +165,34 @@ foreign tables persist across boots like tables. So a retired foreign table, or 
 or option, needs its own statement in a migration, and a view over one whose columns change needs
 DROP and CREATE.
 
+**Nothing else in the replay leaves a gap a request can fall into.** Three more were measured with a
+probe that reads and writes as a signed-in Administrator while the chain replays:
+
+- **Policies and triggers.** `0001` drops and re-creates 80 policies and 47 triggers on every boot.
+  Each statement used to commit on its own. Between a policy's DROP and CREATE a reader found the
+  table empty and an UPDATE matched no row. Between a trigger's, a write skipped it: one audited
+  write in the probe's first run left no audit row. Each table's policy pairs, and its trigger
+  pairs, now commit as one transaction, 56 in all (0177's eight do the same).
+- **`auth_pre_request()`**, PostgREST's hook for every request, was revoked and granted again in
+  two statements. They are now one `DO` block.
+- **`audit_trail.id` lost its default.** The table block dropped every default its `CREATE TABLE`
+  does not state. pg_dump writes a sequence default as a block of its own, 4,300 lines further
+  on, so every audited write failed `NOT NULL` in between (88 to 221 of the probe's updates per
+  replay). A column whose default arrives that way is now left alone; `roles.id` had the same gap.
+
+**Each policy statement, and each DROP TRIGGER, locks up to 24 tables it does not name.** The image's `supautils`
+extension gives `postgres` its policy and trigger rights on GoTrue's, Storage's and Realtime's
+tables (`supautils.policy_grants`, `supautils.drop_trigger_grants`). To do so it takes `ACCESS
+EXCLUSIVE` on every table in those lists that exists, for each `CREATE POLICY`, `DROP POLICY` and `DROP TRIGGER`,
+whatever the target: `auth.users`, `auth.sessions`, `auth.refresh_tokens`, `storage.objects`,
+`realtime.subscription` and the rest. An audited write takes the table it writes, then
+`audit_trail`, then `auth.users` for the foreign key. The lock orders cross, and the deadlock
+detector aborts one side. With a writer updating an area every 2 ms during the replay, db-init's
+`0001` died on a deadlock in 6 of 9 replays when each statement committed alone, and in 2 of 9 with
+one transaction per table, which takes those locks 56 times per boot instead of 207. db-init
+retries a deadlock twice. The writer lost one or two updates per replay either way. Re-creating
+only what changed would take none of these locks on a boot that changes nothing.
+
 ### Seeding is audited now
 
 The baseline creates every trigger before `0002` runs, so a fresh install records an `audit_trail`
