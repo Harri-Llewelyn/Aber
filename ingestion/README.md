@@ -15,7 +15,7 @@ allowed to be heard at all.
 | [`ingestion.py`](ingestion.py) | The daemon. Identity resolution, quarantine gating, telemetry mapping, the historian writer |
 | [`conformance.py`](conformance.py) | The constraint engine: what a device sent, judged against its bound schemas. Pure logic; the daemon decides the policy |
 | [`registry.py`](registry.py) | The Prometheus metric objects, built from the declarations in `metrics.py` |
-| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 80 outcomes |
+| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 81 outcomes |
 | [`logging_config.py`](logging_config.py) | The logger used by both — human-readable lines, or one JSON object per line under `LOG_FORMAT=json` |
 | [`test_gateway_binding.py`](test_gateway_binding.py) | Gateway↔device binding, telemetry sanity window, append-only historian |
 | [`test_declared_metrics.py`](test_declared_metrics.py) | Birth-metric observation, change-only writes, alias resolution, rebirth rate limit, device watchdog, a device that publishes again |
@@ -23,6 +23,7 @@ allowed to be heard at all.
 | [`test_entity_cache.py`](test_entity_cache.py) | The bounded resolution caches: LRU eviction, and the in-place-mutation and negative-entry contracts |
 | [`test_telemetry_writer.py`](test_telemetry_writer.py) | The historian writer: several messages become one transaction, and one bad message still loses one |
 | [`test_directory_refresh.py`](test_directory_refresh.py) | The directory refresher: one request per table per pass, keyed as the per-entity path keys |
+| [`test_stale_node_death.py`](test_stale_node_death.py) | An NDEATH whose bdSeq is an earlier session's changes nothing; the others are applied |
 
 ---
 
@@ -91,6 +92,33 @@ gateway configured by hand can publish under another group. The daemon accepts t
 logs `SPARKPLUG GROUP MISMATCH` once per node every five minutes, naming the group the message used
 and the group the gateway is registered under. To clear it, change one of the two so they agree.
 `test_archived_gateway.py` holds both arms and the wording.
+
+**The group a gateway publishes under is recorded too, so the mismatch shows where an operator
+looks.** A mismatch matters even though it is tolerated: the Factory+ Directory addresses the node
+under its row's group, the Unified Namespace's `<enterprise>` segment is the message's group, and a
+consumer subscribed to `spBv1.0/<site group>/#` misses the node entirely. After the heartbeat write,
+`record_observed_group()` writes the topic's group to `gateways.observed_sparkplug_group` through
+`ingest_record_gateway_group()` (`0174`), and `gateway_status` carries the column. The Gateways page
+warns while it differs from `sparkplug_group` ("Publishes under group X; registered under Y"), and
+a gateway that returns to its own group clears the warning with its next message.
+
+- **Written only when the group changes.** The daemon remembers the group it last wrote per gateway,
+  so a steady state costs no write. The memory is lost on a restart, so the first message per
+  gateway after one writes once more; the gate's `IS DISTINCT FROM` filter leaves the row, and the
+  audit trail, untouched then. A change of group is one `UPDATE` audit row, attributed to
+  ingestion.
+- **Not read back on the hot path.** The column is not among the gateway columns the resolution
+  cache selects. On an upgrade the new daemon runs before db-init has added the column, and a select
+  naming it would fail every gateway lookup until then. A write that fails, there or anywhere, is
+  logged at most once per node every five minutes and retried by the next message.
+- **Not recorded:** a message with an empty group, a group over 255 characters (the gate's cap,
+  `MAX_OBSERVED_GROUP_LENGTH`), an archived or unregistered gateway's traffic, which is refused
+  first, and an NDEATH from an earlier session ([below](#a-death-from-an-earlier-session)).
+- **Not this release:** a count in `platform_health` and an alert rule. The page is where the
+  warning shows.
+
+`test_archived_gateway.py` (`ObservedGroupTests`) holds the writes, and `validate.py` check 19a
+publishes under another group and back again and reads `gateway_status` after each.
 
 ### The directory refresher
 

@@ -63,7 +63,8 @@ class NodeSessionTestCase(unittest.TestCase):
         registry.reset()
         for store in (ingestion._session_bdseq, ingestion._alias_map, ingestion._alias_datatypes,
                       ingestion._name_datatypes, ingestion._last_seq, ingestion._device_seen,
-                      ingestion._device_offline, ingestion._node_epoch):
+                      ingestion._device_offline, ingestion._node_epoch,
+                      ingestion._observed_group_written):
             store.clear()
 
         self._real_client = ingestion.supabase_client
@@ -161,6 +162,14 @@ class TestAnEarlierSessionsDeath(NodeSessionTestCase):
         # The DDATA that follows is the open session's and sets nothing back.
         self.assertTrue(ingestion.accept_device_data(device, GROUP, NODE))
         self.assertEqual(ingestion._session_bdseq[ingestion.alias_key(GROUP, NODE)], 1)
+
+    def test_it_records_no_group(self):
+        """The group a gateway publishes under is the open session's, not the old Will's."""
+        self.send("NBIRTH", certificate(1), group="Other-Group")
+        self.send("NBIRTH", certificate(1))
+        self.send("NDEATH", certificate(0), group="Other-Group")
+        self.assertEqual([p["p_group"] for p in self.calls("ingest_record_gateway_group")],
+                         ["Other-Group", GROUP])
 
 
 class TestADeathThatIsApplied(NodeSessionTestCase):

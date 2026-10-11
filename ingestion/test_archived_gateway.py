@@ -275,5 +275,95 @@ class GroupMismatchTests(unittest.TestCase):
             self.assertIsNotNone(ingestion.resolve_gateway(NODE, None))
 
 
+class _Payload:
+    """A node-level payload with no metrics: a plain heartbeat."""
+    metrics = []
+
+
+class ObservedGroupTests(unittest.TestCase):
+    """
+    The group a gateway last published under reaches gateways.observed_sparkplug_group, through
+    ingest_record_gateway_group(), only when it changes: a steady heartbeat writes nothing more.
+    """
+
+    def setUp(self):
+        ingestion._gateway_cache.clear()
+        ingestion._group_mismatch_warned.clear()
+        ingestion._observed_group_written.clear()
+        ingestion._observed_group_failed_warned.clear()
+        ingestion._session_bdseq.clear()
+        self._real_client = ingestion.supabase_client
+        self.rows = [_row()]
+        self.client = MagicMock()
+        self.client.table.side_effect = lambda _name: _FilteringQuery(self.rows, [])
+        ingestion.supabase_client = self.client
+
+    def tearDown(self):
+        ingestion.supabase_client = self._real_client
+        ingestion._gateway_cache.clear()
+        ingestion._observed_group_written.clear()
+        ingestion._session_bdseq.clear()
+
+    def beat(self, group, msg_type="NDATA"):
+        ingestion._gateway_cache.clear()
+        ingestion.process_node_message(NODE, msg_type, _Payload(), group_id=group)
+
+    def group_writes(self):
+        return [c.args[1]["p_group"] for c in self.client.rpc.call_args_list
+                if c.args and c.args[0] == "ingest_record_gateway_group"]
+
+    def test_the_first_message_records_its_group(self):
+        self.beat(GROUP)
+        self.assertEqual(self.group_writes(), [GROUP])
+        call = next(c for c in self.client.rpc.call_args_list if c.args[0] == "ingest_record_gateway_group")
+        self.assertEqual(call.args[1]["p_gateway_id"], _row()["id"])
+
+    def test_a_steady_state_writes_nothing_more(self):
+        for _ in range(5):
+            self.beat(GROUP)
+        self.assertEqual(self.group_writes(), [GROUP])
+
+    def test_another_group_is_recorded_and_a_return_is_recorded_again(self):
+        self.beat(GROUP)
+        self.beat("Other-Group")
+        self.beat("Other-Group")
+        self.beat(GROUP)
+        self.assertEqual(self.group_writes(), [GROUP, "Other-Group", GROUP])
+
+    def test_the_mismatch_log_line_is_kept(self):
+        with self.assertLogs("ingestion", level="WARNING") as captured:
+            self.beat("Other-Group")
+        self.assertTrue(any("SPARKPLUG GROUP MISMATCH" in line for line in captured.output))
+        self.assertEqual(self.group_writes(), ["Other-Group"])
+
+    def test_a_failed_write_is_retried_and_does_not_cost_the_heartbeat(self):
+        def rpc(name, params):
+            if name == "ingest_record_gateway_group":
+                raise RuntimeError("gate unavailable")
+            return MagicMock()
+        self.client.rpc.side_effect = rpc
+        with self.assertLogs("ingestion", level="WARNING") as captured:
+            self.beat(GROUP)
+        self.assertTrue(any("Could not record" in line for line in captured.output))
+        self.assertNotIn(_row()["id"], ingestion._observed_group_written)
+        heartbeats = [c for c in self.client.rpc.call_args_list if c.args[0] == "ingest_record_gateway_health"]
+        self.assertEqual(len(heartbeats), 1)
+
+        self.client.rpc.side_effect = None
+        self.beat(GROUP)
+        self.assertEqual(self.group_writes()[-1], GROUP)
+        self.assertEqual(ingestion._observed_group_written[_row()["id"]], GROUP)
+
+    def test_an_archived_gateway_records_nothing(self):
+        self.rows = [_row(is_archived=True)]
+        self.beat("Other-Group")
+        self.assertEqual(self.group_writes(), [])
+
+    def test_no_group_or_an_overlong_one_is_not_recorded(self):
+        self.beat("")
+        self.beat("G" * (ingestion.MAX_OBSERVED_GROUP_LENGTH + 1))
+        self.assertEqual(self.group_writes(), [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

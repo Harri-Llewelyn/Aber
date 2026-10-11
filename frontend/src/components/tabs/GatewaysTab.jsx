@@ -7,7 +7,8 @@ import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
 import {
   gatewayDisplayStatus, isGatewayOnline, isGatewayPending, formatHeartbeat, formatUptime,
-  formatCertExpiry, isCertExpiring, holdsOlderRoot, formatBytes, CERT_EXPIRY_WARN_DAYS
+  formatCertExpiry, isCertExpiring, holdsOlderRoot, formatBytes, CERT_EXPIRY_WARN_DAYS,
+  gatewayGroupMismatch
 } from '../../utils/gatewayStatus'
 import { gatewaySparkplugId } from '../../utils/sparkplugId'
 import {
@@ -308,6 +309,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const selected = gateways.find(g => g.gateway_id === selectedId) || null
   const selectedDevices = selected?.devices || []
   const selectedCell = selected ? cells.find(c => c.cell_id === selected.cell_id) : null
+  const selectedGroupMismatch = gatewayGroupMismatch(selected)
 
   // "None yet" only when the stack holds no gateway of its own; anything else is a filter's doing.
   // The seeded Playback gateway does not count, so a new install still prompts under its row.
@@ -474,6 +476,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                    const offlineCount = gwAssets.filter(a => a.status === 'OFFLINE').length
                    const liveStatus = gatewayDisplayStatus(g)
                    const type = gatewayType(g)
+                   const groupMismatch = gatewayGroupMismatch(g)
 
                    return (
                      <React.Fragment key={g.gateway_id}>
@@ -496,6 +499,14 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                            {/* A state, not a kind: a gateway of any type can be archived. */}
                            {g.is_archived && (
                              <ArchivedBadge size="sm" className="gateway-name-badge" title="Archived: out of service. Restore it from its drawer." />
+                           )}
+                           {groupMismatch && (
+                             <div
+                               className="cell-meta gateway-cell-warning"
+                               title="Subscribers to the registered group miss this gateway's messages. Open it for what to change."
+                             >
+                               Publishes under group {groupMismatch.observed}; registered under {groupMismatch.registered}
+                             </div>
                            )}
                          </td>
                          {!compact && <td><CopyableId value={g.gateway_id} label="Gateway UUID" onNotify={showToast} /></td>}
@@ -1071,6 +1082,20 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
         // With the metadata, above the actions.
         beforeActions={selected && (
           <div>
+            {/* Ingestion accepts the traffic by sparkplug_id; this is where the difference shows. */}
+            {selectedGroupMismatch && (
+              <div className="callout callout-warning gateway-group-callout">
+                <IconAlertTriangle size={14} className="callout-icon" />
+                <div>
+                  <strong>
+                    Publishes under group <span className="mono">{selectedGroupMismatch.observed}</span>;
+                    registered under <span className="mono">{selectedGroupMismatch.registered}</span>.
+                  </strong>{' '}
+                  Set the edge node to publish under {selectedGroupMismatch.registered}, or change
+                  this gateway&rsquo;s Sparkplug group to {selectedGroupMismatch.observed}.
+                </div>
+              </div>
+            )}
             <div className="context-panel-section-label">Connected Devices ({selectedDevices.length})</div>
             {selectedDevices.length === 0
               ? <div className="context-field-empty" style={{ fontSize: '11px' }}>No devices assigned</div>

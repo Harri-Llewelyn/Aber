@@ -525,6 +525,14 @@ UNKNOWN_GATEWAY_WARN_INTERVAL_SECONDS = 300
 _group_mismatch_warned = {}
 GROUP_MISMATCH_WARN_INTERVAL_SECONDS = 300
 
+# The group each gateway was last recorded publishing under (gateways.observed_sparkplug_group),
+# keyed by gateway id, so a steady state writes nothing; and a throttle for a failed write, keyed by
+# edge node id. See record_observed_group().
+_observed_group_written = {}
+_observed_group_failed_warned = {}
+# The longest group ingest_record_gateway_group() accepts. A longer topic segment is not recorded.
+MAX_OBSERVED_GROUP_LENGTH = 255
+
 # Throttle for refused self-reported gateway statuses, keyed by edge node id. A node that reports
 # one reports it on every heartbeat -- 119 an hour -- so the refusal has to be legible without
 # being the whole log.
@@ -2495,6 +2503,9 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
     except Exception as e:
         logger.error("Error updating gateway heartbeat for '%s': %s", edge_node_id, e, exc_info=True)
 
+    # After the heartbeat and apart from it, so a failure here cannot cost the status write.
+    record_observed_group(gateway, group_id, edge_node_id)
+
     # Whatever status the payload reported: a node's death is its devices' death.
     if msg_type == "NDEATH":
         mark_node_devices_offline(gateway, group_id, edge_node_id)
@@ -2529,6 +2540,37 @@ def mark_node_devices_offline(gateway, group_id, edge_node_id):
     logger.info("NDEATH: edge node '%s' (%s) -> %d device(s) marked OFFLINE",
                 gateway.get("name"), edge_node_id, len(moved))
     return moved
+
+def record_observed_group(gateway, group_id, edge_node_id):
+    """
+    Write the Sparkplug group a node-level message was published under to
+    gateways.observed_sparkplug_group, when it is not the group last written for this gateway.
+    Returns True when it wrote.
+
+    Remembered in memory only, so after a restart the first message per gateway writes once more,
+    and the gate's no-op filter leaves the row alone. A failed write is retried by the next message.
+    The Gateways page warns while the column differs from sparkplug_group.
+    """
+    if not group_id or len(group_id) > MAX_OBSERVED_GROUP_LENGTH:
+        return False
+    gateway_id = gateway.get("id")
+    if not gateway_id or _observed_group_written.get(gateway_id) == group_id:
+        return False
+    try:
+        supabase_client.rpc("ingest_record_gateway_group", {
+            "p_gateway_id": gateway_id,
+            "p_group": group_id,
+        }).execute()
+    except Exception as e:
+        if _throttled(_observed_group_failed_warned, edge_node_id or "", GROUP_MISMATCH_WARN_INTERVAL_SECONDS):
+            logger.warning(
+                "Could not record that edge node '%s' publishes under Sparkplug group '%s': %s. "
+                "Its heartbeat is unaffected, and the next message retries this.",
+                edge_node_id, group_id, e
+            )
+        return False
+    _observed_group_written[gateway_id] = group_id
+    return True
 
 # -----------------------------------------------------------------------------
 # Payload conformance -- what the device sent against what its schema allows

@@ -2478,8 +2478,9 @@ def verify_gateway_session():
     """
     Check 19: an NDEATH whose bdSeq is an earlier session's leaves the seeded gateway ONLINE and its
     device as it was, and the session's own NDEATH then takes the gateway OFFLINE, which shows the
-    first was judged rather than lost. Before check 18, which brings the gateway back first.
-    Returns True when it passed or was skipped.
+    first was judged rather than lost. 19a: a heartbeat under another Sparkplug group reaches
+    gateway_status.observed_sparkplug_group, and one under its own group puts it back. Before check
+    18, which brings the gateway back first. Returns True when it passed or was skipped.
     """
     gateway_uuid = SEEDED.get("gateway_uuid")
     known = SEEDED.get("known_uuid")
@@ -2526,6 +2527,10 @@ def verify_gateway_session():
         time.sleep(3)
         stale_gateway, stale_device = gateway_status(), device_status()
 
+        # 19a. While the session is open: a heartbeat under another group, then under its own.
+        if not verify_observed_group(publisher, gw, gateway_uuid):
+            passed = False
+
         # The open session's own death, published after the stale one on the same connection.
         publisher.publish(node_topic % "NDEATH", make_node_certificate(7, int(time.time() * 1000)))
         closed = gateway_status_until("OFFLINE")
@@ -2546,6 +2551,40 @@ def verify_gateway_session():
         publisher.loop_stop()
         publisher.disconnect()
     return passed
+
+
+def verify_observed_group(publisher, gw, gateway_uuid):
+    """
+    Check 19a: gateway_status.observed_sparkplug_group follows the group the seeded gateway's
+    heartbeat is published under, there and back. The broker grants a gateway every group under its
+    own node id, so the publisher may use another. Returns True when it passed.
+    """
+    other = f"{VAL_GROUP}-VALIDATE-OTHER"
+
+    def observed_until(wanted, timeout=15):
+        value, deadline = None, time.time() + timeout
+        while time.time() < deadline:
+            res = supabase_client.table("gateway_status").select(
+                "observed_sparkplug_group,sparkplug_group").eq("id", gateway_uuid).execute()
+            value = res.data[0]["observed_sparkplug_group"] if res.data else None
+            if value == wanted:
+                break
+            time.sleep(1)
+        return value
+
+    print(f"\n--- NDATA from {gw} under group {other}, then under {VAL_GROUP} ---")
+    publisher.publish(f"spBv1.0/{other}/NDATA/{gw}", make_node_birth_payload({}, int(time.time() * 1000)))
+    away = observed_until(other)
+    publisher.publish(f"spBv1.0/{VAL_GROUP}/NDATA/{gw}", make_node_birth_payload({}, int(time.time() * 1000)))
+    back = observed_until(VAL_GROUP)
+    if away == other and back == VAL_GROUP:
+        print(f"✅ 19a. OBSERVED GROUP: gateway_status read {other} after a heartbeat under it, and "
+              f"{VAL_GROUP} after the next under its own group.")
+        return True
+    print(f"❌ 19a. OBSERVED GROUP FAIL: gateway_status.observed_sparkplug_group read {away!r} after a "
+          f"heartbeat under {other!r} and {back!r} after one under {VAL_GROUP!r}. Ingestion writes it "
+          "through ingest_record_gateway_group() (0174), and logs 'Could not record' when that fails.")
+    return False
 
 
 def verify_node_death_takes_its_devices_offline():
