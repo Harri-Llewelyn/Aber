@@ -21,6 +21,12 @@ RUN apk upgrade --no-cache \
  && rm /usr/local/bin/gosu /usr/local/bin/timescaledb-tune /usr/local/bin/timescaledb-parallel-copy \
        /docker-entrypoint-initdb.d/001_timescaledb_tune.sh
 
+# POSTGRES (70), FROM THE START. Started as that uid, the upstream entrypoint skips its chown and its
+# gosu, sets the data directory to 0700 (which its owner may do), and runs initdb or the server as
+# itself. PGDATA must be a directory 70 owns or may create: the chart's is a subdirectory of the
+# volume, whose root fsGroup 70 makes group-writable. The chart supplies the server flags.
+USER 70:70
+
 # TINI IS PID 1, NOT THE POSTMASTER. Asynchronous archive-push forks a process that outlives the
 # archive_command that started it; orphaned, it is adopted by PID 1. When the postmaster is PID 1 it
 # reaps it, and an exit code other than 0 or 1 (every archive failure) reads to it as a crashed
@@ -29,6 +35,3 @@ RUN apk upgrade --no-cache \
 # and passes the stop signal (the base image's SIGINT) to the server.
 ENTRYPOINT ["/sbin/tini", "--", "docker-entrypoint.sh"]
 CMD ["postgres"]
-
-# No USER: the upstream entrypoint starts as root, fixes the data directory's ownership and drops to
-# postgres (uid 70) before the server starts. The chart supplies the server flags.

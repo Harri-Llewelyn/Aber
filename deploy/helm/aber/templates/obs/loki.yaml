@@ -87,6 +87,7 @@ spec:
       {{- end }}
       # grafana/loki runs as loki (10001); local-path provisions a root-owned directory.
       securityContext:
+        runAsNonRoot: true
         runAsUser: 10001
         runAsGroup: 10001
         fsGroup: 10001

@@ -44,5 +44,9 @@ RUN rm /usr/local/bin/gosu
 # above, which check-docs-drift.mjs holds against the chart's pin.
 COPY migrations/*.sql /migrations/
 
+# The base's postgres user, numeric so the kubelet can verify runAsNonRoot. The Job runs psql and
+# writes only to /tmp.
+USER 100:101
+
 # The Job supplies the command. Nothing is started here: this image is a filesystem plus psql, and
 # the apply loop lives in the chart beside the connection details and the psql variables it passes.

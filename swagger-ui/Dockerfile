@@ -17,3 +17,10 @@ RUN apk upgrade --no-cache
 # openapi.yaml is the gateway-fronted platform surface; i3x-openapi.yaml is the i3X server, a
 # different origin with a different auth model. The Deployment's URLS env names both by these paths.
 COPY docs/openapi.yaml docs/i3x-openapi.yaml /usr/share/nginx/html/
+
+# NON-ROOT: nginx starts as its own user (101) and listens on 8080. The base leaves most of what its
+# entrypoint and master write world-writable (conf.d, the web root, /run, the cache); the entrypoint
+# also empties the CORS and embedding snippets in templates/, which the base leaves to root. The
+# `user` directive goes: it applies only to a master started as root, and nginx warns otherwise.
+RUN sed -i '/^user /d' /etc/nginx/nginx.conf && chown -R 101:101 /etc/nginx/templates
+USER 101:101

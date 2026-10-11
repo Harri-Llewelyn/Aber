@@ -29,5 +29,9 @@ RUN apk upgrade --no-cache \
 ENTRYPOINT ["/sbin/tini", "--", "docker-entrypoint.sh"]
 CMD ["postgres", "-D", "/etc/postgresql"]
 
-# No USER: the upstream entrypoint starts as root, fixes the data directory's ownership and drops to
-# postgres (uid 100) before the server starts. The chart supplies the server flags.
+# NO USER, ON PURPOSE: this image starts as root. Its data directory is the volume's mount point (the
+# base's postgresql.conf names /var/lib/postgresql/data), which a provisioner creates owned by root,
+# and initdb as postgres (uid 100) cannot take a directory it does not own. As root, the entrypoint
+# gives the directory to postgres and drops to that uid before the server starts. On a directory
+# postgres already owns it also starts as 100 (deploy/k8s/README.md, Users). The chart
+# supplies the server flags.

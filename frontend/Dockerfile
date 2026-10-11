@@ -112,5 +112,12 @@ RUN rm -f /etc/nginx/conf.d/default.conf
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 COPY --from=builder /app/dist /usr/share/nginx/html
 
+# NON-ROOT: nginx starts as its own user (101) rather than starting as root and dropping to it. The
+# master writes its pid to /tmp, creates its temp directories in /var/cache/nginx, and the entrypoint
+# renders the template into conf.d, so those two directories are nginx's. The port is above 1024.
+RUN sed -i -e '/^user /d' -e 's#^pid .*#pid /tmp/nginx.pid;#' /etc/nginx/nginx.conf \
+ && chown -R 101:101 /var/cache/nginx /etc/nginx/conf.d
+USER 101:101
+
 EXPOSE 3000
 CMD ["nginx", "-g", "daemon off;"]

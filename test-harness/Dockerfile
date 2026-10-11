@@ -51,7 +51,8 @@ WORKDIR /app
 #
 # The ingestion image removes pip after its own install, so this restores it, uses it and removes
 # it again. `ensurepip` ships inside CPython and carries its own pip wheel, so this reaches no
-# index for pip itself.
+# index for pip itself. As root: the base ends as its non-root user, and site-packages is root's.
+USER root
 RUN python -m ensurepip \
     && python -m pip install --no-cache-dir jsonschema==4.23.0 \
     && python -m pip uninstall -y pip
@@ -89,6 +90,9 @@ COPY supabase/functions/_shared/aas/sparkplugToXsd.ts \
 COPY frontend/src/utils/sparkplugDatatype.js \
      frontend/src/utils/model3d.js \
      /app/frontend/src/utils/
+
+# The ingestion image's user, so the suites run as the chart runs them. They write only to /tmp.
+USER 10001:10001
 
 # Overrides the ingestion daemon's CMD. Each Job names the suite it wants explicitly; this default
 # exists so a bare `docker run` of this image does something legible rather than starting a daemon.
