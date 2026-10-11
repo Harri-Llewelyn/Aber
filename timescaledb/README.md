@@ -256,6 +256,12 @@ before, then deletes the row. The windows come from the readings, not from the a
 report, so a third-party edge node's replay is covered too. `scripts/check-docs-drift.mjs` (check
 53) holds the reach, the job's list of rollups and the window width to this file.
 
+Real-time aggregation hides the gap until a rollup's watermark passes the replayed hour, because
+a bucket above the watermark is read from raw. On a fresh historian nothing is materialised yet and
+the watermark is -infinity, so a replay shows at once; the gap opens once the policies have
+materialised later readings. `test_rollup_refresh.py` materialises an anchor reading first for this
+reason.
+
 - **Rejected: widening `start_offset` to 7 days.** `compressAfter` must exceed it, so the shipped
   2 days would have to move past 7, and every rollup would keep a week uncompressed instead of two
   days.

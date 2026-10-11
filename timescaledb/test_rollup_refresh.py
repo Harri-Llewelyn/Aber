@@ -12,6 +12,11 @@ buckets afterwards.
 
 THE POLICIES REACH BACK 25 HOURS, so a reading three days old is in raw telemetry and in no rollup
 until the job runs: the first assertion is that the gap is there, the second that the job closes it.
+
+THE GAP NEEDS A WATERMARK PAST THE REPLAY. The rollups are real-time: a bucket above a rollup's
+watermark is read from raw. On a fresh historian nothing has been materialised, the watermark is
+-infinity, and a late reading shows at once. So each test first materialises an anchor reading two
+hours old, which moves every watermark past the replayed hour, as a running site's policies have.
 """
 import os
 import unittest
@@ -71,16 +76,39 @@ class RollupRefreshTestCase(unittest.TestCase):
         now = datetime.now(timezone.utc)
         self.start = now.replace(minute=0, second=0, microsecond=0) - timedelta(days=3)
         self.end = self.start + timedelta(hours=1)
+        self.anchor = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=2)
         self.query("INSERT INTO assets (asset_id, asset_name) VALUES (%s, %s)", self.asset, self.asset)
         self.addCleanup(self.remove_asset)
+        self.materialise_past_the_replay()
+
+    def materialise_past_the_replay(self):
+        """One anchor reading inside the policies' window, refreshed in each rollup, parents first."""
+        self.query("INSERT INTO telemetry (time, asset_id, metric_name, val_double) VALUES (%s, %s, %s, 1.0)",
+                   self.anchor + timedelta(minutes=30), self.asset, METRIC)
+        for view in ROLLUPS:
+            self.query("CALL refresh_continuous_aggregate(%s, %s, %s)",
+                       view, self.anchor, self.anchor + timedelta(hours=1))
+        # The watermark is read through TimescaleDB's internal functions: no public view reports it.
+        marks = dict(self.query(
+            "SELECT c.view_name::text, _timescaledb_functions.to_timestamp("
+            "         _timescaledb_functions.cagg_watermark(h.id)) "
+            "  FROM timescaledb_information.continuous_aggregates c "
+            "  JOIN _timescaledb_catalog.hypertable h "
+            "    ON h.schema_name = c.materialization_hypertable_schema "
+            "   AND h.table_name = c.materialization_hypertable_name"))
+        for view in ROLLUPS:
+            self.assertGreater(marks[view], self.end,
+                               f"{view}'s watermark did not pass the replayed hour")
 
     def remove_asset(self):
         self.query("DELETE FROM telemetry WHERE asset_id = %s", self.asset)
         self.query("DELETE FROM rollup_refresh_requests WHERE window_start = %s AND window_end = %s",
                    self.start, self.end)
-        # The deletion invalidates the hour; refreshing it removes the probe's buckets.
-        for view in ROLLUPS:
-            self.query("CALL refresh_continuous_aggregate(%s, %s, %s)", view, self.start, self.end)
+        # The deletion invalidates both hours; refreshing them removes the probe's buckets.
+        for start in (self.start, self.anchor):
+            for view in ROLLUPS:
+                self.query("CALL refresh_continuous_aggregate(%s, %s, %s)",
+                           view, start, start + timedelta(hours=1))
         self.query("DELETE FROM assets WHERE asset_id = %s", self.asset)
 
     def write_replay(self, conn):
