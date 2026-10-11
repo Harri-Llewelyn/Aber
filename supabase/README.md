@@ -5872,8 +5872,10 @@ view is one row per semantic id, `(semantic_id, name, definition, standard)`, fr
 vocabulary's own description column: the IDTA templates, ASHRAE 223P, OPC UA and ISO 22400. An id
 held by two vocabularies takes the first in that order, the one whose ids are issued furthest from
 this deployment, and a row with no text is left out. MTConnect contributes nothing until
-`mtconnect_vocabulary` stores definitions. The exporter reads the view in one query and uses
-catalog text only for an id no vocabulary holds, such as one an Administrator typed. A new
+`mtconnect_vocabulary` stores definitions. The exporter reads the view in one query. An id no
+vocabulary holds but a known authority issues, such as a QUDT quantity kind, defers to that
+authority (`ID_AUTHORITIES` in `functions/_shared/aas/shell.ts`). Catalog text is used only for
+the rest, such as an id an Administrator typed. A new
 vocabulary with a description column adds an arm in a migration that redeclares the view; the
 columns stay the same, so `CREATE OR REPLACE VIEW` keeps its grants. It is `security_invoker`, so
 the vocabularies' own policies apply to the caller: `authenticated` and `service_role` read it,
