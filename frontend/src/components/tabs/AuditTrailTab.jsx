@@ -99,6 +99,7 @@ const NOISE_FIELDS = new Set(['updated_at', 'last_heartbeat', 'last_seen'])
 /**
  * Fields whose change is a governance act (what the entity is declared to be) rather than an
  * operational one. `asset_config` names the concept even though it is its own, unaudited, table.
+ * `schema_id` stays for the devices rows recorded while a device carried one; the trail keeps them.
  */
 const GOVERNANCE_FIELDS = new Set([
   'schema_id', 'asset_config', 'connection_method', 'grafana_url', 'access_url'
@@ -215,8 +216,8 @@ export function classifyEvent(event, diff) {
   // The same argument, arriving from `user_roles`. A revocation is not `critical`: that
   // marker is for an entity's lifecycle, and nothing on the shopfloor ended here.
   if (action === 'ROLE_GRANTED' || action === 'ROLE_REVOKED') return 'governance'
-  // A device_submodels row is a schema binding: attaching or detaching one is the governance act
-  // a change to `schema_id` is, not a creation or a deletion of the device.
+  // A device_submodels row is a schema binding: attaching or detaching one is a governance act,
+  // not a creation or a deletion of the device.
   if (String(event.entity_type || '').toLowerCase() === 'device_submodels') return 'governance'
   if (action === 'DELETE') return 'critical'
   if (action === 'INSERT') return 'creation'

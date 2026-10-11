@@ -443,8 +443,7 @@ export async function loadDeviceRecord(
   if (!device) return null;
 
   // asset_config is keyed by sparkplug_id, written by ingestion from the DBIRTH payload.
-  // `device_schemas` reads the device_submodels join and the deprecated devices.schema_id, so this
-  // resolves for a device attached by either path.
+  // `device_schemas` is one row per device_submodels row: every schema attached to the device.
   const [
     { data: configRows },
     { data: linkRows },

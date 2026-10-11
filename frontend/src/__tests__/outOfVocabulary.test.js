@@ -87,7 +87,7 @@ describe('the tag it produces', () => {
     schema_uuid: 's1',
     schema_definition: { properties: { 'Controller/EXECUTION': { type: 'string' } } }
   }
-  const device = { asset_id: 'd1', schema_id: 's1', last_birth_metrics: ['Controller/EXECUTION'] }
+  const device = { asset_id: 'd1', submodel_schema_ids: ['s1'], last_birth_metrics: ['Controller/EXECUTION'] }
 
   it('is appended after the classification tags', () => {
     const tags = deviceTagList(device, schema, { 'Controller/EXECUTION': 'RUNNING' }, CATALOG)

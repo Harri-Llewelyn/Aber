@@ -1,45 +1,32 @@
 -- 0168: Every schema attached to a device counts, whichever path attached it.
 --
--- A device's schemas are attached in two places: `device_submodels` rows, and `devices.schema_id`.
+-- A device's schemas were attached in two places: `device_submodels` rows, and `devices.schema_id`.
 -- `device_schemas` read the column only for a device with no `device_submodels` row, so a device
--- given a second schema through the API stopped being judged against the first. The view now
--- returns both, one row per (device, schema). The Devices page writes `device_submodels` through
--- set_device_schemas() and clears the column; writing `devices.schema_id` is deprecated, and the
--- column is still read so an API client that sets it keeps working. `device_submodels` is audited
--- now, so moving the dashboard's writes there keeps a schema change in the audit trail.
+-- given a second schema through the API stopped being judged against the first. The Devices page
+-- writes `device_submodels` through set_device_schemas(), and `device_submodels` is audited now,
+-- so a schema change stays in the audit trail. 0175 removed the column; the declarations below are
+-- in their final form, so a replay never names it.
 
 -- -------------------------------------------------------------------------------------------------
--- The view: both arms, one row per (device, schema)
+-- The view: one row per (device, schema)
 -- -------------------------------------------------------------------------------------------------
--- Same columns as 0001's, so CREATE OR REPLACE keeps the grants. The column arm is skipped only
--- when a `device_submodels` row names the same schema, so that row (and its submodel_key) wins.
+-- Same columns as 0001's, so CREATE OR REPLACE keeps the grants. `source` is a constant, kept so a
+-- client that selects it keeps working.
 CREATE OR REPLACE VIEW public.device_schemas WITH (security_invoker='true') AS
  SELECT ds.device_id,
     ds.schema_id,
     ds.submodel_key,
     'device_submodels'::text AS source
-   FROM public.device_submodels ds
-UNION
- SELECT d.id AS device_id,
-    d.schema_id,
-    NULL::text AS submodel_key,
-    'devices.schema_id'::text AS source
-   FROM public.devices d
-  WHERE ((d.schema_id IS NOT NULL) AND (NOT (EXISTS ( SELECT 1
-           FROM public.device_submodels ds
-          WHERE ((ds.device_id = d.id) AND (ds.schema_id = d.schema_id))))));
+   FROM public.device_submodels ds;
 
-COMMENT ON VIEW public.device_schemas IS 'Every schema attached to a device, one row per (device, schema): its device_submodels rows, and devices.schema_id when no row names that schema. `source` says which arm a row came from.';
+COMMENT ON VIEW public.device_schemas IS 'Every schema attached to a device, one row per (device, schema): its device_submodels rows. `source` is always ''device_submodels'', kept for clients that select it.';
 
-COMMENT ON TABLE public.device_submodels IS 'A device''s schema attachments, one AAS Submodel each. The Devices page writes them through set_device_schemas(); device_schemas also reads the deprecated devices.schema_id.';
-
-COMMENT ON COLUMN public.devices.schema_id IS 'Deprecated for writes: attach schemas as device_submodels rows (set_device_schemas()). Still read through device_schemas, so a client that sets it keeps working until the column is removed.';
+COMMENT ON TABLE public.device_submodels IS 'A device''s schema attachments, one AAS Submodel each. The Devices page writes them through set_device_schemas().';
 
 -- -------------------------------------------------------------------------------------------------
--- reject_archived_schema_assignment(): moving a binding between the two arms is not a new binding
+-- reject_archived_schema_assignment(): a guard on device_submodels
 -- -------------------------------------------------------------------------------------------------
--- Unchanged from 0001 but for the device_schemas check before the status lookup. Without it,
--- set_device_schemas() could not move a device's archived devices.schema_id into device_submodels.
+-- As 0001 declares it.
 CREATE OR REPLACE FUNCTION public.reject_archived_schema_assignment() RETURNS trigger
     LANGUAGE plpgsql
     SET search_path TO 'public', 'pg_catalog'
@@ -52,24 +39,19 @@ DECLARE
     v_version    integer;
     v_successor  text;
 BEGIN
-    -- One function, two tables: `devices.schema_id` and `device_submodels.schema_id` are the two
-    -- arms of the `device_schemas` view, and a guard on one of them is not a guard.
-    IF TG_TABLE_NAME = 'devices' THEN
-        v_device_id := NEW.id;
-        -- READ OFF `NEW`, NOT OUT OF THE TABLE. On INSERT the row is not visible to a query yet,
-        -- so a lookup would report "not a shadow" for every shadow device at the moment it is
-        -- created -- which is the only moment ensure_shadow_devices() writes this column.
-        v_is_shadow := NEW.shadow_of IS NOT NULL;
-    ELSE
-        v_device_id := NEW.device_id;
-        -- The submodel rows are written AFTER the shadow device exists, so here the lookup is both
-        -- possible and necessary -- the join row carries no shadow marker of its own.
-        SELECT d.shadow_of IS NOT NULL INTO v_is_shadow
-          FROM public.devices d WHERE d.id = v_device_id;
+    -- `device_submodels` is the one place a device's schemas are attached; on any other table
+    -- there is no binding to judge.
+    IF TG_TABLE_NAME <> 'device_submodels' THEN
+        RETURN NEW;
     END IF;
+    v_device_id := NEW.device_id;
+    -- The submodel rows are written AFTER the shadow device exists, so here the lookup is both
+    -- possible and necessary -- the join row carries no shadow marker of its own.
+    SELECT d.shadow_of IS NOT NULL INTO v_is_shadow
+      FROM public.devices d WHERE d.id = v_device_id;
 
-    -- Detaching is always allowed. So is leaving the pointer exactly where it was: see the header
-    -- for why the unchanged-value case is the one that keeps an unfinished migration editable.
+    -- Leaving the binding exactly where it was is allowed: the unchanged-value case is the one
+    -- that keeps an unfinished migration editable.
     IF NEW.schema_id IS NULL THEN
         RETURN NEW;
     END IF;
@@ -78,13 +60,6 @@ BEGIN
     END IF;
 
     IF coalesce(v_is_shadow, false) THEN
-        RETURN NEW;
-    END IF;
-
-    -- Already bound through the other arm: the device keeps the schema it has, so nothing new is
-    -- assigned.
-    IF EXISTS (SELECT 1 FROM public.device_schemas ds
-                WHERE ds.device_id = v_device_id AND ds.schema_id = NEW.schema_id) THEN
         RETURN NEW;
     END IF;
 
@@ -124,14 +99,14 @@ $$;
 
 ALTER FUNCTION public.reject_archived_schema_assignment() OWNER TO postgres;
 
-COMMENT ON FUNCTION public.reject_archived_schema_assignment() IS 'Refuses a NEW binding of a device to an archived schema, on either arm of the device_schemas view. Leaving an existing binding in place is allowed -- an archived schema with devices still attached is an unfinished migration, not a fault -- and so is moving one from devices.schema_id to device_submodels or back. Shadow devices are exempt because they copy the contract of the device they replay.';
+COMMENT ON FUNCTION public.reject_archived_schema_assignment() IS 'Refuses a NEW device_submodels row binding a device to an archived schema. Leaving an existing binding in place is allowed -- an archived schema with devices still attached is an unfinished migration, not a fault -- and shadow devices are exempt because they copy the contract of the device they replay.';
 
 -- -------------------------------------------------------------------------------------------------
 -- record_ingestion_rejection(): the snapshot names every schema the device is judged against
 -- -------------------------------------------------------------------------------------------------
 -- Unchanged from 0001 but for the schemas: `schema_ids` lists the device's device_schemas rows,
 -- which is what ingestion judges a payload against, and `schema_id` keeps its key with the first
--- of them (devices.schema_id when that is set, as before).
+-- of them.
 CREATE OR REPLACE FUNCTION public.record_ingestion_rejection(p_device_id uuid, p_violations jsonb, p_observed_at timestamp with time zone DEFAULT now()) RETURNS bigint
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public'
@@ -185,9 +160,7 @@ BEGIN
     END IF;
 
     -- The schemas the daemon judges against, read as it reads them: through the view.
-    SELECT coalesce(jsonb_agg(ds.schema_id
-                              ORDER BY ds.source = 'devices.schema_id' DESC, ds.schema_id),
-                    '[]'::jsonb)
+    SELECT coalesce(jsonb_agg(ds.schema_id ORDER BY ds.schema_id), '[]'::jsonb)
       INTO v_schema_ids
       FROM public.device_schemas ds
      WHERE ds.device_id = v_device.id;
@@ -287,9 +260,7 @@ BEGIN
       FROM public.device_schemas ds WHERE ds.device_id = p_device_id;
 
     -- Only the rows not already present: reject_archived_schema_assignment() fires on every row
-    -- an INSERT proposes, so re-inserting an existing archived binding would be refused. The
-    -- inserts come before the column is cleared, so a schema moving from devices.schema_id is
-    -- still bound when its row arrives.
+    -- an INSERT proposes, so re-inserting an existing archived binding would be refused.
     INSERT INTO public.device_submodels (device_id, schema_id)
     SELECT p_device_id, s
       FROM unnest(v_wanted) s
@@ -299,9 +270,6 @@ BEGIN
     DELETE FROM public.device_submodels
      WHERE device_id = p_device_id
        AND NOT (schema_id = ANY (v_wanted));
-
-    UPDATE public.devices SET schema_id = NULL
-     WHERE id = p_device_id AND schema_id IS NOT NULL;
 
     SELECT coalesce(array_agg(ds.schema_id ORDER BY ds.schema_id), '{}')
       INTO v_after
@@ -321,14 +289,13 @@ ALTER FUNCTION public.set_device_schemas(p_device_id uuid, p_schema_ids uuid[]) 
 REVOKE ALL ON FUNCTION public.set_device_schemas(p_device_id uuid, p_schema_ids uuid[]) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.set_device_schemas(p_device_id uuid, p_schema_ids uuid[]) TO authenticated, service_role;
 
-COMMENT ON FUNCTION public.set_device_schemas(p_device_id uuid, p_schema_ids uuid[]) IS 'Make a device''s schemas exactly p_schema_ids, in one transaction: inserts the missing device_submodels rows, deletes the rest, and clears the deprecated devices.schema_id. An empty array detaches every schema. Unknown device or schema: 404. Authority: Administrator or Shopfloor_Manager.';
+COMMENT ON FUNCTION public.set_device_schemas(p_device_id uuid, p_schema_ids uuid[]) IS 'Make a device''s schemas exactly p_schema_ids, in one transaction: inserts the missing device_submodels rows and deletes the rest. An empty array detaches every schema. Unknown device or schema: 404. Authority: Administrator or Shopfloor_Manager.';
 
 -- -------------------------------------------------------------------------------------------------
 -- A device's schema attachments reach the audit trail
 -- -------------------------------------------------------------------------------------------------
--- The Devices page used to change a device's schema through devices.schema_id, which the devices
--- trigger records. It now writes device_submodels, so that table is audited too, keyed by its
--- device as device_nameplate is, and filed in the asset lane.
+-- The Devices page changes a device's schemas in device_submodels, so that table is audited, keyed
+-- by its device as device_nameplate is, and filed in the asset lane.
 DROP TRIGGER IF EXISTS trg_device_submodels_audit_trail ON public.device_submodels;
 CREATE TRIGGER trg_device_submodels_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.device_submodels FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event('device_id');
 

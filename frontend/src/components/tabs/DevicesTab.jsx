@@ -194,8 +194,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     latestBySparkplugId.get(effectiveSparkplugId(device)) || null
 
   /**
-   * A device row shaped for the edit form. `schema_ids` is every schema attached by either path,
-   * so the picker shows the whole set and saving writes it back as device_submodels rows.
+   * A device row shaped for the edit form. `schema_ids` is every schema attached to it, so the
+   * picker shows the whole set and saving writes it back as device_submodels rows.
    */
   const editFormFor = (device) => ({ ...device, schema_ids: schemaIdsForDevice(device) })
 
@@ -565,8 +565,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
 
     if (filterMode === 'active'   && a.is_archived) return false
     if (filterMode === 'archived' && !a.is_archived) return false
-    // Matches either `devices.schema_id` or any attached submodel, so a device filtered by
-    // schema is found however it was provisioned.
+    // Matches any attached schema, so a device carrying several is found by each of them.
     if (schemaFilter && !schemasForDevice(a, schemas).some(s => s.schema_uuid === schemaFilter)) return false
     if (tagFilter && !deviceHasTag(a, schemasForDevice(a, schemas), tagFilter, latestFor(a), catalog)) return false
     if (gatewayFilter && (a.active_gateway_id || '') !== gatewayFilter) return false
@@ -1507,9 +1506,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                       : noCellReason(selectedGateway) || undefined
           },
           {
-            // Resolved through schemasForDevice, not `selectedDevice.schema_id`: a schema arrives
-            // by either `devices.schema_id` or a `device_submodels` row (`submodel_schema_ids`). All of
-            // them, since a device may carry several.
+            // Resolved through schemasForDevice: every `device_submodels` row
+            // (`submodel_schema_ids`), since a device may carry several.
             label: 'Schema',
             value: (() => {
               const attached = schemasForDevice(selectedDevice, schemas)
@@ -1559,7 +1557,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             title: !canArchive ? requiresRolesTitle(PERMISSION_UUIDS.ARCHIVE_MANAGE) : 'Restore device back to active service'
           } : {
             icon: <IconPencil size={13} />,
-            // Seeded with every attached schema, not the raw row's `schema_id`.
+            // Seeded with every attached schema.
             label: proposeMode ? 'Propose a Change' : 'Edit Details',
             onClick: () => {
               setEditing(selectedDevice)

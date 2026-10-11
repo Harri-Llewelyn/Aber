@@ -240,8 +240,7 @@ The mappings that are decisions rather than mechanics:
   - in a device's map the field is null, and the map's quality is the map's;
   - a stored null in history is `GoodNoData`.
 - **A device is typed by every schema attached to it**, read from the `device_schemas` view as
-  the dashboard, the AAS exporter and ingestion read it, not from `devices.schema_id` alone. One
-  schema is its type. Several are one synthesized type per distinct set,
+  the dashboard, the AAS exporter and ingestion read it. One schema is its type. Several are one synthesized type per distinct set,
   `i3x:type:schemas:<ids sorted, joined by +>`, whose schema is `allOf` over their definitions,
   inlined.
 - **A device's type refers to its metrics' types.** Each property that names a catalog metric

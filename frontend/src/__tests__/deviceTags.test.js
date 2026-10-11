@@ -16,7 +16,7 @@ const builderSchema = {
 
 const device = (overrides = {}) => ({
   asset_id: 'dev-uuid',
-  schema_id: 'schema-1',
+  submodel_schema_ids: ['schema-1'],
   last_birth_metrics: ['Axes/C/ANGLE', 'Axes/X/POSITION'],
   ...overrides
 })
@@ -68,7 +68,7 @@ describe('unmodelledMetrics', () => {
   it('is empty when the device has no schema assigned', () => {
     // "Publishes beyond its model" and "has no model" are different findings; flagging the
     // latter would light up every unschematised device until the tag meant nothing.
-    const d = device({ schema_id: null, last_birth_metrics: ['anything'] })
+    const d = device({ submodel_schema_ids: [], last_birth_metrics: ['anything'] })
     expect(unmodelledMetrics(d, null)).toEqual([])
   })
 
@@ -175,7 +175,7 @@ describe('availableTags', () => {
   })
 
   it('is empty for an unschematised fleet, so the filter can be disabled', () => {
-    expect(availableTags([device({ schema_id: null })], schemas)).toEqual([])
+    expect(availableTags([device({ submodel_schema_ids: [] })], schemas)).toEqual([])
     expect(availableTags([], schemas)).toEqual([])
     expect(availableTags(null, null)).toEqual([])
   })

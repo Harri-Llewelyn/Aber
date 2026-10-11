@@ -5,9 +5,8 @@ import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
 
 /**
- * The Devices form's schema picker: every schema attached by either path, ticked, and saved as
- * device_submodels rows through PUT /api/v1/devices/:id/schemas, which also clears the deprecated
- * `devices.schema_id`. The device PUT and POST never carry `schema_id`.
+ * The Devices form's schema picker: every attached schema, ticked, and saved as device_submodels
+ * rows through PUT /api/v1/devices/:id/schemas. The device PUT and POST never carry `schema_id`.
  */
 
 vi.mock('../api', async () => {
@@ -44,7 +43,6 @@ const device = (overrides = {}) => ({
   location_source: 'inherited',
   conformance_policy: 'audit',
   created_at: '2026-07-20T12:00:00Z',
-  schema_id: null,
   submodel_schema_ids: [],
   ...overrides
 })
@@ -140,16 +138,16 @@ describe('creating a device', () => {
 })
 
 describe('editing a device', () => {
-  it('ticks the whole set, from the view and the column alike', async () => {
-    await show([device({ schema_id: SPINDLE, submodel_schema_ids: [SPINDLE, ENERGY] })])
+  it('ticks the whole set', async () => {
+    await show([device({ submodel_schema_ids: [SPINDLE, ENERGY] })])
     openEdit()
     expect(ticked().sort()).toEqual(['Energy_Schema', 'Spindle_Schema'])
     expect(box('OEE_Schema').checked).toBe(false)
   })
 
-  it('removes a schema that came from schema_id by writing the rest', async () => {
+  it('removes a schema by writing the rest', async () => {
     api.put.mockResolvedValue({})
-    await show([device({ schema_id: SPINDLE, submodel_schema_ids: [SPINDLE, ENERGY] })])
+    await show([device({ submodel_schema_ids: [SPINDLE, ENERGY] })])
     openEdit()
 
     fireEvent.click(box('Spindle_Schema'))

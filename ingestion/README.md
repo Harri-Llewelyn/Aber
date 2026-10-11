@@ -747,8 +747,8 @@ per-gateway flag in Node-RED's own flow context with no MQTT command involved.
 **Shadow devices are lanes, not copies.** `ensure_shadow_devices()` mints one device per captured
 device, bound to the playback gateway, carrying `devices.shadow_of`, and returns the map
 `start_playback_job()` wants. They are reused rather than minted per run, so a chart comparing a
-machine with its replay holds still between runs. What is copied is the **metric contract** —
-`schema_id` and `device_submodels` — because a replay judged against no schema is either unjudged or,
+machine with its replay holds still between runs. What is copied is the **metric contract** — the
+device's `device_submodels` rows — because a replay judged against no schema is either unjudged or,
 under `conformance_policy = enforce`, wholly rejected while the job reports success. What is
 deliberately not copied is the **nameplate**, and `0060` carries a self-check that fails if a shadow
 ever gains one: `device_nameplate` is IDTA Nameplate and holds a serial number, which identifies one

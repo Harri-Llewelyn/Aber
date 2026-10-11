@@ -2228,9 +2228,6 @@ class TestObjectsMatchTheirTypes(unittest.TestCase):
             {"id": "s-local", "schema_name": "Local Pump", "semantic_id": None,
              "schema_definition": {"properties": {"Flow": {}}}},
         ]
-        rows["devices"][0]["schema_id"] = "s-semantic"
-        rows["devices"][1]["schema_id"] = "s-local"
-        # The view's devices.schema_id arm, since neither device has submodels.
         rows["device_schemas"] = [
             {"device_id": "d-explicit", "schema_id": "s-semantic"},
             {"device_id": "d-inherits", "schema_id": "s-local"},
@@ -2335,12 +2332,12 @@ def _metric_rows() -> dict:
     """
     devices = [
         {"id": "d-one", "sparkplug_id": "dev-one", "name": "One", "gateway_id": "g1",
-         "schema_id": MILL, "last_birth_metrics": ["Axes/X/POSITION", "Asset_ID"]},
+         "last_birth_metrics": ["Axes/X/POSITION", "Asset_ID"]},
         {"id": "d-two", "sparkplug_id": "dev-two", "name": "Two", "gateway_id": "g1",
-         "schema_id": MILL, "last_birth_metrics": ["Axes/X/POSITION", "OEE/AVAILABILITY"]},
+         "last_birth_metrics": ["Axes/X/POSITION", "OEE/AVAILABILITY"]},
         {"id": "d-three", "sparkplug_id": "dev-three", "name": "Three", "gateway_id": "g1"},
         {"id": "d-ext", "sparkplug_id": "dev-ext", "name": "Extended", "gateway_id": "g1",
-         "schema_id": MILL, "is_quarantined": True,
+         "is_quarantined": True,
          "last_birth_metrics": ["Axes/X/POSITION", "Environmental/HUMIDITY", "Vendor/COUNT"]},
         {"id": "d-bare", "sparkplug_id": "dev-bare", "name": "Bare", "gateway_id": None},
     ]
@@ -2617,9 +2614,9 @@ class TestMetricsAreComponentsOfTheirDevice(_MetricSpace):
 
 class TestDevicesAreTypedByEveryAttachedSchema(_MetricSpace):
     """
-    A device is typed by every schema the `device_schemas` view attaches, not by
-    `devices.schema_id` alone: one schema is its type; several are one synthesized `allOf` type per
-    distinct set. `isExtended` is computed against their union.
+    A device is typed by every schema the `device_schemas` view attaches: one schema is its type;
+    several are one synthesized `allOf` type per distinct set. `isExtended` is computed against
+    their union.
     """
 
     def test_one_schema_is_the_devices_type(self):

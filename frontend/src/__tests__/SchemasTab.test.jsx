@@ -66,7 +66,7 @@ describe('the registry rows', () => {
   const S1 = schema(1, 'Three_Devices')
   const S2 = schema(2, 'One_Device')
   const S3 = schema(3, 'No_Devices')
-  const device = (id, schemaId) => ({ asset_id: id, asset_name: id, schema_id: schemaId })
+  const device = (id, schemaId) => ({ asset_id: id, asset_name: id, submodel_schema_ids: [schemaId] })
 
   let onSelectSchema
   const renderRegistry = async () => {
