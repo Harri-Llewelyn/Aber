@@ -10,8 +10,8 @@
  *   FUNCTION     CREATE OR REPLACE FUNCTION
  *   VIEW         CREATE OR REPLACE VIEW, or a call to the function that builds it (REBUILT_BY)
  *   INDEX        CREATE [UNIQUE] INDEX IF NOT EXISTS
- *   TRIGGER      DROP TRIGGER IF EXISTS ... ON ...; CREATE TRIGGER ...
- *   POLICY       DROP POLICY IF EXISTS ... ON ...; CREATE POLICY ...
+ *   TRIGGER      DROP TRIGGER IF EXISTS ... ON ...; CREATE TRIGGER ...  (one transaction per table)
+ *   POLICY       DROP POLICY IF EXISTS ... ON ...; CREATE POLICY ...    (one transaction per table)
  *   CONSTRAINT   a DO block guarded on pg_constraint -- rule 2, added guarded, never re-added
  *   the rest     already idempotent (GRANT, REVOKE, COMMENT, ALTER ... ENABLE ROW LEVEL SECURITY)
  *
@@ -342,7 +342,21 @@ function dropBiReaderGrants(sql) {
     .join('\n');
 }
 
+/**
+ * The table a TRIGGER or POLICY block's DROP/CREATE pair is on, or null for any other block.
+ * Consecutive pairs of one kind on one table are wrapped in BEGIN/COMMIT below: between a separate
+ * DROP and CREATE a reader finds no policy and reads no rows, and a write skips the trigger. One
+ * table per transaction, so no lock is held while another table's is awaited.
+ */
+function pairKey(type, s) {
+  const t = type.toUpperCase();
+  if (t !== 'TRIGGER' && t !== 'POLICY') return null;
+  const m = s.match(/^DROP (?:TRIGGER|POLICY) IF EXISTS \S+ ON (\S+);/);
+  return m ? `${t} ${m[1]}` : null;
+}
+
 const out = [];
+const pairKeys = [];
 let kept = 0, dropped = 0, readerGrants = 0, parts = 0;
 for (const b of blocks(dump)) {
   if (/^(SET|SELECT pg_catalog\.set_config)/m.test(b.body.trim()) && !b.name) continue;
@@ -357,6 +371,15 @@ for (const b of blocks(dump)) {
   if (s !== before) readerGrants++;
   kept++;
   out.push(`-- ${b.name} :: ${b.type}\n${s}\n`);
+  pairKeys.push(pairKey(b.type, s));
+}
+
+for (let i = 0; i < pairKeys.length; i++) {
+  if (!pairKeys[i]) continue;
+  const first = i;
+  while (i + 1 < pairKeys.length && pairKeys[i + 1] === pairKeys[first]) i++;
+  out[first] = out[first].replace('\n', '\nBEGIN;\n');
+  out[i] = out[i].replace(/\n$/, '\nCOMMIT;\n');
 }
 
 // ---------------------------------------------------------------------------------------------

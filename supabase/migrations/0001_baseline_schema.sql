@@ -10,7 +10,8 @@
 -- IDEMPOTENT, AND THAT IS NOT OPTIONAL. The db-init Job (`aber-db-init`) replays every
 -- `/migrations/*.sql` on every install and upgrade with no ledger, so every statement survives
 -- re-execution: `CREATE TABLE IF NOT EXISTS`, `CREATE OR REPLACE` for functions and views,
--- `DROP ... IF EXISTS` ahead of every constraint, policy and trigger.
+-- `DROP ... IF EXISTS` ahead of every constraint, policy and trigger. Each table's policy pairs,
+-- and its trigger pairs, commit as one transaction, so no reader or writer meets the gap between.
 --
 -- Not here: the `storage.buckets` row (storage-api owns that schema and migrates it after
 -- db-init has finished; `scripts/storage-init.mjs` creates the bucket), and anything owned by
@@ -15517,6 +15518,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_schemas_one_draft_per_parent ON public.sche
 --
 
 -- system_settings archive_destination_guard_trg :: TRIGGER
+BEGIN;
 DROP TRIGGER IF EXISTS archive_destination_guard_trg ON public.system_settings;
 CREATE TRIGGER archive_destination_guard_trg BEFORE UPDATE ON public.system_settings FOR EACH ROW EXECUTE FUNCTION public.archive_destination_guard();
 
@@ -15537,10 +15539,12 @@ CREATE TRIGGER system_settings_read_only_trg BEFORE UPDATE ON public.system_sett
 -- system_settings system_settings_stamp_trg :: TRIGGER
 DROP TRIGGER IF EXISTS system_settings_stamp_trg ON public.system_settings;
 CREATE TRIGGER system_settings_stamp_trg BEFORE UPDATE ON public.system_settings FOR EACH ROW EXECUTE FUNCTION public.system_settings_stamp();
+COMMIT;
 
 --
 
 -- areas trg_areas_audit_trail :: TRIGGER
+BEGIN;
 DROP TRIGGER IF EXISTS trg_areas_audit_trail ON public.areas;
 CREATE TRIGGER trg_areas_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.areas FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
 
@@ -15549,16 +15553,20 @@ CREATE TRIGGER trg_areas_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.
 -- areas trg_areas_retired :: TRIGGER
 DROP TRIGGER IF EXISTS trg_areas_retired ON public.areas;
 CREATE TRIGGER trg_areas_retired AFTER DELETE ON public.areas FOR EACH ROW EXECUTE FUNCTION public.record_retired_entity();
+COMMIT;
 
 --
 
 -- asset_exports trg_asset_exports_audit_trail :: TRIGGER
+BEGIN;
 DROP TRIGGER IF EXISTS trg_asset_exports_audit_trail ON public.asset_exports;
 CREATE TRIGGER trg_asset_exports_audit_trail AFTER INSERT ON public.asset_exports FOR EACH ROW EXECUTE FUNCTION public.log_asset_export();
+COMMIT;
 
 --
 
 -- audit_trail trg_audit_trail_append_only :: TRIGGER
+BEGIN;
 DROP TRIGGER IF EXISTS trg_audit_trail_append_only ON public.audit_trail;
 CREATE TRIGGER trg_audit_trail_append_only BEFORE DELETE OR UPDATE ON public.audit_trail FOR EACH ROW EXECUTE FUNCTION public.enforce_audit_trail_append_only();
 
@@ -15567,10 +15575,12 @@ CREATE TRIGGER trg_audit_trail_append_only BEFORE DELETE OR UPDATE ON public.aud
 -- audit_trail trg_audit_trail_stamp_domain :: TRIGGER
 DROP TRIGGER IF EXISTS trg_audit_trail_stamp_domain ON public.audit_trail;
 CREATE TRIGGER trg_audit_trail_stamp_domain BEFORE INSERT ON public.audit_trail FOR EACH ROW EXECUTE FUNCTION public.stamp_audit_domain();
+COMMIT;
 
 --
 
 -- cells trg_cells_audit_trail :: TRIGGER
+BEGIN;
 DROP TRIGGER IF EXISTS trg_cells_audit_trail ON public.cells;
 CREATE TRIGGER trg_cells_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.cells FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
 
@@ -15585,10 +15595,12 @@ CREATE TRIGGER trg_cells_place_in_area BEFORE INSERT OR UPDATE OF area_id, plan_
 -- cells trg_cells_retired :: TRIGGER
 DROP TRIGGER IF EXISTS trg_cells_retired ON public.cells;
 CREATE TRIGGER trg_cells_retired AFTER DELETE ON public.cells FOR EACH ROW EXECUTE FUNCTION public.record_retired_entity();
+COMMIT;
 
 --
 
 -- change_proposals trg_change_proposals_author :: TRIGGER
+BEGIN;
 DROP TRIGGER IF EXISTS trg_change_proposals_author ON public.change_proposals;
 CREATE TRIGGER trg_change_proposals_author BEFORE INSERT ON public.change_proposals FOR EACH ROW EXECUTE FUNCTION public.stamp_proposal_author();
 
@@ -15609,10 +15621,12 @@ CREATE TRIGGER trg_change_proposals_transition BEFORE UPDATE ON public.change_pr
 -- change_proposals trg_change_proposals_validate :: TRIGGER
 DROP TRIGGER IF EXISTS trg_change_proposals_validate ON public.change_proposals;
 CREATE TRIGGER trg_change_proposals_validate BEFORE INSERT OR UPDATE OF patch, entity_type, entity_id ON public.change_proposals FOR EACH ROW EXECUTE FUNCTION public.validate_change_proposal();
+COMMIT;
 
 --
 
 -- device_nameplate trg_device_nameplate_audit_trail :: TRIGGER
+BEGIN;
 DROP TRIGGER IF EXISTS trg_device_nameplate_audit_trail ON public.device_nameplate;
 CREATE TRIGGER trg_device_nameplate_audit_trail AFTER INSERT OR DELETE ON public.device_nameplate FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event('device_id');
 
@@ -15621,10 +15635,12 @@ CREATE TRIGGER trg_device_nameplate_audit_trail AFTER INSERT OR DELETE ON public
 -- device_nameplate trg_device_nameplate_audit_trail_update :: TRIGGER
 DROP TRIGGER IF EXISTS trg_device_nameplate_audit_trail_update ON public.device_nameplate;
 CREATE TRIGGER trg_device_nameplate_audit_trail_update AFTER UPDATE ON public.device_nameplate FOR EACH ROW WHEN ((((to_jsonb(new.*) - 'updated_at'::text) - 'updated_by'::text) IS DISTINCT FROM ((to_jsonb(old.*) - 'updated_at'::text) - 'updated_by'::text))) EXECUTE FUNCTION public.log_audit_trail_event('device_id');
+COMMIT;
 
 --
 
 -- devices trg_device_quarantine_webhook_insert :: TRIGGER
+BEGIN;
 DROP TRIGGER IF EXISTS trg_device_quarantine_webhook_insert ON public.devices;
 CREATE TRIGGER trg_device_quarantine_webhook_insert AFTER INSERT ON public.devices FOR EACH ROW WHEN ((new.is_quarantined IS TRUE)) EXECUTE FUNCTION public.dispatch_device_quarantine_webhook();
 
@@ -15633,16 +15649,20 @@ CREATE TRIGGER trg_device_quarantine_webhook_insert AFTER INSERT ON public.devic
 -- devices trg_device_quarantine_webhook_update :: TRIGGER
 DROP TRIGGER IF EXISTS trg_device_quarantine_webhook_update ON public.devices;
 CREATE TRIGGER trg_device_quarantine_webhook_update AFTER UPDATE OF is_quarantined ON public.devices FOR EACH ROW WHEN (((new.is_quarantined IS TRUE) AND (old.is_quarantined IS DISTINCT FROM true))) EXECUTE FUNCTION public.dispatch_device_quarantine_webhook();
+COMMIT;
 
 --
 
 -- device_submodels trg_device_submodels_reject_archived_schema :: TRIGGER
+BEGIN;
 DROP TRIGGER IF EXISTS trg_device_submodels_reject_archived_schema ON public.device_submodels;
 CREATE TRIGGER trg_device_submodels_reject_archived_schema BEFORE INSERT OR UPDATE OF schema_id ON public.device_submodels FOR EACH ROW EXECUTE FUNCTION public.reject_archived_schema_assignment();
+COMMIT;
 
 --
 
 -- devices trg_devices_audit_trail :: TRIGGER
+BEGIN;
 DROP TRIGGER IF EXISTS trg_devices_audit_trail ON public.devices;
 CREATE TRIGGER trg_devices_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.devices FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
 
@@ -15681,16 +15701,20 @@ CREATE TRIGGER trg_devices_shadow_follows_archive AFTER UPDATE OF is_archived ON
 -- devices trg_devices_shadow_follows_delete :: TRIGGER
 DROP TRIGGER IF EXISTS trg_devices_shadow_follows_delete ON public.devices;
 CREATE TRIGGER trg_devices_shadow_follows_delete BEFORE DELETE ON public.devices FOR EACH ROW EXECUTE FUNCTION public.shadow_follows_its_original();
+COMMIT;
 
 --
 
 -- schemas trg_enforce_schema_version_provenance :: TRIGGER
+BEGIN;
 DROP TRIGGER IF EXISTS trg_enforce_schema_version_provenance ON public.schemas;
 CREATE TRIGGER trg_enforce_schema_version_provenance BEFORE INSERT ON public.schemas FOR EACH ROW EXECUTE FUNCTION public.enforce_schema_version_provenance();
+COMMIT;
 
 --
 
 -- gateways trg_gateways_audit_trail :: TRIGGER
+BEGIN;
 DROP TRIGGER IF EXISTS trg_gateways_audit_trail ON public.gateways;
 CREATE TRIGGER trg_gateways_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
 
@@ -15735,10 +15759,12 @@ CREATE TRIGGER trg_gateways_revoke_credential_update AFTER UPDATE OF is_archived
 -- gateways trg_gateways_withdraw_enrolment :: TRIGGER
 DROP TRIGGER IF EXISTS trg_gateways_withdraw_enrolment ON public.gateways;
 CREATE TRIGGER trg_gateways_withdraw_enrolment AFTER UPDATE OF is_archived ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.withdraw_gateway_enrollment_tokens();
+COMMIT;
 
 --
 
 -- metric_catalog trg_metric_catalog_audit_trail :: TRIGGER
+BEGIN;
 DROP TRIGGER IF EXISTS trg_metric_catalog_audit_trail ON public.metric_catalog;
 CREATE TRIGGER trg_metric_catalog_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.metric_catalog FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
 
@@ -15753,16 +15779,20 @@ CREATE TRIGGER trg_metric_catalog_immutability BEFORE UPDATE ON public.metric_ca
 -- metric_catalog trg_metric_group_spelling :: TRIGGER
 DROP TRIGGER IF EXISTS trg_metric_group_spelling ON public.metric_catalog;
 CREATE TRIGGER trg_metric_group_spelling BEFORE INSERT ON public.metric_catalog FOR EACH ROW EXECUTE FUNCTION public.enforce_metric_group_spelling();
+COMMIT;
 
 --
 
 -- playback_jobs trg_playback_target_must_be_shadow :: TRIGGER
+BEGIN;
 DROP TRIGGER IF EXISTS trg_playback_target_must_be_shadow ON public.playback_jobs;
 CREATE TRIGGER trg_playback_target_must_be_shadow BEFORE INSERT ON public.playback_jobs FOR EACH ROW EXECUTE FUNCTION public.playback_target_must_be_shadow();
+COMMIT;
 
 --
 
 -- schemas trg_prevent_active_schema_mutation :: TRIGGER
+BEGIN;
 DROP TRIGGER IF EXISTS trg_prevent_active_schema_mutation ON public.schemas;
 CREATE TRIGGER trg_prevent_active_schema_mutation BEFORE UPDATE ON public.schemas FOR EACH ROW EXECUTE FUNCTION public.prevent_active_schema_mutation();
 
@@ -15771,10 +15801,12 @@ CREATE TRIGGER trg_prevent_active_schema_mutation BEFORE UPDATE ON public.schema
 -- schemas trg_schemas_audit_trail :: TRIGGER
 DROP TRIGGER IF EXISTS trg_schemas_audit_trail ON public.schemas;
 CREATE TRIGGER trg_schemas_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.schemas FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
+COMMIT;
 
 --
 
 -- system_settings trg_system_settings_audit_trail :: TRIGGER
+BEGIN;
 DROP TRIGGER IF EXISTS trg_system_settings_audit_trail ON public.system_settings;
 CREATE TRIGGER trg_system_settings_audit_trail AFTER INSERT OR DELETE ON public.system_settings FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
 
@@ -15783,10 +15815,12 @@ CREATE TRIGGER trg_system_settings_audit_trail AFTER INSERT OR DELETE ON public.
 -- system_settings trg_system_settings_audit_trail_update :: TRIGGER
 DROP TRIGGER IF EXISTS trg_system_settings_audit_trail_update ON public.system_settings;
 CREATE TRIGGER trg_system_settings_audit_trail_update AFTER UPDATE ON public.system_settings FOR EACH ROW WHEN ((((to_jsonb(new.*) - 'updated_at'::text) - 'updated_by'::text) IS DISTINCT FROM ((to_jsonb(old.*) - 'updated_at'::text) - 'updated_by'::text))) EXECUTE FUNCTION public.log_audit_trail_event();
+COMMIT;
 
 --
 
 -- user_roles trg_user_roles_audit_trail :: TRIGGER
+BEGIN;
 DROP TRIGGER IF EXISTS trg_user_roles_audit_trail ON public.user_roles;
 CREATE TRIGGER trg_user_roles_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.user_roles FOR EACH ROW EXECUTE FUNCTION public.log_role_assignment();
 
@@ -15795,6 +15829,7 @@ CREATE TRIGGER trg_user_roles_audit_trail AFTER INSERT OR DELETE OR UPDATE ON pu
 -- user_roles trg_user_roles_refuse_machine_principal :: TRIGGER
 DROP TRIGGER IF EXISTS trg_user_roles_refuse_machine_principal ON public.user_roles;
 CREATE TRIGGER trg_user_roles_refuse_machine_principal BEFORE INSERT OR UPDATE ON public.user_roles FOR EACH ROW EXECUTE FUNCTION public.refuse_role_for_machine_principal();
+COMMIT;
 
 --
 
@@ -16488,6 +16523,7 @@ ALTER TABLE public.areas ENABLE ROW LEVEL SECURITY;
 --
 
 -- areas areas_delete_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS areas_delete_privileged ON public.areas;
 CREATE POLICY areas_delete_privileged ON public.areas FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
@@ -16508,6 +16544,7 @@ CREATE POLICY areas_select_authenticated ON public.areas FOR SELECT TO authentic
 -- areas areas_update_privileged :: POLICY
 DROP POLICY IF EXISTS areas_update_privileged ON public.areas;
 CREATE POLICY areas_update_privileged ON public.areas FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+COMMIT;
 
 --
 
@@ -16517,8 +16554,10 @@ ALTER TABLE public.ashrae223_vocabulary ENABLE ROW LEVEL SECURITY;
 --
 
 -- ashrae223_vocabulary ashrae223_vocabulary_select_authenticated :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS ashrae223_vocabulary_select_authenticated ON public.ashrae223_vocabulary;
 CREATE POLICY ashrae223_vocabulary_select_authenticated ON public.ashrae223_vocabulary FOR SELECT TO authenticated USING (true);
+COMMIT;
 
 --
 
@@ -16528,6 +16567,7 @@ ALTER TABLE public.asset_config ENABLE ROW LEVEL SECURITY;
 --
 
 -- asset_config asset_config_delete_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS asset_config_delete_privileged ON public.asset_config;
 CREATE POLICY asset_config_delete_privileged ON public.asset_config FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
@@ -16548,6 +16588,7 @@ CREATE POLICY asset_config_select_authenticated ON public.asset_config FOR SELEC
 -- asset_config asset_config_update_privileged :: POLICY
 DROP POLICY IF EXISTS asset_config_update_privileged ON public.asset_config;
 CREATE POLICY asset_config_update_privileged ON public.asset_config FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+COMMIT;
 
 --
 
@@ -16557,8 +16598,10 @@ ALTER TABLE public.asset_exports ENABLE ROW LEVEL SECURITY;
 --
 
 -- asset_exports asset_exports_select_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS asset_exports_select_privileged ON public.asset_exports;
 CREATE POLICY asset_exports_select_privileged ON public.asset_exports FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
+COMMIT;
 
 --
 
@@ -16568,6 +16611,7 @@ ALTER TABLE public.audit_trail ENABLE ROW LEVEL SECURITY;
 --
 
 -- audit_trail audit_trail_select_asset :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS audit_trail_select_asset ON public.audit_trail;
 CREATE POLICY audit_trail_select_asset ON public.audit_trail FOR SELECT TO authenticated USING (((audit_domain = 'asset'::text) AND (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]) OR public.has_authority(ARRAY['audit_trail:read'::text]))));
 
@@ -16576,6 +16620,7 @@ CREATE POLICY audit_trail_select_asset ON public.audit_trail FOR SELECT TO authe
 -- audit_trail audit_trail_select_security :: POLICY
 DROP POLICY IF EXISTS audit_trail_select_security ON public.audit_trail;
 CREATE POLICY audit_trail_select_security ON public.audit_trail FOR SELECT TO authenticated USING (((audit_domain = 'security'::text) AND public.has_role(ARRAY['Administrator'::text, 'Auditor'::text])));
+COMMIT;
 
 --
 
@@ -16585,8 +16630,10 @@ ALTER TABLE public.backup_jobs ENABLE ROW LEVEL SECURITY;
 --
 
 -- backup_jobs backup_jobs_select_administrator :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS backup_jobs_select_administrator ON public.backup_jobs;
 CREATE POLICY backup_jobs_select_administrator ON public.backup_jobs FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text]));
+COMMIT;
 
 --
 
@@ -16596,8 +16643,10 @@ ALTER TABLE public.backups ENABLE ROW LEVEL SECURITY;
 --
 
 -- backups backups_select_administrator :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS backups_select_administrator ON public.backups;
 CREATE POLICY backups_select_administrator ON public.backups FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text]));
+COMMIT;
 
 --
 
@@ -16607,8 +16656,10 @@ ALTER TABLE public.capture_jobs ENABLE ROW LEVEL SECURITY;
 --
 
 -- capture_jobs capture_jobs_select_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS capture_jobs_select_privileged ON public.capture_jobs;
 CREATE POLICY capture_jobs_select_privileged ON public.capture_jobs FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
+COMMIT;
 
 --
 
@@ -16618,6 +16669,7 @@ ALTER TABLE public.captures ENABLE ROW LEVEL SECURITY;
 --
 
 -- captures captures_delete_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS captures_delete_privileged ON public.captures;
 CREATE POLICY captures_delete_privileged ON public.captures FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
@@ -16626,6 +16678,7 @@ CREATE POLICY captures_delete_privileged ON public.captures FOR DELETE TO authen
 -- captures captures_select_privileged :: POLICY
 DROP POLICY IF EXISTS captures_select_privileged ON public.captures;
 CREATE POLICY captures_select_privileged ON public.captures FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
+COMMIT;
 
 --
 
@@ -16635,6 +16688,7 @@ ALTER TABLE public.cells ENABLE ROW LEVEL SECURITY;
 --
 
 -- cells cells_delete_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS cells_delete_privileged ON public.cells;
 CREATE POLICY cells_delete_privileged ON public.cells FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
@@ -16655,6 +16709,7 @@ CREATE POLICY cells_select_authenticated ON public.cells FOR SELECT TO authentic
 -- cells cells_update_privileged :: POLICY
 DROP POLICY IF EXISTS cells_update_privileged ON public.cells;
 CREATE POLICY cells_update_privileged ON public.cells FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+COMMIT;
 
 --
 
@@ -16664,6 +16719,7 @@ ALTER TABLE public.change_proposals ENABLE ROW LEVEL SECURITY;
 --
 
 -- change_proposals change_proposals_insert_proposer :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS change_proposals_insert_proposer ON public.change_proposals;
 CREATE POLICY change_proposals_insert_proposer ON public.change_proposals FOR INSERT TO authenticated WITH CHECK ((public.has_authority(ARRAY['proposal:create'::text]) AND (proposed_by = auth.uid()) AND (status = 'open'::text)));
 
@@ -16678,6 +16734,7 @@ CREATE POLICY change_proposals_select_own_or_approver ON public.change_proposals
 -- change_proposals change_proposals_update_own_open :: POLICY
 DROP POLICY IF EXISTS change_proposals_update_own_open ON public.change_proposals;
 CREATE POLICY change_proposals_update_own_open ON public.change_proposals FOR UPDATE TO authenticated USING (((proposed_by = auth.uid()) AND (status = 'open'::text))) WITH CHECK ((proposed_by = auth.uid()));
+COMMIT;
 
 --
 
@@ -16687,6 +16744,7 @@ ALTER TABLE public.device_nameplate ENABLE ROW LEVEL SECURITY;
 --
 
 -- device_nameplate device_nameplate_delete_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS device_nameplate_delete_privileged ON public.device_nameplate;
 CREATE POLICY device_nameplate_delete_privileged ON public.device_nameplate FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
@@ -16707,6 +16765,7 @@ CREATE POLICY device_nameplate_select_authenticated ON public.device_nameplate F
 -- device_nameplate device_nameplate_update_privileged :: POLICY
 DROP POLICY IF EXISTS device_nameplate_update_privileged ON public.device_nameplate;
 CREATE POLICY device_nameplate_update_privileged ON public.device_nameplate FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+COMMIT;
 
 --
 
@@ -16716,6 +16775,7 @@ ALTER TABLE public.device_submodels ENABLE ROW LEVEL SECURITY;
 --
 
 -- device_submodels device_submodels_delete_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS device_submodels_delete_privileged ON public.device_submodels;
 CREATE POLICY device_submodels_delete_privileged ON public.device_submodels FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
@@ -16736,6 +16796,7 @@ CREATE POLICY device_submodels_select_authenticated ON public.device_submodels F
 -- device_submodels device_submodels_update_privileged :: POLICY
 DROP POLICY IF EXISTS device_submodels_update_privileged ON public.device_submodels;
 CREATE POLICY device_submodels_update_privileged ON public.device_submodels FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+COMMIT;
 
 --
 
@@ -16745,6 +16806,7 @@ ALTER TABLE public.devices ENABLE ROW LEVEL SECURITY;
 --
 
 -- devices devices_delete_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS devices_delete_privileged ON public.devices;
 CREATE POLICY devices_delete_privileged ON public.devices FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
@@ -16765,6 +16827,7 @@ CREATE POLICY devices_select_authenticated ON public.devices FOR SELECT TO authe
 -- devices devices_update_privileged :: POLICY
 DROP POLICY IF EXISTS devices_update_privileged ON public.devices;
 CREATE POLICY devices_update_privileged ON public.devices FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+COMMIT;
 
 --
 
@@ -16779,6 +16842,7 @@ ALTER TABLE public.directory_services ENABLE ROW LEVEL SECURITY;
 --
 
 -- directory_services directory_services_delete_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS directory_services_delete_privileged ON public.directory_services;
 CREATE POLICY directory_services_delete_privileged ON public.directory_services FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
@@ -16799,6 +16863,7 @@ CREATE POLICY directory_services_select_authenticated ON public.directory_servic
 -- directory_services directory_services_update_privileged :: POLICY
 DROP POLICY IF EXISTS directory_services_update_privileged ON public.directory_services;
 CREATE POLICY directory_services_update_privileged ON public.directory_services FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+COMMIT;
 
 --
 
@@ -16823,6 +16888,7 @@ ALTER TABLE public.gateways ENABLE ROW LEVEL SECURITY;
 --
 
 -- gateways gateways_delete_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS gateways_delete_privileged ON public.gateways;
 CREATE POLICY gateways_delete_privileged ON public.gateways FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
@@ -16843,6 +16909,7 @@ CREATE POLICY gateways_select_authenticated ON public.gateways FOR SELECT TO aut
 -- gateways gateways_update_privileged :: POLICY
 DROP POLICY IF EXISTS gateways_update_privileged ON public.gateways;
 CREATE POLICY gateways_update_privileged ON public.gateways FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+COMMIT;
 
 --
 
@@ -16852,8 +16919,10 @@ ALTER TABLE public.idta_submodel_templates ENABLE ROW LEVEL SECURITY;
 --
 
 -- idta_submodel_templates idta_submodel_templates_select_authenticated :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS idta_submodel_templates_select_authenticated ON public.idta_submodel_templates;
 CREATE POLICY idta_submodel_templates_select_authenticated ON public.idta_submodel_templates FOR SELECT TO authenticated USING (true);
+COMMIT;
 
 --
 
@@ -16863,8 +16932,10 @@ ALTER TABLE public.iso22400_vocabulary ENABLE ROW LEVEL SECURITY;
 --
 
 -- iso22400_vocabulary iso22400_vocabulary_select_authenticated :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS iso22400_vocabulary_select_authenticated ON public.iso22400_vocabulary;
 CREATE POLICY iso22400_vocabulary_select_authenticated ON public.iso22400_vocabulary FOR SELECT TO authenticated USING (true);
+COMMIT;
 
 --
 
@@ -16874,6 +16945,7 @@ ALTER TABLE public.links ENABLE ROW LEVEL SECURITY;
 --
 
 -- links links_delete_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS links_delete_privileged ON public.links;
 CREATE POLICY links_delete_privileged ON public.links FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
@@ -16894,6 +16966,7 @@ CREATE POLICY links_select_authenticated ON public.links FOR SELECT TO authentic
 -- links links_update_privileged :: POLICY
 DROP POLICY IF EXISTS links_update_privileged ON public.links;
 CREATE POLICY links_update_privileged ON public.links FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+COMMIT;
 
 --
 
@@ -16903,8 +16976,10 @@ ALTER TABLE public.machine_principals ENABLE ROW LEVEL SECURITY;
 --
 
 -- machine_principals machine_principals_select_admin_or_auditor :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS machine_principals_select_admin_or_auditor ON public.machine_principals;
 CREATE POLICY machine_principals_select_admin_or_auditor ON public.machine_principals FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Auditor'::text]));
+COMMIT;
 
 --
 
@@ -16914,6 +16989,7 @@ ALTER TABLE public.metric_catalog ENABLE ROW LEVEL SECURITY;
 --
 
 -- metric_catalog metric_catalog_insert_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS metric_catalog_insert_privileged ON public.metric_catalog;
 CREATE POLICY metric_catalog_insert_privileged ON public.metric_catalog FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
 
@@ -16928,6 +17004,7 @@ CREATE POLICY metric_catalog_select_authenticated ON public.metric_catalog FOR S
 -- metric_catalog metric_catalog_update_privileged :: POLICY
 DROP POLICY IF EXISTS metric_catalog_update_privileged ON public.metric_catalog;
 CREATE POLICY metric_catalog_update_privileged ON public.metric_catalog FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+COMMIT;
 
 --
 
@@ -16937,6 +17014,7 @@ ALTER TABLE public.metric_groups ENABLE ROW LEVEL SECURITY;
 --
 
 -- metric_groups metric_groups_insert_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS metric_groups_insert_privileged ON public.metric_groups;
 CREATE POLICY metric_groups_insert_privileged ON public.metric_groups FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
 
@@ -16951,6 +17029,7 @@ CREATE POLICY metric_groups_select_authenticated ON public.metric_groups FOR SEL
 -- metric_groups metric_groups_update_privileged :: POLICY
 DROP POLICY IF EXISTS metric_groups_update_privileged ON public.metric_groups;
 CREATE POLICY metric_groups_update_privileged ON public.metric_groups FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+COMMIT;
 
 --
 
@@ -16960,8 +17039,10 @@ ALTER TABLE public.mtconnect_vocabulary ENABLE ROW LEVEL SECURITY;
 --
 
 -- mtconnect_vocabulary mtconnect_vocabulary_select_authenticated :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS mtconnect_vocabulary_select_authenticated ON public.mtconnect_vocabulary;
 CREATE POLICY mtconnect_vocabulary_select_authenticated ON public.mtconnect_vocabulary FOR SELECT TO authenticated USING (true);
+COMMIT;
 
 --
 
@@ -16976,8 +17057,10 @@ ALTER TABLE public.opcua_vocabulary ENABLE ROW LEVEL SECURITY;
 --
 
 -- opcua_vocabulary opcua_vocabulary_select_authenticated :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS opcua_vocabulary_select_authenticated ON public.opcua_vocabulary;
 CREATE POLICY opcua_vocabulary_select_authenticated ON public.opcua_vocabulary FOR SELECT TO authenticated USING (true);
+COMMIT;
 
 --
 
@@ -16987,8 +17070,10 @@ ALTER TABLE public.permissions ENABLE ROW LEVEL SECURITY;
 --
 
 -- permissions permissions_select_authenticated :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS permissions_select_authenticated ON public.permissions;
 CREATE POLICY permissions_select_authenticated ON public.permissions FOR SELECT TO authenticated USING (true);
+COMMIT;
 
 --
 
@@ -16998,6 +17083,7 @@ ALTER TABLE public.platform_alerts ENABLE ROW LEVEL SECURITY;
 --
 
 -- platform_alerts platform_alerts_all_service_role :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS platform_alerts_all_service_role ON public.platform_alerts;
 CREATE POLICY platform_alerts_all_service_role ON public.platform_alerts TO service_role USING (true) WITH CHECK (true);
 
@@ -17006,6 +17092,7 @@ CREATE POLICY platform_alerts_all_service_role ON public.platform_alerts TO serv
 -- platform_alerts platform_alerts_select_authenticated :: POLICY
 DROP POLICY IF EXISTS platform_alerts_select_authenticated ON public.platform_alerts;
 CREATE POLICY platform_alerts_select_authenticated ON public.platform_alerts FOR SELECT TO authenticated USING (true);
+COMMIT;
 
 --
 
@@ -17015,8 +17102,10 @@ ALTER TABLE public.playback_jobs ENABLE ROW LEVEL SECURITY;
 --
 
 -- playback_jobs playback_jobs_select_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS playback_jobs_select_privileged ON public.playback_jobs;
 CREATE POLICY playback_jobs_select_privileged ON public.playback_jobs FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
+COMMIT;
 
 --
 
@@ -17026,8 +17115,10 @@ ALTER TABLE public.playback_worker_status ENABLE ROW LEVEL SECURITY;
 --
 
 -- playback_worker_status playback_worker_status_select_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS playback_worker_status_select_privileged ON public.playback_worker_status;
 CREATE POLICY playback_worker_status_select_privileged ON public.playback_worker_status FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
+COMMIT;
 
 --
 
@@ -17037,8 +17128,10 @@ ALTER TABLE public.principal_permissions ENABLE ROW LEVEL SECURITY;
 --
 
 -- principal_permissions principal_permissions_select_own_or_admin :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS principal_permissions_select_own_or_admin ON public.principal_permissions;
 CREATE POLICY principal_permissions_select_own_or_admin ON public.principal_permissions FOR SELECT TO authenticated USING (((principal_id = auth.uid()) OR public.has_role(ARRAY['Administrator'::text])));
+COMMIT;
 
 --
 
@@ -17048,8 +17141,10 @@ ALTER TABLE public.rebirth_requests ENABLE ROW LEVEL SECURITY;
 --
 
 -- rebirth_requests rebirth_requests_select_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS rebirth_requests_select_privileged ON public.rebirth_requests;
 CREATE POLICY rebirth_requests_select_privileged ON public.rebirth_requests FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
+COMMIT;
 
 --
 
@@ -17059,8 +17154,10 @@ ALTER TABLE public.retired_entities ENABLE ROW LEVEL SECURITY;
 --
 
 -- retired_entities retired_entities_select_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS retired_entities_select_privileged ON public.retired_entities;
 CREATE POLICY retired_entities_select_privileged ON public.retired_entities FOR SELECT TO authenticated USING (public.has_authority(ARRAY['archive:manage'::text, 'audit_trail:read'::text]));
+COMMIT;
 
 --
 
@@ -17070,8 +17167,10 @@ ALTER TABLE public.revoked_service_principals ENABLE ROW LEVEL SECURITY;
 --
 
 -- revoked_service_principals revoked_service_principals_select_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS revoked_service_principals_select_privileged ON public.revoked_service_principals;
 CREATE POLICY revoked_service_principals_select_privileged ON public.revoked_service_principals FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Auditor'::text]));
+COMMIT;
 
 --
 
@@ -17081,8 +17180,10 @@ ALTER TABLE public.revoked_service_tokens ENABLE ROW LEVEL SECURITY;
 --
 
 -- revoked_service_tokens revoked_service_tokens_select_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS revoked_service_tokens_select_privileged ON public.revoked_service_tokens;
 CREATE POLICY revoked_service_tokens_select_privileged ON public.revoked_service_tokens FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Auditor'::text]));
+COMMIT;
 
 --
 
@@ -17092,8 +17193,10 @@ ALTER TABLE public.role_permissions ENABLE ROW LEVEL SECURITY;
 --
 
 -- role_permissions role_permissions_select_authenticated :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS role_permissions_select_authenticated ON public.role_permissions;
 CREATE POLICY role_permissions_select_authenticated ON public.role_permissions FOR SELECT TO authenticated USING (true);
+COMMIT;
 
 --
 
@@ -17103,8 +17206,10 @@ ALTER TABLE public.roles ENABLE ROW LEVEL SECURITY;
 --
 
 -- roles roles_select_authenticated :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS roles_select_authenticated ON public.roles;
 CREATE POLICY roles_select_authenticated ON public.roles FOR SELECT TO authenticated USING (true);
+COMMIT;
 
 --
 
@@ -17119,6 +17224,7 @@ ALTER TABLE public.schemas ENABLE ROW LEVEL SECURITY;
 --
 
 -- schemas schemas_delete_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS schemas_delete_privileged ON public.schemas;
 CREATE POLICY schemas_delete_privileged ON public.schemas FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text]));
 
@@ -17139,6 +17245,7 @@ CREATE POLICY schemas_select_authenticated ON public.schemas FOR SELECT TO authe
 -- schemas schemas_update_privileged :: POLICY
 DROP POLICY IF EXISTS schemas_update_privileged ON public.schemas;
 CREATE POLICY schemas_update_privileged ON public.schemas FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+COMMIT;
 
 --
 
@@ -17148,6 +17255,7 @@ ALTER TABLE public.system_settings ENABLE ROW LEVEL SECURITY;
 --
 
 -- system_settings system_settings_all_service_role :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS system_settings_all_service_role ON public.system_settings;
 CREATE POLICY system_settings_all_service_role ON public.system_settings TO service_role USING (true) WITH CHECK (true);
 
@@ -17162,6 +17270,7 @@ CREATE POLICY system_settings_select_authenticated ON public.system_settings FOR
 -- system_settings system_settings_update_admin :: POLICY
 DROP POLICY IF EXISTS system_settings_update_admin ON public.system_settings;
 CREATE POLICY system_settings_update_admin ON public.system_settings FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+COMMIT;
 
 --
 
@@ -17171,8 +17280,10 @@ ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
 --
 
 -- user_roles user_roles_select_own_or_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS user_roles_select_own_or_privileged ON public.user_roles;
 CREATE POLICY user_roles_select_own_or_privileged ON public.user_roles FOR SELECT TO authenticated USING (((user_id = (auth.uid())::text) OR public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])));
+COMMIT;
 
 --
 
@@ -17182,8 +17293,10 @@ ALTER TABLE public.webhook_endpoints ENABLE ROW LEVEL SECURITY;
 --
 
 -- webhook_endpoints webhook_endpoints_select_privileged :: POLICY
+BEGIN;
 DROP POLICY IF EXISTS webhook_endpoints_select_privileged ON public.webhook_endpoints;
 CREATE POLICY webhook_endpoints_select_privileged ON public.webhook_endpoints FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text]));
+COMMIT;
 
 --
 
