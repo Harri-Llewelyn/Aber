@@ -65,8 +65,7 @@ REVOKE ALL ON SCHEMA _realtime FROM PUBLIC;
 -- 3. TimescaleDB foreign data wrapper
 -- ---------------------------------------------------------------------------------------------
 -- TimescaleDB is a separate container reachable only from this database; the FDW gives the SPA
--- a normal PostgREST collection. Must come before section 4: `DROP SERVER ... CASCADE` drops
--- the foreign table and the `public.telemetry` view, which section 4 re-creates.
+-- a normal PostgREST collection. Must come before section 4, whose foreign tables use the server.
 
 \if :{?ts_host}
 \else
@@ -93,10 +92,6 @@ REVOKE ALL ON SCHEMA _realtime FROM PUBLIC;
 -- table is never routable; only the public view is exposed.
 CREATE SCHEMA IF NOT EXISTS timescale;
 
--- Recreated on every run so the connection settings stay in step with the chart's values and
--- timescaledb/init/001_schema.sql. The CASCADE drops the whole telemetry read surface until the
--- rollup views are rebuilt later in the chain; a file aborting in between leaves PostgREST
--- answering `telemetry` with a missing-relation error until the next successful replay.
 -- ---------------------------------------------------------------------------------------------
 -- The FDW's own credential. Two "not set" cases: UNDEFINED (a hand run passes no variable, and
 -- psql aborts on an undefined :'var', so `\if :{?name}` is tested first) and BLANK (db-init
@@ -129,14 +124,50 @@ SELECT btrim(:'ts_sslrootcert') <> '' AS ts_tls,
        CASE WHEN btrim(:'ts_sslrootcert') = '' THEN 'prefer' ELSE 'verify-full' END AS ts_sslmode
 \gset
 
-DROP SERVER IF EXISTS timescaledb_server CASCADE;
-
-CREATE SERVER timescaledb_server
+-- ALTERED IN PLACE, NEVER DROPPED, so the settings follow the chart's values on every run without
+-- taking the foreign tables and the views over them away: a drop cascades to all of them, and a
+-- reader would find no telemetry until section 4 rebuilt it. Each option is SET when present and
+-- ADDed when not, and only when the server or a mapping differs from those values, since any
+-- change resets every session's FDW connection. A foreign table therefore persists like a table:
+-- a retired one, or a changed column or option, needs an explicit statement in a migration, and a
+-- view over one whose columns change needs DROP and CREATE.
+CREATE SERVER IF NOT EXISTS timescaledb_server
   FOREIGN DATA WRAPPER postgres_fdw
   OPTIONS (host :'ts_host', port :'ts_port', dbname :'ts_dbname', sslmode :'ts_sslmode');
 
+SELECT CASE WHEN 'host'        = ANY (keys) THEN 'SET' ELSE 'ADD' END AS ts_op_host,
+       CASE WHEN 'port'        = ANY (keys) THEN 'SET' ELSE 'ADD' END AS ts_op_port,
+       CASE WHEN 'dbname'      = ANY (keys) THEN 'SET' ELSE 'ADD' END AS ts_op_dbname,
+       CASE WHEN 'sslmode'     = ANY (keys) THEN 'SET' ELSE 'ADD' END AS ts_op_sslmode,
+       CASE WHEN 'sslrootcert' = ANY (keys) THEN 'SET' ELSE 'ADD' END AS ts_op_sslrootcert,
+       'sslrootcert' = ANY (keys) AS ts_has_sslrootcert,
+       have IS DISTINCT FROM want AS ts_server_differs
+  FROM (SELECT array(SELECT split_part(o, '=', 1) FROM unnest(s.srvoptions) o) AS keys,
+               array(SELECT o FROM unnest(s.srvoptions) o
+                      WHERE split_part(o, '=', 1) IN ('host', 'port', 'dbname', 'sslmode', 'sslrootcert')
+                      ORDER BY o) AS have,
+               array(SELECT o FROM unnest(ARRAY['host=' || :'ts_host', 'port=' || :'ts_port',
+                                                'dbname=' || :'ts_dbname', 'sslmode=' || :'ts_sslmode']
+                                          || CASE WHEN :'ts_tls'::boolean
+                                                  THEN ARRAY['sslrootcert=' || :'ts_sslrootcert']
+                                                  ELSE ARRAY[]::text[] END) o
+                      ORDER BY o) AS want
+          FROM pg_foreign_server s
+         WHERE s.srvname = 'timescaledb_server') x
+\gset
+
+-- One transaction, so a connection opened meanwhile never sees verify-full without its CA.
+\if :ts_server_differs
+BEGIN;
+ALTER SERVER timescaledb_server
+  OPTIONS (:ts_op_host host :'ts_host', :ts_op_port port :'ts_port',
+           :ts_op_dbname dbname :'ts_dbname', :ts_op_sslmode sslmode :'ts_sslmode');
 \if :ts_tls
-  ALTER SERVER timescaledb_server OPTIONS (ADD sslrootcert :'ts_sslrootcert');
+ALTER SERVER timescaledb_server OPTIONS (:ts_op_sslrootcert sslrootcert :'ts_sslrootcert');
+\elif :ts_has_sslrootcert
+ALTER SERVER timescaledb_server OPTIONS (DROP sslrootcert);
+\endif
+COMMIT;
 \endif
 
 -- `postgres` keeps its own mapping for admin access. A second mapping FOR PUBLIC covers every
@@ -148,13 +179,48 @@ CREATE SERVER timescaledb_server
 -- grant or a new foreign table cannot inherit superuser reach on the historian. The admin
 -- mapping is left alone: it is what a human debugging the FDW connects through. Falls back to
 -- `ts_user` when FDW_READER_PASSWORD is unset, because roles.sql skips a role with no password.
-CREATE USER MAPPING FOR postgres
+CREATE USER MAPPING IF NOT EXISTS FOR postgres
   SERVER timescaledb_server
   OPTIONS (user :'ts_user', password :'ts_password');
 
-CREATE USER MAPPING FOR PUBLIC
+CREATE USER MAPPING IF NOT EXISTS FOR PUBLIC
   SERVER timescaledb_server
   OPTIONS (user :'ts_fdw_user', password :'ts_fdw_password');
+
+-- The same in-place update. umoptions reads as NULL to a role that may not see it; that counts as
+-- a difference, and SET as the operation, since both options are always created.
+SELECT coalesce(bool_or(differs) FILTER (WHERE usename = 'postgres'), false) AS ts_admin_map_differs,
+       coalesce(bool_or(differs) FILTER (WHERE usename = 'public'), false)   AS ts_public_map_differs,
+       coalesce(min(op_user)     FILTER (WHERE usename = 'postgres'), 'SET') AS ts_op_admin_user,
+       coalesce(min(op_password) FILTER (WHERE usename = 'postgres'), 'SET') AS ts_op_admin_password,
+       coalesce(min(op_user)     FILTER (WHERE usename = 'public'), 'SET')   AS ts_op_public_user,
+       coalesce(min(op_password) FILTER (WHERE usename = 'public'), 'SET')   AS ts_op_public_password
+  FROM (SELECT m.usename,
+               CASE WHEN m.umoptions IS NULL OR 'user' = ANY (keys) THEN 'SET' ELSE 'ADD' END AS op_user,
+               CASE WHEN m.umoptions IS NULL OR 'password' = ANY (keys) THEN 'SET' ELSE 'ADD' END AS op_password,
+               m.umoptions IS NULL
+               OR array(SELECT o FROM unnest(m.umoptions) o
+                         WHERE split_part(o, '=', 1) IN ('user', 'password') ORDER BY o)
+                  IS DISTINCT FROM
+                  CASE m.usename
+                    WHEN 'postgres' THEN array(SELECT o FROM unnest(ARRAY['user=' || :'ts_user',
+                                                                         'password=' || :'ts_password']) o ORDER BY o)
+                    ELSE array(SELECT o FROM unnest(ARRAY['user=' || :'ts_fdw_user',
+                                                          'password=' || :'ts_fdw_password']) o ORDER BY o)
+                  END AS differs
+          FROM pg_user_mappings m
+         CROSS JOIN LATERAL (SELECT array(SELECT split_part(o, '=', 1) FROM unnest(m.umoptions) o) AS keys) k
+         WHERE m.srvname = 'timescaledb_server' AND m.usename IN ('postgres', 'public')) x
+\gset
+
+\if :ts_admin_map_differs
+ALTER USER MAPPING FOR postgres SERVER timescaledb_server
+  OPTIONS (:ts_op_admin_user user :'ts_user', :ts_op_admin_password password :'ts_password');
+\endif
+\if :ts_public_map_differs
+ALTER USER MAPPING FOR PUBLIC SERVER timescaledb_server
+  OPTIONS (:ts_op_public_user user :'ts_fdw_user', :ts_op_public_password password :'ts_fdw_password');
+\endif
 
 -- ---------------------------------------------------------------------------------------------
 -- 3b. The dashboard reader
@@ -13259,14 +13325,6 @@ UNION ALL
 
 
 ALTER VIEW public.storage_footprint OWNER TO postgres;
-
--- Re-created on every boot (section 3 drops the server with CASCADE), so the reader's grant is
--- made here as well as in section 8, which keeps it across its sweep.
-DO $g$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
-    GRANT SELECT ON TABLE public.storage_footprint TO grafana_reader;
-  END IF;
-END $g$;
 
 --
 

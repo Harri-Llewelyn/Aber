@@ -862,8 +862,8 @@ function edgeFunctionNames() {
   // -----------------------------------------------------------------------------------------
   // A redeclaration may not change the return type. The chain replays in filename order, so
   // 0001 re-declares its own version first with CREATE OR REPLACE, which cannot change a return
-  // type, and the later file's DROP never runs: the next boot dies at file one having already
-  // dropped the FDW server with CASCADE. A new argument is a new signature and is fine; the
+  // type, and the later file's DROP never runs: the next boot dies at file one, and nothing after
+  // it is applied. A new argument is a new signature and is fine; the
   // same signature with a different return type is not, and it is invisible until the second
   // boot.
   const returnTypes = new Map();
@@ -888,7 +888,7 @@ function edgeFunctionNames() {
         `${fn}() is declared with ${distinct.length} different return types across ` +
           `${decls.map((d) => `${d.file} -> ${d.ret}`).join(' | ')}. CREATE OR REPLACE cannot ` +
           'change a return type, so on the SECOND boot the earlier file aborts the whole chain -- ' +
-          'after 0001 has dropped the FDW server with CASCADE. Give the new shape its own function ' +
+          'with nothing after 0001 applied. Give the new shape its own function ' +
           'name instead, as 0078 does.'
       );
     }

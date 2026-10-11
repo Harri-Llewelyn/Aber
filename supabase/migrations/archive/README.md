@@ -162,8 +162,7 @@ found by reading it.
    fails with `role "grafana_reader" does not exist` on exactly the deployments the condition
    exists for. No probe catches this, because every fixture sets the password. The generator now
    leaves every `grafana_reader` grant out of section 4: section 8 makes them by hand, guarded,
-   after its sweep and in the same transaction, and `storage_footprint`'s is repeated beside the
-   view because section 3's `DROP SERVER ... CASCADE` re-creates it on every boot.
+   after its sweep and in the same transaction.
 
 5. **A partition is written as `PARTITION OF`, not as a table plus an attach.** pg_dump splits
    each one into five objects — a bare `CREATE TABLE`, a `TABLE ATTACH`, one `INDEX` per inherited

@@ -149,10 +149,21 @@ until the replay ends. That blocks the API's reads and writes for its whole leng
 deadlock with Realtime that fails the upgrade. Sweeping only on the first boot would let a grant
 removed from the code survive on every database that already holds it.
 
-`storage_footprint` still disappears for part of each replay: section 3's `DROP SERVER ...
-CASCADE` drops it with the rest of the telemetry read surface. Its grant is repeated beside the
-view so that it comes back readable. A grant made outside the block must be repeated in it, or the
-sweep takes it away on every boot; check-docs-drift's check 55 holds that.
+A grant made outside the block must be repeated in it, or the sweep takes it away on every boot;
+check-docs-drift's check 55 holds that.
+
+**The historian's foreign server is altered in place, never dropped** (`0001` section 3). It used
+to be dropped with `CASCADE` and re-created on every boot, so its settings followed the chart's
+values. The drop took every foreign table and every view over them with it: `telemetry`, the
+rollups, `telemetry_latest`, `telemetry_horizons`, `storage_footprint` and the physical-backup
+tables. Section 4 rebuilt them thousands of lines later, and the grants came later still. A
+dashboard reading telemetry during an upgrade got `relation does not exist` and then
+`permission denied`, for about 4 seconds of a 5-second replay on a test database. The server and
+its two user mappings now take `ALTER ... OPTIONS (SET | ADD | DROP ...)`, and only when they
+differ from the chart's values, because any change resets every session's FDW connection. The
+foreign tables persist across boots like tables. So a retired foreign table, or a changed column
+or option, needs its own statement in a migration, and a view over one whose columns change needs
+DROP and CREATE.
 
 ### Seeding is audited now
 
@@ -2126,9 +2137,8 @@ shopfloor user as a proposer would have admitted the ingestion daemon in the sam
 (`0044`) and `list_service_principals()` (`0042`). **The rename is not cosmetic:** their second
 column moved from the role a machine borrowed to the permissions it holds, and `0001` re-declares its
 own copy of every function on each boot with `CREATE OR REPLACE`, which cannot change a return type.
-Same name, different columns, and the chain aborts at file one on the *second* boot — after `0001`
-has dropped the FDW server with `CASCADE`. `scripts/check-docs-drift.mjs` asserts against exactly
-that and names the remedy.
+Same name, different columns, and the chain aborts at file one on the *second* boot, with nothing
+after it applied. `scripts/check-docs-drift.mjs` asserts against exactly that and names the remedy.
 
 ### Machines propose, people decide (`0146`)
 

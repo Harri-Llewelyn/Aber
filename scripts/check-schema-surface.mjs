@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * Asserts that the migration chain completed, by checking the objects a partial run leaves missing.
- * db-init is a Helm hook that replays every file on every install and upgrade; there is no
- * applied-migrations ledger. An aborted chain does not leave the database merely stale: `0001` runs
- * `DROP SERVER IF EXISTS timescaledb_server CASCADE`, which drops every foreign table in the
- * `timescale` schema and the `public` views over them, recreated further down the chain. Grafana's
+ * Asserts that the migration chain completed and that the telemetry read surface answers. db-init
+ * is a Helm hook that replays every file on every install and upgrade; there is no
+ * applied-migrations ledger, so completion is `schema_bootstrap.completed_at`, which db-init clears
+ * before the chain and stamps after it. The surface is every foreign table in the `timescale`
+ * schema that `0001` builds on the historian's server, and the `public` views over them. Grafana's
  * datasource health check reports OK throughout, since a connection test is not a permission test.
- * Only the objects downstream of that CASCADE are checked, and each is selected, not merely looked
- * up in the catalog: `to_regclass` does not say the foreign table can be reached.
+ * Each is selected, not merely looked up in the catalog: `to_regclass` does not say the foreign
+ * table can be reached.
  *
  * Usage: node scripts/check-schema-surface.mjs, against the cluster the kube context points at.
  * Environment: ABER_NAMESPACE (default aber), DB_USER_NAME (postgres), DB_NAME (postgres).
@@ -24,8 +24,8 @@ const fail = (m) => { failed = true; console.log(`  FAIL  ${m}`); };
 const pass = (m) => console.log(`  ok    ${m}`);
 
 /**
- * Everything `0001`'s `DROP SERVER ... CASCADE` removes, with the live migration that must put it
- * back. `created_by` is a label, never read as a filename: the lowest missing one is printed as
+ * Everything `0001` builds on the historian's foreign server, with the live migration that creates
+ * it. `created_by` is a label, never read as a filename: the lowest missing one is printed as
  * where the chain stopped. Since the squash before 1.0, `0001` recreates all of them.
  */
 const SURFACE = [
@@ -52,7 +52,7 @@ function psql(sql) {
   return { ok: r.status === 0, out: (r.stdout || '').trim(), err: (r.stderr || '').trim() };
 }
 
-console.log('Schema surface: the objects 0001 drops and the chain must recreate.\n');
+console.log('Schema surface: the chain finished, and the objects 0001 builds over the FDW answer.\n');
 
 const ready = spawnSync('kubectl', ['-n', NAMESPACE, 'get', 'statefulset/supabase-db',
   '-o', 'jsonpath={.status.readyReplicas}'], { encoding: 'utf8' });
@@ -60,6 +60,11 @@ if (ready.status !== 0 || ready.stdout.trim() !== '1') {
   console.log(`  skip   supabase-db is not running in namespace ${NAMESPACE}; bring the stack up first.`);
   process.exit(0);
 }
+
+const done = psql('SELECT completed_at IS NOT NULL FROM public.schema_bootstrap');
+if (done.ok && done.out === 't') pass('schema_bootstrap.completed_at is stamped: the last db-init finished the chain');
+else fail('schema_bootstrap.completed_at is not stamped: the last db-init did not finish the chain' +
+  (done.ok ? '' : ` (${done.err.split('\n')[0]})`));
 
 const missing = [];
 for (const { relation, created_by } of SURFACE) {
@@ -78,14 +83,14 @@ for (const { relation, created_by } of SURFACE) {
 console.log('');
 if (missing.length) {
   const earliest = missing.map((m) => m.created_by).sort()[0];
-  console.log(`The migration chain did not complete. The earliest missing object is created by ${earliest},`);
-  console.log('so the chain stopped before that file finished — and 0001 had already dropped the read surface');
-  console.log('by then. The stack will otherwise look healthy: PostgREST answers, Grafana\'s');
+  console.log(`The telemetry read surface is incomplete. The earliest missing object is created by ${earliest},`);
+  console.log('so a chain stopped before that file finished, or the link to the historian is down. The');
+  console.log('stack will otherwise look healthy: PostgREST answers, Grafana\'s');
   console.log('datasource reports OK, and only the panels fail.');
   console.log('');
   console.log(`  kubectl -n ${NAMESPACE} logs job/${RELEASE}-db-init | grep -i error`);
   console.log(`  kubectl -n ${NAMESPACE} create job db-init-replay --from=job/${RELEASE}-db-init   # replaying is safe; every file is idempotent`);
   process.exit(1);
 }
-console.log(`The read surface is complete (${SURFACE.length} relations), so the chain reached the end.`);
+console.log(`The read surface is complete (${SURFACE.length} relations).`);
 process.exit(failed ? 1 : 0);
