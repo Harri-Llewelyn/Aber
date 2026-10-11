@@ -99,7 +99,8 @@ export const PROPOSAL_FORMS = {
     },
     withheld: {
       deployment: 'Deployment says where this gateway’s connector runs — an Administrator changes it.',
-      is_simulated: 'Whether a gateway is simulated is what it IS, not a label — an Administrator changes it.'
+      is_simulated: 'Whether a gateway is simulated is what it IS, not a label — an Administrator changes it.',
+      sparkplug_group: 'The Sparkplug group is half of this gateway’s address — an Administrator or a Shopfloor Manager changes it.'
     }
   }
 }

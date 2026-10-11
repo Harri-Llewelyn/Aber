@@ -4,6 +4,7 @@ import {
   gatewaySparkplugId,
   isSparkplugId,
   effectiveSparkplugId,
+  sparkplugGroupProblem,
   SPARKPLUG_ID_LENGTH
 } from '../utils/sparkplugId';
 
@@ -65,5 +66,27 @@ describe('sparkplug wire identifiers', () => {
     it('is empty for a missing device', () => {
       expect(effectiveSparkplugId(null)).toBe('');
     });
+  });
+});
+
+// The same rule as gateways_sparkplug_group_format: not empty, and none of / + #.
+describe('sparkplugGroupProblem', () => {
+  it('accepts a group that is one topic level', () => {
+    for (const group of ['Aber', 'Plant-B', 'site 7', 'a.b_c']) {
+      expect(sparkplugGroupProblem(group)).toBeNull();
+    }
+  });
+
+  it('refuses an empty group, and says so', () => {
+    expect(sparkplugGroupProblem('')).toBe('A Sparkplug group cannot be empty.');
+    expect(sparkplugGroupProblem(undefined)).toBe('A Sparkplug group cannot be empty.');
+  });
+
+  it('refuses a separator or a wildcard, naming each one found', () => {
+    const refusal = (chars) => `A Sparkplug group is one level of the topic, so it cannot contain ${chars}.`;
+    expect(sparkplugGroupProblem('a/b')).toBe(refusal('/'));
+    expect(sparkplugGroupProblem('a+b')).toBe(refusal('+'));
+    expect(sparkplugGroupProblem('#')).toBe(refusal('#'));
+    expect(sparkplugGroupProblem('a/b#')).toBe(refusal('/ or #'));
   });
 });

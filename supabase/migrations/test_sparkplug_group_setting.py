@@ -1,7 +1,7 @@
 """
-The site's Sparkplug group (0131).
+The site's Sparkplug group (0131), and a gateway's own.
 
-Three properties, none of which anything else in the chain would notice losing.
+Four properties, none of which anything else in the chain would notice losing.
 
 A read-only setting is refused BY THE DATABASE. The Settings page renders it without a control,
 but the page is not the authority: an Administrator holds `GRANT UPDATE (value)` on
@@ -16,6 +16,10 @@ looking correct.
 The format constraint still refuses a separator. The group is one segment of
 `spBv1.0/<group>/<TYPE>/<node>`, so a value containing `/`, `+` or `#` addresses a subtree the
 broker grants nothing on -- and at QoS 0 that publish is dropped silently.
+
+A gateway's group is changed only by those who may edit a gateway. The Edit Gateway dialog offers
+the field to them; RLS (gateways_update_privileged) is what refuses everyone else, and it refuses
+by changing no row rather than by raising, so the row count is what is asserted.
 
 Runs against the Supabase database, not the historian:
 
@@ -198,6 +202,94 @@ class TestSparkplugGroupSetting(unittest.TestCase):
                             (bad,),
                         )
                 self.conn.rollback()
+
+
+class TestWhoMayChangeAGatewaysGroup(unittest.TestCase):
+    """
+    The Edit Gateway dialog offers the group to whoever may edit a gateway, and the database is what
+    holds the line: gateways_update_privileged admits an Administrator and a Shopfloor Manager. A
+    role it does not admit changes nothing, and a change that lands is one audit row. Rolled back.
+    """
+
+    PEOPLE = {
+        "Administrator": "a0d18100-0000-4000-8000-0000000810a1",
+        "Shopfloor_Manager": "a0d18100-0000-4000-8000-0000000810b2",
+        "Operator": "a0d18100-0000-4000-8000-0000000810c3",
+        "Auditor": "a0d18100-0000-4000-8000-0000000810d4",
+    }
+    GATEWAY = "0a810000-0000-4000-8000-000000000810"
+
+    def setUp(self):
+        self.conn = get_connection()
+        self.cur = self.conn.cursor()
+        # People, not only role grants: audit_trail.changed_by references auth.users.
+        self.cur.execute("SELECT id, name FROM public.roles")
+        roles = {name: rid for rid, name in self.cur.fetchall()}
+        for role, user_id in self.PEOPLE.items():
+            self.cur.execute(
+                "INSERT INTO auth.users (id, email, encrypted_password) VALUES (%s, %s, 'not-a-hash')"
+                " ON CONFLICT (id) DO NOTHING",
+                (user_id, f"{user_id}@group-edit.test"),
+            )
+            self.cur.execute(
+                "INSERT INTO public.user_roles (user_id, role_id) VALUES (%s, %s)"
+                " ON CONFLICT (user_id, role_id) DO NOTHING",
+                (user_id, roles[role]),
+            )
+        self.cur.execute(
+            "INSERT INTO public.gateways (id, name) VALUES (%s, 'Group_Edit_Gateway')"
+            " RETURNING sparkplug_group",
+            (self.GATEWAY,),
+        )
+        self.registered = self.cur.fetchone()[0]
+
+    def tearDown(self):
+        self.conn.rollback()
+        self.conn.close()
+
+    def change_group_as(self, role, group):
+        """Rows changed by `role` setting the group, as PostgREST would run the PATCH."""
+        self.cur.execute("SET LOCAL ROLE authenticated")
+        self.cur.execute('SET LOCAL "request.jwt.claims" = %s', ('{"sub": "%s"}' % self.PEOPLE[role],))
+        # Not reset in a `finally`: after a refusal the transaction is aborted, and tearDown's
+        # rollback ends the SET LOCAL anyway.
+        self.cur.execute(
+            "UPDATE public.gateways SET sparkplug_group = %s WHERE id = %s", (group, self.GATEWAY)
+        )
+        changed = self.cur.rowcount
+        self.cur.execute("RESET ROLE")
+        return changed
+
+    def group(self):
+        self.cur.execute("SELECT sparkplug_group FROM public.gateways WHERE id = %s", (self.GATEWAY,))
+        return self.cur.fetchone()[0]
+
+    def test_a_role_that_may_not_edit_a_gateway_cannot_change_its_group(self):
+        for role in ("Operator", "Auditor"):
+            with self.subTest(role=role):
+                self.assertEqual(self.change_group_as(role, "Plant-B"), 0,
+                                 f"{role} changed a gateway's Sparkplug group")
+                self.assertEqual(self.group(), self.registered)
+
+    def test_an_administrator_and_a_manager_can_and_each_change_is_audited(self):
+        self.assertEqual(self.change_group_as("Shopfloor_Manager", "Plant-B"), 1)
+        self.assertEqual(self.change_group_as("Administrator", "Plant-C"), 1)
+        self.assertEqual(self.group(), "Plant-C")
+        self.cur.execute(
+            "SELECT old_data ->> 'sparkplug_group', new_data ->> 'sparkplug_group', changed_by::text"
+            "  FROM public.audit_trail"
+            " WHERE causation_id = txid_current() AND entity_type = 'gateways'"
+            "   AND action = 'UPDATE' AND entity_id = %s ORDER BY id",
+            (self.GATEWAY,),
+        )
+        self.assertEqual(self.cur.fetchall(), [
+            (self.registered, "Plant-B", self.PEOPLE["Shopfloor_Manager"]),
+            ("Plant-B", "Plant-C", self.PEOPLE["Administrator"]),
+        ])
+
+    def test_an_administrator_is_refused_a_group_that_is_not_one_topic_level(self):
+        with self.assertRaises(psycopg2.errors.CheckViolation):
+            self.change_group_as("Administrator", "Plant/B")
 
 
 if __name__ == "__main__":

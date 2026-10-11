@@ -4449,6 +4449,17 @@ components:
       type: object
       properties:
         name: { type: string, example: Sim_Gateway_Cell1_Machining }
+        description: { type: string, nullable: true, description: 'Operator note. Free text, read by nothing.' }
+        sparkplug_group:
+          type: string
+          example: Aber
+          description: >-
+            The Sparkplug B Group ID. Left out on POST, a new gateway takes the site's group. Not empty,
+            and no `/`, `+` or `#` (`gateways_sparkplug_group_format`, 23514 otherwise). Changing it
+            moves the gateway's Factory+ Directory address; it does not reconfigure the edge node,
+            which goes on publishing under its own group until it is changed there (an enrolled
+            appliance keeps its enrolment group until it is set up again). Administrator and
+            Shopfloor_Manager only, as for every gateway update.
         cell_id: { type: string, format: uuid, nullable: true }
         area_id: { type: string, format: uuid, nullable: true }
         location_scope: { $ref: '#/components/schemas/LocationScope' }
