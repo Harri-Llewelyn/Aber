@@ -59,6 +59,7 @@ python ingestion/test_host_connection.py
 python ingestion/test_historical_replay.py
 python ingestion/test_dockerfile_copies.py
 python ingestion/test_audit_write_dedup.py
+python ingestion/test_stale_node_death.py  # an earlier session's NDEATH (bdSeq) changes nothing
 python ingestion/test_payload_conformance.py
 # The Prometheus endpoint and the Sparkplug seq gap counters -- no stack, no broker
 python ingestion/test_metrics_endpoint.py

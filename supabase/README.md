@@ -635,6 +635,28 @@ than an edit. In order:
 written before the change stay addressed by the old pair. That is the cost the fixed-at-install rule
 exists to make visible before it is paid.
 
+### A gateway shows the group it publishes under (`0174`)
+
+A mismatch is tolerated (`0008`, above), and until `0174` it was visible only as a log line.
+`gateways.observed_sparkplug_group` holds the group the gateway's edge node last published under,
+NULL until a node-level message arrives. Ingestion writes it through
+`ingest_record_gateway_group(p_gateway_id, p_group)` when the group changes, after the heartbeat
+([`ingestion/README.md`](../ingestion/README.md#resolution-precedence)). The Gateways page warns while
+it differs from `sparkplug_group`, so step 5 above shows each appliance still on the old group.
+
+- **A function of its own, not a fifth parameter on `ingest_record_gateway_health()`.** The
+  heartbeat gate is called on every message; this one only on a change. A redeclaration with a new
+  parameter would also be a second signature beside the old one rather than a replacement.
+- **The gate checks the group as `gateways_sparkplug_group_format` does**, not empty and no `/`,
+  `+` or `#`, and caps it at 255 characters: the topic segment is the gateway's choice. Its `UPDATE`
+  carries `IS DISTINCT FROM`, so a repeat moves no row and writes no audit row, and a change is one
+  `UPDATE` row attributed to ingestion. The column is not in `audit_telemetry_columns()`: a change of
+  group is an event, as a change of status is.
+- **`gateway_status` is rebuilt** with `ensure_gateway_status_view()`, as check 10d requires.
+- **Not this release:** a count in `platform_health` and an alert rule.
+
+`test_ingestion_rejection_rpc.py` (`GatewayGroupObservationTestCase`) holds the gate and the view.
+
 ### The Directory reports liveness it observed (archived migration 0054)
 
 `directory_services.status` and `.last_heartbeat` were **never written by anything**. The only

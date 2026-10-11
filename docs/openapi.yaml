@@ -4415,6 +4415,17 @@ components:
             Sparkplug B Group ID -- the second topic segment. With `sparkplug_id` it forms the edge
             node address Factory+ resolves as (group, node), which is what `/v1/address/…` reads.
             Editable, unlike `sparkplug_id`: it is a configuration choice, not an issued identity.
+        observed_sparkplug_group:
+          type: string
+          nullable: true
+          readOnly: true
+          example: Aber
+          description: >-
+            The Sparkplug group this edge node last published under, from the topic of its last
+            node-level message, written by the ingestion daemon when it changes (migration `0174`).
+            NULL until one arrives. When it differs from `sparkplug_group` the node publishes outside
+            the group it is addressed by: ingestion still accepts it by `sparkplug_id`, and the
+            Gateways page warns.
         location_scope: { $ref: '#/components/schemas/LocationScope' }
         area_id: { type: string, format: uuid, nullable: true, description: 'Populated exactly when `location_scope` is `area_wide`.' }
         access_url: { type: string, nullable: true, description: 'The gateway''s own UI. Omitted rather than disabled in the dashboard when absent.' }

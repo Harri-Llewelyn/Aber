@@ -5311,6 +5311,8 @@ ol.gateway-steps {
 /* GATEWAYS: the list page. */
 .gateway-name-badge { margin-left: 8px; }
 .gateway-cell-warning { color: var(--warning-text); }
+/* The group-mismatch warning at the top of a gateway's drawer, where the drawer already insets it. */
+.gateway-group-callout { margin: 0 0 14px; }
 .gateway-cell-italic { font-style: italic; }
 .gateway-withheld { color: var(--warning-text); }
 

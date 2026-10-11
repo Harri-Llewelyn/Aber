@@ -91,6 +91,20 @@ export function gatewayNeedsAttention(gateway, now = Date.now()) {
   return gatewayLiveStatus(gateway, now) !== 'ONLINE';
 }
 
+/**
+ * `{ observed, registered }` when a gateway last published under a Sparkplug group other than its
+ * own `sparkplug_group`, else null. Ingestion writes `observed_sparkplug_group` when the group
+ * changes, so a gateway that returns to its own group clears this with its next message. Null for an
+ * archived gateway, whose traffic is refused, so the column only says what it did before.
+ */
+export function gatewayGroupMismatch(gateway) {
+  if (!gateway || gateway.is_archived) return null;
+  const observed = gateway.observed_sparkplug_group;
+  const registered = gateway.sparkplug_group;
+  if (!observed || !registered || observed === registered) return null;
+  return { observed, registered };
+}
+
 /** Relative age of a heartbeat, e.g. "12s ago". */
 export function formatHeartbeat(lastHeartbeat, now = Date.now()) {
   if (!lastHeartbeat) return 'Never';

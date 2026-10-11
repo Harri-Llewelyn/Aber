@@ -348,6 +348,14 @@ export const SUITES = {
       'The archived-gateway path, which #102 found broken in production. Nothing else looks at ' +
       'it: an archived gateway is by definition one nobody is watching.',
   },
+  'ingestion/test_stale_node_death.py': {
+    lanes: ['unit'],
+    why:
+      'An NDEATH whose bdSeq names an earlier session of the same edge node, a Last Will the ' +
+      'broker delivered after the node was born again. Applied, it reads a live gateway and its ' +
+      'devices OFFLINE until their next data message, and nothing reports it: the gateway is ' +
+      'publishing and every other check passes.',
+  },
   'ingestion/test_archived_device.py': {
     lanes: ['unit'],
     why:

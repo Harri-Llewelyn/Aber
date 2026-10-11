@@ -86,3 +86,27 @@ describe('the drawer', () => {
     expect(credentialProps).toHaveBeenCalledWith(expect.objectContaining({ is_shadow: true }))
   })
 })
+
+describe('a gateway publishing under another Sparkplug group', () => {
+  const elsewhere = { sparkplug_group: 'Aber', observed_sparkplug_group: 'Plant-B' }
+  const warning = 'Publishes under group Plant-B; registered under Aber'
+
+  it('says so on its row', async () => {
+    await show([gateway(elsewhere)])
+    expect(within(document.querySelector('.page-main')).getByText(warning)).toBeInTheDocument()
+  })
+
+  it('says so in its drawer, with what to change', async () => {
+    await show([gateway(elsewhere)])
+    const callout = openPanel().getByText(/Set the edge node to publish under Aber/).closest('.callout')
+    expect(callout).toHaveClass('callout-warning')
+    expect(callout).toHaveTextContent('Publishes under group Plant-B; registered under Aber.')
+    expect(callout).toHaveTextContent("change this gateway’s Sparkplug group to Plant-B")
+  })
+
+  it('says nothing once it publishes under its own group again', async () => {
+    await show([gateway({ ...elsewhere, observed_sparkplug_group: 'Aber' })])
+    expect(screen.queryByText(/Publishes under group/)).toBeNull()
+    expect(openPanel().queryByText(/Set the edge node to publish under/)).toBeNull()
+  })
+})
