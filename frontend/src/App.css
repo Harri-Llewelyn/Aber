@@ -274,6 +274,10 @@ html, body, #root {
    colour is never the only signal. */
 .connection-strip-region { flex-shrink: 0; }
 
+/* The strip's height, which ConnectionStrip.jsx keeps current on the shell, for the drawer that
+   overlays the page below 800px and must start under the strip. */
+.app-shell { --connection-strip-height: 0px; }
+
 .connection-strip {
   display: flex;
   flex-wrap: wrap;
@@ -3983,7 +3987,7 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   .context-panel-open {
     position: fixed;
     /* Below the bar, and below the connection strip while it shows (ConnectionStrip.jsx). */
-    top: calc(52px + var(--connection-strip-height, 0px));
+    top: calc(52px + var(--connection-strip-height));
     right: 0;
     bottom: 0;
     /* NOT the desktop clamp, and not a bare 360px either. As an overlay it is measured against
