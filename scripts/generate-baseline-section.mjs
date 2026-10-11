@@ -387,7 +387,8 @@ for (let i = 0; i < pairKeys.length; i++) {
   if (!pairKeys[i]) continue;
   const first = i;
   while (i + 1 < pairKeys.length && pairKeys[i + 1] === pairKeys[first]) i++;
-  out[first] = out[first].replace('\n', '\nBEGIN;\n');
+  const header = out[first].indexOf('\n') + 1;
+  out[first] = `${out[first].slice(0, header)}BEGIN;\n${out[first].slice(header)}`;
   out[i] = out[i].replace(/\n$/, '\nCOMMIT;\n');
 }
 

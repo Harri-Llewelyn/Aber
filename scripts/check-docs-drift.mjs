@@ -1006,10 +1006,11 @@ function edgeFunctionNames() {
       else if (/^COMMIT;\s*$/.test(line)) open = false;
       const drop = /^DROP (POLICY|TRIGGER) IF EXISTS (\S+) ON (\S+);/.exec(line);
       if (!drop) return;
-      const create = new RegExp(`^CREATE (?:OR REPLACE )?(?:CONSTRAINT )?${drop[1]} ${drop[2].replace(/[.*+?^$(){}|[\]\\]/g, '\\$&')}\\b`);
+      const heads = ['', 'OR REPLACE ', 'CONSTRAINT '].map((m) => `CREATE ${m}${drop[1]} ${drop[2]}`);
+      const isCreate = (l) => heads.some((h) => l === h || l.startsWith(`${h} `));
       let committed = !open;
       for (let j = i + 1; j < lines.length && !committed; j++) {
-        if (create.test(lines[j])) break;
+        if (isCreate(lines[j].trimEnd())) break;
         if (/^COMMIT;\s*$/.test(lines[j])) committed = true;
       }
       if (committed) bare.push(`${name}:${i + 1} ${drop[1]} ${drop[2]} ON ${drop[3]}`);
