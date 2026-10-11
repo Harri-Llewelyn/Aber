@@ -1,7 +1,8 @@
 name: Install k3d
 description: >-
-  Install a pinned k3d release binary, verify it against its published checksum, and unload the
-  runner's `mosquitto` AppArmor profile, which would otherwise confine the broker inside k3d's pods.
+  Install a pinned k3d release binary, verify it against its published checksum, raise the
+  runner's inotify limits to what a node running the stack needs, and unload the runner's
+  `mosquitto` AppArmor profile, which would otherwise confine the broker inside k3d's pods.
 runs:
   using: composite
   steps:
@@ -22,6 +23,18 @@ runs:
     # k3s in a container cannot confine its pods, so a host profile attaches to a pod's program by
     # path: Ubuntu 26.04's `mosquitto` profile refuses the broker /mosquitto/config. A site's k3s
     # confines every pod itself. docs/testing.md, "AppArmor on the runner", has the measurement.
+    # The runner image puts these floors in /etc/sysctl.conf; this applies them whatever its boot
+    # did, and prints what was in force. Below them the kubelet cannot follow every container's log
+    # for the collector and injects "failed to create fsnotify watcher" into the stream
+    # (docs/install.md step 2).
+    - name: Raise The Runner's inotify Limits
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "before: max_user_instances=$(cat /proc/sys/fs/inotify/max_user_instances) max_user_watches=$(cat /proc/sys/fs/inotify/max_user_watches)"
+        sudo sysctl -q -w fs.inotify.max_user_instances=1280 fs.inotify.max_user_watches=655360
+        echo "after:  max_user_instances=$(cat /proc/sys/fs/inotify/max_user_instances) max_user_watches=$(cat /proc/sys/fs/inotify/max_user_watches)"
+
     - name: Unload The Runner's Mosquitto AppArmor Profile
       shell: bash
       run: |

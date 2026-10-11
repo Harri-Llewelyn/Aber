@@ -159,7 +159,16 @@ fi
 k3s brings `kubectl` with it. Node.js runs only `npm run setup` (step 5), which needs no
 `npm install`.
 
+Raise the inotify limits first. The kubelet uses one inotify instance for each container log it
+follows, and Aber's log collector follows them all. That is about 140 on one machine, and Ubuntu
+allows 128 per user. Without the change, log lines are lost and the logs show "failed to create
+fsnotify watcher: too many open files".
+
 ```bash
+printf 'fs.inotify.max_user_instances = 1280\nfs.inotify.max_user_watches = 655360\n' \
+  | sudo tee /etc/sysctl.d/60-aber-inotify.conf
+sudo sysctl --system
+
 curl -sfL https://get.k3s.io | sh -
 
 # k3s's kubeconfig is root's alone, and its kubectl reads a copy only when KUBECONFIG names it.
