@@ -34,7 +34,7 @@ It applies from 1.0.0 onwards. An install older than that is reinstalled rather 
   [*`devices.schema_id` is removed*](#from-130-devicesschema_id-is-removed).
 - **An image tag pinned to an earlier release, a storage class that does not apply `fsGroup`, or a
   policy that pins uids?** Check them first: see
-  [*every image runs as a named, non-root user*](#from-130-every-image-runs-as-a-named-non-root-user).
+  [*the images run as non-root users*](#from-130-the-images-run-as-non-root-users).
 - **Upgrading with `helm upgrade` rather than the installer?** Raise the node's inotify limits: see
   [*the node needs room for every container's log*](#from-130-the-node-needs-room-for-every-containers-log).
 - **Pinned `supabaseDb.image.tag` to run another server build?** Set `supabaseDb.serverImage`
@@ -518,10 +518,10 @@ certificate*). A site that did this for 1.2.0 has nothing more to do, and a site
 nothing to do. Node-RED's generated `settings.js` is rewritten once on the new image's first boot;
 the previous file is kept as `settings.js.bak`.
 
-### From 1.3.0, every image runs as a named, non-root user
+### From 1.3.0, the images run as non-root users
 
-Every image this repository builds now ends with a numeric, non-root `USER`, and the chart runs it
-as that uid with `runAsNonRoot: true` (#419, phase two of three;
+Every image this repository builds but `supabase-db` now ends with a non-root `USER`, and the chart
+runs it as that uid with `runAsNonRoot: true` (#419, phase two of three;
 [`deploy/k8s/README.md`](../deploy/k8s/README.md), *Users*). Volumes 1.2.0 wrote as root stay
 usable. Check three things first:
 
