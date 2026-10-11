@@ -14,6 +14,11 @@ FROM swaggerapi/swagger-ui:v5.33.0
 # two base cuts reaches the release rather than waiting for the next base (#347).
 RUN apk upgrade --no-cache
 
+# Strict-Transport-Security, from the value the chart sets when global.scheme is https: the base's
+# entrypoint renders this template into conf.d with its own. Empty sends no header.
+ENV ABER_STRICT_TRANSPORT_SECURITY=""
+COPY swagger-ui/aber-headers.conf.template /etc/nginx/templates/
+
 # openapi.yaml is the gateway-fronted platform surface; i3x-openapi.yaml is the i3X server, a
 # different origin with a different auth model. The Deployment's URLS env names both by these paths.
 COPY docs/openapi.yaml docs/i3x-openapi.yaml /usr/share/nginx/html/

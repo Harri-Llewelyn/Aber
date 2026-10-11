@@ -83,9 +83,13 @@ spec:
             - name: VALIDATOR_URL
               value: none
             # Off: no other origin reads these files. "Try it out" calls the gateway, whose CORS is
-            # its own; this only stops the image adding Access-Control-Allow-Origin: * here.
+            # its own; this only stops the image adding Access-Control-Allow-Origin: * here. On, the
+            # image's nested locations would send it twice (swagger-ui/aber-headers.conf.template).
             - name: CORS
               value: "false"
+            # Rendered into nginx's config at start; empty, and so not sent, unless global.scheme is https.
+            - name: ABER_STRICT_TRANSPORT_SECURITY
+              value: {{ include "aber.strictTransportSecurity" . | quote }}
           readinessProbe:
             httpGet:
               path: /

@@ -758,11 +758,12 @@ helm upgrade ... \
 is built from it, including every OAuth `redirect_uri` that db-init registers. If you leave it
 `http` with TLS on, sign-in breaks with `invalid redirect_uri`, while every pod reports healthy.
 
-**With `https`, the hosts tell browsers to use only HTTPS with them for a year.** The dashboard,
-the API, Grafana, Studio and the forge send `Strict-Transport-Security`. A browser that has seen
-it refuses plain HTTP to that host. It also turns a certificate warning there into an error nobody
-can click past. So install the root certificate (step 3) before people use the site, and install
-the new one before you replace the CA. Node-RED, i3X and the documentation host do not send it.
+**With `https`, the hosts tell browsers to use only HTTPS with them for a year.** Every web host
+the chart serves sends `Strict-Transport-Security`: the dashboard, the API, Grafana, Studio, the
+forge, Node-RED, i3X and the documentation host. A browser that has seen it refuses plain HTTP to
+that host. It also turns a certificate warning there into an error nobody can click past. So
+install the root certificate (step 3) before people use the site, and install the new one before
+you replace the CA.
 
 Use one wildcard certificate for `*.<domain>`, or nine subdomains mean nine certificates, each
 renewing on its own.
