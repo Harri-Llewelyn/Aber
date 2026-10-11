@@ -133,6 +133,27 @@ failing run rather than by inspection:
    contains no reference to it. Dropping the Realtime setup was invisible to the schema comparison
    and surfaced two migrations later as `0028` reporting the dashboard would never see an alert.
 
+**What `grafana_reader` may read is granted in one statement**, the `DO` block that ends `0001`
+(section 8). It withdraws everything the role holds in `public` and then grants the alert rules'
+views, `storage_footprint` and the functions behind them, so a grant deleted from the block is
+withdrawn on the next upgrade. The sweep used to sit in the role block and the grants beside their
+objects, 18,000 lines further on. Each statement commits on its own, so every Grafana rule that
+evaluated during an upgrade failed with `permission denied for view platform_health`. One block is
+one transaction, and a reader sees either the old grants or the new ones. On a test database the
+replay refused 1,736 of the probe's queries in a 1.2-second window before the change and none of
+the alert rules' after it.
+
+Two other fixes were rejected. `psql --single-transaction` would hold every `ACCESS EXCLUSIVE`
+lock the replay takes (`DROP POLICY`, `CREATE POLICY`, `CREATE OR REPLACE VIEW`, `ALTER TABLE`)
+until the replay ends. That blocks the API's reads and writes for its whole length, and invites a
+deadlock with Realtime that fails the upgrade. Sweeping only on the first boot would let a grant
+removed from the code survive on every database that already holds it.
+
+`storage_footprint` still disappears for part of each replay: section 3's `DROP SERVER ...
+CASCADE` drops it with the rest of the telemetry read surface. Its grant is repeated beside the
+view so that it comes back readable. A grant made outside the block must be repeated in it, or the
+sweep takes it away on every boot; check-docs-drift's check 55 holds that.
+
 ### Seeding is audited now
 
 The baseline creates every trigger before `0002` runs, so a fresh install records an `audit_trail`

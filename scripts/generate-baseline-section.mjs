@@ -332,25 +332,18 @@ function guardedConstraint(table, name, statement) {
 }
 
 /**
- * A grant to `grafana_reader` has to survive the role not existing. The role is created only
- * where `BI_READER_PASSWORD` is set, and a dump records the resulting ACL as a bare GRANT that
- * fails with `role "grafana_reader" does not exist` on exactly the deployments the condition
- * exists for. NO PROBE CATCHES THIS: the fixtures set the password, so the role is there.
+ * A grant to `grafana_reader` is left out: section 8 of the baseline makes every one by hand,
+ * after its sweep and guarded on the role existing, which a dump's bare GRANT is not.
  */
-function guardBiReader(sql) {
+function dropBiReaderGrants(sql) {
   if (!/grafana_reader/.test(sql)) return sql;
-  return sql.split('\n').map((line) => {
-    if (!/grafana_reader/.test(line) || !/^\s*(GRANT|REVOKE)\b/i.test(line)) return line;
-    const stmt = line.trim().replace(/;\s*$/, '');
-    return `DO $g$ BEGIN\n`
-         + `  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN\n`
-         + `    EXECUTE '${stmt.replace(/'/g, "''")}';\n`
-         + `  END IF;\nEND $g$;`;
-  }).join('\n');
+  return sql.split('\n')
+    .filter((line) => !(/grafana_reader/.test(line) && /^\s*(GRANT|REVOKE)\b/i.test(line)))
+    .join('\n');
 }
 
 const out = [];
-let kept = 0, dropped = 0, guarded = 0, parts = 0;
+let kept = 0, dropped = 0, readerGrants = 0, parts = 0;
 for (const b of blocks(dump)) {
   if (/^(SET|SELECT pg_catalog\.set_config)/m.test(b.body.trim()) && !b.name) continue;
   // Default privileges are hand-carried BEFORE section 4, because they apply only to objects
@@ -360,8 +353,8 @@ for (const b of blocks(dump)) {
   if (s === null) { dropped++; continue; }
   if (/PARTITION OF/.test(s)) parts++;
   const before = s;
-  s = guardBiReader(s);
-  if (s !== before) guarded++;
+  s = dropBiReaderGrants(s);
+  if (s !== before) readerGrants++;
   kept++;
   out.push(`-- ${b.name} :: ${b.type}\n${s}\n`);
 }
@@ -415,7 +408,7 @@ if (declared.length) {
 
 process.stderr.write(
   `kept ${kept} object(s), dropped ${dropped} (monthly partitions, inherited indexes, default ACLs); `
-  + `${partitionOf.size} partition(s) seen, ${parts} written as PARTITION OF; ${guarded} grant(s) guarded\n`);
+  + `${partitionOf.size} partition(s) seen, ${parts} written as PARTITION OF; ${readerGrants} object(s) whose grafana_reader grant section 8 makes\n`);
 if (needBackfill.length) {
   // NOT a list of problems. These are the columns whose widening clause would be REFUSED if an
   // upgrading database happened to lack that particular column AND hold rows -- PostgreSQL will

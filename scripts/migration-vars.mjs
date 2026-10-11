@@ -48,6 +48,8 @@ export const MIGRATION_VARS = {
   gateway_revoke_secret: 'test-revoke-secret',
   forge_sweep_secret: 'test-sweep-secret',
   supabase_functions_url: 'http://localhost:9999/functions/v1',
+  // Creates grafana_reader, so the chain runs 0001's section 8 and the suites that read as it run.
+  bi_reader_password: 'test-reader-not-a-real-key',
 }
 
 /** `['-v', 'name=value', ...]`, ready to splice into a psql invocation. */

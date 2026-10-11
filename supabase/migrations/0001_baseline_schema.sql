@@ -204,12 +204,8 @@ BEGIN
 
     EXECUTE format('ALTER ROLE %I WITH LOGIN PASSWORD %L', v_role, v_password);
 
-    -- REVOKE EVERYTHING FIRST. Supabase's own bootstrap issues broad DEFAULT PRIVILEGES in this
-    -- schema, so a role created afterwards inherits reach nobody intended. The narrow grants this
-    -- role actually needs are issued beside the objects they name, further down.
-    EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA public FROM %I', v_role);
-    EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM %I', v_role);
-    EXECUTE format('REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM %I', v_role);
+    -- Objects created later grant this role nothing by default. What it may read in public is
+    -- swept and granted in section 8, the last block of this file.
     EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM %I', v_role);
 
     EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), v_role);
@@ -13264,6 +13260,14 @@ UNION ALL
 
 ALTER VIEW public.storage_footprint OWNER TO postgres;
 
+-- Re-created on every boot (section 3 drops the server with CASCADE), so the reader's grant is
+-- made here as well as in section 8, which keeps it across its sweep.
+DO $g$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
+    GRANT SELECT ON TABLE public.storage_footprint TO grafana_reader;
+  END IF;
+END $g$;
+
 --
 
 -- VIEW storage_footprint :: COMMENT
@@ -17130,11 +17134,6 @@ GRANT USAGE ON SCHEMA public TO postgres;
 GRANT USAGE ON SCHEMA public TO anon;
 GRANT USAGE ON SCHEMA public TO authenticated;
 GRANT USAGE ON SCHEMA public TO service_role;
-DO $g$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
-    EXECUTE 'GRANT USAGE ON SCHEMA public TO grafana_reader';
-  END IF;
-END $g$;
 
 --
 
@@ -17273,11 +17272,6 @@ REVOKE ALL ON FUNCTION public.backup_offsite_destination() FROM PUBLIC;
 -- FUNCTION backup_offsite_health_rows() :: ACL
 REVOKE ALL ON FUNCTION public.backup_offsite_health_rows() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.backup_offsite_health_rows() TO service_role;
-DO $g$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
-    EXECUTE 'GRANT ALL ON FUNCTION public.backup_offsite_health_rows() TO grafana_reader';
-  END IF;
-END $g$;
 
 --
 
@@ -17529,11 +17523,6 @@ GRANT ALL ON FUNCTION public.gateway_has_broker_credential(g public.gateways) TO
 -- FUNCTION gateway_health_rows() :: ACL
 REVOKE ALL ON FUNCTION public.gateway_health_rows() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.gateway_health_rows() TO service_role;
-DO $g$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
-    EXECUTE 'GRANT ALL ON FUNCTION public.gateway_health_rows() TO grafana_reader';
-  END IF;
-END $g$;
 
 --
 
@@ -17833,22 +17822,12 @@ GRANT ALL ON FUNCTION public.plan_distance(p_x1 numeric, p_y1 numeric, p_x2 nume
 -- FUNCTION platform_health_rows() :: ACL
 REVOKE ALL ON FUNCTION public.platform_health_rows() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.platform_health_rows() TO service_role;
-DO $g$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
-    EXECUTE 'GRANT ALL ON FUNCTION public.platform_health_rows() TO grafana_reader';
-  END IF;
-END $g$;
 
 --
 
 -- FUNCTION platform_storage_rows() :: ACL
 REVOKE ALL ON FUNCTION public.platform_storage_rows() FROM PUBLIC;
 GRANT ALL ON FUNCTION public.platform_storage_rows() TO service_role;
-DO $g$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
-    EXECUTE 'GRANT ALL ON FUNCTION public.platform_storage_rows() TO grafana_reader';
-  END IF;
-END $g$;
 
 --
 
@@ -18305,11 +18284,6 @@ GRANT SELECT ON TABLE public.audit_trail TO authenticated;
 
 -- TABLE audit_trail_partition_health :: ACL
 GRANT ALL ON TABLE public.audit_trail_partition_health TO service_role;
-DO $g$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
-    EXECUTE 'GRANT SELECT ON TABLE public.audit_trail_partition_health TO grafana_reader';
-  END IF;
-END $g$;
 
 --
 
@@ -18321,21 +18295,11 @@ GRANT SELECT ON TABLE public.backup_jobs TO authenticated;
 
 -- TABLE backup_health :: ACL
 GRANT ALL ON TABLE public.backup_health TO service_role;
-DO $g$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
-    EXECUTE 'GRANT SELECT ON TABLE public.backup_health TO grafana_reader';
-  END IF;
-END $g$;
 
 --
 
 -- TABLE backup_offsite_health :: ACL
 GRANT ALL ON TABLE public.backup_offsite_health TO service_role;
-DO $g$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
-    EXECUTE 'GRANT SELECT ON TABLE public.backup_offsite_health TO grafana_reader';
-  END IF;
-END $g$;
 
 --
 
@@ -18422,11 +18386,6 @@ GRANT ALL ON TABLE public.gateway_enrollment_tokens TO service_role;
 
 -- TABLE gateway_health :: ACL
 GRANT ALL ON TABLE public.gateway_health TO service_role;
-DO $g$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
-    EXECUTE 'GRANT SELECT ON TABLE public.gateway_health TO grafana_reader';
-  END IF;
-END $g$;
 
 --
 
@@ -18514,11 +18473,6 @@ GRANT SELECT ON TABLE public.platform_alerts_active TO authenticated;
 
 -- TABLE platform_health :: ACL
 GRANT ALL ON TABLE public.platform_health TO service_role;
-DO $g$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
-    EXECUTE 'GRANT SELECT ON TABLE public.platform_health TO grafana_reader';
-  END IF;
-END $g$;
 
 --
 
@@ -18596,11 +18550,6 @@ GRANT ALL ON TABLE public.schemas TO authenticated;
 
 -- TABLE storage_footprint :: ACL
 GRANT ALL ON TABLE public.storage_footprint TO service_role;
-DO $g$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
-    EXECUTE 'GRANT SELECT ON TABLE public.storage_footprint TO grafana_reader';
-  END IF;
-END $g$;
 
 --
 
@@ -19247,3 +19196,37 @@ BEGIN
     RAISE EXCEPTION 'baseline incomplete: a published table is not REPLICA IDENTITY FULL';
   END IF;
 END $$;
+
+-- ---------------------------------------------------------------------------------------------
+-- 8. What the dashboard reader may read
+-- ---------------------------------------------------------------------------------------------
+-- Every privilege grafana_reader holds in public is granted here, after a sweep that withdraws
+-- whatever it held, so a grant deleted from this block is withdrawn on the next boot. One DO block
+-- is one transaction: a query Grafana makes during a replay sees the old grants or the new ones,
+-- never the sweep alone. A grant made anywhere else must be repeated here, or the sweep takes it
+-- away until that statement runs again; an object a later file creates is granted here guarded by
+-- to_regclass, for the first boot. check-docs-drift.mjs (check 55) holds this.
+DO $grafana_reader$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
+    RETURN;
+  END IF;
+
+  REVOKE ALL ON ALL TABLES    IN SCHEMA public FROM grafana_reader;
+  REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM grafana_reader;
+  REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM grafana_reader;
+
+  -- The views the alert rules and the storage panel query, and the functions behind them: a
+  -- function a view calls is checked against the caller, not the view's owner.
+  GRANT SELECT ON TABLE public.platform_health              TO grafana_reader;
+  GRANT SELECT ON TABLE public.gateway_health               TO grafana_reader;
+  GRANT SELECT ON TABLE public.backup_health                TO grafana_reader;
+  GRANT SELECT ON TABLE public.backup_offsite_health        TO grafana_reader;
+  GRANT SELECT ON TABLE public.audit_trail_partition_health TO grafana_reader;
+  GRANT SELECT ON TABLE public.storage_footprint            TO grafana_reader;
+  GRANT EXECUTE ON FUNCTION public.platform_health_rows()       TO grafana_reader;
+  GRANT EXECUTE ON FUNCTION public.gateway_health_rows()        TO grafana_reader;
+  GRANT EXECUTE ON FUNCTION public.backup_offsite_health_rows() TO grafana_reader;
+  GRANT EXECUTE ON FUNCTION public.platform_storage_rows()      TO grafana_reader;
+END
+$grafana_reader$;

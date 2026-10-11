@@ -36,10 +36,11 @@ datasources:
   # ---------------------------------------------------------------------------------------------
   # The Supabase database: one view, `public.storage_footprint`, which can only live on this side
   # because postgres_fdw runs Supabase -> TimescaleDB and nothing runs back. Connects as
-  # `grafana_reader`, which may SELECT that view and nothing else, with the grant re-revoked on
-  # every boot. Same name and password as the historian's `grafana_reader` on purpose: it is the
-  # same tool, and the two roles share nothing but the credential. An empty BI_READER_PASSWORD
-  # skips the role and this datasource fails its health check.
+  # `grafana_reader`, which may read that view and the alert rules' views and nothing else, swept
+  # and re-granted in one transaction on every boot (0001, section 8). Same name and password as
+  # the historian's `grafana_reader` on purpose: it is the same tool, and the two roles share
+  # nothing but the credential. An empty BI_READER_PASSWORD skips the role and this datasource
+  # fails its health check.
   # ---------------------------------------------------------------------------------------------
   - name: Supabase
     uid: supabase
