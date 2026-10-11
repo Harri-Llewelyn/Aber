@@ -95,6 +95,22 @@ def loki_query(expr, since_seconds=600, limit=50):
     return get_json(f"{LOKI}/loki/api/v1/query_range?{q}")["data"]["result"]
 
 
+def parse_record(stream, value):
+    """One Loki entry as the JSON record ingestion wrote, or a failure that shows the whole entry.
+
+    A record with a foreign line inside it is a pipeline defect, so this stays strict; the message
+    carries what a bare JSONDecodeError would hide: the entry itself, its labels and its time.
+    """
+    ts, line = value
+    try:
+        return json.loads(line)
+    except ValueError as exc:
+        raise AssertionError(
+            f"a Loki entry is not one JSON record ({exc}).\n  labels: {stream.get('stream')}\n"
+            f"  time:   {ts}\n  entry:  {line!r}"
+        ) from None
+
+
 def prom_query(expr):
     q = urllib.parse.urlencode({"query": expr})
     return get_json(f"{PROM}/api/v1/query?{q}")["data"]["result"]
@@ -313,7 +329,7 @@ class DropPairTestCase(unittest.TestCase):
         seen = []
         while time.time() < deadline:
             seen = [
-                v[1] for s in loki_query(expr, limit=200) for v in s["values"]
+                (s, v) for s in loki_query(expr, limit=200) for v in s["values"]
                 if self.device in v[1]
             ]
             if seen:
@@ -327,7 +343,7 @@ class DropPairTestCase(unittest.TestCase):
             f"Check that alloy is collecting `ingestion` and that LOG_FORMAT=json.",
         )
 
-        record = json.loads(seen[0])
+        record = parse_record(*seen[0])
         self.assertEqual(REASON, record["reason"])
         self.assertEqual(self.device, record["device"],
                          "the line names a different device than the one that was dropped")
@@ -359,7 +375,7 @@ class DropPairTestCase(unittest.TestCase):
         fields = set()
         while time.time() < deadline:
             fields = {
-                json.loads(v[1])["reason"]
+                parse_record(s, v)["reason"]
                 for s in loki_query(expr, limit=200) for v in s["values"]
             }
             if fields:
