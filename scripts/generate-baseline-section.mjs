@@ -183,14 +183,18 @@ function widenTable(b, createSql) {
     // is idempotent and costs nothing on a fresh install. GENERATED columns are skipped -- they
     // have no default to set -- and a column that has LOST its default is dropped explicitly,
     // which is the same statement read the other way.
+    // A sequence default is its own DEFAULT block further down, after the sequence exists; dropping
+    // it here would leave every insert into the table failing NOT NULL until that block ran.
     const defaults = cols
       .filter((c) => !/\bGENERATED\b/i.test(c))
       .map((c) => {
         const name = c.match(/^("[^"]+"|[a-z_][a-z0-9_$]*)\s/i)[1];
         const d = c.match(/\bDEFAULT\s+([\s\S]+?)(?:\s+NOT NULL)?$/i);
+        if (!d && SEPARATE_DEFAULTS.has(`${b.schema}.${b.name}.${name}`)) return null;
         return d ? `    ALTER COLUMN ${name} SET DEFAULT ${d[1].trim()}`
                  : `    ALTER COLUMN ${name} DROP DEFAULT`;
-      });
+      })
+      .filter(Boolean);
     if (defaults.length) {
       parts.push(`ALTER TABLE ${b.schema}.${b.name}\n${defaults.join(',\n')};`);
     }
@@ -341,6 +345,11 @@ function dropBiReaderGrants(sql) {
     .filter((line) => !(/grafana_reader/.test(line) && /^\s*(GRANT|REVOKE)\b/i.test(line)))
     .join('\n');
 }
+
+/** schema.table.column for every default pg_dump writes as its own block (`Name: t col; Type: DEFAULT`). */
+const SEPARATE_DEFAULTS = new Set(blocks(dump)
+  .filter((b) => b.type.toUpperCase() === 'DEFAULT')
+  .map((b) => `${b.schema}.${b.name.replace(/\s+/, '.')}`));
 
 /**
  * The table a TRIGGER or POLICY block's DROP/CREATE pair is on, or null for any other block.

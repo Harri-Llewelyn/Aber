@@ -9777,7 +9777,6 @@ ALTER TABLE public.audit_trail
     ADD COLUMN IF NOT EXISTS audit_domain text NOT NULL;
 
 ALTER TABLE public.audit_trail
-    ALTER COLUMN id DROP DEFAULT,
     ALTER COLUMN entity_type DROP DEFAULT,
     ALTER COLUMN entity_id DROP DEFAULT,
     ALTER COLUMN action DROP DEFAULT,
@@ -13000,7 +12999,6 @@ ALTER TABLE public.roles
     ADD COLUMN IF NOT EXISTS description text;
 
 ALTER TABLE public.roles
-    ALTER COLUMN id DROP DEFAULT,
     ALTER COLUMN name DROP DEFAULT,
     ALTER COLUMN description DROP DEFAULT;
 
