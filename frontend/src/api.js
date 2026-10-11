@@ -1,7 +1,7 @@
 import { supabase, SUPABASE_URL, SUPABASE_GATEWAY_KEY } from './lib/supabaseClient';
 import { withActivityTracking } from './lib/apiActivity';
 import { isUuid } from './utils/isUuid';
-import { deviceSparkplugId } from './utils/sparkplugId';
+import { deviceSparkplugId, sparkplugGroupProblem } from './utils/sparkplugId';
 import { resolveDeviceLocation, normaliseScope, SCOPE_CELL, SCOPE_AREA_WIDE } from './utils/cellResolution';
 import { isSvgFile, readSvgPlan, decodeSvgBytes, areaPlanPath, AREA_PLAN_MAX_BYTES } from './utils/areaPlans';
 import { edgeFunctionErrorMessage, withReference } from './utils/edgeFunctionError';
@@ -2880,12 +2880,20 @@ const apiMethods = {
       if ('is_simulated' in body) patch.is_simulated = !!body.is_simulated;
       // See the devices patch: emptyToNull so clearing the field stores NULL, not ''.
       if ('description' in body) patch.description = emptyToNull(body.description);
+      // As typed: the column is NOT NULL, and gateways_sparkplug_group_format refuses '' itself.
+      if ('sparkplug_group' in body) patch.sparkplug_group = body.sparkplug_group ?? '';
       // Same pairing rule as devices: marking a gateway Site-Wide clears its cell. `deployment` says
       // where the connector runs; site-wide is an assertion about where the assets are.
       Object.assign(patch, locationFieldsFrom(body));
 
       const { data, error } = await supabase.from('gateways').update(patch).eq('id', id).select();
-      if (error) throw error;
+      if (error) {
+        // The constraint's name says nothing to the person who typed the value; the rule does.
+        if (error.code === '23514' && /gateways_sparkplug_group_format/.test(error.message || '')) {
+          throw new Error(sparkplugGroupProblem(patch.sparkplug_group) || 'That Sparkplug group was refused.');
+        }
+        throw error;
+      }
       return data[0];
     }
 

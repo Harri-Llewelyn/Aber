@@ -10,7 +10,7 @@ import {
   formatCertExpiry, isCertExpiring, holdsOlderRoot, formatBytes, CERT_EXPIRY_WARN_DAYS,
   gatewayGroupMismatch
 } from '../../utils/gatewayStatus'
-import { gatewaySparkplugId } from '../../utils/sparkplugId'
+import { gatewaySparkplugId, sparkplugGroupProblem } from '../../utils/sparkplugId'
 import {
   GATEWAY_TYPES, SELECTABLE_TYPES, LISTED_TYPES, gatewayType, gatewayTypeFields,
   gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone,
@@ -187,7 +187,10 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
       }
 
       if (editing) {
-        await api.put(`/api/v1/gateways/${editing.gateway_id}`, form)
+        // The group only when it was changed: it is half of the gateway's address, and sending the
+        // copy the dialog opened with would undo a change made meanwhile.
+        const { sparkplug_group: group, ...unchanged } = form
+        await api.put(`/api/v1/gateways/${editing.gateway_id}`, group === editing.sparkplug_group ? unchanged : form)
         setShowForm(false); load(); showToast('Gateway saved', 'success')
         return
       }
@@ -256,6 +259,17 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const [editingProposal, setEditingProposal] = useState(null)
   const [openProposals, setOpenProposals] = useState([])
   const withheldFields = nonProposableFields('gateway')
+
+  // The Sparkplug group, offered in the Edit dialog only: a new gateway takes the site's. Checked as
+  // gateways_sparkplug_group_format checks it, and the group the gateway was last seen publishing
+  // under is offered when it differs from the row's.
+  const groupEdited = !!editing && !proposeMode && form.sparkplug_group !== editing.sparkplug_group
+  const groupProblem = groupEdited ? sparkplugGroupProblem(form.sparkplug_group) : null
+  const editingMismatch = editing ? gatewayGroupMismatch(editing) : null
+  const offeredGroup = editingMismatch && !proposeMode && form.sparkplug_group !== editingMismatch.observed
+    ? editingMismatch.observed : null
+  const groupChanged = groupEdited && !groupProblem
+  const groupFollowsTheNode = groupChanged && form.sparkplug_group === editing.observed_sparkplug_group
 
   /** The note under a field a proposal may not name: disabled with the reason rather than hidden. */
   const Withheld = ({ field }) => (
@@ -601,9 +615,11 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                 pendingLabel={proposeMode ? 'Proposing…' : editing ? 'Saving…' : 'Creating…'}
                 onClick={() => runSave(save)}
                 // Area-Wide with no area named would be refused by the database; held here.
-                disabled={locationIncomplete(form) || remoteWithheld}
+                disabled={locationIncomplete(form) || remoteWithheld || !!groupProblem}
                 title={remoteWithheld
                   ? 'Remote gateways cannot be enrolled on this deployment yet'
+                  : groupProblem
+                  ? groupProblem
                   : locationIncomplete(form)
                   ? 'Choose which area the gateway serves'
                   : proposeMode
@@ -699,6 +715,55 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                   : null}
           </div>
         </div>
+        {editing && (
+          <div className="form-group">
+            <label className="form-label" htmlFor="gateway-sparkplug-group">Sparkplug Group</label>
+            <Withheld field="sparkplug_group" />
+            <input
+              id="gateway-sparkplug-group"
+              className="form-control mono"
+              disabled={proposeMode}
+              value={form.sparkplug_group ?? ''}
+              onChange={e => setForm(f => ({ ...f, sparkplug_group: e.target.value }))}
+              aria-invalid={groupProblem ? true : undefined}
+              title={proposeMode ? withheldFields.sparkplug_group : 'The second level of every topic this gateway publishes'}
+            />
+            {groupProblem && <div className="form-hint hint-danger" role="alert">{groupProblem}</div>}
+            {offeredGroup && (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm gateway-group-offer"
+                onClick={() => setForm(f => ({ ...f, sparkplug_group: offeredGroup }))}
+                title="The group this gateway was last seen publishing under"
+              >
+                Use {offeredGroup}
+              </button>
+            )}
+            {/* What a change does, said before it is saved. The broker grants a gateway every group
+                under its own node id, so only the edge node and the Directory are concerned. */}
+            {groupFollowsTheNode ? (
+              <div className="form-hint">
+                The edge node already publishes under {form.sparkplug_group}, so saving makes the two
+                agree and clears the warning. The gateway&rsquo;s Factory+ Directory address moves with it.
+              </div>
+            ) : groupChanged ? (
+              <div className="form-hint hint-warning">
+                Saving moves this gateway&rsquo;s Factory+ Directory address to {form.sparkplug_group},
+                and the broker needs nothing. The edge node does not move with it:{' '}
+                {editing.deployment === 'remote'
+                  ? 'an enrolled Remote gateway keeps the group written into its flow until it is set up again or its flow is changed.'
+                  : 'change the group on the edge node itself.'}{' '}
+                Until it does, this page warns, and its Unified Namespace topics stay under the group it
+                publishes under.
+              </div>
+            ) : (
+              <div className="form-hint">
+                The second level of every topic this gateway publishes, and half of its Factory+ Directory
+                address.
+              </div>
+            )}
+          </div>
+        )}
         <div className="form-group">
           <label className="form-label">Gateway Access URL (Optional UI Console)</label>
           <input className="form-control" value={form.access_url || ''} onChange={e => setForm(f => ({ ...f, access_url: e.target.value }))} placeholder="e.g. http://localhost:1880" title="Web Console / Management URL for this gateway" />
@@ -1092,7 +1157,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                     registered under <span className="mono">{selectedGroupMismatch.registered}</span>.
                   </strong>{' '}
                   Set the edge node to publish under {selectedGroupMismatch.registered}, or change
-                  this gateway&rsquo;s Sparkplug group to {selectedGroupMismatch.observed}.
+                  this gateway&rsquo;s Sparkplug group to {selectedGroupMismatch.observed} in Edit Details.
                 </div>
               </div>
             )}

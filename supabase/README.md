@@ -626,8 +626,9 @@ than an edit. In order:
    not a policy, so `service_role` does not bypass it.
 3. Set `ingestion.sparkplugGroup` to the same value and `helm upgrade`. The broker's Directory grant
    and the daemon's topic prefix are both derived from it, so they move together.
-4. `UPDATE public.gateways SET sparkplug_group = ...` for every gateway that should move. The column
-   is per-row on purpose: a gateway can stay in the old group while the rest move.
+4. `UPDATE public.gateways SET sparkplug_group = ...` for every gateway that should move, or the
+   **Sparkplug Group** field of each gateway's Edit Gateway dialog. The column is per-row on purpose:
+   a gateway can stay in the old group while the rest move.
 5. Re-issue a bundle for every Remote appliance. The flow template carries the group as a literal,
    substituted at bundle time, so a running appliance goes on publishing under the old one.
 

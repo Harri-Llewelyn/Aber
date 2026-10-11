@@ -319,7 +319,8 @@ python supabase/migrations/test_system_settings_rls.py
 # The site's Sparkplug group (0131), which is DISPLAYED and not editable. An Administrator holds
 # GRANT UPDATE (value) on system_settings, so a direct PostgREST write is admitted by RLS and only
 # the trigger refuses it -- a read-only control in the browser alone would be a suggestion. Also
-# that gateways.sparkplug_group now defaults to the setting rather than the old literal.
+# that gateways.sparkplug_group now defaults to the setting rather than the old literal, and that a
+# gateway's own group is changed only by a role gateways_update_privileged admits.
 python supabase/migrations/test_sparkplug_group_setting.py
 # The Directory's Version column (0140). The chart's component -> image map reaches every row it
 # manages, clears a component the chart stops deploying, leaves other registrations alone, and the

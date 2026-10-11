@@ -42,3 +42,21 @@ export function effectiveSparkplugId(device) {
   if (!device) return '';
   return device.reported_identity || device.sparkplug_id || deviceSparkplugId(device.id);
 }
+
+/**
+ * The characters a Sparkplug group may not contain. A group is one level of the topic,
+ * spBv1.0/<group>/<type>/<node>, so a separator or a wildcard would address something else.
+ * Mirrors gateways_sparkplug_group_format, with the empty string (check-mirror-drift.mjs, 1b).
+ */
+export const SPARKPLUG_GROUP_FORBIDDEN = '/+#';
+
+/** Why `value` cannot be a gateway's Sparkplug group, as a sentence, or null when it can be. */
+export function sparkplugGroupProblem(value) {
+  const group = typeof value === 'string' ? value : '';
+  if (group === '') return 'A Sparkplug group cannot be empty.';
+  const found = [...SPARKPLUG_GROUP_FORBIDDEN].filter(c => group.includes(c));
+  if (found.length) {
+    return `A Sparkplug group is one level of the topic, so it cannot contain ${found.join(' or ')}.`;
+  }
+  return null;
+}

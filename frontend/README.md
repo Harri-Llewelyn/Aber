@@ -60,7 +60,7 @@ would stay wrong until the device's next birth, and rebirths are rare.
 
 | Util | Mirrors |
 | :--- | :--- |
-| `utils/sparkplugId.js` | the `sparkplug_id` generated column |
+| `utils/sparkplugId.js` | the `sparkplug_id` generated column, and `gateways_sparkplug_group_format` (`sparkplugGroupProblem()`) |
 | `utils/metricGroup.js` | the `metric_group` generated column and the spelling trigger |
 | `utils/cellResolution.js` | `public.device_locations` |
 | `utils/gatewayStatus.js` | `public.gateway_status` (90 s threshold) |

@@ -134,9 +134,9 @@ describe('the fields a proposal may not name', () => {
     }
   })
 
-  it('withholds what a gateway IS, not what it is called', () => {
+  it('withholds what a gateway IS, and its address, not what it is called', () => {
     expect(Object.keys(nonProposableFields('gateway')).sort())
-      .toEqual(['deployment', 'is_simulated'])
+      .toEqual(['deployment', 'is_simulated', 'sparkplug_group'])
   })
 
   it('names every withheld field as one this form actually has', () => {
