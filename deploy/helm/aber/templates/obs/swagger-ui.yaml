@@ -46,7 +46,11 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      # The image's nginx user; it listens on 8080.
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -97,9 +101,6 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-              # The nginx master runs as root: it chowns its temp directories to the nginx user
-              # and drops to that user for the workers.
-              add: ["CHOWN", "SETGID", "SETUID"]
           resources:
             {{- toYaml .Values.swaggerUi.resources | nindent 12 }}
 {{- end }}

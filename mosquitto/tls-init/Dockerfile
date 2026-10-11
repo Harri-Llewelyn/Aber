@@ -23,5 +23,9 @@ FROM node:24-alpine
 
 RUN apk add --no-cache openssl
 
+# The base's node user. The one caller, check-broker-config.mjs, runs the generator as root: it hands
+# the broker's key to uid 1883 and keeps the CA key root's, and only root can chown.
+USER 1000:1000
+
 # No CMD: the caller supplies `node /scripts/mosquitto-tls-init.mjs` and mounts the script, keeping
 # it editable without a rebuild -- the same arrangement as node-red-init.

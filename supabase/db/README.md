@@ -84,6 +84,11 @@ asynchronous push fails after `archive.info` was read:
   drop the postmaster's effective set is empty (`CapEff: 0`). Without `KILL`, `docker stop` ends
   in `[FATAL tini (1)] Unexpected error when forwarding signal: 'Operation not permitted'` and the
   server is killed. With it, the server logs `received fast shutdown request` and exits 0.
+- **The server starts as root on purpose.** Its data directory is the volume's mount point, which
+  is root's on a fresh volume, and initdb as uid 100 cannot take it: `could not change permissions
+  of directory "/var/lib/postgresql/data": Operation not permitted`. Measured in Docker, the image
+  does start as 100 on a volume the server already owns, but one pod spec serves both kinds of
+  volume. So the Dockerfile names no `USER`, and `scripts/lint/config-allowlist.json` says why.
 - **The sidecar runs as `postgres` (100:101) with no capabilities.** A backup reads the data
   directory, which that user owns, and connects over the shared socket directory as
   `supabase_admin`, the image's superuser, whom its `pg_hba` trusts on the socket. `postgres` is not

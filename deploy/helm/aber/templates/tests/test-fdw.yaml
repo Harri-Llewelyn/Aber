@@ -40,7 +40,11 @@ spec:
   imagePullSecrets:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  # supabase/postgres's postgres user: psql needs nothing more.
   securityContext:
+    runAsNonRoot: true
+    runAsUser: 100
+    runAsGroup: 101
     seccompProfile:
       type: RuntimeDefault
   {{- /* A new pod's first connection can be refused until the NetworkPolicy controller admits

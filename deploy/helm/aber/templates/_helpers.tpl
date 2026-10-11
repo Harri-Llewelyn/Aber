@@ -845,7 +845,8 @@ Usage: (dict "ctx" . "name" "DATABASE_SSL_ROOT_CERT")
 {{/*
 The certificate reload sidecar for a database pod. cert-manager renews the leaf in place and
 nothing restarts a StatefulSet for it; Postgres re-reads its certificate on a reload, so this
-watches the mounted certificate and asks for one over loopback, which pg_hba trusts.
+watches the mounted certificate and asks for one over loopback, which pg_hba trusts. `runAs`
+(dict "uid" N "gid" N) states its user where the pod states none.
 Usage: (dict "ctx" . "image" "<repo:tag>" "pullPolicy" "IfNotPresent" "user" "postgres" "db" "postgres")
 */}}
 {{- define "aber.dbCertificateReload" -}}
@@ -874,6 +875,11 @@ Usage: (dict "ctx" . "image" "<repo:tag>" "pullPolicy" "IfNotPresent" "user" "po
       mountPath: /etc/aber/postgres/tls
       readOnly: true
   securityContext:
+    {{- with .runAs }}
+    runAsNonRoot: true
+    runAsUser: {{ .uid }}
+    runAsGroup: {{ .gid }}
+    {{- end }}
     allowPrivilegeEscalation: false
     capabilities:
       drop: ["ALL"]
@@ -937,7 +943,11 @@ database out of service. Whether it works is the scrape's question.
     - name: exporter-queries
       mountPath: /etc/postgres-exporter
       readOnly: true
+  # The image's own user, nobody, whatever uid the database pod runs as.
   securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
     allowPrivilegeEscalation: false
     capabilities:
       drop: ["ALL"]

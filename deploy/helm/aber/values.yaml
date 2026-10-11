@@ -241,9 +241,12 @@ timescaledb:
   # 0.5-4.7% fewer WAL bytes, more as checkpoints come closer together, at no measurable time.
   # It does not reduce the number of fsyncs, which is what sets the ingest ceiling.
   walCompression: lz4
-  # The image's `postgres` user is uid/gid 70 (Alpine). The entrypoint runs as root and chowns,
-  # so this only becomes load-bearing if `runAsUser` is ever set.
+  # The image's `postgres` user is uid/gid 70 (Alpine), and every container in the pod runs as it.
+  # fsGroup makes a fresh volume's root group-writable, so 70 can create PGDATA beneath it.
   podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 70
+    runAsGroup: 70
     fsGroup: 70
     fsGroupChangePolicy: OnRootMismatch
   # Worker pool. The template computes max_worker_processes = 1 + background + parallel
@@ -402,8 +405,9 @@ supabaseDb:
   # Compression of full-page images in the WAL (off, pglz, lz4, zstd), as timescaledb.walCompression.
   # Fewer WAL bytes to archive and to keep, at no measured cost on the historian.
   walCompression: lz4
-  # supabase/postgres:17.6.1.175 is Alpine; its `postgres` user is uid 100 / gid 101. Same
-  # caveat as timescaledb: the entrypoint chowns, so this matters only with `runAsUser`.
+  # supabase/postgres:17.6.1.175 is Alpine; its `postgres` user is uid 100 / gid 101. The server
+  # starts as root (deploy/k8s/README.md, Users), so no runAsUser here; its sidecars
+  # state 100 themselves.
   podSecurityContext:
     fsGroup: 101
     fsGroupChangePolicy: OnRootMismatch
@@ -753,7 +757,8 @@ supabaseStorage:
   #   podAnnotations:
   #     backup.velero.io/backup-volumes: data
   podAnnotations: {}
-  # node:alpine-derived image running as uid/gid 1000.
+  # storage-api's image names no user, so the server runs as root (deploy/k8s/README.md,
+  # Users); fsGroup gives what it writes group 1000.
   podSecurityContext:
     fsGroup: 1000
     fsGroupChangePolicy: OnRootMismatch
@@ -846,8 +851,12 @@ mosquitto:
     pullPolicy: IfNotPresent
   # Always one. Mosquitto does not cluster; Sparkplug state is per-connection.
   replicas: 1
-  # The `mosquitto` user in eclipse-mosquitto is uid/gid 1883.
+  # The `mosquitto` user in eclipse-mosquitto is uid/gid 1883, and every container in the pod runs
+  # as it. fsGroup is what lets 1883 write the plugin's document on a fresh volume.
   podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1883
+    runAsGroup: 1883
     fsGroup: 1883
     fsGroupChangePolicy: OnRootMismatch
   # Broker metrics via an exporter sidecar (Mosquitto publishes its statistics to `$SYS/#`
@@ -1168,6 +1177,9 @@ nodeRed:
     accessMode: ReadWriteOnce
   # The `node-red` user is uid/gid 1000; local-path hands over a root-owned directory.
   podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
     fsGroup: 1000
     fsGroupChangePolicy: OnRootMismatch
   resources:
@@ -1227,8 +1239,11 @@ grafana:
     size: 2Gi
     storageClass: ""
     accessMode: ReadWriteOnce
-  # grafana/grafana runs as uid/gid 472.
+  # grafana/grafana runs as uid 472, primary group 0. No runAsGroup: the image's group stands, as
+  # it did before the chart stated the uid.
   podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 472
     fsGroup: 472
     fsGroupChangePolicy: OnRootMismatch
   # 1Gi: 13.2 runs its own apiserver, Zanzana and unified storage in-process, and installs a

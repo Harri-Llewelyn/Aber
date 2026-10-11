@@ -93,6 +93,7 @@ spec:
       {{- end }}
       # prom/prometheus runs as nobody (65534); local-path provisions a root-owned directory.
       securityContext:
+        runAsNonRoot: true
         runAsUser: 65534
         runAsGroup: 65534
         fsGroup: 65534

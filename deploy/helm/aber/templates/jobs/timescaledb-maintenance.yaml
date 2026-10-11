@@ -66,7 +66,11 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      # The historian image's postgres user: psql needs nothing more.
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
         seccompProfile:
           type: RuntimeDefault
       initContainers:

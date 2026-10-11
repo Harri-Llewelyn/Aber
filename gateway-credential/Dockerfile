@@ -17,10 +17,10 @@ FROM eclipse-mosquitto:2.0.22
 # The image is Alpine-based; only a runtime for the scripts is missing.
 RUN apk add --no-cache nodejs
 
-# ROOT, DELIBERATELY. The boot reconcile writes the plugin's document owned by uid 1883 at 0600,
-# and the service writes the playback delivery file at 0600 for another container to read. The
-# service holds no database credential and is not published outside the container network.
-USER root
+# THE BROKER'S OWN USER (mosquitto, 1883). The boot reconcile writes the plugin's document, which
+# the broker reads and rewrites as that uid at 0600, so writing it as 1883 needs no chown. The
+# service patches the playback delivery file through the Kubernetes API and writes nothing on disk.
+USER 1883:1883
 
 # No CMD: the chart supplies the script to run and mounts it from a ConfigMap, so it is editable
 # without a rebuild.

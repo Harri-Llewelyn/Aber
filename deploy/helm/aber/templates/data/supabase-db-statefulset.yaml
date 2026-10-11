@@ -119,7 +119,10 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      # M5. Same reasoning as TimescaleDB; this image's postgres is uid 100, gid 101 (values.yaml).
+      # M5. This image's postgres is uid 100, gid 101 (values.yaml). No pod-wide runAsUser: the
+      # server starts as root, because its data directory is the volume's own root, which initdb as
+      # 100 cannot take on a fresh volume (deploy/k8s/README.md, Users). Each sidecar
+      # states its own non-root user.
       securityContext:
         {{- include "aber.podSecurityContext" .Values.supabaseDb.podSecurityContext | nindent 8 }}
       containers:
@@ -291,7 +294,7 @@ spec:
             {{- include "aber.physicalBackupMounts" . | nindent 12 }}
         {{- end }}
         {{- if .Values.postgresTls.enabled }}
-        {{- include "aber.dbCertificateReload" (dict "ctx" . "image" (include "aber.image" (dict "image" .Values.supabaseDb.serverImage "ctx" .)) "pullPolicy" .Values.supabaseDb.serverImage.pullPolicy "user" "postgres" "db" "postgres") | nindent 8 }}
+        {{- include "aber.dbCertificateReload" (dict "ctx" . "image" (include "aber.image" (dict "image" .Values.supabaseDb.serverImage "ctx" .)) "pullPolicy" .Values.supabaseDb.serverImage.pullPolicy "user" "postgres" "db" "postgres" "runAs" (dict "uid" 100 "gid" 101)) | nindent 8 }}
         {{- end }}
         {{- if .Values.databaseMetrics.enabled }}
         {{- include "aber.dbMetricsExporter" (dict "ctx" . "db" $component "database" "postgres") | nindent 8 }}

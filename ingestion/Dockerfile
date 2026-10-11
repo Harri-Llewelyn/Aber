@@ -86,5 +86,11 @@ COPY ingestion/cold_archive.py .
 # Compile the Sparkplug B protobuf definition
 RUN protoc --python_out=. sparkplug_b.proto
 
+# NON-ROOT, numeric so the kubelet can verify runAsNonRoot from the image alone. The daemon, the
+# playback worker and the cold archive write only to /tmp and their volumes; /app stays root's.
+RUN groupadd --gid 10001 ingestion \
+ && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin ingestion
+USER 10001:10001
+
 # Start the ingestion pipeline daemon
 CMD ["python", "ingestion.py"]
