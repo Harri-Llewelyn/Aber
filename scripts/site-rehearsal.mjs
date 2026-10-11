@@ -15,6 +15,9 @@
  *                                 temporary directory; the default kubeconfig is never touched
  *           --from=<tag>          upgrade from this tag instead of the last release (`upgrade`)
  *           --keep                leave the cluster up after a pass (a failure always leaves it)
+ *           --i3x-suite=<dir>     then run CESMII's i3X conformance suite from <dir> (the
+ *                                 conformance-tests folder of a cesmii/i3X checkout) against
+ *                                 https://i3x.<domain>/v1 through Traefik; CORE-05 must pass
  *
  * What both end with: every StatefulSet, Deployment and DaemonSet rolls out, `helm test` passes,
  * every running pod's built image is the checkout's, the first administrator signs in through
@@ -53,6 +56,7 @@ const RELEASE = 'aber'
 // loopback one. The administrator's address only has to have an email's shape.
 const DOMAIN = 'rehearsal.aber.test'
 const API_HOST = `api.${DOMAIN}`
+const I3X_HOST = `i3x.${DOMAIN}`
 const ADMIN_EMAIL = `admin@${DOMAIN}`
 const DEMO = { email: 'admin@aber.local', password: 'aber123' }
 // The first release whose chart holds every edge its own hooks need under the policy layer. An
@@ -68,6 +72,10 @@ if (!['install', 'upgrade'].includes(mode)) {
   process.exit(mode ? 1 : 0)
 }
 const CLUSTER = option('cluster') || 'aber-rehearsal'
+const I3X_SUITE = option('i3x-suite') && path.resolve(option('i3x-suite'))
+if (I3X_SUITE && !existsSync(path.join(I3X_SUITE, 'bin', 'i3x-test.js'))) {
+  die(`--i3x-suite=${I3X_SUITE} holds no bin/i3x-test.js: name the conformance-tests folder of a cesmii/i3X checkout`)
+}
 // The values (credentials included), site.yaml, the packaged chart and, by default, the kubeconfig.
 const WORK = mkdtempSync(path.join(os.tmpdir(), 'aber-rehearsal-'))
 const KUBECONFIG = path.resolve(option('kubeconfig') || path.join(WORK, 'kubeconfig'))
@@ -483,6 +491,40 @@ async function checkSignIn () {
 }
 
 // ---------------------------------------------------------------------------------------------
+// CESMII's i3X conformance suite, the way a site's clients reach i3X
+// ---------------------------------------------------------------------------------------------
+/**
+ * The suite from --i3x-suite against https://i3x.<domain>/v1 through Traefik, trusting only the
+ * internal CA. The domain resolves nowhere, so resolve-hosts.cjs points the name at the forward.
+ * The verdict rule is CI's end-to-end run's, and CORE-05 (served over HTTPS) must pass here.
+ */
+async function checkI3xConformance () {
+  const site = siteCredentials()
+  const forward = await forwardTraefik()
+  const tls = await reachApi(forward.port, site.apikey)
+  const admin = await signIn(tls, site.apikey, site)
+  const token = admin.status === 200 ? JSON.parse(admin.body).access_token : null
+  if (!token) die(`${site.email} could not sign in for the i3X suite: ${admin.status} ${admin.body.slice(0, 300)}`)
+  const caFile = path.join(WORK, 'internal-ca.crt')
+  writeFileSync(caFile, tls.ca)
+  const endpoint = `https://${I3X_HOST}:${forward.port}/v1`
+  const r = capture('node', ['--require', path.join(REPO, 'scripts', 'lib', 'resolve-hosts.cjs'),
+    path.join(I3X_SUITE, 'bin', 'i3x-test.js'), 'run', endpoint, '--token', token], {
+    env: { ...process.env, NODE_EXTRA_CA_CERTS: caFile, ABER_RESOLVE: `${I3X_HOST}=127.0.0.1`, NO_COLOR: '1' },
+  })
+  forward.close()
+  // eslint-disable-next-line no-control-regex
+  const out = `${r.out}\n${r.err}`.replace(/\x1b\[[0-9;]*m/g, '')
+  console.log(out.split('\n').map(line => `    ${line}`).join('\n'))
+  const verdict = /Result: (Full 1\.0 Compliance|1\.0 Compatible)/.exec(out)
+  if (!verdict) die(`the i3X suite at ${endpoint} did not reach a passing verdict`)
+  if (!/✓\s+\[\s*\d+\/\d+\]\s+CORE-05\b/.test(out)) {
+    die('the i3X suite did not pass CORE-05 (served over HTTPS) through Traefik with the internal CA')
+  }
+  console.log(`  i3X through Traefik over HTTPS: ${verdict[1]}, CORE-05 passed`)
+}
+
+// ---------------------------------------------------------------------------------------------
 // The two rehearsals
 // ---------------------------------------------------------------------------------------------
 async function rehearse () {
@@ -531,6 +573,7 @@ async function rehearse () {
   await phase('helm test', helmTest)
   await phase('every running pod is on the checkout\'s images', () => assertRunningImages(candidate))
   await phase('the first administrator signs in; the demo account is refused', checkSignIn)
+  if (I3X_SUITE) await phase("CESMII's i3X suite through Traefik over HTTPS", checkI3xConformance)
   passed = true
 }
 
