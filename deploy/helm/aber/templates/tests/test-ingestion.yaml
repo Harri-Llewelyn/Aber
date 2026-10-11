@@ -1,0 +1,71 @@
+{{- if and .Values.ingestion.enabled .Values.ingestion.metrics.enabled }}
+{{- $component := "test-ingestion" -}}
+{{/*
+Ingestion: the daemon's metrics endpoint reports it subscribed to spBv1.0/# on the broker
+(aber_ingestion_mqtt_connected) and its historian connection open (aber_ingestion_db_connected).
+Read-only: the endpoint carries counters and gauges and no device data.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ printf "%s-%s" (include "aber.fullname" .) $component }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "2"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  restartPolicy: Never
+  {{- with .Values.global.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: {{ $component }}
+      image: {{ include "aber.curlImage" . | quote }}
+      imagePullPolicy: {{ .Values.initJobs.curlImage.pullPolicy }}
+      env:
+        - name: URL
+          value: {{ printf "http://ingestion-metrics:%d/metrics" (int .Values.ingestion.metrics.port) | quote }}
+      command:
+        - /bin/sh
+        - -c
+        - |
+          {{- include "aber.testRetry" . | nindent 10 }}
+          # A gauge's value is a float in the exposition format, so 1 and 1.0 are compared as numbers.
+          gauge() { printf '%s\n' "$body" | awk -v n="$1" '$1 == n { print $2 }'; }
+          connected() {
+            body=$(curl -sf --max-time 10 "$URL" || true)
+            mqtt=$(gauge aber_ingestion_mqtt_connected); db=$(gauge aber_ingestion_db_connected)
+            awk -v a="${mqtt:-0}" -v b="${db:-0}" 'BEGIN { exit !(a == 1 && b == 1) }'
+          }
+          echo "--- $URL ---"
+          if retry "both connection gauges to read 1" connected; then
+            echo "    aber_ingestion_mqtt_connected $mqtt, aber_ingestion_db_connected $db"
+          elif [ -z "$body" ]; then
+            echo "FAIL: $URL answered nothing: the daemon is not running or not serving its metrics. curl says:" >&2
+            curl -sSf -o /dev/null --max-time 10 "$URL" >&2
+            exit 1
+          else
+            echo "FAIL: aber_ingestion_mqtt_connected is ${mqtt:-absent} (1 is subscribed to spBv1.0/#) and aber_ingestion_db_connected is ${db:-absent} (1 is the historian connection open). The daemon's log says why: kubectl -n {{ .Release.Namespace }} logs deploy/ingestion -c ingestion" >&2
+            exit 1
+          fi
+          echo
+          echo 'PASS: the ingestion daemon is subscribed to the broker and connected to the historian.'
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        # curl_user in curlimages/curl.
+        runAsUser: 100
+        runAsGroup: 101
+        capabilities:
+          drop: ["ALL"]
+      resources:
+        requests: { cpu: 10m, memory: 16Mi }
+        limits: { memory: 64Mi }
+{{- end }}

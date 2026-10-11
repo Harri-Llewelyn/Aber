@@ -484,7 +484,7 @@ async function waitForStack () {
 }
 
 function helmTest () {
-  step('helm test (the postgres_fdw gate)')
+  step('helm test (the databases, the API, the broker, ingestion, the dashboard)')
   must('helm', ['test', RELEASE, '-n', NS, '--timeout', '5m'], 'helm test failed')
 }
 

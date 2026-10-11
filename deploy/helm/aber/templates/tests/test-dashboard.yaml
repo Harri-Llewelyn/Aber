@@ -1,0 +1,68 @@
+{{- if .Values.frontend.enabled }}
+{{- $component := "test-dashboard" -}}
+{{/*
+The dashboard: the frontend Service serves /config.js, and it is the chart's, naming the API's
+browser-facing address, not the image's empty placeholder. Writes nothing.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ printf "%s-%s" (include "aber.fullname" .) $component }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "2"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  restartPolicy: Never
+  {{- with .Values.global.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: {{ $component }}
+      image: {{ include "aber.curlImage" . | quote }}
+      imagePullPolicy: {{ .Values.initJobs.curlImage.pullPolicy }}
+      env:
+        # The Service's port; the container's may differ.
+        - name: URL
+          value: http://frontend:3000/config.js
+        - name: WANT
+          value: {{ printf "VITE_SUPABASE_URL: %s" (include "aber.supabaseUrl" . | quote) | quote }}
+      command:
+        - /bin/sh
+        - -c
+        - |
+          {{- include "aber.testRetry" . | nindent 10 }}
+          served() { body=$(curl -sf --max-time 10 "$URL" || true); [ -n "$body" ]; }
+          echo "--- $URL ---"
+          if ! retry "the frontend Service" served; then
+            echo "FAIL: $URL answered no file. curl says:" >&2
+            curl -sSf -o /dev/null --max-time 10 "$URL" >&2
+            exit 1
+          fi
+          case "$body" in
+            *"$WANT"*) echo "    served, and it names $WANT" ;;
+            *) echo "FAIL: $URL is served, but does not carry '$WANT'. The chart's ConfigMap is not mounted over the image's placeholder, or names another address:" >&2
+               printf '%s\n' "$body" | grep VITE_SUPABASE_URL >&2
+               exit 1 ;;
+          esac
+          echo
+          echo 'PASS: the frontend Service serves /config.js as the chart renders it.'
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        # curl_user in curlimages/curl.
+        runAsUser: 100
+        runAsGroup: 101
+        capabilities:
+          drop: ["ALL"]
+      resources:
+        requests: { cpu: 10m, memory: 16Mi }
+        limits: { memory: 64Mi }
+{{- end }}

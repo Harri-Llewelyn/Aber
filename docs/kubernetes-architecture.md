@@ -301,6 +301,7 @@ deploy/
       apps/{frontend,ingestion,node-red,i3x-service}.yaml
       obs/{grafana,swagger-ui,servicemonitors}.yaml
       tests/test-fdw.yaml                the helm-test gate — §9-M6
+      tests/test-{api,broker,ingestion,dashboard}.yaml   what a site depends on
       ingress.yaml
       networkpolicy.yaml
       {pdbs,hpas}.yaml
@@ -945,7 +946,9 @@ Both targets must stay green.
    PostgREST, GoTrue, Realtime and storage-api wait for), so `--wait` deadlocks the first install
    and reports it as `context deadline exceeded` with no hook pod ever created.
 4. **`helm test` first (§9-M6)** — the `postgres_fdw` cross-database check. It is seconds long and
-   turns a whole class of deep, misattributed `validate.py` failures into one legible one.
+   turns a whole class of deep, misattributed `validate.py` failures into one legible one. The same
+   run checks the API through the gateway, the broker refusing a wrong password (over TLS under the
+   chart CA when it is on), ingestion's two connection gauges and the frontend's `/config.js`.
 5. Run `ingestion/validate.py` **as a Job in the namespace** (§2.5), then
    `supabase/functions/aas-export/test_aas_export.py` the same way — ordered after `validate.py` so
    that a failed conformance run stops the export suite rather than being reported twice. Its

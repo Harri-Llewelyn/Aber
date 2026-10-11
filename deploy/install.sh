@@ -816,7 +816,8 @@ finish() {
   fi
   fi_password=$(yaml_value "$VALUES" firstAdministratorPassword)
   say ""
-  say "Aber $ABER_VERSION is installed, and its checks passed."
+  say "Aber $ABER_VERSION is installed, and its checks passed: the link between the databases,"
+  say "the API through the gateway, the broker over TLS, ingestion and the dashboard."
   say ""
   printf '  %-12s %s\n' "Sign in at" "https://app.$DOMAIN" "Email" "$EMAIL" "Password" "${fi_password:-(not in $VALUES)}"
   if [ "$RERUN" = 1 ]; then

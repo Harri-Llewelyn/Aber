@@ -933,15 +933,29 @@ the conformance suites write to the install they run against.
 
 ### `helm test` — the cheap gate, mutates nothing
 
-**Run it before anything else.** It takes about a second:
+**Run it before anything else, and after every upgrade.** It needs no person's credential, writes
+nothing and takes seconds on a healthy site:
 
 ```bash
-helm test aber -n aber
-kubectl -n aber logs aber-test-fdw
+helm test aber -n aber --logs
 ```
 
-It proves the **`postgres_fdw` link** end to end. The foreign server exists and points at
-`timescaledb:5432`, and the historian has its hypertable. `public.telemetry` can be queried across
+| Pod | Checks |
+| :--- | :--- |
+| `aber-test-fdw` | the `postgres_fdw` link between the two databases (below) |
+| `aber-test-db-tls` | with `postgresTls.enabled`: both databases refuse plaintext ([*TLS to the databases*](#tls-to-the-databases)) |
+| `aber-test-api` | `GET /auth/v1/health`, and `GET /rest/v1/` with the publishable key, each answer 200 through `supabase-envoy:8000` |
+| `aber-test-broker` | a CONNECT with a password no account has gets CONNACK "not authorised". With `mosquitto.tls.enabled` it is made on 8883 and verifies the certificate against the chart's CA under the name `mosquitto`; without, on 1883 |
+| `aber-test-ingestion` | `aber_ingestion_mqtt_connected` and `aber_ingestion_db_connected` both read 1: the daemon is subscribed to `spBv1.0/#` and its historian connection is open |
+| `aber-test-dashboard` | the `frontend` Service serves `/config.js`, and it names the API's browser-facing address |
+
+Each of the last four retries for up to two minutes, so a pod still starting after an upgrade, or a
+new pod that the NetworkPolicy controller has not yet admitted, does not fail it. Under
+`networkPolicy.enabled` each has its own edges in `templates/networkpolicy.yaml`. A failing pod
+stays until the next run, so `kubectl -n aber logs aber-test-<name>` still answers what it found.
+
+`aber-test-fdw` proves the **`postgres_fdw` link** end to end. The foreign server exists and points
+at `timescaledb:5432`, and the historian has its hypertable. `public.telemetry` can be queried across
 the wrapper, and is readable as `authenticated`, not only as owner.
 
 `public.telemetry` is a foreign-table projection, so a mistake in the foreign server (most likely
@@ -1020,7 +1034,7 @@ kubectl -n aber get pvc          # delete deliberately, never as cleanup habit
 | `gitea` + `gitea-external` | deployed |
 | `prometheus`, `loki`, `alloy`, the `cold-archive` CronJob | deployed |
 | `grafana`, `Ingress` (9 subdomain routes) | deployed |
-| `helm test` FDW gate, k3d CI | deployed |
+| `helm test` (the FDW link, the API, the broker, ingestion, the dashboard), k3d CI | deployed |
 | In-cluster E2E Jobs, `playback`, the backup service, historian physical backup, database TLS | **available, off by default** |
 | NetworkPolicies, PDBs, HPAs, backup CronJob | **available, off by default** |
 | MQTTS on 8883, internal CA, ServiceMonitors | **available, off by default** |

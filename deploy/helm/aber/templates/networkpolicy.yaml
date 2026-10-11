@@ -96,6 +96,10 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "test-fdw"           "to" "timescaledb"        "port" 5432 "why" "M6: checks the hypertable from the far side")
   (dict "from" "test-db-tls"        "to" "supabase-db"        "port" 5432 "why" "helm test: plaintext refused, TLS verified")
   (dict "from" "test-db-tls"        "to" "timescaledb"        "port" 5432 "why" "helm test: plaintext refused, TLS verified")
+  (dict "from" "test-api"           "to" $gw      "port" 8000 "why" "helm test: GoTrue's health and PostgREST's root through the gateway")
+  (dict "from" "test-broker"        "to" "mosquitto"          "port" (ternary 8883 1883 .Values.mosquitto.tls.enabled) "why" "helm test: a wrong password is refused, over TLS under the chart CA when the broker has it")
+  (dict "from" "test-ingestion"     "to" "ingestion"          "port" (int .Values.ingestion.metrics.port) "why" "helm test: the daemon's broker and historian connection gauges")
+  (dict "from" "test-dashboard"     "to" "frontend"           "port" 3000 "why" "helm test: /config.js from the frontend Service (the container's port, as a policy matches it)")
   (dict "from" "e2e-validate"       "to" "supabase-db"        "port" 5432 "why" "audit-row cleanup, out of reach of service_role")
   (dict "from" "e2e-validate"       "to" "timescaledb"        "port" 5432 "why" "telemetry assertions")
   (dict "from" "e2e-validate"       "to" "mosquitto"          "port" $brokerPort "why" "publishes Sparkplug fixtures")
@@ -157,6 +161,10 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
       "cold-archive" .Values.coldArchive.enabled
       "test-fdw" (and .Values.supabaseDb.enabled .Values.timescaledb.enabled)
       "test-db-tls" .Values.postgresTls.enabled
+      "test-api" (and .Values.supabaseEnvoy.enabled .Values.supabaseAuth.enabled .Values.supabaseRest.enabled)
+      "test-broker" .Values.mosquitto.enabled
+      "test-ingestion" (and .Values.ingestion.enabled .Values.ingestion.metrics.enabled)
+      "test-dashboard" .Values.frontend.enabled
       "e2e-validate" .Values.e2e.enabled
       "e2e-aas-export" .Values.e2e.enabled
       "backup" (and .Values.backup.enabled (not .Values.backupService.enabled))
