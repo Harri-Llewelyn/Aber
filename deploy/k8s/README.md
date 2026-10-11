@@ -1485,9 +1485,10 @@ volumes stay usable across `helm upgrade`:
   dropping to postgres. Started as 70, the entrypoint sets it to 0700, which its owner may do.
 - The broker's plugin document already belongs to uid 1883, at 0600. `assemble-config` rewrites it
   as 1883.
-- `backup-service` sets `fsGroupChangePolicy: Always`. A backup directory written as root becomes
-  group-writable at every start, so the service can prune it as uid 100. The backup CronJob writes
-  flat files into the volume's root, which fsGroup already makes writable.
+- `backup-service`, when it runs as uid 100, sets `fsGroupChangePolicy: Always`. A backup
+  directory written as root becomes group-writable at every start, so the service can prune it.
+  The backup CronJob writes flat files into the volume's root, which fsGroup already makes
+  writable.
 
 What happens on a storage class that does not apply `fsGroup` (some NFS and `hostPath`
 provisioners): a new volume stays owned by root. `assemble-config` then stops with `EACCES` on the

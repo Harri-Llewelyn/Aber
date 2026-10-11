@@ -1129,7 +1129,7 @@ did not choose and cannot easily inspect.
 | Node-RED | `1000` | The `node-red` user; replaces the init chown |
 | Supabase Postgres | `101` | The `postgres` group in `supabase/postgres` (Alpine at 17.x) |
 | Storage / Grafana | `1000` / `472` | Grafana's uid is 472, not 1000 — a common mistake |
-| Backup volume | `101` | `fsGroupChangePolicy: Always` on the backup service (deploy/k8s/README.md, *Users*) |
+| Backup volume | `101` | `fsGroupChangePolicy: Always` on the backup service when it runs as 100 (deploy/k8s/README.md, *Users*) |
 
 **Confirm each uid against the pinned image tag rather than trusting this table**; they are image
 properties and the images here are pinned for unrelated reasons. `fsGroupChangePolicy: OnRootMismatch`

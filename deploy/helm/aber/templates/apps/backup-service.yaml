@@ -111,9 +111,9 @@ spec:
       {{- end }}
       {{/*
         The image's postgres user, unless the service archives the forge or the broker: then root,
-        with DAC_OVERRIDE below. fsGroup `Always`, not OnRootMismatch: a backup directory written as
-        root (by 1.2.0, or with either volume included) is pruned as 100 only once the kubelet has
-        given group 101 write on everything in it, at every start.
+        with DAC_OVERRIDE below. As 100, fsGroup `Always`, not OnRootMismatch: a backup directory
+        written as root (by 1.2.0, or while either volume was included) is pruned as 100 only once
+        the kubelet has given group 101 write on everything in it, at every start.
       */}}
       securityContext:
         {{- if $asRoot }}
@@ -122,9 +122,9 @@ spec:
         runAsNonRoot: true
         runAsUser: 100
         runAsGroup: 101
-        {{- end }}
         fsGroup: 101
         fsGroupChangePolicy: Always
+        {{- end }}
         seccompProfile:
           type: RuntimeDefault
       containers:
