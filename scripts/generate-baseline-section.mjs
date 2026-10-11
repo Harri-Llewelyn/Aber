@@ -10,8 +10,8 @@
  *   FUNCTION     CREATE OR REPLACE FUNCTION
  *   VIEW         CREATE OR REPLACE VIEW, or a call to the function that builds it (REBUILT_BY)
  *   INDEX        CREATE [UNIQUE] INDEX IF NOT EXISTS
- *   TRIGGER      DROP TRIGGER IF EXISTS ... ON ...; CREATE TRIGGER ...
- *   POLICY       DROP POLICY IF EXISTS ... ON ...; CREATE POLICY ...
+ *   TRIGGER      DROP TRIGGER IF EXISTS ... ON ...; CREATE TRIGGER ...  (one transaction per table)
+ *   POLICY       DROP POLICY IF EXISTS ... ON ...; CREATE POLICY ...    (one transaction per table)
  *   CONSTRAINT   a DO block guarded on pg_constraint -- rule 2, added guarded, never re-added
  *   the rest     already idempotent (GRANT, REVOKE, COMMENT, ALTER ... ENABLE ROW LEVEL SECURITY)
  *
@@ -183,14 +183,18 @@ function widenTable(b, createSql) {
     // is idempotent and costs nothing on a fresh install. GENERATED columns are skipped -- they
     // have no default to set -- and a column that has LOST its default is dropped explicitly,
     // which is the same statement read the other way.
+    // A sequence default is its own DEFAULT block further down, after the sequence exists; dropping
+    // it here would leave every insert into the table failing NOT NULL until that block ran.
     const defaults = cols
       .filter((c) => !/\bGENERATED\b/i.test(c))
       .map((c) => {
         const name = c.match(/^("[^"]+"|[a-z_][a-z0-9_$]*)\s/i)[1];
         const d = c.match(/\bDEFAULT\s+([\s\S]+?)(?:\s+NOT NULL)?$/i);
+        if (!d && SEPARATE_DEFAULTS.has(`${b.schema}.${b.name}.${name}`)) return null;
         return d ? `    ALTER COLUMN ${name} SET DEFAULT ${d[1].trim()}`
                  : `    ALTER COLUMN ${name} DROP DEFAULT`;
-      });
+      })
+      .filter(Boolean);
     if (defaults.length) {
       parts.push(`ALTER TABLE ${b.schema}.${b.name}\n${defaults.join(',\n')};`);
     }
@@ -342,7 +346,26 @@ function dropBiReaderGrants(sql) {
     .join('\n');
 }
 
+/** schema.table.column for every default pg_dump writes as its own block (`Name: t col; Type: DEFAULT`). */
+const SEPARATE_DEFAULTS = new Set(blocks(dump)
+  .filter((b) => b.type.toUpperCase() === 'DEFAULT')
+  .map((b) => `${b.schema}.${b.name.replace(/\s+/, '.')}`));
+
+/**
+ * The table a TRIGGER or POLICY block's DROP/CREATE pair is on, or null for any other block.
+ * Consecutive pairs of one kind on one table are wrapped in BEGIN/COMMIT below: between a separate
+ * DROP and CREATE a reader finds no policy and reads no rows, and a write skips the trigger. One
+ * table per transaction, so no lock is held while another table's is awaited.
+ */
+function pairKey(type, s) {
+  const t = type.toUpperCase();
+  if (t !== 'TRIGGER' && t !== 'POLICY') return null;
+  const m = s.match(/^DROP (?:TRIGGER|POLICY) IF EXISTS \S+ ON (\S+);/);
+  return m ? `${t} ${m[1]}` : null;
+}
+
 const out = [];
+const pairKeys = [];
 let kept = 0, dropped = 0, readerGrants = 0, parts = 0;
 for (const b of blocks(dump)) {
   if (/^(SET|SELECT pg_catalog\.set_config)/m.test(b.body.trim()) && !b.name) continue;
@@ -357,6 +380,16 @@ for (const b of blocks(dump)) {
   if (s !== before) readerGrants++;
   kept++;
   out.push(`-- ${b.name} :: ${b.type}\n${s}\n`);
+  pairKeys.push(pairKey(b.type, s));
+}
+
+for (let i = 0; i < pairKeys.length; i++) {
+  if (!pairKeys[i]) continue;
+  const first = i;
+  while (i + 1 < pairKeys.length && pairKeys[i + 1] === pairKeys[first]) i++;
+  const header = out[first].indexOf('\n') + 1;
+  out[first] = `${out[first].slice(0, header)}BEGIN;\n${out[first].slice(header)}`;
+  out[i] = out[i].replace(/\n$/, '\nCOMMIT;\n');
 }
 
 // ---------------------------------------------------------------------------------------------

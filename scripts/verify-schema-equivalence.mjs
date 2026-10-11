@@ -59,8 +59,8 @@
  *
  * `check-migration-idempotency.mjs` dumps only `public`. That is defensible for a drift guard, but
  * it means a change confined to the FDW mappings is invisible to it -- and those mappings are
- * exactly what `0001` section 3's `DROP SERVER ... CASCADE` takes out and rebuilds. A squash cannot
- * afford that blind spot.
+ * exactly what `0001` section 3 keeps in step with the chart. A squash cannot afford that blind
+ * spot.
  *
  * The `\restrict` / `\unrestrict` nonce lines are dropped before comparison: modern pg_dump wraps
  * its output in a fresh random token every run, so two dumps of ONE database never match raw.

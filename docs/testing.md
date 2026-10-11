@@ -244,9 +244,9 @@ npm run test:lib
 # migration can move (the schema digest, and audit_trail's `migration` lane) and treats a FALL
 # in operator row counts as failure while ignoring a rise, so a live daemon cannot make it flaky.
 # DID THE CHAIN FINISH? There is no migrations ledger, and an aborted db-init leaves the stack
-# running on a partially-migrated database -- with the telemetry read surface DROPPED rather than
-# stale, because 0001 removes it with CASCADE before later files recreate it. Checks the objects
-# that abort would leave missing, and names the migration that should have made them.
+# running on a partially-migrated database. Checks the stamp db-init writes at the end of the chain,
+# then selects every object 0001 builds over the historian's foreign server, and names the migration
+# that should have made any that is missing.
 node scripts/check-schema-surface.mjs
 
 node scripts/check-migration-idempotency.mjs

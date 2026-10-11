@@ -149,10 +149,49 @@ until the replay ends. That blocks the API's reads and writes for its whole leng
 deadlock with Realtime that fails the upgrade. Sweeping only on the first boot would let a grant
 removed from the code survive on every database that already holds it.
 
-`storage_footprint` still disappears for part of each replay: section 3's `DROP SERVER ...
-CASCADE` drops it with the rest of the telemetry read surface. Its grant is repeated beside the
-view so that it comes back readable. A grant made outside the block must be repeated in it, or the
-sweep takes it away on every boot; check-docs-drift's check 55 holds that.
+A grant made outside the block must be repeated in it, or the sweep takes it away on every boot;
+check-docs-drift's check 55 holds that.
+
+**The historian's foreign server is altered in place, never dropped** (`0001` section 3). It used
+to be dropped with `CASCADE` and re-created on every boot, so its settings followed the chart's
+values. The drop took every foreign table and every view over them with it: `telemetry`, the
+rollups, `telemetry_latest`, `telemetry_horizons`, `storage_footprint` and the physical-backup
+tables. Section 4 rebuilt them thousands of lines later, and the grants came later still. A
+dashboard reading telemetry during an upgrade got `relation does not exist` and then
+`permission denied`, for about 4 seconds of a 5-second replay on a test database. The server and
+its two user mappings now take `ALTER ... OPTIONS (SET | ADD | DROP ...)`, and only when they
+differ from the chart's values, because any change resets every session's FDW connection. The
+foreign tables persist across boots like tables. So a retired foreign table, or a changed column
+or option, needs its own statement in a migration, and a view over one whose columns change needs
+DROP and CREATE.
+
+**Nothing else in the replay leaves a gap a request can fall into.** Three more were measured with a
+probe that reads and writes as a signed-in Administrator while the chain replays:
+
+- **Policies and triggers.** `0001` drops and re-creates 80 policies and 47 triggers on every boot.
+  Each statement used to commit on its own. Between a policy's DROP and CREATE a reader found the
+  table empty and an UPDATE matched no row. Between a trigger's, a write skipped it: one audited
+  write in the probe's first run left no audit row. Each table's policy pairs, and its trigger
+  pairs, now commit as one transaction, 56 in all (0177's eight do the same).
+- **`auth_pre_request()`**, PostgREST's hook for every request, was revoked and granted again in
+  two statements. They are now one `DO` block.
+- **`audit_trail.id` lost its default.** The table block dropped every default its `CREATE TABLE`
+  does not state. pg_dump writes a sequence default as a block of its own, 4,300 lines further
+  on, so every audited write failed `NOT NULL` in between (88 to 221 of the probe's updates per
+  replay). A column whose default arrives that way is now left alone; `roles.id` had the same gap.
+
+**Each policy statement, and each DROP TRIGGER, locks up to 24 tables it does not name.** The image's `supautils`
+extension gives `postgres` its policy and trigger rights on GoTrue's, Storage's and Realtime's
+tables (`supautils.policy_grants`, `supautils.drop_trigger_grants`). To do so it takes `ACCESS
+EXCLUSIVE` on every table in those lists that exists, for each `CREATE POLICY`, `DROP POLICY` and `DROP TRIGGER`,
+whatever the target: `auth.users`, `auth.sessions`, `auth.refresh_tokens`, `storage.objects`,
+`realtime.subscription` and the rest. An audited write takes the table it writes, then
+`audit_trail`, then `auth.users` for the foreign key. The lock orders cross, and the deadlock
+detector aborts one side. With a writer updating an area every 2 ms during the replay, db-init's
+`0001` died on a deadlock in 6 of 9 replays when each statement committed alone, and in 2 of 9 with
+one transaction per table, which takes those locks 56 times per boot instead of 207. db-init
+retries a deadlock twice. The writer lost up to three updates per replay to a deadlock before, and one or two after. Re-creating
+only what changed would take none of these locks on a boot that changes nothing.
 
 ### Seeding is audited now
 
@@ -2148,9 +2187,8 @@ shopfloor user as a proposer would have admitted the ingestion daemon in the sam
 (`0044`) and `list_service_principals()` (`0042`). **The rename is not cosmetic:** their second
 column moved from the role a machine borrowed to the permissions it holds, and `0001` re-declares its
 own copy of every function on each boot with `CREATE OR REPLACE`, which cannot change a return type.
-Same name, different columns, and the chain aborts at file one on the *second* boot — after `0001`
-has dropped the FDW server with `CASCADE`. `scripts/check-docs-drift.mjs` asserts against exactly
-that and names the remedy.
+Same name, different columns, and the chain aborts at file one on the *second* boot, with nothing
+after it applied. `scripts/check-docs-drift.mjs` asserts against exactly that and names the remedy.
 
 ### Machines propose, people decide (`0146`)
 
