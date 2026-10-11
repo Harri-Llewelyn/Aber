@@ -473,6 +473,25 @@ class TestRollupWindowWrites(WriterTestCase):
         self.assertEqual(snapshot.get("write_failures", 0), 0)
         self.assertEqual(snapshot.get("rollup_windows_recorded", 0), 0)
 
+    def test_with_rollups_off_a_replay_records_nothing_and_counts_nothing(self):
+        real = ingestion.ROLLUPS_ENABLED
+        ingestion.ROLLUPS_ENABLED = False
+        self.addCleanup(setattr, ingestion, "ROLLUPS_ENABLED", real)
+        self.writer.submit(late(DEV_A, at(3 * 24 * 3600)))
+        self.writer.flush()
+
+        self.assertEqual(self.window_calls(), [])
+        self.assertEqual(self.statements(), [], "no savepoint either")
+        snapshot = registry.counter_snapshot()
+        self.assertEqual(snapshot.get("written_messages"), 1)
+        self.assertEqual(snapshot.get("rollup_windows_recorded", 0), 0)
+        self.assertEqual(snapshot.get("rollup_windows_failed", 0), 0)
+
+    def test_rollups_are_on_when_the_chart_says_nothing(self):
+        if "TIMESCALEDB_ROLLUPS_ENABLED" in os.environ:
+            self.skipTest("TIMESCALEDB_ROLLUPS_ENABLED is set in this environment")
+        self.assertTrue(ingestion.ROLLUPS_ENABLED)
+
     def test_the_window_counters_are_exported(self):
         registry.count("rollup_windows_recorded", 3)
         registry.count("rollup_windows_failed", 1)

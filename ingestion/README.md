@@ -992,9 +992,11 @@ the historian's `rollup_refresh_requests`, one row per hour per transaction, aft
 in the same transaction. A job on the historian refreshes those hours in every rollup
 ([`timescaledb/README.md`](../timescaledb/README.md#aggregatessql)). Few rows are that old besides
 a replay: a live reading is refused past 24 hours. So a live batch normally issues nothing extra.
-The insert runs under a savepoint: if it fails, the batch's
-rows are still committed, and `aber_ingestion_rollup_windows_failed_total` counts the hours the
-rollups will lack.
+The insert runs under a savepoint: if it fails, the batch's rows are still committed, and
+`aber_ingestion_rollup_windows_failed_total` counts the hours the rollups will lack. Where the chart
+turns the rollups off (`timescaledb.rollups.enabled`), it sets `TIMESCALEDB_ROLLUPS_ENABLED=false`.
+The daemon then records nothing, takes no savepoint and moves neither counter, and says so once at
+start.
 
 **What runs after the commit runs on the writer thread**: the UNS republish and the conformance
 record, per message, in arrival order. Both were on the callback thread before and neither raises
@@ -1584,6 +1586,7 @@ published default is a silent security downgrade, and the failure mode is silenc
 | `SUPABASE_URL` | `http://127.0.0.1:54321` | |
 | `SUPABASE_PUBLISHABLE_KEY` / `SUPABASE_INGESTION_KEY` | **required** | The gateway's `apikey` and the `Service_Ingestor` bearer (`secrets.ingestionKey`). Without either the daemon exits rather than running fail-open; it never holds the service-role key |
 | `TELEMETRY_MAX_HISTORICAL_AGE_SECONDS` | `604800` (7 days) | How old an `is_historical` reading may be. `ingestion.historicalMaxAgeSeconds` — see [Loss model](#loss-model) |
+| `TIMESCALEDB_ROLLUPS_ENABLED` | `true` | Whether a late replay's hours are recorded for the rollups. The chart sets it from `timescaledb.rollups.enabled`; `false` records nothing — see [The historian writer](#the-historian-writer) |
 | `DEVICE_OFFLINE_TIMEOUT_SECONDS` | `300` | Silence after which a device is marked OFFLINE. `0` disables the watchdog |
 | `DEVICE_WATCHDOG_INTERVAL_SECONDS` | `30` | Sweep interval |
 | `REBIRTH_REQUEST_INTERVAL_SECONDS` | `300` | Minimum gap between rebirth requests to one edge node |

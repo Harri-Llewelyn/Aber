@@ -412,6 +412,10 @@ TELEMETRY_MAX_HISTORICAL_AGE_SECONDS = int(
 ROLLUP_POLICY_REACH_SECONDS = 23 * 60 * 60
 # The window recorded: the widest rollup bucket, so each window is whole buckets in every rollup.
 ROLLUP_WINDOW_SECONDS = 60 * 60
+# Whether the historian keeps rollups (timescaledb.rollups.enabled). Off, no window is recorded:
+# the table and the job exist only where aggregates.sql runs. Unset means on.
+ROLLUPS_ENABLED = os.getenv("TIMESCALEDB_ROLLUPS_ENABLED", "true").strip().lower() not in (
+    "0", "false", "no", "off")
 
 # Why a reading's timestamp was refused, as the `reason` label of
 # aber_ingestion_timestamps_rejected_total.
@@ -2644,7 +2648,7 @@ def _write_batch(cur, batch):
             page_size=TELEMETRY_INSERT_PAGE_SIZE,
         )
 
-    windows = rollup_windows(rows)
+    windows = rollup_windows(rows) if ROLLUPS_ENABLED else []
     return _record_rollup_windows(cur, windows) if windows else 0
 
 def rollup_windows(rows, now=None):
@@ -2689,8 +2693,7 @@ def _record_rollup_windows(cur, windows):
                 "Could not record %d window(s) of late telemetry for the rollups (%s). The readings "
                 "are stored, and reach telemetry_1m/5m/1h only when refreshed by hand "
                 "(docs/remote-gateways.md, \"Late data after an outage\"). A missing table means "
-                "the historian's maintenance Job has not run since this daemon was upgraded, or "
-                "timescaledb.rollups.enabled is false.",
+                "the historian's maintenance Job has not run since this daemon was upgraded.",
                 len(windows), str(e).strip(),
             )
         return 0
@@ -3887,6 +3890,12 @@ def main():
     # Also before the connect loop, so a daemon that cannot reach the broker still reports "no
     # traffic" on a timer rather than going silent in a way that looks like a crash.
     start_stats_reporter()
+    if not ROLLUPS_ENABLED:
+        logger.info(
+            "Rollups are off (TIMESCALEDB_ROLLUPS_ENABLED=%s), so a late replay's hours are not "
+            "recorded for them; its readings are stored in raw telemetry as usual.",
+            os.getenv("TIMESCALEDB_ROLLUPS_ENABLED"),
+        )
     # The writer before the broker connects: nothing drains the queue until it runs. The
     # directory refresher likewise, so the first messages resolve against a warm cache.
     _writer.start()

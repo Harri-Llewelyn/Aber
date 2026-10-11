@@ -272,7 +272,10 @@ report, so a third-party edge node's replay is covered too. `scripts/check-docs-
   target: measured, one naming the waiting index is refused without SELECT, and one naming none is
   not. The insert runs under a savepoint, so a missing table (the maintenance Job not yet run after
   an upgrade) costs the rollups those hours, counted in
-  `aber_ingestion_rollup_windows_failed_total`, and never costs the readings.
+  `aber_ingestion_rollup_windows_failed_total`, and never costs the readings. With
+  `timescaledb.rollups.enabled` off, this file does not run, and the chart tells ingestion
+  (`TIMESCALEDB_ROLLUPS_ENABLED=false`) to record nothing, so the counter only ever means a real
+  failure.
 - **Nothing older than the raw window is refreshed.** A refresh rebuilds every series' buckets in
   the window from raw. Over a range retention has dropped, it would keep the replayed series and
   delete every other.
