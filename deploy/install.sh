@@ -36,6 +36,12 @@ MIN_DISK_KIB=94371840    # 90 GiB
 MIN_K3S=1.25
 MIN_HELM=3.8
 MIN_NODE=20.0
+# The kubelet opens an inotify instance for every container log it follows, and the log collector
+# follows them all: about 140 on one node, past the kernel's default of 128 per user. Raised to
+# these floors, never lowered, and kept across reboots in INOTIFY_CONF (docs/install.md step 2).
+INOTIFY_CONF=/etc/sysctl.d/60-aber-inotify.conf
+INOTIFY_INSTANCES=1280
+INOTIFY_WATCHES=655360
 
 say() { printf '%s\n' "$*"; }
 warn() { printf '\nWARNING: %s\n' "$*" >&2; }
@@ -551,6 +557,26 @@ fetch_source() {
   say "  downloaded $fs_url"
 }
 
+raise_inotify_limits() {
+  step "Room for the kubelet to follow every container's log"
+  ri_i=$(cat /proc/sys/fs/inotify/max_user_instances 2>/dev/null || echo 0)
+  ri_w=$(cat /proc/sys/fs/inotify/max_user_watches 2>/dev/null || echo 0)
+  if [ "$ri_i" -ge "$INOTIFY_INSTANCES" ] && [ "$ri_w" -ge "$INOTIFY_WATCHES" ]; then
+    say "  inotify allows $ri_i instances and $ri_w watches per user, which is enough"
+    return 0
+  fi
+  [ "$ri_i" -ge "$INOTIFY_INSTANCES" ] || ri_i=$INOTIFY_INSTANCES
+  [ "$ri_w" -ge "$INOTIFY_WATCHES" ] || ri_w=$INOTIFY_WATCHES
+  if [ "$DRY_RUN" = 1 ]; then
+    say "  would write $INOTIFY_CONF ($ri_i instances, $ri_w watches) and apply it"
+    return 0
+  fi
+  printf '# Written by the Aber installer: the kubelet follows every container log.\nfs.inotify.max_user_instances = %s\nfs.inotify.max_user_watches = %s\n' \
+    "$ri_i" "$ri_w" >"$INOTIFY_CONF"
+  sysctl -q -p "$INOTIFY_CONF" >/dev/null || die "sysctl could not apply $INOTIFY_CONF"
+  say "  inotify now allows $ri_i instances and $ri_w watches per user ($INOTIFY_CONF)"
+}
+
 install_k3s() {
   step "k3s, the Kubernetes that runs Aber"
   ik_have=
@@ -865,6 +891,7 @@ aber_install() {
   trap 'exit 130' INT
   trap 'exit 143' TERM
   fetch_source
+  raise_inotify_limits
   install_k3s
   install_helm_and_node
   prepare_cluster
