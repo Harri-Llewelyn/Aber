@@ -629,23 +629,19 @@ class TestPublish(SchemaVersioningTestCase):
     """publish_schema_version(): activate, archive, rebind -- atomically."""
 
     def _seed_device_on(self, schema_id, suffix="A"):
-        """A gateway and a device bound to `schema_id` through both attachment paths."""
+        """A gateway and a device bound to `schema_id` by a device_submodels row."""
         self.cur.execute(
             "INSERT INTO public.gateways (name) VALUES (%s) RETURNING id::text;",
             (f"TESTVER_GW_{suffix}",),
         )
         gateway_id = self.cur.fetchone()[0]
         self.cur.execute(
-            "INSERT INTO public.devices (name, gateway_id, schema_id) "
-            "VALUES (%s, %s, %s) RETURNING id::text;",
-            (f"TESTVER_DEV_{suffix}", gateway_id, schema_id),
+            "INSERT INTO public.devices (name, gateway_id) VALUES (%s, %s) RETURNING id::text;",
+            (f"TESTVER_DEV_{suffix}", gateway_id),
         )
         device_id = self.cur.fetchone()[0]
         self.cur.execute(
-            """
-            INSERT INTO public.device_submodels (device_id, schema_id) VALUES (%s, %s)
-            ON CONFLICT (device_id, schema_id) DO NOTHING;
-            """,
+            "INSERT INTO public.device_submodels (device_id, schema_id) VALUES (%s, %s);",
             (device_id, schema_id),
         )
         return device_id
@@ -663,7 +659,7 @@ class TestPublish(SchemaVersioningTestCase):
         self.assertEqual((published["version"], published["status"]), (2, "active"))
         self.assertEqual(result["archived_schema_id"], v1_id)
 
-    def test_publishing_rebinds_device_submodels_and_devices_schema_id(self):
+    def test_publishing_rebinds_device_submodels(self):
         v1_id, _, _, _ = self._seed_schema("TESTVER_Rebind")
         device_id = self._seed_device_on(v1_id, "REBIND")
         self._act_as(ADMIN_USER_ID, "Administrator")
@@ -680,14 +676,10 @@ class TestPublish(SchemaVersioningTestCase):
             "the submodel attachment must point at the newly published version",
         )
 
-        # The deprecated column. A device attached only through it would otherwise stay pinned to an
-        # archived version and report the new version's metrics as Unmodelled.
-        self.cur.execute("SELECT schema_id::text FROM public.devices WHERE id = %s;", (device_id,))
-        self.assertEqual(self.cur.fetchone()[0], v2["id"])
-
         self.assertEqual(result["submodels_rebound"], 1)
-        self.assertEqual(result["schema_ids_rebound"], 1)
-        self.assertEqual(result["devices_rebound"], 2)
+        self.assertEqual(result["devices_rebound"], 1)
+        # Kept in the answer for API clients; the column it counted is gone.
+        self.assertEqual(result["schema_ids_rebound"], 0)
 
     def test_publishing_resolves_a_device_attached_to_both_versions(self):
         """
@@ -756,9 +748,9 @@ class TestPublish(SchemaVersioningTestCase):
 
     def test_publishing_writes_the_rebinding_to_the_audit_trail(self):
         """
-        Repointing `devices.schema_id` fires `log_audit_trail_event()`, so "what was this
-        machine judged against, and when did that change" is answerable from the audit trail
-        rather than only from the schema rows.
+        Repointing a `device_submodels` row fires `log_audit_trail_event()`, keyed by its device,
+        so "what was this machine judged against, and when did that change" is answerable from the
+        audit trail rather than only from the schema rows.
         """
         v1_id, _, _, _ = self._seed_schema("TESTVER_Audit")
         device_id = self._seed_device_on(v1_id, "AUDIT")
@@ -777,7 +769,7 @@ class TestPublish(SchemaVersioningTestCase):
         self.cur.execute(
             """
             SELECT count(*) FROM public.audit_trail
-             WHERE entity_id = %s AND entity_type = 'devices' AND action = 'UPDATE'
+             WHERE entity_id = %s AND entity_type = 'device_submodels' AND action = 'UPDATE'
                AND new_data ->> 'schema_id' = %s;
             """,
             (device_id, str(v2["id"])),
@@ -826,9 +818,8 @@ class TestTheRpcsDoNotGoAroundThePolicy(SchemaVersioningTestCase):
 
     Measured before the fix, in one transaction as a Manager: the direct `UPDATE public.schemas`
     was refused (0 rows) and `publish_schema_version()` then archived the parent anyway. That is
-    not a status flip -- publishing repoints every `device_submodels` row and
-    `devices.schema_id` onto the new version, so it changes what ingestion judges each attached
-    device against.
+    not a status flip -- publishing repoints every `device_submodels` row onto the new version, so
+    it changes what ingestion judges each attached device against.
 
     THE PAIR OF ASSERTIONS IS THE POINT. Refusing the Manager proves the hole is closed; letting
     the Administrator through proves the fix is not merely a broken function.
@@ -896,9 +887,9 @@ class TestDiscardingADraft(SchemaVersioningTestCase):
 
     THE TEST THAT MATTERS MOST is test_an_active_schema_cannot_be_discarded. `schemas_delete_
     privileged` has admitted an Administrator since the baseline, so a plain DELETE was always
-    possible -- and `devices.schema_id` is ON DELETE SET NULL while `device_submodels.schema_id` is
-    ON DELETE CASCADE, so deleting an ACTIVE schema silently detaches every device bound to it. The
-    function is the narrow door that cannot make that mistake.
+    possible -- and `device_submodels.schema_id` is ON DELETE CASCADE, so deleting an ACTIVE schema
+    silently detaches every device bound to it. The function is the narrow door that cannot make
+    that mistake.
     """
 
     def _discard(self, schema_id):
@@ -979,12 +970,11 @@ class TestDiscardingADraft(SchemaVersioningTestCase):
         )
         self.assertNotFound(err, "schema 00000000-0000-4000-8000-0000000000ff not found")
 
-    def test_every_device_the_discard_detaches_is_counted_once(self):
+    def test_every_device_the_discard_detaches_is_counted(self):
         """
-        A 1.0 dashboard attached through `devices.schema_id` and offered drafts in its picker. That
-        column is ON DELETE SET NULL, so a device attached there is detached by the discard as
-        surely as a `device_submodels` row is removed, and the count the page reports includes it.
-        A device attached both ways counts once.
+        The Devices page offers drafts in its picker, so a draft can be attached to machines to
+        try it out. `device_submodels.schema_id` is ON DELETE CASCADE, so the discard detaches each
+        of them, and the count the page reports includes them all.
         """
         v1_id, _, _, _ = self._seed_schema("TESTVER_Discard_Counted")
         self._act_as(ADMIN_USER_ID, "Administrator")
@@ -996,17 +986,16 @@ class TestDiscardingADraft(SchemaVersioningTestCase):
         )
         gateway_id = self.cur.fetchone()[0]
         device_ids = []
-        for suffix in ("PICKER", "BOTH"):
+        for suffix in ("PICKER", "SECOND"):
             self.cur.execute(
-                "INSERT INTO public.devices (name, gateway_id, schema_id) "
-                "VALUES (%s, %s, %s) RETURNING id::text;",
-                (f"TESTVER_DEV_DISCARD_{suffix}", gateway_id, draft["id"]),
+                "INSERT INTO public.devices (name, gateway_id) VALUES (%s, %s) RETURNING id::text;",
+                (f"TESTVER_DEV_DISCARD_{suffix}", gateway_id),
             )
             device_ids.append(self.cur.fetchone()[0])
-        self.cur.execute(
-            "INSERT INTO public.device_submodels (device_id, schema_id) VALUES (%s, %s);",
-            (device_ids[1], draft["id"]),
-        )
+            self.cur.execute(
+                "INSERT INTO public.device_submodels (device_id, schema_id) VALUES (%s, %s);",
+                (device_ids[-1], draft["id"]),
+            )
 
         self._act_as(ADMIN_USER_ID, "Administrator")
         result = self._discard(draft["id"])
@@ -1014,10 +1003,10 @@ class TestDiscardingADraft(SchemaVersioningTestCase):
 
         self._act_as_owner()
         self.cur.execute(
-            "SELECT count(*) FROM public.devices WHERE id = ANY(%s::uuid[]) AND schema_id IS NULL;",
+            "SELECT count(*) FROM public.device_submodels WHERE device_id = ANY(%s::uuid[]);",
             (device_ids,),
         )
-        self.assertEqual(self.cur.fetchone()[0], 2)
+        self.assertEqual(self.cur.fetchone()[0], 0)
 
     def test_discarding_frees_the_lineage_for_a_new_fork(self):
         # The state the missing action created: forking is refused while a draft is open, so a
@@ -1099,21 +1088,6 @@ class TestBootReconciliation(SchemaVersioningTestCase):
         The invariant the reconciliation exists to hold, stated over the whole fleet rather than
         over the demo device alone.
         """
-        self.cur.execute(
-            """
-            SELECT d.name, s.schema_name
-              FROM public.devices d
-              JOIN public.schemas s ON s.id = d.schema_id
-             WHERE s.status = 'archived'
-               AND public.active_schema_version(d.schema_id) IS DISTINCT FROM d.schema_id;
-            """
-        )
-        stranded = self.cur.fetchall()
-        self.assertEqual(
-            stranded, [],
-            f"devices left pointing at a superseded schema version: {stranded}",
-        )
-
         self.cur.execute(
             """
             SELECT ds.device_id, s.schema_name
@@ -1207,19 +1181,37 @@ class TestArchivedSchemasAreNotAssignable(SchemaVersioningTestCase):
         return self.cur.fetchone()[0]
 
     def _seed_device(self, suffix, schema_id=None, shadow_of=None):
+        """A device, attached to `schema_id` by a device_submodels row when one is given."""
         self.cur.execute(
-            "INSERT INTO public.devices (name, gateway_id, schema_id, shadow_of) "
-            "VALUES (%s, %s, %s, %s) RETURNING id::text;",
-            ("TESTVER_ARCH_DEV_" + suffix, self._seed_gateway(suffix), schema_id, shadow_of),
+            "INSERT INTO public.devices (name, gateway_id, shadow_of) "
+            "VALUES (%s, %s, %s) RETURNING id::text;",
+            ("TESTVER_ARCH_DEV_" + suffix, self._seed_gateway(suffix), shadow_of),
         )
-        return self.cur.fetchone()[0]
+        device_id = self.cur.fetchone()[0]
+        if schema_id is not None:
+            self._attach(device_id, schema_id)
+        return device_id
+
+    def _attach(self, device_id, schema_id):
+        self.cur.execute(
+            "INSERT INTO public.device_submodels (device_id, schema_id) VALUES (%s, %s);",
+            (device_id, schema_id),
+        )
+
+    def _attached(self, device_id):
+        self.cur.execute(
+            "SELECT schema_id::text FROM public.device_submodels WHERE device_id = %s;", (device_id,)
+        )
+        return [r[0] for r in self.cur.fetchall()]
 
     # ------------------------------------------------------------------ what it refuses
 
-    def test_creating_a_device_on_an_archived_schema_raises(self):
-        archived_id, _, _, _ = self._seed_schema("TESTVER_Arch_Insert", status="archived")
+    def test_attaching_an_archived_schema_raises(self):
+        archived_id, _, _, _ = self._seed_schema("TESTVER_Arch_Submodel", status="archived")
+        device_id = self._seed_device("SUBMODEL")
+
         exc = self.assertRaisesInStatement(
-            lambda: self._seed_device("INSERT", schema_id=archived_id),
+            lambda: self._attach(device_id, archived_id),
             message_contains="is archived and cannot be assigned",
         )
         self.assertEqual(exc.pgcode, "23514")  # check_violation, the code 0093 raises with
@@ -1232,22 +1224,8 @@ class TestArchivedSchemasAreNotAssignable(SchemaVersioningTestCase):
 
         exc = self.assertRaisesInStatement(
             lambda: self.cur.execute(
-                "UPDATE public.devices SET schema_id = %s WHERE id = %s;",
+                "UPDATE public.device_submodels SET schema_id = %s WHERE device_id = %s;",
                 (archived_id, device_id),
-            ),
-            message_contains="is archived and cannot be assigned",
-        )
-        self.assertEqual(exc.pgcode, "23514")  # check_violation, the code 0093 raises with
-
-    def test_attaching_an_archived_submodel_raises(self):
-        """The other arm of `device_schemas`. A guard on one column is not a guard."""
-        archived_id, _, _, _ = self._seed_schema("TESTVER_Arch_Submodel", status="archived")
-        device_id = self._seed_device("SUBMODEL")
-
-        exc = self.assertRaisesInStatement(
-            lambda: self.cur.execute(
-                "INSERT INTO public.device_submodels (device_id, schema_id) VALUES (%s, %s);",
-                (device_id, archived_id),
             ),
             message_contains="is archived and cannot be assigned",
         )
@@ -1289,10 +1267,16 @@ class TestArchivedSchemasAreNotAssignable(SchemaVersioningTestCase):
             "UPDATE public.devices SET name = %s WHERE id = %s;",
             ("TESTVER_ARCH_RENAMED", device_id),
         )
-        self.cur.execute("SELECT name, schema_id::text FROM public.devices WHERE id = %s;", (device_id,))
-        name, still_bound = self.cur.fetchone()
-        self.assertEqual(name, "TESTVER_ARCH_RENAMED")
-        self.assertEqual(still_bound, schema_id, "the existing binding must survive an unrelated edit")
+        self.cur.execute(
+            "UPDATE public.device_submodels SET submodel_key = 'Kept' WHERE device_id = %s;",
+            (device_id,),
+        )
+        self.cur.execute("SELECT name FROM public.devices WHERE id = %s;", (device_id,))
+        self.assertEqual(self.cur.fetchone()[0], "TESTVER_ARCH_RENAMED")
+        self.assertEqual(
+            self._attached(device_id), [schema_id],
+            "the existing binding must survive an unrelated edit",
+        )
 
     def test_detaching_from_an_archived_schema_is_allowed(self):
         """Finishing the migration by hand must not be the one move that is refused."""
@@ -1300,9 +1284,8 @@ class TestArchivedSchemasAreNotAssignable(SchemaVersioningTestCase):
         device_id = self._seed_device("DETACH", schema_id=schema_id)
         self.cur.execute("UPDATE public.schemas SET status = 'archived' WHERE id = %s;", (schema_id,))
 
-        self.cur.execute("UPDATE public.devices SET schema_id = NULL WHERE id = %s;", (device_id,))
-        self.cur.execute("SELECT schema_id FROM public.devices WHERE id = %s;", (device_id,))
-        self.assertIsNone(self.cur.fetchone()[0])
+        self.cur.execute("DELETE FROM public.device_submodels WHERE device_id = %s;", (device_id,))
+        self.assertEqual(self._attached(device_id), [])
 
     def test_a_draft_is_still_assignable(self):
         """
@@ -1315,12 +1298,11 @@ class TestArchivedSchemasAreNotAssignable(SchemaVersioningTestCase):
         self._act_as_owner()
 
         device_id = self._seed_device("DRAFT", schema_id=v2["id"])
-        self.cur.execute("SELECT schema_id::text FROM public.devices WHERE id = %s;", (device_id,))
-        self.assertEqual(self.cur.fetchone()[0], v2["id"])
+        self.assertEqual(self._attached(device_id), [v2["id"]])
 
     def test_a_shadow_device_may_copy_an_archived_contract(self):
         """
-        ensure_shadow_devices() copies the origin device's schema so a replay is judged against the
+        ensure_shadow_devices() copies the origin device's schemas so a replay is judged against the
         same contract it was recorded under. If the origin is mid-migration, the shadow has to be
         able to say so -- refusing it would break playback for the exact fleet this guard protects.
         """
@@ -1329,12 +1311,7 @@ class TestArchivedSchemasAreNotAssignable(SchemaVersioningTestCase):
         self.cur.execute("UPDATE public.schemas SET status = 'archived' WHERE id = %s;", (schema_id,))
 
         shadow_id = self._seed_device("SHADOW", schema_id=schema_id, shadow_of=origin_id)
-        self.cur.execute(
-            "INSERT INTO public.device_submodels (device_id, schema_id) VALUES (%s, %s);",
-            (shadow_id, schema_id),
-        )
-        self.cur.execute("SELECT schema_id::text FROM public.devices WHERE id = %s;", (shadow_id,))
-        self.assertEqual(self.cur.fetchone()[0], schema_id)
+        self.assertEqual(self._attached(shadow_id), [schema_id])
 
     def test_publishing_still_works_with_the_guard_in_force(self):
         """
@@ -1344,29 +1321,24 @@ class TestArchivedSchemasAreNotAssignable(SchemaVersioningTestCase):
         """
         v1_id, _, _, _ = self._seed_schema("TESTVER_Arch_Publish")
         device_id = self._seed_device("PUBLISH", schema_id=v1_id)
-        self.cur.execute(
-            "INSERT INTO public.device_submodels (device_id, schema_id) VALUES (%s, %s);",
-            (device_id, v1_id),
-        )
 
         self._act_as(ADMIN_USER_ID, "Administrator")
         v2 = self._fork(v1_id, "widened")
         result = self._publish(v2["id"])
         self._act_as_owner()
 
-        self.assertEqual(result["devices_rebound"], 2)
-        self.cur.execute("SELECT schema_id::text FROM public.devices WHERE id = %s;", (device_id,))
-        self.assertEqual(self.cur.fetchone()[0], v2["id"])
+        self.assertEqual(result["devices_rebound"], 1)
+        self.assertEqual(self._attached(device_id), [v2["id"]])
         self.assertEqual(self._fetch(v1_id)["status"], "archived")
 
 
 # -------------------------------------------------------------------------------------------------
-# 0168: a device's schemas are the union of both attachment paths
+# A device's schemas are its device_submodels rows (0168, 0175)
 # -------------------------------------------------------------------------------------------------
 
-MIGRATION_0168 = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "0168_every_schema_attached_to_a_device_counts.sql"
-)
+MIGRATIONS_DIR = os.path.dirname(os.path.abspath(__file__))
+MIGRATION_0168 = os.path.join(MIGRATIONS_DIR, "0168_every_schema_attached_to_a_device_counts.sql")
+MIGRATION_0175 = os.path.join(MIGRATIONS_DIR, "0175_a_device_s_schemas_are_its_submodels.sql")
 
 # The Service_Ingestor principal, the one identity record_ingestion_rejection() admits.
 INGESTION_PRINCIPAL = "b0000000-0000-4000-8000-000000000002"
@@ -1374,13 +1346,12 @@ INGESTION_PRINCIPAL = "b0000000-0000-4000-8000-000000000002"
 
 class DeviceSchemasTestCase(SchemaVersioningTestCase):
     """
-    A schema reaches a device through a `device_submodels` row or through `devices.schema_id`.
-    Until 0168 the `device_schemas` view read the column only for a device with no submodel row,
-    so the places that read a device's schemas disagreed. The classes below hold them to one
-    answer: the view returns both arms, one row per (device, schema); a SCHEMA_REJECTION row names
-    every schema the device is judged against; set_device_schemas(), the Devices page's writer,
-    makes the set exact in one transaction and clears the deprecated column; and replaying 0168
-    onto a database that holds both arms keeps the union.
+    A schema reaches a device through a `device_submodels` row, and nowhere else: 0175 moved what
+    `devices.schema_id` still held into rows and dropped the column. The classes below hold the
+    readers and the writer to that: the `device_schemas` view returns one row per (device, schema);
+    a SCHEMA_REJECTION row names every schema the device is judged against; set_device_schemas(),
+    the Devices page's writer, makes the set exact in one transaction; and 0175 itself moves a
+    column's schemas into rows, then is a no-op on the next boot.
 
     Fixtures are written as the owner; the RPC is called as `authenticated` with claims.
     """
@@ -1406,11 +1377,10 @@ class DeviceSchemasTestCase(SchemaVersioningTestCase):
     def schema(self, name, status="active"):
         return self._seed_schema(name, status=status)[0]
 
-    def device(self, name, schema_id=None):
+    def device(self, name):
         self.cur.execute(
-            "INSERT INTO public.devices (name, gateway_id, schema_id) VALUES (%s, %s, %s) "
-            "RETURNING id::text",
-            (name, self.gateway_id, schema_id),
+            "INSERT INTO public.devices (name, gateway_id) VALUES (%s, %s) RETURNING id::text",
+            (name, self.gateway_id),
         )
         return self.cur.fetchone()[0]
 
@@ -1432,15 +1402,18 @@ class DeviceSchemasTestCase(SchemaVersioningTestCase):
         self.assertEqual(len(rows), len({r[0] for r in rows}), f"a schema appears twice: {rows}")
         return {r[0]: (r[1], r[2]) for r in rows}
 
-    def column(self, device_id):
-        self.cur.execute("SELECT schema_id::text FROM public.devices WHERE id = %s", (device_id,))
-        return self.cur.fetchone()[0]
-
     def submodels(self, device_id):
         self.cur.execute(
             "SELECT schema_id::text FROM public.device_submodels WHERE device_id = %s", (device_id,)
         )
         return {r[0] for r in self.cur.fetchall()}
+
+    def has_schema_id_column(self):
+        self.cur.execute(
+            "SELECT count(*) FROM pg_attribute WHERE attrelid = 'public.devices'::regclass "
+            "   AND attname = 'schema_id' AND NOT attisdropped"
+        )
+        return self.cur.fetchone()[0] == 1
 
     def set_schemas(self, device_id, schema_ids):
         self.cur.execute(
@@ -1453,58 +1426,130 @@ class DeviceSchemasTestCase(SchemaVersioningTestCase):
         return self.assertRaisesInStatement(fn)
 
 
-class TheViewIsTheUnion(DeviceSchemasTestCase):
-    """The four places in the issue read this view, so the union here is what they agree on."""
+class TheViewReadsTheRows(DeviceSchemasTestCase):
+    """Ingestion, the AAS shell, i3X and the Directory read this view, so it is what they agree on."""
 
-    def test_a_submodel_added_beside_the_column_keeps_the_column(self):
-        # The issue's first case: schema A from the dashboard, then B through the API.
+    def test_every_row_is_one_row_of_the_view_with_its_key(self):
         a = self.schema("ONEPATH_A")
         b = self.schema("ONEPATH_B")
-        device_id = self.device("ONEPATH_DEV_AB", schema_id=a)
+        device_id = self.device("ONEPATH_DEV_AB")
+        self.submodel(device_id, a, key="Machining")
         self.submodel(device_id, b)
 
         self.assertEqual(
             self.resolved(device_id),
-            {a: ("devices.schema_id", None), b: ("device_submodels", None)},
+            {a: ("device_submodels", "Machining"), b: ("device_submodels", None)},
         )
+        self.assertEqual(self.resolved(self.device("ONEPATH_DEV_NONE")), {})
 
-    def test_a_schema_on_both_arms_is_one_row_and_keeps_its_submodel_key(self):
-        a = self.schema("ONEPATH_BOTH")
-        device_id = self.device("ONEPATH_DEV_BOTH", schema_id=a)
-        self.submodel(device_id, a, key="Machining")
+    def test_the_column_is_gone_and_source_is_constant(self):
+        self.assertFalse(self.has_schema_id_column(), "devices.schema_id is still there")
+        self.cur.execute("SELECT DISTINCT source FROM public.device_schemas")
+        self.assertIn(self.cur.fetchall(), ([], [("device_submodels",)]))
 
-        self.assertEqual(self.resolved(device_id), {a: ("device_submodels", "Machining")})
-
-    def test_either_arm_alone_still_resolves(self):
-        a = self.schema("ONEPATH_COLUMN_ONLY")
-        b = self.schema("ONEPATH_SUBMODEL_ONLY")
-        by_column = self.device("ONEPATH_DEV_COLUMN", schema_id=a)
-        by_submodel = self.device("ONEPATH_DEV_SUBMODEL")
-        self.submodel(by_submodel, b)
-        nothing = self.device("ONEPATH_DEV_NONE")
-
-        self.assertEqual(self.resolved(by_column), {a: ("devices.schema_id", None)})
-        self.assertEqual(self.resolved(by_submodel), {b: ("device_submodels", None)})
-        self.assertEqual(self.resolved(nothing), {})
-
-    def test_replaying_the_migration_keeps_the_union(self):
-        # db-init replays every file on every boot, onto a database that already holds both arms.
+    def test_replaying_the_migrations_keeps_the_rows(self):
+        # db-init replays every file on every boot, onto a database that already holds rows.
         a = self.schema("ONEPATH_REPLAY_A")
         b = self.schema("ONEPATH_REPLAY_B")
-        device_id = self.device("ONEPATH_DEV_REPLAY", schema_id=a)
+        device_id = self.device("ONEPATH_DEV_REPLAY")
+        self.submodel(device_id, a)
         self.submodel(device_id, b)
 
-        with open(MIGRATION_0168, encoding="utf-8") as f:
-            sql = f.read()
-        self.cur.execute(sql)
-        self.cur.execute(sql)
+        for path in (MIGRATION_0168, MIGRATION_0175, MIGRATION_0168, MIGRATION_0175):
+            with open(path, encoding="utf-8") as f:
+                self.cur.execute(f.read())
 
         self.assertEqual(set(self.resolved(device_id)), {a, b})
+        self.assertFalse(self.has_schema_id_column())
         self.cur.execute(
             "SELECT has_table_privilege('authenticated', 'public.device_schemas', 'SELECT'), "
             "       has_function_privilege('anon', 'public.set_device_schemas(uuid, uuid[])', 'EXECUTE')"
         )
         self.assertEqual(self.cur.fetchone(), (True, False))
+
+
+class TheColumnBecomesRows(DeviceSchemasTestCase):
+    """
+    0175 on a database that still has `devices.schema_id`, rebuilt here as 1.2.0 left it: the
+    column, its foreign key and its trigger. Rolled back with the rest of the test.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.cur.execute(
+            "ALTER TABLE public.devices ADD COLUMN schema_id uuid "
+            "  CONSTRAINT devices_schema_id_fkey REFERENCES public.schemas(id) ON DELETE SET NULL"
+        )
+        self.cur.execute(
+            "CREATE TRIGGER trg_devices_reject_archived_schema BEFORE INSERT OR UPDATE OF schema_id "
+            "  ON public.devices FOR EACH ROW EXECUTE FUNCTION public.reject_archived_schema_assignment()"
+        )
+
+    def column_device(self, name, schema_id):
+        device_id = self.device(name)
+        self.cur.execute(
+            "UPDATE public.devices SET schema_id = %s WHERE id = %s", (schema_id, device_id)
+        )
+        return device_id
+
+    def run_0175(self):
+        with open(MIGRATION_0175, encoding="utf-8") as f:
+            self.cur.execute(f.read())
+
+    def test_each_column_schema_becomes_one_row_and_the_column_goes(self):
+        a = self.schema("ONEPATH_MOVE_A")
+        b = self.schema("ONEPATH_MOVE_B")
+        c = self.schema("ONEPATH_MOVE_C")
+        column_only = self.column_device("ONEPATH_DEV_COLUMN_ONLY", a)
+        both = self.column_device("ONEPATH_DEV_BOTH", b)
+        self.submodel(both, b, key="Machining")
+        beside = self.column_device("ONEPATH_DEV_BESIDE", a)
+        self.submodel(beside, c)
+        nothing = self.device("ONEPATH_DEV_NOTHING")
+
+        self.run_0175()
+
+        self.assertEqual(self.resolved(column_only), {a: ("device_submodels", None)})
+        self.assertEqual(self.resolved(both), {b: ("device_submodels", "Machining")})
+        self.assertEqual(set(self.resolved(beside)), {a, c})
+        self.assertEqual(self.resolved(nothing), {})
+        self.assertFalse(self.has_schema_id_column())
+        self.cur.execute(
+            "SELECT count(*) FROM pg_trigger WHERE tgrelid = 'public.devices'::regclass "
+            "   AND tgname = 'trg_devices_reject_archived_schema'"
+        )
+        self.assertEqual(self.cur.fetchone()[0], 0)
+
+        # The second boot finds no column and changes nothing.
+        self.run_0175()
+        self.assertEqual(set(self.resolved(beside)), {a, c})
+
+    def test_an_archived_schema_on_the_column_is_kept(self):
+        # Keeping a binding is allowed, so the archived-schema guard does not refuse the move.
+        old = self.schema("ONEPATH_MOVE_ARCHIVED")
+        device_id = self.column_device("ONEPATH_DEV_MOVE_ARCHIVED", old)
+        self.cur.execute("UPDATE public.schemas SET status = 'archived' WHERE id = %s", (old,))
+
+        self.run_0175()
+
+        self.assertEqual(self.submodels(device_id), {old})
+        # The guard is back on afterwards.
+        other = self.device("ONEPATH_DEV_MOVE_ARCHIVED_NEW")
+        exc = self.raises(lambda: self.submodel(other, old))
+        self.assertEqual(exc.pgcode, "23514", str(exc))
+
+    def test_the_move_is_recorded_in_the_audit_trail(self):
+        a = self.schema("ONEPATH_MOVE_AUDIT")
+        device_id = self.column_device("ONEPATH_DEV_MOVE_AUDIT", a)
+
+        self.run_0175()
+
+        self.cur.execute(
+            "SELECT action, new_data ->> 'schema_id' FROM public.audit_trail "
+            " WHERE entity_type = 'device_submodels' AND entity_id = %s",
+            (device_id,),
+        )
+        self.assertEqual(self.cur.fetchall(), [("INSERT", a)])
 
 
 class TheRejectionNamesTheJudgedSchemas(DeviceSchemasTestCase):
@@ -1523,18 +1568,7 @@ class TheRejectionNamesTheJudgedSchemas(DeviceSchemasTestCase):
         self.cur.execute("SELECT new_data FROM public.audit_trail WHERE id = %s", (audit_id,))
         return self.cur.fetchone()[0]
 
-    def test_both_arms_are_named_with_the_column_first(self):
-        a = self.schema("ONEPATH_REJECT_A")
-        b = self.schema("ONEPATH_REJECT_B")
-        device_id = self.device("ONEPATH_DEV_REJECT", schema_id=a)
-        self.submodel(device_id, b)
-
-        row = self.reject(device_id)
-        self.assertEqual(row["schema_ids"], [a, b])
-        self.assertEqual(row["schema_id"], a, "the 1.0 key keeps the column's value where it is set")
-
-    def test_a_device_attached_only_through_submodels_names_its_schemas(self):
-        # The issue's second case: the 1.0 snapshot recorded no schema for this device.
+    def test_every_attached_schema_is_named_and_the_first_keeps_the_old_key(self):
         a = self.schema("ONEPATH_REJECT_SUB_A")
         b = self.schema("ONEPATH_REJECT_SUB_B")
         device_id = self.device("ONEPATH_DEV_REJECT_SUB")
@@ -1552,12 +1586,13 @@ class TheRejectionNamesTheJudgedSchemas(DeviceSchemasTestCase):
 
 
 class SetDeviceSchemas(DeviceSchemasTestCase):
-    """The dashboard's one writer: device_submodels only, and the column cleared."""
+    """The Devices page's one writer of a device's schemas."""
 
-    def test_adding_a_schema_moves_the_column_into_submodels(self):
+    def test_adding_a_schema_adds_its_row(self):
         a = self.schema("ONEPATH_SET_A")
         b = self.schema("ONEPATH_SET_B")
-        device_id = self.device("ONEPATH_DEV_SET", schema_id=a)
+        device_id = self.device("ONEPATH_DEV_SET")
+        self.submodel(device_id, a)
 
         self.act_as(ADMIN_USER_ID)
         result = self.set_schemas(device_id, [a, b])
@@ -1566,13 +1601,13 @@ class SetDeviceSchemas(DeviceSchemasTestCase):
         self.assertEqual(sorted(result["schema_ids"]), sorted([a, b]))
         self.assertEqual((result["attached"], result["detached"]), (1, 0))
         self.assertEqual(self.submodels(device_id), {a, b})
-        self.assertIsNone(self.column(device_id))
         self.assertEqual(set(self.resolved(device_id)), {a, b})
 
-    def test_removing_the_schema_that_came_from_the_column(self):
+    def test_removing_a_schema_deletes_its_row(self):
         a = self.schema("ONEPATH_REMOVE_A")
         b = self.schema("ONEPATH_REMOVE_B")
-        device_id = self.device("ONEPATH_DEV_REMOVE", schema_id=a)
+        device_id = self.device("ONEPATH_DEV_REMOVE")
+        self.submodel(device_id, a)
         self.submodel(device_id, b)
 
         self.act_as(MANAGER_USER_ID)
@@ -1580,13 +1615,13 @@ class SetDeviceSchemas(DeviceSchemasTestCase):
         self.act_as_owner()
 
         self.assertEqual((result["schema_ids"], result["attached"], result["detached"]), ([b], 0, 1))
-        self.assertIsNone(self.column(device_id))
         self.assertEqual(set(self.resolved(device_id)), {b})
 
     def test_an_empty_set_detaches_everything(self):
         a = self.schema("ONEPATH_EMPTY_A")
         b = self.schema("ONEPATH_EMPTY_B")
-        device_id = self.device("ONEPATH_DEV_EMPTY", schema_id=a)
+        device_id = self.device("ONEPATH_DEV_EMPTY")
+        self.submodel(device_id, a)
         self.submodel(device_id, b)
 
         self.act_as(ADMIN_USER_ID)
@@ -1611,12 +1646,13 @@ class SetDeviceSchemas(DeviceSchemasTestCase):
             {a: ("device_submodels", "Machining"), b: ("device_submodels", None)},
         )
 
-    def test_an_archived_schema_already_attached_survives_the_move(self):
+    def test_an_archived_schema_already_attached_is_kept(self):
         # A device left on an archived version is an unfinished migration; saving it with a second
         # schema must not be refused for the one it already had.
         old = self.schema("ONEPATH_ARCHIVED_KEPT")
         b = self.schema("ONEPATH_ARCHIVED_NEW")
-        device_id = self.device("ONEPATH_DEV_ARCHIVED", schema_id=old)
+        device_id = self.device("ONEPATH_DEV_ARCHIVED")
+        self.submodel(device_id, old)
         self.cur.execute("UPDATE public.schemas SET status = 'archived' WHERE id = %s", (old,))
 
         self.act_as(ADMIN_USER_ID)
@@ -1624,20 +1660,19 @@ class SetDeviceSchemas(DeviceSchemasTestCase):
         self.act_as_owner()
 
         self.assertEqual(self.submodels(device_id), {old, b})
-        self.assertIsNone(self.column(device_id))
 
     def test_a_new_archived_schema_is_refused_and_nothing_changes(self):
         a = self.schema("ONEPATH_ATOMIC_A")
         archived = self.schema("ONEPATH_ATOMIC_OLD", status="archived")
-        device_id = self.device("ONEPATH_DEV_ATOMIC", schema_id=a)
+        device_id = self.device("ONEPATH_DEV_ATOMIC")
+        self.submodel(device_id, a)
 
         self.act_as(ADMIN_USER_ID)
         exc = self.raises(lambda: self.set_schemas(device_id, [a, archived]))
         self.act_as_owner()
 
         self.assertEqual(exc.pgcode, "23514", str(exc))
-        self.assertEqual(self.column(device_id), a, "a refused save must leave the column as it was")
-        self.assertEqual(self.submodels(device_id), set())
+        self.assertEqual(self.submodels(device_id), {a}, "a refused save must leave the rows as they were")
 
     def test_an_operator_is_refused(self):
         device_id = self.device("ONEPATH_DEV_OPERATOR")
@@ -1664,11 +1699,11 @@ class SetDeviceSchemas(DeviceSchemasTestCase):
         self.assertEqual(exc.pgcode, "22004", str(exc))  # null_value_not_allowed
 
     def test_the_change_reaches_the_audit_trail_under_the_device(self):
-        # The dashboard's schema changes used to be devices UPDATEs, which the trail records. They
-        # are device_submodels writes now, so that table has to be audited for none to be lost.
+        # device_submodels is audited, keyed by its device, so a schema change is in the trail.
         a = self.schema("ONEPATH_AUDIT_A")
         b = self.schema("ONEPATH_AUDIT_B")
-        device_id = self.device("ONEPATH_DEV_AUDIT", schema_id=a)
+        device_id = self.device("ONEPATH_DEV_AUDIT")
+        self.submodel(device_id, a)
 
         self.act_as(ADMIN_USER_ID)
         self.set_schemas(device_id, [b])
@@ -1683,8 +1718,8 @@ class SetDeviceSchemas(DeviceSchemasTestCase):
             (device_id, ADMIN_USER_ID),
         )
         self.assertEqual(self.cur.fetchall(), [
+            ("device_submodels", "DELETE", a, ADMIN_USER_ID, "user", "asset"),
             ("device_submodels", "INSERT", b, ADMIN_USER_ID, "user", "asset"),
-            ("devices", "UPDATE", None, ADMIN_USER_ID, "user", "asset"),
         ])
 
 

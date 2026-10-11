@@ -269,8 +269,8 @@ export default async function handler(req: Request): Promise<Response> {
  * GET /v1/schema/{uuid}: the reverse of every other lookup, from a schema to its assets. No status
  * filter, unlike the collection: the most useful case is an archived schema with devices still
  * attached, a migration that has not finished, so the status is returned instead. Devices as full
- * entries, as `/v1/address` returns them. Through the `device_schemas` view, which includes devices
- * attached through the deprecated `devices.schema_id`.
+ * entries, as `/v1/address` returns them. Through the `device_schemas` view, as every other reader
+ * of a device's schemas.
  */
 async function schemaMembers(
   req: Request,
@@ -326,8 +326,8 @@ async function schemaMembers(
 
 /**
  * Fill in each entry's `schemas` from the `device_schemas` view. One query for the whole set, since
- * the collection endpoint returns the entire fleet. The view, not `device_submodels`, so a device
- * attached through the deprecated `devices.schema_id` reports the set the exporter and frontend see.
+ * the collection endpoint returns the entire fleet. The view, as the exporter and frontend read it,
+ * so a device reports the set they see.
  */
 async function attachSchemas(
   supabase: SupabaseClient,

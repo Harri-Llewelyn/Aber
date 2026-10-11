@@ -332,7 +332,7 @@ def _read_address_space(pg: PostgrestClient) -> dict:
         "devices",
         {
             "select": "id,sparkplug_id,name,gateway_id,is_quarantined,last_birth_metrics,"
-            "schema_id,status,cell_id,location_scope",
+            "status,cell_id,location_scope",
             "is_archived": live,
         },
     )
@@ -351,7 +351,7 @@ def _read_address_space(pg: PostgrestClient) -> dict:
                    "change_description"},
     )
     # Every schema attached to a device, as the dashboard, the AAS exporter and ingestion read it:
-    # device_submodels rows and the deprecated devices.schema_id, one row per schema.
+    # one device_submodels row per schema.
     attached = _read_relation(pg, "device_schemas", {"select": "device_id,schema_id"})
     # A metric's catalog row is its type on every device that carries it.
     catalog = _read_relation(

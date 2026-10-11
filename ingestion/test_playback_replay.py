@@ -705,7 +705,7 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
         """
         lane = self.lane_map[self.source["sparkplug_id"]]
         status, rows = self.session.rest(
-            f"/devices?select=id,shadow_of,schema_id,conformance_policy,gateway_id"
+            f"/devices?select=id,shadow_of,conformance_policy,gateway_id"
             f"&sparkplug_id=eq.{lane}&limit=1")
         self.assertEqual(status, 200)
         self.assertTrue(rows, f"the lane {lane} the map named does not exist")

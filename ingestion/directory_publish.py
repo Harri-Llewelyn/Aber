@@ -164,13 +164,10 @@ def _device_entry(row):
 
 def _attach_schemas(supabase, entries):
     """
-    Fill in each entry's `schemas` from the `device_schemas` VIEW.
+    Fill in each entry's `schemas` from the `device_schemas` view.
 
-    THE VIEW, NOT `device_submodels`. The view reads the join table and the deprecated
-    `devices.schema_id`, and reading the join table alone would report "no schema" for every
-    device attached through it. The edge function reads the view for the same reason, and the
-    two answers have to agree or the same device describes itself differently depending on which
-    surface asked.
+    The edge function reads the same view, and the two answers have to agree or the same device
+    describes itself differently depending on which surface asked.
 
     ONE query for the whole fleet, not one per device.
     """

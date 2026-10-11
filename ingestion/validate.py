@@ -843,14 +843,7 @@ def seed_supabase():
     SEEDED["kpi_schema_uuid"] = k_res.data[0]["id"] if k_res.data else None
 
     if SEEDED.get("schema_uuid") and SEEDED.get("known_uuid"):
-        # devices.schema_id is written as a 1.0 dashboard wrote it; leaving it unset would mean the
-        # join table were the only thing under test.
-        supabase_client.table("devices").update(
-            {"schema_id": SEEDED["schema_uuid"]}
-        ).eq("id", SEEDED["known_uuid"]).execute()
-
-        # Both schemas attached as submodels. The first duplicates devices.schema_id on purpose --
-        # the view must not return it twice.
+        # Both schemas attached as submodels, as the Devices page attaches them.
         for schema_key in ("schema_uuid", "kpi_schema_uuid"):
             if SEEDED.get(schema_key):
                 supabase_client.table("device_submodels").insert({
@@ -858,9 +851,8 @@ def seed_supabase():
                     "schema_id": SEEDED[schema_key],
                 }).execute()
 
-    # Plant device A's one schema, attached both ways as the known device's first is, so A has
-    # exactly one type whichever of the two a reader resolves. Its semantic id is what check 12j
-    # expects as the device's sourceTypeId.
+    # Plant device A's one schema. Its semantic id is what check 12j expects as the device's
+    # sourceTypeId.
     p_res = supabase_client.table("schemas").insert({
         "schema_name": VAL_PLANT_SCHEMA_NAME,
         "description": "End-to-end validation plant device",
@@ -878,9 +870,6 @@ def seed_supabase():
     }).execute()
     SEEDED["plant_schema_uuid"] = p_res.data[0]["id"] if p_res.data else None
     if SEEDED.get("plant_schema_uuid") and SEEDED.get("plant_a_uuid"):
-        supabase_client.table("devices").update(
-            {"schema_id": SEEDED["plant_schema_uuid"]}
-        ).eq("id", SEEDED["plant_a_uuid"]).execute()
         supabase_client.table("device_submodels").insert({
             "device_id": SEEDED["plant_a_uuid"],
             "schema_id": SEEDED["plant_schema_uuid"],
@@ -2773,7 +2762,7 @@ def verify_results():
         # 6. The birth-declared metric names must be recorded on the device row.
         try:
             res = supabase_client.table("devices").select(
-                "last_birth_metrics,last_birth_metrics_at,schema_id"
+                "last_birth_metrics,last_birth_metrics_at"
             ).eq("id", SEEDED.get("known_uuid")).execute()
             row = res.data[0] if res.data else {}
             declared = row.get("last_birth_metrics")

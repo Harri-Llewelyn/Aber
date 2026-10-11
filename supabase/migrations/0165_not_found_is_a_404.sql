@@ -317,7 +317,7 @@ BEGIN
     -- reported_identity carries over deliberately: the physical device keeps publishing under
     -- the id it announced, and that is what ingestion has to keep resolving. Without it the
     -- merged device is re-quarantined on its very next birth. The candidate's deliberately
-    -- provisioned fields (gateway_id, schema_id, connection_method) are left alone.
+    -- provisioned fields (gateway_id, connection_method, its device_submodels) are left alone.
     UPDATE public.devices
        SET status            = v_quarantined.status,
            first_dbirth_at   = COALESCE(v_candidate.first_dbirth_at, v_quarantined.first_dbirth_at),
@@ -404,7 +404,7 @@ BEGIN
 
     -- THE WHOLE REASON THIS FUNCTION EXISTS. An active or archived schema is part of the record of
     -- what devices were judged against, and deleting one would detach every device bound to it
-    -- through two different foreign keys, silently.
+    -- through the device_submodels foreign key, silently.
     IF v_draft.status <> 'draft' THEN
         RAISE EXCEPTION
             'schema "%" is %, not a draft; only a draft can be discarded',
@@ -412,13 +412,11 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    -- Counted BEFORE the delete, because the CASCADE and the SET NULL are what detach them and
-    -- neither reports anything. A draft can be attached to a machine to try it out, through either
-    -- arm, so this is a real number rather than always zero. A device on both arms counts once.
+    -- Counted BEFORE the delete, because the CASCADE is what detaches them and it reports nothing.
+    -- A draft can be attached to a machine to try it out, so this is a real number rather than
+    -- always zero.
     SELECT count(*) INTO v_detached
-      FROM (SELECT d.id FROM public.devices d WHERE d.schema_id = p_schema_id
-            UNION
-            SELECT ds.device_id FROM public.device_submodels ds WHERE ds.schema_id = p_schema_id) attached;
+      FROM public.device_submodels ds WHERE ds.schema_id = p_schema_id;
 
     -- Attributes the audit row this DELETE fires to the person who asked for it. SET LOCAL, so it
     -- is discarded at COMMIT and cannot bleed into the connection's next user.
@@ -504,24 +502,20 @@ BEGIN
 
         IF NOT FOUND THEN
             INSERT INTO public.devices (
-                name, gateway_id, shadow_of, status, schema_id, conformance_policy, description
+                name, gateway_id, shadow_of, status, conformance_policy, description
             ) VALUES (
                 left(v_origin.name, 96) || ' (replay)',
                 v_gateway.id,
                 v_origin.id,
                 'OFFLINE',
-                -- THE CONTRACT, COPIED. See this migration's header: without it a replay is either
-                -- unjudged or wholly rejected, and both look like a broken capture.
-                v_origin.schema_id,
                 v_origin.conformance_policy,
                 'Replays recordings of ' || v_origin.name || '. Not a machine: its readings are '
                 'genuine but were observed elsewhere, at another time.'
             )
             RETURNING id INTO v_shadow_id;
 
-            -- The many-to-many half of the same contract. `device_schemas` unions this with
-            -- devices.schema_id, so copying only one of the two silently narrows what the shadow
-            -- is judged against for every device provisioned with submodels.
+            -- THE CONTRACT, COPIED: the original's schemas, as device_submodels rows. Without them
+            -- a replay is either unjudged or wholly rejected, and both look like a broken capture.
             INSERT INTO public.device_submodels (device_id, schema_id, submodel_key)
             SELECT v_shadow_id, ds.schema_id, ds.submodel_key
               FROM public.device_submodels ds
@@ -637,7 +631,6 @@ DECLARE
   parent           public.schemas%ROWTYPE;
   published        public.schemas%ROWTYPE;
   v_submodels      INTEGER := 0;
-  v_schema_ids     INTEGER := 0;
   v_merged         INTEGER := 0;
 BEGIN
   -- NARROWED BY 0087. This admitted the pair while the RLS write policies it is the transactional
@@ -677,14 +670,10 @@ BEGIN
        );
     GET DIAGNOSTICS v_merged = ROW_COUNT;
 
+    -- This UPDATE fires `log_audit_trail_event()`, so the rebinding lands in the audit trail per
+    -- device.
     UPDATE public.device_submodels SET schema_id = draft.id WHERE schema_id = parent.id;
     GET DIAGNOSTICS v_submodels = ROW_COUNT;
-
-    -- The dashboard's attachment moves too: `devices.schema_id` is the other arm of the
-    -- `device_schemas` view. This UPDATE fires `log_audit_trail_event()`, so the rebinding lands in
-    -- the audit trail per device.
-    UPDATE public.devices SET schema_id = draft.id WHERE schema_id = parent.id;
-    GET DIAGNOSTICS v_schema_ids = ROW_COUNT;
 
     IF parent.status = 'active' THEN
       UPDATE public.schemas SET status = 'archived' WHERE id = parent.id;
@@ -697,9 +686,10 @@ BEGIN
     'schema', to_jsonb(published),
     'archived_schema_id', parent.id,
     'archived_schema_name', parent.schema_name,
-    'devices_rebound', v_submodels + v_schema_ids,
+    'devices_rebound', v_submodels,
     'submodels_rebound', v_submodels,
-    'schema_ids_rebound', v_schema_ids,
+    -- Kept for API clients that read it: it counted devices.schema_id, which no longer exists.
+    'schema_ids_rebound', 0,
     'duplicate_submodels_removed', v_merged
   );
 END;

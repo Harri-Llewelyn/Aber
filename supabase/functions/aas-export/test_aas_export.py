@@ -642,6 +642,27 @@ class TestConceptDescriptions(unittest.TestCase):
         text = content["embeddedDataSpecifications"][0]["dataSpecificationContent"]["definition"]
         self.assertEqual(text[0]["text"], "Zone air temperature")
 
+    def test_a_qudt_quantity_kind_is_defined_by_qudt_however_many_metrics_carry_it(self):
+        # The metrics are filed under ASHRAE 223P, which does not define QUDT's quantity kinds, and
+        # one reading's description does not define the kind either.
+        kind = "http://qudt.org/vocab/quantitykind/Temperature"
+        zone = metric("BMS/ZONE_TEMPERATURE", kind, 10, "CELSIUS", "Zone air temperature",
+                      standard="ASHRAE 223P")
+        supply = metric("BMS/SUPPLY_TEMPERATURE", kind, 10, "CELSIUS", "Supply air temperature",
+                        standard="ASHRAE 223P")
+        for catalog in ([zone], [zone, supply]):
+            with self.subTest(rows=len(catalog)):
+                schema = {**SHELL_RECORD["schemas"][0], "schema_definition": {
+                    "properties": {m["name"]: {} for m in catalog}}}
+                record = {**SHELL_RECORD, "catalog": catalog, "schemas": [schema]}
+                environment = run_build_environment(record)["environment"]
+                self.assertEqual(concept_description_problems(environment), [])
+                content = next(cd for cd in environment["conceptDescriptions"]
+                               if cd["id"] == kind)["embeddedDataSpecifications"][0]["dataSpecificationContent"]
+                self.assertEqual(content["definition"][0]["text"], "Temperature, as QUDT defines it.")
+                self.assertEqual(content["preferredName"], [{"language": "en", "text": "Temperature"}])
+                self.assertEqual((content["unit"], content["dataType"]), ("CELSIUS", "REAL_MEASURE"))
+
     def test_a_deprecated_metric_does_not_define_the_concept_its_successor_carries(self):
         content = self.content(ISO + "EFFECTIVENESS")
         self.assertEqual(content["definition"][0]["text"], "ISO 22400 effectiveness ratio")

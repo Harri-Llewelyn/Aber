@@ -39,25 +39,25 @@ const healthyDevice = {
   asset_id: 'aaaaaaaa-0000-4000-8000-000000000001', asset_name: 'CNC_01',
   sparkplug_id: 'devaaaaaaaa000040008000', status: 'ONLINE', is_quarantined: false,
   is_archived: false, active_gateway_id: 'gw-1', cell_id: 'cell-1',
-  schema_id: 'schema-cnc', first_dbirth_at: new Date(NOW - DAY).toISOString(),
+  submodel_schema_ids: ['schema-cnc'], first_dbirth_at: new Date(NOW - DAY).toISOString(),
   created_at: new Date(NOW - 5 * DAY).toISOString(), identity_source: 'sparkplug_id'
 }
 const offlineDevice = {
   ...healthyDevice,
   asset_id: 'aaaaaaaa-0000-4000-8000-000000000002', asset_name: 'CNC_02',
-  sparkplug_id: 'devaaaaaaaa000040008001', status: 'OFFLINE', schema_id: 'schema-robot'
+  sparkplug_id: 'devaaaaaaaa000040008001', status: 'OFFLINE', submodel_schema_ids: ['schema-robot']
 }
 // Provisioned 5 days ago, never sent a birth -> overdue, and therefore "needs attention".
 const neverBornDevice = {
   ...healthyDevice,
   asset_id: 'aaaaaaaa-0000-4000-8000-000000000003', asset_name: 'Robot_03',
   sparkplug_id: 'devaaaaaaaa000040008002', status: 'OFFLINE', first_dbirth_at: null,
-  schema_id: 'schema-robot', active_gateway_id: 'gw-2', cell_id: 'cell-2'
+  submodel_schema_ids: ['schema-robot'], active_gateway_id: 'gw-2', cell_id: 'cell-2'
 }
 const quarantinedDevice = {
   ...healthyDevice,
   asset_id: 'aaaaaaaa-0000-4000-8000-000000000004', asset_name: 'Unknown_Thing',
-  sparkplug_id: 'devaaaaaaaa000040008003', is_quarantined: true, schema_id: null,
+  sparkplug_id: 'devaaaaaaaa000040008003', is_quarantined: true, submodel_schema_ids: [],
   active_gateway_id: 'gw-2', cell_id: 'cell-2', quarantine_id: 'aaaaaaaa-0000-4000-8000-000000000004',
   reported_identity: 'devfffffffffffffffffffff', quarantine_reason: 'UNKNOWN_DEVICE',
   discovered_at: new Date(NOW - 60_000).toISOString(), reported_metrics: []

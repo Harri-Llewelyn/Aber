@@ -1453,7 +1453,7 @@ describe('the device schema on the panel', () => {
     api.get.mockImplementation(path => {
       if (path.includes('schemas')) return Promise.resolve([SCHEMA])
       if (path.includes('gateways')) return Promise.resolve([GATEWAY, SIM_GATEWAY])
-      return Promise.resolve([{ ...DEVICE, schema_id: 'sch-1' }, UNBOUND_DEVICE])
+      return Promise.resolve([{ ...DEVICE, submodel_schema_ids: ['sch-1'] }, UNBOUND_DEVICE])
     })
   })
 

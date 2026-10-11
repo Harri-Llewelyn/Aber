@@ -78,7 +78,7 @@ beforeEach(() => vi.clearAllMocks())
 describe('the Schema Conformance control', () => {
 
   it('offers both policies and shows the device\'s current one', async () => {
-    await show([device({ schema_id: SCHEMA_UUID, conformance_policy: 'enforce' })])
+    await show([device({ submodel_schema_ids: [SCHEMA_UUID], conformance_policy: 'enforce' })])
     openEdit()
     expect(policySelect().value).toBe('enforce')
   })
@@ -86,7 +86,7 @@ describe('the Schema Conformance control', () => {
   it('defaults to audit for a device that has never been set', async () => {
     // A row cached or created before archived migration 0050_device_conformance_policy has no such key. Absent must read as audit, which is
     // what the column defaults to, rather than rendering blank and saving something else.
-    const d = device({ schema_id: SCHEMA_UUID })
+    const d = device({ submodel_schema_ids: [SCHEMA_UUID] })
     delete d.conformance_policy
     await show([d])
     openEdit()
@@ -104,14 +104,14 @@ describe('the Schema Conformance control', () => {
   it('warns that enforcing does nothing when no schema is attached', async () => {
     // The state that looks like it worked: with nothing bound the daemon has nothing to judge
     // against, so `enforce` is inert.
-    await show([device({ schema_id: null })], [])
+    await show([device({ submodel_schema_ids: [] })], [])
     openEdit()
     fireEvent.change(policySelect(), { target: { value: 'enforce' } })
     expect(screen.getByText(/no schema attached, so enforcing does nothing/i)).toBeInTheDocument()
   })
 
   it('warns that readings will be discarded when switching a schema-bound device on', async () => {
-    await show([device({ schema_id: SCHEMA_UUID })])
+    await show([device({ submodel_schema_ids: [SCHEMA_UUID] })])
     openEdit()
     fireEvent.change(policySelect(), { target: { value: 'enforce' } })
     expect(screen.getByText(/cannot be recovered/i)).toBeInTheDocument()
@@ -120,14 +120,14 @@ describe('the Schema Conformance control', () => {
   it('does not re-warn a device that already enforces', async () => {
     // The warning is about the CHANGE, not the state. Somebody reopening a device that already
     // enforces does not need telling again, and a banner that never goes away stops being read.
-    await show([device({ schema_id: SCHEMA_UUID, conformance_policy: 'enforce' })])
+    await show([device({ submodel_schema_ids: [SCHEMA_UUID], conformance_policy: 'enforce' })])
     openEdit()
     expect(screen.queryByText(/cannot be recovered/i)).not.toBeInTheDocument()
   })
 
   it('sends the chosen policy on save', async () => {
     api.put.mockResolvedValue({})
-    await show([device({ schema_id: SCHEMA_UUID })])
+    await show([device({ submodel_schema_ids: [SCHEMA_UUID] })])
     openEdit()
     fireEvent.change(policySelect(), { target: { value: 'enforce' } })
     fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))

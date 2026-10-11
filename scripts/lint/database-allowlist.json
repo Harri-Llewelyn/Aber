@@ -107,9 +107,7 @@
     "active_schema_version(uuid) | warning extra | control reached end of function without RETURN": "The LOOP exits only by RETURN or RAISE; the end is unreachable.",
     "capped_capture_manifest(jsonb) | warning | routine is marked as IMMUTABLE, but expression is STABLE": "Marked IMMUTABLE and calls to_jsonb(), which is STABLE. Harmless for its integer argument; relabel STABLE when the function is next touched.",
     "ensure_audit_trail_partitions(integer) | warning | unused variable \"v_i\"": "The FOR loop declares its own v_i, so the DECLAREd one is unused. Cosmetic; drop it when the function is next touched.",
-    "ensure_audit_trail_partitions(integer) | warning extra | auto variable \"v_i\" shadows a previously defined variable": "The FOR loop declares its own v_i, so the DECLAREd one is unused. Cosmetic; drop it when the function is next touched.",
-    "reject_archived_schema_assignment() on device_submodels | error | record \"new\" has no field \"shadow_of\"": "The column is read only in the TG_TABLE_NAME branch for the table that has it; the checker cannot see the branch.",
-    "reject_archived_schema_assignment() on devices | error | record \"new\" has no field \"device_id\"": "The column is read only in the TG_TABLE_NAME branch for the table that has it; the checker cannot see the branch."
+    "ensure_audit_trail_partitions(integer) | warning extra | auto variable \"v_i\" shadows a previously defined variable": "The FOR loop declares its own v_i, so the DECLAREd one is unused. Cosmetic; drop it when the function is next touched."
   },
   "historian_splinter": {
     "extension_in_public_timescaledb": "TimescaleDB installs itself in public, and the historian is not exposed through PostgREST, which is what this lint guards.",

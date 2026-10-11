@@ -1184,8 +1184,9 @@ paths:
       summary: Publish a draft, archiving its predecessor
       description: |
         One transaction: flips the draft to `active`, archives the predecessor, repoints every
-        `device_submodels` row **and** `devices.schema_id`, and logs the device updates to the
-        Audit Trail.
+        `device_submodels` row, and logs each repoint to the Audit Trail under its device.
+        `devices_rebound` and `submodels_rebound` count the repointed rows; `schema_ids_rebound`
+        is always 0, since the `devices.schema_id` column it counted was removed in 1.3.0.
 
         A device attached to both versions has its redundant old attachment dropped first, or
         the repoint would collide on `uq_device_submodels`.
@@ -1213,11 +1214,11 @@ paths:
       tags: [Registry]
       summary: Schemas attached to a device
       description: |
-        Many schemas per device, one AAS Submodel each. This is where a device's schemas are
-        written: the Devices page writes them through `rpc/set_device_schemas`, and writing the
-        deprecated `devices.schema_id` instead is still read. **Prefer `device_schemas`** for
-        reading — it returns these rows and `devices.schema_id` together, and is what ingestion,
-        the AAS export, i3X, the Directory and the frontend resolve through.
+        Many schemas per device, one AAS Submodel each. This is the one place a device's schemas
+        are attached: the Devices page writes them through `rpc/set_device_schemas`. 1.3.0
+        removed `devices.schema_id`, the column 1.1.0 deprecated, and moved what it held into
+        rows here. **Prefer `device_schemas`** for reading — it is what ingestion, the AAS
+        export, i3X, the Directory and the frontend resolve through.
 
         The modelled metric set is the **union** across attachments. Judging a device against
         one schema flags it for publishing what another of its own submodels accounts for.
@@ -1261,11 +1262,10 @@ paths:
   /rest/v1/device_schemas:
     get:
       tags: [Registry]
-      summary: Resolved schema attachments (join rows and devices.schema_id)
+      summary: Resolved schema attachments
       description: |
-        Read-only view, one row per (device, schema): every `device_submodels` row, and the
-        deprecated `devices.schema_id` when no row names that schema. `source` says which arm
-        supplied the row (`device_submodels` | `devices.schema_id`).
+        Read-only view, one row per (device, schema): every `device_submodels` row. `source` is
+        always `device_submodels`; it is kept for clients that select it.
         Read this rather than `device_submodels` unless you are writing attachments.
       parameters:
         - $ref: '#/components/parameters/Select'
@@ -1283,7 +1283,7 @@ paths:
       summary: Set a device's schemas
       description: |
         Makes the device's schemas exactly `p_schema_ids`, in one transaction: inserts the missing
-        `device_submodels` rows, deletes the rest, and clears the deprecated `devices.schema_id`.
+        `device_submodels` rows and deletes the rest.
         An empty array detaches every schema. A row the device keeps keeps its `submodel_key`.
         This is how the Devices page saves its schema picker. `Administrator` or
         `Shopfloor_Manager`.
@@ -2092,8 +2092,8 @@ paths:
 
         `patch` names keys `proposable_columns(entity_type)` admits and nothing else — the
         columns ingestion writes (`status`, `reported_identity`, `identity_source`,
-        `is_quarantined`, `first_dbirth_at`), the device's `gateway_id` data path and its
-        `schema_id` binding are all refused, by name, at insert time.
+        `is_quarantined`, `first_dbirth_at`) and the device's `gateway_id` data path are all
+        refused, by name, at insert time. A device's schemas are not proposable either.
 
         **A lane is open while `proposable_columns()` answers for it**, which it does for the five
         `entity_type` values below. `schemas` is refused: archived migration 0090 withdrew that
@@ -3789,9 +3789,8 @@ paths:
         devices still attached, which is a migration that has not finished. `status` is returned
         so the caller can tell the two apart.
 
-        Members are read through the `device_schemas` **view**, so a device the dashboard
-        attached through `devices.schema_id` is reported alongside one carrying `device_submodels`
-        rows. Each device reports its **full** schema set, not just this one. Archived devices are
+        Members are read through the `device_schemas` **view**, as every other reader of a
+        device's schemas. Each device reports its **full** schema set, not just this one. Archived devices are
         excluded; a schema nothing implements is `200` with an empty `devices` array, not `404`.
       security:
         - bearerAuth: []
@@ -4523,12 +4522,6 @@ components:
           type: boolean
           default: false
           description: True for auto-discovered devices awaiting approval. Their DDATA is dropped.
-        schema_id:
-          type: string
-          format: uuid
-          nullable: true
-          deprecated: true
-          description: 'Deprecated for writes: attach schemas as `device_submodels` rows, or all at once with `rpc/set_device_schemas`. Still read: the `device_schemas` view returns it beside the device''s `device_submodels` rows. Removed no sooner than the next minor release.'
         model_3d_path:
           type: string
           nullable: true
@@ -4580,7 +4573,6 @@ components:
         location_scope: { $ref: '#/components/schemas/LocationScope' }
         status: { type: string, enum: [ONLINE, OFFLINE] }
         is_quarantined: { type: boolean }
-        schema_id: { type: string, format: uuid, nullable: true, deprecated: true, description: 'Deprecated: write `device_submodels` rows, or call `rpc/set_device_schemas`. Still read through `device_schemas`.' }
         model_3d_path: { type: string, nullable: true }
         connection_method: { type: string, nullable: true }
         is_archived: { type: boolean }
@@ -4629,7 +4621,7 @@ components:
         device_id: { type: string, format: uuid }
         schema_id: { type: string, format: uuid }
         submodel_key: { type: string, nullable: true }
-        source: { type: string, enum: [device_submodels, devices.schema_id], description: '`devices.schema_id` means the row comes from the deprecated column, which no `device_submodels` row of this device repeats.' }
+        source: { type: string, enum: [device_submodels], description: 'Always `device_submodels`. Kept for clients that select it.' }
 
     TelemetryRow:
       type: object
@@ -5279,7 +5271,7 @@ components:
         schemas:
           type: array
           items: { type: string, format: uuid }
-          description: 'Resolved through the `device_schemas` view, so join rows and `devices.schema_id` agree.'
+          description: 'Resolved through the `device_schemas` view.'
 
     FunctionError:
       type: object
