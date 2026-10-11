@@ -1005,6 +1005,13 @@ export const SUITES = {
       'The rollups are compressed by series, on their own chunk spans, after the late-data window. ' +
       'Uncompressed they were most of the historian and filled its default volume in two months (#415).',
   },
+  'timescaledb/test_rollup_refresh.py': {
+    lanes: ['stack'],
+    why:
+      'A replay written days late reaches the rollups: the window ingestion records is refreshed by ' +
+      'the historian job, as ingest_writer can record it and read nothing. The policies reach back ' +
+      '25 hours, so without the job the rollups show the outage as a gap the raw table does not have.',
+  },
   'timescaledb/test_physical_backup.py': {
     lanes: ['stack'],
     why:

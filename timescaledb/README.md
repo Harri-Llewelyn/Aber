@@ -217,9 +217,11 @@ projection is not an alternative because LIMIT is not pushed down. Each `min()` 
 per chunk (MergeAppend over the per-chunk time indexes), so the cost is the chunk count, not the
 row count.
 
-**Refresh policies.** `start_offset` is 25 hours because the refresh window must exceed the
-late-data window: ingestion accepts telemetry up to `TELEMETRY_MAX_AGE_SECONDS` (24h) old, and a
-smaller offset would leave late arrivals in raw and in no rollup. It is cheap despite the width,
+**Refresh policies.** `start_offset` is 25 hours because the refresh window must exceed the window
+ingestion accepts a live reading in, `TELEMETRY_MAX_AGE_SECONDS` (24h): a smaller offset would leave
+a late live reading in raw and in no rollup. A reading flagged `is_historical`, an edge node's replay
+after an outage, may be up to `ingestion.historicalMaxAgeSeconds` (7 days) old, which the policies
+do not reach; `refresh_requested_rollups()` below brings it in. It is cheap despite the width,
 because TimescaleDB refreshes only the buckets its invalidation log marks as changed.
 `end_offset` is one full bucket, so the policy never materialises a bucket still being written to;
 real-time aggregation serves that bucket meanwhile. The 1h view refreshes on a five-minute
@@ -243,6 +245,65 @@ The spans (1 day, 7 days, 30 days) put about a day of rows in a one-minute chunk
 a wider chunk already open keeps its span until it closes. The variable is optional, so a caller
 that predates it leaves the rollups uncompressed. What compression measured is in
 `deploy/k8s/README.md`.
+
+**A late replay is refreshed by a job, from windows ingestion records.** When ingestion writes a
+reading older than `ROLLUP_POLICY_REACH_SECONDS` (23 hours), it records the UTC hour holding it in
+`rollup_refresh_requests`, one row per waiting hour, in the same transaction as the readings. The
+two hours below the policies' 25 cover the widest bucket's alignment and the policies' schedules.
+`refresh_requested_rollups()`, a TimescaleDB job every five minutes, refreshes each recorded hour in
+`telemetry_1m`, `telemetry_5m` and `telemetry_1h`, in that order because each is built from the one
+before, then deletes the row. The windows come from the readings, not from the appliance's outage
+report, so a third-party edge node's replay is covered too. `scripts/check-docs-drift.mjs` (check
+53) holds the reach, the job's list of rollups and the window width to this file.
+
+Real-time aggregation hides the gap until a rollup's watermark passes the replayed hour, because
+a bucket above the watermark is read from raw. On a fresh historian nothing is materialised yet and
+the watermark is -infinity, so a replay shows at once; the gap opens once the policies have
+materialised later readings. `test_rollup_refresh.py` materialises an anchor reading first for this
+reason.
+
+- **Rejected: widening `start_offset` to 7 days.** `compressAfter` must exceed it, so the shipped
+  2 days would have to move past 7, and every rollup would keep a week uncompressed instead of two
+  days.
+- **Rejected: reading TimescaleDB's invalidation log.** It is an internal catalog whose shape
+  changes between releases.
+- **Rows are claimed and committed before any refresh.** A reading committed during a refresh then
+  records its hour again for the next run, rather than having its row deleted unseen. A run that
+  fails leaves its rows claimed, and the next run takes them.
+- **The procedure has no `SET search_path` and cannot catch a failed refresh.** Measured on 2.29.2,
+  `refresh_continuous_aggregate()` refuses a procedure with a `SET` clause ("cannot be executed
+  from a function") and an exception block ("cannot run inside a transaction block"). So every
+  name in the body is schema-qualified, and splinter's finding is allow-listed.
+- **`ingest_writer` holds INSERT on the table and nothing else.** Its `ON CONFLICT` names no
+  target: measured, one naming the waiting index is refused without SELECT, and one naming none is
+  not. The insert runs under a savepoint, so a missing table (the maintenance Job not yet run after
+  an upgrade) costs the rollups those hours, counted in
+  `aber_ingestion_rollup_windows_failed_total`, and never costs the readings. With
+  `timescaledb.rollups.enabled` off, this file does not run, and the chart tells ingestion
+  (`TIMESCALEDB_ROLLUPS_ENABLED=false`) to record nothing, so the counter only ever means a real
+  failure.
+- **Nothing older than the raw window is refreshed.** A refresh rebuilds every series' buckets in
+  the window from raw. Over a range retention has dropped, it would keep the replayed series and
+  delete every other.
+
+Measured on 2.29.2, with the shipped settings (raw chunks compressed after 12 hours, rollups after
+2 days) and 20 series reporting each minute:
+
+| Step | Result |
+| :--- | :--- |
+| A reading 3 days late | Inserted into the compressed raw chunk, which becomes partially compressed |
+| The three policies run | The rollups still lack it |
+| The window refreshed over compressed rollup chunks | Works without decompressing. The chunks are left partial, and the compression policy recompresses them on its next run |
+| The job, nothing waiting | 0.3 ms per run; 12 ms through the scheduler, worker start included |
+| The job, one window | About 0.1 s |
+| The job, 72 windows (a three-day replay) | About 6 s |
+| The job, one window of 1,000 series sampled every 30 s (120,000 rows) | About 1 s |
+| The job while another session spends 6 to 9 s refreshing the same rollup | No error and no wait |
+
+The refresh rebuilds every series in the window, so a window costs the same however little of it
+the replay holds; the cost grows with the fleet.
+If a window was not recorded, `docs/remote-gateways.md` ("Late data after an outage") gives the
+refresh to run by hand.
 
 **`telemetry_gapfill()` carries the last observation forward.** Under report-by-exception a metric
 that has not changed publishes nothing, so the aggregates emit one bucket in sixty for a steady
@@ -472,6 +533,10 @@ UPDATE there, and still no DELETE on the manifest and nothing on telemetry beyon
 an archived chunk goes through `cold_tier_drop_verified()`, which is `SECURITY DEFINER` so the
 daemon can ask for a drop the manifest has verified without holding DELETE. It also reports
 whether archiving is on, which decides what the retention job may drop.
+
+**It records a late replay's windows, and cannot read them back.** It holds INSERT on
+`rollup_refresh_requests` alone, which the self-check asserts both ways; why that is enough is under
+`aggregates.sql`.
 
 ### `fdw_reader`
 

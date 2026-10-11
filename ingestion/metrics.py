@@ -111,6 +111,9 @@ COUNTER_MAP = {
     # The historian write path.
     "write_failures": ("aber_ingestion_write_failures_total", {}),
     "write_batch_failures": ("aber_ingestion_write_batch_failures_total", {}),
+    # Late telemetry's windows, recorded for the historian job that refreshes the rollups.
+    "rollup_windows_recorded": ("aber_ingestion_rollup_windows_recorded_total", {}),
+    "rollup_windows_failed": ("aber_ingestion_rollup_windows_failed_total", {}),
     "db_reconnects": ("aber_ingestion_db_reconnects_total", {}),
     "db_connect_failures": ("aber_ingestion_db_connect_failures_total", {}),
     "db_heals": ("aber_ingestion_db_heals_total", {}),
@@ -241,6 +244,15 @@ HELP = {
         "Transactions carrying more than one message that failed and were retried one message at a "
         "time. The message at fault is counted by aber_ingestion_write_failures_total; the others were "
         "written on the retry.",
+    "aber_ingestion_rollup_windows_recorded_total":
+        "Hour windows of telemetry written later than the rollups' refresh policies reach back (a "
+        "replay after an outage), recorded in the historian for the job that refreshes them in "
+        "telemetry_1m/5m/1h. One per window per transaction; a window already waiting is not added "
+        "twice.",
+    "aber_ingestion_rollup_windows_failed_total":
+        "Windows of late telemetry that could not be recorded. The readings are stored, but reach the "
+        "rollups only when that window is refreshed by hand (docs/remote-gateways.md, \"Late data "
+        "after an outage\").",
     "aber_ingestion_write_queue_depth":
         "DDATA messages decided by the callback thread and not yet written. THE SATURATION SIGNAL: "
         "it grows only while the writer is behind the fleet, and a full queue drops with "

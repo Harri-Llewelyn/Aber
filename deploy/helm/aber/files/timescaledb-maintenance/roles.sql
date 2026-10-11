@@ -279,6 +279,13 @@ BEGIN
   IF to_regprocedure('public.cold_archive_report_armed(boolean)') IS NOT NULL THEN
     EXECUTE format('GRANT EXECUTE ON FUNCTION public.cold_archive_report_armed(boolean) TO %I', v_role);
   END IF;
+  -- Records the windows a late replay touched (aggregates.sql). INSERT alone: it never reads, and
+  -- its ON CONFLICT names no target, since naming one needs SELECT.
+  IF to_regclass('public.rollup_refresh_requests') IS NOT NULL THEN
+    EXECUTE format('GRANT INSERT ON public.rollup_refresh_requests TO %I', v_role);
+    EXECUTE format('REVOKE SELECT, UPDATE, DELETE, TRUNCATE ON public.rollup_refresh_requests '
+                   'FROM %I', v_role);
+  END IF;
 
   -- DELETE and TRUNCATE are what make append-only true, so they are named.
   EXECUTE format('REVOKE DELETE, TRUNCATE ON public.telemetry FROM %I', v_role);
@@ -380,6 +387,15 @@ BEGIN
 
     IF (SELECT rolsuper FROM pg_roles WHERE rolname = 'ingest_writer') THEN
       RAISE EXCEPTION 'roles self-check: ingest_writer is a superuser, which defeats the entire role.';
+    END IF;
+
+    IF to_regclass('public.rollup_refresh_requests') IS NOT NULL
+       AND (NOT has_table_privilege('ingest_writer', 'public.rollup_refresh_requests', 'INSERT')
+            OR has_table_privilege('ingest_writer', 'public.rollup_refresh_requests', 'SELECT')
+            OR has_table_privilege('ingest_writer', 'public.rollup_refresh_requests', 'DELETE')) THEN
+      RAISE EXCEPTION
+        'roles self-check: ingest_writer must INSERT into rollup_refresh_requests and do '
+        'nothing else there. Without INSERT a late replay never reaches the rollups.';
     END IF;
 
     RAISE NOTICE
