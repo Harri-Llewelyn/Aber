@@ -240,6 +240,7 @@ RETURNS TABLE (
 )
 LANGUAGE plpgsql
 STABLE
+SET search_path TO 'public'
 AS $fn$
 DECLARE
   source  text;

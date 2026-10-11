@@ -1294,6 +1294,16 @@ it — but **nothing authorises on that claim**. The edge functions were correct
 remediation to read the table too, because falling back to the claim when no row was found inverted
 the meaning of a revocation.
 
+**Every function in `public` pins its search_path except `may_decide_proposal()` (0176).** The
+pin is hygiene: the eleven 0176 looked at are SECURITY INVOKER and name every relation with its
+schema. But a SQL function with a SET clause is never inlined, and `list_proposer_names()` calls
+`may_decide_proposal()` once per proposal, every status included. Inlined, its `CASE` folds into
+the scan's filter. Pinned, the filter became an opaque call: 1,130 ms over 5,000 proposals instead
+of 262 ms (test database, median of seven runs). So it stays unpinned, its comment says why, and
+Studio's advisor keeps listing it. `audit_domain_for()` and `proposable_columns()` are pinned:
+each runs once per written row, about 3 µs a call more in a PL/pgSQL loop, and nothing reads
+through them. The historian's `telemetry_gapfill()` is PL/pgSQL, never inlined, and pinned too.
+
 ### People are added, given roles and removed from the dashboard (0166)
 
 The People tab on Access Control is Administrator only, and has two halves.
