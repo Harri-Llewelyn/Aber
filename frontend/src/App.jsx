@@ -5,6 +5,8 @@ import { useAppRouting } from './hooks/useAppRouting'
 import { useTheme } from './hooks/useTheme'
 import { useToast, clearStoredHistory } from './hooks/useToast'
 import { useApiActivity } from './hooks/useApiActivity'
+import { useConnectionStatus } from './hooks/useConnectionStatus'
+import { CONNECTION_OK } from './lib/connectionState'
 import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
 import { clearInvalidSession, isSessionRejected } from './utils/sessionError'
 import { signOutOfForge, signOutOfStudio } from './utils/studioSignOut'
@@ -21,6 +23,7 @@ import { useDocumentTitle } from './hooks/useDocumentTitle'
 import { Sidebar } from './components/common/Sidebar'
 import { GlobalSearch } from './components/common/GlobalSearch'
 import { AberMark } from './components/common/AberMark'
+import { ConnectionStrip } from './components/common/ConnectionStrip'
 
 /* There is no sign-up form. Registration is disabled server-side by GOTRUE_DISABLE_SIGNUP, so
    accounts arrive by invitation, admin provisioning or an upstream identity provider; a client-side
@@ -372,7 +375,7 @@ function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReport
   )
 }
 
-function Dashboard({ session, onSignOut }) {
+function Dashboard({ session, onSignOut, onSignInAgain }) {
   /* One-shot, cleared by ApprovalsTab's onClearFocus. Held in state rather than a query parameter
      because it is an intent, not a location, and must not replay on reload. */
   const [proposalFocus, setProposalFocus] = useState(null)
@@ -499,8 +502,12 @@ function Dashboard({ session, onSignOut }) {
   const openAlertsFromToast = useCallback((id) => { setAlertsOpen(true); dismissToast(id) }, [dismissToast])
   const firingAlerts = usePlatformAlerts(showToast, openAlertsFromToast)
 
+  // Whether the page is still refreshing, from every poll and Realtime channel. Read by the strip
+  // under the bar and the tab title.
+  const connection = useConnectionStatus()
+
   // The page's rail label, and the pill's count, so the tab and the bar never disagree.
-  useDocumentTitle(TABS.find(t => t.id === tab)?.label, firingAlerts.length)
+  useDocumentTitle(TABS.find(t => t.id === tab)?.label, firingAlerts.length, connection.status !== CONNECTION_OK)
 
   // What the rail flags, with a number, to a viewer who can act on it: quarantine, offline gateways,
   // unfiled cells and waiting proposals. Owned here for the same reason the alerts are.
@@ -630,6 +637,10 @@ function Dashboard({ session, onSignOut }) {
           />
         )}
       </header>
+
+      {/* Its own row under the bar, never inside it: the busy line already owns the bar's bottom
+          edge. Empty while every refresh is working. */}
+      <ConnectionStrip status={connection.status} since={connection.since} onSignInAgain={onSignInAgain} />
 
       {/* The rail is a permanent gutter. In hover mode its expanded panel paints over the page; in
           expanded mode the row reflows. See Sidebar.jsx. */}
@@ -828,5 +839,8 @@ export default function App() {
   return <Dashboard
     session={session}
     onSignOut={() => Promise.all([signOutOfStudio(), signOutOfForge(), supabase.auth.signOut()])}
+    /* The rejected-session path above: a local sign-out, then the sign-in screen with its notice.
+       setSession too, because signOut() cannot always clear an expired session it fails to refresh. */
+    onSignInAgain={async () => { setAuthNotice(await clearInvalidSession()); setSession(null) }}
   />
 }

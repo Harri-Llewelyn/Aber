@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { reportRealtimeStatus } from '../lib/connectionState'
 
 /** Coalesce bursts of changes into one reload. Ingestion registers devices in batches. */
 const DEFAULT_DEBOUNCE_MS = 250
@@ -59,14 +60,16 @@ export function useRealtimeTable(tables, onChange, { enabled = true, debounceMs 
 
       channel.subscribe((status, err) => {
         if (cancelled) return
+        // An error or a timeout marks the dashboard as not updating, and SUBSCRIBED clears it.
+        reportRealtimeStatus(status)
         if (status === 'SUBSCRIBED') {
           // Reconcile on subscribe. Realtime creates its replication slot lazily, after SUBSCRIBED,
           // so the first subscription against a fresh service can miss changes for a moment;
           // loading here closes that window.
           Promise.resolve(cbRef.current?.()).catch(() => {})
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          // Without this the failure mode is a silent retry loop that looks merely slow. The paired
-          // usePolling keeps data flowing meanwhile.
+          // The paired usePolling keeps data flowing meanwhile, and its first success clears the
+          // strip under the top bar.
           console.warn('[realtime] %s subscription %s:', tableKey, status, err?.message || '')
         }
       })

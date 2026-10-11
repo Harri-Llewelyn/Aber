@@ -246,8 +246,9 @@ trail are unchanged. The secret key field starts empty and an empty field keeps 
   error — it silently emits nothing, which is the worse failure. **Do not "fix" the telemetry
   inspector (`modals/TelemetryModal.jsx`) by subscribing it.**
 - **Never delete `usePolling`.** Realtime has no replay: a dropped socket loses every change in the
-  gap and the client is not told. The 60 s poll is also the only path carrying the 401 stop and
-  exponential backoff.
+  gap and the client is not told. The 60 s poll is also the only path carrying the exponential
+  backoff, and the only one that reports a refresh's outcome (see **When the dashboard stops
+  updating** below).
 - **The replication slot is created lazily, *after* `SUBSCRIBED`.** A client can be subscribed and
   receiving nothing, so the hook reloads once on `SUBSCRIBED` to close that window. This is not
   redundant with the initial load.
@@ -259,6 +260,36 @@ trail are unchanged. The secret key field starts empty and an empty field keeps 
 
 `VITE_ENABLE_REALTIME` is resolved by `src/config.js` — see **Configuration** below. It comes
 from the frontend ConfigMap and flips with a `helm upgrade`.
+
+### When the dashboard stops updating
+
+A page that keeps its last rows after the API has gone looks live, and people act on it. So every
+poll and every Realtime channel reports into one module, `lib/connectionState.js`, and the shell
+shows `common/ConnectionStrip.jsx` under the top bar once a failure has lasted
+`STALE_AFTER_MS` (10 seconds). The tab title then leads with "Not updating · ", for a background
+tab; the strip is the signal that matters, because full screen and pinned tabs hide the title.
+
+- **What marks it failing:** a poll that fails with a network error, a 5xx or a PostgREST
+  connection error; a channel's `CHANNEL_ERROR` or `TIMED_OUT`; the browser's `offline` event. The
+  first poll that succeeds, or a channel's `SUBSCRIBED`, clears it. Coming back online clears
+  nothing by itself, but a poll waiting out its backoff runs at once.
+- **What does not:** a 4xx other than 401. The server answered, so the connection is not the
+  problem, and a page that never loads for one role should not claim the network is down.
+- **The status is mostly gone by the time an error reaches a poll.** supabase-js returns a
+  PostgREST error without its HTTP status, a non-JSON proxy body (Envoy's "no healthy upstream")
+  as a bare message, and a fetch rejection as "TypeError: Failed to fetch"; `api.js` sometimes
+  rethrows only the message. `classifyRefreshError()` therefore reads the status where there is
+  one, then the PostgREST code, then the message.
+- **A 401 says "Your session has ended."** with **Sign In Again**, which is the rejected-session
+  path `App.jsx` already uses (`clearInvalidSession()`, then the sign-in screen). The poll keeps
+  going at its longest interval instead of stopping, so a token the auth client refreshes a moment
+  later gets through and clears the strip. The strip lives in the signed-in shell, so it never
+  shows over the sign-in page, and the state is reset when the shell mounts and unmounts.
+- **Device status is not touched.** The chips still show the stored status; the strip is what says
+  it may be stale.
+- **The strip takes its own row**, so it covers nothing. Below 800px a drawer overlays the page
+  from a fixed `top`; the strip publishes its height as `--connection-strip-height` on the shell so
+  the drawer starts below it.
 
 ---
 

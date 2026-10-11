@@ -2654,6 +2654,57 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 57. The connection strip says what its docs quote.
+//
+// The Site Map help names the strip under the top bar by its opening words, its button and its
+// threshold, and frontend/README.md gives the threshold and the tab title's prefix. The words live
+// in ConnectionStrip.jsx, the threshold in lib/connectionState.js and the prefix in
+// useDocumentTitle.js, and any of them can change without the prose noticing.
+// -------------------------------------------------------------------------------------------------
+{
+  const STRIP = 'frontend/src/components/common/ConnectionStrip.jsx';
+  const STATE = 'frontend/src/lib/connectionState.js';
+  const TITLE = 'frontend/src/hooks/useDocumentTitle.js';
+  const HELP = 'frontend/src/help/site-map.md';
+  const README = 'frontend/README.md';
+
+  const threshold = /export const STALE_AFTER_MS = (\d+)\b/.exec(read(STATE));
+  const prefix = /export const NOT_UPDATING_PREFIX = '([^']+)'/.exec(read(TITLE));
+
+  if (!threshold || !prefix) {
+    fail(`check-docs-drift: could not find STALE_AFTER_MS in ${STATE} or NOT_UPDATING_PREFIX in ${TITLE}.`);
+  } else {
+    const seconds = Number(threshold[1]) / 1000;
+    // Substring matches: the prefix carries a middle dot, and an escaping slip would fail open.
+    const claims = [
+      { file: STRIP, needle: 'Not updating since', what: 'the strip\'s opening words' },
+      { file: STRIP, needle: 'Sign In Again', what: 'the button a rejected session shows' },
+      { file: HELP, needle: '**Not updating since**', what: 'the strip\'s opening words, quoted' },
+      { file: HELP, needle: '**Sign In Again**', what: 'the button, quoted' },
+      { file: HELP, needle: `about ${seconds} seconds`, what: `the threshold (STALE_AFTER_MS is ${threshold[1]})` },
+      { file: README, needle: `\`STALE_AFTER_MS\` (${seconds} seconds)`, what: `the threshold (STALE_AFTER_MS is ${threshold[1]})` },
+      { file: README, needle: `"${prefix[1]}"`, what: 'the tab title\'s prefix (NOT_UPDATING_PREFIX)' },
+    ];
+    const stale = claims.filter(({ file, needle }) => !read(file).includes(needle));
+
+    if (stale.length) {
+      for (const { file, needle, what } of stale) {
+        fail(
+          `connection strip: ${file} no longer contains ${JSON.stringify(needle)}, ${what}.\n` +
+            '      The strip, its threshold and the title prefix are quoted in the Site Map help and\n' +
+            '      frontend/README.md; change the code and the quotes together.'
+        );
+      }
+    } else {
+      pass(
+        `the connection strip's words, its ${seconds}-second threshold and the title prefix match ` +
+          'the Site Map help and frontend/README.md'
+      );
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 16. Every navigable page has help, and every help file names a page that exists.
 //
 // The help corpus is resolved by filename at runtime (frontend/src/help/index.js) and a missing
