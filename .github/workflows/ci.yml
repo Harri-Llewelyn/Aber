@@ -19,6 +19,14 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # CESMII's i3X conformance suite, run twice: against the dev loop in k8s-validation and through
+  # Traefik over HTTPS in site-install-rehearsal. A commit SHA: the `1.0.0` tag predates the suite,
+  # and an unpinned branch would let someone else's commit decide whether this pipeline is green.
+  # This one is the 1.0 branch head of 2026-09-25. Read the suite's CHANGELOG before bumping: a new
+  # MUST test is a real finding about this server.
+  I3X_SUITE_REF: "3eae7ea455f333181ba07bad14064006c2f4c939"
+
 jobs:
   # Which paths changed. A job-level filter, not `paths-ignore` on the trigger: the cheap jobs run
   # on everything, only the end-to-end stack and the two rehearsals are gated. Fails open (a range
@@ -1549,11 +1557,6 @@ jobs:
       # collapses the "<release>-<chart>" prefix when the release already contains the chart name.
       RELEASE: aber
       NS: aber
-      # A commit SHA: the `1.0.0` tag predates the conformance suite, and an unpinned branch would let
-      # someone else's commit decide whether this pipeline is green. This one is the 1.0 branch head
-      # of 2026-09-25. Read the suite's CHANGELOG before bumping: a new MUST test is a real finding
-      # about this server.
-      I3X_SUITE_REF: "3eae7ea455f333181ba07bad14064006c2f4c939"
     steps:
       - name: Checkout Code
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -1765,7 +1768,9 @@ jobs:
       # i3X 1.0 conformance, run by CESMII's own suite rather than by assertions of ours, for the
       # same reason the AAS export is validated against the real IDTA schema. Pinned to a commit. The
       # expected verdict is 1.0 Compatible, not Full Compliance: Update is a MAY and this server
-      # declares `update.current: false`.
+      # declares `update.current: false`. This run warns CORE-05 (plain HTTP): it reaches the
+      # service through a port-forward, and on a site TLS terminates at Traefik. The site install
+      # rehearsal runs the suite on that path, where CORE-05 must pass.
       - name: i3X Conformance — CESMII Official Suite
         run: |
           set -eu
@@ -1900,12 +1905,20 @@ jobs:
       - name: Set up k3d
         uses: ./.github/actions/install-k3d
 
+      - name: Fetch CESMII's i3X Conformance Suite
+        run: |
+          git clone --quiet https://github.com/cesmii/i3X.git /tmp/i3x-spec
+          git -C /tmp/i3x-spec checkout --quiet "$I3X_SUITE_REF"
+
       # Values from the checkout's `npm run setup`, never values-dev.yaml; cert-manager, the
       # internal CA and the runbook's site.yaml, with NetworkPolicies on as values-prod.yaml.example
       # has them; then the first administrator signs in through Traefik, the demo accounts are
-      # refused, and a pod no policy admits cannot reach the database.
+      # refused, a pod no policy admits cannot reach the database, and CESMII's i3X suite passes
+      # against https://i3x.<domain>/v1 through Traefik, trusting only the internal CA.
       - name: Install A Site From The Checkout (site-rehearsal install)
-        run: node scripts/site-rehearsal.mjs install --cluster=aber-rehearsal --kubeconfig="$KUBECONFIG"
+        run: >-
+          node scripts/site-rehearsal.mjs install --cluster=aber-rehearsal --kubeconfig="$KUBECONFIG"
+          --i3x-suite=/tmp/i3x-spec/conformance-tests
 
       - name: Diagnostics On Failure
         if: failure()

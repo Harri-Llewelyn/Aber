@@ -739,7 +739,7 @@ CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs nine jobs:
 | **helm-chart** | `helm lint`, render, API-schema validation, chart guard rails |
 | **edge-function-auth-test** | Auth ladders and RLS against a real Postgres |
 | **k8s-validation** | k3d cluster through `dev-cluster up --e2e --network-policy`: `helm test`, `validate.py` in-cluster, the stack lane through port-forwards, the i3X conformance suite, ingress assertions, all with NetworkPolicies on |
-| **site-install-rehearsal** | `site-rehearsal install` on k3d: the checkout installed as a new site, with values from `setup.mjs`, never `values-dev.yaml` (*The install and upgrade rehearsals*, below) |
+| **site-install-rehearsal** | `site-rehearsal install` on k3d: the checkout installed as a new site, with values from `setup.mjs`, never `values-dev.yaml`, then the i3X conformance suite through Traefik over HTTPS (*The install and upgrade rehearsals*, below) |
 | **upgrade-rehearsal** | `site-rehearsal upgrade` on k3d: the last release installed as published, then `helm upgrade` to the checkout with the same values |
 | **secret-scan** | gitleaks over every commit in a full clone and the working tree, on every push |
 | **static-analysis** | The other eight checks of [`docs/static-analysis.md`](static-analysis.md), in pinned containers; skipped with the end-to-end stack on a documentation-only push |
@@ -806,6 +806,22 @@ Both end with the same checks:
 - the first administrator signs in through Traefik, over HTTPS to `api.rehearsal.aber.test` with a
   certificate from the internal CA, using the password in the values file;
 - `admin@aber.local` with `aber123` is refused.
+
+**With `--i3x-suite=<dir>`, CESMII's i3X conformance suite runs last**, against
+`https://i3x.rehearsal.aber.test/v1` through Traefik. `<dir>` is the `conformance-tests` folder of a
+`cesmii/i3X` checkout at the commit `ci.yml` pins (`I3X_SUITE_REF`); CI's site-install job passes
+it. The suite trusts only the internal CA (`NODE_EXTRA_CA_CERTS`, never its `--insecure` flag), and
+`scripts/lib/resolve-hosts.cjs` points the name at the port-forward, since the domain resolves
+nowhere. The verdict must be *Full 1.0 Compliance* or *1.0 Compatible*, as in k8s-validation, and
+CORE-05 (served over HTTPS) must pass. The two runs cover different things. k8s-validation's has
+`validate.py`'s data in the stack, so it exercises tests a fresh site skips, and it warns CORE-05
+because it reaches the service over a port-forward. This one is the path a site's clients take:
+Traefik's route, TLS from the internal CA, the HSTS header and the NetworkPolicy layer.
+
+```bash
+git clone https://github.com/cesmii/i3X.git ../i3x-spec && git -C ../i3x-spec checkout <I3X_SUITE_REF>
+npm run rehearse:install -- --i3x-suite=../i3x-spec/conformance-tests
+```
 
 `upgrade` also signs in before the upgrade, and asserts that the upgrade's own `aber-db-init` Job ran
 the checkout's image and completed: it replays the migration chain onto the last release's database.
