@@ -129,8 +129,8 @@ previous baseline each time, and the rules below had to be rediscovered each tim
 2. `node scripts/generate-baseline-section.mjs <dump.sql> > section4.sql`
 
 3. Assemble: the hand-written head (sections 1–3: extensions, roles, default privileges), the
-   generated section 4, then the hand-written tail (sections 5–7: the Realtime publication, the
-   privileges withdrawn, the structural self-checks).
+   generated section 4, then the hand-written tail (sections 5–8: the Realtime publication, the
+   privileges withdrawn, the structural self-checks, and what `grafana_reader` may read).
 
 4. Check it: `node scripts/verify-schema-equivalence.mjs <new chain dir> <old chain dir>`. It
    builds both databases and compares a dump of each, plus the seeded rows table by table. The
@@ -160,8 +160,10 @@ found by reading it.
 4. **A grant to `grafana_reader` must survive the role not existing.** The role is created only
    where `BI_READER_PASSWORD` is set, and a dump records the resulting ACL as a bare `GRANT` that
    fails with `role "grafana_reader" does not exist` on exactly the deployments the condition
-   exists for. No probe catches this, because every fixture sets the password. The generator wraps
-   all eight in a role-exists guard.
+   exists for. No probe catches this, because every fixture sets the password. The generator now
+   leaves every `grafana_reader` grant out of section 4: section 8 makes them by hand, guarded,
+   after its sweep and in the same transaction, and `storage_footprint`'s is repeated beside the
+   view because section 3's `DROP SERVER ... CASCADE` re-creates it on every boot.
 
 5. **A partition is written as `PARTITION OF`, not as a table plus an attach.** pg_dump splits
    each one into five objects — a bare `CREATE TABLE`, a `TABLE ATTACH`, one `INDEX` per inherited
