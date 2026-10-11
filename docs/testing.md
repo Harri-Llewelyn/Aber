@@ -827,6 +827,31 @@ from nothing, so it takes longer.
 rest of the hardening that is off by default (both backup tiers, database TLS), real appliances and
 the failure drills.
 
+### AppArmor on the runner
+
+Every job that starts a k3d cluster first unloads the runner's `mosquitto` AppArmor profile
+(`.github/actions/install-k3d`). Ubuntu 26.04 loads that profile, and Ubuntu 24.04 did not.
+
+k3s runs inside a container in k3d, where it cannot load AppArmor profiles, so its pods run
+unconfined as far as the host kernel is concerned. An unconfined process that executes
+`/usr/sbin/mosquitto` is attached to the host's profile by path. That profile allows the Debian
+package's paths, not `/mosquitto/config`, so the broker exits with "Unable to open config file", and
+ingestion and i3X fail behind it. Measured on the 26.04 runner on 2026-10-11:
+
+- In a k3d pod, `open("/mosquitto/config/mosquitto.conf")` returned `EACCES` to the broker with
+  `DAC_OVERRIDE` held and with seccomp `Unconfined`. `cat` read the same file. The kernel log said
+  `apparmor="DENIED" operation="open" profile="mosquitto" name="/mosquitto/config/mosquitto.conf"`.
+- The same pod on the 24.04 runner started the broker.
+- On the 26.04 host itself, `docker run` started the broker: Docker confines its containers with
+  `docker-default`, and an exec inside that profile does not change profile.
+
+A site should not be affected, though no 26.04 host has measured it yet (the installer supports
+22.04 and 24.04): k3s on the host confines every pod with containerd's own profile, which does not
+change profile on exec either. A developer running k3d on an Ubuntu 26.04 host meets the
+same refusal; removing the profile (`echo -n mosquitto | sudo tee
+/sys/kernel/security/apparmor/.remove`) lasts until the next reboot. The cluster diagnostics print
+the runner's AppArmor denials, so another profile that attaches the same way shows up by name.
+
 ## Keeping the pinned versions current
 
 Three scheduled workflows, and they answer different questions. None runs on a pull request:
