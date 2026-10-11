@@ -1490,11 +1490,12 @@ volumes stay usable across `helm upgrade`:
   The backup CronJob writes flat files into the volume's root, which fsGroup already makes
   writable.
 
-What happens on a storage class that does not apply `fsGroup` (some NFS and `hostPath`
-provisioners): a new volume stays owned by root. `assemble-config` then stops with `EACCES` on the
-plugin's document, and the historian's initdb with `Permission denied`. Volumes 1.2.0 wrote keep
-working, because their files already belong to the right uid. What to do: use a storage class that
-applies `fsGroup`, or give the volume's root to the uid in the table once, before the first start.
+What happens on a storage class that neither applies `fsGroup` nor creates a new volume
+world-writable (some NFS and CSI drivers; k3s's `local-path` creates it 0777): a new volume's root
+stays writable by root alone. `assemble-config` then stops with `EACCES` on the plugin's document,
+and the historian's initdb with `Permission denied`. Volumes 1.2.0 wrote keep working, because
+their files already belong to the right uid. What to do: use a storage class that applies
+`fsGroup`, or give the volume's root to the uid in the table once, before the first start.
 
 ### PDBs and HPAs
 
