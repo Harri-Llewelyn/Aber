@@ -28,7 +28,15 @@ It applies from 1.0.0 onwards. An install older than that is reinstalled rather 
   the sign-in limit first: see [*a proxy in front of Traefik*](#from-120-a-proxy-in-front-of-traefik-is-counted-in-trustedproxyhops)
   and [*a site where Traefik loses the client's address*](#from-120-a-site-where-traefik-loses-the-clients-address-raises-perclientperminute).
 - **On `https`?** Make sure people's devices trust the site's root certificate first: see
-  [*an `https` site tells browsers to use only HTTPS*](#from-120-an-https-site-tells-browsers-to-use-only-https).
+  [*an `https` site tells browsers to use only HTTPS*](#from-120-an-https-site-tells-browsers-to-use-only-https),
+  and [*Node-RED, i3X and the API documentation send it too*](#from-130-node-red-i3x-and-the-api-documentation-send-hsts-too).
+- **An API client that writes or reads `devices.schema_id`?** Move it first: see
+  [*`devices.schema_id` is removed*](#from-130-devicesschema_id-is-removed).
+- **An image tag pinned to an earlier release, a storage class that does not apply `fsGroup`, or a
+  policy that pins uids?** Check them first: see
+  [*every image runs as a named, non-root user*](#from-130-every-image-runs-as-a-named-non-root-user).
+- **Upgrading with `helm upgrade` rather than the installer?** Raise the node's inotify limits: see
+  [*the node needs room for every container's log*](#from-130-the-node-needs-room-for-every-containers-log).
 - **Pinned `supabaseDb.image.tag` to run another server build?** Set `supabaseDb.serverImage`
   first: see [*the platform database runs Aber's own image*](#from-120-the-platform-database-runs-abers-own-image).
 - **An admission webhook that injects sidecars?** Check each tolerates the runtime's default seccomp
@@ -335,8 +343,8 @@ From 1.1.0 the Devices page attaches a device's schemas as `device_submodels` ro
 union of the rows and the column.
 
 The upgrade changes no device: a schema set in the column stays attached. An API client that writes
-the column keeps working, and should move to `rpc/set_device_schemas`. The column is removed no
-sooner than 1.2.0 ([`releases.md`](releases.md#deprecation)).
+the column keeps working, and should move to `rpc/set_device_schemas`. The column is removed in
+1.3.0: see [*`devices.schema_id` is removed*](#from-130-devicesschema_id-is-removed).
 
 ### From 1.2.0, a proxy in front of Traefik is counted in `trustedProxyHops`
 
@@ -477,6 +485,97 @@ births at once, and the default queue shed that rebirth: a restart lost 1.1 % of
 500 msg/s and 3.9 % at 1,000 (#399, #791). The new line restarts the broker on this upgrade. An
 appliance running the new flow buffers through that restart; other clients reconnect.
 
+### From 1.3.0, `devices.schema_id` is removed
+
+1.1.0 deprecated writing the column (above). From 1.3.0 a device's schemas are its
+`device_submodels` rows and nothing else (#767).
+
+- **What the upgrade does.** Migration `0175` gives every device whose `devices.schema_id` names a
+  schema a `device_submodels` row for it, unless the device already has one, then drops the column.
+  No device loses a schema, an archived one included. Each moved row is in the Audit Trail as a
+  `device_submodels` INSERT under its device. There is nothing to run.
+- **An API client that still writes or reads the column gets HTTP 400.** Move it before upgrading:
+  - to set a device's schemas, `POST /rest/v1/rpc/set_device_schemas` with
+    `{"p_device_id": "<device uuid>", "p_schema_ids": ["<schema uuid>", ...]}`, which makes them
+    exactly that list, as the Devices page does;
+  - or write `device_submodels` rows (`POST /rest/v1/device_submodels` with `device_id` and
+    `schema_id`; `DELETE` one to detach);
+  - to read them, select `schema_id` from `/rest/v1/device_schemas?device_id=eq.<uuid>`.
+- **What stays the same.** `device_schemas` keeps its four columns; `source` is now always
+  `device_submodels`. `publish_schema_version()` still answers `schema_ids_rebound`, now always 0.
+  The dashboard, ingestion, i3X, the AAS export and the Directory already read `device_schemas`.
+
+### From 1.3.0, Node-RED, i3X and the API documentation send HSTS too
+
+On a site with `global.scheme: https`, `nodered.<domain>`, `i3x.<domain>` and `docs.<domain>` now
+send `Strict-Transport-Security: max-age=31536000`, as the dashboard, the API, Studio, the forge and
+Grafana have since 1.2.0 (#778). A browser that has seen it refuses plain HTTP to that host, and
+turns a certificate warning there into an error nobody can click past.
+
+Check that the devices people open Node-RED, i3X or the API documentation from trust the site's root
+certificate ([`deploy/k8s/README.md`](../deploy/k8s/README.md), *TLS → 3. Distribute the root
+certificate*). A site that did this for 1.2.0 has nothing more to do, and a site on `http` has
+nothing to do. Node-RED's generated `settings.js` is rewritten once on the new image's first boot;
+the previous file is kept as `settings.js.bak`.
+
+### From 1.3.0, every image runs as a named, non-root user
+
+Every image this repository builds now ends with a numeric, non-root `USER`, and the chart runs it
+as that uid with `runAsNonRoot: true` (#419, phase two of three;
+[`deploy/k8s/README.md`](../deploy/k8s/README.md), *Users*). Volumes 1.2.0 wrote as root stay
+usable. Check three things first:
+
+- **No image of this repository pinned to an earlier tag.** A 1.2.0 frontend or swagger-ui image
+  started as uid 101 exits at once with `open() "/run/nginx.pid" failed (13: Permission denied)`.
+  Leave each `image.tag` empty (the chart's version), or move every one to 1.3.0.
+- **A storage class that neither applies `fsGroup` nor creates a new volume world-writable** (some
+  NFS and CSI drivers; k3s's `local-path` is not one). A NEW volume on it is writable by root alone,
+  so on a fresh install the broker's `assemble-config` stops with `EACCES` and the historian's initdb
+  with `Permission denied`. Use a class that applies `fsGroup`, or give the volume's root to the uid
+  in the runbook's *Users* table first. The backup service also needs `fsGroup` applied to prune
+  backups an earlier root run wrote.
+- **A security policy that pins uids** (OpenShift's `restricted-v2`, a Kyverno or Gatekeeper rule).
+  The chart states 10001, 101, 1883, 1000, 70, 100, 472 and 65534. Allow them for the namespace, or
+  override the chart's `podSecurityContext` values.
+
+`supabase-db` still starts as root, on purpose: its data directory is the volume's own root. The
+backup service runs as root only when it archives the forge or the broker. `kubectl exec` now lands
+as each container's uid; debug as root with `kubectl debug -it <pod> --profile=sysadmin`.
+
+### From 1.3.0, the node needs room for every container's log
+
+The kubelet uses one inotify instance for every container log it follows, and the log collector
+follows them all: about 140 on one node, past the kernel's default of 128 per user, which stock
+Ubuntu keeps. Out of instances, the kubelet answers with `failed to create fsnotify watcher: too many
+open files` inside the log stream, and log lines are lost (#831).
+
+The installer now raises the limits before k3s, so **upgrading by running the installer again does
+this for you**. Upgrading with `helm upgrade` by hand, run step 2's two commands on the node once:
+
+```bash
+printf 'fs.inotify.max_user_instances = 1280\nfs.inotify.max_user_watches = 655360\n' \
+  | sudo tee /etc/sysctl.d/60-aber-inotify.conf
+sudo sysctl --system
+```
+
+A node that already allows more (`cat /proc/sys/fs/inotify/max_user_instances`) needs nothing.
+
+### From 1.3.0, each gateway writes one Audit Trail row for the group it publishes under
+
+`gateways.observed_sparkplug_group` (migration `0174`) is the group a gateway last published under,
+and the Gateways page warns when it differs from the gateway's own (#780). It is NULL after the
+upgrade until each gateway's next node-level message. Ingestion writes it only when it changes, and
+each change is one `UPDATE` row attributed to ingestion. Expect one per gateway shortly after the
+upgrade. The Edit Gateway dialog can now change a gateway's Sparkplug group (#810).
+
+### The upgrade to 1.3.0 rolls every workload and restarts Grafana once
+
+Every workload rolls once, for the new security contexts. Grafana restarts once more, because its
+datasource file changed. The historian's maintenance Job creates the job that brings a late replay
+into the rollups (#788). A replay more than a day late that arrives in the minutes before that Job
+runs is stored, but missing from the rollups until refreshed by hand
+([`remote-gateways.md`](remote-gateways.md), *Late data after an outage*).
+
 ---
 
 ## Backups
@@ -527,6 +626,7 @@ is fresh.
 | Check | Where |
 | :--- | :--- |
 | Every migration applied cleanly | `kubectl -n aber logs job/aber-db-init` — it exits non-zero on any failure |
+| The databases' link, the API, the broker, ingestion and the dashboard answer | `helm test aber -n aber` — every test Pod Succeeded; none of them writes anything |
 | The historian's extension matches its image | `kubectl -n aber logs job/aber-timescaledb-maintenance` — the first step names the version, and fails the step if it drifted |
 | Policy jobs are getting workers | `kubectl -n aber logs statefulset/timescaledb \| grep -c 'failed to start a background worker'` — expect `0` |
 | Gateways still reporting | Dashboard → Gateways: `Last Heartbeat` under 90s |
