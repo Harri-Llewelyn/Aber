@@ -405,6 +405,13 @@ TELEMETRY_MAX_FUTURE_SECONDS = 5 * 60      # 5 minutes ahead of now
 # MAX_AGE_DAYS). ingestion.historicalMaxAgeSeconds in the chart.
 TELEMETRY_MAX_HISTORICAL_AGE_SECONDS = int(
     os.getenv("TELEMETRY_MAX_HISTORICAL_AGE_SECONDS", str(7 * 24 * 60 * 60)))
+# The rollups' refresh policies reach back 25 hours (timescaledb/aggregates.sql, late_data). A row
+# older than this has its hour recorded for the historian job that refreshes it; the two hours
+# between cover the policies' bucket alignment and schedules. scripts/check-docs-drift.mjs holds
+# the two together.
+ROLLUP_POLICY_REACH_SECONDS = 23 * 60 * 60
+# The window recorded: the widest rollup bucket, so each window is whole buckets in every rollup.
+ROLLUP_WINDOW_SECONDS = 60 * 60
 
 # Why a reading's timestamp was refused, as the `reason` label of
 # aber_ingestion_timestamps_rejected_total.
@@ -2601,7 +2608,10 @@ class PendingWrite(NamedTuple):
     live_rows: list = None
 
 def _write_batch(cur, batch):
-    """The statements for one transaction: the asset rows, then every telemetry row."""
+    """
+    The statements for one transaction: the asset rows, every telemetry row, then the rollup
+    windows a late row needs refreshed. Returns how many windows it recorded.
+    """
     # Asset rows first, for the foreign key. One statement, one row per asset: an upsert cannot
     # touch the same row twice in a statement, so the last name seen for an asset wins. Refreshed
     # on every write so a rename is not left stale.
@@ -2633,6 +2643,59 @@ def _write_batch(cur, batch):
             rows,
             page_size=TELEMETRY_INSERT_PAGE_SIZE,
         )
+
+    windows = rollup_windows(rows)
+    return _record_rollup_windows(cur, windows) if windows else 0
+
+def rollup_windows(rows, now=None):
+    """
+    The windows, as sorted (start, end) pairs, holding a row older than the rollups' refresh
+    policies reach. Aligned to the epoch, as time_bucket() is; one per window, not per row.
+    """
+    cutoff = (now or datetime.now(timezone.utc)).timestamp() - ROLLUP_POLICY_REACH_SECONDS
+    starts = {
+        int(row[0].timestamp()) // ROLLUP_WINDOW_SECONDS * ROLLUP_WINDOW_SECONDS
+        for row in rows if row[0].timestamp() < cutoff
+    }
+    return [
+        (datetime.fromtimestamp(start, timezone.utc),
+         datetime.fromtimestamp(start + ROLLUP_WINDOW_SECONDS, timezone.utc))
+        for start in sorted(starts)
+    ]
+
+# Throttle for the warning that windows could not be recorded: a replay is many transactions.
+_rollup_window_warned = {}
+ROLLUP_WINDOW_WARN_INTERVAL_SECONDS = 300
+
+def _record_rollup_windows(cur, windows):
+    """
+    Record the windows for refresh_requested_rollups() in the batch's own transaction, under a
+    savepoint: a failure here costs the rollups those windows, never the batch its rows. ON
+    CONFLICT names no target, because ingest_writer holds INSERT alone. Returns how many.
+    """
+    cur.execute("SAVEPOINT rollup_windows")
+    try:
+        execute_values(
+            cur,
+            "INSERT INTO rollup_refresh_requests (window_start, window_end) VALUES %s "
+            "ON CONFLICT DO NOTHING",
+            windows,
+        )
+    except Exception as e:  # noqa: BLE001 - any failure is the windows', not the batch's
+        cur.execute("ROLLBACK TO SAVEPOINT rollup_windows")
+        count("rollup_windows_failed", len(windows))
+        if _throttled(_rollup_window_warned, "historian", ROLLUP_WINDOW_WARN_INTERVAL_SECONDS):
+            logger.warning(
+                "Could not record %d window(s) of late telemetry for the rollups (%s). The readings "
+                "are stored, and reach telemetry_1m/5m/1h only when refreshed by hand "
+                "(docs/remote-gateways.md, \"Late data after an outage\"). A missing table means "
+                "the historian's maintenance Job has not run since this daemon was upgraded, or "
+                "timescaledb.rollups.enabled is false.",
+                len(windows), str(e).strip(),
+            )
+        return 0
+    cur.execute("RELEASE SAVEPOINT rollup_windows")
+    return len(windows)
 
 def _after_commit(item):
     """What one message owes once its rows are durable."""
@@ -2761,7 +2824,7 @@ class TelemetryWriter:
         try:
             with db_conn:
                 with db_conn.cursor() as cur:
-                    _write_batch(cur, batch)
+                    windows = _write_batch(cur, batch)
         except Exception as e:
             if len(batch) > 1:
                 # One message can poison a batch. Retried one at a time, so only that message is
@@ -2782,6 +2845,7 @@ class TelemetryWriter:
 
         # After `with db_conn` exits: the commit is where a hypertable write becomes durable.
         observe_write_seconds(time.perf_counter() - started)
+        count("rollup_windows_recorded", windows)
         for item in batch:
             _after_commit(item)
 

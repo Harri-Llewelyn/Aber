@@ -111,6 +111,7 @@
     "reject_archived_schema_assignment() on devices | error | record \"new\" has no field \"device_id\"": "The column is read only in the TG_TABLE_NAME branch for the table that has it; the checker cannot see the branch."
   },
   "historian_splinter": {
+    "function_search_path_mutable_public_refresh_requested_rollups_f842ac7c9bbe4adabcdd561075962ef1": "A job procedure that commits between refreshes: a SET clause would make it atomic, and refresh_continuous_aggregate() refuses to run there (timescaledb/README.md). Every name in the body is schema-qualified, and it runs as the superuser who owns it.",
     "extension_in_public_timescaledb": "TimescaleDB installs itself in public, and the historian is not exposed through PostgREST, which is what this lint guards.",
     "function_search_path_mutable_public_telemetry_gapfill_e3c432d688e38a7fd174ef602c75c04c": "SECURITY INVOKER, executed by grafana_reader against its own grants; the same class as #384, pinned when that is."
   },

@@ -473,6 +473,8 @@ python timescaledb/test_physical_backup.py
 # The rollups' columnstore: segmented by series, each on its own chunk span, compressed only once
 # older than the late-data window the refresh reaches back over (#415).
 python timescaledb/test_rollup_compression.py
+# A replay days late reaching the rollups: the window ingestion records, refreshed by the job.
+python timescaledb/test_rollup_refresh.py
 # The daemon's and the FDW's own roles (item 18). Each skips itself when its password is unset,
 # because roles.sql skips creating the role on the same condition.
 python timescaledb/test_historian_role_grants.py

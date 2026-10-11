@@ -40,7 +40,7 @@ the same reason: `/docker-entrypoint-initdb.d` runs only on an empty data direct
 
 | Role | May | Used by |
 | :--- | :--- | :--- |
-| `ingest_writer` | INSERT + SELECT on `telemetry`; upsert `assets` | the ingestion daemon |
+| `ingest_writer` | INSERT + SELECT on `telemetry`; upsert `assets`; INSERT on `rollup_refresh_requests` | the ingestion daemon |
 | `fdw_reader` | SELECT only, on each object Supabase projects as a foreign table | Supabase's `postgres_fdw` PUBLIC mapping |
 | `grafana_reader` | SELECT everything the dashboards query | Grafana |
 | `powerbi_reader` | SELECT the three rollups only | external BI |
@@ -64,7 +64,8 @@ reading. Those two wore the same clothes until a wrong password was tried on pur
 **`ingest_writer` needs SELECT, which is not obvious.** Both of the daemon's statements carry an
 `ON CONFLICT` clause, and inferring the arbiter index reads the target. So the role is *append-only*
 rather than write-only: it can add a row and cannot change or remove one, which is the distinction
-the security model above depends on.
+the security model above depends on. The statement that records a late replay's hours for the
+rollups names no conflict target, so that table needs INSERT alone.
 
 **Why `fdw_reader` exists at all.** `0001` maps every local Supabase role onto this database through
 `postgres_fdw`. That mapping used the historian's superuser, so an FDW session opened for

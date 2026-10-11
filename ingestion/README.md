@@ -986,6 +986,16 @@ records that a batch had to be split. A message whose every metric was filtered 
 asset row and still counts as written; the empty telemetry statement is guarded, since
 `execute_values` on an empty list is a syntax error.
 
+**A row older than the rollups reach records its hour.** The rollups' refresh policies reach back
+25 hours. A row older than `ROLLUP_POLICY_REACH_SECONDS` (23 hours) has its UTC hour inserted into
+the historian's `rollup_refresh_requests`, one row per hour per transaction, after the telemetry and
+in the same transaction. A job on the historian refreshes those hours in every rollup
+([`timescaledb/README.md`](../timescaledb/README.md#aggregatessql)). Few rows are that old besides
+a replay: a live reading is refused past 24 hours. So a live batch normally issues nothing extra.
+The insert runs under a savepoint: if it fails, the batch's
+rows are still committed, and `aber_ingestion_rollup_windows_failed_total` counts the hours the
+rollups will lack.
+
 **What runs after the commit runs on the writer thread**: the UNS republish and the conformance
 record, per message, in arrival order. Both were on the callback thread before and neither raises
 into the writer.
@@ -1522,9 +1532,11 @@ daemon does with it:
   node, start), from a registered gateway only, into the `aber_ingestion_gateway_outage_*` series,
   and logs it. Node metrics are never stored as telemetry. The *Gateway Outage Lost Readings* alert
   fires for an hour after a report with any reading dropped. Any edge node may send the same report.
-- **Readings more than 25 hours late reach the raw table but not the rollups.** The continuous
-  aggregates refresh 25 hours back (`timescaledb/aggregates.sql`), so a longer outage's replay is
-  missing from `telemetry_1m`, `_5m` and `_1h` until that range is refreshed by hand
+- **A replay reaches the rollups however late it is.** The continuous aggregates' own refresh
+  reaches back 25 hours (`timescaledb/aggregates.sql`). For an older reading the writer records its
+  hour, and a historian job refreshes it in `telemetry_1m`, `_5m` and `_1h` within five minutes
+  ([The historian writer](#the-historian-writer)). An hour that could not be recorded is counted in
+  `aber_ingestion_rollup_windows_failed_total` and is refreshed by hand
   ([`docs/remote-gateways.md`](../docs/remote-gateways.md#late-data-after-an-outage)).
 
 ### What paho 1.6.1 cannot promise
@@ -1716,6 +1728,8 @@ the line, so a drop counter appearing there at all is still the signal.
 | `aber_ingestion_sequence_messages_missed_total` | `edge_node` | How many, as a **lower bound** — see the caveat below. |
 | `aber_ingestion_write_failures_total` | — | A historian write raised. That telemetry is gone. |
 | `aber_ingestion_write_batch_failures_total` | — | A transaction carrying several messages failed and was split. The message at fault is in `write_failures_total`; the rest were written on the retry. |
+| `aber_ingestion_rollup_windows_recorded_total` | — | Hours of telemetry written later than the rollups' refresh reaches back (a replay), recorded for the historian job that refreshes them. |
+| `aber_ingestion_rollup_windows_failed_total` | — | Such hours that could not be recorded. **The readings are stored but missing from the rollups** until the hour is refreshed by hand ([Loss model](#loss-model)). |
 | `aber_ingestion_write_queue_depth` | — | Gauge. Messages decided and not yet written. **The saturation signal**: it grows only while the writer is behind the fleet. |
 | `aber_ingestion_db_reconnects_total` / `_db_connect_failures_total` | — | Historian connection churn. Failures rising while `db_connected` reads 1 is the shape of a server-side drop. |
 | `aber_ingestion_payload_violations_recorded_total` | — | A DDATA payload failed schema validation and was recorded in `audit_trail` (archived migration 0026). The telemetry was still written. |

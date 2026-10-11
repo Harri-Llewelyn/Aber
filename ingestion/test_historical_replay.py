@@ -186,6 +186,15 @@ class ReplayedDdataTest(DdataTestCase):
         published = self.uns.call_args[0][4]
         self.assertEqual([r[2] for r in published], ["New"])
 
+    def test_a_replay_past_the_rollups_reach_records_its_window_and_a_day_old_one_does_not(self):
+        reach_ms = ingestion.ROLLUP_POLICY_REACH_SECONDS * 1000
+        self.ingest(payload(("T", 1.0, now_ms() - reach_ms + 60_000, True)))
+        self.ingest(payload(("T", 1.0, now_ms() - 3 * DAY_MS, True)))
+        recorded = [c[0][2] for c in self.written.call_args_list if "rollup_refresh_requests" in c[0][1]]
+        self.assertEqual(len(recorded), 1, "only the replay three days old records a window")
+        ((start, end),) = recorded[0]
+        self.assertEqual((start.minute, start.second, end - start), (0, 0, timedelta(hours=1)))
+
 
 class ReplayMeetsTheSameChecksTest(DdataTestCase):
     """Replayed data goes through the quarantine and binding checks live data does."""

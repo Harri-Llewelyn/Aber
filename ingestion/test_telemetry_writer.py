@@ -19,7 +19,7 @@ import os
 import sys
 import types
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 INGESTION_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -371,6 +371,114 @@ class TestExposition(unittest.TestCase):
         for name in ("written_messages", "write_batch_failures", "dropped_write_queue_full"):
             self.assertIn(name, metrics.COUNTER_MAP)
         self.assertEqual(metrics.TYPES.get("aber_ingestion_write_queue_depth"), "gauge")
+
+
+REACH = ingestion.ROLLUP_POLICY_REACH_SECONDS
+
+
+def at(seconds_ago, now=NOW):
+    return now - timedelta(seconds=seconds_ago)
+
+
+def late(wire_id, *stamps):
+    """A decided replay: one row per timestamp."""
+    item = pending(wire_id, [])
+    return item._replace(rows=[(stamp, wire_id, "T", 1.0, None, None) for stamp in stamps])
+
+
+class TestRollupWindows(unittest.TestCase):
+    """
+    A row older than the rollups' refresh policies reach is in no rollup until its window is
+    refreshed: the writer names each such window once, aligned as time_bucket() aligns a bucket.
+    """
+
+    NOW = datetime(2026, 10, 11, 12, 34, 56, tzinfo=timezone.utc)
+
+    def windows(self, *stamps):
+        return ingestion.rollup_windows([(s, DEV_A, "T", 1.0, None, None) for s in stamps], now=self.NOW)
+
+    def test_rows_inside_the_reach_record_nothing(self):
+        self.assertEqual(self.windows(self.NOW, at(REACH - 60, self.NOW)), [])
+
+    def test_a_row_past_the_reach_records_its_hour(self):
+        stamp = datetime(2026, 10, 8, 7, 43, 30, tzinfo=timezone.utc)
+        self.assertEqual(self.windows(stamp), [(
+            datetime(2026, 10, 8, 7, tzinfo=timezone.utc), datetime(2026, 10, 8, 8, tzinfo=timezone.utc))])
+
+    def test_the_threshold_is_the_reach(self):
+        self.assertEqual(len(self.windows(at(REACH + 1, self.NOW))), 1)
+        self.assertEqual(self.windows(at(REACH - 1, self.NOW)), [])
+
+    def test_rows_coalesce_to_one_window_an_hour_in_order(self):
+        base = datetime(2026, 10, 8, 7, tzinfo=timezone.utc)
+        stamps = [base + timedelta(hours=2, minutes=5), base + timedelta(minutes=1),
+                  base + timedelta(minutes=59, seconds=59), base + timedelta(hours=2, minutes=55)]
+        self.assertEqual([w[0] for w in self.windows(*stamps)], [base, base + timedelta(hours=2)])
+
+    def test_a_window_is_one_hour_aligned_to_utc_whatever_the_row_zone(self):
+        plus_five_thirty = timezone(timedelta(hours=5, minutes=30))
+        stamp = datetime(2026, 10, 8, 13, 13, tzinfo=plus_five_thirty)  # 07:43 UTC
+        ((start, end),) = self.windows(stamp)
+        self.assertEqual(start, datetime(2026, 10, 8, 7, tzinfo=timezone.utc))
+        self.assertEqual(end - start, timedelta(seconds=ingestion.ROLLUP_WINDOW_SECONDS))
+
+
+class TestRollupWindowWrites(WriterTestCase):
+    """The windows go in the batch's own transaction, after its rows, and cannot cost it them."""
+
+    def window_calls(self):
+        return [c for c in self.execute_values.call_args_list
+                if "INSERT INTO rollup_refresh_requests" in c[0][1]]
+
+    def statements(self):
+        return [c[0][0] for c in self.cursor.execute.call_args_list]
+
+    def test_a_live_batch_records_no_window_and_takes_no_savepoint(self):
+        self.writer.submit(pending(DEV_A, [("T", 1.0)]))
+        self.writer.flush()
+        self.assertEqual(self.window_calls(), [])
+        self.assertEqual(self.statements(), [])
+        self.assertEqual(registry.counter_snapshot().get("rollup_windows_recorded", 0), 0)
+
+    def test_a_replay_records_its_windows_once_in_the_same_transaction(self):
+        hour = at(3 * 24 * 3600).replace(minute=0, second=0, microsecond=0)
+        self.writer.submit(late(DEV_A, hour + timedelta(minutes=1), hour + timedelta(minutes=2), NOW))
+        self.writer.submit(late(DEV_B, hour + timedelta(minutes=3), hour + timedelta(hours=1)))
+        self.writer.flush()
+
+        self.assertEqual(self.transactions(), 1)
+        statements = [c[0][1] for c in self.execute_values.call_args_list]
+        self.assertIn("INSERT INTO telemetry", statements[1])
+        self.assertIn("INSERT INTO rollup_refresh_requests", statements[2])
+        self.assertIn("ON CONFLICT DO NOTHING", statements[2])
+        self.assertEqual(self.window_calls()[0][0][2], [
+            (hour, hour + timedelta(hours=1)), (hour + timedelta(hours=1), hour + timedelta(hours=2))])
+        self.assertEqual(self.statements(),
+                         ["SAVEPOINT rollup_windows", "RELEASE SAVEPOINT rollup_windows"])
+        self.assertEqual(registry.counter_snapshot().get("rollup_windows_recorded"), 2)
+
+    def test_a_failed_window_insert_keeps_the_batch(self):
+        def refuse_windows(cur, sql, rows, **kwargs):
+            if "rollup_refresh_requests" in sql:
+                raise RuntimeError('relation "rollup_refresh_requests" does not exist')
+        self.execute_values.side_effect = refuse_windows
+        self.writer.submit(late(DEV_A, at(3 * 24 * 3600)))
+        self.writer.flush()
+
+        self.assertEqual(self.statements(),
+                         ["SAVEPOINT rollup_windows", "ROLLBACK TO SAVEPOINT rollup_windows"])
+        snapshot = registry.counter_snapshot()
+        self.assertEqual(snapshot.get("written_messages"), 1)
+        self.assertEqual(snapshot.get("rollup_windows_failed"), 1)
+        self.assertEqual(snapshot.get("write_failures", 0), 0)
+        self.assertEqual(snapshot.get("rollup_windows_recorded", 0), 0)
+
+    def test_the_window_counters_are_exported(self):
+        registry.count("rollup_windows_recorded", 3)
+        registry.count("rollup_windows_failed", 1)
+        out = registry.render()
+        self.assertIn("aber_ingestion_rollup_windows_recorded_total 3.0", out)
+        self.assertIn("aber_ingestion_rollup_windows_failed_total 1.0", out)
 
 
 if __name__ == "__main__":
