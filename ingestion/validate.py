@@ -687,6 +687,17 @@ def make_node_birth_payload(aliased_metrics, timestamp_ms):
     return payload.SerializeToString()
 
 
+def make_node_certificate(bdseq, timestamp_ms):
+    """An NBIRTH or NDEATH carrying only `bdSeq`, as an Int64: the session it belongs to."""
+    payload = sparkplug_b_pb2.Payload()
+    payload.timestamp = timestamp_ms
+    m = payload.metrics.add()
+    m.name = "bdSeq"
+    m.datatype = 4
+    m.long_value = bdseq
+    return payload.SerializeToString()
+
+
 def make_typed_payload(asset_id, typed_metrics, timestamp_ms, declare):
     """A payload whose values travel in their Sparkplug datatype's field: {name: (datatype, value)}.
     `declare` writes each datatype, as a birth must. DATA leaves them out, as Sparkplug recommends,
@@ -2463,6 +2474,80 @@ def verify_i3x_live(token):
         publisher.disconnect()
 
 
+def verify_gateway_session():
+    """
+    Check 19: an NDEATH whose bdSeq is an earlier session's leaves the seeded gateway ONLINE and its
+    device as it was, and the session's own NDEATH then takes the gateway OFFLINE, which shows the
+    first was judged rather than lost. Before check 18, which brings the gateway back first.
+    Returns True when it passed or was skipped.
+    """
+    gateway_uuid = SEEDED.get("gateway_uuid")
+    known = SEEDED.get("known_uuid")
+    if not supabase_client or not gateway_uuid:
+        print("⚠️  19. GATEWAY SESSION: skipped, no Supabase client or fixture gateway.")
+        return True
+
+    def gateway_status():
+        res = supabase_client.table("gateways").select("status").eq("id", gateway_uuid).execute()
+        return res.data[0]["status"] if res.data else None
+
+    def device_status():
+        if not known:
+            return None
+        res = supabase_client.table("devices").select("status").eq("id", known).execute()
+        return res.data[0]["status"] if res.data else None
+
+    def gateway_status_until(wanted, timeout=15):
+        status, deadline = None, time.time() + timeout
+        while time.time() < deadline:
+            status = gateway_status()
+            if status == wanted:
+                break
+            time.sleep(1)
+        return status
+
+    publisher = connect_publisher(capture=False)
+    if publisher is None:
+        print("❌ 19. GATEWAY SESSION FAIL: could not connect to the broker as the seeded gateway.")
+        return False
+
+    gw = SEEDED.get("gateway_id") or VAL_GW_NAME
+    node_topic = f"spBv1.0/{VAL_GROUP}/%s/{gw}"
+    passed = True
+    try:
+        print(f"\n--- NBIRTH with bdSeq 7, then an NDEATH with bdSeq 6, from {gw} ---")
+        publisher.publish(node_topic % "NBIRTH", make_node_certificate(7, int(time.time() * 1000)))
+        if gateway_status_until("ONLINE") != "ONLINE":
+            print(f"❌ 19. GATEWAY SESSION FAIL: {gw} is not ONLINE after its NBIRTH, so an NDEATH "
+                  "would prove nothing.")
+            return False
+        device_before = device_status()
+        publisher.publish(node_topic % "NDEATH", make_node_certificate(6, int(time.time() * 1000)))
+        time.sleep(3)
+        stale_gateway, stale_device = gateway_status(), device_status()
+
+        # The open session's own death, published after the stale one on the same connection.
+        publisher.publish(node_topic % "NDEATH", make_node_certificate(7, int(time.time() * 1000)))
+        closed = gateway_status_until("OFFLINE")
+        if stale_gateway != "ONLINE" or stale_device != device_before:
+            print(f"❌ 19. GATEWAY SESSION FAIL: after an NDEATH with bdSeq 6 under a session born "
+                  f"with bdSeq 7, {gw} reads '{stale_gateway}' and its device '{stale_device}' (was "
+                  f"'{device_before}'). An earlier session's death must change nothing; the daemon "
+                  "logs 'STALE NDEATH' when it ignores one.")
+            passed = False
+        elif closed != "OFFLINE":
+            print(f"❌ 19. GATEWAY SESSION FAIL: the session's own NDEATH (bdSeq 7) left {gw} "
+                  f"'{closed}', so the ignored one proves nothing.")
+            passed = False
+        else:
+            print("✅ 19. GATEWAY SESSION: an earlier session's NDEATH left the gateway ONLINE, and "
+                  "the open session's NDEATH took it OFFLINE.")
+    finally:
+        publisher.loop_stop()
+        publisher.disconnect()
+    return passed
+
+
 def verify_node_death_takes_its_devices_offline():
     """
     Check 18: the seeded gateway's NDEATH sets its registered device OFFLINE with one audit row, and
@@ -3390,6 +3475,14 @@ def verify_results():
             passed = False
     except Exception as e:
         print(f"❌ 17.  i3X LIVE ERROR: {type(e).__name__}: {e}")
+        passed = False
+
+    # 19. Which NDEATH ends the gateway's session. Before 18, which brings the gateway back first.
+    try:
+        if not verify_gateway_session():
+            passed = False
+    except Exception as e:
+        print(f"❌ 19. GATEWAY SESSION ERROR: {type(e).__name__}: {e}")
         passed = False
 
     # 18. A node's NDEATH takes its devices OFFLINE. Last: it kills the seeded gateway.

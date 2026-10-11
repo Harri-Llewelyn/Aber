@@ -553,6 +553,10 @@ REBIRTH_METRIC_NAME = "Node Control/Rebirth"
 _last_seq = {}
 _seq_lock = threading.Lock()
 
+# The bdSeq of each edge node's open session, as its NBIRTH carried it, under the same lock and key;
+# None when that NBIRTH carried none, absent once an NDEATH closed it. See stale_death().
+_session_bdseq = {}
+
 # Devices heard from in THIS process -- {device_uuid: {"at": monotonic, "name": label, "node":
 # alias_key, "epoch": the node's _node_epoch then}}. Deliberately in-memory and deliberately not
 # seeded from the database: see stale_device_ids().
@@ -928,6 +932,51 @@ def check_message_sequence(group_id, edge_node_id, msg_type, payload, client=Non
         else " A rebirth was not requested (throttled or no broker client)."
     )
     return False
+
+# -----------------------------------------------------------------------------
+# Edge node sessions: which NDEATH belongs to the session now open
+# -----------------------------------------------------------------------------
+BDSEQ_METRIC_NAME = "bdSeq"
+
+def payload_bdseq(payload):
+    """The integer a birth or death certificate's `bdSeq` metric carries, or None without one."""
+    for metric in getattr(payload, "metrics", []):
+        if metric.name != BDSEQ_METRIC_NAME:
+            continue
+        for field in ("long_value", "int_value"):
+            if metric.HasField(field):
+                return getattr(metric, field)
+        return None
+    return None
+
+def open_session(group_id, edge_node_id, payload):
+    """NBIRTH: the node's session is now the one this birth's bdSeq names (None when it has none)."""
+    with _seq_lock:
+        _session_bdseq[alias_key(group_id, edge_node_id)] = payload_bdseq(payload)
+
+def close_session(group_id, edge_node_id):
+    """An NDEATH that was applied: the session it ended has no bdSeq to match a later death against."""
+    with _seq_lock:
+        _session_bdseq.pop(alias_key(group_id, edge_node_id), None)
+
+def stale_death(group_id, edge_node_id, payload):
+    """
+    (death bdSeq, session bdSeq) when an NDEATH belongs to an earlier session than the one open:
+    both carry a bdSeq and they differ. None otherwise, which includes a death without a bdSeq and
+    a node with no NBIRTH seen since this process started; those are applied as before.
+
+    Any difference counts, not only an older number: an edge node that restarts its bdSeq at 0 on
+    a reboot makes the old session's Last Will numerically ahead. See ingestion/README.md ->
+    "A death from an earlier session".
+    """
+    death = payload_bdseq(payload)
+    if death is None:
+        return None
+    with _seq_lock:
+        session = _session_bdseq.get(alias_key(group_id, edge_node_id))
+    if session is None or session == death:
+        return None
+    return death, session
 
 # -----------------------------------------------------------------------------
 # Device Liveness Watchdog
@@ -2308,12 +2357,31 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
     NBIRTH/NDATA mark the edge node ONLINE; NDEATH marks it and every device behind it OFFLINE. A
     `Gateway_Status` metric overrides the gateway's derived status, subject to
     accept_reported_status(). Gateways are never auto-created.
+
+    An NDEATH whose bdSeq names an earlier session than the open one changes nothing: see
+    stale_death().
     """
+    # Before anything is reset: a Last Will the broker delivered after the node connected again and
+    # was born says nothing about the session now running, its aliases and device births included.
+    if msg_type == "NDEATH":
+        stale = stale_death(group_id, edge_node_id, payload)
+        if stale:
+            count_labelled("aber_ingestion_stale_deaths_total", {"edge_node": edge_node_id})
+            logger.info(
+                "STALE NDEATH: edge node '%s' sent an NDEATH with bdSeq %s, but its open session "
+                "was born with bdSeq %s. Ignored: it is the Last Will of an earlier connection, "
+                "delivered after the node connected again. The gateway and its devices keep their "
+                "status.", edge_node_id, stale[0], stale[1]
+            )
+            return
+        close_session(group_id, edge_node_id)
+
     # An NBIRTH resets the edge node's whole alias table -- including its devices' -- because it
     # invalidates every binding the node previously declared. Registered before the client check
     # and before gateway resolution, for the same reason as in process_dbirth.
     if msg_type == "NBIRTH":
         register_birth_aliases(group_id, edge_node_id, payload, reset=True)
+        open_session(group_id, edge_node_id, payload)
     if msg_type in ("NBIRTH", "NDEATH"):
         end_device_births(group_id, edge_node_id)
 

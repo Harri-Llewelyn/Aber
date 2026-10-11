@@ -198,6 +198,11 @@ HELP = {
         "Historical messages whose seq was not the next one, by edge node: a replay sent under the "
         "seq it was first given. Left out of gap detection, so not counted as loss and not "
         "answered with a rebirth.",
+    "aber_ingestion_stale_deaths_total":
+        "NDEATHs ignored because their bdSeq names an earlier session than the one the edge node's "
+        "last NBIRTH opened: a Last Will the broker delivered after the node connected again. The "
+        "gateway and its devices kept their status. Expected now and then from a node that "
+        "reconnects under a new client id; nothing was lost.",
     "aber_ingestion_gateway_outages_total":
         "Outages edge nodes reported after reconnecting, by edge node and whether it buffers. An "
         "outage is a window in which the node could not deliver: no broker, or no primary host.",
