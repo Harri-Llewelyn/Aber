@@ -37,8 +37,9 @@ const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
 // needs; without it a settings.js that merely has an adminAuth passes settingsAreCorrect()
 // forever. v2 adminAuth.users; v3 persisted username -> permissions map; v4 constant-time
 // NODERED_ADMIN_TOKEN comparison; v5 editorTheme.tours off; v6 telemetry off; v7 the editor's
-// response headers; v8 the editor's role re-checked every minute, the persisted map retired.
-const SETTINGS_VERSION = 8;
+// response headers; v8 the editor's role re-checked every minute, the persisted map retired; v9
+// Strict-Transport-Security on the editor and the http-in routes.
+const SETTINGS_VERSION = 9;
 
 function fail(message) {
   console.error(`[node-red-init] ERROR: ${message}`);
@@ -490,6 +491,16 @@ function cachePut(token, user) {
   roleCache.set(token, { user: user, at: Date.now() });
 }
 
+/**
+ * Strict-Transport-Security as every host the chart serves sends it: the chart sets the value when
+ * global.scheme is https, and an empty one sends nothing.
+ */
+function strictTransportSecurity(res) {
+  if (env.ABER_STRICT_TRANSPORT_SECURITY) {
+    res.setHeader('Strict-Transport-Security', env.ABER_STRICT_TRANSPORT_SECURITY);
+  }
+}
+
 module.exports = {
   aberSettingsVersion: ${SETTINGS_VERSION},
 
@@ -521,6 +532,7 @@ module.exports = {
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
     res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    strictTransportSecurity(res);
     next();
   },
 
@@ -681,8 +693,11 @@ module.exports = {
    * The token is not the admin credential and must never be: a flow author can read
    * msg.req.headers, so anything sent here is readable by every flow. The database's webhook
    * dispatcher mints a fresh 60-second JWT per event, scoped aud=node-red-hooks.
+   *
+   * The routes share the editor's host, so they carry its Strict-Transport-Security, refusals too.
    */
   httpNodeAuth: function (req, res, next) {
+    strictTransportSecurity(res);
     const header = req.headers.authorization || '';
     const token = header.startsWith('Bearer ') ? header.slice(7) : null;
     if (!token) {

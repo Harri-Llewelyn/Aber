@@ -812,8 +812,8 @@ function edgeFunctionNames() {
   const INTENDED_REDECLARATIONS = {
     'public.audit_trail_page': '0168 probes device_submodels rows for deletion beside device_nameplate, both keyed by their device; the baseline drew a deleted device\'s schema rows as live',
     'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited',
-    'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline copied devices.schema_id alone',
-    'public.reject_archived_schema_assignment': '0168 lets a binding move between devices.schema_id and device_submodels, which set_device_schemas() does; the baseline refused the move as a new binding',
+    'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline records the first alone',
+    'public.reject_archived_schema_assignment': '0168 declares it as the baseline does, in its final form, so neither names devices.schema_id (0175)',
     // Empty just after a squash: the baseline is generated from a dump of the finished database,
     // so every function appears in it exactly once, in its final form. Entries return as soon as
     // a migration added after the fold redeclares something the baseline holds, and each one
@@ -1246,6 +1246,56 @@ function edgeFunctionNames() {
     pass(
       `openapi.yaml covers all ${published} published relations and all ${functions.length} edge functions`
     );
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 54. devices.schema_id stays removed. 0175 moves what the column held into device_submodels rows
+// and drops it with its foreign key and trigger. db-init replays every file on every boot, so any
+// other file that declares the column, the key or the trigger, or a device_schemas view that reads
+// devices, would bring it back or fail the replay. The API spec documents neither the column nor
+// the view's old arm, whose `source` value is gone.
+// -------------------------------------------------------------------------------------------------
+{
+  const DROPPER = '0175_a_device_s_schemas_are_its_submodels.sql';
+  const dir = 'supabase/migrations';
+  const files = readdirSync(join(REPO, dir)).filter((f) => /^\d+_.*\.sql$/.test(f)).sort();
+  const offences = [];
+  if (!files.includes(DROPPER)) offences.push(`${dir}/${DROPPER} is missing`);
+
+  for (const f of files.filter((name) => name !== DROPPER)) {
+    const sql = read(`${dir}/${f}`);
+    for (const m of sql.matchAll(/(?:CREATE TABLE IF NOT EXISTS|ALTER TABLE(?: ONLY)?) public\.devices\b[\s\S]*?;/g)) {
+      if (/\bschema_id\b/.test(m[0])) offences.push(`${f} declares a schema_id column or constraint on public.devices`);
+    }
+    if (/devices_schema_id_fkey/.test(sql)) offences.push(`${f} names devices_schema_id_fkey`);
+    if (/CREATE TRIGGER trg_devices_reject_archived_schema\b/.test(sql)) {
+      offences.push(`${f} creates trg_devices_reject_archived_schema`);
+    }
+    for (const m of sql.matchAll(/CREATE OR REPLACE VIEW public\.device_schemas\b[\s\S]*?;/g)) {
+      if (/\bpublic\.devices\b/.test(m[0])) offences.push(`${f} declares a device_schemas view that reads public.devices`);
+    }
+  }
+
+  const spec = read('docs/openapi.yaml');
+  // A component schema's body: the lines after its 4-space key, up to the next 4-space key.
+  const components = {
+    Device: spec.match(/^ {4}Device:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? null,
+    DeviceWrite: spec.match(/^ {4}DeviceWrite:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? null,
+  };
+  for (const [name, body] of Object.entries(components)) {
+    if (body === null) offences.push(`docs/openapi.yaml has no ${name} schema`);
+    else if (/^ {8}schema_id:/m.test(body)) offences.push(`docs/openapi.yaml's ${name} still documents schema_id`);
+  }
+  const deviceSchema = spec.match(/^ {4}DeviceSchema:\n([\s\S]*?)(?=^ {4}\S)/m)?.[1] ?? '';
+  if (!/^ {8}source: \{ type: string, enum: \[device_submodels\]/m.test(deviceSchema)) {
+    offences.push("docs/openapi.yaml's DeviceSchema.source is not the one value device_submodels");
+  }
+
+  if (offences.length) {
+    fail(`devices.schema_id must stay removed (0175):\n  ${offences.join('\n  ')}`);
+  } else {
+    pass(`devices.schema_id stays removed: no file but 0175 names the column, its key or its trigger, and the API spec documents neither it nor the view's old arm`);
   }
 }
 
@@ -2692,6 +2742,77 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 57. The connection strip says what its docs quote.
+//
+// The Site Map help names the strip under the top bar by its opening words, its button and its
+// threshold, and frontend/README.md gives the threshold, the Realtime window, the reconcile poll it
+// sits above and the tab title's prefix. The words live in ConnectionStrip.jsx, the threshold and
+// the window in lib/connectionState.js, the poll in constants.js and the prefix in
+// useDocumentTitle.js, and any of them can change without the prose noticing. The window must also
+// stay above the poll, or a Realtime outage with REST up shows the strip between polls.
+// -------------------------------------------------------------------------------------------------
+{
+  const STRIP = 'frontend/src/components/common/ConnectionStrip.jsx';
+  const STATE = 'frontend/src/lib/connectionState.js';
+  const TITLE = 'frontend/src/hooks/useDocumentTitle.js';
+  const CONSTANTS = 'frontend/src/constants.js';
+  const HELP = 'frontend/src/help/site-map.md';
+  const README = 'frontend/README.md';
+
+  const threshold = /export const STALE_AFTER_MS = (\d+)\b/.exec(read(STATE));
+  const realtimeWindow = /export const REALTIME_RECONCILE_WINDOW_MS = (\d+)\b/.exec(read(STATE));
+  const reconcile = /const RECONCILE_INTERVAL_MS = (\d+)\b/.exec(read(CONSTANTS));
+  const prefix = /export const NOT_UPDATING_PREFIX = '([^']+)'/.exec(read(TITLE));
+
+  if (!threshold || !realtimeWindow || !reconcile || !prefix) {
+    fail(
+      `check-docs-drift: could not find STALE_AFTER_MS or REALTIME_RECONCILE_WINDOW_MS in ${STATE}, ` +
+        `RECONCILE_INTERVAL_MS in ${CONSTANTS}, or NOT_UPDATING_PREFIX in ${TITLE}.`
+    );
+  } else {
+    const seconds = Number(threshold[1]) / 1000;
+    const windowSeconds = Number(realtimeWindow[1]) / 1000;
+    const reconcileSeconds = Number(reconcile[1]) / 1000;
+    // Substring matches: the prefix carries a middle dot, and an escaping slip would fail open.
+    const claims = [
+      { file: STRIP, needle: 'Not updating since', what: 'the strip\'s opening words' },
+      { file: STRIP, needle: 'Sign In Again', what: 'the button a rejected session shows' },
+      { file: HELP, needle: '**Not updating since**', what: 'the strip\'s opening words, quoted' },
+      { file: HELP, needle: '**Sign In Again**', what: 'the button, quoted' },
+      { file: HELP, needle: `about ${seconds} seconds`, what: `the threshold (STALE_AFTER_MS is ${threshold[1]})` },
+      { file: README, needle: `\`STALE_AFTER_MS\` (${seconds} seconds)`, what: `the threshold (STALE_AFTER_MS is ${threshold[1]})` },
+      { file: README, needle: `\`REALTIME_RECONCILE_WINDOW_MS\` (${windowSeconds} seconds)`, what: `the Realtime window (REALTIME_RECONCILE_WINDOW_MS is ${realtimeWindow[1]})` },
+      { file: README, needle: `${reconcileSeconds}-second reconcile poll`, what: `the reconcile poll (RECONCILE_INTERVAL_MS is ${reconcile[1]})` },
+      { file: README, needle: `"${prefix[1]}"`, what: 'the tab title\'s prefix (NOT_UPDATING_PREFIX)' },
+    ];
+    const stale = claims.filter(({ file, needle }) => !read(file).includes(needle));
+
+    for (const { file, needle, what } of stale) {
+      fail(
+        `connection strip: ${file} no longer contains ${JSON.stringify(needle)}, ${what}.\n` +
+          '      The strip, its timings and the title prefix are quoted in the Site Map help and\n' +
+          '      frontend/README.md; change the code and the quotes together.'
+      );
+    }
+    if (Number(realtimeWindow[1]) <= Number(reconcile[1])) {
+      fail(
+        `connection strip: REALTIME_RECONCILE_WINDOW_MS (${realtimeWindow[1]}) is not above RECONCILE_INTERVAL_MS ` +
+          `(${reconcile[1]}).\n` +
+          '      While Realtime is down and REST is up, the strip would show between reconcile polls\n' +
+          '      that are still bringing data.'
+      );
+    }
+    if (!stale.length && Number(realtimeWindow[1]) > Number(reconcile[1])) {
+      pass(
+        `the connection strip's words, its ${seconds}-second threshold, its ${windowSeconds}-second ` +
+          `Realtime window (above the ${reconcileSeconds}-second reconcile poll) and the title prefix ` +
+          'match the Site Map help and frontend/README.md'
+      );
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 16. Every navigable page has help, and every help file names a page that exists.
 //
 // The help corpus is resolved by filename at runtime (frontend/src/help/index.js) and a missing
@@ -3119,6 +3240,146 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 56. Every image this repository builds runs as a stated, non-root user. Each Dockerfile's final
+// stage ends with a USER that is not root, or config-allowlist.json carries a DS-0002 line saying
+// why. The runbook's *Users* table gives each image the chart runs a uid:gid; that image's
+// Dockerfile names the same one, and every container the templates run it in states it, with
+// runAsNonRoot, itself or through its pod (values.yaml's podSecurityContext included). A `root`
+// row is an allow-listed image; ROOT_ALSO names an image the chart may also run as root.
+// -------------------------------------------------------------------------------------------------
+{
+  const TEMPLATES = 'deploy/helm/aber/templates/';
+  const RUNBOOK = 'deploy/k8s/README.md';
+  const ROOT_ALSO = new Map([['backup-service', 'backup.includeForge or backup.includeBroker']]);
+  const bad = [];
+  const allow = JSON.parse(read('scripts/lint/config-allowlist.json'));
+
+  // The final stage's last USER, per Dockerfile.
+  const users = new Map();
+  for (const f of allFiles.filter((p) => p.endsWith('Dockerfile') && !p.startsWith('frontend/dist/'))) {
+    const text = read(f);
+    const stage = text.slice(Math.max(0, text.search(/^FROM\s[^\n]*$(?![\s\S]*^FROM\s)/m)));
+    const user = [...stage.matchAll(/^USER\s+(\S+)\s*$/gm)].map((m) => m[1]).pop() || null;
+    users.set(f, user);
+    const rootish = !user || /^(root|0)(:|$)/.test(user);
+    if (rootish && !allow[`DS-0002 ${f}`]) bad.push(`${f} ends ${user ? `as ${user}` : 'with no USER'}, and config-allowlist.json states no DS-0002 reason`);
+    if (!rootish && allow[`DS-0002 ${f}`]) bad.push(`${f} ends as ${user}, but config-allowlist.json still allow-lists its DS-0002`);
+  }
+
+  // The images the chart builds (scripts/dev-cluster.mjs), and the runbook's table of their users.
+  const dockerfileOf = new Map([...read('scripts/dev-cluster.mjs').matchAll(/name: '([^']+)', file: '([^']+)'/g)].map((m) => [m[1], m[2]]));
+  const section = read(RUNBOOK).match(/\n### Users\n([\s\S]*?)(?=\n### )/);
+  const table = new Map();
+  for (const row of (section ? section[1] : '').split('\n').filter((l) => /^\| [a-z0-9-]+ \|/.test(l))) {
+    const [, image, runs, where] = row.split('|').map((c) => c.trim());
+    table.set(image, { runs, where });
+  }
+  if (!table.size) bad.push(`${RUNBOOK} has no *Users* table`);
+  for (const name of dockerfileOf.keys()) if (!table.has(name)) bad.push(`${RUNBOOK}'s Users table has no row for ${name}, which the chart runs`);
+  for (const [name, { runs, where }] of table) {
+    const file = dockerfileOf.get(name);
+    if (!file) { bad.push(`${RUNBOOK}'s Users table names ${name}, which scripts/dev-cluster.mjs does not build`); continue; }
+    const user = users.get(file);
+    if (runs === 'root') {
+      if (user) bad.push(`${RUNBOOK} says ${name} runs as root, but ${file} ends as ${user}`);
+    } else if (!/^[1-9]\d*:\d+$/.test(runs)) {
+      bad.push(`${RUNBOOK}'s Users table gives ${name} "${runs}", not a non-root uid:gid`);
+    } else if (/^\d+(:\d+)?$/.test(user || '') && user !== runs && user !== runs.split(':')[0]) {
+      // A USER with no group takes its passwd entry's; the table's gid is held against the chart.
+      bad.push(`${file} ends as ${user}; ${RUNBOOK}'s Users table says ${name} runs as ${runs}`);
+    }
+    if (ROOT_ALSO.has(name) && !/as root/.test(where)) bad.push(`${RUNBOOK}'s Users table does not say when ${name} runs as root (${ROOT_ALSO.get(name)})`);
+  }
+
+  // values.yaml: <key>.<image|serverImage>.repository, and <key>.podSecurityContext's text.
+  const VALUES = read('deploy/helm/aber/values.yaml').split('\n');
+  const blockOf = (key) => {
+    const s = VALUES.findIndex((l) => l === `${key}:`);
+    if (s === -1) return [];
+    let e = s + 1;
+    while (e < VALUES.length && (VALUES[e] === '' || /^[ #]/.test(VALUES[e]))) e += 1;
+    return VALUES.slice(s + 1, e);
+  };
+  const subBlock = (lines, sub) => {
+    const s = lines.findIndex((l) => l === `  ${sub}:`);
+    if (s === -1) return [];
+    let e = s + 1;
+    while (e < lines.length && (lines[e] === '' || /^ {4}/.test(lines[e]) || /^\s*#/.test(lines[e]))) e += 1;
+    return lines.slice(s + 1, e);
+  };
+  const imageName = (key, sub) => {
+    const repo = subBlock(blockOf(key), sub).map((l) => l.match(/^ {4}repository:\s*(\S+)/)).find(Boolean);
+    return repo && repo[1].startsWith('ghcr.io/harri-llewelyn/aber/') ? repo[1].slice('ghcr.io/harri-llewelyn/aber/'.length) : null;
+  };
+
+  // Every container in the templates running one of them: the runAs settings it states, or failing
+  // that its pod's. Read as check 51 reads them.
+  const indent = (l) => l.match(/^ */)[0].length;
+  const skip = (l) => !l.trim() || /^\s*#/.test(l) || /^\s*\{\{.*\}\}\s*$/.test(l);
+  const blockText = (lines, i) => {
+    let t = '';
+    for (let j = i + 1; j < lines.length && (!lines[j].trim() || indent(lines[j]) > indent(lines[i])); j++) t += `${lines[j]}\n`;
+    return t;
+  };
+  const seen = new Map();
+  for (const f of allFiles.filter((p) => p.startsWith(TEMPLATES) && /\.(ya?ml|tpl)$/.test(p))) {
+    const lines = read(f).replace(/\{\{-?\s*\/\*[\s\S]*?\*\/\s*-?\}\}/g, (c) => c.replace(/[^\n]/g, '')).split('\n');
+    lines.forEach((line, i) => {
+      const item = line.match(/^( *)- name:\s*(.+?)\s*$/);
+      if (!item) return;
+      let imageLine = null;
+      let sc = null;
+      for (let j = i + 1; j < lines.length && (skip(lines[j]) || indent(lines[j]) > item[1].length); j++) {
+        if (indent(lines[j]) !== item[1].length + 2) continue;
+        if (/^\s*image:/.test(lines[j])) imageLine = lines[j];
+        if (/^\s*securityContext:\s*$/.test(lines[j])) sc = j;
+      }
+      const ref = imageLine && imageLine.match(/\.Values\.(\w+)\.(image|serverImage)\b/);
+      const name = ref && imageName(ref[1], ref[2]);
+      if (!name || !table.has(name) || table.get(name).runs === 'root') return;
+      const own = sc === null ? '' : blockText(lines, sc);
+      // The pod: the `containers:` or `initContainers:` key above this item, and the
+      // `securityContext:` at that key's indent in the same pod spec.
+      let k = i;
+      while (k > 0 && !(indent(lines[k]) === item[1].length - 2 && /^\s*(initContainers|containers):\s*$/.test(lines[k]))) k -= 1;
+      const podIndent = indent(lines[k]);
+      let s = k;
+      while (s > 0 && (skip(lines[s - 1]) || indent(lines[s - 1]) >= podIndent)) s -= 1;
+      let e = k;
+      while (e + 1 < lines.length && (skip(lines[e + 1]) || indent(lines[e + 1]) >= podIndent)) e += 1;
+      const podSc = lines.findIndex((l, j) => j >= s && j <= e && indent(l) === podIndent && /^\s*securityContext:\s*$/.test(l));
+      let pod = podSc === -1 ? '' : blockText(lines, podSc);
+      const viaValues = pod.match(/include "aber\.podSecurityContext" \.Values\.(\w+)\.podSecurityContext/);
+      if (viaValues) pod = subBlock(blockOf(viaValues[1]), 'podSecurityContext').join('\n');
+      const stated = (re) => {
+        const mine = [...own.matchAll(re)].map((m) => m[1]);
+        return mine.length ? mine : [...pod.matchAll(re)].map((m) => m[1]);
+      };
+      const where = `${f}:${i + 1} (${item[2]}, ${name})`;
+      const [uid, gid] = table.get(name).runs.split(':');
+      const uids = stated(/runAsUser:\s*(\d+)/g);
+      const gids = stated(/runAsGroup:\s*(\d+)/g);
+      const allowed = ROOT_ALSO.has(name) ? [uid, '0'] : [uid];
+      if (!uids.includes(uid) || uids.some((u) => !allowed.includes(u))) bad.push(`${where} runs as ${uids.join(' or ') || 'its image\'s user, unstated'}; the Users table says ${uid}`);
+      if (!gids.includes(gid) || gids.some((g) => g !== gid)) bad.push(`${where} states runAsGroup ${gids.join(' or ') || 'nowhere'}; the Users table says ${gid}`);
+      if (!/runAsNonRoot: true/.test(own + pod)) bad.push(`${where} does not set runAsNonRoot: true`);
+      seen.set(name, (seen.get(name) || 0) + 1);
+    });
+  }
+  for (const [name, { runs }] of table) {
+    if (runs !== 'root' && !seen.has(name)) bad.push(`no container in ${TEMPLATES} runs ${name}, so its row in the Users table is unchecked`);
+  }
+
+  const named = [...table.keys()].filter((n) => dockerfileOf.has(n) && !/^\d/.test(users.get(dockerfileOf.get(n)) || '0') && table.get(n).runs !== 'root');
+  if (bad.length) {
+    fail(`an image runs as root, or its Dockerfile, the chart and the runbook's Users table disagree:\n${bad.map((x) => `        ${x}`).join('\n')}`);
+  } else {
+    pass(`all ${users.size} Dockerfiles end as a non-root user or say why not; the chart runs ${seen.size} images in ${[...seen.values()].reduce((a, b) => a + b, 0)} containers as the Users table's uid:gid` +
+      (named.length ? ` (${named.join(', ')} names its user in its Dockerfile; the chart states the uid)` : ''));
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 18. A Dockerfile built FROM an image the chart also runs is pinned to the chart's tag.
 //
 // THE COUPLING IS REAL AND SILENT WHEN BROKEN. `backup-service` and `db-init` are built FROM
@@ -3168,6 +3429,64 @@ function edgeFunctionNames() {
     );
   } else {
     pass(`all ${coupled} image base(s) shared with the chart agree with its pins`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 53. A late replay reaches every rollup. Ingestion records an hour once a reading is older than
+// ROLLUP_POLICY_REACH_SECONDS, and refresh_requested_rollups() refreshes it in each rollup it names.
+// The reach plus the widest bucket must stay inside the policies' late_data, with room for their
+// schedules, or a reading in between reaches neither; the job must name every rollup aggregates.sql creates, parents first;
+// and the window must be whole buckets in each.
+// -------------------------------------------------------------------------------------------------
+{
+  const AGG = 'timescaledb/aggregates.sql';
+  const agg = read(AGG);
+  const daemon = read('ingestion/ingestion.py');
+  const UNIT = { minute: 60, minutes: 60, hour: 3600, hours: 3600, day: 86400, days: 86400 };
+  const seconds = (text) => {
+    const m = /^(\d+) (\w+)$/.exec(text || '');
+    return m && UNIT[m[2]] ? Number(m[1]) * UNIT[m[2]] : NaN;
+  };
+  const product = (text) => (text ? text.split('*').reduce((p, f) => p * Number(f.trim()), 1) : NaN);
+  const rollups = [...agg.matchAll(
+    /CREATE MATERIALIZED VIEW IF NOT EXISTS (\w+)\s+WITH \(timescaledb\.continuous\) AS\s+SELECT time_bucket\(INTERVAL '([^']+)', \w+\)[\s\S]*?\n\s*FROM (\w+)/g,
+  )].map(([, name, width, source]) => ({ name, width: seconds(width), source }));
+  const lateData = seconds((agg.match(/late_data CONSTANT interval := INTERVAL '([^']+)';/) || [])[1]);
+  const named = ((agg.match(/v_rollups CONSTANT text\[\] := ARRAY\[([^\]]*)\];/) || [])[1] || '')
+    .split(',').map((s) => s.trim().replace(/^'|'$/g, '').replace(/^public\./, '')).filter(Boolean);
+  const reach = product((daemon.match(/\nROLLUP_POLICY_REACH_SECONDS = ([\d *]+)\n/) || [])[1]);
+  const windowSeconds = product((daemon.match(/\nROLLUP_WINDOW_SECONDS = ([\d *]+)\n/) || [])[1]);
+  const widest = Math.max(...rollups.map((r) => r.width));
+  if (!rollups.length || rollups.some((r) => !Number.isFinite(r.width)) || !Number.isFinite(lateData)
+      || !named.length || !Number.isFinite(reach) || !Number.isFinite(windowSeconds)) {
+    fail(`check 53 could not read the rollups, late_data or refresh_requested_rollups()'s list in ${AGG}, `
+      + "or ROLLUP_POLICY_REACH_SECONDS / ROLLUP_WINDOW_SECONDS in ingestion/ingestion.py");
+  } else {
+    const problems = [];
+    const created = rollups.map((r) => r.name);
+    if (named.join(',') !== created.join(',')) {
+      problems.push(`refresh_requested_rollups() refreshes ${named.join(', ')}; ${AGG} creates ${created.join(', ')}, `
+        + 'in that order');
+    }
+    rollups.forEach((r, i) => {
+      if (r.source !== 'telemetry' && !created.slice(0, i).includes(r.source)) {
+        problems.push(`${r.name} is built from ${r.source}, which is not created before it`);
+      }
+      if (windowSeconds % r.width !== 0) {
+        problems.push(`ingestion's ${windowSeconds} s window is not whole ${r.name} buckets (${r.width} s)`);
+      }
+    });
+    if (reach + widest >= lateData) {
+      problems.push(`ingestion records windows past ${reach} s and the widest bucket is ${widest} s, which `
+        + `leaves the policies no time inside the ${lateData} s they reach back`);
+    }
+    if (problems.length) {
+      fail('a late replay would miss a rollup:\n' + problems.map((p) => `        ${p}`).join('\n'));
+    } else {
+      pass(`a reading older than ${reach / 3600} h has its window refreshed in ${created.join(', ')}, `
+        + `inside the policies' ${lateData / 3600} h`);
+    }
   }
 }
 
@@ -3496,6 +3815,66 @@ function edgeFunctionNames() {
     );
   } else if (!broken.length) {
     pass(`no retired name is back (${RETIRED.length} names, ${KEPT.length} kept on purpose, ${scanned.length} files scanned)`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 58. Every web host the chart publishes sends Strict-Transport-Security under https. The header
+// carries no includeSubDomains, so each sibling host sends its own. Each backend aber.ingressRoutes
+// names is the gateway (its listeners are check-gateway-surface.mjs's), Grafana (a setting of its
+// own), a component whose template sets ABER_STRICT_TRANSPORT_SECURITY from
+// aber.strictTransportSecurity and whose own code reads that variable, or an exemption with its reason.
+// -------------------------------------------------------------------------------------------------
+{
+  const HELPERS = 'deploy/helm/aber/templates/_helpers.tpl';
+  const T = 'deploy/helm/aber/templates/';
+  const ENV = /- name: ABER_STRICT_TRANSPORT_SECURITY\n\s+value: \{\{ include "aber\.strictTransportSecurity" \. \| quote \}\}/;
+  const SENDERS = {
+    'supabase-envoy': { template: `${T}supabase/envoy.yaml`, needs: [/include "aber\.strictTransportSecurity"/] },
+    grafana: { template: `${T}obs/grafana.yaml`, needs: [/GF_SECURITY_STRICT_TRANSPORT_SECURITY_MAX_AGE_SECONDS\n\s+value: \{\{ include "aber\.hstsMaxAgeSeconds"/] },
+    frontend: { template: `${T}apps/frontend.yaml`, needs: [ENV], code: ['frontend/nginx.conf'] },
+    'node-red': { template: `${T}apps/node-red.yaml`, needs: [ENV], code: ['node-red/node-red-init.mjs'] },
+    'i3x-service': { template: `${T}apps/i3x-service.yaml`, needs: [ENV], code: ['i3x/i3x_service.py'] },
+    'swagger-ui': { template: `${T}obs/swagger-ui.yaml`, needs: [ENV], code: ['swagger-ui/aber-headers.conf.template'] },
+    // MQTT over WebSockets serves no page, and Mosquitto adds no header to its upgrade response.
+    mosquitto: { exempt: true },
+  };
+  const helpers = read(HELPERS);
+  const start = helpers.indexOf('{{- define "aber.ingressRoutes" -}}');
+  const end = helpers.indexOf('{{- define', start + 1);
+  const block = start < 0 ? '' : helpers.slice(start, end < 0 ? undefined : end);
+  const services = [...new Set([...block.matchAll(/"service" "([a-z0-9-]+)"/g)].map((m) => m[1]))];
+  const wrong = [];
+  for (const service of services) {
+    const sender = SENDERS[service];
+    if (!sender) {
+      wrong.push(`aber.ingressRoutes publishes ${service}, which no entry here says sends Strict-Transport-Security. ` +
+        'Give its container ABER_STRICT_TRANSPORT_SECURITY from aber.strictTransportSecurity, send it, and list it in check 58');
+      continue;
+    }
+    if (sender.exempt) continue;
+    const template = read(sender.template);
+    if (!sender.needs.every((re) => re.test(template))) {
+      wrong.push(`${sender.template} no longer hands ${service} the value aber.strictTransportSecurity renders`);
+    }
+    for (const file of sender.code || []) {
+      if (!read(file).includes('ABER_STRICT_TRANSPORT_SECURITY')) wrong.push(`${file} no longer reads ABER_STRICT_TRANSPORT_SECURITY, so ${service} sends no header`);
+    }
+  }
+  if (!read('swagger-ui/Dockerfile').includes('aber-headers.conf.template')) {
+    wrong.push('swagger-ui/Dockerfile no longer copies aber-headers.conf.template, so the documentation host sends no header');
+  }
+  for (const stale of Object.keys(SENDERS).filter((s) => !services.includes(s))) {
+    wrong.push(`check 58 lists ${stale}, which aber.ingressRoutes no longer publishes; remove it`);
+  }
+  if (!services.length) {
+    fail(`check 58 found no "service" in ${HELPERS}'s aber.ingressRoutes, so it checks nothing`);
+  } else if (wrong.length) {
+    fail('a host the chart publishes may not send Strict-Transport-Security under https:\n' + wrong.map((w) => `        ${w}`).join('\n'));
+  } else {
+    const exempt = services.filter((s) => SENDERS[s].exempt);
+    pass(`${services.length - exempt.length} of the ${services.length} backends the Ingress publishes send ` +
+      `Strict-Transport-Security under https; ${exempt.join(', ')} serves no page`);
   }
 }
 

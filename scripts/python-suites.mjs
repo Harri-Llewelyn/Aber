@@ -348,6 +348,14 @@ export const SUITES = {
       'The archived-gateway path, which #102 found broken in production. Nothing else looks at ' +
       'it: an archived gateway is by definition one nobody is watching.',
   },
+  'ingestion/test_stale_node_death.py': {
+    lanes: ['unit'],
+    why:
+      'An NDEATH whose bdSeq names an earlier session of the same edge node, a Last Will the ' +
+      'broker delivered after the node was born again. Applied, it reads a live gateway and its ' +
+      'devices OFFLINE until their next data message, and nothing reports it: the gateway is ' +
+      'publishing and every other check passes.',
+  },
   'ingestion/test_archived_device.py': {
     lanes: ['unit'],
     why:
@@ -782,11 +790,9 @@ export const SUITES = {
       'precedes routing, which is the entire boundary in front of these key-auth-exempt routes. ' +
       'THE REST NEED THE STACK, and two of them are the reason the suite exists: /v1/device and ' +
       '/v1/schema/{uuid} answer the same question from opposite ends, composed by different ' +
-      'queries, and a disagreement is a 200 at both endpoints. The live layer also provisions a ' +
-      'device attached through the deprecated `devices.schema_id` beside the join-table ' +
-      '`device_submodels` one, because a reverse lookup written against the join table alone ' +
-      'passes every other assertion in the file while omitting every device attached through ' +
-      'the column, which a 1.0 dashboard wrote and an API client still may.',
+      'queries, and a disagreement is a 200 at both endpoints. The live layer provisions a second ' +
+      'device attached through set_device_schemas(), the Devices page\'s writer, beside the ' +
+      'shared fixture\'s, so the reverse lookup is asserted over a set.',
   },
   'supabase/migrations/test_gateway_enrollment.py': {
     // STACK ONLY, AND IT WAS BRIEFLY `db` TOO -- WRONGLY, BY THIS FILE'S OWN RULE. Every one of
@@ -998,6 +1004,13 @@ export const SUITES = {
     why:
       'The rollups are compressed by series, on their own chunk spans, after the late-data window. ' +
       'Uncompressed they were most of the historian and filled its default volume in two months (#415).',
+  },
+  'timescaledb/test_rollup_refresh.py': {
+    lanes: ['stack'],
+    why:
+      'A replay written days late reaches the rollups: the window ingestion records is refreshed by ' +
+      'the historian job, as ingest_writer can record it and read nothing. The policies reach back ' +
+      '25 hours, so without the job the rollups show the outage as a gap the raw table does not have.',
   },
   'timescaledb/test_physical_backup.py': {
     lanes: ['stack'],

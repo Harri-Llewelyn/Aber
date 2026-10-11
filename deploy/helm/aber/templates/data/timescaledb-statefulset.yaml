@@ -105,11 +105,11 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      # M5. local-path provisions a host directory owned by root; this image runs postgres as
-      # uid/gid 999 and initdb refuses a directory it cannot write. Without fsGroup the pod
-      # crash-loops on a permission error naming a path the operator never chose.
-      # OnRootMismatch skips a recursive chgrp on every restart once ownership is already correct,
-      # which matters as the historian grows.
+      # M5. Every container runs as the image's postgres user, uid/gid 70 (values.yaml). local-path
+      # provisions a host directory owned by root; fsGroup makes its root group-writable, so 70
+      # creates PGDATA beneath it. Without fsGroup initdb fails on a permission error naming a path
+      # the operator never chose. OnRootMismatch skips a recursive chgrp on every restart once
+      # ownership is already correct, which matters as the historian grows.
       securityContext:
         {{- include "aber.podSecurityContext" .Values.timescaledb.podSecurityContext | nindent 8 }}
       containers:
@@ -213,13 +213,12 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 6
+          # Started as postgres, the entrypoint skips its chown and gosu and sets PGDATA to 0700,
+          # which the owner may do; tini forwards the stop signal to a process of its own uid.
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-              # The entrypoint starts as root, fixes the data directory's owner and mode and drops
-              # to postgres (uid 70) through gosu; tini, as root, forwards the stop signal to it.
-              add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "KILL", "SETGID", "SETUID"]
           resources:
             {{- toYaml .Values.timescaledb.resources | nindent 12 }}
           volumeMounts:
@@ -238,17 +237,15 @@ spec:
         {{- if include "aber.physicalBackupOn" . }}
         {{- /*
           The scheduled backups (timescaledb/pgbackrest/historian-backup.sh). The server's image, so
-          one pgBackRest version writes the repository; the database's own uid, because a backup
-          reads the 0700 data directory. It reaches the server over the shared socket directory.
+          one pgBackRest version writes the repository; the database's own uid (the pod's), because
+          a backup reads the 0700 data directory. It reaches the server over the shared socket
+          directory.
         */}}
         - name: pgbackrest
           image: {{ include "aber.image" (dict "image" .Values.timescaledb.image "ctx" .) | quote }}
           imagePullPolicy: {{ .Values.timescaledb.image.pullPolicy }}
           command: ["/bin/sh", "/opt/aber/historian-backup.sh"]
           securityContext:
-            runAsUser: 70
-            runAsGroup: 70
-            runAsNonRoot: true
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]

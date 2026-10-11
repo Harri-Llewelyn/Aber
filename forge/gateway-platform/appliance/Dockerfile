@@ -71,3 +71,7 @@ RUN node -e "require('/usr/src/node-red/node_modules/bcryptjs'); \
 # No CMD and no ENTRYPOINT override here: the base image's entrypoint is correct for the `node-red`
 # service. docker-compose.yml overrides both for the one-shot `bootstrap` service instead -- see the
 # note there about why a bare `command:` would silently start Node-RED rather than the script.
+
+# The base's node-red user, by number (the base names it): 1000:1000. docker-compose.yml runs the
+# one-shot `bootstrap` service as root, for the reason it gives there.
+USER 1000:1000

@@ -106,27 +106,27 @@ describe('assignableSchemas()', () => {
 describe('the Edit Details schema picker', () => {
 
   it('does not offer an archived version to a device that is not on one', async () => {
-    await show([device({ schema_id: V2 })])
+    await show([device({ submodel_schema_ids: [V2] })])
     openEdit()
     expect(optionTexts()).not.toContain('Test_Schema')
     expect(optionTexts()).toContain('Test_Schema_v2')
   })
 
   it('still offers a draft, which is how a version is tried before publishing', async () => {
-    await show([device({ schema_id: V2 })])
+    await show([device({ submodel_schema_ids: [V2] })])
     openEdit()
     expect(optionTexts()).toContain('Test_Schema_v3')
   })
 
   it('keeps a device that is already on an archived version showing it, labelled', async () => {
-    await show([device({ schema_id: V1 })])
+    await show([device({ submodel_schema_ids: [V1] })])
     openEdit()
     expect(within(schemaPicker()).getByRole('checkbox', { name: 'Test_Schema · Archived' }).checked).toBe(true)
     expect(optionTexts()).toContain('Test_Schema · Archived')
   })
 
   it('says what to do about it rather than only that it is archived', async () => {
-    await show([device({ schema_id: V1 })])
+    await show([device({ submodel_schema_ids: [V1] })])
     openEdit()
     expect(
       within(document.querySelector('.modal')).getByText(/still on an archived version/)
@@ -134,7 +134,7 @@ describe('the Edit Details schema picker', () => {
   })
 
   it('says nothing of the kind for a device on the current version', async () => {
-    await show([device({ schema_id: V2 })])
+    await show([device({ submodel_schema_ids: [V2] })])
     openEdit()
     expect(
       within(document.querySelector('.modal')).queryByText(/still on an archived version/)

@@ -115,6 +115,27 @@ Deno.test("catalog text defines only an id no vocabulary holds", () => {
   );
 });
 
+Deno.test("a QUDT quantity kind defers to QUDT, however many metrics carry it", () => {
+  const kind = "http://qudt.org/vocab/quantitykind/Temperature";
+  const zone = metric("BMS/ZONE_TEMPERATURE", kind, "Zone air temperature");
+  const supply = metric("BMS/SUPPLY_TEMPERATURE", kind, "Supply air temperature");
+  for (const catalog of [[zone], [zone, supply]]) {
+    const [concept] = buildConceptDescriptions([kind], { ...record([]), catalog });
+    const content = contentOf([concept], kind);
+    assert.equal(content.definition[0].text, "Temperature, as QUDT defines it.", `${catalog.length} row(s)`);
+    assert.equal([content.unit, content.dataType], ["CELSIUS", "REAL_MEASURE"]);
+  }
+  // A vocabulary's own text still comes first.
+  const defined = [{ semantic_id: kind, name: "Temperature", definition: "Hotness.", standard: "QUDT" }];
+  const [concept] = buildConceptDescriptions([kind], { ...record(defined), catalog: [zone] });
+  assert.equal(contentOf([concept], kind).definition[0].text, "Hotness.");
+  // A schema's description does not define it either.
+  const rows = record([]);
+  rows.schemas = [{ ...rows.schemas[0], semantic_id: kind, description: "AHU telemetry" }];
+  const [bySchema] = buildConceptDescriptions([kind], { ...rows, catalog: [] });
+  assert.equal(contentOf([bySchema], kind).definition[0].text, "Temperature, as QUDT defines it.");
+});
+
 Deno.test("a nameplate concept is unchanged by its row in concept_definitions", () => {
   const ids = [MANUFACTURER_NAME];
   const withRow = buildConceptDescriptions(ids, record(DEFINED));

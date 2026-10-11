@@ -1929,9 +1929,8 @@ const apiMethods = {
       ]);
       if (error) throw error;
 
-      // The schemas attached to each device, read from the `device_schemas` view, which unions
-      // device_submodels rows and devices.schema_id in SQL. Non-fatal: schemasForDevice() still
-      // reads schema_id.
+      // The schemas attached to each device, read from the `device_schemas` view: one row per
+      // device_submodels row. Non-fatal: a device whose links did not load shows no schema.
       const { data: links } = await supabase.from('device_schemas').select('device_id, schema_id');
       const schemasByDevice = new Map();
       for (const link of links || []) {
@@ -2647,9 +2646,9 @@ const apiMethods = {
     /**
      * Discard a draft, returning the lineage to the state before the fork.
      *
-     * Through the RPC, not a DELETE: `devices.schema_id` is ON DELETE SET NULL and
-     * `device_submodels.schema_id` is ON DELETE CASCADE, so deleting an active schema silently
-     * detaches every device bound to it. The function refuses anything that is not a draft.
+     * Through the RPC, not a DELETE: `device_submodels.schema_id` is ON DELETE CASCADE, so
+     * deleting an active schema silently detaches every device bound to it. The function refuses
+     * anything that is not a draft.
      */
     if (/^\/api\/v1\/schemas\/[^/]+\/discard$/.test(path)) {
       const draftId = path.split('/')[4];
@@ -2891,7 +2890,7 @@ const apiMethods = {
 
     /**
      * Make a device's schemas exactly `body.schema_ids`, through set_device_schemas(): one
-     * transaction that writes `device_submodels` and clears the deprecated `devices.schema_id`.
+     * transaction that writes `device_submodels`.
      */
     if (/^\/api\/v1\/devices\/[^/]+\/schemas$/.test(path)) {
       const deviceId = path.split('/')[4];

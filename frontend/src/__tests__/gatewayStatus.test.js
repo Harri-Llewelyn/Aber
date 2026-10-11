@@ -6,7 +6,8 @@ import {
   gatewayDisplayStatus,
   isGatewayOnline,
   formatHeartbeat,
-  formatUptime
+  formatUptime,
+  gatewayGroupMismatch
 } from '../utils/gatewayStatus';
 
 const NOW = Date.parse('2026-01-01T12:00:00Z');
@@ -82,5 +83,24 @@ describe('formatUptime', () => {
     expect(formatUptime(undefined)).toBeNull();
     expect(formatUptime(-1)).toBeNull();
     expect(formatUptime('abc')).toBeNull();
+  });
+});
+
+describe('gatewayGroupMismatch', () => {
+  it('names both groups when the gateway publishes under another', () => {
+    expect(gatewayGroupMismatch({ sparkplug_group: 'Aber', observed_sparkplug_group: 'Plant-B' }))
+      .toEqual({ observed: 'Plant-B', registered: 'Aber' });
+  });
+
+  it('is null when the groups agree, or nothing has been observed yet', () => {
+    expect(gatewayGroupMismatch({ sparkplug_group: 'Aber', observed_sparkplug_group: 'Aber' })).toBeNull();
+    expect(gatewayGroupMismatch({ sparkplug_group: 'Aber', observed_sparkplug_group: null })).toBeNull();
+    expect(gatewayGroupMismatch({ sparkplug_group: 'Aber' })).toBeNull();
+    expect(gatewayGroupMismatch(null)).toBeNull();
+  });
+
+  it('is null for an archived gateway, whose traffic is refused', () => {
+    expect(gatewayGroupMismatch({ sparkplug_group: 'Aber', observed_sparkplug_group: 'Plant-B', is_archived: true }))
+      .toBeNull();
   });
 });

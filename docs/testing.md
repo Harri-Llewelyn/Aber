@@ -59,6 +59,7 @@ python ingestion/test_host_connection.py
 python ingestion/test_historical_replay.py
 python ingestion/test_dockerfile_copies.py
 python ingestion/test_audit_write_dedup.py
+python ingestion/test_stale_node_death.py  # an earlier session's NDEATH (bdSeq) changes nothing
 python ingestion/test_payload_conformance.py
 # The Prometheus endpoint and the Sparkplug seq gap counters -- no stack, no broker
 python ingestion/test_metrics_endpoint.py
@@ -473,6 +474,8 @@ python timescaledb/test_physical_backup.py
 # The rollups' columnstore: segmented by series, each on its own chunk span, compressed only once
 # older than the late-data window the refresh reaches back over (#415).
 python timescaledb/test_rollup_compression.py
+# A replay days late reaching the rollups: the window ingestion records, refreshed by the job.
+python timescaledb/test_rollup_refresh.py
 # The daemon's and the FDW's own roles (item 18). Each skips itself when its password is unset,
 # because roles.sql skips creating the role on the same condition.
 python timescaledb/test_historian_role_grants.py
@@ -497,6 +500,12 @@ npm run dev:test -- --filter=i3x
 
 **`validate.py` runs in-cluster as a Job (`e2e.enabled`) and from the host through the dev loop's
 port-forwards**, and the two agreeing is the wiring check.
+
+**CI runs the lane with the NetworkPolicy layer on** (`dev-cluster up --e2e --network-policy`), as
+`values-prod.yaml.example` has it. A flow the chart's edge list does not name is dropped at its
+destination, and nothing logs a policy decision, so this is where a missing edge shows. `npm run
+dev:up -- --network-policy` does the same on a laptop. Without the flag the layer stays off, which
+is the chart's default.
 
 ### What validate.py leaves behind
 
@@ -728,7 +737,7 @@ CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs nine jobs:
 | **frontend-build** | Vitest, the mirrored-logic drift guards, production bundle |
 | **helm-chart** | `helm lint`, render, API-schema validation, chart guard rails |
 | **edge-function-auth-test** | Auth ladders and RLS against a real Postgres |
-| **k8s-validation** | k3d cluster through `dev-cluster up --e2e`: `helm test`, `validate.py` in-cluster, the stack lane through port-forwards, the i3X conformance suite, ingress assertions |
+| **k8s-validation** | k3d cluster through `dev-cluster up --e2e --network-policy`: `helm test`, `validate.py` in-cluster, the stack lane through port-forwards, the i3X conformance suite, ingress assertions, all with NetworkPolicies on |
 | **site-install-rehearsal** | `site-rehearsal install` on k3d: the checkout installed as a new site, with values from `setup.mjs`, never `values-dev.yaml` (*The install and upgrade rehearsals*, below) |
 | **upgrade-rehearsal** | `site-rehearsal upgrade` on k3d: the last release installed as published, then `helm upgrade` to the checkout with the same values |
 | **secret-scan** | gitleaks over every commit in a full clone and the working tree, on every push |
@@ -814,9 +823,17 @@ an edge admits, is answered, and one no rule admits is not. Together with the re
 this shows that every flow the install or upgrade, its hook Jobs, `helm test` and the sign-in
 through Traefik need is admitted on k3s, and that nothing else is. **It cannot show** whether the API-server rules
 are right: k3s does not filter a pod's traffic to the node it runs on, which is where the API server
-is. Nor can it show flows the install never exercises, such as the cold archive at 03:15, the
-backups, `e2e.enabled` or gateways from outside the cluster. And it shows k3s's policy controller
-only, not Calico's or Cilium's.
+is. Nor can it show flows the install never exercises, such as the cold archive at 03:15 or
+gateways from outside the cluster. And it shows k3s's policy controller only, not Calico's or
+Cilium's. k8s-validation covers more of those flows: it runs `validate.py`, the AAS export suite,
+the stack lane (backups and the playback replay among it) and the i3X conformance suite with the
+layer on.
+
+**No CI job installs with the layer off**, though that is the chart's default and what most sites
+run. The helm-chart job's render checks hold that default: with the layer off, the forge's policy
+is the only one rendered. Every developer's `npm run dev:up` installs without the layer. A second,
+smaller k3d job with the layer off would cost another cluster's minutes on every push, for a
+configuration that differs from the one CI runs only in its NetworkPolicy objects.
 
 Measured on a 16 GB laptop with the image builds cached, `install` took 8 minutes with
 NetworkPolicies on and `upgrade` 7½ to 12½, most of the spread in pulling the published images. CI builds every image
@@ -826,6 +843,31 @@ from nothing, so it takes longer.
 [#691](https://github.com/Harri-Llewelyn/Aber/issues/691): real hardware, weeks of running, the
 rest of the hardening that is off by default (both backup tiers, database TLS), real appliances and
 the failure drills.
+
+### AppArmor on the runner
+
+Every job that starts a k3d cluster first unloads the runner's `mosquitto` AppArmor profile
+(`.github/actions/install-k3d`). Ubuntu 26.04 loads that profile, and Ubuntu 24.04 did not.
+
+k3s runs inside a container in k3d, where it cannot load AppArmor profiles, so its pods run
+unconfined as far as the host kernel is concerned. An unconfined process that executes
+`/usr/sbin/mosquitto` is attached to the host's profile by path. That profile allows the Debian
+package's paths, not `/mosquitto/config`, so the broker exits with "Unable to open config file", and
+ingestion and i3X fail behind it. Measured on the 26.04 runner on 2026-10-11:
+
+- In a k3d pod, `open("/mosquitto/config/mosquitto.conf")` returned `EACCES` to the broker with
+  `DAC_OVERRIDE` held and with seccomp `Unconfined`. `cat` read the same file. The kernel log said
+  `apparmor="DENIED" operation="open" profile="mosquitto" name="/mosquitto/config/mosquitto.conf"`.
+- The same pod on the 24.04 runner started the broker.
+- On the 26.04 host itself, `docker run` started the broker: Docker confines its containers with
+  `docker-default`, and an exec inside that profile does not change profile.
+
+A site should not be affected, though no 26.04 host has measured it yet (the installer supports
+22.04 and 24.04): k3s on the host confines every pod with containerd's own profile, which does not
+change profile on exec either. A developer running k3d on an Ubuntu 26.04 host meets the
+same refusal; removing the profile (`echo -n mosquitto | sudo tee
+/sys/kernel/security/apparmor/.remove`) lasts until the next reboot. The cluster diagnostics print
+the runner's AppArmor denials, so another profile that attaches the same way shows up by name.
 
 ## Keeping the pinned versions current
 

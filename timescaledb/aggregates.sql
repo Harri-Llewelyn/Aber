@@ -1,5 +1,5 @@
--- The telemetry rollups (1m -> 5m -> 1h), telemetry_latest, telemetry_horizons and telemetry_gapfill(),
--- reconciled on every boot. Variables:
+-- The telemetry rollups (1m -> 5m -> 1h), telemetry_latest, telemetry_horizons, the job that
+-- refreshes a late replay, and telemetry_gapfill(), reconciled on every boot. Variables:
 --     -v rollup_1m_retain='180 days' -v rollup_5m_retain='1 year' -v rollup_1h_retain='5 years'
 --     -v rollup_compress_after='2 days'
 -- 'never' (also off, none, disabled) removes a rollup's retention or compression policy without
@@ -114,7 +114,9 @@ DO $$
 DECLARE
   disabled CONSTANT text[] := ARRAY['never', 'off', 'disabled', 'none', 'false', '0'];
 
-  -- Must exceed ingestion's 24h late-data window, or a late arrival lands in raw and in no rollup.
+  -- Must exceed ingestion's 24h window for live readings. An older replay is refreshed by
+  -- refresh_requested_rollups() below, from the hours ingestion records once a reading is older
+  -- than ROLLUP_POLICY_REACH_SECONDS, which must stay at least an hour inside this.
   -- Cheap: only buckets the invalidation log marks are refreshed.
   late_data CONSTANT interval := INTERVAL '25 hours';
 
@@ -215,6 +217,97 @@ BEGIN
   END LOOP;
 
   RAISE NOTICE 'telemetry rollups reconciled (1m -> 5m -> 1h, real-time aggregation on).';
+END $$;
+
+-- Hours of telemetry written later than the refresh policies reach back, recorded by ingestion (as
+-- ingest_writer, INSERT only, so ON CONFLICT names no target) for refresh_requested_rollups().
+-- claimed_at is set when the job takes a row; one waiting row per window.
+CREATE TABLE IF NOT EXISTS public.rollup_refresh_requests (
+    window_start timestamptz NOT NULL,
+    window_end   timestamptz NOT NULL,
+    requested_at timestamptz NOT NULL DEFAULT now(),
+    claimed_at   timestamptz,
+    CONSTRAINT rollup_refresh_requests_window CHECK (window_end > window_start)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS rollup_refresh_requests_waiting
+    ON public.rollup_refresh_requests (window_start, window_end)
+ WHERE claimed_at IS NULL;
+
+COMMENT ON TABLE public.rollup_refresh_requests IS
+  'Windows of telemetry written later than the rollup refresh policies reach back (a gateway''s '
+  'replay after an outage), recorded by ingestion and refreshed in every rollup by '
+  'refresh_requested_rollups(). A row is deleted once its window is refreshed.';
+
+-- Refreshes each recorded window in every rollup, parents first. Rows are claimed and committed
+-- before any refresh, so a reading committed meanwhile records its window again for the next run;
+-- a failed run leaves its rows claimed and the next takes them. No SET clause: a procedure with one
+-- runs atomically, and refresh_continuous_aggregate() refuses to run there. Nothing older than the
+-- raw window is refreshed: rebuilt from a dropped range, a bucket would lose every other series.
+CREATE OR REPLACE PROCEDURE public.refresh_requested_rollups(job_id integer, config jsonb)
+LANGUAGE plpgsql
+AS $proc$
+DECLARE
+    v_rollups CONSTANT text[] := ARRAY['public.telemetry_1m', 'public.telemetry_5m', 'public.telemetry_1h'];
+    v_rollup  text;
+    v_window  record;
+    v_raw     interval;
+    v_floor   timestamptz := '-infinity';
+    v_done    integer := 0;
+BEGIN
+    UPDATE public.rollup_refresh_requests
+       SET claimed_at = pg_catalog.now()
+     WHERE claimed_at IS NULL;
+    COMMIT;
+
+    SELECT w.raw_window INTO v_raw FROM public.telemetry_raw_window w;
+    IF v_raw IS NOT NULL THEN
+        v_floor := public.time_bucket(INTERVAL '1 hour', pg_catalog.now() - v_raw) + INTERVAL '1 hour';
+    END IF;
+
+    FOR v_window IN
+        SELECT DISTINCT r.window_start, r.window_end
+          FROM public.rollup_refresh_requests r
+         WHERE r.claimed_at IS NOT NULL
+         ORDER BY r.window_start, r.window_end
+    LOOP
+        IF v_window.window_end > v_floor THEN
+            FOREACH v_rollup IN ARRAY v_rollups LOOP
+                CALL public.refresh_continuous_aggregate(
+                    v_rollup::regclass, GREATEST(v_window.window_start, v_floor), v_window.window_end);
+            END LOOP;
+            v_done := v_done + 1;
+        ELSE
+            RAISE LOG 'refresh_requested_rollups: % .. % is older than the raw window (%); not refreshed',
+                v_window.window_start, v_window.window_end, v_raw;
+        END IF;
+        DELETE FROM public.rollup_refresh_requests r
+         WHERE r.claimed_at IS NOT NULL
+           AND r.window_start = v_window.window_start AND r.window_end = v_window.window_end;
+        COMMIT;
+    END LOOP;
+    IF v_done > 0 THEN
+        RAISE LOG 'refresh_requested_rollups: % window(s) of late telemetry refreshed in %', v_done, v_rollups;
+    END IF;
+END $proc$;
+REVOKE ALL ON PROCEDURE public.refresh_requested_rollups(integer, jsonb) FROM PUBLIC;
+
+-- TimescaleDB's scheduler runs it, as it runs the policies above; found by name so a second boot
+-- re-schedules rather than adds.
+DO $$
+DECLARE
+  schedule CONSTANT interval := INTERVAL '5 minutes';
+  v_job    integer;
+BEGIN
+  SELECT j.job_id INTO v_job FROM timescaledb_information.jobs j
+   WHERE j.proc_schema = 'public' AND j.proc_name = 'refresh_requested_rollups'
+   ORDER BY j.job_id LIMIT 1;
+  IF v_job IS NULL THEN
+    SELECT add_job('public.refresh_requested_rollups', schedule) INTO v_job;
+  ELSE
+    PERFORM alter_job(v_job, schedule_interval => schedule, scheduled => true);
+  END IF;
+  RAISE NOTICE 'late replays (job %): every % the rollups are refreshed over the windows ingestion '
+               'recorded in rollup_refresh_requests', v_job, schedule;
 END $$;
 
 -- Carries the last observation forward across buckets nobody reported in: under report-by-exception

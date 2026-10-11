@@ -123,8 +123,12 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `supabase-storage` | `supabase/storage-api:v1.74.0` | behind `api.<domain>/storage/v1` |
 | `supabase-studio` | `supabase/studio:2026.09.28-sha-5e59b60` | `studio.<domain>`, off by default, behind the gateway's login |
 | `swagger-ui` | `ghcr.io/harri-llewelyn/aber/swagger-ui` | `docs.<domain>`; the two specs are baked into the image |
+| `test-api` | `curlimages/curl:8.22.0` | `helm test` Pod: GoTrue's health and PostgREST with the publishable key answer 200 through the gateway |
+| `test-broker` | `eclipse-mosquitto:2.0.22` | `helm test` Pod: a wrong password gets CONNACK "not authorised", over TLS verified under the chart CA when broker TLS is on |
+| `test-dashboard` | `curlimages/curl:8.22.0` | `helm test` Pod: the frontend Service serves the chart's `/config.js` |
 | `test-db-tls` | `supabase/postgres:17.6.1.175` | `helm test` Pod (`postgresTls.enabled`): both databases refuse plaintext and every remote backend is on TLS |
 | `test-fdw` | `supabase/postgres:17.6.1.175` | `helm test`: the postgres_fdw gate |
+| `test-ingestion` | `curlimages/curl:8.22.0` | `helm test` Pod: the ingestion daemon reports itself subscribed to the broker and connected to the historian |
 | `timescaledb` | `ghcr.io/harri-llewelyn/aber/timescaledb` (`timescale/timescaledb:2.29.2-pg17` with pgBackRest), `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` as a sidecar, and the `pgbackrest` backup sidecar when `timescaledb.physicalBackup` is on | `timescaledb:5432`; `:9187` is scraped |
 | `timescaledb-maintenance` | `ghcr.io/harri-llewelyn/aber/timescaledb` | hook Job: extension, retention, rollups, roles |
 

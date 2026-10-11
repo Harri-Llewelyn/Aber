@@ -656,6 +656,28 @@ than an edit. In order:
 written before the change stay addressed by the old pair. That is the cost the fixed-at-install rule
 exists to make visible before it is paid.
 
+### A gateway shows the group it publishes under (`0174`)
+
+A mismatch is tolerated (`0008`, above), and until `0174` it was visible only as a log line.
+`gateways.observed_sparkplug_group` holds the group the gateway's edge node last published under,
+NULL until a node-level message arrives. Ingestion writes it through
+`ingest_record_gateway_group(p_gateway_id, p_group)` when the group changes, after the heartbeat
+([`ingestion/README.md`](../ingestion/README.md#resolution-precedence)). The Gateways page warns while
+it differs from `sparkplug_group`, so step 5 above shows each appliance still on the old group.
+
+- **A function of its own, not a fifth parameter on `ingest_record_gateway_health()`.** The
+  heartbeat gate is called on every message; this one only on a change. A redeclaration with a new
+  parameter would also be a second signature beside the old one rather than a replacement.
+- **The gate checks the group as `gateways_sparkplug_group_format` does**, not empty and no `/`,
+  `+` or `#`, and caps it at 255 characters: the topic segment is the gateway's choice. Its `UPDATE`
+  carries `IS DISTINCT FROM`, so a repeat moves no row and writes no audit row, and a change is one
+  `UPDATE` row attributed to ingestion. The column is not in `audit_telemetry_columns()`: a change of
+  group is an event, as a change of status is.
+- **`gateway_status` is rebuilt** with `ensure_gateway_status_view()`, as check 10d requires.
+- **Not this release:** a count in `platform_health` and an alert rule.
+
+`test_ingestion_rejection_rpc.py` (`GatewayGroupObservationTestCase`) holds the gate and the view.
+
 ### The Directory reports liveness it observed (archived migration 0054)
 
 `directory_services.status` and `.last_heartbeat` were **never written by anything**. The only
@@ -866,8 +888,8 @@ trigger on `playback_jobs`. Two publishers on one edge node is not a race but a 
 `seq` is scoped to the edge node, so a simulator and a playback under one identity increment private
 counters into one shared sequence and the daemon correctly concludes messages were dropped.
 `ensure_shadow_devices()` mints one device per captured device against that gateway, carrying
-`devices.shadow_of` and reused between runs. It copies the **metric contract** — `schema_id` and
-`device_submodels` — because a replay judged against no schema is either unjudged or, under
+`devices.shadow_of` and reused between runs. It copies the **metric contract** — the origin's
+`device_submodels` rows — because a replay judged against no schema is either unjudged or, under
 `conformance_policy = enforce`, wholly rejected while the job reports success. It does **not** copy
 the nameplate, and a self-check fails if a shadow ever gains one: `device_nameplate` (`0011`) is
 IDTA Nameplate and holds a serial number, so a copy would make the AAS Part 5 export emit two shells
@@ -1030,7 +1052,7 @@ holds them for every other writer, a Manager's PATCH included.
 | :--- | :--- |
 | `gateway_status` | `gateways` plus read-time `live_status` / `is_stale` (90 s threshold) |
 | `device_locations` | A device's effective cell: `COALESCE(device.cell_id, gateway.cell_id)` |
-| `device_schemas` | Every schema attached to a device, one row per (device, schema): its `device_submodels` rows and its deprecated `devices.schema_id` (`0168`) |
+| `device_schemas` | Every schema attached to a device, one row per (device, schema): its `device_submodels` rows. `source` is always `device_submodels` (`0168`, `0175`) |
 | `concept_definitions` | Each semantic id a vocabulary defines, with the vocabulary's own text, for the AAS export's ConceptDescriptions (`0169`) |
 | `telemetry` | `security_invoker` view over `timescale.telemetry`, a `postgres_fdw` foreign table |
 
@@ -1126,8 +1148,7 @@ SELECT status FROM public.schemas WHERE id=parent  →  'archived'
 
 The direct write was refused and the RPC performed it. **This is not a cosmetic status flip**:
 publishing activates a draft, archives its predecessor and repoints every `device_submodels` row
-and `devices.schema_id` onto the new version, so it changes what ingestion judges every
-attached device against.
+onto the new version, so it changes what ingestion judges every attached device against.
 
 **`fork_schema()` carried the same gate**, under a comment claiming *"Same allow-list as the RLS
 write policies on `schemas`"* — true when written, false the moment `0069` moved those policies
@@ -3414,9 +3435,8 @@ holds, and the most useful case it answers is the one a filter would hide — an
 with devices still attached to it, which is a migration that has not finished. Answering `404`
 there would report "no such schema" about a schema whose members are the answer, so the row's
 `status` is returned instead and the caller decides. Members are read through the `device_schemas`
-**view**, not `device_submodels`, so a device attached through `devices.schema_id` is not
-silently omitted. A schema
-nothing implements is a `200` with an empty list.
+**view**, as every reader of a device's schemas is. A schema nothing implements is a `200` with an
+empty list.
 
 **What it does not claim.** Schema and service identifiers are this deployment's own UUIDs, and the
 response says so (`"namespace": "local"`). Factory+ `Schema_UUID`s are registered against the AMRC
@@ -3564,7 +3584,8 @@ written out by hand, for the columns `proposable_columns()` admits. The omission
 argument: `status`, `first_dbirth_at`, `reported_identity`, `identity_source` and `is_quarantined`
 are what ingestion *observed*, and a proposal able to edit them would let an operator assert a
 device's identity by describing it. `gateway_id` is the data path, which `0036` separated from
-location precisely so a location change need not rewire one; `schema_id` belongs to
+location precisely so a location change need not rewire one. A device's schemas are not a column
+of it at all: they are `device_submodels` rows, written by `set_device_schemas()` and repointed by
 `publish_schema_version()`, transactionally.
 
 **Two caps, doing two different jobs, and both in the database.** A partial unique index gives one
@@ -3656,8 +3677,8 @@ able to refuse a schema publication could block an Administrator-only decision i
 operator would read that refusal as the platform's answer.
 
 **The lane proposes an act, not a column edit.** Publishing activates the draft, archives its
-parent, repoints every `device_submodels` row and `devices.schema_id`, and drops the
-duplicate links that would collide — one transaction. A patch of `{"status": "active"}` would name
+parent, repoints every `device_submodels` row, and drops the duplicate links that would
+collide — one transaction. A patch of `{"status": "active"}` would name
 one column write while the apply path did six other things, so the patch is `{"publish": true}` and
 `proposable_columns()` returns `publish` for this lane. Its contract is *the keys a patch may name*:
 columns for the asset lanes, the act for this one. Anything else — `{"publish": false}` above all —
@@ -3766,11 +3787,11 @@ Cancel button.
 
 **It is an RPC, and not the `DELETE` policy that already existed.** `schemas_delete_privileged` has
 admitted an Administrator since the baseline, and that is precisely the problem:
-`devices.schema_id` is `ON DELETE SET NULL` and `device_submodels.schema_id` is `ON DELETE CASCADE`,
-so deleting an **active** schema silently detaches every device bound to it — no error, no warning,
-and the next conformance run reports every metric as unmodelled. `discard_schema_draft()` refuses
-anything whose status is not `draft`, and returns the number of devices attached to the draft
-through either column rather than letting them disappear out of sight. The policy is unchanged; what the UI calls
+`device_submodels.schema_id` is `ON DELETE CASCADE`, so deleting an **active** schema silently
+detaches every device bound to it — no error, no warning, and the next conformance run reports
+every metric as unmodelled. `discard_schema_draft()` refuses anything whose status is not `draft`,
+and returns the number of devices attached to the draft rather than letting them disappear out of
+sight. The policy is unchanged; what the UI calls
 is now a door that cannot make that mistake.
 
 **A draft may legitimately have devices attached** — `publish_schema_version()` depends on that
@@ -3797,12 +3818,11 @@ an untidy dropdown critical.
 unfinished migration — the case `/v1/schema/{uuid}` above deliberately refuses to hide — and it has
 to stay editable, or every rename, relocation and policy change on a device a publish could not reach
 would freeze. So `reject_archived_schema_assignment()` returns early on an `UPDATE` that leaves
-`schema_id` unchanged, and on a detach to `NULL`. What it refuses is an `INSERT` or an `UPDATE` that
-*arrives at* an archived schema.
+`schema_id` unchanged, and a detach is a `DELETE` it never sees. What it refuses is an `INSERT` or
+an `UPDATE` that *arrives at* an archived schema.
 
-**Both arms, because a guard on one column is not a guard.** `device_schemas` reads
-`device_submodels` and `devices.schema_id`; the trigger is on both tables, one function body
-switching on `TG_TABLE_NAME`.
+**It guards `device_submodels`, the one place a device's schemas are attached.** Until `0175`
+removed `devices.schema_id`, the same function guarded that column too.
 
 **A draft is still assignable**, deliberately — attaching a draft to a real machine is how a version
 is tried before publishing, and `publish_schema_version()` already merges that state rather than
@@ -3823,39 +3843,43 @@ a public write surface, and the approvals queue applies a patch on somebody else
 cannot see another table and an RLS policy is bypassed by every `SECURITY DEFINER` path, which is why
 this is a trigger and why the test suite runs it as the **owner** — this guard exempts nobody.
 
-### A device's schemas are both arms, and the dashboard writes one of them (`0168`)
+### A device's schemas are its `device_submodels` rows (`0168`, `0175`)
 
-A schema reaches a device through a `device_submodels` row or through `devices.schema_id`. Until
-`0168`, `device_schemas` read the column only for a device with **no** `device_submodels` row. So a
-device the dashboard attached to schema A, and the API then gave schema B, resolved to B alone.
-Conformance, the AAS export, i3X and the Directory stopped seeing A; the Devices page still showed it.
+A schema used to reach a device through a `device_submodels` row or through `devices.schema_id`.
+Until `0168`, `device_schemas` read the column only for a device with **no** `device_submodels` row,
+so a device given a second schema through the API stopped being judged against the first. `0168`
+made the view the union of both and moved the dashboard's writes to the rows. 1.1.0 deprecated
+writing the column, and `0175` (1.3.0) removed it.
 
-**The view is now the union**, one row per (device, schema). The column's arm is skipped only when a
-`device_submodels` row names the same schema, so that row and its `submodel_key` win. The columns
-are unchanged, so `CREATE OR REPLACE VIEW` keeps the grants. Every reader already took a list:
+**The view is one row per (device, schema)**, read from `device_submodels`. Its columns are
+unchanged, so `CREATE OR REPLACE VIEW` keeps the grants, and `source` stays as the constant
+`device_submodels` for a client that selects it. Every reader takes a list:
 
 - ingestion's conformance check unions the metrics across the rows;
 - the AAS export builds each schema's submodels;
 - i3X synthesises a type for a device with several;
 - the Directory, edge function and MQTT publisher alike, lists them.
 
-**`devices.schema_id` is deprecated for writes.** It is still read, so an API client that sets it
-keeps working, and it is removed no sooner than the next minor release
-([`docs/releases.md`](../docs/releases.md#deprecation)). The Devices page no longer writes it:
-its picker saves through **`set_device_schemas(p_device_id, p_schema_ids)`**, which makes the set
-exact in one transaction. It inserts the missing `device_submodels` rows, deletes the rest, and sets
-the column to `NULL`. A kept row keeps its `submodel_key`. It is `SECURITY DEFINER` so it can answer
-404 through `raise_not_found()`; its `has_role()` check is the pair the table policies name.
+**The Devices page saves through `set_device_schemas(p_device_id, p_schema_ids)`**, which makes the
+set exact in one transaction: it inserts the missing `device_submodels` rows and deletes the rest.
+A kept row keeps its `submodel_key`, and only a row it inserts meets the archived-schema guard, so
+saving a device left on an archived version is not refused for the schema it already had. It is
+`SECURITY DEFINER` so it can answer 404 through `raise_not_found()`; its `has_role()` check is the
+pair the table policies name. An API client attaches a schema the same way, or by writing a
+`device_submodels` row.
 
-**Moving a binding between the arms is not a new binding.** `set_device_schemas()` inserts before it
-clears the column, and `reject_archived_schema_assignment()` now returns early when the device
-already carries the schema through either arm. Without that, saving a device left on an archived
-version would be refused for the schema it already had.
+**`0175` moved the column into rows, then dropped it.** Every device whose `devices.schema_id`
+named a schema no row of its own named gained a row in the shape `set_device_schemas()` writes.
+The archived-schema trigger is disabled for that one insert, since the device already held the
+binding; the audit trigger is not, so the trail records each moved row under its device. Then the
+column goes, with its foreign key and its trigger. The earlier files no longer create or name it,
+so a replay never brings it back, and everything in `0175` is guarded by the column's existence:
+a fresh install and every later boot skip it. An API client that still writes the column gets
+PostgREST's unknown-column error.
 
 **The `SCHEMA_REJECTION` row names every schema the payload was judged against.**
 `record_ingestion_rejection()` reads them through the view into `schema_ids`. The 1.0 key
-`schema_id` stays, holding the first of them: the column's value where it is set, as before. A
-device attached only through `device_submodels` used to record no schema there.
+`schema_id` stays, holding the first of them.
 
 **`device_submodels` is audited now.** The Devices page's schema changes used to be `devices`
 updates, which the audit trigger records. Without a trigger on the table they moved to, every
@@ -3866,8 +3890,9 @@ deleted device's schema rows are hidden and counted with it. **View Audit Trail*
 no kind filter: the id in the search box selects its `devices`, `device_nameplate` and
 `device_submodels` rows, which is where a schema change made in the dashboard now lives.
 
-`publish_schema_version()` and `discard_schema_draft()` are unchanged: both already handle both
-arms. `devices_rebound` still counts bindings, so a device on both arms counts twice.
+`publish_schema_version()` repoints and `discard_schema_draft()` counts `device_submodels` rows
+only. `publish_schema_version()` still answers `schema_ids_rebound`, always 0, for a client that
+reads it.
 
 ### A device behind a gateway that never arrived is not late (archived migration 0092)
 
@@ -5921,8 +5946,10 @@ view is one row per semantic id, `(semantic_id, name, definition, standard)`, fr
 vocabulary's own description column: the IDTA templates, ASHRAE 223P, OPC UA and ISO 22400. An id
 held by two vocabularies takes the first in that order, the one whose ids are issued furthest from
 this deployment, and a row with no text is left out. MTConnect contributes nothing until
-`mtconnect_vocabulary` stores definitions. The exporter reads the view in one query and uses
-catalog text only for an id no vocabulary holds, such as one an Administrator typed. A new
+`mtconnect_vocabulary` stores definitions. The exporter reads the view in one query. An id no
+vocabulary holds but a known authority issues, such as a QUDT quantity kind, defers to that
+authority (`ID_AUTHORITIES` in `functions/_shared/aas/shell.ts`). Catalog text is used only for
+the rest, such as an id an Administrator typed. A new
 vocabulary with a description column adds an arm in a migration that redeclares the view; the
 columns stay the same, so `CREATE OR REPLACE VIEW` keeps its grants. It is `security_invoker`, so
 the vocabularies' own policies apply to the caller: `authenticated` and `service_role` read it,

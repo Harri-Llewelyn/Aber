@@ -301,6 +301,7 @@ deploy/
       apps/{frontend,ingestion,node-red,i3x-service}.yaml
       obs/{grafana,swagger-ui,servicemonitors}.yaml
       tests/test-fdw.yaml                the helm-test gate — §9-M6
+      tests/test-{api,broker,ingestion,dashboard}.yaml   what a site depends on
       ingress.yaml
       networkpolicy.yaml
       {pdbs,hpas}.yaml
@@ -945,7 +946,9 @@ Both targets must stay green.
    PostgREST, GoTrue, Realtime and storage-api wait for), so `--wait` deadlocks the first install
    and reports it as `context deadline exceeded` with no hook pod ever created.
 4. **`helm test` first (§9-M6)** — the `postgres_fdw` cross-database check. It is seconds long and
-   turns a whole class of deep, misattributed `validate.py` failures into one legible one.
+   turns a whole class of deep, misattributed `validate.py` failures into one legible one. The same
+   run checks the API through the gateway, the broker refusing a wrong password (over TLS under the
+   chart CA when it is on), ingestion's two connection gauges and the frontend's `/config.js`.
 5. Run `ingestion/validate.py` **as a Job in the namespace** (§2.5), then
    `supabase/functions/aas-export/test_aas_export.py` the same way — ordered after `validate.py` so
    that a failed conformance run stops the export suite rather than being reported twice. Its
@@ -1125,10 +1128,11 @@ did not choose and cannot easily inspect.
 | Workload | `fsGroup` | Note |
 |---|---|---|
 | Mosquitto | `1883` | The `mosquitto` user in `eclipse-mosquitto` |
-| TimescaleDB | `999` | The `postgres` user in the Debian-based image |
+| TimescaleDB | `70` | The `postgres` user in the Alpine-based image |
 | Node-RED | `1000` | The `node-red` user; replaces the init chown |
-| Supabase Postgres | `999` | Same image lineage as TimescaleDB |
+| Supabase Postgres | `101` | The `postgres` group in `supabase/postgres` (Alpine at 17.x) |
 | Storage / Grafana | `1000` / `472` | Grafana's uid is 472, not 1000 — a common mistake |
+| Backup volume | `101` | `fsGroupChangePolicy: Always` on the backup service when it runs as 100 (deploy/k8s/README.md, *Users*) |
 
 **Confirm each uid against the pinned image tag rather than trusting this table**; they are image
 properties and the images here are pinned for unrelated reasons. `fsGroupChangePolicy: OnRootMismatch`
@@ -1158,13 +1162,16 @@ most of these images, about fourteen capabilities, privilege escalation through 
 and no seccomp filter unless the kubelet defaults one. `trivy config` reported it for 54 of 58
 containers (`KSV-0118`, #419).
 
-**Mitigation, in three phases (#419).** The first is built. Every pod sets `seccompProfile:
+**Mitigation, in three phases (#419).** The first two are built. Every pod sets `seccompProfile:
 RuntimeDefault`, and every container, init containers and hooks included, sets
 `allowPrivilegeEscalation: false` and `capabilities.drop: ["ALL"]`. A container gets back only what
 its image was shown to need. The runbook's *Security contexts* table lists each one with its
-reason, and `check-docs-drift.mjs` (check 51) holds that table and the templates together. The
-second phase gives each image this repository builds a non-root `USER`, matched by `runAsNonRoot`
-and `runAsUser`. The third makes each root filesystem read-only, one workload at a time.
+reason, and `check-docs-drift.mjs` (check 51) holds that table and the templates together. In the
+second phase each image this repository builds ends with a numeric, non-root `USER`, and the chart
+runs it as that uid with `runAsNonRoot: true`. The runbook's *Users* table gives each uid and the
+pods that still start a container as root, with the reason; check 56 holds the Dockerfiles, the
+templates and that table together. The third phase makes each root filesystem read-only, one
+workload at a time.
 
 **Each add-back was measured, not read off an entrypoint.** The pinned image ran in Docker with
 `--cap-drop ALL --security-opt no-new-privileges` and the candidate set, through its own entrypoint,
@@ -1188,6 +1195,24 @@ obvious from the scripts:
 Alloy keeps its read-only `hostPath` mounts (`KSV-0121`, allow-listed) and needs no capability: the
 host files it reads belong to root, which it runs as. Its host metrics measured the same with every
 capability dropped.
+
+**Each non-root start was measured on a volume the previous release wrote.** In Docker, a volume
+was prepared as the kubelet leaves a fresh fsGroup volume (root-owned, group-writable, setgid). The
+1.2.0 arrangement populated it as root, and the new image then started on it as its own uid, with
+every capability dropped. Three results decided the design:
+
+- **The historian starts as 70 on a fresh volume and on one 1.2.0 wrote**, and after a simulated
+  kubelet ownership walk. Its PGDATA is a subdirectory of the volume, which 70 can create, and the
+  1.2.0 entrypoint had already given the existing one to 70. tini then forwards the stop signal to
+  a process of its own uid, so `KILL` goes.
+- **The platform database cannot.** It starts as 100 on a volume 1.2.0 wrote, but on a fresh one
+  initdb stops with `could not change permissions of directory "/var/lib/postgresql/data": Operation
+  not permitted`. The image's `postgresql.conf` puts the data directory at the volume's root, which
+  root owns. So it still starts as root, and keeps its six capabilities.
+- **The broker's pod runs as 1883 throughout.** The reconcile rewrites the document 1.2.0 left
+  (1883, 0600), the broker reads it and issues new accounts into it, and the certificate-reload
+  sidecar signals the broker with no capability, because they share a uid. On a fresh volume left
+  root's by a storage class without fsGroup, the reconcile stops with `EACCES`.
 
 ## 10. Production hardening
 

@@ -252,7 +252,8 @@ other username authenticates perfectly and then drops every message.
 **The document is written atomically and owned by the broker.** The reconcile writes beside the
 document and renames, so the broker can never open a half-written file; the file is owned by the
 broker's uid at 0600, because the plugin rewrites it on every change and warns on anything
-world-readable. A stored document that cannot be parsed stops the boot rather than being
+world-readable. The chart runs every container in the broker's pod as that uid, 1883, so the
+reconcile writes the file as its owner; run as root, it chowns the file to 1883 instead. A stored document that cannot be parsed stops the boot rather than being
 overwritten, since it is the fleet's credentials.
 
 ## Adding a principal

@@ -494,5 +494,89 @@ class NodeDeathTakesItsDevicesOfflineTestCase(unittest.TestCase):
             self.mark()
 
 
+class GatewayGroupObservationTestCase(unittest.TestCase):
+    """
+    `ingest_record_gateway_group()` (0174): the group a gateway publishes under reaches
+    `gateways.observed_sparkplug_group` and `gateway_status`, one audit row per change. Rolled back.
+    """
+
+    GATEWAY = "0a500000-0000-4000-8000-000000000003"
+    ABSENT = "0a600000-0000-4000-8000-000000000003"
+
+    def setUp(self):
+        self.conn = get_connection()
+        self.cur = self.conn.cursor()
+        self.cur.execute(
+            "INSERT INTO public.gateways (id, name, sparkplug_group) VALUES (%s, 'Group Gateway', 'Aber')",
+            (self.GATEWAY,),
+        )
+
+    def tearDown(self):
+        self.conn.rollback()
+        self.cur.close()
+        self.conn.close()
+
+    def claim(self, sub):
+        self.cur.execute(
+            "SELECT set_config('request.jwt.claims', %s, true)",
+            (json.dumps({"sub": sub, "role": "authenticated"}),),
+        )
+
+    def record(self, group, gateway=None):
+        self.cur.execute("SELECT public.ingest_record_gateway_group(%s::uuid, %s)",
+                         (gateway or self.GATEWAY, group))
+        return self.cur.fetchone()[0]
+
+    def observed(self):
+        self.cur.execute(
+            "SELECT observed_sparkplug_group, sparkplug_group FROM public.gateway_status WHERE id = %s",
+            (self.GATEWAY,),
+        )
+        return self.cur.fetchone()
+
+    def change_rows(self):
+        self.cur.execute(
+            "SELECT new_data ->> 'observed_sparkplug_group' FROM public.audit_trail "
+            " WHERE causation_id = txid_current() AND entity_type = 'gateways' AND action = 'UPDATE'"
+            "   AND entity_id = %s ORDER BY id",
+            (self.GATEWAY,),
+        )
+        return self.cur.fetchall()
+
+    def test_a_new_column_is_null_until_a_message_arrives(self):
+        self.assertEqual(self.observed(), (None, "Aber"))
+
+    def test_the_group_reaches_gateway_status_with_one_audit_row_per_change(self):
+        self.claim(INGESTION_PRINCIPAL)
+        self.assertTrue(self.record("Other-Group"))
+        self.assertFalse(self.record("Other-Group"), "a repeat wrote the row again")
+        self.assertEqual(self.observed(), ("Other-Group", "Aber"))
+        self.assertTrue(self.record("Aber"))
+        self.assertEqual(self.observed(), ("Aber", "Aber"))
+        self.assertEqual(self.change_rows(), [("Other-Group",), ("Aber",)])
+
+    def test_a_group_that_is_not_one_topic_segment_is_refused(self):
+        self.claim(INGESTION_PRINCIPAL)
+        for group in ("", "a/b", "a+", "#", None):
+            with self.subTest(group=group):
+                self.cur.execute("SAVEPOINT s")
+                with self.assertRaises(psycopg2.errors.InvalidParameterValue):
+                    self.record(group)
+                self.cur.execute("ROLLBACK TO SAVEPOINT s")
+        with self.assertRaises(psycopg2.errors.StringDataRightTruncation):
+            self.record("G" * 256)
+
+    def test_an_absent_gateway_is_not_found(self):
+        self.claim(INGESTION_PRINCIPAL)
+        with self.assertRaises(psycopg2.Error) as caught:
+            self.record("Aber", gateway=self.ABSENT)
+        self.assertIn("not found", str(caught.exception))
+
+    def test_another_authenticated_identity_cannot(self):
+        self.claim(OTHER_PRINCIPAL)
+        with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
+            self.record("Other-Group")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

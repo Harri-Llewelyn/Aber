@@ -38,6 +38,7 @@ vi.mock('../lib/supabaseClient', () => ({
 }))
 
 const { useRealtimeTable } = await import('../hooks/useRealtimeTable')
+const { getConnectionSnapshot, resetConnectionState } = await import('../lib/connectionState')
 
 describe('useRealtimeTable hook', () => {
   beforeEach(() => {
@@ -113,5 +114,41 @@ describe('useRealtimeTable hook', () => {
     await new Promise(r => setTimeout(r, 20))
     expect(channels).toHaveLength(1)
     expect(removeChannel).not.toHaveBeenCalled()
+  })
+
+  // The channel's statuses feed the strip under the top bar: an error or a timeout marks the
+  // dashboard as not updating, and SUBSCRIBED clears it.
+  describe('reporting into the connection state', () => {
+    beforeEach(() => {
+      resetConnectionState()
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+    })
+    afterEach(() => {
+      resetConnectionState()
+      vi.restoreAllMocks()
+    })
+
+    it.each(['CHANNEL_ERROR', 'TIMED_OUT'])('marks it failing on %s', async (status) => {
+      renderHook(() => useRealtimeTable('devices', vi.fn()))
+      await waitFor(() => expect(channels).toHaveLength(1))
+      act(() => { channels[0].subscribeCallback(status, new Error('socket closed')) })
+      expect(getConnectionSnapshot().failing).toBe(true)
+    })
+
+    it('clears it on SUBSCRIBED', async () => {
+      renderHook(() => useRealtimeTable('devices', vi.fn()))
+      await waitFor(() => expect(channels).toHaveLength(1))
+      act(() => { channels[0].subscribeCallback('CHANNEL_ERROR') })
+      await act(async () => { channels[0].subscribeCallback('SUBSCRIBED') })
+      expect(getConnectionSnapshot().failing).toBe(false)
+    })
+
+    it('reports nothing once the channel is being torn down', async () => {
+      const { unmount } = renderHook(() => useRealtimeTable('devices', vi.fn()))
+      await waitFor(() => expect(channels).toHaveLength(1))
+      unmount()
+      channels[0].subscribeCallback('CHANNEL_ERROR')
+      expect(getConnectionSnapshot().failing).toBe(false)
+    })
   })
 })

@@ -1,10 +1,13 @@
 # Roadmap
 
-**The queue lives in the issue tracker.** What 1.0 must have is an issue on the
-[1.0 milestone](https://github.com/Harri-Llewelyn/Aber/milestone/1); what it does not need is a
-feature request competing for [2.0](https://github.com/Harri-Llewelyn/Aber/milestone/2) rather
-than sitting in the release's critical path. **This file is what the roadmap leaves behind:** the
-record of every entry that has retired, and where its substance now lives.
+**The queue lives in the issue tracker, as one [milestone](https://github.com/Harri-Llewelyn/Aber/milestones)
+per release.** What 1.0 had to have was the [1.0 milestone](https://github.com/Harri-Llewelyn/Aber/milestone/1).
+Each 1.x minor release now has its own. [2.0](https://github.com/Harri-Llewelyn/Aber/milestone/2)
+holds only the changes that would break a running site, as
+[`releases.md`](releases.md#what-the-version-number-means) defines them, and
+[Later](https://github.com/Harri-Llewelyn/Aber/milestone/15) holds what is wanted but waits for a
+site to ask. **This file is what the roadmap leaves behind:** the record of every entry that has
+retired, and where its substance now lives.
 
 **Why the queue moved.** This file and the 1.0 milestone were two lists both claiming to name what
 1.0 needs, and the entries in one were already half-written as issues in the other. An entry's

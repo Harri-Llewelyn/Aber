@@ -16,7 +16,8 @@ slot queues that backup once, and does not retry it before the next slot when it
 Needs the stack up with the backup-service container, the seeded personas and both keys. The
 cancel and catch-up tests stop the service container for a few seconds. The off-site test applies
 test-harness/restore-rehearsal/minio.yaml and deletes its namespace afterwards; it skips on a stack
-that already has a destination, or NetworkPolicies. Skips without the keys.
+that already has a destination, or NetworkPolicies with no backupService.offsiteEgress rule. Skips
+without the keys.
 
     SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... python backup-service/test_backup_service.py
 """
@@ -383,8 +384,12 @@ class BackupServiceTests(unittest.TestCase):
         if psql("SELECT count(*) FROM public.system_settings WHERE starts_with(key, 'backup_offsite.') "
                 "AND value NOT IN ('\"\"'::jsonb, 'false'::jsonb)") != "0":
             self.skipTest("this stack has an off-site destination already, which the test will not replace")
-        if kubectl("get", "networkpolicy", "-o", "name", namespace=stack_exec.NAMESPACE).strip():
-            self.skipTest("NetworkPolicies are on, and the backup service has no egress rule for the test's MinIO")
+        # The default-deny marks the layer, not any policy: the forge's renders with it off.
+        policies = {n.split("/")[-1] for n in kubectl("get", "networkpolicy", "-o", "name", namespace=stack_exec.NAMESPACE).split()}
+        if (f"{stack_exec.RELEASE}-default-deny" in policies
+                and f"{stack_exec.RELEASE}-offsite-egress-backup-service" not in policies):
+            self.skipTest("NetworkPolicies are on, and backupService.offsiteEgress admits nothing "
+                          "(`dev-cluster up --network-policy` admits the test's MinIO)")
         self.wait_for_idle()
 
         with open(MINIO_MANIFEST, encoding="utf-8") as handle:

@@ -65,7 +65,11 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      # The image's postgres user, for the waits too: curl and psql need nothing more.
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
         seccompProfile:
           type: RuntimeDefault
       initContainers:

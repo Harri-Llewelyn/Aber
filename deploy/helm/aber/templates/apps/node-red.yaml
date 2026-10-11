@@ -169,6 +169,10 @@ spec:
           env:
             # The same block the initContainer got -- see the note there for why parity matters.
             {{- include "aber.noderedAuthEnv" . | nindent 12 }}
+            # Read by settings.js per response, not when node-red-init checks the file, so the
+            # runtime alone needs it. Empty, and so not sent, unless global.scheme is https.
+            - name: ABER_STRICT_TRANSPORT_SECURITY
+              value: {{ include "aber.strictTransportSecurity" . | quote }}
           {{/*
             PROBED ON `/` WITH NO CREDENTIALS, and that needs saying because it looks wrong.
 

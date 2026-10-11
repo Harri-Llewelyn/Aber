@@ -62,7 +62,11 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      # The image's user, for the waits too: curl and psql need nothing more.
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
       initContainers:
@@ -211,6 +215,9 @@ spec:
             # How old a replayed (is_historical) reading may be (values.yaml).
             - name: TELEMETRY_MAX_HISTORICAL_AGE_SECONDS
               value: {{ .Values.ingestion.historicalMaxAgeSeconds | int | quote }}
+            # Off, a late replay's hours are not recorded: the historian has no rollups to refresh.
+            - name: TIMESCALEDB_ROLLUPS_ENABLED
+              value: {{ .Values.timescaledb.rollups.enabled | toString | quote }}
             {{/*
               The Sparkplug primary host id. The render already failed above if it is empty, so
               this is never the daemon's own SystemExit in practice -- an operator meets the

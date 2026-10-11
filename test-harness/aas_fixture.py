@@ -145,9 +145,8 @@ def ensure(base, token, anon):
     }, on_conflict="schema_name")
     schema_id = schemas[0]["id"]
 
-    # device_submodels rather than devices.schema_id: the join table is the current path and the
-    # 1:1 column is the archived fallback. Attaching through the join is what the exporter's
-    # `device_schemas` view unions, and what an operator's UI edit writes.
+    # A device_submodels row is how a schema is attached: what the exporter's `device_schemas`
+    # view reads, and what an operator's UI edit writes.
     existing = _request(
         base, token, anon, "GET",
         f"/device_submodels?device_id=eq.{DEVICE_UUID}&schema_id=eq.{schema_id}&select=id",

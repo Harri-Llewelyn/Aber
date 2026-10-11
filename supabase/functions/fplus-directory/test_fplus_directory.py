@@ -19,10 +19,9 @@ disagree, both endpoints go on reporting success: a client integrating against a
 subscribe to a set of addresses that the devices themselves do not claim to publish. The suite
 asserts the round trip rather than either half.
 
-Two members are provisioned, not one, and the second is the point: `device_schemas` reads
-`device_submodels` and the deprecated `devices.schema_id`, and a reverse lookup written against the
-join table alone would pass every other check in this file while silently omitting every device
-attached through the column, which a 1.0 dashboard wrote and an API client still may.
+Two members are provisioned, not one: the shared fixture's device, and a second attached through
+set_device_schemas(), the Devices page's writer, so the reverse lookup is asserted over a set and
+over the path a site actually attaches schemas by.
 
 Run:  python supabase/functions/fplus-directory/test_fplus_directory.py
 """
@@ -120,7 +119,7 @@ def rest(method: str, path: str, token: str, payload=None, headers=None):
 
 def provision(token):
     """
-    The fixture subject plus one device attached through `devices.schema_id`. Returns (schema_id, expected_device_ids).
+    The fixture subject plus one device attached through set_device_schemas(). Returns (schema_id, expected_device_ids).
 
     THE FIXTURE IS SHARED with the two AAS suites deliberately -- it already provisions a schema
     with a `device_submodels` member at pinned ids, and a second conformance subject would be a
@@ -142,13 +141,11 @@ def provision(token):
         return None, []
     schema_id = rows[0]["id"]
 
-    # The dashboard's arm. `devices.schema_id` and NO device_submodels row, which is the only way the
-    # view's second branch is reachable: it requires NOT EXISTS on the join table.
+    # The Devices page's path: the device first, then its schemas through set_device_schemas().
     status, detail = rest("POST", "/devices?on_conflict=id", token, {
         "id": DASHBOARD_DEVICE_UUID,
         "name": DASHBOARD_DEVICE_NAME,
         "gateway_id": aas_fixture.GATEWAY_UUID,
-        "schema_id": schema_id,
         # OFFLINE: devices_online_implies_born (0119) refuses ONLINE without a first_dbirth_at.
         "status": "OFFLINE",
         "is_quarantined": False,
@@ -157,7 +154,14 @@ def provision(token):
     if status not in (200, 201):
         # The body, not just the code: PostgREST answers 409 for a unique violation and for a
         # foreign-key one alike, and the two mean opposite things about what went wrong.
-        print(f"[test_fplus_directory] could not provision the dashboard-attached device: "
+        print(f"[test_fplus_directory] could not provision the Devices page's device: "
+              f"{status} {detail}")
+        return schema_id, [device["id"]]
+    status, detail = rest("POST", "/rpc/set_device_schemas", token, {
+        "p_device_id": DASHBOARD_DEVICE_UUID, "p_schema_ids": [schema_id],
+    })
+    if status != 200:
+        print(f"[test_fplus_directory] could not attach the schema to the Devices page's device: "
               f"{status} {detail}")
         return schema_id, [device["id"]]
 
@@ -165,7 +169,7 @@ def provision(token):
 
 
 def teardown(token):
-    """Best effort, and the dashboard-attached device first: it references the fixture's gateway and schema."""
+    """Best effort, and the Devices page's device first: it references the fixture's gateway and schema."""
     rest("DELETE", f"/devices?id=eq.{DASHBOARD_DEVICE_UUID}", token)
     aas_fixture.teardown(SUPABASE_URL, token, PUBLISHABLE_KEY)
 
@@ -226,8 +230,8 @@ class TestTheSourceKeepsItsShape(unittest.TestCase):
         self.assertLess(auth, self.source.index('path === "/v1/schema"'))
 
     def test_the_reverse_lookup_reads_the_view_not_the_join_table(self):
-        # device_schemas reads the join table and devices.schema_id. Reading device_submodels
-        # alone omits every device attached through the column, and reports success.
+        # Every reader of a device's schemas reads the view, so the forward and reverse lookups
+        # cannot drift apart.
         self.assertIn('.from("device_schemas")', self.members)
         self.assertNotIn('.from("device_submodels")', self.members)
 
@@ -309,10 +313,8 @@ class TestReverseLookup(unittest.TestCase):
         _, body = get(f"/v1/schema/{SCHEMA_ID}", TOKEN)
         self.assertIn(EXPECTED_DEVICE_IDS[0], [d["uuid"] for d in body["devices"]])
 
-    @unittest.skipUnless(len(EXPECTED_DEVICE_IDS) > 1, "the dashboard-attached device was not provisioned")
-    def test_it_finds_a_device_attached_through_devices_schema_id(self):
-        # The specific omission a reverse lookup written against device_submodels would make, and
-        # the one no other assertion in this file would notice.
+    @unittest.skipUnless(len(EXPECTED_DEVICE_IDS) > 1, "the Devices page's device was not provisioned")
+    def test_it_finds_a_device_attached_through_set_device_schemas(self):
         _, body = get(f"/v1/schema/{SCHEMA_ID}", TOKEN)
         self.assertIn(DASHBOARD_DEVICE_UUID, [d["uuid"] for d in body["devices"]])
 

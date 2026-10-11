@@ -26,7 +26,7 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 
 ROLLUPS = {"telemetry_1m": timedelta(days=1), "telemetry_5m": timedelta(days=7),
            "telemetry_1h": timedelta(days=30)}
-# aggregates.sql's refresh start_offset: late data is accepted up to 24 hours old.
+# aggregates.sql's refresh start_offset: a live reading is accepted up to 24 hours old.
 LATE_DATA = timedelta(hours=25)
 
 

@@ -268,6 +268,34 @@ html, body, #root {
   }
 }
 
+/* The strip under the bar that says the page has stopped updating (ConnectionStrip.jsx). A row of
+   the shell's column, so it pushes the page down and covers nothing; the region is empty, and so
+   zero height, while every refresh works. An icon and a sentence as well as the amber, so the
+   colour is never the only signal. */
+.connection-strip-region { flex-shrink: 0; }
+
+/* The strip's height, which ConnectionStrip.jsx keeps current on the shell, for the drawer that
+   overlays the page below 800px and must start under the strip. */
+.app-shell { --connection-strip-height: 0px; }
+
+.connection-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 6px 20px;
+  background: color-mix(in srgb, var(--warning) 12%, var(--bg-surface));
+  border-bottom: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.connection-strip-icon { flex-shrink: 0; color: var(--warning-text); }
+/* A basis, so on a narrow screen the sentence wraps beside its icon and the button drops below. */
+.connection-strip-text { flex: 1 1 14em; min-width: 0; }
+.connection-strip .btn-sm { padding: 3px 12px; }
+
 /* The brand and the right-hand group are equal-weight sides, which is what centres the search box:
    both take `flex: 1 1 0` so they claim equal shares of free space whatever their content measures.
    Only the brand may shrink below its content, so when the bar runs out of room the brand gives up
@@ -3958,7 +3986,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 @media (max-width: 800px) {
   .context-panel-open {
     position: fixed;
-    top: 52px;
+    /* Below the bar, and below the connection strip while it shows (ConnectionStrip.jsx). */
+    top: calc(52px + var(--connection-strip-height));
     right: 0;
     bottom: 0;
     /* NOT the desktop clamp, and not a bare 360px either. As an overlay it is measured against
@@ -5311,6 +5340,8 @@ ol.gateway-steps {
 /* GATEWAYS: the list page. */
 .gateway-name-badge { margin-left: 8px; }
 .gateway-cell-warning { color: var(--warning-text); }
+/* The group-mismatch warning at the top of a gateway's drawer, where the drawer already insets it. */
+.gateway-group-callout { margin: 0 0 14px; }
 .gateway-cell-italic { font-style: italic; }
 .gateway-withheld { color: var(--warning-text); }
 

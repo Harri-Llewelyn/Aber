@@ -1,5 +1,7 @@
 name: Install k3d
-description: Install a pinned k3d release binary and verify it against its published checksum.
+description: >-
+  Install a pinned k3d release binary, verify it against its published checksum, and unload the
+  runner's `mosquitto` AppArmor profile, which would otherwise confine the broker inside k3d's pods.
 runs:
   using: composite
   steps:
@@ -16,3 +18,17 @@ runs:
         echo "$K3D_SHA256  /tmp/k3d" | sha256sum -c -
         sudo install -m 0755 /tmp/k3d /usr/local/bin/k3d
         k3d version
+
+    # k3s in a container cannot confine its pods, so a host profile attaches to a pod's program by
+    # path: Ubuntu 26.04's `mosquitto` profile refuses the broker /mosquitto/config. A site's k3s
+    # confines every pod itself. docs/testing.md, "AppArmor on the runner", has the measurement.
+    - name: Unload The Runner's Mosquitto AppArmor Profile
+      shell: bash
+      run: |
+        set -euo pipefail
+        if sudo grep -q '^mosquitto ' /sys/kernel/security/apparmor/profiles 2>/dev/null; then
+          echo -n mosquitto | sudo tee /sys/kernel/security/apparmor/.remove >/dev/null
+          echo "unloaded the runner's mosquitto AppArmor profile"
+        else
+          echo "this runner has no mosquitto AppArmor profile loaded"
+        fi

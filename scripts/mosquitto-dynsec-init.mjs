@@ -161,11 +161,15 @@ function main() {
   mkdirSync(dirname(FILE), { recursive: true });
   const tmp = `${FILE}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(config, null, '\t')}\n`, { mode: 0o600 });
-  try {
-    chownSync(tmp, BROKER_UID, BROKER_UID);
-    chownSync(dirname(FILE), BROKER_UID, BROKER_UID);
-  } catch (err) {
-    log(`could not chown to uid ${BROKER_UID}: ${err.message}`);
+  // Run as the broker's uid, as the chart runs it, the file is already the broker's. Run as root,
+  // it is handed over.
+  if (process.getuid() !== BROKER_UID) {
+    try {
+      chownSync(tmp, BROKER_UID, BROKER_UID);
+      chownSync(dirname(FILE), BROKER_UID, BROKER_UID);
+    } catch (err) {
+      log(`could not chown to uid ${BROKER_UID}: ${err.message}`);
+    }
   }
   chmodSync(tmp, 0o600);
   renameSync(tmp, FILE);

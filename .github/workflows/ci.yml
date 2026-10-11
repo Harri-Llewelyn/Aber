@@ -25,7 +25,7 @@ jobs:
   # it cannot compute runs everything). No third-party action; `git diff` answers this.
   changes:
     name: Which Paths Changed
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       code: ${{ steps.classify.outputs.code }}
@@ -124,7 +124,7 @@ jobs:
 
   frontend-build:
     name: Frontend Build & Test
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     # Ordering only -- there is no job-level `if`, so this job runs whatever the diff holds. One
     # step inside it reads `playbook`, and a step cannot see an output the job did not ask for.
@@ -353,7 +353,7 @@ jobs:
   # that cannot produce valid manifests fails on the PR. The in-cluster run is k8s-validation.
   helm-chart:
     name: Helm Chart Lint & Render
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       - name: Checkout Code
@@ -1426,7 +1426,7 @@ jobs:
 
   edge-function-auth-test:
     name: Edge Function & RLS Authorization Tests
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     services:
       postgres:
@@ -1541,7 +1541,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     name: End-to-End Kubernetes (k3d) Stack Validation
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # Sequential inside the job; the whole thing is bounded so a hung wait cannot burn an hour.
     timeout-minutes: 60
     env:
@@ -1621,8 +1621,12 @@ jobs:
       # values plus broker TLS, the backup service and the in-cluster conformance Jobs, waits for
       # every hook and rollout and for the daemon to be subscribed, and runs `helm test`. With
       # --e2e it then waits for the two conformance Jobs and prints their logs.
-      - name: Bring The Stack Up (dev-cluster up --e2e)
-        run: node scripts/dev-cluster.mjs up --e2e
+      #
+      # --network-policy: every step below runs under the NetworkPolicy layer, as a site's values
+      # turn it on, so a flow the edge list does not name fails here. The layer-off default is held
+      # by the helm-chart job's render checks and by every developer's `dev:up` (docs/testing.md).
+      - name: Bring The Stack Up (dev-cluster up --e2e --network-policy)
+        run: node scripts/dev-cluster.mjs up --e2e --network-policy
 
       # The host copies are never read again once imported; dropping them is the largest single
       # reclaim before the suites run.
@@ -1868,7 +1872,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.install == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     name: Site Install Rehearsal (k3d)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     env:
       NS: aber
@@ -1920,7 +1924,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.install == 'true' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     name: Upgrade From The Last Release (k3d)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 75
     env:
       NS: aber
@@ -1969,7 +1973,7 @@ jobs:
   # because it reads history, and a shallow clone would scan one commit and say so.
   secret-scan:
     name: Secret Scan
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - name: Checkout Code
@@ -1987,7 +1991,7 @@ jobs:
     name: Static Analysis
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - name: Checkout Code

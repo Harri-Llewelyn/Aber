@@ -47,6 +47,7 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
+        runAsGroup: 10001
         fsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
@@ -113,6 +114,9 @@ spec:
             # Reported by GET /info as `serverVersion`: the release, not the image tag override.
             - name: I3X_SERVER_VERSION
               value: {{ .Chart.AppVersion | quote }}
+            # Sent on every response; empty, and so not sent, unless global.scheme is https.
+            - name: ABER_STRICT_TRANSPORT_SECURITY
+              value: {{ include "aber.strictTransportSecurity" . | quote }}
             - name: PYTHONUNBUFFERED
               value: "1"
           # GET /info is the health probe, and that is a design property rather than a convenience:

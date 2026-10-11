@@ -91,7 +91,7 @@ concurrency:
 jobs:
   rehearse:
     name: Seed → Backup → Destroy → Reinstall → Restore → Assert
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # The target is under 30 minutes so it stays enabled; this is the ceiling that stops a hung
     # wait burning an hour, not the expectation.
     timeout-minutes: 45

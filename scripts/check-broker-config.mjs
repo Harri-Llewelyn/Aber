@@ -163,6 +163,9 @@ const cfg = join(work, 'cfg');
 const dynsecDir = join(work, 'dynsec');
 const brokenDir = join(work, 'broken');
 for (const d of [cfg, dynsecDir, brokenDir]) mkdirSync(d, { recursive: true });
+// The reconcile runs as the credential image's user, the broker's uid, as the chart runs it; on a
+// Linux host it must be able to write beside the document it replaces.
+for (const d of [dynsecDir, brokenDir]) chmodSync(d, 0o777);
 
 /**
  * The principals of the test broker. GATEWAY_A is the platform's validator gateway and arrives
@@ -260,7 +263,7 @@ function storedClient(username, roles) {
 }
 
 /**
- * The written document, read through a container. On a Linux host the reconcile has chowned it to
+ * The written document, read through a container. On a Linux host the reconcile has written it as
  * uid 1883 at 0600, which is exactly right for the broker and unreadable for whoever runs this.
  */
 function readDocument(dir = dynsecDir) {
@@ -325,7 +328,7 @@ function startBroker({ withTls, certsDir }) {
 const started = [];
 function cleanup() {
   for (const n of started) if (n) docker(['rm', '-f', n]);
-  // The reconcile and the certificate generator chown what they write to uid 1883, so on a Linux
+  // The reconcile writes as uid 1883 and the certificate generator chowns to it, so on a Linux
   // host the temp directory is emptied from a container before the host removes it.
   docker(['run', '--rm', '-v', `${work}:/w`, IMAGE, 'sh', '-c', 'rm -rf /w/*']);
   try {
@@ -946,9 +949,10 @@ try {
       const certs = join(work, 'issued');
       mkdirSync(certs, { recursive: true });
 
-      /** Run the real generator against `certs`, exactly as the broker init did. */
+      /** Run the real generator against `certs`, exactly as the broker init did. As root, which
+       *  the image does not default to: it chowns the broker's key to uid 1883. */
       const generate = (extraArgs = []) => docker([
-        'run', '--rm',
+        'run', '--rm', '--user', '0:0',
         '-v', `${certs}:/mosquitto/certs`,
         '-v', `${join(REPO, 'scripts', 'mosquitto-tls-init.mjs')}:/s.mjs:ro`,
         TLS_INIT_IMAGE,
