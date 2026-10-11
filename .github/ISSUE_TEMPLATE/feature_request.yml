@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        **Check the [1.0](https://github.com/Harri-Llewelyn/Aber/milestone/1) and [2.0](https://github.com/Harri-Llewelyn/Aber/milestone/2) milestones first.**
+        **Check the [milestones](https://github.com/Harri-Llewelyn/Aber/milestones) first.**
         Between them they hold everything already accepted and not yet built, and an issue there
         names the code it would build on — so it tells you both whether a thing is already planned
         and how far away it is. Several turned out to be much closer than the person asking

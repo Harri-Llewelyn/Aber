@@ -305,6 +305,47 @@ class TestSubscriptionsAuthenticateEveryRequest(unittest.TestCase):
         self.assertFalse(sub.stream_open)
 
 
+class TestStrictTransportSecurity(unittest.TestCase):
+    """The value the chart sets under https goes on every response, refusals and the base class's
+    own error page included; empty, as over http, sends nothing."""
+
+    def setUp(self):
+        self._saved = i3x_service.STRICT_TRANSPORT_SECURITY
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), i3x_service.Handler)
+        self.server.daemon_threads = True
+        threading.Thread(
+            target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+        ).start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        i3x_service.STRICT_TRANSPORT_SECURITY = self._saved
+
+    def headers(self, method, path):
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
+        try:
+            conn.request(method, path)
+            resp = conn.getresponse()
+            resp.read()
+            return resp.status, resp.getheader("Strict-Transport-Security")
+        finally:
+            conn.close()
+
+    def test_sent_on_every_response_when_set(self):
+        i3x_service.STRICT_TRANSPORT_SECURITY = "max-age=31536000"
+        # GET /info answers 200 unauthenticated; the subscriptions refuse a missing token with
+        # 401; BaseHTTPRequestHandler answers an unknown method itself with 501.
+        for method, path, status in (("GET", "/v1/info", 200), ("POST", "/v1/subscriptions", 401),
+                                     ("BREW", "/v1/info", 501)):
+            with self.subTest(method=method, path=path):
+                self.assertEqual(self.headers(method, path), (status, "max-age=31536000"))
+
+    def test_absent_when_empty(self):
+        i3x_service.STRICT_TRANSPORT_SECURITY = ""
+        self.assertEqual(self.headers("GET", "/v1/info"), (200, None))
+
+
 class TestASubscriptionDeliversOnlyWhatItsOwnerCanSee(unittest.TestCase):
     """
     What a subscription delivers is checked again, as its owner, at each /sync, at a stream's open
@@ -2228,9 +2269,6 @@ class TestObjectsMatchTheirTypes(unittest.TestCase):
             {"id": "s-local", "schema_name": "Local Pump", "semantic_id": None,
              "schema_definition": {"properties": {"Flow": {}}}},
         ]
-        rows["devices"][0]["schema_id"] = "s-semantic"
-        rows["devices"][1]["schema_id"] = "s-local"
-        # The view's devices.schema_id arm, since neither device has submodels.
         rows["device_schemas"] = [
             {"device_id": "d-explicit", "schema_id": "s-semantic"},
             {"device_id": "d-inherits", "schema_id": "s-local"},
@@ -2335,12 +2373,12 @@ def _metric_rows() -> dict:
     """
     devices = [
         {"id": "d-one", "sparkplug_id": "dev-one", "name": "One", "gateway_id": "g1",
-         "schema_id": MILL, "last_birth_metrics": ["Axes/X/POSITION", "Asset_ID"]},
+         "last_birth_metrics": ["Axes/X/POSITION", "Asset_ID"]},
         {"id": "d-two", "sparkplug_id": "dev-two", "name": "Two", "gateway_id": "g1",
-         "schema_id": MILL, "last_birth_metrics": ["Axes/X/POSITION", "OEE/AVAILABILITY"]},
+         "last_birth_metrics": ["Axes/X/POSITION", "OEE/AVAILABILITY"]},
         {"id": "d-three", "sparkplug_id": "dev-three", "name": "Three", "gateway_id": "g1"},
         {"id": "d-ext", "sparkplug_id": "dev-ext", "name": "Extended", "gateway_id": "g1",
-         "schema_id": MILL, "is_quarantined": True,
+         "is_quarantined": True,
          "last_birth_metrics": ["Axes/X/POSITION", "Environmental/HUMIDITY", "Vendor/COUNT"]},
         {"id": "d-bare", "sparkplug_id": "dev-bare", "name": "Bare", "gateway_id": None},
     ]
@@ -2617,9 +2655,9 @@ class TestMetricsAreComponentsOfTheirDevice(_MetricSpace):
 
 class TestDevicesAreTypedByEveryAttachedSchema(_MetricSpace):
     """
-    A device is typed by every schema the `device_schemas` view attaches, not by
-    `devices.schema_id` alone: one schema is its type; several are one synthesized `allOf` type per
-    distinct set. `isExtended` is computed against their union.
+    A device is typed by every schema the `device_schemas` view attaches: one schema is its type;
+    several are one synthesized `allOf` type per distinct set. `isExtended` is computed against
+    their union.
     """
 
     def test_one_schema_is_the_devices_type(self):

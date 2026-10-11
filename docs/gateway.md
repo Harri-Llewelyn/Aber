@@ -148,8 +148,10 @@ there. `enabled: false` turns the gateway's limit off and leaves GoTrue's.
 | `Cache-Control: no-store` | `/auth/v1/` | always |
 | `Strict-Transport-Security: max-age=31536000` | all three listeners | `global.scheme: https` |
 
-The same `Strict-Transport-Security` value comes from the dashboard's nginx and from Grafana, each
-set by the chart. The forge's comes from its listener here, because Gitea has no setting for it.
+The same `Strict-Transport-Security` value comes from every other web host the chart serves, each
+set by the chart: the dashboard's nginx, Grafana, Node-RED (the editor and its http-in routes), the
+i3X server and the documentation host's nginx. The forge's comes from its listener here, because
+Gitea has no setting for it.
 It carries no `includeSubDomains`: the hosts are siblings under `publicBaseDomain`, and the site's
 other names are not the chart's to pin.
 

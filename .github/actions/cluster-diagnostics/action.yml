@@ -48,6 +48,11 @@ runs:
           kubectl -n "$NS" logs "$pod" -c "$ctr" --previous --tail 80 || true
         done < /tmp/restarted.tsv
 
+        # A host AppArmor profile can attach to a program inside k3d's unconfined pods by path, and
+        # the program then reports only EACCES. The kernel log names the profile and the path.
+        echo "=== AppArmor denials on the runner"
+        sudo dmesg 2>/dev/null | grep 'apparmor="DENIED"' | tail -20 || echo "(none)"
+
         # The ingestion daemon gets a longer tail: validate.py publishes ~40 messages and the daemon
         # logs several lines per message, so 40 lines scrolls the evidence off.
         echo "=== ingestion daemon, extended"

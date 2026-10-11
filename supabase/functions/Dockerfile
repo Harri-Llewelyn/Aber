@@ -33,9 +33,16 @@ FROM supabase/edge-runtime:v1.77.0 AS runtime
 # The base's Debian packages as of its build; the security updates published since come in here.
 RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
+# The runtime's user (10001), numeric so the kubelet can verify runAsNonRoot from the image alone.
+# It writes its analysis caches into DENO_DIR at run time, so the module cache is its own; the
+# functions stay root's.
+RUN groupadd --gid 10001 deno \
+ && useradd --uid 10001 --gid 10001 --home-dir /home/deno --no-create-home --shell /usr/sbin/nologin deno \
+ && install -d -o 10001 -g 10001 /home/deno/deno-dir
+
 ENV DENO_DIR=/home/deno/deno-dir
-COPY --from=modules /deno-dir/npm /home/deno/deno-dir/npm
-COPY --from=modules /deno-dir/remote /home/deno/deno-dir/remote
+COPY --from=modules --chown=10001:10001 /deno-dir/npm /home/deno/deno-dir/npm
+COPY --from=modules --chown=10001:10001 /deno-dir/remote /home/deno/deno-dir/remote
 
 # The functions themselves, including main/ -- the allow-list stating what each one may reach. An
 # unregistered function 404s before a worker spawns, so main/index.ts must ship alongside them.
@@ -44,6 +51,7 @@ COPY --from=modules /deno-dir/remote /home/deno/deno-dir/remote
 COPY supabase/functions /home/deno/functions
 # The build files copy themselves in with the rest of the directory; nothing dispatches to them.
 RUN rm -f /home/deno/functions/Dockerfile /home/deno/functions/offline-check.sh
+USER 10001:10001
 
 # The appliance's files (the compose project gateway-bundle zips up and the installer lays down)
 # are NOT copied here: they are part of forge/gateway-platform/, which reaches the functions as the
@@ -60,10 +68,12 @@ RUN rm -f /home/deno/functions/Dockerfile /home/deno/functions/offline-check.sh
 # deployment without ingress TLS. Exec form with a literal script, so the quoting survives.
 ENTRYPOINT ["/bin/sh", "-e", "-c", "export ABER_CA_PEM=\"$(cat /home/deno/ca/ca.crt 2>/dev/null || true)\"; exec edge-runtime start --main-service /home/deno/functions/main"]
 
+# As the runtime's user, so a function that needs to write somewhere that user cannot fails here.
 FROM runtime AS offline-check
 COPY supabase/functions/offline-check.sh /offline-check.sh
-RUN --network=none bash /offline-check.sh > /offline-check.txt; s=$?; cat /offline-check.txt; exit $s
+RUN --network=none bash /offline-check.sh > /tmp/offline-check.txt; s=$?; cat /tmp/offline-check.txt; exit $s
 
 # The image is `runtime` plus the check's report, which makes the check a dependency of every build.
 FROM runtime
-COPY --from=offline-check /offline-check.txt /home/deno/offline-check.txt
+COPY --from=offline-check /tmp/offline-check.txt /home/deno/offline-check.txt
+USER 10001:10001

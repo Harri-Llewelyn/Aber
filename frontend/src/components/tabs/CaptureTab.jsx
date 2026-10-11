@@ -237,8 +237,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   // and over Realtime, so a held object would freeze.
   const selected = allRows.find(r => r.id === selectedId) || null
 
-  // `schemasForDevice` handles both attachment paths -- the device_submodels join and the
-  // dashboard's `schema_id` -- in one place, which is why it is used rather than reading either.
+  // `schemasForDevice` resolves the device's attached schemas in one place, as the Devices page does.
   const selectedSchemas = useMemo(
     () => (selected?.device ? schemasForDevice(selected.device, schemas) : []),
     [selected, schemas]

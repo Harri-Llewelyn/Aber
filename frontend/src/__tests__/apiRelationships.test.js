@@ -256,9 +256,9 @@ describe('device liveness is never asserted by the UI', () => {
   });
 
   it('sends no status on an ordinary edit either', async () => {
-    // The device form sends name, gateway, schema and location. An unguarded `status: body.status`
+    // The device form sends name, gateway and location. An unguarded `status: body.status`
     // here is one careless caller away from writing the same lie through the edit path.
-    await api.put('/api/v1/devices/dev-1', { asset_name: 'KUKA_r2e', schema_id: 'schema-1' });
+    await api.put('/api/v1/devices/dev-1', { asset_name: 'KUKA_r2e', active_gateway_id: 'gw-9' });
     expect(callFor('devices').payload).not.toHaveProperty('status');
     expect(callFor('devices').payload).not.toHaveProperty('is_quarantined');
   });

@@ -48,18 +48,13 @@ const gateway = {
   devices: [{ asset_id: 'dev-1', asset_name: 'Sim_CNC_Mill_01', status: 'ONLINE' }]
 }
 
-/**
- * The device carries its schema through `submodel_schema_ids` and not `schema_id`, the shape the
- * drawer used to render as "Not set", so the fixture is the broken case rather than the convenient
- * one.
- */
+/** The device carries its schema through `submodel_schema_ids`, as /api/v1/devices returns it. */
 const device = {
   asset_id: 'dev-1',
   asset_name: 'Sim_CNC_Mill_01',
   status: 'ONLINE',
   sparkplug_id: 'dev220000000000400080000',
   active_gateway_id: 'gw-1',
-  schema_id: null,
   submodel_schema_ids: ['sch-machining'],
   connection_method: 'Modbus TCP',
   cell_id: null,
@@ -164,25 +159,13 @@ describe('a drawer names its neighbours, and each one is a way to reach them', (
 })
 
 /** The device drawer's schema field, which was the defect rather than a missing convenience. */
-describe('the device drawer resolves a schema by either route', () => {
+describe('the device drawer resolves every attached schema', () => {
   const renderDevices = (extra = {}) => render(
     <DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
       initialSearchFilter="" onClearFilter={vi.fn()} onSelectSchema={vi.fn()} {...extra} />
   )
 
-  it('finds a schema attached through device_submodels, not only through schema_id', async () => {
-    // The fixture carries schema_id: null and submodel_schema_ids: ['sch-machining']. Reading
-    // `schema_id` alone rendered "Not set" while the table beside it listed the schema's tags from
-    // the same row.
-    renderDevices()
-    await openRow('Sim_CNC_Mill_01')
-    expect(chip('Machining_Cell_Schema')).toBeTruthy()
-  })
-
-  it('still finds one attached the 1:1 way', async () => {
-    api.get.mockImplementation(routeGet({
-      devices: [{ ...device, schema_id: 'sch-machining', submodel_schema_ids: [] }]
-    }))
+  it('finds a schema attached through device_submodels', async () => {
     renderDevices()
     await openRow('Sim_CNC_Mill_01')
     expect(chip('Machining_Cell_Schema')).toBeTruthy()
@@ -190,7 +173,7 @@ describe('the device drawer resolves a schema by either route', () => {
 
   it('says nothing rather than inventing a chip when no schema is attached', async () => {
     api.get.mockImplementation(routeGet({
-      devices: [{ ...device, schema_id: null, submodel_schema_ids: [] }]
+      devices: [{ ...device, submodel_schema_ids: [] }]
     }))
     renderDevices()
     await openRow('Sim_CNC_Mill_01')
@@ -229,24 +212,8 @@ describe('the device drawer resolves a schema by either route', () => {
   }
 
   it('ticks the attached schema when the edit form opens', async () => {
-    // Copying schema_id straight into the form read "No schema assigned" for a device the rest of
-    // the page showed as schema'd, and any other save confirmed it.
     renderDevices()
     const picker = await openEditPicker()
-    expect(picker.getByRole('checkbox', { name: 'Machining_Cell_Schema' }).checked).toBe(true)
-  })
-
-  it('ticks a schema from either path, the column as well as a submodel', async () => {
-    // A row read without the view still carries both: schemaIdsForDevice() unions them, as the
-    // device_schemas view does.
-    const second = { ...SCHEMA, schema_uuid: 'sch-oee', schema_name: 'ISO22400_OEE_Schema' }
-    api.get.mockImplementation(routeGet({
-      schemas: [SCHEMA, second],
-      devices: [{ ...device, schema_id: 'sch-oee', submodel_schema_ids: ['sch-machining'] }]
-    }))
-    renderDevices()
-    const picker = await openEditPicker()
-    expect(picker.getByRole('checkbox', { name: 'ISO22400_OEE_Schema' }).checked).toBe(true)
     expect(picker.getByRole('checkbox', { name: 'Machining_Cell_Schema' }).checked).toBe(true)
   })
 

@@ -662,7 +662,7 @@ BEGIN
     -- reported_identity carries over deliberately: the physical device keeps publishing under
     -- the id it announced, and that is what ingestion has to keep resolving. Without it the
     -- merged device is re-quarantined on its very next birth. The candidate's deliberately
-    -- provisioned fields (gateway_id, schema_id, connection_method) are left alone.
+    -- provisioned fields (gateway_id, connection_method, its device_submodels) are left alone.
     UPDATE public.devices
        SET status            = v_quarantined.status,
            first_dbirth_at   = COALESCE(v_candidate.first_dbirth_at, v_quarantined.first_dbirth_at),
@@ -2540,7 +2540,7 @@ BEGIN
 
     -- THE WHOLE REASON THIS FUNCTION EXISTS. An active or archived schema is part of the record of
     -- what devices were judged against, and deleting one would detach every device bound to it
-    -- through two different foreign keys, silently.
+    -- through the device_submodels foreign key, silently.
     IF v_draft.status <> 'draft' THEN
         RAISE EXCEPTION
             'schema "%" is %, not a draft; only a draft can be discarded',
@@ -2548,13 +2548,11 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
 
-    -- Counted BEFORE the delete, because the CASCADE and the SET NULL are what detach them and
-    -- neither reports anything. A draft can be attached to a machine to try it out, through either
-    -- arm, so this is a real number rather than always zero. A device on both arms counts once.
+    -- Counted BEFORE the delete, because the CASCADE is what detaches them and it reports nothing.
+    -- A draft can be attached to a machine to try it out, so this is a real number rather than
+    -- always zero.
     SELECT count(*) INTO v_detached
-      FROM (SELECT d.id FROM public.devices d WHERE d.schema_id = p_schema_id
-            UNION
-            SELECT ds.device_id FROM public.device_submodels ds WHERE ds.schema_id = p_schema_id) attached;
+      FROM public.device_submodels ds WHERE ds.schema_id = p_schema_id;
 
     -- Attributes the audit row this DELETE fires to the person who asked for it. SET LOCAL, so it
     -- is discarded at COMMIT and cannot bleed into the connection's next user.
@@ -2578,7 +2576,7 @@ ALTER FUNCTION public.discard_schema_draft(p_schema_id uuid) OWNER TO postgres;
 --
 
 -- FUNCTION discard_schema_draft(p_schema_id uuid) :: COMMENT
-COMMENT ON FUNCTION public.discard_schema_draft(p_schema_id uuid) IS 'Delete a draft schema version, returning it to the state before the fork. Refuses anything that is not a draft: devices.schema_id is ON DELETE SET NULL and device_submodels.schema_id is ON DELETE CASCADE, so deleting an active schema would silently detach every device bound to it. Returns the number of devices attached to the draft through either arm, each detached by the delete.';
+COMMENT ON FUNCTION public.discard_schema_draft(p_schema_id uuid) IS 'Delete a draft schema version, returning it to the state before the fork. Refuses anything that is not a draft: device_submodels.schema_id is ON DELETE CASCADE, so deleting an active schema would silently detach every device bound to it. Returns the number of devices attached to the draft, each detached by the delete.';
 
 --
 
@@ -3079,24 +3077,20 @@ BEGIN
 
         IF NOT FOUND THEN
             INSERT INTO public.devices (
-                name, gateway_id, shadow_of, status, schema_id, conformance_policy, description
+                name, gateway_id, shadow_of, status, conformance_policy, description
             ) VALUES (
                 left(v_origin.name, 96) || ' (replay)',
                 v_gateway.id,
                 v_origin.id,
                 'OFFLINE',
-                -- THE CONTRACT, COPIED. See this migration's header: without it a replay is either
-                -- unjudged or wholly rejected, and both look like a broken capture.
-                v_origin.schema_id,
                 v_origin.conformance_policy,
                 'Replays recordings of ' || v_origin.name || '. Not a machine: its readings are '
                 'genuine but were observed elsewhere, at another time.'
             )
             RETURNING id INTO v_shadow_id;
 
-            -- The many-to-many half of the same contract. `device_schemas` unions this with
-            -- devices.schema_id, so copying only one of the two silently narrows what the shadow
-            -- is judged against for every device provisioned with submodels.
+            -- THE CONTRACT, COPIED: the original's schemas, as device_submodels rows. Without them
+            -- a replay is either unjudged or wholly rejected, and both look like a broken capture.
             INSERT INTO public.device_submodels (device_id, schema_id, submodel_key)
             SELECT v_shadow_id, ds.schema_id, ds.submodel_key
               FROM public.device_submodels ds
@@ -3127,7 +3121,7 @@ ALTER FUNCTION public.ensure_shadow_devices(p_capture_id uuid) OWNER TO postgres
 --
 
 -- FUNCTION ensure_shadow_devices(p_capture_id uuid) :: COMMENT
-COMMENT ON FUNCTION public.ensure_shadow_devices(p_capture_id uuid) IS 'Find or create one shadow device per device named in a capture''s manifest, bound to the playback gateway, and return the device map start_playback_job() takes. Reuses an existing lane rather than minting per playback, so a comparison chart holds still between runs. Copies the metric contract (schema_id and device_submodels) and nothing else -- notably not the nameplate, whose serial number identifies one physical object. See 0060''s header.';
+COMMENT ON FUNCTION public.ensure_shadow_devices(p_capture_id uuid) IS 'Find or create one shadow device per device named in a capture''s manifest, bound to the playback gateway, and return the device map start_playback_job() takes. Reuses an existing lane rather than minting per playback, so a comparison chart holds still between runs. Copies the metric contract (the device_submodels rows) and nothing else -- notably not the nameplate, whose serial number identifies one physical object. See 0060''s header.';
 
 --
 
@@ -6291,7 +6285,6 @@ DECLARE
   parent           public.schemas%ROWTYPE;
   published        public.schemas%ROWTYPE;
   v_submodels      INTEGER := 0;
-  v_schema_ids     INTEGER := 0;
   v_merged         INTEGER := 0;
 BEGIN
   -- NARROWED BY 0087. This admitted the pair while the RLS write policies it is the transactional
@@ -6331,14 +6324,10 @@ BEGIN
        );
     GET DIAGNOSTICS v_merged = ROW_COUNT;
 
+    -- This UPDATE fires `log_audit_trail_event()`, so the rebinding lands in the audit trail per
+    -- device.
     UPDATE public.device_submodels SET schema_id = draft.id WHERE schema_id = parent.id;
     GET DIAGNOSTICS v_submodels = ROW_COUNT;
-
-    -- The dashboard's attachment moves too: `devices.schema_id` is the other arm of the
-    -- `device_schemas` view. This UPDATE fires `log_audit_trail_event()`, so the rebinding lands in
-    -- the audit trail per device.
-    UPDATE public.devices SET schema_id = draft.id WHERE schema_id = parent.id;
-    GET DIAGNOSTICS v_schema_ids = ROW_COUNT;
 
     IF parent.status = 'active' THEN
       UPDATE public.schemas SET status = 'archived' WHERE id = parent.id;
@@ -6351,9 +6340,10 @@ BEGIN
     'schema', to_jsonb(published),
     'archived_schema_id', parent.id,
     'archived_schema_name', parent.schema_name,
-    'devices_rebound', v_submodels + v_schema_ids,
+    'devices_rebound', v_submodels,
     'submodels_rebound', v_submodels,
-    'schema_ids_rebound', v_schema_ids,
+    -- Kept for API clients that read it: it counted devices.schema_id, which no longer exists.
+    'schema_ids_rebound', 0,
     'duplicate_submodels_removed', v_merged
   );
 END;
@@ -6365,7 +6355,7 @@ ALTER FUNCTION public.publish_schema_version(draft_schema_id uuid) OWNER TO post
 --
 
 -- FUNCTION publish_schema_version(draft_schema_id uuid) :: COMMENT
-COMMENT ON FUNCTION public.publish_schema_version(draft_schema_id uuid) IS 'Activates a draft version, archives its parent, and atomically repoints every device_submodels row and devices.schema_id from the parent to it.';
+COMMENT ON FUNCTION public.publish_schema_version(draft_schema_id uuid) IS 'Activates a draft version, archives its parent, and atomically repoints every device_submodels row from the parent to it. `schema_ids_rebound` is always 0: the devices.schema_id column it counted was removed in 1.3.0.';
 
 --
 
@@ -6634,7 +6624,7 @@ BEGIN
     -- exist. `entity_id` is a bare uuid with no foreign key -- deliberately, so history survives a
     -- purge -- which means nothing else would catch a typo'd id, and the row would sit in the
     -- trail forever describing nothing.
-    SELECT id, name, sparkplug_id, schema_id INTO v_device
+    SELECT id, name, sparkplug_id INTO v_device
       FROM public.devices WHERE id = p_device_id;
 
     IF NOT FOUND THEN
@@ -6656,7 +6646,8 @@ BEGIN
             -- would lose its meaning in exactly the cases it matters most.
             'name',            v_device.name,
             'sparkplug_id',    v_device.sparkplug_id,
-            'schema_id',       v_device.schema_id,
+            'schema_id',       (SELECT ds.schema_id FROM public.device_schemas ds
+                                 WHERE ds.device_id = v_device.id ORDER BY ds.schema_id LIMIT 1),
             'observed_at',     p_observed_at,
             'violation_count', v_count,
             'violations',      CASE
@@ -7279,24 +7270,19 @@ DECLARE
     v_version    integer;
     v_successor  text;
 BEGIN
-    -- One function, two tables: `devices.schema_id` and `device_submodels.schema_id` are the two
-    -- arms of the `device_schemas` view, and a guard on one of them is not a guard.
-    IF TG_TABLE_NAME = 'devices' THEN
-        v_device_id := NEW.id;
-        -- READ OFF `NEW`, NOT OUT OF THE TABLE. On INSERT the row is not visible to a query yet,
-        -- so a lookup would report "not a shadow" for every shadow device at the moment it is
-        -- created -- which is the only moment ensure_shadow_devices() writes this column.
-        v_is_shadow := NEW.shadow_of IS NOT NULL;
-    ELSE
-        v_device_id := NEW.device_id;
-        -- The submodel rows are written AFTER the shadow device exists, so here the lookup is both
-        -- possible and necessary -- the join row carries no shadow marker of its own.
-        SELECT d.shadow_of IS NOT NULL INTO v_is_shadow
-          FROM public.devices d WHERE d.id = v_device_id;
+    -- `device_submodels` is the one place a device's schemas are attached; on any other table
+    -- there is no binding to judge.
+    IF TG_TABLE_NAME <> 'device_submodels' THEN
+        RETURN NEW;
     END IF;
+    v_device_id := NEW.device_id;
+    -- The submodel rows are written AFTER the shadow device exists, so here the lookup is both
+    -- possible and necessary -- the join row carries no shadow marker of its own.
+    SELECT d.shadow_of IS NOT NULL INTO v_is_shadow
+      FROM public.devices d WHERE d.id = v_device_id;
 
-    -- Detaching is always allowed. So is leaving the pointer exactly where it was: see the header
-    -- for why the unchanged-value case is the one that keeps an unfinished migration editable.
+    -- Leaving the binding exactly where it was is allowed: the unchanged-value case is the one
+    -- that keeps an unfinished migration editable.
     IF NEW.schema_id IS NULL THEN
         RETURN NEW;
     END IF;
@@ -7348,7 +7334,7 @@ ALTER FUNCTION public.reject_archived_schema_assignment() OWNER TO postgres;
 --
 
 -- FUNCTION reject_archived_schema_assignment() :: COMMENT
-COMMENT ON FUNCTION public.reject_archived_schema_assignment() IS 'Refuses a NEW binding of a device to an archived schema, on either arm of the device_schemas view. Leaving an existing binding in place is allowed -- an archived schema with devices still attached is an unfinished migration, not a fault -- and shadow devices are exempt because they copy the contract of the device they replay. Issue #167.';
+COMMENT ON FUNCTION public.reject_archived_schema_assignment() IS 'Refuses a NEW device_submodels row binding a device to an archived schema. Leaving an existing binding in place is allowed -- an archived schema with devices still attached is an unfinished migration, not a fault -- and shadow devices are exempt because they copy the contract of the device they replay. Issue #167.';
 
 --
 
@@ -10897,7 +10883,6 @@ CREATE TABLE IF NOT EXISTS public.devices (
     auto_delete_at timestamp with time zone,
     connection_method text,
     first_dbirth_at timestamp with time zone,
-    schema_id uuid,
     sparkplug_id text GENERATED ALWAYS AS (('dev'::text || substr(encode(uuid_send(id), 'hex'::text), 1, 21))) STORED,
     reported_identity text,
     quarantine_reason text,
@@ -10938,7 +10923,6 @@ ALTER TABLE public.devices
     ADD COLUMN IF NOT EXISTS auto_delete_at timestamp with time zone,
     ADD COLUMN IF NOT EXISTS connection_method text,
     ADD COLUMN IF NOT EXISTS first_dbirth_at timestamp with time zone,
-    ADD COLUMN IF NOT EXISTS schema_id uuid,
     ADD COLUMN IF NOT EXISTS sparkplug_id text GENERATED ALWAYS AS (('dev'::text || substr(encode(uuid_send(id), 'hex'::text), 1, 21))) STORED,
     ADD COLUMN IF NOT EXISTS reported_identity text,
     ADD COLUMN IF NOT EXISTS quarantine_reason text,
@@ -10965,7 +10949,6 @@ ALTER TABLE public.devices
     ALTER COLUMN auto_delete_at DROP DEFAULT,
     ALTER COLUMN connection_method DROP DEFAULT,
     ALTER COLUMN first_dbirth_at DROP DEFAULT,
-    ALTER COLUMN schema_id DROP DEFAULT,
     ALTER COLUMN reported_identity DROP DEFAULT,
     ALTER COLUMN quarantine_reason DROP DEFAULT,
     ALTER COLUMN identity_source DROP DEFAULT,
@@ -11365,7 +11348,7 @@ END $c$;
 --
 
 -- TABLE device_submodels :: COMMENT
-COMMENT ON TABLE public.device_submodels IS 'Submodel attachments written through the API, one AAS Submodel each. The dashboard attaches its one schema through devices.schema_id; device_schemas reads both.';
+COMMENT ON TABLE public.device_submodels IS 'A device''s schema attachments, one AAS Submodel each. The Devices page writes them through set_device_schemas().';
 
 --
 
@@ -11375,16 +11358,7 @@ CREATE OR REPLACE VIEW public.device_schemas WITH (security_invoker='true') AS
     ds.schema_id,
     ds.submodel_key,
     'device_submodels'::text AS source
-   FROM public.device_submodels ds
-UNION
- SELECT d.id AS device_id,
-    d.schema_id,
-    NULL::text AS submodel_key,
-    'devices.schema_id'::text AS source
-   FROM public.devices d
-  WHERE ((d.schema_id IS NOT NULL) AND (NOT (EXISTS ( SELECT 1
-           FROM public.device_submodels ds
-          WHERE (ds.device_id = d.id)))));
+   FROM public.device_submodels ds;
 
 
 ALTER VIEW public.device_schemas OWNER TO postgres;
@@ -11392,7 +11366,7 @@ ALTER VIEW public.device_schemas OWNER TO postgres;
 --
 
 -- VIEW device_schemas :: COMMENT
-COMMENT ON VIEW public.device_schemas IS 'Every schema attached to a device: its device_submodels rows, or devices.schema_id (the dashboard''s attachment) for a device that has none.';
+COMMENT ON VIEW public.device_schemas IS 'Every schema attached to a device, one row per (device, schema): its device_submodels rows. `source` is always ''device_submodels'', kept for clients that select it.';
 
 --
 
@@ -15672,12 +15646,6 @@ CREATE TRIGGER trg_devices_delete_asset_config AFTER DELETE ON public.devices FO
 
 --
 
--- devices trg_devices_reject_archived_schema :: TRIGGER
-DROP TRIGGER IF EXISTS trg_devices_reject_archived_schema ON public.devices;
-CREATE TRIGGER trg_devices_reject_archived_schema BEFORE INSERT OR UPDATE OF schema_id ON public.devices FOR EACH ROW EXECUTE FUNCTION public.reject_archived_schema_assignment();
-
---
-
 -- devices trg_devices_replay_lane_is_minted :: TRIGGER
 DROP TRIGGER IF EXISTS trg_devices_replay_lane_is_minted ON public.devices;
 CREATE TRIGGER trg_devices_replay_lane_is_minted BEFORE INSERT OR UPDATE OF gateway_id ON public.devices FOR EACH ROW EXECUTE FUNCTION public.refuse_hand_assigning_a_replay_lane();
@@ -16149,25 +16117,6 @@ DO $c$ BEGIN
                     AND conrelid = 'public.devices'::regclass) THEN
     ALTER TABLE ONLY public.devices
         ADD CONSTRAINT devices_gateway_id_fkey FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE SET NULL;
-  END IF;
-END $c$;
-
---
-
--- devices devices_schema_id_fkey :: FK CONSTRAINT
-DO $c$ BEGIN
-
-  IF EXISTS (SELECT 1 FROM pg_constraint
-              WHERE conname = 'devices_schema_id_fkey'
-                AND conrelid = 'public.devices'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (schema_id) REFERENCES public.schemas(id) ON DELETE SET NULL') THEN
-    ALTER TABLE public.devices DROP CONSTRAINT devices_schema_id_fkey;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint
-                  WHERE conname = 'devices_schema_id_fkey'
-                    AND conrelid = 'public.devices'::regclass) THEN
-    ALTER TABLE ONLY public.devices
-        ADD CONSTRAINT devices_schema_id_fkey FOREIGN KEY (schema_id) REFERENCES public.schemas(id) ON DELETE SET NULL;
   END IF;
 END $c$;
 

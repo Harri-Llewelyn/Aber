@@ -235,9 +235,8 @@ class TheProjection(unittest.TestCase):
 
     def test_schemas_are_attached_from_the_view_in_one_query(self):
         """
-        `device_schemas`, not `device_submodels`. The view reads the join table and the deprecated
-        `devices.schema_id`, and reading the join table alone reports "no schema" for every device
-        attached through the column.
+        `device_schemas`, the view fplus-directory reads too, so the two surfaces give one device
+        the same schemas.
         """
         supabase = FakeSupabase()
         directory_publish.directory_documents(supabase)

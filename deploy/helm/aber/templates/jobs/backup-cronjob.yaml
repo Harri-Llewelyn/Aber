@@ -125,7 +125,14 @@ spec:
           # 17.x one -- and this is the copy most likely to be missed, because getting it wrong here
           # does not break the backup. It breaks the RESTORE, months later, on files that were
           # written correctly.
+          #
+          # As that image's postgres user (100), which pg_dump and tar need nothing more than. The
+          # dumps are flat files in the volume's root, which fsGroup makes group-writable, so this
+          # Job prunes what an earlier root-run one wrote.
           securityContext:
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 101
             fsGroup: 101
             fsGroupChangePolicy: OnRootMismatch
             seccompProfile:

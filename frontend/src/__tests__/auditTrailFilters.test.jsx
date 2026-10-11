@@ -742,7 +742,7 @@ describe('Audit Trail event classification', () => {
   })
 
   it('calls attaching or detaching a device schema governance, not creation or lifecycle', () => {
-    // A device_submodels row is a schema binding, the act a change to `schema_id` is.
+    // A device_submodels row is a schema binding: attaching one is a governance act.
     const row = { device_id: 'dev-1', schema_id: 'sch-1', submodel_key: null }
     const attach = { event_type: 'INSERT', entity_type: 'device_submodels', new_data: row }
     const detach = { event_type: 'DELETE', entity_type: 'device_submodels', old_data: row }

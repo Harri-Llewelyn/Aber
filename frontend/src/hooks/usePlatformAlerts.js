@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { REALTIME_ENABLED } from '../constants'
+import { classifyRefreshError, FAILURE_SESSION } from '../lib/connectionState'
 
 /**
  * Reconciliation interval. Detection is the socket's job; this only repairs what it missed.
@@ -43,9 +44,9 @@ export function usePlatformAlerts(showToast, onOpenAlerts) {
       .order('starts_at', { ascending: false })
 
     if (error) {
-      // A 401 here means the session went away; the app's own auth handling owns that, and toasting
-      // from a background reconciler would double-report it.
-      if (error.code !== 'PGRST301') console.warn('[alerts] refresh failed:', error.message)
+      // An expired or rejected session is the strip under the top bar's to report, with Sign In
+      // Again; warning from a background reconciler as well would double-report it.
+      if (classifyRefreshError(error) !== FAILURE_SESSION) console.warn('[alerts] refresh failed:', error.message)
       return
     }
 

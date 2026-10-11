@@ -92,11 +92,14 @@ before proposing a change:
   wherever one defines the id. `concept_definitions` (`0169`) unions the IDTA, ASHRAE 223P, OPC UA
   and ISO 22400 descriptions, in that order of precedence. So a 223P class such as
   `TemperatureSensor` is defined by 223P, not by the description of a metric carrying it.
-  MTConnect stores no definitions yet, so its ids, like the QUDT quantity kinds the example 223P
-  readings carry and any id an Administrator typed, take the catalog description only when every
-  live metric carrying the id agrees on it. The POSITION
-  metrics describe their own axes, so that concept's definition defers to MTConnect instead. A new
-  standard's ids are covered with no code change; its definitions need an arm in the view.
+  An id no vocabulary holds but a known authority issues defers to that authority, whatever the
+  metrics carrying it say: the QUDT quantity kinds the example 223P readings carry are defined as,
+  for example, "Temperature, as QUDT defines it." (`ID_AUTHORITIES` in `shell.ts`, one entry per
+  authority). MTConnect stores no definitions yet, so its ids, like any id an Administrator typed,
+  take the catalog description only when every live metric carrying the id agrees on it. The
+  POSITION metrics describe their own axes, so that concept's definition defers to MTConnect
+  instead. A new standard's ids are covered with no code change; its definitions need an arm in
+  the view.
 
 ## How a vocabulary entry becomes a metric
 
@@ -425,9 +428,9 @@ imported: the five ids are typed in `example-metrics.sql`, the one place that fi
 an id from a vocabulary table, so its inner join does not check them. Check 47 holds them to the
 pairs migration `0172` repoints an install to. That install holds the old 223P class ids, seeded by
 `0002` up to 1.0.1 and by the example set since, and `0172` moves a row only while its id is still
-the seed's. An AAS export defines these ids from the catalog description, as for any id no
-vocabulary holds. i3X files their types in the local namespace, since `metric_type_namespace()`
-has no case for QUDT.
+the seed's. An AAS export defines each of these ids as QUDT's, "Temperature, as QUDT defines it.",
+never by a reading's description or as 223P's. i3X files their types in the local namespace, since
+`metric_type_namespace()` has no case for QUDT.
 
 **The full model waits for a BMS adapter:** a QUDT quantity-kind vocabulary of its own, with its
 provenance, and a second field saying what a point is attached to (its 223P class). Until then the

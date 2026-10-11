@@ -538,11 +538,17 @@ A live reading more than 24 hours old is refused. A reading flagged `is_historic
 `ingestion.historicalMaxAgeSeconds` old (7 days), the appliance buffer's maximum age. Each refusal
 is counted per gateway with its reason, and *Readings Refused for Their Timestamp* fires on it.
 
-**A replay more than 25 hours late reaches the raw table, but not the rollups.** The rollups refresh
-25 hours back, so `telemetry_1m`, `telemetry_5m` and `telemetry_1h` lack it, and anything reading
-them shows the outage as a gap; anything reading the raw table sees it. To bring it into the
-rollups, refresh the outage's window on the historian, using the start and end the outage report
-gave:
+**A replay reaches the rollups within about five minutes, however late it is.** The rollups'
+own refresh reaches back 25 hours. For anything older, ingestion records each hour the replay
+touched, and a job on the historian refreshes those hours in `telemetry_1m`, `telemetry_5m` and
+`telemetry_1h` every five minutes. This works for any edge node that flags its replay
+`is_historical`, not only the appliance. How it works is in
+[`timescaledb/README.md`](../timescaledb/README.md#aggregatessql).
+
+**If the rollups still show the outage as a gap** once the replay has finished and five minutes have
+passed, the hours were not recorded. `aber_ingestion_rollup_windows_failed_total` counts this, and
+the daemon logs a warning naming the cause. The readings are in the raw table. Refresh the outage's
+window on the historian by hand, using the start and end the outage report gave:
 
 ```sql
 CALL refresh_continuous_aggregate('telemetry_1m', '<start>', '<end>');
@@ -550,8 +556,12 @@ CALL refresh_continuous_aggregate('telemetry_5m', '<start>', '<end>');
 CALL refresh_continuous_aggregate('telemetry_1h', '<start>', '<end>');
 ```
 
-A window older than a rollup's retention is not refreshed. Doing this without a person is
-[#788](https://github.com/Harri-Llewelyn/Aber/issues/788).
+A window older than a rollup's retention is not refreshed.
+
+Do not refresh by hand a window older than the raw window (`timescaledb.retention.retainFor`, 14
+days by default). A refresh rebuilds every device's buckets in the window from the raw table. Once
+retention has dropped those readings, it deletes the other devices' buckets from the rollups. The
+job skips such a window for this reason.
 
 ---
 

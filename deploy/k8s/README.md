@@ -258,6 +258,8 @@ Its other options:
 - `--no-build` reuses the images already in the node.
 - `--only=ingestion` rebuilds a subset.
 - `--e2e` adds the in-cluster conformance Jobs.
+- `--network-policy` turns the NetworkPolicy layer on, as a site's values do. CI's k8s-validation
+  runs with it.
 
 On an upgrade, `up` sets `e2e.suspend` and starts the Jobs only once every workload has rolled out.
 That way they test the new pods, not the ones being replaced. Helm creates those Jobs during the
@@ -756,11 +758,12 @@ helm upgrade ... \
 is built from it, including every OAuth `redirect_uri` that db-init registers. If you leave it
 `http` with TLS on, sign-in breaks with `invalid redirect_uri`, while every pod reports healthy.
 
-**With `https`, the hosts tell browsers to use only HTTPS with them for a year.** The dashboard,
-the API, Grafana, Studio and the forge send `Strict-Transport-Security`. A browser that has seen
-it refuses plain HTTP to that host. It also turns a certificate warning there into an error nobody
-can click past. So install the root certificate (step 3) before people use the site, and install
-the new one before you replace the CA. Node-RED, i3X and the documentation host do not send it.
+**With `https`, the hosts tell browsers to use only HTTPS with them for a year.** Every web host
+the chart serves sends `Strict-Transport-Security`: the dashboard, the API, Grafana, Studio, the
+forge, Node-RED, i3X and the documentation host. A browser that has seen it refuses plain HTTP to
+that host. It also turns a certificate warning there into an error nobody can click past. So
+install the root certificate (step 3) before people use the site, and install the new one before
+you replace the CA.
 
 Use one wildcard certificate for `*.<domain>`, or nine subdomains mean nine certificates, each
 renewing on its own.
@@ -930,15 +933,29 @@ the conformance suites write to the install they run against.
 
 ### `helm test` — the cheap gate, mutates nothing
 
-**Run it before anything else.** It takes about a second:
+**Run it before anything else, and after every upgrade.** It needs no person's credential, writes
+nothing and takes seconds on a healthy site:
 
 ```bash
-helm test aber -n aber
-kubectl -n aber logs aber-test-fdw
+helm test aber -n aber --logs
 ```
 
-It proves the **`postgres_fdw` link** end to end. The foreign server exists and points at
-`timescaledb:5432`, and the historian has its hypertable. `public.telemetry` can be queried across
+| Pod | Checks |
+| :--- | :--- |
+| `aber-test-fdw` | the `postgres_fdw` link between the two databases (below) |
+| `aber-test-db-tls` | with `postgresTls.enabled`: both databases refuse plaintext ([*TLS to the databases*](#tls-to-the-databases)) |
+| `aber-test-api` | `GET /auth/v1/health`, and `GET /rest/v1/` with the publishable key, each answer 200 through `supabase-envoy:8000` |
+| `aber-test-broker` | a CONNECT with a password no account has gets CONNACK "not authorised". With `mosquitto.tls.enabled` it is made on 8883 and verifies the certificate against the chart's CA under the name `mosquitto`; without, on 1883 |
+| `aber-test-ingestion` | `aber_ingestion_mqtt_connected` and `aber_ingestion_db_connected` both read 1: the daemon is subscribed to `spBv1.0/#` and its historian connection is open |
+| `aber-test-dashboard` | the `frontend` Service serves `/config.js`, and it names the API's browser-facing address |
+
+Each of the last four retries for up to two minutes, so a pod still starting after an upgrade, or a
+new pod that the NetworkPolicy controller has not yet admitted, does not fail it. Under
+`networkPolicy.enabled` each has its own edges in `templates/networkpolicy.yaml`. A failing pod
+stays until the next run, so `kubectl -n aber logs aber-test-<name>` still answers what it found.
+
+`aber-test-fdw` proves the **`postgres_fdw` link** end to end. The foreign server exists and points
+at `timescaledb:5432`, and the historian has its hypertable. `public.telemetry` can be queried across
 the wrapper, and is readable as `authenticated`, not only as owner.
 
 `public.telemetry` is a foreign-table projection, so a mistake in the foreign server (most likely
@@ -1017,7 +1034,7 @@ kubectl -n aber get pvc          # delete deliberately, never as cleanup habit
 | `gitea` + `gitea-external` | deployed |
 | `prometheus`, `loki`, `alloy`, the `cold-archive` CronJob | deployed |
 | `grafana`, `Ingress` (9 subdomain routes) | deployed |
-| `helm test` FDW gate, k3d CI | deployed |
+| `helm test` (the FDW link, the API, the broker, ingestion, the dashboard), k3d CI | deployed |
 | In-cluster E2E Jobs, `playback`, the backup service, historian physical backup, database TLS | **available, off by default** |
 | NetworkPolicies, PDBs, HPAs, backup CronJob | **available, off by default** |
 | MQTTS on 8883, internal CA, ServiceMonitors | **available, off by default** |
@@ -1301,6 +1318,13 @@ does not exempt kubelet probes from ingress policy. Add an ingress allow from th
   gateway. pg_net has no retries and no dead-letter queue (DLQ), so blocking this flow drops every
   notification silently.
 
+**With `ingress.tls.enabled`, the edge functions reach the ingress controller.** Before the gateway
+dialog offers the one-liner, `gateway-bundle` fetches the root certificate from the dashboard's
+public host, over plain HTTP, as a fresh appliance does. A rule admits the controller's namespace on
+ports 80 and 8000, its HTTP port for ingress-nginx and for k3s's Traefik. If that host resolves to an
+address outside the cluster, allow it with `networkPolicy.extraEgress`. Blocked, the dialog offers
+only the bundle, and says the root could not be fetched.
+
 **The forge's login depends on a policy, so it gets one whether or not you enable this layer.** With
 `gitea.enabled: true`, the chart renders **one** NetworkPolicy even when
 `networkPolicy.enabled: false` (#172). It covers ingress to the Gitea pod only: port 3000 from the
@@ -1405,17 +1429,12 @@ container gets back only the capabilities its process was shown to need, each na
 
 | Container (pod) | Added back | Why |
 |---|---|---|
-| `frontend`, `swagger-ui` | `CHOWN`, `SETGID`, `SETUID` | The nginx master runs as root. It chowns its temp directories to `nginx` and drops to that user for the workers. |
 | `envoy` (supabase-envoy) | `CHOWN`, `SETGID`, `SETUID` | The image's entrypoint hands `/dev/stdout` and `/dev/stderr` to the envoy user, then drops to it. |
 | `realtime` (supabase-realtime) | `SETGID`, `SETUID` | `/app/run.sh` runs the migrations as `nobody` through `sudo`. Its start logs `sudo: unable to send audit message: Operation not permitted`, which is harmless. |
-| `mosquitto` | `CHOWN`, `SETGID`, `SETUID` | The entrypoint hands `/mosquitto` to uid 1883, so the broker can save its plugin document on any storage class. The broker then starts as root and drops to that uid. |
-| `assemble-config` (mosquitto) | `CHOWN`, `DAC_OVERRIDE`, `FOWNER` | It reads the plugin's document (uid 1883, mode 0600) and writes its replacement owned by 1883. |
-| `certificate-reload` (mosquitto, broker TLS only) | `KILL` | It sends SIGHUP to the broker, which runs as another uid. |
-| `timescaledb` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `SETGID`, `SETUID` | The entrypoint fixes the data directory's owner and mode, then drops to postgres (uid 70). tini forwards the stop signal to it. |
-| `supabase-db` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `SETGID`, `SETUID` | The same, for postgres at uid 100. |
+| `supabase-db` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `SETGID`, `SETUID` | The entrypoint fixes the data directory's owner and mode, then drops to postgres (uid 100). tini, as root, forwards the stop signal to it. Why it starts as root is under *Users*, below. |
 | `gitea-init` (gitea) | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID`, `SETUID` | The image's setup rewrites `app.ini` and the git user's `.ssh`, and runs `gitea` as git (uid 1000). |
 | `gitea` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `NET_BIND_SERVICE`, `SETGID`, `SETUID`, `SYS_CHROOT` | The same setup. sshd binds port 22 and chroots its pre-authentication child, and s6 delivers SIGTERM to Gitea. |
-| `backup-service` | `DAC_OVERRIDE` | It archives the forge's and the broker's volumes, whose files belong to other uids, some at 0600. |
+| `backup-service` | `DAC_OVERRIDE` | Only with `backup.includeForge` or `backup.includeBroker`, when it runs as root. It archives the forge's and the broker's volumes, whose files belong to other uids, some at 0600. |
 
 Each of these is in the Pod Security Standards' *baseline* set. **Alloy is the exception to
 baseline**: it mounts the node's `/`, `/proc` and `/sys` read-only, as `hostPath` volumes, for the
@@ -1425,11 +1444,84 @@ What happens if a capability is missing: the container exits at start with `Oper
 permitted`, or, for `KILL`, a stop takes the whole grace period and the process is killed rather
 than shut down. What to do: add it back in that container's `securityContext`, and say why.
 
-Two steps of #419 follow. Each image this repository builds gets a non-root `USER`, matched by
-`runAsNonRoot` and `runAsUser` in the chart. Then each root filesystem becomes read-only, one
-workload at a time, with an `emptyDir` for what the process writes. Until then the containers run as
-their images' users, several as root, and `scripts/lint/config-allowlist.json` lists those
-findings against #419.
+One step of #419 follows: each root filesystem becomes read-only, one workload at a time, with an
+`emptyDir` for what the process writes. Until then `scripts/lint/config-allowlist.json` lists each
+writable root against #419.
+
+### Users
+
+Every image this repository builds, except `supabase-db` (below), ends with a non-root `USER`. It is
+a number in every Dockerfile but `node-red/Dockerfile`, which names its base's user. The chart runs
+each image as the uid in the table and sets `runAsNonRoot: true`, so the kubelet refuses to start
+the container as root.
+Containers that share a pod with one, such as the `wait-for-*` init containers, run as the same
+user. `scripts/check-docs-drift.mjs` (check 56) holds the Dockerfiles, the chart and this table
+together.
+
+| Image | uid:gid | Where it runs |
+|---|---|---|
+| ingestion | 10001:10001 | `ingestion`, `playback`, the `cold-archive` CronJob, the `claim-templates` hook |
+| test-runner | 10001:10001 | the e2e and load-test Jobs |
+| i3x-service | 10001:10001 | `i3x-service` |
+| edge-runtime | 10001:10001 | `supabase-functions` |
+| frontend | 101:101 | `frontend` (nginx's user; it listens on 3000) |
+| swagger-ui | 101:101 | `swagger-ui` (nginx's user; it listens on 8080) |
+| node-red | 1000:1000 | `node-red` |
+| gateway-credential | 1883:1883 | the `mosquitto` pod: `assemble-config` and `gateway-credential` |
+| timescaledb | 70:70 | `timescaledb`, the `timescaledb-maintenance` Job |
+| db-init | 100:101 | the `db-init` Job |
+| backup-service | 100:101 | `backup-service`; as root with `backup.includeForge` or `backup.includeBroker` |
+| supabase-db | root | `supabase-db`, which drops to 100:101; its sidecars run as 100:101 |
+
+Two images the chart does not run follow the same rule. The Remote gateway appliance runs as
+1000:1000, and `docker-compose.yml` starts its one-shot `bootstrap` as root, for the reason it gives.
+`mosquitto/tls-init` runs as 1000:1000, and `check-broker-config.mjs` runs it as root, because it
+chowns the broker's key.
+
+The chart also states the user of each third-party image that already runs as one: Grafana (472),
+Loki (10001), Prometheus and postgres_exporter (65534), GoTrue and PostgREST (1000). The broker
+(`eclipse-mosquitto`) starts as its own user, 1883, with every other container in its pod. The Jobs
+that run `supabase/postgres` or `node` tools run as those images' own users (100:101, 1000:1000).
+
+These pods still start a container as root, each for the reason given:
+
+- **`alloy`** reads the node's `/`, `/proc` and `/sys`, which root owns.
+- **`gitea`**: the image's s6 supervisor and sshd start as root and drop to git (1000).
+- **`supabase-envoy`**: the image's entrypoint hands `/dev/stdout` to the envoy user and drops to it.
+- **`supabase-realtime`**: `/app/run.sh` runs the migrations through `sudo`.
+- **`supabase-db`**: its data directory is the volume's own root, because the image's
+  `postgresql.conf` names `/var/lib/postgresql/data`. A provisioner creates that directory owned by
+  root, and initdb as postgres (100) cannot take a directory it does not own. Started as root, the
+  entrypoint gives it to postgres and drops to that uid. Measured: on a volume postgres already owns,
+  the image also starts as 100.
+- **`supabase-storage`, `supabase-meta`, `supabase-studio`**: their images name no user, and the
+  chart has not been shown to run them as another.
+- **`backup-service`**, with `backup.includeForge` or `backup.includeBroker`: it reads files other
+  uids own at 0600.
+
+**Pod Security admission.** A namespace that enforces the *restricted* level now admits every pod
+except the ones listed above. *baseline* admits every pod except Alloy, as before.
+
+**Volumes written by an earlier release.** 1.2.0 started several of these processes as root. Their
+volumes stay usable across `helm upgrade`:
+
+- Each pod that writes a volume sets `fsGroup`, with `fsGroupChangePolicy: OnRootMismatch`. The
+  kubelet gives the volume's root to that group, writable, so the new uid can create files in it.
+- The historian's data directory already belongs to uid 70: the 1.2.0 entrypoint chowned it before
+  dropping to postgres. Started as 70, the entrypoint sets it to 0700, which its owner may do.
+- The broker's plugin document already belongs to uid 1883, at 0600. `assemble-config` rewrites it
+  as 1883.
+- `backup-service`, when it runs as uid 100, sets `fsGroupChangePolicy: Always`. A backup
+  directory written as root becomes group-writable at every start, so the service can prune it.
+  The backup CronJob writes flat files into the volume's root, which fsGroup already makes
+  writable.
+
+What happens on a storage class that neither applies `fsGroup` nor creates a new volume
+world-writable (some NFS and CSI drivers; k3s's `local-path` creates it 0777): a new volume's root
+stays writable by root alone. `assemble-config` then stops with `EACCES` on the plugin's document,
+and the historian's initdb with `Permission denied`. Volumes 1.2.0 wrote keep working, because
+their files already belong to the right uid. What to do: use a storage class that applies
+`fsGroup`, or give the volume's root to the uid in the table once, before the first start.
 
 ### PDBs and HPAs
 

@@ -33,7 +33,11 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      # supabase/postgres's postgres user: psql needs nothing more.
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
         seccompProfile:
           type: RuntimeDefault
       initContainers:

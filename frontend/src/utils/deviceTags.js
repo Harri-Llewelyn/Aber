@@ -51,13 +51,12 @@ export function hasUnmodelledMetrics(device, schemaOrSchemas) {
 }
 
 /**
- * The ids of every schema attached to a device: `submodel_schema_ids` (the `device_schemas` view,
- * already the union of device_submodels rows and `schema_id`) plus `schema_id` itself, for a row
- * read without the view. No repeats; [] when nothing is attached.
+ * The ids of every schema attached to a device: `submodel_schema_ids`, read from the
+ * `device_schemas` view. No repeats; [] when nothing is attached.
  */
 export function schemaIdsForDevice(device) {
   const fromView = Array.isArray(device?.submodel_schema_ids) ? device.submodel_schema_ids : []
-  return [...new Set([...fromView, device?.schema_id].filter(Boolean))]
+  return [...new Set(fromView.filter(Boolean))]
 }
 
 /** Every schema attached to a device, as schema rows. Ids with no row in `schemas` are dropped. */

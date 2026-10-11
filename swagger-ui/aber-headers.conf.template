@@ -1,0 +1,6 @@
+# Rendered into conf.d at start by the image's entrypoint, which substitutes the variables the
+# environment defines. The chart sets this one when global.scheme is https; empty, nginx sends no
+# header. `merge` keeps it on Swagger UI's locations, whose own headers would otherwise replace it,
+# and would repeat the image's CORS headers on its nested locations: the chart keeps CORS off.
+add_header_inherit merge;
+add_header Strict-Transport-Security "${ABER_STRICT_TRANSPORT_SECURITY}" always;

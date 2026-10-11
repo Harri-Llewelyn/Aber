@@ -63,7 +63,11 @@ spec:
             - {{ printf "%s.%s" $sub $.Values.global.publicBaseDomain | quote }}
             {{- end }}
       {{- end }}
+      # The test runner's user, for the waits too: curl, nc and psql need nothing more.
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
       initContainers:

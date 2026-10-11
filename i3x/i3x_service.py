@@ -75,6 +75,9 @@ SERVER_VERSION = os.getenv("I3X_SERVER_VERSION", "dev")
 LISTEN_HOST = os.getenv("I3X_HOST", "0.0.0.0")
 LISTEN_PORT = int(os.getenv("I3X_PORT", "8090"))
 
+# Sent on every response; the chart sets it when global.scheme is https, and empty sends nothing.
+STRICT_TRANSPORT_SECURITY = os.getenv("ABER_STRICT_TRANSPORT_SECURITY", "").strip()
+
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://supabase-envoy:8000").rstrip("/")
 # The publishable key does no work here beyond getting past the gate: `_headers()` sends it as
 # `apikey` and puts the CALLER'S OWN token in Authorization, so RLS decides what the address
@@ -332,7 +335,7 @@ def _read_address_space(pg: PostgrestClient) -> dict:
         "devices",
         {
             "select": "id,sparkplug_id,name,gateway_id,is_quarantined,last_birth_metrics,"
-            "schema_id,status,cell_id,location_scope",
+            "status,cell_id,location_scope",
             "is_archived": live,
         },
     )
@@ -351,7 +354,7 @@ def _read_address_space(pg: PostgrestClient) -> dict:
                    "change_description"},
     )
     # Every schema attached to a device, as the dashboard, the AAS exporter and ingestion read it:
-    # device_submodels rows and the deprecated devices.schema_id, one row per schema.
+    # one device_submodels row per schema.
     attached = _read_relation(pg, "device_schemas", {"select": "device_id,schema_id"})
     # A metric's catalog row is its type on every device that carries it.
     catalog = _read_relation(
@@ -1482,6 +1485,12 @@ class Handler(BaseHTTPRequestHandler):
     def version_string(self):
         """The Server header names the service and no versions; GET /info carries serverVersion."""
         return "aber-i3x"
+
+    def end_headers(self):
+        """Every response ends its headers here: the JSON answers, the stream, and send_error's."""
+        if STRICT_TRANSPORT_SECURITY:
+            self.send_header("Strict-Transport-Security", STRICT_TRANSPORT_SECURITY)
+        super().end_headers()
 
     # -- plumbing ----------------------------------------------------------------------------
     def log_message(self, fmt, *args):

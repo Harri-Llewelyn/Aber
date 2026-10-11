@@ -6,6 +6,8 @@
       .Values.supabaseStorage.persistence.enabled (eq .Values.supabaseStorage.backend "file") -}}
 {{- $includeForge := and .Values.backup.includeForge .Values.gitea.enabled -}}
 {{- $includeBroker := and .Values.backup.includeBroker .Values.mosquitto.enabled -}}
+{{- /* The forge's and the broker's volumes hold files other uids own at 0600: root reads them. */ -}}
+{{- $asRoot := or $includeForge $includeBroker -}}
 {{- $brokerClaim := .Values.mosquitto.persistence.existingClaim | default (printf "%s-mosquitto-data" $fullname) -}}
 {{- $ca := .Values.backup.ca -}}
 {{- $includeCa := and $ca.secretName $ca.namespace -}}
@@ -107,7 +109,22 @@ spec:
                       - mosquitto
                       {{- end }}
       {{- end }}
+      {{/*
+        The image's postgres user, unless the service archives the forge or the broker: then root,
+        with DAC_OVERRIDE below. As 100, fsGroup `Always`, not OnRootMismatch: a backup directory
+        written as root (by 1.2.0, or while either volume was included) is pruned as 100 only once
+        the kubelet has given group 101 write on everything in it, at every start.
+      */}}
       securityContext:
+        {{- if $asRoot }}
+        runAsUser: 0
+        {{- else }}
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        fsGroupChangePolicy: Always
+        {{- end }}
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -169,9 +186,11 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+              {{- if $asRoot }}
               # Archives the forge's and the broker's volumes, whose files belong to uids 1000 and
               # 1883, some at 0600.
               add: ["DAC_OVERRIDE"]
+              {{- end }}
           resources:
             {{- toYaml .Values.backupService.resources | nindent 12 }}
           volumeMounts:

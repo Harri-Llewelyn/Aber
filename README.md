@@ -79,7 +79,7 @@ Mosquitto, Node-RED, Grafana and Gitea, running on Kubernetes (k3s).
 | See how it is secured | [Security model](docs/security-model.md) |
 | Upgrade to a new release | [Upgrades](docs/upgrades.md) |
 | Run it day to day | [The Kubernetes runbook](deploy/k8s/README.md) |
-| See what is planned | The [2.0 milestone](https://github.com/Harri-Llewelyn/Aber/milestone/2), and [what has already shipped](docs/roadmap.md) |
+| See what is planned | The [milestones](https://github.com/Harri-Llewelyn/Aber/milestones), one per release, and [what has already shipped](docs/roadmap.md) |
 
 ## Relationship to ACS
 

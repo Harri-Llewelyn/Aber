@@ -15,7 +15,7 @@ allowed to be heard at all.
 | [`ingestion.py`](ingestion.py) | The daemon. Identity resolution, quarantine gating, telemetry mapping, the historian writer |
 | [`conformance.py`](conformance.py) | The constraint engine: what a device sent, judged against its bound schemas. Pure logic; the daemon decides the policy |
 | [`registry.py`](registry.py) | The Prometheus metric objects, built from the declarations in `metrics.py` |
-| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 79 outcomes |
+| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 81 outcomes |
 | [`logging_config.py`](logging_config.py) | The logger used by both — human-readable lines, or one JSON object per line under `LOG_FORMAT=json` |
 | [`test_gateway_binding.py`](test_gateway_binding.py) | Gateway↔device binding, telemetry sanity window, append-only historian |
 | [`test_declared_metrics.py`](test_declared_metrics.py) | Birth-metric observation, change-only writes, alias resolution, rebirth rate limit, device watchdog, a device that publishes again |
@@ -23,6 +23,7 @@ allowed to be heard at all.
 | [`test_entity_cache.py`](test_entity_cache.py) | The bounded resolution caches: LRU eviction, and the in-place-mutation and negative-entry contracts |
 | [`test_telemetry_writer.py`](test_telemetry_writer.py) | The historian writer: several messages become one transaction, and one bad message still loses one |
 | [`test_directory_refresh.py`](test_directory_refresh.py) | The directory refresher: one request per table per pass, keyed as the per-entity path keys |
+| [`test_stale_node_death.py`](test_stale_node_death.py) | An NDEATH whose bdSeq is an earlier session's changes nothing; the others are applied |
 
 ---
 
@@ -91,6 +92,33 @@ gateway configured by hand can publish under another group. The daemon accepts t
 logs `SPARKPLUG GROUP MISMATCH` once per node every five minutes, naming the group the message used
 and the group the gateway is registered under. To clear it, change one of the two so they agree.
 `test_archived_gateway.py` holds both arms and the wording.
+
+**The group a gateway publishes under is recorded too, so the mismatch shows where an operator
+looks.** A mismatch matters even though it is tolerated: the Factory+ Directory addresses the node
+under its row's group, the Unified Namespace's `<enterprise>` segment is the message's group, and a
+consumer subscribed to `spBv1.0/<site group>/#` misses the node entirely. After the heartbeat write,
+`record_observed_group()` writes the topic's group to `gateways.observed_sparkplug_group` through
+`ingest_record_gateway_group()` (`0174`), and `gateway_status` carries the column. The Gateways page
+warns while it differs from `sparkplug_group` ("Publishes under group X; registered under Y"), and
+a gateway that returns to its own group clears the warning with its next message.
+
+- **Written only when the group changes.** The daemon remembers the group it last wrote per gateway,
+  so a steady state costs no write. The memory is lost on a restart, so the first message per
+  gateway after one writes once more; the gate's `IS DISTINCT FROM` filter leaves the row, and the
+  audit trail, untouched then. A change of group is one `UPDATE` audit row, attributed to
+  ingestion.
+- **Not read back on the hot path.** The column is not among the gateway columns the resolution
+  cache selects. On an upgrade the new daemon runs before db-init has added the column, and a select
+  naming it would fail every gateway lookup until then. A write that fails, there or anywhere, is
+  logged at most once per node every five minutes and retried by the next message.
+- **Not recorded:** a message with an empty group, a group over 255 characters (the gate's cap,
+  `MAX_OBSERVED_GROUP_LENGTH`), an archived or unregistered gateway's traffic, which is refused
+  first, and an NDEATH from an earlier session ([below](#a-death-from-an-earlier-session)).
+- **Not this release:** a count in `platform_health` and an alert rule. The page is where the
+  warning shows.
+
+`test_archived_gateway.py` (`ObservedGroupTests`) holds the writes, and `validate.py` check 19a
+publishes under another group and back again and reads `gateway_status` after each.
 
 ### The directory refresher
 
@@ -747,8 +775,8 @@ per-gateway flag in Node-RED's own flow context with no MQTT command involved.
 **Shadow devices are lanes, not copies.** `ensure_shadow_devices()` mints one device per captured
 device, bound to the playback gateway, carrying `devices.shadow_of`, and returns the map
 `start_playback_job()` wants. They are reused rather than minted per run, so a chart comparing a
-machine with its replay holds still between runs. What is copied is the **metric contract** —
-`schema_id` and `device_submodels` — because a replay judged against no schema is either unjudged or,
+machine with its replay holds still between runs. What is copied is the **metric contract** — the
+device's `device_submodels` rows — because a replay judged against no schema is either unjudged or,
 under `conformance_policy = enforce`, wholly rejected while the job reports success. What is
 deliberately not copied is the **nameplate**, and `0060` carries a self-check that fails if a shadow
 ever gains one: `device_nameplate` is IDTA Nameplate and holds a serial number, which identifies one
@@ -985,6 +1013,18 @@ fails is retried one message at a time, so the message at fault is the only one 
 records that a batch had to be split. A message whose every metric was filtered still upserts its
 asset row and still counts as written; the empty telemetry statement is guarded, since
 `execute_values` on an empty list is a syntax error.
+
+**A row older than the rollups reach records its hour.** The rollups' refresh policies reach back
+25 hours. A row older than `ROLLUP_POLICY_REACH_SECONDS` (23 hours) has its UTC hour inserted into
+the historian's `rollup_refresh_requests`, one row per hour per transaction, after the telemetry and
+in the same transaction. A job on the historian refreshes those hours in every rollup
+([`timescaledb/README.md`](../timescaledb/README.md#aggregatessql)). Few rows are that old besides
+a replay: a live reading is refused past 24 hours. So a live batch normally issues nothing extra.
+The insert runs under a savepoint: if it fails, the batch's rows are still committed, and
+`aber_ingestion_rollup_windows_failed_total` counts the hours the rollups will lack. Where the chart
+turns the rollups off (`timescaledb.rollups.enabled`), it sets `TIMESCALEDB_ROLLUPS_ENABLED=false`.
+The daemon then records nothing, takes no savepoint and moves neither counter, and says so once at
+start.
 
 **What runs after the commit runs on the writer thread**: the UNS republish and the conformance
 record, per message, in arrival order. Both were on the callback thread before and neither raises
@@ -1330,6 +1370,68 @@ it runs only when `DEVICE_OFFLINE_TIMEOUT_SECONDS` is 90 or less. Check 18 publi
 gateway's NDEATH, expects its registered device OFFLINE with one audit row, and expects it ONLINE
 after an NBIRTH and its DBIRTH.
 
+### A death from an earlier session
+
+Sparkplug numbers each MQTT session of an edge node with **bdSeq**. The NDEATH an edge node
+registers as its CONNECT's Last Will carries it, and the NBIRTH that follows repeats it, so a host
+can tell which session a death ends. A Last Will can arrive after the node has connected again and
+been born: an edge node that reconnects under a new client id while the broker still holds the old
+connection has its old Will published at the keepalive timeout, up to 1.5 × keepalive after the new
+NBIRTH. Applied, that death would read a live gateway OFFLINE until its next NDATA, and its devices
+until their next DDATA, which under report by exception can be minutes.
+
+**The daemon holds the bdSeq each NBIRTH carries**, per (group, edge node), keyed as the alias table
+is. An NDEATH whose bdSeq is present and differs from it changes nothing: no status write, no device
+marked OFFLINE, and none of the open session's state reset (its aliases, its device births, its seq
+run). It is counted in `aber_ingestion_stale_deaths_total{edge_node}` and logged at INFO as
+`STALE NDEATH`, naming both numbers. Every other NDEATH is applied as before: one whose bdSeq
+matches, one without a bdSeq, and one for a node with no NBIRTH seen since the daemon started or
+whose NBIRTH carried none. An applied NDEATH closes the session, so a later death is applied too
+until the next NBIRTH opens one.
+
+- **Any difference counts, not only an older number.** bdSeq advances by one on every CONNECT and
+  wraps at 255, so a later session could be told by its number. But an edge node that starts again
+  at 0 after a reboot makes the old session's Will the larger number, and only equality is safe.
+- **A missed NBIRTH is the one case this gets wrong.** An NBIRTH is published at QoS 0. If one is
+  lost, the daemon still holds the previous session's bdSeq and would ignore this session's real
+  death. The gateway still reads STALE 90 s after its last heartbeat, and the watchdog takes its
+  devices OFFLINE. The window is short: the node's next NDATA carries a seq out of the run the
+  daemon holds, which requests a rebirth, and the NBIRTH that answers opens the session again. After
+  an applied death no session is held, so a birth missed then cannot cause it.
+- **A duplicate is applied twice, harmlessly.** An edge node that publishes its NDEATH before
+  disconnecting without a DISCONNECT packet leaves the broker to deliver the same death as its Will.
+  The first closes the session and the second is applied again. The gateway and its devices are
+  already OFFLINE, so the second changes no status and records no audit row.
+- **Aber's own appliance.** Its broker node uses a fixed client id (its `sparkplug_id`), and
+  Mosquitto publishes the old connection's Will at takeover, before the new CONNACK, so the old
+  death arrives before the new NBIRTH. Its NBIRTH and NDEATH carry the same bdSeq: store and forward
+  builds the Will, and the NDEATH it publishes before a deliberate disconnect, when it connects, from
+  a bdSeq it advances only there, and every NBIRTH of that connection, a rebirth's included, repeats
+  it.
+
+**What Sparkplug 3.0.0 says.** The edge node's half is normative and tested: the NBIRTH carries
+bdSeq and it matches the Will's (`tck-id-topics-nbirth-bdseq-included`,
+`tck-id-topics-nbirth-bdseq-matching`, `tck-id-message-flow-edge-node-birth-publish-nbirth-payload-bdSeq`,
+`tck-id-payloads-nbirth-bdseq`, `tck-id-payloads-nbirth-bdseq-repeat`), the Will carries the bdSeq
+of its CONNECT and it advances on every CONNECT (`tck-id-topics-nbirth-bdseq-increment`,
+`tck-id-message-flow-edge-node-birth-publish-will-message-payload-bdSeq`,
+`tck-id-payloads-ndeath-bdseq`), an NDEATH carries bdSeq as its only metric
+(`tck-id-topics-ndeath-payload`), and a rebirth keeps it
+(`tck-id-operational-behavior-data-commands-rebirth-action-3`). The host's half,
+`tck-id-operational-behavior-edge-node-termination-host-action-ndeath-node-offline` and
+`-ndeath-devices-offline`, marks the node and its devices offline "immediately after receiving an
+NDEATH", at the host's own time, and names no bdSeq. The passages that say which NDEATH ends the
+session carry no tck-id: chapter 4, *Death Message (NDEATH)*, acts on an NDEATH "with a bdSeq number
+that matches the preceding bdSeq number in the NBIRTH"; chapter 5, *Edge Node Session
+Establishment*, gives the reason ("timing with Will Messages may result in NDEATH messages arriving
+after a new/next NBIRTH message"); chapter 5, *Edge Node Session Termination*, says a Will with a
+duplicate bdSeq "MUST be ignored"; and chapter 6, *NDEATH*, says the bdSeq "MUST be used to
+determine that an NDEATH matches a prior NBIRTH". The daemon reads the host's normative statements
+as applying to the open session's NDEATH.
+
+`test_stale_node_death.py` covers each case. `validate.py` check 19 publishes an NBIRTH and an older
+session's NDEATH as the seeded gateway and expects it still ONLINE.
+
 ---
 
 ## The Primary Host, and the STATE Every Gateway Watches
@@ -1522,9 +1624,11 @@ daemon does with it:
   node, start), from a registered gateway only, into the `aber_ingestion_gateway_outage_*` series,
   and logs it. Node metrics are never stored as telemetry. The *Gateway Outage Lost Readings* alert
   fires for an hour after a report with any reading dropped. Any edge node may send the same report.
-- **Readings more than 25 hours late reach the raw table but not the rollups.** The continuous
-  aggregates refresh 25 hours back (`timescaledb/aggregates.sql`), so a longer outage's replay is
-  missing from `telemetry_1m`, `_5m` and `_1h` until that range is refreshed by hand
+- **A replay reaches the rollups however late it is.** The continuous aggregates' own refresh
+  reaches back 25 hours (`timescaledb/aggregates.sql`). For an older reading the writer records its
+  hour, and a historian job refreshes it in `telemetry_1m`, `_5m` and `_1h` within five minutes
+  ([The historian writer](#the-historian-writer)). An hour that could not be recorded is counted in
+  `aber_ingestion_rollup_windows_failed_total` and is refreshed by hand
   ([`docs/remote-gateways.md`](../docs/remote-gateways.md#late-data-after-an-outage)).
 
 ### What paho 1.6.1 cannot promise
@@ -1572,6 +1676,7 @@ published default is a silent security downgrade, and the failure mode is silenc
 | `SUPABASE_URL` | `http://127.0.0.1:54321` | |
 | `SUPABASE_PUBLISHABLE_KEY` / `SUPABASE_INGESTION_KEY` | **required** | The gateway's `apikey` and the `Service_Ingestor` bearer (`secrets.ingestionKey`). Without either the daemon exits rather than running fail-open; it never holds the service-role key |
 | `TELEMETRY_MAX_HISTORICAL_AGE_SECONDS` | `604800` (7 days) | How old an `is_historical` reading may be. `ingestion.historicalMaxAgeSeconds` — see [Loss model](#loss-model) |
+| `TIMESCALEDB_ROLLUPS_ENABLED` | `true` | Whether a late replay's hours are recorded for the rollups. The chart sets it from `timescaledb.rollups.enabled`; `false` records nothing — see [The historian writer](#the-historian-writer) |
 | `DEVICE_OFFLINE_TIMEOUT_SECONDS` | `300` | Silence after which a device is marked OFFLINE. `0` disables the watchdog |
 | `DEVICE_WATCHDOG_INTERVAL_SECONDS` | `30` | Sweep interval |
 | `REBIRTH_REQUEST_INTERVAL_SECONDS` | `300` | Minimum gap between rebirth requests to one edge node |
@@ -1705,6 +1810,7 @@ the line, so a drop counter appearing there at all is still the signal.
 | `aber_ingestion_timestamps_rejected_at_seconds` | `edge_node`, `reason` | Gauge: when the last refusal happened. What the alert reads, since a counter born at its first value shows Prometheus no increase. |
 | `aber_ingestion_historical_readings_total` | `edge_node` | Replayed (`is_historical`) readings accepted. Set it against the buffered count the same gateway reported. |
 | `aber_ingestion_sequence_replayed_total` | `edge_node` | Historical messages out of the live seq run, left out of gap detection. |
+| `aber_ingestion_stale_deaths_total` | `edge_node` | NDEATHs ignored because their bdSeq is not the open session's: an earlier connection's Last Will, delivered after the node was born again ([*A death from an earlier session*](#a-death-from-an-earlier-session)). Nothing was lost. |
 | `aber_ingestion_gateway_outages_total` | `edge_node`, `buffering` | Outages the gateway reported after reconnecting. |
 | `aber_ingestion_gateway_outage_seconds_total` | `edge_node` | Their total length. |
 | `aber_ingestion_gateway_outage_readings_buffered_total` / `_dropped_total` | `edge_node` | Readings buffered to replay (an appliance's include those it sent again after finding its link dead), and readings **dropped and never recorded**. Nothing else counts the second. |
@@ -1716,6 +1822,8 @@ the line, so a drop counter appearing there at all is still the signal.
 | `aber_ingestion_sequence_messages_missed_total` | `edge_node` | How many, as a **lower bound** — see the caveat below. |
 | `aber_ingestion_write_failures_total` | — | A historian write raised. That telemetry is gone. |
 | `aber_ingestion_write_batch_failures_total` | — | A transaction carrying several messages failed and was split. The message at fault is in `write_failures_total`; the rest were written on the retry. |
+| `aber_ingestion_rollup_windows_recorded_total` | — | Hours of telemetry written later than the rollups' refresh reaches back (a replay), recorded for the historian job that refreshes them. |
+| `aber_ingestion_rollup_windows_failed_total` | — | Such hours that could not be recorded. **The readings are stored but missing from the rollups** until the hour is refreshed by hand ([Loss model](#loss-model)). |
 | `aber_ingestion_write_queue_depth` | — | Gauge. Messages decided and not yet written. **The saturation signal**: it grows only while the writer is behind the fleet. |
 | `aber_ingestion_db_reconnects_total` / `_db_connect_failures_total` | — | Historian connection churn. Failures rising while `db_connected` reads 1 is the shape of a server-side drop. |
 | `aber_ingestion_payload_violations_recorded_total` | — | A DDATA payload failed schema validation and was recorded in `audit_trail` (archived migration 0026). The telemetry was still written. |

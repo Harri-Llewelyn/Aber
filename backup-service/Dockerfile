@@ -19,10 +19,10 @@ RUN rm /usr/local/bin/gosu
 # SHA-256 the store checks and HEADs it back. The CLI and its Python are most of the image's size.
 RUN apk add --no-cache nodejs sqlite tar age aws-cli
 
-# ROOT, DELIBERATELY. The service reads three volumes owned by three uids -- the storage objects,
-# the forge (1000) and its own -- and writes one. It holds the two superuser passwords because
-# pg_dump needs them; the image boundary and the absence of a published port are what confine it.
-USER root
+# The base's postgres user (100:101), the owner group the backup volume is given (fsGroup 101). The
+# forge's and the broker's volumes hold files other uids own at 0600, so the chart runs the service
+# as root, with DAC_OVERRIDE, only when it archives either of those.
+USER 100:101
 
 # No CMD: the chart supplies `node /scripts/backup-service.mjs` and mounts the script from a
 # ConfigMap, as gateway-credential does, so it is editable without a rebuild.

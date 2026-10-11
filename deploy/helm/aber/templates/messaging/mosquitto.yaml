@@ -371,7 +371,8 @@ spec:
       */}}
       automountServiceAccountToken: false
       {{- end }}
-      # M5. eclipse-mosquitto runs as uid/gid 1883.
+      # M5. Every container runs as the broker's uid/gid, 1883 (values.yaml): the broker starts as
+      # it rather than dropping to it, and the sidecars that write its document or signal it share it.
       securityContext:
         {{- include "aber.podSecurityContext" .Values.mosquitto.podSecurityContext | nindent 8 }}
       initContainers:
@@ -385,20 +386,17 @@ spec:
           exist, and a ConfigMap mount is read-only.
 
           THE CREDENTIAL SERVICE'S IMAGE, not the broker's: the reconcile needs node beside the
-          broker's own mosquitto_passwd, and that image is built FROM the broker's for this. Root,
-          because the document is written owned by uid 1883 at mode 0600; the plugin warns on
-          anything wider.
+          broker's own mosquitto_passwd, and that image is built FROM the broker's for this. As
+          1883, the pod's uid, because the document is the broker's at mode 0600; the plugin warns
+          on anything wider.
         */}}
         - name: assemble-config
           image: {{ include "aber.image" (dict "ctx" . "image" .Values.gatewayCredential.image) | quote }}
           imagePullPolicy: {{ .Values.gatewayCredential.image.pullPolicy }}
           securityContext:
-            runAsUser: 0
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-              # Reads the stored document (uid 1883, 0600), then chowns and chmods its replacement.
-              add: ["CHOWN", "DAC_OVERRIDE", "FOWNER"]
           env:
             {{- include "aber.mqttPrincipalEnv" . | nindent 12 }}
             {{- include "aber.secretEnv" (dict "name" "MQTT_DYNSEC_ADMIN_USER" "secretName" $secretName "key" "MQTT_DYNSEC_ADMIN_USER") | nindent 12 }}
@@ -552,13 +550,12 @@ spec:
             periodSeconds: 20
             timeoutSeconds: 5
             failureThreshold: 4
+          # Started as 1883, the entrypoint skips its chown and the broker its drop of privileges.
+          # It writes its plugin document on the data volume, which fsGroup makes group-writable.
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-              # The entrypoint chowns /mosquitto to uid 1883, so the broker can write its plugin
-              # document on any storage class; then it starts as root and drops to that uid.
-              add: ["CHOWN", "SETGID", "SETUID"]
           resources:
             {{- toYaml .Values.mosquitto.resources | nindent 12 }}
           volumeMounts:
@@ -597,13 +594,11 @@ spec:
         - name: certificate-reload
           image: "{{ .Values.mosquitto.image.repository }}:{{ .Values.mosquitto.image.tag }}"
           imagePullPolicy: {{ .Values.mosquitto.image.pullPolicy }}
+          # As 1883, the broker's own uid, so it may signal the broker with no capability.
           securityContext:
-            # Root, to signal a process running as 1883.
-            runAsUser: 0
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-              add: ["KILL"]
           command:
             - /bin/sh
             - -c
@@ -665,11 +660,9 @@ spec:
         - name: gateway-credential
           image: {{ include "aber.image" (dict "ctx" . "image" .Values.gatewayCredential.image) | quote }}
           imagePullPolicy: {{ .Values.gatewayCredential.image.pullPolicy }}
+          # The pod's uid, 1883, which is also the image's: the CA is projected 0440 to group 1883,
+          # and the service writes nothing on this target.
           securityContext:
-            # The broker's uid: the CA is projected 0440 to group 1883, and the service writes
-            # nothing on this target. The image's default user is root and is not needed.
-            runAsUser: 1883
-            runAsGroup: 1883
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]

@@ -23,7 +23,6 @@ const SCHEMAS = [
 const candidate = (overrides = {}) => ({
   asset_id: 'dev-1',
   asset_name: 'Lathe 7',
-  schema_id: null,
   submodel_schema_ids: [],
   ...overrides
 })
@@ -31,27 +30,25 @@ const candidate = (overrides = {}) => ({
 const quarantined = (reported_metrics, asset_name = 'unrelated label') => ({ asset_name, reported_metrics })
 
 describe('schemaIdsForDevice', () => {
-  it('unions the view and the column, without repeats', () => {
-    expect(schemaIdsForDevice({ schema_id: 'a', submodel_schema_ids: ['b', 'a'] })).toEqual(['b', 'a'])
-    expect(schemaIdsForDevice({ schema_id: 'a', submodel_schema_ids: ['b'] })).toEqual(['b', 'a'])
-  })
-
-  it('reads either path alone, and nothing as an empty list', () => {
-    expect(schemaIdsForDevice({ schema_id: 'a' })).toEqual(['a'])
-    expect(schemaIdsForDevice({ schema_id: null, submodel_schema_ids: ['b'] })).toEqual(['b'])
-    expect(schemaIdsForDevice({ schema_id: null, submodel_schema_ids: [] })).toEqual([])
+  it('reads the view, without repeats, and nothing as an empty list', () => {
+    expect(schemaIdsForDevice({ submodel_schema_ids: ['b', 'a', 'b'] })).toEqual(['b', 'a'])
+    expect(schemaIdsForDevice({ submodel_schema_ids: [] })).toEqual([])
+    expect(schemaIdsForDevice({})).toEqual([])
     expect(schemaIdsForDevice(null)).toEqual([])
   })
 
+  it('ignores a schema_id on the row, which no longer names an attachment', () => {
+    expect(schemaIdsForDevice({ schema_id: 'a', submodel_schema_ids: ['b'] })).toEqual(['b'])
+  })
+
   it('resolves to schema rows, dropping an id with no row', () => {
-    const device = { schema_id: 'sch-spindle', submodel_schema_ids: ['sch-energy', 'sch-gone'] }
+    const device = { submodel_schema_ids: ['sch-energy', 'sch-gone', 'sch-spindle'] }
     expect(schemasForDevice(device, SCHEMAS).map(s => s.schema_uuid)).toEqual(['sch-energy', 'sch-spindle'])
   })
 })
 
 describe('suggestMatches', () => {
   it('scores a candidate attached only through device_submodels by its schema', () => {
-    // The 1.0 fault: candidate.schema_id alone was read, so this matched on its name only.
     const [match] = suggestMatches(
       quarantined(['Spindle/SPEED', 'Spindle/LOAD']),
       [candidate({ submodel_schema_ids: ['sch-spindle'] })],
@@ -62,20 +59,11 @@ describe('suggestMatches', () => {
     expect(match.score).toBe(1)
   })
 
-  it('still scores a candidate attached only through schema_id', () => {
-    const [match] = suggestMatches(
-      quarantined(['Spindle/SPEED', 'Spindle/LOAD']),
-      [candidate({ schema_id: 'sch-spindle' })],
-      SCHEMAS
-    )
-    expect(match.overlap).toMatchObject({ present: 2, total: 2 })
-  })
-
-  it('takes the best of several schemas, whichever path attached it', () => {
-    // The energy schema matches fully; the spindle schema from the column does not match at all.
+  it('takes the best of several schemas', () => {
+    // The energy schema matches fully; the spindle schema does not match at all.
     const [match] = suggestMatches(
       quarantined(['Energy/KWH', 'Energy/KW', 'Energy/PF']),
-      [candidate({ schema_id: 'sch-spindle', submodel_schema_ids: ['sch-spindle', 'sch-energy'] })],
+      [candidate({ submodel_schema_ids: ['sch-spindle', 'sch-energy'] })],
       SCHEMAS
     )
     expect(match.overlap).toMatchObject({ present: 3, total: 3 })

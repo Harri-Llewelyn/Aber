@@ -24,7 +24,7 @@ vi.mock('../utils/downloadBlob', () => ({ downloadBlob: vi.fn() }))
 const DEVICE = {
   asset_id: 'aaaaaaaa-0000-4000-8000-000000000001', asset_name: 'CNC_01',
   sparkplug_id: 'devaaaaaaaa000040008000', status: 'ONLINE', is_quarantined: false,
-  is_archived: false, active_gateway_id: 'gw-1', cell_id: 'cell-1', schema_id: 'schema-cnc',
+  is_archived: false, active_gateway_id: 'gw-1', cell_id: 'cell-1', submodel_schema_ids: ['schema-cnc'],
   first_dbirth_at: '2026-07-27T12:00:00Z', created_at: '2026-07-20T12:00:00Z'
 }
 

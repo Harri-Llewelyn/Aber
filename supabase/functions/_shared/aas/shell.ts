@@ -256,6 +256,19 @@ function conceptName(id: string): string | null {
   return /^[A-Za-z]/.test(tail) ? tail : null;
 }
 
+/**
+ * Authorities that issue ids no vocabulary here holds, by IRI prefix. Such an id is defined by its
+ * authority, whatever standard the metrics carrying it are filed under, so its definition defers
+ * there and never to a metric's description. A row in `concept_definitions` still takes precedence.
+ */
+export const ID_AUTHORITIES: readonly { prefix: string; authority: string }[] = [
+  { prefix: "http://qudt.org/vocab/quantitykind/", authority: "QUDT" },
+];
+
+function authorityOf(id: string): string | undefined {
+  return ID_AUTHORITIES.find((a) => id.startsWith(a.prefix))?.authority;
+}
+
 /** The single distinct non-empty value, or undefined when there are none or they disagree. */
 function onlyValue(values: unknown[]): string | undefined {
   const distinct = [...new Set(values.map((v) => String(v ?? "").trim()).filter(Boolean))];
@@ -293,9 +306,10 @@ function conceptDescription(
  * One ConceptDescription per semantic id, from rows the shell was built from: the nameplate
  * template, else the catalog rows carrying the id, else the schema. The definition is the
  * vocabulary's own text (`concept_definitions`) wherever a vocabulary defines the id, so one
- * metric's description never defines a standard concept. For any other id, a catalog description
- * is the definition only when every live row carrying the id agrees on it, since several metrics
- * can share one concept (#457). The unit and datatype come from the catalog rows on the same terms.
+ * metric's description never defines a standard concept. An id under one of ID_AUTHORITIES defers
+ * to that authority. For any other id, a catalog description is the definition only when every
+ * live row carrying the id agrees on it, since several metrics can share one concept (#457). The
+ * unit and datatype come from the catalog rows on the same terms.
  * `unitId` is not set: the units are MTConnect UnitEnum names, which IEC 61360 `unit` takes as free
  * text.
  */
@@ -316,26 +330,29 @@ export function buildConceptDescriptions(
     }
 
     const defined = definedBy.get(id);
+    const authority = authorityOf(id);
     const carrying = rows.catalog.filter((m) => m.semantic_id === id);
     const live = carrying.filter((m) => !m.deprecated);
     const metrics = live.length > 0 ? live : carrying;
     if (metrics.length > 0) {
       const named = conceptName(id);
       const name = named ?? defined?.name ?? String(metrics.map((m) => m.name).sort()[0]);
-      const standard = onlyValue(metrics.map((m) => m.standard));
+      const source = authority ?? onlyValue(metrics.map((m) => m.standard));
       const units = new Set(metrics.map((m) => String(m.units ?? "").trim()).filter(Boolean));
       const unit = units.size === 1 ? [...units][0] : undefined;
       const datatype = onlyValue(metrics.map((m) => m.datatype));
-      // Without one agreed description, the definition defers to the identifier's source.
+      // Without one agreed description, or under an authority, the definition defers to the
+      // identifier's source.
       const deferred = !named
         ? `The concept identified by ${id}.`
-        : standard
-        ? `${name}, as ${standard} defines it.`
+        : source
+        ? `${name}, as ${source} defines it.`
         : `${name}, a local extension with no recorded definition.`;
+      const described = authority ? undefined : onlyValue(metrics.map((m) => m.description));
       return conceptDescription(
         id,
         name,
-        defined?.definition ?? onlyValue(metrics.map((m) => m.description)) ?? deferred,
+        defined?.definition ?? described ?? deferred,
         {
           unit,
           // Units that disagree leave the type unsaid: MEASURE needs one unit, COUNT claims none.
@@ -348,7 +365,8 @@ export function buildConceptDescriptions(
 
     const schema = rows.schemas.find((s) => s.semantic_id === id);
     const name = conceptName(id) ?? defined?.name ?? String(schema?.schema_name ?? "Concept");
-    const definition = defined?.definition || (schema?.description as string | null) ||
+    const definition = defined?.definition ||
+      (authority ? `${name}, as ${authority} defines it.` : schema?.description as string | null) ||
       `The concept ${name}, which this shell references.`;
     return conceptDescription(id, name, definition);
   });
@@ -425,8 +443,7 @@ export async function loadDeviceRecord(
   if (!device) return null;
 
   // asset_config is keyed by sparkplug_id, written by ingestion from the DBIRTH payload.
-  // `device_schemas` reads the device_submodels join and the deprecated devices.schema_id, so this
-  // resolves for a device attached by either path.
+  // `device_schemas` is one row per device_submodels row: every schema attached to the device.
   const [
     { data: configRows },
     { data: linkRows },
