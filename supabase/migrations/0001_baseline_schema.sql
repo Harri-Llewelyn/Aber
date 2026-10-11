@@ -19335,8 +19335,13 @@ REVOKE ALL ON FUNCTION public.backup_offsite_setting_guard() FROM PUBLIC, anon, 
 -- All three are withdrawn and re-granted together, in 0076's order, rather than adding `anon` back
 -- on its own. A grantee keeps its place in the ACL, so re-granting one role leaves it last instead
 -- of first -- the same three grants in a different order, which a dump records and a digest sees.
-REVOKE ALL ON FUNCTION public.auth_pre_request() FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.auth_pre_request() TO anon, authenticated, service_role;
+-- One DO block, one transaction: between a separate REVOKE and GRANT every request is refused.
+DO $pre_request$
+BEGIN
+  REVOKE ALL ON FUNCTION public.auth_pre_request() FROM PUBLIC, anon, authenticated, service_role;
+  GRANT EXECUTE ON FUNCTION public.auth_pre_request() TO anon, authenticated, service_role;
+END
+$pre_request$;
 
 -- 7. Structural self-checks
 -- ---------------------------------------------------------------------------------------------
