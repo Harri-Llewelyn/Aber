@@ -305,6 +305,47 @@ class TestSubscriptionsAuthenticateEveryRequest(unittest.TestCase):
         self.assertFalse(sub.stream_open)
 
 
+class TestStrictTransportSecurity(unittest.TestCase):
+    """The value the chart sets under https goes on every response, refusals and the base class's
+    own error page included; empty, as over http, sends nothing."""
+
+    def setUp(self):
+        self._saved = i3x_service.STRICT_TRANSPORT_SECURITY
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), i3x_service.Handler)
+        self.server.daemon_threads = True
+        threading.Thread(
+            target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+        ).start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        i3x_service.STRICT_TRANSPORT_SECURITY = self._saved
+
+    def headers(self, method, path):
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
+        try:
+            conn.request(method, path)
+            resp = conn.getresponse()
+            resp.read()
+            return resp.status, resp.getheader("Strict-Transport-Security")
+        finally:
+            conn.close()
+
+    def test_sent_on_every_response_when_set(self):
+        i3x_service.STRICT_TRANSPORT_SECURITY = "max-age=31536000"
+        # GET /info answers 200 unauthenticated; the subscriptions refuse a missing token with
+        # 401; BaseHTTPRequestHandler answers an unknown method itself with 501.
+        for method, path, status in (("GET", "/v1/info", 200), ("POST", "/v1/subscriptions", 401),
+                                     ("BREW", "/v1/info", 501)):
+            with self.subTest(method=method, path=path):
+                self.assertEqual(self.headers(method, path), (status, "max-age=31536000"))
+
+    def test_absent_when_empty(self):
+        i3x_service.STRICT_TRANSPORT_SECURITY = ""
+        self.assertEqual(self.headers("GET", "/v1/info"), (200, None))
+
+
 class TestASubscriptionDeliversOnlyWhatItsOwnerCanSee(unittest.TestCase):
     """
     What a subscription delivers is checked again, as its owner, at each /sync, at a stream's open

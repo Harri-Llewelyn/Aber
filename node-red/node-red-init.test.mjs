@@ -210,7 +210,7 @@ module.exports = {
     return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
   };
   const settings = createRequire(import.meta.url)(path.join(dir, 'settings.js'));
-  return { adminAuth: settings.adminAuth, calls };
+  return { adminAuth: settings.adminAuth, settings, calls };
 }
 
 const SETTINGS_ENV = {
@@ -341,6 +341,50 @@ describe("the editor's role, re-checked", () => {
     fs.writeFileSync(path.join(dir, '.aber-editor-users.json'), JSON.stringify({ [EMAIL]: '*' }));
     run(dir);
     assert.equal(fs.existsSync(path.join(dir, '.aber-editor-users.json')), false);
+  });
+});
+
+/** A response that records the headers set on it and a refusal's status. */
+function recordedResponse() {
+  const headers = {};
+  return {
+    headers,
+    setHeader(name, value) { headers[name] = value; },
+    set(name, value) { headers[name] = value; return this; },
+    status(code) { this.statusCode = code; return this; },
+    end() {},
+  };
+}
+
+describe('the response headers', () => {
+  const HSTS = 'Strict-Transport-Security';
+  afterEach(() => { globalThis.fetch = originalFetch; delete process.env.ABER_STRICT_TRANSPORT_SECURITY; });
+
+  /** The editor's response and an http-in route's refusal, under the value the chart set. */
+  function responses(value) {
+    const { settings } = editorSettings(() => ({}));
+    process.env.ABER_STRICT_TRANSPORT_SECURITY = value;
+    const editor = recordedResponse();
+    let reached = false;
+    settings.httpAdminMiddleware({}, editor, () => { reached = true; });
+    assert.equal(reached, true, 'the editor middleware did not pass the request on');
+    const refused = recordedResponse();
+    settings.httpNodeAuth({ headers: {} }, refused, () => assert.fail('a request with no token reached a route'));
+    assert.equal(refused.statusCode, 401);
+    return { editor, refused };
+  }
+
+  it('sends the chart\'s Strict-Transport-Security on the editor and on an http-in refusal under https', () => {
+    const { editor, refused } = responses('max-age=31536000');
+    assert.equal(editor.headers[HSTS], 'max-age=31536000');
+    assert.equal(refused.headers[HSTS], 'max-age=31536000');
+  });
+
+  it('sends none where the chart leaves the value empty, as over http', () => {
+    const { editor, refused } = responses('');
+    assert.equal(HSTS in editor.headers, false);
+    assert.equal(HSTS in refused.headers, false);
+    assert.equal(editor.headers['X-Content-Type-Options'], 'nosniff', 'the other headers still go');
   });
 });
 

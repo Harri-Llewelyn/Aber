@@ -1,0 +1,67 @@
+{{- if and .Values.supabaseEnvoy.enabled .Values.supabaseAuth.enabled .Values.supabaseRest.enabled }}
+{{- $component := "test-api" -}}
+{{/*
+The API through the gateway: GoTrue's health, and PostgREST's root with the publishable key, which
+is public by design, each a 200 from supabase-envoy:8000. Needs no person's credential and writes
+nothing, so it is safe on a running site and after every upgrade.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ printf "%s-%s" (include "aber.fullname" .) $component }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "2"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  restartPolicy: Never
+  {{- with .Values.global.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: {{ $component }}
+      image: {{ include "aber.curlImage" . | quote }}
+      imagePullPolicy: {{ .Values.initJobs.curlImage.pullPolicy }}
+      env:
+        {{- include "aber.secretEnv" (dict "name" "APIKEY" "secretName" (include "aber.secretName" .) "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 8 }}
+      command:
+        - /bin/sh
+        - -c
+        - |
+          {{- include "aber.testRetry" . | nindent 10 }}
+          GW={{ include "aber.supabase.internalUrl" . }}
+          ok() { code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$@" || true); [ "$code" = 200 ]; }
+          check() {
+            what=$1; shift
+            if retry "$what" ok "$@"; then
+              echo "    $what: 200"
+            else
+              echo "FAIL: $what answered ${code:-nothing}, not 200. curl says:" >&2
+              curl -sSf -o /dev/null --max-time 10 "$@" >&2
+              exit 1
+            fi
+          }
+          echo "--- the API through the gateway, $GW ---"
+          check "GET /auth/v1/health" "$GW/auth/v1/health"
+          check "GET /rest/v1/ with the publishable key" -H "apikey: $APIKEY" "$GW/rest/v1/"
+          echo
+          echo 'PASS: the gateway answers for GoTrue, and for PostgREST with the publishable key.'
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        # curl_user in curlimages/curl.
+        runAsUser: 100
+        runAsGroup: 101
+        capabilities:
+          drop: ["ALL"]
+      resources:
+        requests: { cpu: 10m, memory: 16Mi }
+        limits: { memory: 64Mi }
+{{- end }}

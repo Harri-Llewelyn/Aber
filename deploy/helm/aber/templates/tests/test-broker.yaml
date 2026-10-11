@@ -1,0 +1,89 @@
+{{- if .Values.mosquitto.enabled }}
+{{- $component := "test-broker" -}}
+{{- $tls := .Values.mosquitto.tls.enabled -}}
+{{/*
+The broker answers and checks: a CONNECT with a password no account has gets CONNACK "not
+authorised". With broker TLS on it is made on 8883 and verifies the certificate against the chart's
+CA under the name mosquitto, so the refusal also proves the handshake; with TLS off the TLS half is
+skipped and the CONNECT goes to 1883. Nothing is accepted, so nothing is written.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ printf "%s-%s" (include "aber.fullname" .) $component }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "2"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  restartPolicy: Never
+  {{- with .Values.global.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: {{ $component }}
+      image: "{{ .Values.mosquitto.image.repository }}:{{ .Values.mosquitto.image.tag }}"
+      imagePullPolicy: {{ .Values.mosquitto.image.pullPolicy }}
+      command:
+        - /bin/sh
+        - -c
+        - |
+          {{- include "aber.testRetry" . | nindent 10 }}
+          {{- if $tls }}
+          echo '--- mosquitto:8883, verified against the chart CA under the name mosquitto ---'
+          set -- -h mosquitto -p 8883 --cafile /etc/aber/broker-ca/ca.crt
+          {{- else }}
+          echo '--- mosquitto:1883 (mosquitto.tls.enabled is off, so there is no TLS listener to verify) ---'
+          set -- -h mosquitto -p 1883
+          {{- end }}
+          # MQTT 3.1.1 answers a refused password with CONNACK 5 (not authorised) or 4; mosquitto_sub
+          # exits with that code. -d prints the CONNACK and, on a failed handshake, OpenSSL's reason.
+          refused() {
+            out=$(timeout 15 mosquitto_sub -d "$@" -u aber-helm-test -P "refused-$(date +%s)" -t aber/helm-test -C 1 -W 5 2>&1)
+            rc=$?
+            case "$out" in *"CONNACK (0)"*)
+              echo "FAIL: the broker ACCEPTED a password no account has: allow_anonymous is on, or its authentication checks nothing." >&2
+              printf '%s\n' "$out" >&2
+              exit 1 ;;
+            esac
+            case "$rc" in 4|5) printf '%s\n' "$out" | grep -qiE 'not authori[sz]ed|bad user name or password' ;; *) return 1 ;; esac
+          }
+          if retry "the broker to refuse the CONNECT" refused "$@"; then
+            printf '%s\n' "$out" | grep -iE 'CONNACK|refused' | sed 's/^/    /'
+          else
+            case "$out" in
+              *"OpenSSL Error"*|*"Protocol error"*) echo "FAIL: the TLS handshake did not verify against the chart CA, or the certificate does not name mosquitto." >&2 ;;
+              *) echo "FAIL: the broker did not answer the CONNECT (mosquitto_sub exit $rc)." >&2 ;;
+            esac
+            printf '%s\n' "$out" >&2
+            exit 1
+          fi
+          echo
+          echo 'PASS: the broker refuses a wrong password{{ if $tls }}, over TLS that verifies under the chart CA{{ end }}.'
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        # The mosquitto user in eclipse-mosquitto.
+        runAsUser: 1883
+        runAsGroup: 1883
+        capabilities:
+          drop: ["ALL"]
+      resources:
+        requests: { cpu: 10m, memory: 16Mi }
+        limits: { memory: 64Mi }
+      {{- if $tls }}
+      volumeMounts:
+        {{- include "aber.brokerClientCaMount" . | nindent 8 }}
+      {{- end }}
+  {{- if $tls }}
+  volumes:
+    {{- include "aber.brokerClientCaVolume" . | nindent 4 }}
+  {{- end }}
+{{- end }}

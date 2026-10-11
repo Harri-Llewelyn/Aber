@@ -53,6 +53,7 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "supabase-db"        "to" "timescaledb"        "port" 5432 "why" "postgres_fdw -- public.telemetry (M2)")
   (dict "from" "ingestion"          "to" "timescaledb"        "port" 5432 "why" "telemetry writes")
   (dict "from" "grafana"            "to" "timescaledb"        "port" 5432 "why" "the historian datasource")
+  (dict "from" "grafana"            "to" "supabase-db"        "port" 5432 "why" "the Supabase datasource, as grafana_reader: the storage footprint and the Gateway Fleet Health dashboard")
 
   (dict "from" "supabase-db"        "to" $gw      "port" 8000 "why" "pg_net: edge functions and REST called from SQL")
   (dict "from" "supabase-db"        "to" "node-red"           "port" 1880 "why" "pg_net: WEBHOOKS to a site's flows, direct, no retries/DLQ")
@@ -95,6 +96,10 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "test-fdw"           "to" "timescaledb"        "port" 5432 "why" "M6: checks the hypertable from the far side")
   (dict "from" "test-db-tls"        "to" "supabase-db"        "port" 5432 "why" "helm test: plaintext refused, TLS verified")
   (dict "from" "test-db-tls"        "to" "timescaledb"        "port" 5432 "why" "helm test: plaintext refused, TLS verified")
+  (dict "from" "test-api"           "to" $gw      "port" 8000 "why" "helm test: GoTrue's health and PostgREST's root through the gateway")
+  (dict "from" "test-broker"        "to" "mosquitto"          "port" (ternary 8883 1883 .Values.mosquitto.tls.enabled) "why" "helm test: a wrong password is refused, over TLS under the chart CA when the broker has it")
+  (dict "from" "test-ingestion"     "to" "ingestion"          "port" (int .Values.ingestion.metrics.port) "why" "helm test: the daemon's broker and historian connection gauges")
+  (dict "from" "test-dashboard"     "to" "frontend"           "port" 3000 "why" "helm test: /config.js from the frontend Service (the container's port, as a policy matches it)")
   (dict "from" "e2e-validate"       "to" "supabase-db"        "port" 5432 "why" "audit-row cleanup, out of reach of service_role")
   (dict "from" "e2e-validate"       "to" "timescaledb"        "port" 5432 "why" "telemetry assertions")
   (dict "from" "e2e-validate"       "to" "mosquitto"          "port" $brokerPort "why" "publishes Sparkplug fixtures")
@@ -156,6 +161,10 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
       "cold-archive" .Values.coldArchive.enabled
       "test-fdw" (and .Values.supabaseDb.enabled .Values.timescaledb.enabled)
       "test-db-tls" .Values.postgresTls.enabled
+      "test-api" (and .Values.supabaseEnvoy.enabled .Values.supabaseAuth.enabled .Values.supabaseRest.enabled)
+      "test-broker" .Values.mosquitto.enabled
+      "test-ingestion" (and .Values.ingestion.enabled .Values.ingestion.metrics.enabled)
+      "test-dashboard" .Values.frontend.enabled
       "e2e-validate" .Values.e2e.enabled
       "e2e-aas-export" .Values.e2e.enabled
       "backup" (and .Values.backup.enabled (not .Values.backupService.enabled))
@@ -361,6 +370,38 @@ spec:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressControllerNamespace }}
 {{- end }}
+{{- if and .Values.supabaseFunctions.enabled .Values.ingress.tls.enabled }}
+---
+{{/*
+The functions reaching the ingress controller: gateway-bundle offers the one-liner only once
+ABER_CA_URL, plain HTTP on the dashboard's public host, answers as a fresh appliance's stage 0
+would, and that host resolves to the controller. Its HTTP container port after the Service's
+DNAT: 8000 for k3s's Traefik, 80 for ingress-nginx. A host that resolves outside the cluster
+needs networkPolicy.extraEgress instead.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-supabase-functions-to-ingress-controller" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" "supabase-functions") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" . "component" "supabase-functions") | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressControllerNamespace }}
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 8000
+{{- end }}
 {{- if and .Values.mosquitto.enabled .Values.mosquitto.external.enabled }}
 ---
 {{/*
@@ -449,6 +490,8 @@ spec:
 {{- $apiClients := list -}}
 {{- if .Values.e2e.enabled }}{{- $apiClients = append $apiClients "e2e-aas-export" -}}{{- end -}}
 {{- if .Values.observability.enabled }}{{- $apiClients = append $apiClients "alloy" -}}{{- end -}}
+{{- /* The broker pod's credential sidecar patches the playback delivery Secret through the API. */ -}}
+{{- if .Values.gatewayCredential.enabled }}{{- $apiClients = append $apiClients "mosquitto" -}}{{- end -}}
 {{- /* The backup service reads the CA's Secret through the API when backup.ca names one. */ -}}
 {{- if and .Values.backup.enabled .Values.backupService.enabled .Values.backup.ca.secretName .Values.backup.ca.namespace }}{{- $apiClients = append $apiClients "backup-service" -}}{{- end -}}
 {{- if and $apiClients .Values.networkPolicy.apiServerCidr }}
@@ -458,7 +501,11 @@ The Kubernetes API server, for the pods that talk to it.
 
 `alloy` discovers pods and tails their logs through it: under default-deny it collects nothing and
 the dashboards' log panel is simply empty. `e2e-aas-export`'s wait-for-validate step reads a Job's
-status from it; dropped, it times out blaming a Job that had already completed.
+status from it; dropped, it times out blaming a Job that had already completed. `mosquitto`'s
+gateway-credential sidecar patches the playback delivery Secret through it; dropped, the credential
+is issued but never reaches the playback worker (ECONNREFUSED in the sidecar's log). The rule covers
+the whole broker pod, since a NetworkPolicy cannot select one container; only that sidecar holds a
+token.
 
 THE ADDRESS IS ENVIRONMENT-SPECIFIC AND CANNOT BE SELECTED: NetworkPolicy has no selector for the
 API server, so this is an ipBlock. Default 0.0.0.0/0 on the API ports only; set

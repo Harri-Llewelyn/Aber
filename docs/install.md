@@ -265,7 +265,16 @@ done
 helm test aber -n aber
 ```
 
-The loop waits for every part of Aber to start, and `helm test` checks the result.
+The loop waits for every part of Aber to start. Then `helm test` checks what the site depends on:
+
+- the link between the two databases;
+- the API, answering through the gateway;
+- the broker, refusing a wrong password over TLS that your internal CA verifies;
+- ingestion, connected to the broker and to the database;
+- the dashboard, served with its settings.
+
+It uses no one's password and changes nothing, so you can run it again at any time, for example
+after an upgrade. If a check fails, `helm test aber -n aber --logs` shows what it found.
 
 **If a setting is missing or wrong, the install stops before anything starts, and the error says what
 to fix.** It catches, for example, a missing site name, the forge offered over plain HTTP, broker TLS

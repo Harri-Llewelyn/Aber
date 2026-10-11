@@ -1621,8 +1621,12 @@ jobs:
       # values plus broker TLS, the backup service and the in-cluster conformance Jobs, waits for
       # every hook and rollout and for the daemon to be subscribed, and runs `helm test`. With
       # --e2e it then waits for the two conformance Jobs and prints their logs.
-      - name: Bring The Stack Up (dev-cluster up --e2e)
-        run: node scripts/dev-cluster.mjs up --e2e
+      #
+      # --network-policy: every step below runs under the NetworkPolicy layer, as a site's values
+      # turn it on, so a flow the edge list does not name fails here. The layer-off default is held
+      # by the helm-chart job's render checks and by every developer's `dev:up` (docs/testing.md).
+      - name: Bring The Stack Up (dev-cluster up --e2e --network-policy)
+        run: node scripts/dev-cluster.mjs up --e2e --network-policy
 
       # The host copies are never read again once imported; dropping them is the largest single
       # reclaim before the suites run.
