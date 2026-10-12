@@ -577,9 +577,13 @@ class TestRepositories(ForgeSweepBase):
         """
         self.enrol()
         before = len(audit_events("repository:branch:protection", self.repo))
+        # Gitea applies the deploy-key flag only beside enable_push and enable_push_whitelist.
         status, _ = forge(f"/repos/{ORGANISATION}/{self.repo}/branch_protections/{urllib.parse.quote('**', safe='')}",
-                          method="PATCH", body={"push_whitelist_deploy_keys": True})
+                          method="PATCH", body={"enable_push": True, "enable_push_whitelist": True,
+                                                "push_whitelist_deploy_keys": True})
         self.assertEqual(status, 200)
+        status, catch_all = self.rule("**")
+        self.assertTrue(catch_all["push_whitelist_deploy_keys"], catch_all)
         self.assertEqual(len(audit_events("repository:branch:protection", self.repo)), before,
                          "the API change was recorded: update forge/README.md, \"What it records here\"")
 
