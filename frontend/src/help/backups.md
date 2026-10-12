@@ -17,6 +17,8 @@ This page does not make backups itself. **Take a backup** queues a request, and 
 - **Cancel** withdraws a request the service has not yet picked up. A running backup cannot be cancelled: it finishes or fails.
 - **Release** lets the retention window apply to a backup taken on request. Nothing is deleted at that moment. The service prunes it on its next pass, but only once it is older than the window and not one of the newest three.
 - **Set a destination**, beside **Take a backup**, opens the off-site destination dialog. It holds the S3 endpoint, region, bucket, key prefix, access key ID and secret key. It also holds the age public key that every file is encrypted to (age is an encryption tool).
+- **The secret key** is stored in the Vault and never shown again. Once one is stored, the dialog says so instead of showing a field.
+- **Replace Key** asks before it overwrites the stored key, because the old one cannot be recovered. A wrong key shows only when the next off-site copy fails.
 - **Address the bucket by path** is for MinIO and most self-hosted stores. Leave it off for AWS, R2 and B2.
 - **Remove the destination** stops the copies and deletes the secret key. Copies already made stay in the bucket.
 - **The filter** shows every run, or only the completed ones, or only the failed ones. A cancelled run is listed under all runs only.

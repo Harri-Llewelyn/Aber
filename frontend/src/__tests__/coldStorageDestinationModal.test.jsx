@@ -122,7 +122,7 @@ describe('saving', () => {
   })
 
   it('offers no Save while nothing has changed, and whitespace is not a key', () => {
-    open({ values: COMPLETE, credentialSet: true })
+    open({ values: COMPLETE, credentialSet: false })
     expect(saveButton()).toBeDisabled()
     type('Secret access key', '   ')
     expect(saveButton()).toBeDisabled()
@@ -132,23 +132,46 @@ describe('saving', () => {
   })
 
   it('keeps the typed key and shows the refusal in the dialog when a write fails', async () => {
-    api.setArchiveCredential.mockRejectedValue(new Error('Only an Administrator can set the archive credential'))
+    api.setArchiveCredential.mockRejectedValue(
+      Object.assign(new Error('Only an Administrator can set the archive credential'), { status: 403 }))
     const onSaved = open({ values: COMPLETE })
     type('Secret access key', 'wJalrXUtnFEMI')
     fireEvent.click(saveButton())
-    await waitFor(() => expect(screen.getByText(/Only an Administrator/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(
+      'Only an Administrator can set the secret access key. Nothing was stored.'))
     expect(onSaved).not.toHaveBeenCalled()
     expect(screen.getByLabelText('Secret access key').value).toBe('wJalrXUtnFEMI')
   })
 })
 
 describe('what it shows', () => {
-  it('never holds the stored secret: the field is a password field and starts empty', () => {
+  it('never holds the stored secret: it says one is stored, with no field to fill', () => {
     open({ values: COMPLETE, credentialSet: true })
-    const secret = screen.getByLabelText('Secret access key')
-    expect(secret).toHaveAttribute('type', 'password')
-    expect(secret.value).toBe('')
-    expect(secret).toHaveAttribute('placeholder', 'Stored. Leave empty to keep it')
+    expect(screen.getByText('Stored in the vault')).toBeInTheDocument()
+    expect(document.querySelector('input[type="password"]')).toBeNull()
+  })
+
+  it('asks before replacing a stored key, then writes it before archiving is switched on', async () => {
+    const onSaved = open({ values: COMPLETE, credentialSet: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Replace Key' }))
+    expect(screen.getByTestId('cold-secret-replace')).toHaveTextContent('the nightly export failing to authenticate')
+    // Answering the question is not a change: nothing to save until a key is typed.
+    fireEvent.click(screen.getByRole('button', { name: 'Replace It' }))
+    expect(saveButton()).toBeDisabled()
+    type('Secret access key', 'second-key')
+    fireEvent.click(toggle())
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(api.setArchiveCredential).toHaveBeenCalledWith('second-key')
+    expect(api.setArchiveCredential.mock.invocationCallOrder[0])
+      .toBeLessThan(api.patchSetting.mock.invocationCallOrder[0])
+    expect(api.patchSetting.mock.calls).toEqual([['archive.enabled', true]])
+  })
+
+  it('sets a first key without asking', () => {
+    open({ values: COMPLETE, credentialSet: false })
+    expect(screen.getByLabelText('Secret access key')).toHaveAttribute('placeholder', 'Not set')
+    expect(screen.queryByRole('button', { name: 'Replace Key' })).toBeNull()
   })
 
   it('shows the site key read-only, and the destination as something to copy', () => {

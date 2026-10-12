@@ -2687,8 +2687,8 @@ can read `system_settings`, so no credential key is declared there and the endpo
 chart values rather than settings. The S3 secret itself lives in the Vault: `0134` seeds it once
 from `secrets.archiveS3SecretAccessKey` and never again, because an Administrator may have set it
 since through `set_archive_credential()` from the Cold Storage page, and `cold_archive.py` reads it
-back through `cold_archive_destination()`. #353 is where the rule that admits that writer is being
-settled. `archive.bucket` was a setting and is retired with the local bucket it named (`0132`).
+back through `cold_archive_destination()`. The secrets rule under *Runtime configuration* admits
+that writer, and since `0178` it shares one helper with the off-site backup key's. `archive.bucket` was a setting and is retired with the local bucket it named (`0132`).
 
 #### The destination is somewhere else, and only somewhere else (archived migration 0132)
 
@@ -5191,6 +5191,33 @@ Administrator-only `SELECT` would break that page for everyone else in a way tha
   `set_archive_credential()`, and the off-site backup key from the Backups page by
   `set_backup_offsite_credential()`. Each writer has an `..._is_set()` companion that answers
   whether a value is stored, never what it is; nothing reads the value back to a page.
+
+**Every foreign credential shares one writer and one probe (0178).** The writer is
+`set_foreign_credential(name, secret, label, description)`:
+
+- It refuses anybody but an `Administrator` with `insufficient_privilege`, which PostgREST answers
+  403, and it refuses an empty value.
+- It creates the vault row on the first write and updates it in place after, so a rotation keeps
+  the row's id.
+- It returns nothing.
+
+The probe is `foreign_credential_is_set(name)`, true only for an `Administrator`. No API role may
+call either helper. A page calls the credential's own writer and probe, each a few lines naming its
+vault secret, so no page can name a stack-internal one. The reader stays with the one principal that
+consumes the value: `cold_archive_destination()` returns a row to the ingestion principal alone, and
+`backup_offsite_destination()` answers the backup service and no PostgREST role. A new foreign
+credential is those three functions and the dashboard's `CredentialField` on the page that uses it.
+The field asks before it replaces a stored value, because a mistyped key is found only when its
+consumer fails, and the old one cannot be recovered from this stack.
+
+**A rotation takes effect when the consumer next reads the credential.** The writer stores the new
+value and returns, and nothing tells the consumer:
+
+| Credential | Consumer | A new value takes effect | Known by |
+| :--- | :--- | :--- | :--- |
+| The cold archive's S3 key | The `cold-archive` CronJob (`coldArchive.schedule`, 03:15 daily) | At the next run. `cold_archive.py` reads its destination once, when the process starts, so a run in progress finishes with the old key. A `--loop` process, which the chart does not run, needs a restart | Reading `s3_config()` and `main()` |
+| The off-site backup key | The backup service | At the next copy or prune, so within one poll (`BACKUP_POLL_SECONDS`, 15 seconds) while it is idle. An upload already running finishes with the old key | Reading `copyOffsite()` and `prune()`, which call `backup_offsite_destination()` each time; `test_foreign_credentials.py` measures the reader returning the new key at its next call |
+| The SMTP password | GoTrue | After a chart change and a GoTrue restart. `secrets.smtpPassword` (or the `SMTP_PASSWORD` key of `secrets.existingSecret`) reaches GoTrue as `GOTRUE_SMTP_PASS`. Kubernetes resolves that variable once, when the container starts, and the Deployment carries no checksum of the Secret, so `helm upgrade` changes the Secret and not the running pod. Run `kubectl -n aber rollout restart deploy/supabase-auth` after it | Reading `templates/supabase/auth.yaml` |
 
 Supabase Studio's Vault UI remains the escape hatch for anything else. **Note the trust boundary:**
 Studio is not gated by this schema's RLS. Its one door is the gateway's Studio listener, which

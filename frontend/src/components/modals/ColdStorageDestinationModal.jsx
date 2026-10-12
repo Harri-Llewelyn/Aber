@@ -3,6 +3,7 @@ import { api } from '../../api'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import CopyableId from '../common/CopyableId'
+import { CredentialField, useCredential } from '../common/CredentialField'
 import { Modal } from '../common/Modal'
 import { IconAlertTriangle, IconDatabase } from '../common/Icons'
 import {
@@ -31,7 +32,8 @@ const normalise = (key, value) => (BOOLEAN_KEYS.has(key) ? value === true : Stri
  * Where cold telemetry is written, and the switch that starts writing it. The six values are
  * `system_settings` rows, written one by one through `api.patchSetting` as the Settings page writes
  * them, so RLS, `sensitive` and the audit trail apply unchanged; only rows that changed are
- * written. The secret key goes to the vault and is never read back: an empty field keeps it.
+ * written. The secret key is a `CredentialField`: written to the vault, never read back, and
+ * replaced only after the field has asked.
  *
  * Archiving cannot be switched on, or saved on, until the destination is complete. Switching on is
  * written last and switching off first, so the stored state never has it on with half a
@@ -46,17 +48,17 @@ const normalise = (key, value) => (BOOLEAN_KEYS.has(key) ? value === true : Stri
 export function ColdStorageDestinationModal({ values = {}, siteKey = '', credentialSet = false, onSaved, onClose }) {
   const [draft, setDraft] = useState(() =>
     Object.fromEntries(COLD_STORAGE_DIALOG_KEYS.map(k => [k, BOOLEAN_KEYS.has(k) ? values[k] === true : String(values[k] ?? '')])))
-  const [secret, setSecret] = useState('')
+  const credential = useCredential({ stored: credentialSet, write: api.setArchiveCredential, label: 'the secret access key' })
   const [error, setError] = useState(null)
   const [pending, run] = usePendingAction()
   const reasonId = useId()
 
   const set = (key) => (e) => setDraft(d => ({ ...d, [key]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }))
 
-  const missing = missingDestination({ values: draft, credentialSet: credentialSet || !!secret.trim(), siteKey })
+  const missing = missingDestination({ values: draft, credentialSet: credential.stored || credential.typed, siteKey })
   const on = draft[ENABLED]
   const changed = COLD_STORAGE_DIALOG_KEYS.filter(k => normalise(k, draft[k]) !== normalise(k, values[k]))
-  const nothingToSave = changed.length === 0 && !secret.trim()
+  const nothingToSave = changed.length === 0 && !credential.typed
   // On with half a destination is the state this dialog exists to prevent.
   const blocked = on && missing.length > 0
   const summary = destinationSummary({ endpoint: draft['archive.endpoint'], bucket: draft['archive.bucket'], siteKey })
@@ -67,7 +69,7 @@ export function ColdStorageDestinationModal({ values = {}, siteKey = '', credent
     try {
       if (changed.includes(ENABLED) && !on) await write(ENABLED)
       for (const key of changed.filter(k => k !== ENABLED)) await write(key)
-      if (secret.trim()) await api.setArchiveCredential(secret.trim())
+      await credential.commit()
       if (changed.includes(ENABLED) && on) await write(ENABLED)
       onSaved?.()
     } catch (e) {
@@ -115,26 +117,12 @@ export function ColdStorageDestinationModal({ values = {}, siteKey = '', credent
             />
           </div>
         ))}
-        <div className="form-group">
-          <label className="form-label" htmlFor="cold-secret">Secret access key</label>
-          <input
-            id="cold-secret"
-            className="form-control mono"
-            type="password"
-            value={secret}
-            onChange={e => setSecret(e.target.value)}
-            disabled={pending}
-            placeholder={credentialSet ? 'Stored. Leave empty to keep it' : 'Not set'}
-            autoComplete="off"
-            spellCheck={false}
-            aria-describedby="cold-secret-hint"
-          />
-          <p id="cold-secret-hint" className="form-hint">
-            Written to the vault and never shown again.{credentialSet
-              ? ' A new one overwrites the stored key, which cannot be recovered.'
-              : ''}
-          </p>
-        </div>
+        <CredentialField
+          id="cold-secret"
+          credential={credential}
+          disabled={pending}
+          consequence="If the new one is wrong, the first sign is the nightly export failing to authenticate."
+        />
         <div className="form-group">
           <label className="form-label" htmlFor="cold-site-key">Site key</label>
           <input

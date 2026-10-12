@@ -399,6 +399,12 @@ python supabase/migrations/test_cold_archive_backlog.py
 # everything would pass the negative and break the Settings page for every role but one. The
 # credential is never asserted by value -- nothing reads it back, and that is the property.
 python supabase/migrations/test_cold_archive_destination.py
+# The foreign credentials' one writer and one probe (0178). The cold archive and off-site backup
+# keys are set by an Administrator only, refused otherwise with the code PostgREST answers 403; the
+# probe says false, then true, and false for anybody else; no API role can read a value back or
+# call either helper; and a second write rotates in place, which the backup service's reader
+# returns at its next call.
+python supabase/migrations/test_foreign_credentials.py
 # A device cannot be posted onto the replay lane by hand (0083, issue 144). The dashboard used to
 # offer the Playback gateway in three device pickers; choosing it produced a shadow device with no
 # `shadow_of` -- "an asset with no provenance, which is the thing this design exists to avoid

@@ -176,11 +176,11 @@ export function BackupsTab({ showToast }) {
     })
   }
 
-  const onSaveDestination = async ({ values, secret }) => {
-    await api.setBackupOffsiteDestination(Object.fromEntries(
-      Object.entries(values).map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v])
-    ))
-    if (secret) await api.setBackupOffsiteCredential(secret)
+  const onSaveDestination = ({ values }) => api.setBackupOffsiteDestination(Object.fromEntries(
+    Object.entries(values).map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v])
+  ))
+
+  const onDestinationSaved = async () => {
     setEditingDestination(false)
     showToast('Off-site destination saved. The service copies each backup on its next polls.', 'success')
     await refresh()
@@ -351,6 +351,8 @@ export function BackupsTab({ showToast }) {
           destination={offsite}
           credentialSet={!!offsite?.credentialSet}
           onSave={onSaveDestination}
+          writeCredential={api.setBackupOffsiteCredential}
+          onSaved={onDestinationSaved}
           onRemove={onRemoveDestination}
           onClose={() => setEditingDestination(false)}
         />
