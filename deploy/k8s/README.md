@@ -749,8 +749,8 @@ and log in the console what the policy would refuse. Nothing collects those logs
 in the stack sends them out.
 
 - **Grafana's** is Grafana's own template, in [`grafana/grafana.ini`](../../grafana/grafana.ini),
-  without `grafana.com` and the map tiles' host, with images confined to Grafana, and with
-  framing refused. To enforce it, open every provisioned dashboard, Explore, Alerting, the bundled
+  connecting to Grafana alone (no `grafana.com`, no map tiles), with images confined to Grafana,
+  and with framing refused. To enforce it, open every provisioned dashboard, Explore, Alerting, the bundled
   Drilldown apps and Administration with the console open. When the console lists nothing, move
   the template to `content_security_policy`. Grafana's plugin loader and its stylesheets need
   `'unsafe-eval'` and `'unsafe-inline'`, so enforcing it limits framing, connections, images and
