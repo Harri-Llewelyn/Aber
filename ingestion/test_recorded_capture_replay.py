@@ -185,7 +185,8 @@ class FixtureEdgeNode:
         self.sequence = payloads.SequenceCounter()
         self.client = mqtt.Client(client_id=f"aber-test-{node_id}")
         self.client.username_pw_set(node_id, password)
-        self.client.will_set(self.topic("NDEATH"), payloads.node_death(self.bdseq), qos=1, retain=False)
+        self.client.will_set(self.topic("NDEATH"), payloads.node_death(self.bdseq),
+                             qos=1, retain=False)
         self.client.on_connect = self._on_connect
         self.client.on_subscribe = self._on_subscribe
         self.client.on_message = self._on_message
@@ -301,8 +302,8 @@ class FixtureEdgeNode:
         self._send("NBIRTH", self.topic("NBIRTH"),
                    lambda seq: payloads.node_birth(node_stamp, seq, self.bdseq))
         self._send("DBIRTH", self.topic("DBIRTH", self.device_id),
-                   lambda seq: payloads.device_birth(self.device_id, self.device_name, [self.metric],
-                                                     device_stamp, seq))
+                   lambda seq: payloads.device_birth(
+                       self.device_id, self.device_name, [self.metric], device_stamp, seq))
         self.births.append(time.monotonic())
 
     def _run(self):
@@ -316,7 +317,8 @@ class FixtureEdgeNode:
                     value = float(len(self.values) + 1)
                     stamp = self._stamp()
                     if self._send("DDATA", self.topic("DDATA", self.device_id),
-                                  lambda seq: payloads.device_data([self.metric], stamp, [value], seq)):
+                                  lambda seq: payloads.device_data(
+                                      [self.metric], stamp, [value], seq)):
                         self.values.append((time.monotonic(), value))
                     due = time.monotonic() + DATA_INTERVAL
             time.sleep(0.02)
@@ -372,9 +374,11 @@ class RecordedCaptureReplays(unittest.TestCase):
             "gateway_id": cls.gateway["id"],
             "description": "Fixture for ingestion/test_recorded_capture_replay.py. Safe to delete.",
         })
-        # Under `enforce` the lane, which copies the policy, would drop the unscheduled metric.
+        # Under `enforce` the run's metric, which no schema declares, would be dropped on ingest; the
+        # lane copies the policy.
         if cls.device["conformance_policy"] != "audit":
-            raise AssertionError(f"the fixture device is {cls.device['conformance_policy']}, not audit")
+            raise AssertionError(
+                f"the fixture device is {cls.device['conformance_policy']}, not audit")
         cls.storage_path = f"{cls.device['sparkplug_id']}/capture.json"
         cls.edge = cls._connect_edge_node(cls._issue_gateway_credential())
         cls.edge.start()
@@ -389,8 +393,9 @@ class RecordedCaptureReplays(unittest.TestCase):
                      "Content-Type": "application/json"},
         )
         if status != 200 or not (body or {}).get("password"):
-            raise AssertionError(f"could not issue the fixture gateway's broker credential: {status} "
-                                 f"{(body or {}).get('error')} {(body or {}).get('details')}")
+            raise AssertionError(
+                f"could not issue the fixture gateway's broker credential: {status} "
+                f"{(body or {}).get('error')} {(body or {}).get('details')}")
         if body.get("mqtt_username") != cls.gateway["sparkplug_id"]:
             raise AssertionError(f"the credential is for {body.get('mqtt_username')!r}, not the "
                                  f"gateway's sparkplug_id {cls.gateway['sparkplug_id']!r}")
@@ -398,7 +403,8 @@ class RecordedCaptureReplays(unittest.TestCase):
 
     @classmethod
     def _connect_edge_node(cls, password):
-        """A new credential can take a moment to reach the running broker, so a refusal is retried."""
+        """A new credential can take a moment to reach the running broker, so a refusal is
+        retried."""
         deadline = time.monotonic() + BROKER_ACCEPT_TIMEOUT
         while True:
             edge = FixtureEdgeNode(cls.gateway["sparkplug_group"], cls.gateway["sparkplug_id"],
@@ -413,7 +419,8 @@ class RecordedCaptureReplays(unittest.TestCase):
             edge.stop()
             if time.monotonic() >= deadline:
                 raise AssertionError(
-                    f"the broker did not accept the fixture gateway within {BROKER_ACCEPT_TIMEOUT}s "
+                    f"the broker did not accept the fixture gateway within "
+                    f"{BROKER_ACCEPT_TIMEOUT}s "
                     f"(CONNACK {rc}, NCMD subscription granted: {edge.subscribed.is_set()})")
             time.sleep(2)
 
@@ -428,7 +435,8 @@ class RecordedCaptureReplays(unittest.TestCase):
                    LIVE_BIRTH_TIMEOUT, 2)
         if cls.metric not in (row.get("last_birth_metrics") or []):
             raise AssertionError(
-                f"the daemon did not record the fixture device's DBIRTH within {LIVE_BIRTH_TIMEOUT}s "
+                f"the daemon did not record the fixture device's DBIRTH within "
+                f"{LIVE_BIRTH_TIMEOUT}s "
                 f"(last row {row}). The broker accepted the connection, so its publishes were "
                 f"refused or the daemon dropped them.")
 
@@ -450,17 +458,18 @@ class RecordedCaptureReplays(unittest.TestCase):
             raise AssertionError(f"start_capture_job refused the fixture: {status} {job_id}")
         cls.capture_job_id = job_id
 
-        job = cls._capture_job(lambda j: j.get("status") != "PENDING", CLAIM_TIMEOUT)
+        job = cls._capture_job(lambda j: j.get("status") not in (None, "PENDING"), CLAIM_TIMEOUT)
         if job.get("status") != "RECORDING":
             raise AssertionError(
                 f"the capture is {job.get('status')} after {CLAIM_TIMEOUT}s, not RECORDING "
                 f"({job.get('error')}). PENDING means the daemon never claimed it.")
 
-        births = poll(lambda: cls.edge.births_since(cls.capture_started), bool, REBIRTH_TIMEOUT, 0.2)
+        births = poll(lambda: cls.edge.births_since(cls.capture_started), bool,
+                      REBIRTH_TIMEOUT, 0.2)
         if not births:
             raise AssertionError(
-                f"the daemon claimed the capture and the edge node answered no rebirth request within "
-                f"{REBIRTH_TIMEOUT}s; NCMDs received: {cls.edge.commands}")
+                f"the daemon claimed the capture and the edge node answered no rebirth request "
+                f"within {REBIRTH_TIMEOUT}s; NCMDs received: {cls.edge.commands}")
         poll(lambda: cls.edge.values_since(births[0]), lambda v: len(v) >= DATA_AFTER_BIRTH,
              DATA_AFTER_BIRTH * DATA_INTERVAL + 10, 0.2)
         cls.edge.pause()
@@ -468,7 +477,10 @@ class RecordedCaptureReplays(unittest.TestCase):
 
         status, stopped = cls.session.rpc("request_capture_stop", {"p_job_id": job_id})
         if status != 200 or stopped is not True:
-            raise AssertionError(f"request_capture_stop did not stop a RECORDING job: {status} {stopped}")
+            job = cls._capture_job(lambda j: True, 0)
+            raise AssertionError(
+                f"request_capture_stop answered {status} {stopped}; the job is "
+                f"{job.get('status')}: {job.get('error')}")
         cls.capture_job = cls._capture_job(lambda j: j.get("status") in TERMINAL, FINISH_TIMEOUT)
         cls.edge.stop()
         if cls.capture_job.get("status") != "COMPLETED":
@@ -479,7 +491,8 @@ class RecordedCaptureReplays(unittest.TestCase):
     @classmethod
     def _capture_job(cls, done, timeout):
         def read():
-            status, rows = cls.session.rest(f"/capture_jobs?select=*&id=eq.{cls.capture_job_id}&limit=1")
+            status, rows = cls.session.rest(
+                f"/capture_jobs?select=*&id=eq.{cls.capture_job_id}&limit=1")
             return rows[0] if status == 200 and rows else {}
         return poll(read, done, timeout, 1)
 
@@ -503,7 +516,8 @@ class RecordedCaptureReplays(unittest.TestCase):
         except ValueError as err:
             raise AssertionError(f"the stored capture is not JSON: {err}")
         cls.messages = cls.document.get("messages") or []
-        cls.recorded_values = [reading(m, cls.metric) for m in cls.messages if msg_type(m) == "DDATA"]
+        cls.recorded_values = [
+            reading(m, cls.metric) for m in cls.messages if msg_type(m) == "DDATA"]
 
     # ------------------------------------------------------------------------------------------
     # Stage 4: the replay, as the playback dialog starts it
@@ -535,7 +549,8 @@ class RecordedCaptureReplays(unittest.TestCase):
             "p_speed": 1.0,
         })
         if status not in (200, 201) or not job_id:
-            raise AssertionError(f"start_playback_job refused the recorded capture: {status} {job_id}")
+            raise AssertionError(
+                f"start_playback_job refused the recorded capture: {status} {job_id}")
 
         def read():
             got, rows = cls.session.rest(f"/playback_jobs?select=*&id=eq.{job_id}&limit=1")
@@ -543,14 +558,16 @@ class RecordedCaptureReplays(unittest.TestCase):
         timeout = JOB_TIMEOUT + cls.document.get("duration_ms", 0) / 1000
         cls.playback_job = poll(read, lambda j: j.get("status") in TERMINAL, timeout, 2)
         if cls.playback_job.get("status") not in TERMINAL:
-            raise AssertionError(f"the playback did not finish within {timeout:.0f}s "
-                                 f"(last seen: {cls.playback_job}). PENDING means no worker claimed it.")
+            raise AssertionError(
+                f"the playback did not finish within {timeout:.0f}s (last seen: "
+                f"{cls.playback_job}). PENDING means no worker claimed it.")
         cls.rows = cls._await_historian()
 
     @classmethod
     def _worker_holds(cls, wanted):
         """The worker reports, recently, the Playback gateway's current credential."""
-        status, rows = cls.session.rest("/playback_worker_status?select=held_edge_nodes,reported_at&limit=1")
+        status, rows = cls.session.rest(
+            "/playback_worker_status?select=held_edge_nodes,reported_at&limit=1")
         if status != 200 or not rows or wanted not in (rows[0].get("held_edge_nodes") or []):
             return False
         if time.time() - _epoch_seconds(rows[0]["reported_at"]) > WORKER_STALE_SECONDS:
@@ -621,18 +638,21 @@ class RecordedCaptureReplays(unittest.TestCase):
             except Exception as err:  # noqa: BLE001 -- cleanup must not mask a real failure
                 print(f"cleanup warning: {what}: {err}")
 
+        def delete(path):
+            return lambda: session.rest(path, method="DELETE")
+
         if cls.capture_job_id:
             attempt("stopping the capture", cls._settle_capture)
         if cls.lane:
-            attempt("the lane", lambda: session.rest(f"/devices?sparkplug_id=eq.{cls.lane}", method="DELETE"))
+            attempt("the lane", delete(f"/devices?sparkplug_id=eq.{cls.lane}"))
         if cls.capture_id:
-            attempt("the capture row", lambda: session.rest(f"/captures?id=eq.{cls.capture_id}", method="DELETE"))
+            attempt("the capture row", delete(f"/captures?id=eq.{cls.capture_id}"))
         if cls.storage_path:
             attempt("the stored file", lambda: session.remove(cls.storage_path))
         # The device explicitly: deleting a gateway leaves its devices unassigned rather than gone.
         # Either delete also removes the capture job rows.
-        attempt("the device", lambda: session.rest(f"/devices?id=eq.{SOURCE_DEVICE_ID}", method="DELETE"))
-        attempt("the gateway", lambda: session.rest(f"/gateways?id=eq.{SOURCE_GATEWAY_ID}", method="DELETE"))
+        attempt("the device", delete(f"/devices?id=eq.{SOURCE_DEVICE_ID}"))
+        attempt("the gateway", delete(f"/gateways?id=eq.{SOURCE_GATEWAY_ID}"))
         if cls.gateway:
             attempt("the broker account", lambda: cls._delete_account(cls.gateway["sparkplug_id"]))
         attempt("the historian rows", cls._delete_telemetry)
@@ -678,7 +698,8 @@ class RecordedCaptureReplays(unittest.TestCase):
         asked = [c for c in self.edge.commands if c[0] >= self.capture_started and c[2]]
         self.assertTrue(
             asked, f"no NCMD carrying 'Node Control/Rebirth' = true reached "
-                   f"{self.edge.topic('NCMD')} after the capture started; received: {self.edge.commands}")
+                   f"{self.edge.topic('NCMD')} after the capture started; received: "
+                   f"{self.edge.commands}")
         self.assertTrue(self.edge.births_since(self.capture_started),
                         "the edge node published no birth sequence in answer")
 
@@ -703,7 +724,8 @@ class RecordedCaptureReplays(unittest.TestCase):
         self.assertEqual(row["storage_path"], f"{dev}/capture.json",
                          "a capture is filed under the subject recorded")
         self.assertEqual(row["note"], self.note)
-        self.assertEqual(row["created_by"], self.user_id, "the capture does not name who recorded it")
+        self.assertEqual(row["created_by"], self.user_id,
+                         "the capture does not name who recorded it")
         self.assertGreater(row["message_count"], 0)
         self.assertEqual(row["message_count"], job["messages"], "the row and the job disagree")
         self.assertEqual(row["size_bytes"], job["bytes"], "the row and the job disagree")
@@ -725,8 +747,8 @@ class RecordedCaptureReplays(unittest.TestCase):
         self.assertEqual(doc.get("duration_ms"), offsets[-1])
 
     def test_the_file_holds_the_birth_the_edge_node_sent_in_answer(self):
-        """Without the NBIRTH a replay cannot announce the edge node, and without the DBIRTH the lane
-        never comes online."""
+        """Without the NBIRTH a replay cannot announce the edge node, and without the DBIRTH the
+        lane never comes online."""
         self._needs("what was stored")
         kinds = [msg_type(m) for m in self.messages]
         self.assertIn("NBIRTH", kinds, f"the recording holds no NBIRTH; it holds {kinds}")
@@ -748,13 +770,16 @@ class RecordedCaptureReplays(unittest.TestCase):
 
     def test_the_file_holds_every_reading_and_only_the_subjects_traffic(self):
         self._needs("what was stored")
-        group, gw, dev = self.gateway["sparkplug_group"], self.gateway["sparkplug_id"], self.device["sparkplug_id"]
+        group, gw = self.gateway["sparkplug_group"], self.gateway["sparkplug_id"]
+        dev = self.device["sparkplug_id"]
         allowed = {f"spBv1.0/{group}/{kind}/{gw}" for kind in ("NBIRTH", "NDATA", "NDEATH")} | {
             f"spBv1.0/{group}/{kind}/{gw}/{dev}" for kind in ("DBIRTH", "DDATA", "DDEATH")}
         topics = {m["topic"] for m in self.messages}
-        self.assertEqual(topics - allowed, set(), "the recording holds traffic from outside its subject")
+        self.assertEqual(topics - allowed, set(),
+                         "the recording holds traffic from outside its subject")
         self.assertEqual({m.get("encoding") for m in self.messages}, {"protobuf"},
-                         "the edge node published protobuf; the file must say so to replay it as such")
+                         "the edge node published protobuf; the file must say so to replay it "
+                         "as such")
 
         recorded, published = self.recorded_values, self.edge.published
         self.assertTrue(recorded, "the recording holds no DDATA")
@@ -791,7 +816,8 @@ class RecordedCaptureReplays(unittest.TestCase):
     def test_the_replay_published_every_recorded_message(self):
         self._needs("the replay")
         job = self.playback_job
-        self.assertEqual(job["status"], "COMPLETED", f"the playback did not complete: {job.get('error')}")
+        self.assertEqual(job["status"], "COMPLETED",
+                         f"the playback did not complete: {job.get('error')}")
         self.assertEqual(job["messages_sent"], len(self.messages))
 
     def test_the_recorded_readings_reached_the_historian_under_the_lane(self):
@@ -815,16 +841,19 @@ class RecordedCaptureReplays(unittest.TestCase):
                          f"{self.metric} was written under assets other than {dev} and its lane")
         machine = [v for a, v in self.rows if a == dev]
         self.assertEqual(len(machine), len(set(machine)),
-                         f"{dev} holds a reading twice ({machine}): a replay reached the real machine")
+                         f"{dev} holds a reading twice ({machine}): a replay reached the real "
+                         f"machine")
         self.assertLessEqual(set(machine), set(self.edge.published))
 
     def test_the_replayed_birth_announced_the_lane(self):
         self._needs("the replay")
         status, rows = self.session.rest(
-            f"/devices?select=shadow_of,gateway_id,last_birth_metrics&sparkplug_id=eq.{self.lane}&limit=1")
+            f"/devices?select=shadow_of,gateway_id,last_birth_metrics"
+            f"&sparkplug_id=eq.{self.lane}&limit=1")
         self.assertEqual(status, 200)
         self.assertTrue(rows, f"the lane {self.lane} does not exist")
-        self.assertEqual(rows[0]["shadow_of"], SOURCE_DEVICE_ID, "the lane does not name its machine")
+        self.assertEqual(rows[0]["shadow_of"], SOURCE_DEVICE_ID,
+                         "the lane does not name its machine")
         self.assertEqual(rows[0]["gateway_id"], self.playback_gateway["id"])
         self.assertIn(self.metric, rows[0].get("last_birth_metrics") or [],
                       "the replayed DBIRTH did not reach the daemon")
