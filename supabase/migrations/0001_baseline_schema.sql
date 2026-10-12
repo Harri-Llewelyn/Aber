@@ -285,12 +285,11 @@ $roles$;
 -- 3c. Policies and triggers, re-created only when they differ
 -- ---------------------------------------------------------------------------------------------
 -- Every policy and trigger in the chain is a call to replay_policy() or replay_trigger() with its
--- CREATE statement as pg_dump writes it. The live object is rebuilt in that form and compared as
--- text, and only a missing or different one is dropped and created: each DROP POLICY, CREATE
--- POLICY and DROP TRIGGER makes supautils lock up to 24 GoTrue, Storage and Realtime tables. A
--- statement in any other form never matches, so it is re-created on every boot, with a WARNING.
--- With p_stated_by, a later migration states the object and this call only creates a missing one.
--- supabase/README.md, "Policies and triggers are re-created only when they differ", has the rest.
+-- CREATE as pg_dump writes it. Only a missing or different object is dropped and created: each
+-- DROP POLICY, CREATE POLICY and DROP TRIGGER makes supautils lock up to 24 GoTrue, Storage and
+-- Realtime tables. A statement in another form never matches and is re-created on every boot.
+-- p_stated_by: a later migration states the object, so this call only creates a missing one.
+-- supabase/README.md, "Policies and triggers are re-created only when they differ".
 
 CREATE OR REPLACE FUNCTION public.live_policy_statement(p_table regclass, p_name name) RETURNS text
     LANGUAGE sql STABLE
