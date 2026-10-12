@@ -15,7 +15,8 @@ THE SECURITY MODEL IS THE MOST IMPORTANT THING IN THIS FILE.
 
   EVERY REQUEST BUT `GET /info` IS AUTHENTICATED BEFORE DISPATCH by one PostgREST call made as the
   caller (`_authenticate`), so revocation and expiry reach the subscription endpoints too, and each
-  subscription belongs to the token's `sub`.
+  subscription belongs to the token's `sub`. A CORS preflight (`OPTIONS`) is answered without
+  one, since a browser sends it with no credentials; it returns no data.
 
   THE MQTT VALUE CACHE HAS NO RLS, and that is the trap this file closes. It is a dict keyed by
   sparkplug_id, so serving from it directly would hand any authenticated caller live values for
@@ -24,6 +25,9 @@ THE SECURITY MODEL IS THE MOST IMPORTANT THING IN THIS FILE.
 
   `GET /info` is unauthenticated because the spec says it MUST be, and it doubles as the health
   check. It reports capabilities and nothing about the address space.
+
+  CORS: an allow-listed Origin is echoed on every response, errors and the stream included, and
+  never `*`, because requests carry a bearer token (README.md -> "Browser clients").
 
 WRITES ARE NOT IMPLEMENTED. `PUT /objects/value` and `PUT /objects/history` answer 405 and `GET
 /info` declares `update.current: false` / `update.history: false`. Update is a MAY, so this is
@@ -77,6 +81,29 @@ LISTEN_PORT = int(os.getenv("I3X_PORT", "8090"))
 
 # Sent on every response; the chart sets it when global.scheme is https, and empty sends nothing.
 STRICT_TRANSPORT_SECURITY = os.getenv("ABER_STRICT_TRANSPORT_SECURITY", "").strip()
+
+
+def cors_origins(text: str) -> frozenset:
+    """The browser origins named by a JSON array of strings; empty or blank names none."""
+    if not text.strip():
+        return frozenset()
+    try:
+        origins = json.loads(text)
+    except ValueError:
+        origins = None
+    if not isinstance(origins, list) or not all(isinstance(o, str) for o in origins):
+        raise ValueError(f"I3X_CORS_ORIGINS must be a JSON array of origins; got {text!r}")
+    return frozenset(o.strip().rstrip("/") for o in origins if o.strip())
+
+
+# The browser origins whose cross-origin requests are answered, matched exactly and never `*`: the
+# chart passes the gateway's list (aber.corsOrigins). With none, no CORS header is sent.
+CORS_ORIGINS = cors_origins(os.getenv("I3X_CORS_ORIGINS", ""))
+# PUT is left out: writes are refused (405) whatever the origin.
+CORS_ALLOW_METHODS = "GET, POST"
+CORS_ALLOW_HEADERS = "Authorization, Content-Type, Accept, Accept-Encoding"
+# How long a browser may reuse a preflight's answer, so a polling client skips most preflights.
+CORS_MAX_AGE_SECONDS = 600
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://supabase-envoy:8000").rstrip("/")
 # The publishable key does no work here beyond getting past the gate: `_headers()` sends it as
@@ -1487,10 +1514,25 @@ class Handler(BaseHTTPRequestHandler):
         return "aber-i3x"
 
     def end_headers(self):
-        """Every response ends its headers here: the JSON answers, the stream, and send_error's."""
+        """
+        Every response ends its headers here: the JSON answers, the stream, and send_error's. So an
+        error reaches a browser client as its status, where one without CORS headers would be
+        discarded and reported as a CORS failure.
+        """
         if STRICT_TRANSPORT_SECURITY:
             self.send_header("Strict-Transport-Security", STRICT_TRANSPORT_SECURITY)
+        if CORS_ORIGINS:
+            self.send_header("Vary", "Origin")
+            origin = self._allowed_origin()
+            if origin:
+                self.send_header("Access-Control-Allow-Origin", origin)
         super().end_headers()
+
+    def _allowed_origin(self) -> Optional[str]:
+        """The request's Origin if allow-listed. send_error may run before headers parse."""
+        headers = getattr(self, "headers", None)
+        origin = headers.get("Origin") if headers is not None else None
+        return origin if origin in CORS_ORIGINS else None
 
     # -- plumbing ----------------------------------------------------------------------------
     def log_message(self, fmt, *args):
@@ -1595,8 +1637,24 @@ class Handler(BaseHTTPRequestHandler):
     def do_PUT(self):
         self._dispatch("PUT")
 
-    def _dispatch(self, method: str) -> None:
+    def do_OPTIONS(self):
+        """
+        A CORS preflight, answered 204 on every /v1 path without authentication: a browser sends
+        it with no credentials. An unknown path is the real request's 404, which then reaches the
+        client.
+        """
         self._read_body()
+        if self._v1_path() is None:
+            return
+        self.send_response(204)
+        if self._allowed_origin():
+            self.send_header("Access-Control-Allow-Methods", CORS_ALLOW_METHODS)
+            self.send_header("Access-Control-Allow-Headers", CORS_ALLOW_HEADERS)
+            self.send_header("Access-Control-Max-Age", str(CORS_MAX_AGE_SECONDS))
+        self.end_headers()
+
+    def _v1_path(self) -> Optional[str]:
+        """The path without query or trailing slash; None once one outside /v1 has its 404."""
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
         if not path.startswith("/v1/") and path != "/v1":
             self._fail(
@@ -1604,6 +1662,13 @@ class Handler(BaseHTTPRequestHandler):
                 "Not Found",
                 f"Unknown path {path} -- i3X endpoints are prefixed with /v1 (spec: Versioning).",
             )
+            return None
+        return path
+
+    def _dispatch(self, method: str) -> None:
+        self._read_body()
+        path = self._v1_path()
+        if path is None:
             return
         route = f"{method} {path[3:] or '/'}"
         handler = ROUTES.get(route)

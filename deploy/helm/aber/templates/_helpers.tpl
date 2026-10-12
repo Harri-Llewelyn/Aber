@@ -1030,11 +1030,12 @@ URLs are constants.
 {{- define "aber.mqttUrl" -}}{{ include "aber.publicUrl" (dict "ctx" . "key" "mqtt" "sub" "mqtt") }}{{- end -}}
 
 {{/*
-The browser origins the gateway echoes, as a JSON array for __CORS_ORIGINS__. DERIVED, NOT
-CONFIGURED: this is the stack's only statement of origin policy (the edge functions carry none),
-built from the dashboard's and Swagger UI's own URL helpers so it cannot name a host the chart does
-not serve or miss one it does; corsExtraOrigins is appended for what the chart cannot know. Empty
-is refused: origins: [] is a gateway that starts and refuses every browser request.
+The browser origins the gateway echoes, as a JSON array for __CORS_ORIGINS__, and the i3X server
+(I3X_CORS_ORIGINS), whose route bypasses the gateway. DERIVED, NOT CONFIGURED: this is the stack's
+only statement of origin policy (the edge functions carry none), built from the dashboard's and
+Swagger UI's own URL helpers so it cannot name a host the chart does not serve or miss one it does;
+corsExtraOrigins is appended for what the chart cannot know. Empty is refused: origins: [] is a
+gateway that starts and refuses every browser request.
 */}}
 {{- define "aber.corsOrigins" -}}
 {{- $origins := list -}}

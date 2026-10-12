@@ -69,9 +69,8 @@ spec:
             # failed to load as an authorization error. It duplicated openapi.yaml, which
             # check-docs-drift.mjs holds against every published relation and edge function.
             #
-            # The i3X spec loads from this origin like the other file, but its "Try it out" cannot
-            # work: the i3X server sends no CORS headers and answers OPTIONS with 501, so the
-            # browser cannot reach :8090 cross-origin. The document says so in its description.
+            # The i3X spec loads from this origin like the other file. Its "Try it out" reaches the
+            # i3X server cross-origin, which allows this origin: it is in aber.corsOrigins.
             - name: URLS
               value: >-
                 [{"url":"/openapi.yaml","name":"Aber Platform API"},
@@ -86,9 +85,10 @@ spec:
             # spec's URL. `none` is Swagger UI's own spelling for disabled.
             - name: VALIDATOR_URL
               value: none
-            # Off: no other origin reads these files. "Try it out" calls the gateway, whose CORS is
-            # its own; this only stops the image adding Access-Control-Allow-Origin: * here. On, the
-            # image's nested locations would send it twice (swagger-ui/aber-headers.conf.template).
+            # Off: no other origin reads these files. "Try it out" calls the gateway or i3X, whose
+            # CORS is their own; this only stops the image adding Access-Control-Allow-Origin: *
+            # here. On, the image's nested locations would send it twice
+            # (swagger-ui/aber-headers.conf.template).
             - name: CORS
               value: "false"
             # Rendered into nginx's config at start; empty, and so not sent, unless global.scheme is https.
