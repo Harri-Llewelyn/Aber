@@ -216,7 +216,10 @@ class TestDirectoryImageScans(unittest.TestCase):
 
     def scan_of(self, cur, row_id):
         cur.execute(
-            f"SELECT {', '.join(SCAN_COLUMNS)} FROM public.directory_services WHERE id = %s", (row_id,)
+            "SELECT image_fixable_critical, image_fixable_high, image_scanned_at,"
+            "       image_vulnerability_db_at, upstream_version"
+            "  FROM public.directory_services WHERE id = %s",
+            (row_id,),
         )
         return dict(zip(SCAN_COLUMNS, cur.fetchone()))
 
