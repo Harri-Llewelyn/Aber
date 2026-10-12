@@ -609,12 +609,13 @@ export default async function handler(req: Request): Promise<Response> {
 
   const cfg = forgeConfig();
   if (!cfg) {
-    // A deployment without the forge is asked every fifteen minutes and has nothing to sweep.
+    // A deployment without the forge is asked every fifteen minutes and has nothing to sweep. A
+    // forge whose token has not arrived is said so by forgeConfig() on every call.
     if (!saidNoForge) {
-      console.log("forge-sweep: this deployment has no forge configured; nothing to sweep");
+      console.log("forge-sweep: this deployment has no forge configured, or not yet its token; nothing to sweep");
       saidNoForge = true;
     }
-    return json({ error: "This deployment has no forge configured" }, 503);
+    return json({ error: "This deployment has no forge configured, or its token has not arrived yet" }, 503);
   }
 
   const admin = serviceRoleClient(SUPABASE_URL, SERVICE_ROLE_KEY);

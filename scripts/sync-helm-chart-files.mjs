@@ -143,11 +143,11 @@ const MIRRORS = [
   {
     source: 'scripts',
     dest: 'gitea-scripts',
-    // The provisioning script, projected onto an initContainer. It decides which accounts the forge has and
-    // what they may do -- the machine account is deliberately not an admin -- and that is policy
+    // The provisioning script, projected onto two initContainers. It decides which accounts the forge has
+    // and what they may do -- the machine account is a bot and deliberately not an admin -- and that is policy
     // rather than plumbing, so a hand-copied second version is exactly the drift this exists for.
     match: (name) => name === 'gitea-init.sh',
-    why: 'Builds app.ini through the setup script the image ships, migrates the schema, and creates the administrator and the platform machine account. Runs as an initContainer',
+    why: 'Builds app.ini through the setup script the image ships, migrates the schema, creates the administrator and the platform bot account, and mints the bot token. Runs as two initContainers',
   },
   // NODE-RED'S PROVISIONING SCRIPT IS NOT MIRRORED. It lives at node-red/node-red-init.mjs and is
   // copied into that image, which is the same image the initContainer running it uses -- so the

@@ -156,7 +156,7 @@ python supabase/functions/fplus-directory/test_fplus_directory.py
 # Remote gateway enrolment — signs in as Administrator to mint tokens (issuing is a USER's act,
 # gated on has_role, so the service key cannot do it), then redeems them the way an appliance does:
 # the publishable key and no user JWT. Stops the credential service to exercise the 503 rollback path.
-SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_MACHINE_TOKEN=... \
   python supabase/functions/enroll-gateway/test_enroll_gateway.py
 
 # The forge's door, end to end -- the same OAuth flow a browser runs, for each seeded persona --
@@ -166,7 +166,7 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
 # sent back through the door, and that Gitea's own sign-out link signs the person out of the
 # platform. Needs the forge and one enrolled gateway (which creates the organisation), and skips
 # without them.
-SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_MACHINE_TOKEN=... \
   python supabase/functions/forge-membership/test_forge_membership.py
 
 # The one-liner (0105): the install command is minted by role and names the token, the pin and the
@@ -184,7 +184,7 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
 # force-push). GITEA_WEBHOOK_SECRET is the release Secret's value (the one the edge runtime
 # holds); GITEA_TEST_SSH is the forge's SSH address from this host (the dev loop publishes it, or
 # forwards it on an older cluster, at ssh://git@127.0.0.1:2222). Each class skips without its own.
-SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=... \
+SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=... GITEA_MACHINE_TOKEN=... \
   GITEA_TEST_SSH=ssh://git@127.0.0.1:2222 python supabase/functions/forge-events/test_forge_events.py
 
 # The forge sweep (0099, 0104): the secret is checked; a role changed in user_roles behind the door is
@@ -198,8 +198,12 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=
 # publishes nothing; and the database's own sweep_forge() answers true. One pass at a time (0156):
 # each test holds the sweep lease and runs its passes under it, a call meeting a held lease answers
 # already_sweeping at once and pg_net records it as 200, a lapsed lease is taken over, and a second
-# push webhook of ours is removed. FORGE_SWEEP_SECRET is the release Secret's value. Skips without it.
-SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=... \
+# push webhook of ours is removed; and the machine account is a bot whose token is refused outside
+# its scopes and whose removals the audit log names with that token. FORGE_SWEEP_SECRET is the
+# release Secret's value. Skips without it. GITEA_MACHINE_TOKEN, in every forge suite, is the
+# `token` of the <release>-forge-token Secret, which the forge mints (forge/README.md); the dev loop
+# reads it from there.
+SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=... GITEA_MACHINE_TOKEN=... \
   python supabase/functions/forge-sweep/test_forge_sweep.py
 
 # The backup service (0101): only an Administrator can ask, and no PostgREST role reaches the

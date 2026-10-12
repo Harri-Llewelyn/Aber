@@ -1068,6 +1068,15 @@ address an engineer copies cannot disagree with the address the Ingress routes.
 {{- define "aber.giteaUrl" -}}{{ include "aber.publicUrl" (dict "ctx" . "key" "gitea" "sub" "git") }}{{- end -}}
 
 {{/*
+The Secret holding the platform's forge token: written by the forge's gitea-token init container,
+mounted by the edge runtime. Empty when there is no machine account, which is the forge
+integration turned off.
+*/}}
+{{- define "aber.forgeTokenSecretName" -}}
+{{- if and .Values.gitea.enabled .Values.gitea.machineUser -}}{{ printf "%s-forge-token" (include "aber.fullname" .) }}{{- end -}}
+{{- end -}}
+
+{{/*
 Host only, for an Ingress rule. host is a DNS name and rejects a scheme; a URL there yields a rule
 matching nothing, accepted, failing as a 404 from the controller's default backend.
 */}}

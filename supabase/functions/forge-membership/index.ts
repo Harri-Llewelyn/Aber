@@ -164,8 +164,9 @@ export default async function handler(req: Request): Promise<Response> {
 
   const cfg = forgeConfig();
   if (!cfg) {
-    // A door with no forge behind it. The listener lets this through; there is nothing to place.
-    return json({ error: "This deployment has no forge configured" }, 503);
+    // A door with no forge behind it, or a forge whose token has not arrived. The listener lets
+    // this through; there is nothing to place yet.
+    return json({ error: "This deployment has no forge configured, or its token has not arrived yet" }, 503);
   }
 
   const username = user.id;

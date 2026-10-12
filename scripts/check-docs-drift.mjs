@@ -2110,6 +2110,7 @@ function edgeFunctionNames() {
   const elsewhere = {
     ABER_CA_PEM: 'main/index.ts reads it from the mounted platform root at spawn, the entrypoint at start',
     ABER_CA_STATE: 'main/index.ts derives it from what the mounted platform root holds',
+    GITEA_MACHINE_TOKEN: 'main/index.ts reads it at spawn from the mounted file GITEA_MACHINE_TOKEN_FILE names',
     ASSET_EXPORT_MAX_TELEMETRY_ROWS: 'defaulted inside aas-export, deliberately not plumbed',
     ASSET_EXPORT_MAX_TRAIL_ROWS: 'defaulted inside aas-export, deliberately not plumbed',
   };
@@ -4000,6 +4001,7 @@ function edgeFunctionNames() {
     mqttPlaybackCredentials: 'empty is valid: the worker refuses a job for a gateway it holds no credential for',
     archiveS3SecretAccessKey: 'only for a cold archive in S3, which setup does not configure',
     smtpPassword: 'only for supabaseAuth.smtp, which setup does not configure',
+    giteaMachinePassword: 'deprecated and read by nothing: the machine account is a bot with a token the forge mints',
   };
   const values = read('deploy/helm/aber/values.yaml');
   const block = /^secrets:\n([\s\S]*?)^\S/m.exec(values)?.[1] ?? '';
@@ -4238,6 +4240,30 @@ function edgeFunctionNames() {
   }
   if (found.length) fail(`check 63: ${found.join('; ')}`);
   else pass(`the forge's audit log is asserted on, and forge/README.md gives its ${days}-day default`);
+}
+
+// -------------------------------------------------------------------------------------------------
+// 63b. The machine account's token carries the scopes forge/README.md lists, and no others.
+//
+// gitea-init.sh mints the token with TOKEN_SCOPES; the README's table says what each scope is for
+// and what is refused without it. A scope added to one and not the other is a token wider than
+// anyone reviewing the README believes, or a README promising a refusal that no longer happens.
+// -------------------------------------------------------------------------------------------------
+{
+  const script = read('scripts/gitea-init.sh');
+  const readme = read('forge/README.md');
+  const minted = /^TOKEN_SCOPES="([a-z:,]+)"$/m.exec(script)?.[1];
+  const said = /^`([a-z:,]+)`, in the order Gitea normalises them to\.$/m.exec(readme)?.[1];
+  const section = /^### The scopes\n([\s\S]*?)^### /m.exec(readme)?.[1] ?? '';
+  const rows = [...section.matchAll(/^\| `([a-z]+:[a-z]+)` \|/gm)].map((m) => m[1]);
+  if (!minted || !said) {
+    fail(`check 63b found no TOKEN_SCOPES in scripts/gitea-init.sh (${minted}) or no scope list in forge/README.md (${said})`);
+  } else if (minted !== said || [...rows].sort().join(',') !== minted.split(',').sort().join(',')) {
+    fail(`the forge token's scopes disagree: gitea-init.sh mints "${minted}", forge/README.md lists ` +
+      `"${said}" and its table has rows for ${rows.join(', ') || 'none'}`);
+  } else {
+    pass(`the forge token is minted with the ${rows.length} scopes forge/README.md lists and explains`);
+  }
 }
 
 // -------------------------------------------------------------------------------------------------

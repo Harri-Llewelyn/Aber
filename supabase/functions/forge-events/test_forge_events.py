@@ -16,11 +16,11 @@ asserts that the forge delivered that push and the row records it, that `main` r
 key, and that a force-push to `appliance` was refused. It needs GITEA_TEST_SSH, the forge's SSH
 address as reachable from this host (`ssh://git@127.0.0.1:2222` in the dev loop).
 
-Needs the stack, the forge, and GITEA_WEBHOOK_SECRET (the value the edge runtime holds; read it from
-.env). Skips without them.
+Needs the stack, the forge, GITEA_WEBHOOK_SECRET (the value the edge runtime holds; read it from
+.env) and GITEA_MACHINE_TOKEN (the <release>-forge-token Secret's `token`). Skips without them.
 
     SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=... \\
-      python supabase/functions/forge-events/test_forge_events.py
+      GITEA_MACHINE_TOKEN=... python supabase/functions/forge-events/test_forge_events.py
 """
 import base64
 import hashlib
@@ -46,7 +46,8 @@ WEBHOOK_SECRET = os.getenv("GITEA_WEBHOOK_SECRET", "")
 FORGE_URL = os.getenv("GITEA_TEST_URL", "http://127.0.0.1:3003")
 FORGE_SSH = os.getenv("GITEA_TEST_SSH", "")
 MACHINE_USER = os.getenv("GITEA_MACHINE_USER", "aber_platform")
-MACHINE_PASSWORD = os.getenv("GITEA_MACHINE_PASSWORD", "aber-platform-machine-account")
+# The machine account's token, from the <release>-forge-token Secret (the account is a bot).
+MACHINE_TOKEN = os.getenv("GITEA_MACHINE_TOKEN", "")
 ORGANISATION = os.getenv("GITEA_ORGANISATION", "gateways")
 # The status main requires. Must agree with FLOW_SHAPE_CONTEXT in _shared/forge.ts.
 FLOW_SHAPE_CONTEXT = "aber/flow-shape"
@@ -106,8 +107,7 @@ def push(sparkplug_id, ref="refs/heads/main", sha="a" * 40, owner=ORGANISATION, 
 
 
 def forge_as_machine(path, method="GET", body=None):
-    credentials = base64.b64encode(f"{MACHINE_USER}:{MACHINE_PASSWORD}".encode()).decode()
-    headers = {"Authorization": f"Basic {credentials}"}
+    headers = {"Authorization": f"token {MACHINE_TOKEN}"}
     if body is not None:
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(f"{FORGE_URL}{path}", method=method, headers=headers,
@@ -287,7 +287,7 @@ class TestTheForgeItself(ForgeEventsBase):
         super().setUpClass()
         status, _ = forge_as_machine("/api/v1/version")
         if status != 200:
-            skip_or_fail(f"no forge reachable at {FORGE_URL} ({status})")
+            skip_or_fail(f"no forge reachable at {FORGE_URL} with GITEA_MACHINE_TOKEN ({status})")
         try:
             cls.admin_token = sign_in()
         except Exception as err:  # noqa: BLE001
@@ -372,7 +372,7 @@ class TestAProposal(ForgeEventsBase):
         super().setUpClass()
         status, _ = forge_as_machine("/api/v1/version")
         if status != 200:
-            skip_or_fail(f"no forge reachable at {FORGE_URL} ({status})")
+            skip_or_fail(f"no forge reachable at {FORGE_URL} with GITEA_MACHINE_TOKEN ({status})")
         cls.repo = f"gateway-{cls.sparkplug_id}"
         forge_as_machine(f"/api/v1/repos/{ORGANISATION}/{cls.repo}", method="DELETE")
         status, made = forge_as_machine(f"/api/v1/orgs/{ORGANISATION}/repos", method="POST", body={
@@ -484,7 +484,7 @@ class TestTheApplianceItself(ForgeEventsBase):
         super().setUpClass()
         status, _ = forge_as_machine("/api/v1/version")
         if status != 200:
-            skip_or_fail(f"no forge reachable at {FORGE_URL} ({status})")
+            skip_or_fail(f"no forge reachable at {FORGE_URL} with GITEA_MACHINE_TOKEN ({status})")
         try:
             cls.admin_token = sign_in()
         except Exception as err:  # noqa: BLE001

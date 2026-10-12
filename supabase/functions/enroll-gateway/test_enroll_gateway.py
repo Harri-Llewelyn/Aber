@@ -532,12 +532,13 @@ class TestForgeProvisioning(EnrollGatewayBase):
         super().setUpClass()
         cls.forge_url = os.getenv("GITEA_TEST_URL", "http://127.0.0.1:3003")
         cls.machine_user = os.getenv("GITEA_MACHINE_USER", "aber_platform")
-        cls.machine_password = os.getenv(
-            "GITEA_MACHINE_PASSWORD", "aber-platform-machine-account"
-        )
+        # The forge mints the bot's token into the <release>-forge-token Secret; it has no password.
+        cls.machine_token = os.getenv("GITEA_MACHINE_TOKEN", "")
         # Every gateway repository lives in this organisation (forge.ts); the machine account owns
         # it, which is exactly the authority to create a repository in it and no more.
         cls.organisation = os.getenv("GITEA_ORGANISATION", "gateways")
+        if not cls.machine_token:
+            skip_or_fail("GITEA_MACHINE_TOKEN is unset; read it from the <release>-forge-token Secret")
         try:
             cls.forge("/api/v1/version")
         except Exception as err:  # noqa: BLE001 -- any failure here means "no forge"
@@ -546,10 +547,7 @@ class TestForgeProvisioning(EnrollGatewayBase):
     @classmethod
     def forge(cls, path, method="GET", body=None):
         """The forge's API, as the machine account -- the same credential enroll-gateway holds."""
-        credentials = base64.b64encode(
-            f"{cls.machine_user}:{cls.machine_password}".encode()
-        ).decode()
-        headers = {"Authorization": f"Basic {credentials}"}
+        headers = {"Authorization": f"token {cls.machine_token}"}
         if body is not None:
             headers["Content-Type"] = "application/json"
         req = urllib.request.Request(
