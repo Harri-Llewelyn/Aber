@@ -70,6 +70,12 @@ spec:
       port: 8002
       targetPort: forge
       protocol: TCP
+    # THE FORGE'S API FOR THE EDGE RUNTIME: Gitea's /api/ with the identity headers removed, so the
+    # functions never need port 3000. No Ingress route names it.
+    - name: forge-api
+      port: 8003
+      targetPort: forge-api
+      protocol: TCP
     {{- if .Values.supabaseEnvoy.metrics.enabled }}
     # NAMED `metrics`, selected BY NAME by the ServiceMonitor, which scrapes /stats/prometheus on
     # the admin listener. A ServiceMonitor with the wrong path scrapes 404 while reporting the
@@ -289,7 +295,7 @@ spec:
               value: {{ dig "signInRateLimit" "perClientPerMinute" 10 .Values.supabaseEnvoy | int | quote }}
             - name: SIGN_IN_LIMIT_TOTAL
               value: {{ dig "signInRateLimit" "totalPerMinute" 120 .Values.supabaseEnvoy | int | quote }}
-            # All three listeners send it; empty, and so not sent, unless global.scheme is https.
+            # The three browser listeners send it; empty, and so not sent, unless global.scheme is https.
             - name: STRICT_TRANSPORT_SECURITY
               value: {{ include "aber.strictTransportSecurity" . | quote }}
             # ------------------------------------------------------------------------------
@@ -375,9 +381,11 @@ spec:
             # describe itself wrongly without changing what it serves.
             - name: studio
               containerPort: 8001
-            # The forge's listener, declared unconditionally for the same reason.
+            # The forge's listener and its API listener, declared unconditionally for the same reason.
             - name: forge
               containerPort: 8002
+            - name: forge-api
+              containerPort: 8003
             {{- if .Values.supabaseEnvoy.metrics.enabled }}
             - name: metrics
               containerPort: {{ .Values.supabaseEnvoy.metrics.port }}

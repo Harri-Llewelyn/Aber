@@ -116,7 +116,7 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `storage-policies` | `supabase/postgres:17.6.1.175` | hook Job: the storage RLS policies |
 | `supabase-auth` | `supabase/gotrue:v2.197.0` | behind `api.<domain>/auth/v1` |
 | `supabase-db` | `ghcr.io/harri-llewelyn/aber/supabase-db` (`supabase/postgres:17.6.1.175` with pgBackRest and tini), `quay.io/prometheuscommunity/postgres-exporter:v0.20.1` as a sidecar, and the `pgbackrest` backup sidecar when `supabaseDb.physicalBackup` is on | `supabase-db:5432`; `:9187` is scraped |
-| `supabase-envoy` | `envoyproxy/envoy:v1.39.2` | the gateway: `api.<domain>` (in-cluster `supabase-envoy:8000`), Studio on 8001, the forge on 8002 |
+| `supabase-envoy` | `envoyproxy/envoy:v1.39.2` | the gateway: `api.<domain>` (in-cluster `supabase-envoy:8000`), Studio on 8001, the forge on 8002, the forge's API for the edge functions on 8003 |
 | `supabase-functions` | `ghcr.io/harri-llewelyn/aber/edge-runtime` | behind `api.<domain>/functions/v1` |
 | `supabase-meta` | `supabase/postgres-meta:v0.99.0` | in-cluster only, for Studio |
 | `supabase-rest` | `postgrest/postgrest:v14.17` | behind `api.<domain>/rest/v1`; admin port 3001 is scraped |

@@ -29,6 +29,10 @@
 import { spkiPin } from "./caPin.ts";
 
 export interface ForgeConfig {
+  /**
+   * The gateway's forge-api listener, which serves Gitea's API and host key with the identity
+   * headers removed. Never gitea:3000, whose web routes sign in whoever one header names.
+   */
   baseUrl: string;
   user: string;
   /** The machine account's API token. The account is a bot, so it has no password to send. */

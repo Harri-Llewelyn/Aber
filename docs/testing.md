@@ -198,8 +198,10 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=
 # publishes nothing; and the database's own sweep_forge() answers true. One pass at a time (0156):
 # each test holds the sweep lease and runs its passes under it, a call meeting a held lease answers
 # already_sweeping at once and pg_net records it as 200, a lapsed lease is taken over, and a second
-# push webhook of ours is removed; and the machine account is a bot whose token is refused outside
-# its scopes and whose removals the audit log names with that token. FORGE_SWEEP_SECRET is the
+# push webhook of ours is removed; the machine account is a bot whose token is refused outside
+# its scopes and whose removals the audit log names with that token; and from inside the functions
+# pod, the gateway's forge-api listener refuses a web route sent with the identity header and
+# gitea:3000 does not answer. FORGE_SWEEP_SECRET is the
 # release Secret's value. Skips without it. GITEA_MACHINE_TOKEN, in every forge suite, is the
 # `token` of the <release>-forge-token Secret, which the forge mints (forge/README.md); the dev loop
 # reads it from there.

@@ -269,6 +269,55 @@ class TestTheMachineAccount(unittest.TestCase):
         self.assertEqual(status.strip(), "200", "the header no longer signs anyone in, so the check above proves nothing")
 
 
+def from_the_edge_runtime(host, port, path, headers=()):
+    """
+    The status line one GET from inside the functions pod draws, or '' when no connection opened in
+    ten seconds. Bash's /dev/tcp, because the edge-runtime image carries no HTTP client.
+    """
+    request = "".join([f"GET {path} HTTP/1.1\\r\\nHost: {host}\\r\\n", *(f"{h}\\r\\n" for h in headers),
+                       "Connection: close\\r\\n\\r\\n"])
+    script = 'exec 3<>"/dev/tcp/$0/$1" || exit 7; printf "%b" "$2" >&3; head -n 1 <&3'
+    result = stack_exec.run("functions", "timeout", "10", "bash", "-c", script, host, str(port), request)
+    return result.stdout.strip()
+
+
+class TestTheEdgeRuntimesPathToTheForge(unittest.TestCase):
+    """
+    The edge functions reach the forge through the gateway's forge-api listener, never Gitea's own
+    port, where one header signs in as anyone (forge/README.md, "How the platform reaches the
+    forge"). Asked from inside the functions pod, which is where a fault in a function would ask.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if not stack_exec.running("functions"):
+            skip_or_fail(f"no edge runtime running ({stack_exec.describe('functions')})")
+
+    def test_a_web_route_with_the_identity_header_is_not_served(self):
+        for path in ("/-/admin/monitor/audit_logs/export", "/user/settings", "/api/../-/admin"):
+            status = from_the_edge_runtime("supabase-envoy", 8003, path, ["X-WEBAUTH-USER: gitea_admin"])
+            self.assertTrue(status.startswith("HTTP/1.1 403"), f"{path} through forge-api answered {status!r}")
+
+    def test_the_api_and_the_host_key_are_served(self):
+        self.assertTrue(from_the_edge_runtime("supabase-envoy", 8003, "/api/healthz").startswith("HTTP/1.1 200"))
+        self.assertTrue(from_the_edge_runtime("supabase-envoy", 8003, "/assets/ssh_host_key.pub").startswith("HTTP/1.1 200"))
+
+    def test_the_header_alone_signs_nobody_in_to_the_api(self):
+        """The API ignores it anyway, and the listener removes it: Gitea answers 403, as to anyone anonymous."""
+        status = from_the_edge_runtime("supabase-envoy", 8003, "/api/v1/user", ["X-WEBAUTH-USER: gitea_admin"])
+        self.assertTrue(status.startswith("HTTP/1.1 403"), status)
+
+    def test_the_forges_own_port_is_closed_to_the_edge_runtime(self):
+        """Every policy that selects the forge admits the gateway alone on 3000."""
+        selected = stack_exec._kubectl(
+            "get", "networkpolicy", "-o",
+            "jsonpath={range .items[*]}{.spec.podSelector.matchLabels.app\\.kubernetes\\.io/component} {end}").stdout
+        if "gitea" not in selected.split():
+            skip_or_fail("no NetworkPolicy selects the forge (networkPolicy.protectForge is off)")
+        self.assertEqual(from_the_edge_runtime("gitea", 3000, "/api/healthz"), "",
+                         "the functions pod reached gitea:3000, where one header signs in as anyone")
+
+
 class TestOnePassAtATime(ForgeSweepBase):
     """
     THE LEASE (0156). Two passes at once each list what the forge holds and each write what is

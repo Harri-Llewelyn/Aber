@@ -1590,7 +1590,8 @@ networkPolicy:
   # the exposure is the web UI, its approve control on `main`, and through `administrators` every
   # gateway's flow.
   #
-  # Ingress-only, on port 3000, from the two components that are meant to reach it. Gitea's egress
+  # Ingress-only, on port 3000, from the gateway alone (the edge functions reach the API through its
+  # forge-api listener, which removes the header). Gitea's egress
   # is untouched, SSH is allowed on port 22 from `giteaSshAllowedCidrs` below -- open to anything at
   # its default -- and turning `enabled` on replaces this with the generated pair.
   #

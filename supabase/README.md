@@ -4292,14 +4292,17 @@ auto-registration. The username is the token's `sub` (Gitea refuses `@` in a nam
 in its own header, and the full name carries the email so the UI shows a person. Gitea trusts
 `X-WEBAUTH-USER` from **any** peer — `REVERSE_PROXY_TRUSTED_PROXIES` governs `X-Forwarded-For`
 only — so the access control is reachability: the NetworkPolicy edge list admits only the gateway
-and the edge runtime. The API ignores the header (`ENABLE_REVERSE_PROXY_AUTHENTICATION_API` off), so the machine
-account's token path is not a second door. The machine account is a bot, which no header signs in
-even on a web route, and its token carries four scopes and nothing else
-([`forge/README.md`](../forge/README.md#the-machine-accounts-token)). Measured against Gitea 28:
-the edge runtime, which may reach port 3000 for the API, could still sign in as anyone else,
-the administrator included, by sending the header on a web route, so the function code is trusted
-not to. The listener overwrites or removes the identity
-headers on every route, so a value a browser sent never reaches Gitea.
+to port 3000. The listener overwrites or removes the identity headers on every route, so a value a
+browser sent never reaches Gitea.
+
+**The edge functions reach the forge's API through the gateway too**, on a fourth listener,
+`forge-api` (`supabase-envoy:8003`), which only `supabase-functions` may reach. It serves `/api/` and
+the published host key, answers 403 to every other path, and removes the identity headers from
+every request, so no function, and nothing that can make a function send a request, can name a
+user to the web UI. Before 1.4.0 the functions reached `gitea:3000` directly, where the same header
+on a web route signed in as anyone, the site administrator included (measured against Gitea 28).
+The machine account itself is a bot, which no header signs in, and its token carries four scopes
+and nothing else ([`forge/README.md`](../forge/README.md#how-the-platform-reaches-the-forge)).
 
 **Membership is placed on the way through** by [`forge-membership`](functions/forge-membership),
 the listener's `ext_authz` step: one call per non-static request, the role read from `user_roles`,
