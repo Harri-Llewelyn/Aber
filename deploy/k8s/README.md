@@ -1527,6 +1527,7 @@ These pods still start a container as root, each for the reason given:
 
 **Pod Security admission.** A namespace that enforces the *restricted* level now admits every pod
 except the ones listed above. *baseline* admits every pod except Alloy, as before.
+`scripts/check-docs-drift.mjs` (check 69) holds the list to the templates.
 
 **Volumes written by an earlier release.** 1.2.0 started several of these processes as root, and
 1.3.0 still started storage-api as root. Their volumes stay usable across `helm upgrade`:
