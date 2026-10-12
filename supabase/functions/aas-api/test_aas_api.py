@@ -146,11 +146,18 @@ def target_shell_id() -> str | None:
 
     /shells already returns real identifiers, so the deployment's own answer is one request away.
     """
-    _, body = get("/shells?limit=100", TOKEN)
-    for shell in body.get("result", []):
-        if shell.get("idShort") == TARGET_DEVICE:
-            return shell["id"]
-    return None
+    # Every page, following the cursor: a stack with more than one page of devices puts the
+    # target wherever the keyset order does.
+    cursor = None
+    while True:
+        query = "/shells?limit=100" + (f"&cursor={urllib.parse.quote(cursor, safe='')}" if cursor else "")
+        _, body = get(query, TOKEN)
+        for shell in body.get("result", []):
+            if shell.get("idShort") == TARGET_DEVICE:
+                return shell["id"]
+        cursor = (body.get("paging_metadata") or {}).get("cursor")
+        if not cursor:
+            return None
 
 
 SHELL_ID = target_shell_id() if LIVE else None
@@ -354,11 +361,7 @@ class TestAuthorization(unittest.TestCase):
 class TestShellRoutes(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.shell_id = None
-        _, body = get("/shells?limit=50", TOKEN)
-        for shell in body.get("result", []):
-            if shell.get("idShort") == TARGET_DEVICE:
-                cls.shell_id = shell["id"]
+        cls.shell_id = target_shell_id()
         cls.encoded = b64url(cls.shell_id) if cls.shell_id else None
 
     def test_the_listing_is_paginated_in_the_specification_shape(self):
