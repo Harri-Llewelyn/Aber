@@ -1023,7 +1023,8 @@ code, bounded by count alone, grew by about 100 MiB on the same run.
 
 **The defaults fit the 512 Mi limit.** 128 MiB of queues is about 140 MiB resident. With the idle
 process that leaves over 300 MiB for the value cache, the address-space cache and the requests in
-flight; a `/objects` on 1,000 devices × 20 metrics serialises 4.9 MB. 32 MiB per principal holds
+flight. For 1,000 devices × 20 metrics one cached address space holds 0.7 MiB, so the cache's 64
+callers hold about 45 MiB, and a `/objects` serialises 4.9 MB. 32 MiB per principal holds
 20 subscriptions × 500 batches of a 20-metric device at `maxDepth: 1`, and four principals reach
 their ceiling before the server's applies. Raise `maxQueuedMiB` only with
 `resources.limits.memory`: the chart refuses a value at or above the limit.
