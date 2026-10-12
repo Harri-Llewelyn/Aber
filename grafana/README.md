@@ -368,6 +368,22 @@ and an outage that buffered everything does not fire. Gated on the report's age,
 hold the last report for ever. What to do is in
 [`docs/remote-gateways.md`](../docs/remote-gateways.md#13-troubleshooting).
 
+### Late Replay Missing From the Rollups (`aber-ingestion-rollup-windows-failed`)
+
+Warning, `for: 0s`, any increase within an hour. A replay further back than the rollups' refresh
+policies reach gets into `telemetry_1m`, `5m` and `1h` only through `refresh_requested_rollups()`,
+the historian job that refreshes the hours ingestion records in `rollup_refresh_requests`. When the
+record fails, `aber_ingestion_rollup_windows_failed_total` counts the hours and the daemon logs a
+warning naming the cause; the readings are stored, and the rollups lack them until someone
+refreshes the window by hand
+([`docs/remote-gateways.md`](../docs/remote-gateways.md#late-data-after-an-outage)). Nothing else
+shows it: every dashboard built on the rollups draws the outage as a gap. Warning, not critical,
+because nothing is lost from the raw table. `for: 0s` because `increase(...[1h])` is the delay, as
+with *Database Deadlocks*; the hour keeps the alert up long enough to be read. The counter is
+exported at zero from startup, so the first failure is an increase. *Stack & Ingestion Health*
+draws the recorded and failed hours beside *Outage Readings*, and the failed series links to the
+daemon's warning in the log store.
+
 ### Gateway Clock Skew (`aber-gateway-clock-skew`)
 
 Warning, `for: 15m`, more than sixty seconds. The fault that passes every other check: a gateway
