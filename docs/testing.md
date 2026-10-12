@@ -190,8 +190,10 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... GITEA_WEBHOOK_SECRET=
 # The forge sweep (0099, 0104): the secret is checked; a role changed in user_roles behind the door is
 # unseated by one sweep and seated again when it returns; a member seated by hand is left alone; a
 # deleted push webhook comes back; a repository made by hand gets main protected; a gateway
-# repository gets its appliance and catch-all rules back and main closed again; a key downgraded
-# to read-only is re-registered read-write; an archived gateway's key is removed from both
+# repository gets its appliance and catch-all rules back and main closed again; a rule changed in
+# the web UI is in the forge's audit log under its author, read from the forge's own pod as an
+# operator's port-forward reads it, and one changed through the API is not (Gitea 28.0.0); a key
+# downgraded to read-only is re-registered read-write; an archived gateway's key is removed from both
 # repositories; one sweep publishes the platform playbook, tags it and protects it, and a second
 # publishes nothing; and the database's own sweep_forge() answers true. One pass at a time (0156):
 # each test holds the sweep lease and runs its passes under it, a call meeting a held lease answers

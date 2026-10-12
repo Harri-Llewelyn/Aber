@@ -37,6 +37,7 @@ TARGETS = {
     "broker": {"workload": "deploy/mosquitto", "container": "mosquitto", "service": "mosquitto"},
     "supabase-db": {"workload": "statefulset/supabase-db", "container": "supabase-db", "service": "supabase-db"},
     "backup-service": {"workload": "deploy/backup-service", "container": "backup-service", "service": None},
+    "forge": {"workload": "deploy/gitea", "container": "gitea", "service": "gitea"},
 }
 
 

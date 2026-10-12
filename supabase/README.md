@@ -4396,6 +4396,14 @@ An empty secret leaves the sweep inert, and `0002` says so at boot. `test_forge_
 role changed behind the door, a deleted hook and a hand-made repository. One pass runs at a time
 ([One pass at a time](#one-pass-at-a-time-0156)).
 
+**Who changed what the sweep puts back is in the forge's audit log.** Gitea 28 records seats placed
+and removed, deploy keys removed, and a branch rule, webhook or deploy key changed in its web UI,
+each under the account that did it. It does not record those changes made through its API, which is
+how the platform furnishes a repository, so the platform's own writes are mostly absent and a quiet
+pass records nothing. The log is kept for `gitea.audit.retentionDays` (365 days) in `gitea.db`, and
+an operator reads it through a port-forward to the forge's own port:
+[`forge/README.md`](../forge/README.md#the-audit-log) has the recipe and the measured list.
+
 ### The appliance reports on a branch of its own (archived migration 0104)
 
 `main` is what was approved; **`appliance` is what is running**, a second branch in the gateway's

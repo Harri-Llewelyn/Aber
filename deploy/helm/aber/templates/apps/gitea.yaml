@@ -104,6 +104,17 @@ in one database and the server opens another, with nothing reporting a fault.
 # portless `private` an earlier release wrote, which would refuse port 9000.
 - name: GITEA__webhook__ALLOWED_HOST_LIST
   value: ""
+{{- /* The audit log: an audit_event table in gitea.db, which the backup takes with the rest of
+     the file. Both asserted, never omitted, for the reason START_SSH_SERVER is. How to read it and
+     what it leaves out: forge/README.md, "The audit log". */}}
+{{- $auditDays := toString .Values.gitea.audit.retentionDays }}
+{{- if not (regexMatch "^[0-9]+$" $auditDays) }}
+{{- fail (printf "\n\naber: gitea.audit.retentionDays must be a whole number of days (0 keeps every event), not %q.\n" $auditDays) }}
+{{- end }}
+- name: GITEA__audit__RECORD_OUTPUT
+  value: database
+- name: GITEA__audit__RETENTION_DAYS
+  value: {{ $auditDays | quote }}
 - name: GITEA__log__LEVEL
   value: {{ .Values.gitea.logLevel | quote }}
 {{- end -}}

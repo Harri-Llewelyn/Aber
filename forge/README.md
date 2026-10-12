@@ -108,3 +108,99 @@ sshd will present. A missing key is not fatal: a forge with no host key still se
 dashboard, the proposals and every existing appliance are unaffected. What is lost is new
 appliances, which enrol with no `known_hosts` entry and decline to converge rather than trusting an
 unverified forge, and the script says so because nothing else would.
+
+## The audit log
+
+The forge keeps a record of who changed its controls: team seats, deploy keys, branch rules made in
+the web UI, accounts. It answers the question `forge-sweep`'s summary cannot. The sweep says what it
+put back; the log says who took it away. This section is for an operator with `kubectl` access to
+the release's namespace.
+
+### Reading it
+
+Open a port-forward to the forge's own port, then ask for the export as the administrator:
+
+```bash
+kubectl -n aber port-forward deploy/gitea 3000:3000
+# in a second terminal:
+curl -s -H 'X-WEBAUTH-USER: gitea_admin' \
+  'http://127.0.0.1:3000/-/admin/monitor/audit_logs/export?action=repository:branch:protection' \
+  -o forge-audit.jsonl
+```
+
+Each line is one event, oldest first: the action, the actor, the origin (`ui`, `api`, `cli` or
+`system`), the IP address, the time and what changed. The export takes the listing's filters:
+`action` (a whole action, or a prefix such as `repository:branch:protection`), `actor` (a username)
+and `origin`. Leave them out for every event. Close the forward when you are done: while it is open,
+anything on your machine that can reach port 3000 can act as any forge user.
+
+`gitea_admin` is the administrator `gitea.adminUser` names. A different value there means a
+different header value here.
+
+**Why this works, and why only for an operator.** Gitea signs in whoever the `X-WEBAUTH-USER` header
+names, from any peer that reaches port 3000. A port-forward arrives from the pod's own loopback, so
+the forge treats it like any other peer. The NetworkPolicy edge list keeps every pod but the gateway
+and the edge runtime off that port, and the gateway's `forge` listener replaces the header with the
+signed-in person's id. So the path is open to someone who may port-forward in the namespace, and that
+person can already do anything there. Measured against `gitea/gitea:28.0.0` on 2026-10-12: the
+header fetched the export from the pod's loopback and from another container on the same network,
+and a request without it was sent to the sign-in page.
+
+### What it records here, and what it does not
+
+Measured against `gitea/gitea:28.0.0` by driving the platform's own calls (enrolment, the door's
+placement, the sweep) and reading the export after each step.
+
+| Change | Recorded? |
+| :--- | :--- |
+| A person's first visit (`user:create`, actor `(gitea-auth-source)`) | Yes |
+| A seat placed or taken away (`organization:team:member:add`/`remove`) | Yes |
+| A gateway's repository and its wiki page created at enrolment | Yes |
+| A deploy key removed, by the sweep or by enrolment | Yes |
+| A branch rule, deploy key, webhook or archive mark changed **in the web UI** | Yes, with the person who did it (measured for a branch rule; the rest read from the source) |
+| The machine account's type changed with `gitea admin user change-type` | Yes, actor `(gitea-cli)` |
+| A branch rule, webhook or archive mark changed **through the API** | **No** |
+| A deploy key added through the API | **No** |
+| Accounts created and tokens minted with `gitea admin` | **No** |
+| Sign-ins, clones, pushes and page views | **No** |
+
+**A rule changed through the API leaves no event.** Gitea 28.0.0 records branch-rule, webhook,
+archive and deploy-key-add changes only in its web handlers (`routers/web/repo/setting/`), not in
+the API's. The platform makes every one of those changes through the API, so its own furnishing is
+not in the log either. What the log adds is the person who changed a rule in the web UI, which is how
+a person changes one. Someone holding the machine account's credential or `gitea_admin`'s password
+could change a rule through the API unrecorded. The sweep still puts the rule back within fifteen
+minutes. `test_forge_sweep.py` holds both halves: the web change is found under its author, and the
+API change is not found at all, so a Gitea that starts recording it fails the test and this table is
+updated.
+
+**A quiet sweep writes nothing.** Every step of a pass reads before it writes, so a pass that finds
+the forge as it left it records no event. The door's placement is the same: `forge-membership` asks
+whether a person holds a seat before taking it away, because Gitea answers 204 to removing a
+non-member and records the removal anyway. Before that check, every visit logged a removal that
+never happened, up to twelve an hour for each person using the forge.
+
+### How long events are kept
+
+`gitea.audit.retentionDays`, **365** by default, and `0` keeps every event. Gitea's own default is
+30 days, which can be shorter than the gap between a rule changing and someone asking why. A daily
+Gitea job deletes older events. The events are rows in `gitea.db`, so the backup takes them with the
+rest of the forge and a restore brings them back.
+
+The table stays small. An event is about 410 bytes on disk with its indexes (2,044 events took
+839,680 bytes in `audit_event`). A busy site writes tens of events on a day with changes and none on a
+day without. A year at a hundred a day is about 15 MB on the forge's 10 GiB volume.
+
+### Other ways to read it, which the chart does not take
+
+**One named person as a site administrator** is a per-site choice. `gitea_admin` can make one
+person's forge account an administrator, in the web UI through the port-forward above or with
+`PATCH /api/v1/admin/users/{username}`. That person then reads the whole log through the `forge`
+listener, with no port-forward. They also get every right the machine account holds, and more: they
+can change the rules the sweep defends, delete repositories and make other administrators. The chart
+never does this, and the sweep never undoes it, so a site that does it must also remember to undo it.
+
+**Raising the dashboard's Administrators to repository admin or organisation owner** is not
+recommended. It would let them read each repository's or the organisation's events. It would also
+hand every one of them the branch rules and deploy keys `forge-sweep` defends, and the sweep and the
+people it seats would keep undoing each other.
