@@ -473,7 +473,9 @@ Five rules are easy to get wrong and each fails quietly:
    all" is the obvious implementation and it loses exactly the updates a client crashed before
    processing.
 2. **Overflow is reported, not hidden.** The oldest batches drop and the next `/sync` answers 206.
-   A client computes the gap from `lastSequenceNumber + 1` to `result[0].sequenceNumber - 1`.
+   A client computes the gap from `lastSequenceNumber + 1` to `result[0].sequenceNumber - 1`. A
+   queue overflows at its batch count, or when its principal's queues or the server's pass their
+   byte ceiling ([Memory](#memory)).
 3. **One stream per subscription.** There is no fan-out in i3X — a second consumer creates its own
    subscription. Opening a second stream closes the first *cleanly* (a terminating zero-length
    chunk), because the spec says the displaced client sees a close **with no error**.
@@ -907,7 +909,9 @@ On Kubernetes each setting comes from the chart: the tunables from `i3xService.*
 | `MQTT_HOST` / `MQTT_PORT` | set by the chart | `mosquitto` / `1883` | |
 | `MQTT_TLS_ENABLED` / `MQTT_TLS_CA_FILE` | `mosquitto.tls` | off | Fails closed: a missing CA stops startup |
 | `I3X_SUBSCRIPTION_TTL_SECONDS` | `i3xService.subscriptionTtlSeconds` | `300` | Spec MUST — abandoned subscriptions are deleted |
-| `I3X_SUBSCRIPTION_QUEUE_LIMIT` | `i3xService.subscriptionQueueLimit` | `500` | Batches per subscription before 206. A count, not bytes: see [What causes a restart](#what-causes-a-restart-and-how-often-to-expect-one) |
+| `I3X_SUBSCRIPTION_QUEUE_LIMIT` | `i3xService.subscriptionQueueLimit` | `500` | Batches per subscription before 206. A count; the bytes are the next two rows' |
+| `I3X_MAX_QUEUED_MIB_PER_PRINCIPAL` | `i3xService.maxQueuedMiBPerPrincipal` | `32` | Estimated MiB one principal's queues may hold; past it, its largest queue drops its oldest batches. See [Memory](#memory) |
+| `I3X_MAX_QUEUED_MIB` | `i3xService.maxQueuedMiB` | `128` | The same for every queue on the server; past it, the largest queue of the principal holding most drops. The chart refuses one at or above the memory limit |
 | `I3X_MAX_SUBSCRIPTIONS_PER_PRINCIPAL` | `i3xService.maxSubscriptionsPerPrincipal` | `20` | Per token `sub`; past it, create answers 429 |
 | `I3X_MAX_SUBSCRIPTIONS` | `i3xService.maxSubscriptions` | `500` | On the server; past it, create answers 429 |
 | `I3X_MAX_STREAMS` | `i3xService.maxStreams` | `50` | Open SSE streams; past it, stream answers 429 |
@@ -934,7 +938,7 @@ and discover it during their own integration.
 | Current values immediately after a restart | **Filled on the first read.** The MQTT cache refills from `spBv1.0/#` as devices publish, and the first `/objects/value` naming a device fills what it lacks from `telemetry_latest`, with each sample's stored time ([Address space](#address-space)). Only a metric the historian does not hold within raw retention is `GoodNoData` until it next changes. A subscription registration fills the devices it names the same way, so the first map staged for one is complete |
 | Metadata and history across a restart | **Unaffected.** Neither is held here — metadata is PostgREST's and history is TimescaleDB's, so a restart cannot lose either |
 | Client contract | `/subscriptions/sync` and `/subscriptions/stream` answer **404** for a subscriptionId this process has never seen. Create a new subscription |
-| Subscription limits | **20 per principal, 500 in total, 50 open streams**, each set in the chart. Past one, `POST /subscriptions` or `/subscriptions/stream` answers **429** naming the limit. Each subscription queues **500 batches**; past that the oldest drop and `/sync` answers **206**. A principal is the token's `sub`, so every token minted for one service principal shares its 20 |
+| Subscription limits | **20 per principal, 500 in total, 50 open streams**, each set in the chart. Past one, `POST /subscriptions` or `/subscriptions/stream` answers **429** naming the limit. Each subscription queues **500 batches**, a principal's queues **32 MiB** and the server's **128 MiB**; past any of them the oldest drop and `/sync` answers **206** ([Memory](#memory)). A principal is the token's `sub`, so every token minted for one service principal shares its 20 |
 
 ### Why 404-then-recreate is the contract and not a workaround
 
@@ -954,24 +958,79 @@ because a subscription that lies about its continuity is worse than one that adm
 | Chart upgrade that changes the pod spec | Every release that moves `appVersion` — the image tag is the chart's own, so in practice **once per release** | Immediate; bounded by image pull and the 10s readiness period |
 | Liveness probe failure on `/v1/info` | Unplanned, and rare enough that one is worth investigating | Up to **3 minutes** to detect — `periodSeconds: 30` × `failureThreshold: 6`, set deliberately high because a restart costs every open stream |
 | Node drain, eviction or loss | Cluster-operational, not application-driven | Reschedule time, which is the cluster's property rather than this service's |
-| OOM kill at `i3xService.resources.limits.memory` (512Mi) | Not expected at the shipped defaults; possible once `i3xService.maxSubscriptions` or `i3xService.subscriptionQueueLimit` is raised without the limit | Immediate restart by the kubelet. Every client loses its subscriptions and streams, not only the one whose queue filled |
-
-**The queues are bounded by count, not by memory.** A subscription holds up to
-`subscriptionQueueLimit` batches, dropping the oldest past it, whatever they weigh. At about 0.5 KB
-a batch the shipped defaults allow 500 subscriptions × 500 batches × 0.5 KB ≈ 125 MB, a quarter of
-the limit, leaving the rest for the value cache, the address-space cache and connections; one
-principal at its 20 subscriptions holds about 5 MB. The estimate is unmeasured and may be low: a
-batch for a device carries a map of every metric the device holds. The default was 10,000 batches
-until 1.0, which allowed about 2.5 GB. A queue fills only when its client does not acknowledge:
-`/sync` without `lastSequenceNumber` keeps a subscription alive and its queue full, and a client that
-stops syncing is reaped after `subscriptionTtlSeconds`. Raise `subscriptionQueueLimit` or
-`maxSubscriptions` only with `resources.limits.memory`, keeping their product times the batch size
-well inside it.
+| OOM kill at `i3xService.resources.limits.memory` (512Mi) | Not expected from the subscription queues: `maxQueuedMiB` holds them to 128 MiB ([Memory](#memory)). Possible if it is raised without the limit | Immediate restart by the kubelet. Every client loses its subscriptions and streams, not only the one whose queue filled |
 
 A `helm upgrade` that does not touch the i3X pod template does not restart it. The controlling number
 is therefore the release cadence, and **an operator who needs a quiet window should treat an i3X
 restart as a planned client-visible event** in the same way as any other rolling deployment — the
 difference being that here there is no rolling, by design.
+
+### Memory
+
+**The subscription queues are budgeted in bytes as well as in batches.** A count alone bounds
+no memory, since a batch is as large as the device it carries. Each batch is charged an estimate of
+what it holds when it is queued. It gives the bytes back when it leaves the queue: acknowledged,
+sent on a stream, dropped, withdrawn, or deleted or reaped with its subscription. Two ceilings
+apply:
+
+- **`maxQueuedMiBPerPrincipal`, 32 MiB.** Past it, the principal's largest queue drops its oldest
+  batches.
+- **`maxQueuedMiB`, 128 MiB.** Past it, the largest queue of the principal holding the most drops
+  its oldest batches.
+
+Either drop is reported like any overflow: the next `/sync` answers 206. The largest queue goes
+first, so a client that does not acknowledge loses its own backlog, and a client that keeps up keeps
+its queue. The batch count, `subscriptionQueueLimit`, still applies to each queue.
+
+**Measured on 2026-10-12** in the i3X image (CPython 3.13) with `tracemalloc`. Sparkplug DDATA was
+built the way `test-harness/load_generator.py` builds it, every metric a named double, and fed
+through `on_message`, so each batch was staged as the service stages it. One subscription, so
+nothing was shared:
+
+| Device | `maxDepth: 1` | `maxDepth: 0` |
+| :--- | ---: | ---: |
+| 1 metric | 1.1 KB | 1.4 KB |
+| 10 metrics, the load generator's default | 1.5 KB | 4.7 KB |
+| 20 metrics | 1.8 KB | 8.7 KB |
+| 100 metrics | 6.6 KB | 41 KB |
+| 1,000 metrics | 52 KB | 397 KB |
+
+- At `maxDepth: 1` a batch holds the device's map of every metric it holds. At `maxDepth: 0` it also
+  holds each changed metric's own value, about 340 bytes a metric.
+- Twenty subscriptions receiving the same device share its map, but each holds its own copy of every
+  update: about 0.6 KB a batch each at `maxDepth: 1`, and 2.6 KB (10 metrics) or 4.6 KB (20 metrics)
+  at `maxDepth: 0`.
+- Resident memory grew 178 MiB for 20,000 batches of the 20-metric device at `maxDepth: 0`, 9.3 KB a
+  batch. The allocator adds about 8% to what `tracemalloc` counts.
+- The idle process, its broker unreachable, was 39 MiB resident.
+
+The earlier estimate of 0.5 KB a batch was low by 3 to 17 times for a 20-metric device. Under the
+count limits alone, 500 subscriptions × 500 batches of that device at `maxDepth: 0` come to about
+2 GiB, and one subscription to a 1,000-metric device to about 190 MiB.
+
+**The estimate** is `update_bytes` in `subscriptions.py`, computed once per update however many
+queues it joins. It is the measured fixed overheads, plus `sys.getsizeof` of the update's value, of
+each value in its map, and of its two strings. For one queue it came within 0.98 to 1.09 of
+`tracemalloc` across the shapes above, so within a few percent of resident memory. A map several
+queues share is charged to each, so with twenty subscriptions on one device the estimate is 2 to 3
+times what they hold: the ceilings bite early, never late. It costs a few tens of microseconds for a
+20-metric update at `maxDepth: 0`. `test_i3x_service.py` holds it near `tracemalloc`'s measure.
+
+In one process under synthetic load, four principals each held 20 subscriptions on the same 40
+20-metric devices, half at each depth, and synced without acknowledging. The estimate held at
+128 MiB while resident memory grew by about 55 MiB, since the queues shared each map. The 1.3.0
+code, bounded by count alone, grew by about 100 MiB on the same run.
+
+**The defaults fit the 512 Mi limit.** 128 MiB of queues is about 140 MiB resident. With the idle
+process that leaves over 300 MiB for the value cache, the address-space cache and the requests in
+flight; a `/objects` on 1,000 devices × 20 metrics serialises 4.9 MB. 32 MiB per principal holds
+20 subscriptions × 500 batches of a 20-metric device at `maxDepth: 1`, and four principals reach
+their ceiling before the server's applies. Raise `maxQueuedMiB` only with
+`resources.limits.memory`: the chart refuses a value at or above the limit.
+
+A queue fills only when its client does not acknowledge. `/sync` without `lastSequenceNumber` keeps
+a subscription alive and its queue full, and a client that stops syncing is reaped after
+`subscriptionTtlSeconds`.
 
 ### Why subscriptions are not made to survive
 

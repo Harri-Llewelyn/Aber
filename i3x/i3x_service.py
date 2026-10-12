@@ -63,7 +63,7 @@ import requests
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import address_space as A  # noqa: E402
-from subscriptions import SubscriptionError, SubscriptionRegistry  # noqa: E402
+from subscriptions import MIB, SubscriptionError, SubscriptionRegistry  # noqa: E402
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -128,6 +128,10 @@ SUBSCRIPTION_QUEUE_LIMIT = int(os.getenv("I3X_SUBSCRIPTION_QUEUE_LIMIT", "500"))
 MAX_SUBSCRIPTIONS_PER_PRINCIPAL = int(os.getenv("I3X_MAX_SUBSCRIPTIONS_PER_PRINCIPAL", "20"))
 MAX_SUBSCRIPTIONS = int(os.getenv("I3X_MAX_SUBSCRIPTIONS", "500"))
 MAX_STREAMS = int(os.getenv("I3X_MAX_STREAMS", "50"))
+# The most the subscription queues may hold, in MiB, for one principal and on the server: estimated
+# bytes, inside the pod's memory limit (README.md -> "Memory"). Empty takes the default.
+MAX_QUEUED_MIB_PER_PRINCIPAL = int(os.getenv("I3X_MAX_QUEUED_MIB_PER_PRINCIPAL") or "32")
+MAX_QUEUED_MIB = int(os.getenv("I3X_MAX_QUEUED_MIB") or "128")
 # The most stored rows one history series reads, and the most values it returns, a device's map of
 # N metrics counting N. A request's `limit` may ask for fewer. A series cut short is answered 206,
 # naming the instant it stops at. Past about 6300, postgres_fdw no longer ships the LIMIT and each
@@ -181,6 +185,8 @@ registry = SubscriptionRegistry(
     max_per_principal=MAX_SUBSCRIPTIONS_PER_PRINCIPAL,
     max_subscriptions=MAX_SUBSCRIPTIONS,
     max_streams=MAX_STREAMS,
+    max_queued_bytes_per_principal=MAX_QUEUED_MIB_PER_PRINCIPAL * MIB,
+    max_queued_bytes=MAX_QUEUED_MIB * MIB,
 )
 
 
@@ -2655,8 +2661,10 @@ def _withdraw_hidden(sub, bearer: str) -> bool:
 def _sync_detail(overflowed: bool, withdrawn: List[str]) -> Optional[dict]:
     """The 206 `responseDetail`: queue overflow, elements that left the caller's view, or both."""
     overflow = (
-        f"Updates were dropped from the subscription queue. The server limit is "
-        f"{registry.queue_limit} batches."
+        f"Updates were dropped from the subscription queue. The server limits are "
+        f"{registry.queue_limit} batches per subscription, and "
+        f"{registry.max_queued_bytes_per_principal // MIB} MiB queued per principal and "
+        f"{registry.max_queued_bytes // MIB} MiB on the server, the oldest batches dropping first."
     )
     left = (
         "These elements are no longer visible to this caller, so they were removed from the "
@@ -3212,12 +3220,15 @@ def main():
     server = ThreadingHTTPServer((LISTEN_HOST, LISTEN_PORT), Handler)
     server.daemon_threads = True
     logger.info(
-        "i3X %s server listening on http://%s:%d/v1 (subscriptions: ttl=%ss queue=%d)",
+        "i3X %s server listening on http://%s:%d/v1 (subscriptions: ttl=%ss, queues %d batches, "
+        "%d MiB per principal, %d MiB in all)",
         SPEC_VERSION,
         LISTEN_HOST,
         LISTEN_PORT,
         SUBSCRIPTION_TTL_SECONDS,
         SUBSCRIPTION_QUEUE_LIMIT,
+        MAX_QUEUED_MIB_PER_PRINCIPAL,
+        MAX_QUEUED_MIB,
     )
     server.serve_forever()
 

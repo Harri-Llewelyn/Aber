@@ -37,7 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import address_space as A  # noqa: E402
 import i3x_service  # noqa: E402
-from subscriptions import SubscriptionError, SubscriptionRegistry  # noqa: E402
+from subscriptions import SubscriptionError, SubscriptionRegistry, batch_bytes  # noqa: E402
 
 MODELLED_METRICS_FIXTURE = (
     Path(__file__).resolve().parents[1] / "test-harness" / "fixtures" / "modelled-metrics.json"
@@ -986,6 +986,190 @@ class TestOverflow(unittest.TestCase):
         stage(registry)
         _, second = registry.sync(sub, last_sequence_number=-1)
         self.assertEqual(second, 200, "a latched overflow flag would report 206 forever")
+
+
+class TestByteCeilings(unittest.TestCase):
+    """
+    The queues are budgeted in estimated bytes as well as batches: per principal and on the server.
+    Past a ceiling the largest queue it covers drops its oldest batches, reported like any overflow,
+    and every way a batch leaves a queue gives its bytes back.
+    """
+
+    METRICS = [f"Systems/METRIC_{i}" for i in range(10)]
+
+    def device_updates(self, device="dev1", value=1.0):
+        """A device's map and each metric's own VQT, built the way staging builds them."""
+        row = {"sparkplug_id": device, "status": "ONLINE"}
+        metrics = {n: {"value": value + i, "timestamp": "2026-01-01T00:00:00.000Z"}
+                   for i, n in enumerate(self.METRICS)}
+        out = {device: A.device_value(row, metrics, None)}
+        for name in self.METRICS:
+            eid = A.metric_element_id(device, name)
+            out[eid] = A.device_metric_value(row, eid, metrics[name], None)
+        return out
+
+    def assertAccounted(self, registry):
+        """Each queue's bytes are the sum of its batches', and the totals are the sum of the queues'."""
+        subs = list(registry._subs.values())
+        for sub in subs:
+            self.assertEqual(len(sub.sizes), len(sub.batches))
+            self.assertEqual(sub.queued_bytes, sum(sub.sizes))
+        self.assertEqual(registry.queued_bytes(), sum(s.queued_bytes for s in subs))
+        for principal in {s.principal for s in subs}:
+            self.assertEqual(registry.queued_bytes(principal),
+                             sum(s.queued_bytes for s in subs if s.principal == principal))
+
+    def test_a_batch_is_charged_its_estimate_once_per_queue(self):
+        registry, _ = make_registry()
+        a, b = registry.create("a", principal="p"), registry.create("b", principal="q")
+        registry.register(a, [{"elementId": "dev1", "maxDepth": 1}])
+        registry.register(b, [{"elementId": "dev1", "maxDepth": 0}])
+        updates = self.device_updates()
+        registry.stage(updates)
+        self.assertEqual(a.queued_bytes, batch_bytes([updates["dev1"]]))
+        self.assertEqual(b.queued_bytes, batch_bytes(updates.values()))
+        self.assertAccounted(registry)
+
+    def test_the_estimate_is_close_to_what_a_queue_holds(self):
+        """tracemalloc's measure of one queue's growth, against the bytes it was charged."""
+        import tracemalloc
+
+        for depth in (1, 0):
+            with self.subTest(maxDepth=depth):
+                registry, _ = make_registry(queue_limit=10**6)
+                sub = registry.create("c", principal="p")
+                registry.register(sub, [{"elementId": "dev1", "maxDepth": depth}])
+                registry.stage(self.device_updates())
+                registry.sync(sub, -1)
+                tracemalloc.start()
+                try:
+                    before = tracemalloc.take_snapshot()
+                    # Each message is built and let go as the service does, so the queue holds
+                    # every map and value it was given and nothing else.
+                    for i in range(300):
+                        registry.stage(self.device_updates(value=float(i)))
+                    after = tracemalloc.take_snapshot()
+                finally:
+                    tracemalloc.stop()
+                held = sum(s.size_diff for s in after.compare_to(before, "filename"))
+                self.assertGreater(sub.queued_bytes, 0.9 * held)
+                self.assertLess(sub.queued_bytes, 1.5 * held)
+
+    def test_a_principal_past_its_ceiling_loses_its_largest_queues_oldest(self):
+        registry, _ = make_registry(queue_limit=10**6)
+        idle = registry.create("idle", principal="p")
+        busy = registry.create("busy", principal="p")
+        for sub in (idle, busy):
+            registry.register(sub, [{"elementId": "dev1", "maxDepth": 0}])
+        registry.stage(self.device_updates())
+        size = idle.queued_bytes
+        registry.max_queued_bytes_per_principal = 10 * size
+        for i in range(30):
+            registry.stage(self.device_updates(value=float(i)))
+            registry.sync(busy, -1)
+        self.assertLessEqual(registry.queued_bytes("p"), 10 * size)
+        self.assertEqual(len(busy.batches), 0)
+        self.assertEqual(len(idle.batches), 9)
+        batches, status = registry.sync(idle)
+        self.assertEqual(status, 206)
+        self.assertEqual(batches[-1]["sequenceNumber"], 31, "the newest batches were dropped")
+        self.assertGreater(batches[0]["sequenceNumber"], 1)
+        _, status = registry.sync(busy)
+        self.assertEqual(status, 200, "the queue that kept up was charged for the other's backlog")
+        self.assertAccounted(registry)
+
+    def test_the_server_ceiling_takes_from_the_principal_holding_most(self):
+        registry, _ = make_registry(queue_limit=10**6)
+        hog = [registry.create(f"h{i}", principal="hog") for i in range(2)]
+        light = registry.create("l", principal="light")
+        for sub in hog + [light]:
+            registry.register(sub, [{"elementId": "dev1"}])
+        registry.stage(self.device_updates())
+        size = light.queued_bytes
+        registry.max_queued_bytes = 12 * size
+        for i in range(40):
+            registry.stage(self.device_updates(value=float(i)))
+            registry.sync(light, -1)
+        self.assertLessEqual(registry.queued_bytes(), 12 * size)
+        self.assertEqual(sum(len(s.batches) for s in hog), 11)
+        self.assertLessEqual(abs(len(hog[0].batches) - len(hog[1].batches)), 1, "one queue was emptied")
+        self.assertEqual([registry.sync(s)[1] for s in hog], [206, 206])
+        self.assertEqual(registry.sync(light), ([], 200))
+        self.assertAccounted(registry)
+
+    def test_the_count_limit_still_applies(self):
+        registry, _ = make_registry(queue_limit=3)
+        sub = registry.create("c", principal="p")
+        registry.register(sub, [{"elementId": "dev1"}])
+        for i in range(5):
+            registry.stage(self.device_updates(value=float(i)))
+        self.assertEqual(len(sub.batches), 3)
+        self.assertEqual(registry.sync(sub)[1], 206)
+        self.assertAccounted(registry)
+
+    def test_every_way_out_of_a_queue_gives_its_bytes_back(self):
+        registry, clock = make_registry(ttl_seconds=60)
+
+        def filled(client):
+            sub = registry.create(client, principal=client)
+            registry.register(sub, [{"elementId": "dev1", "maxDepth": 0}])
+            return sub
+
+        acked, cleared, streamed, drained, withdrawn, deleted, reaped = (
+            filled(name) for name in ("acked", "cleared", "streamed", "drained", "withdrawn",
+                                      "deleted", "reaped"))
+        for i in range(4):
+            registry.stage(self.device_updates(value=float(i)))
+        registry.open_stream(streamed)
+        registry.open_stream(drained)
+        registry.stage(self.device_updates(value=9.0))
+        self.assertGreater(registry.queued_bytes(), 0)
+        self.assertAccounted(registry)
+
+        registry.sync(acked, 2)
+        self.assertAccounted(registry)
+        registry.sync(acked, 5)
+        registry.sync(cleared, -1)
+        registry.drain(drained)
+        registry.drain(streamed)
+        registry.withdraw(withdrawn, lambda eid: "/" not in eid)
+        self.assertAccounted(registry)
+        registry.withdraw(withdrawn, lambda eid: False)
+        registry.delete("deleted", deleted.subscription_id, principal="deleted")
+        for sub in (acked, cleared, streamed, drained, withdrawn, deleted):
+            with self.subTest(sub=sub.client_id):
+                self.assertEqual((sub.queued_bytes, registry.queued_bytes(sub.client_id)), (0, 0))
+        self.assertGreater(registry.queued_bytes("reaped"), 0)
+
+        registry.close_stream(streamed)
+        registry.close_stream(drained)
+        clock.advance(61)
+        registry.reap()
+        self.assertEqual(registry.queued_bytes(), 0)
+        self.assertEqual((registry._principal_bytes, registry._by_principal), ({}, {}))
+        # A handler still holding a removed subscription changes nothing.
+        registry.drain(reaped)
+        registry.withdraw(deleted, lambda eid: False)
+        self.assertEqual(registry.queued_bytes(), 0)
+
+    def test_a_partly_withdrawn_batch_is_charged_what_it_keeps(self):
+        registry, _ = make_registry()
+        sub = registry.create("c", principal="p")
+        registry.register(sub, [{"elementId": "dev1", "maxDepth": 0}])
+        updates = self.device_updates()
+        registry.stage(updates)
+        registry.withdraw(sub, lambda eid: eid == "dev1")
+        self.assertEqual(sub.queued_bytes, batch_bytes([updates["dev1"]]))
+        self.assertAccounted(registry)
+
+    def test_the_206_names_the_ceilings(self):
+        saved = i3x_service.registry
+        self.addCleanup(setattr, i3x_service, "registry", saved)
+        i3x_service.registry = SubscriptionRegistry(
+            queue_limit=7, max_queued_bytes_per_principal=3 << 20, max_queued_bytes=5 << 20)
+        detail = i3x_service._sync_detail(True, [])["detail"]
+        for number in ("7 batches", "3 MiB", "5 MiB"):
+            self.assertIn(number, detail)
 
 
 class _FakeChannel:

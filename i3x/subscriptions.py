@@ -12,7 +12,8 @@ quietly when got wrong (README.md -> "Subscriptions" says how):
   1. `/sync` MUST NOT clear the queue when `lastSequenceNumber` is omitted or invalid, MUST clear
      everything at or below it when valid, and MUST clear the WHOLE queue for the sentinel `-1`.
   2. Overflow is reported, not hidden: the OLDEST batches drop and the next `/sync` answers 206, so
-     a client can compute the gap and backfill from history.
+     a client can compute the gap and backfill from history. A queue overflows at its batch count,
+     or when the bytes queued for its principal, or on the whole server, pass their ceiling.
   3. ONE stream per subscription. Opening a second MUST close the first, cleanly and with no error.
   4. Sync and stream are mutually exclusive: `/sync` MUST error while a stream is open, because the
      stream has already delivered -- and discarded -- the queue the sync caller is acknowledging.
@@ -29,6 +30,7 @@ elements and queued updates it rejects and holding their ids until a `/sync` rep
 from __future__ import annotations
 
 import secrets
+import sys
 import threading
 import time
 from collections import OrderedDict, deque
@@ -43,6 +45,37 @@ DEFAULT_TTL_SECONDS = 300
 DEFAULT_MAX_PER_PRINCIPAL = 20
 DEFAULT_MAX_SUBSCRIPTIONS = 500
 DEFAULT_MAX_STREAMS = 50
+# The most bytes the queues may hold for one principal and on the whole server, by `batch_bytes`.
+# Past one, the largest queue it covers drops its oldest batches (rule 2). README.md -> "Memory".
+MIB = 1 << 20
+DEFAULT_MAX_QUEUED_BYTES_PER_PRINCIPAL = 32 * MIB
+DEFAULT_MAX_QUEUED_BYTES = 128 * MIB
+
+# What a queued batch and each update in it hold beyond the update's value and strings: the batch
+# dict, its list and sequence number, and the per-subscription copy of the update. Measured with
+# tracemalloc on CPython 3.13 (README.md -> "Memory"), and rounded up.
+BATCH_OVERHEAD_BYTES = 640
+UPDATE_OVERHEAD_BYTES = 200
+_sizeof = sys.getsizeof
+
+
+def update_bytes(update: dict) -> int:
+    """
+    The estimated bytes one queued update holds: UPDATE_OVERHEAD_BYTES, its two strings, and its
+    value, a map counted with each value in it. One shallow pass, since the values are scalars. A
+    value or string several queues share is counted in each.
+    """
+    value = update.get("value")
+    size = (UPDATE_OVERHEAD_BYTES + _sizeof(value) + _sizeof(update.get("timestamp"))
+            + _sizeof(update.get("elementId")))
+    if isinstance(value, dict):
+        size += sum(map(_sizeof, value.values()))
+    return size
+
+
+def batch_bytes(updates: Iterable[dict]) -> int:
+    return BATCH_OVERHEAD_BYTES + sum(map(update_bytes, updates))
+
 
 # 2**64 - 1. Sequence numbers MUST be 64-bit unsigned; a subscription that somehow reached this
 # would wrap into reuse, so it is refused instead.
@@ -102,6 +135,10 @@ class Subscription:
         # reports registrations in the order they were made.
         self.monitored: "OrderedDict[str, int]" = OrderedDict()
         self.batches: "deque[dict]" = deque()
+        # Each queued batch's `batch_bytes`, in step with `batches`, and their sum. Only the
+        # registry's `_put`, `_take` and `_set_queue` change the three, so the totals stay true.
+        self.sizes: "deque[int]" = deque()
+        self.queued_bytes = 0
         self.next_seq = 1
         self.stream_open = False
         # Bumped on every create/sync/stream/register. The reaper reads only this.
@@ -140,15 +177,23 @@ class SubscriptionRegistry:
         max_per_principal: int = DEFAULT_MAX_PER_PRINCIPAL,
         max_subscriptions: int = DEFAULT_MAX_SUBSCRIPTIONS,
         max_streams: int = DEFAULT_MAX_STREAMS,
+        max_queued_bytes_per_principal: int = DEFAULT_MAX_QUEUED_BYTES_PER_PRINCIPAL,
+        max_queued_bytes: int = DEFAULT_MAX_QUEUED_BYTES,
     ):
         self.queue_limit = queue_limit
         self.ttl_seconds = ttl_seconds
         self.max_per_principal = max_per_principal
         self.max_subscriptions = max_subscriptions
         self.max_streams = max_streams
+        self.max_queued_bytes_per_principal = max_queued_bytes_per_principal
+        self.max_queued_bytes = max_queued_bytes
         self._clock = clock
         self._lock = threading.RLock()
         self._subs: Dict[str, Subscription] = {}
+        # principal -> its subscriptions by id, and the bytes they queue; the server's total.
+        self._by_principal: Dict[str, Dict[str, Subscription]] = {}
+        self._principal_bytes: Dict[str, int] = {}
+        self._queued_bytes = 0
         # Called with the Subscription when a stream must be closed because another was opened, or
         # because the subscription was deleted or reaped. The transport owns what "close" means.
         self.on_stream_close: Optional[Callable[[Subscription], None]] = None
@@ -164,7 +209,7 @@ class SubscriptionRegistry:
             secrets.token_urlsafe(32), client_id, display_name, self._clock(), principal
         )
         with self._lock:
-            held = sum(1 for s in self._subs.values() if s.principal == principal)
+            held = len(self._by_principal.get(principal, ()))
             if held >= self.max_per_principal:
                 raise SubscriptionError(
                     429,
@@ -182,7 +227,17 @@ class SubscriptionRegistry:
                     f"({self.ttl_seconds} s without a sync or stream).",
                 )
             self._subs[sub.subscription_id] = sub
+            self._by_principal.setdefault(principal, {})[sub.subscription_id] = sub
         return sub
+
+    def _remove(self, sub: Subscription) -> None:
+        """Forget a subscription and release what it queued. Its handler may still hold it."""
+        self._set_queue(sub, deque(), deque())
+        del self._subs[sub.subscription_id]
+        owned = self._by_principal.get(sub.principal, {})
+        owned.pop(sub.subscription_id, None)
+        if not owned:
+            self._by_principal.pop(sub.principal, None)
 
     def get_owned(
         self, client_id: str, subscription_id: str, *, principal: str = ""
@@ -206,7 +261,7 @@ class SubscriptionRegistry:
         with self._lock:
             sub = self.get_owned(client_id, subscription_id, principal=principal)
             self._close_stream(sub)
-            del self._subs[subscription_id]
+            self._remove(sub)
 
     def list_owned(
         self, client_id: str, subscription_ids: Iterable[str], *, principal: str = ""
@@ -298,7 +353,8 @@ class SubscriptionRegistry:
                 del sub.monitored[element_id]
                 dropped[element_id] = None
             kept: "deque[dict]" = deque()
-            for batch in sub.batches:
+            sizes: "deque[int]" = deque()
+            for batch, size in zip(sub.batches, sub.sizes):
                 updates = []
                 for update in batch["updates"]:
                     if visible(update["elementId"]):
@@ -307,9 +363,11 @@ class SubscriptionRegistry:
                         dropped[update["elementId"]] = None
                 if len(updates) == len(batch["updates"]):
                     kept.append(batch)
+                    sizes.append(size)
                 elif updates:
                     kept.append(dict(batch, updates=updates))
-            sub.batches = kept
+                    sizes.append(batch_bytes(updates))
+            self._set_queue(sub, kept, sizes)
             sub.withdrawn.update(dropped)
             return list(dropped), had_monitored and not sub.monitored
 
@@ -330,36 +388,99 @@ class SubscriptionRegistry:
         Called from the MQTT thread on every value change. Returns the subscriptions with an open
         stream so the caller can wake exactly those; each stream's own handler thread drains and
         writes, so a slow or dead SSE consumer cannot stall the ingest thread.
+
+        Each update's size is estimated once, however many queues it joins. The byte ceilings are
+        applied once every queue has its batch.
         """
         streaming = []
+        sizes: Dict[str, int] = {}
+        principals = set()
         with self._lock:
             for sub in self._subs.values():
-                relevant = [
-                    dict(update, elementId=eid)
-                    for eid, update in updates_by_element.items()
-                    if receives(sub.monitored, eid)
-                ]
-                if not relevant:
+                wanted = [eid for eid in updates_by_element if receives(sub.monitored, eid)]
+                if not wanted:
                     continue
-                self._append_batch(sub, relevant)
+                for eid in wanted:
+                    if eid not in sizes:
+                        sizes[eid] = update_bytes(updates_by_element[eid])
+                self._append_batch(
+                    sub,
+                    [dict(updates_by_element[eid], elementId=eid) for eid in wanted],
+                    BATCH_OVERHEAD_BYTES + sum(sizes[eid] for eid in wanted),
+                )
+                principals.add(sub.principal)
                 if sub.stream_open:
                     streaming.append(sub)
+            self._enforce_byte_ceilings(principals)
         return streaming
 
-    def _append_batch(self, sub: Subscription, updates: List[dict]) -> None:
-        """Append one batch, dropping the OLDEST first if the queue is full."""
+    def _append_batch(self, sub: Subscription, updates: List[dict], size: int) -> None:
+        """Append one batch of `size` bytes, dropping the OLDEST first if the queue is full."""
         if sub.next_seq > MAX_SEQUENCE_NUMBER:
             raise SubscriptionError(
                 500, "Internal Server Error", "Sequence number space exhausted for this subscription."
             )
         while len(sub.batches) >= self.queue_limit:
-            sub.batches.popleft()
-            # Latched, not a counter. The client is told once that a gap exists; it computes the
-            # exact extent itself from the sequence numbers, which is more precise than any count
-            # this server could report and cannot drift from the queue's real contents.
-            sub.overflowed = True
-        sub.batches.append({"sequenceNumber": sub.next_seq, "updates": updates})
+            self._drop_oldest(sub)
+        self._put(sub, {"sequenceNumber": sub.next_seq, "updates": updates}, size)
         sub.next_seq += 1
+
+    def _drop_oldest(self, sub: Subscription) -> None:
+        self._take(sub)
+        # Latched, not a counter. The client is told once that a gap exists; it computes the exact
+        # extent itself from the sequence numbers, which is more precise than any count this
+        # server could report and cannot drift from the queue's real contents.
+        sub.overflowed = True
+
+    def _enforce_byte_ceilings(self, principals: Iterable[str]) -> None:
+        """
+        Drop oldest batches until each of `principals`, and then the server, is within its ceiling.
+        Each drop comes from the largest queue the ceiling covers, so the client that is not
+        acknowledging loses its backlog and a client that keeps up keeps its own.
+        """
+        ceiling = max(self.max_queued_bytes_per_principal, 0)
+        for principal in principals:
+            while self._principal_bytes.get(principal, 0) > ceiling:
+                self._drop_oldest(max(self._by_principal[principal].values(),
+                                      key=lambda s: s.queued_bytes))
+        while self._queued_bytes > max(self.max_queued_bytes, 0):
+            principal = max(self._principal_bytes, key=self._principal_bytes.__getitem__)
+            self._drop_oldest(max(self._by_principal[principal].values(),
+                                  key=lambda s: s.queued_bytes))
+
+    # -- byte accounting: every change to a queue goes through these three --------------------
+
+    def _account(self, sub: Subscription, delta: int) -> None:
+        if not delta:
+            return
+        sub.queued_bytes += delta
+        self._queued_bytes += delta
+        held = self._principal_bytes.get(sub.principal, 0) + delta
+        if held:
+            self._principal_bytes[sub.principal] = held
+        else:
+            self._principal_bytes.pop(sub.principal, None)
+
+    def _put(self, sub: Subscription, batch: dict, size: int) -> None:
+        sub.batches.append(batch)
+        sub.sizes.append(size)
+        self._account(sub, size)
+
+    def _take(self, sub: Subscription) -> dict:
+        batch = sub.batches.popleft()
+        self._account(sub, -sub.sizes.popleft())
+        return batch
+
+    def _set_queue(self, sub: Subscription, batches: "deque[dict]", sizes: "deque[int]") -> None:
+        sub.batches, sub.sizes = batches, sizes
+        self._account(sub, sum(sizes) - sub.queued_bytes)
+
+    def queued_bytes(self, principal: Optional[str] = None) -> int:
+        """The bytes queued for `principal`, or on the whole server."""
+        with self._lock:
+            if principal is None:
+                return self._queued_bytes
+            return self._principal_bytes.get(principal, 0)
 
     # -- sync --------------------------------------------------------------------------------
 
@@ -402,12 +523,12 @@ class SubscriptionRegistry:
             return
         if last_sequence_number == -1:
             # The documented sentinel for "acknowledge everything pending".
-            sub.batches.clear()
+            self._set_queue(sub, deque(), deque())
             return
         if last_sequence_number < 0:
             return
         while sub.batches and sub.batches[0]["sequenceNumber"] <= last_sequence_number:
-            sub.batches.popleft()
+            self._take(sub)
 
     # -- streaming ---------------------------------------------------------------------------
 
@@ -437,7 +558,7 @@ class SubscriptionRegistry:
             sub.stream_open = True
             sub.last_activity = self._clock()
             backlog = [dict(b) for b in sub.batches]
-            sub.batches.clear()
+            self._set_queue(sub, deque(), deque())
             return backlog
 
     def drain(self, sub: Subscription) -> List[dict]:
@@ -450,7 +571,7 @@ class SubscriptionRegistry:
         """
         with self._lock:
             batches = [dict(b) for b in sub.batches]
-            sub.batches.clear()
+            self._set_queue(sub, deque(), deque())
             return batches
 
     def close_stream(self, sub: Subscription) -> None:
@@ -487,7 +608,7 @@ class SubscriptionRegistry:
                     continue
                 if now - sub.last_activity >= self.ttl_seconds:
                     self._close_stream(sub)
-                    del self._subs[sid]
+                    self._remove(sub)
                     removed.append(sid)
         return removed
 
