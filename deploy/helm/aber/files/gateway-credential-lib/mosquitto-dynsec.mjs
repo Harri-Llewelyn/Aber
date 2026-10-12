@@ -94,25 +94,51 @@ export function directoryTopicFilter(prefix) {
   return `${clean}/#`;
 }
 
-// Returns a NEW policy; applying it twice is a no-op.
-export function withDirectoryGrant(policy, prefix) {
-  const topic = directoryTopicFilter(prefix);
+// Publish, subscribe and receive on `topic` for one role. Returns a NEW policy; applying it twice
+// is a no-op.
+function withSubtreeGrant(policy, rolename, topic, what) {
   const acltypes = ['publishClientSend', 'subscribePattern', 'publishClientReceive'];
   const roles = (policy?.roles || []).map((role) => {
-    if (role.rolename !== DIRECTORY_ROLE) return role;
+    if (role.rolename !== rolename) return role;
     const acls = role.acls || [];
     const missing = acltypes
       .filter((acltype) => !acls.some((a) => a.acltype === acltype && a.topic === topic))
       .map((acltype) => ({ acltype, topic, allow: true }));
     return missing.length ? { ...role, acls: [...acls, ...missing] } : role;
   });
-  if (!roles.some((r) => r.rolename === DIRECTORY_ROLE)) {
+  if (!roles.some((r) => r.rolename === rolename)) {
     throw new CredentialError(
-      `the policy declares no '${DIRECTORY_ROLE}' role, so the Directory has nothing to grant`,
+      `the policy declares no '${rolename}' role, so ${what} has nothing to grant`,
       'invalid_policy',
     );
   }
   return { ...policy, roles };
+}
+
+export function withDirectoryGrant(policy, prefix) {
+  return withSubtreeGrant(policy, DIRECTORY_ROLE, directoryTopicFilter(prefix), 'the Directory');
+}
+
+// The role that writes the Unified Namespace, and the subtree it may write. Not in the roles file
+// for the same reason: the root is the deployment's (ingestion.unsMqttTopicRoot), rendered once by
+// the chart for both uns_publish.py and this reconcile.
+export const UNS_ROLE = 'ingestion';
+
+// Trimmed of slashes at both ends, as uns_publish.py trims it; the root may span levels.
+export function unsTopicFilter(root) {
+  const clean = typeof root === 'string' ? root.trim().replace(/^\/+|\/+$/g, '') : '';
+  if (!clean || !DIRECTORY_PREFIX_PATTERN.test(clean)) {
+    throw new CredentialError(
+      `'${root}' is not a usable Unified Namespace root: it must be non-empty and contain no `
+      + "'+', '#' or whitespace",
+      'invalid_uns_root',
+    );
+  }
+  return `${clean}/#`;
+}
+
+export function withUnsGrant(policy, root) {
+  return withSubtreeGrant(policy, UNS_ROLE, unsTopicFilter(root), 'the Unified Namespace');
 }
 
 // A role generated per gateway before 2.1: gateway-<sparkplug_id>, and nothing near it.

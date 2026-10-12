@@ -32,6 +32,8 @@ import {
   withPrimaryHostGrant,
   withDirectoryGrant,
   directoryTopicFilter,
+  unsTopicFilter,
+  withUnsGrant,
 } from './mosquitto-dynsec.mjs';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -449,5 +451,55 @@ describe('the Directory grant is derived from the site, not written in the polic
     const writes = ingestion.acls.filter((a) => a.acltype === 'publishClientSend').map((a) => a.topic);
     assert.ok(writes.includes('spBv1.0/STATE/Site-One'));
     assert.ok(writes.includes('Plant-7/Directory/v1/#'));
+  });
+});
+
+describe('the Unified Namespace grant follows the root the deployment names', () => {
+  test('the ingestion role gains all three grants on <root>/#, and no other subtree', () => {
+    const granted = withUnsGrant(POLICY, 'plant/uns');
+    const ingestion = granted.roles.find((r) => r.rolename === 'ingestion');
+    for (const acltype of ['publishClientSend', 'subscribePattern', 'publishClientReceive']) {
+      assert.ok(
+        ingestion.acls.some((a) => a.acltype === acltype && a.topic === 'plant/uns/#' && a.allow),
+        `ingestion is missing ${acltype}`,
+      );
+    }
+    assert.ok(!ingestion.acls.some((a) => a.topic === 'uns/#'), 'the literal uns/# grant survived a different root');
+  });
+
+  test('the policy file itself names no UNS subtree', () => {
+    // A literal in the file would grant uns/# whatever the root, and drop every publish under
+    // another one, silently at QoS 0.
+    assert.ok(!JSON.stringify(POLICY.roles).includes('"uns/'), 'dynsec-roles.json declares a UNS ACL');
+  });
+
+  test('the root is trimmed as uns_publish.py trims it, and may span levels', () => {
+    assert.equal(unsTopicFilter('uns'), 'uns/#');
+    assert.equal(unsTopicFilter(' /plant/uns/ '), 'plant/uns/#');
+  });
+
+  test('a root with a wildcard or whitespace, or none, is refused', () => {
+    for (const bad of ['a/+/b', 'a/#', 'a b', '', '/', null, undefined]) {
+      assert.throws(() => unsTopicFilter(bad), (e) => e.code === 'invalid_uns_root', `${bad}`);
+    }
+  });
+
+  test('applying it twice is a no-op, and the argument is not mutated', () => {
+    const before = JSON.stringify(POLICY);
+    const once = withUnsGrant(POLICY, 'uns');
+    assert.deepEqual(withUnsGrant(once, 'uns'), once);
+    assert.equal(JSON.stringify(POLICY), before);
+  });
+
+  test('a policy with no ingestion role is refused rather than silently ungranted', () => {
+    const stripped = { ...POLICY, roles: POLICY.roles.filter((r) => r.rolename !== 'ingestion') };
+    assert.throws(() => withUnsGrant(stripped, 'uns'), (e) => e.code === 'invalid_policy');
+  });
+
+  test('all three derived grants survive each other', () => {
+    const all = withUnsGrant(withDirectoryGrant(withPrimaryHostGrant(POLICY, 'Site-One'), 'Plant-7/Directory/v1'), 'plant/uns');
+    const writes = all.roles.find((r) => r.rolename === 'ingestion').acls
+      .filter((a) => a.acltype === 'publishClientSend').map((a) => a.topic);
+    for (const topic of ['spBv1.0/STATE/Site-One', 'Plant-7/Directory/v1/#', 'plant/uns/#']) assert.ok(writes.includes(topic), topic);
   });
 });

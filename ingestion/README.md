@@ -1278,8 +1278,10 @@ nanoseconds the wire never had. `units` is the metric catalog's, when the catalo
 Retained, QoS 0: a subscriber sees the last value on connect, and the next reading is the retry.
 
 **It is off by default**, for the Directory publisher's reason. A topic has no caller, so the broker
-ACL is the whole of the access control, and `uns/#` is every machine's readings in the clear.
-The ingestion role grants the daemon publish and read on `uns/#` and **no gateway a read of it**:
+ACL is the whole of the access control, and the tree (`uns/#` by default) is every machine's
+readings in the clear. The ingestion role grants the daemon publish and read on `<root>/#`, derived
+at reconcile time from the same `ingestion.unsMqttTopicRoot` this daemon reads, and **no gateway a
+read of it**:
 one gateway credential reading the tree would read the whole plant, which the per-node confinement
 exists to prevent. A BI or SCADA consumer gets its own account and a role reading `uns/#`, added
 deliberately in `mosquitto/dynsec-roles.json`. `scripts/check-broker-config.mjs` asserts all three halves by delivery.
@@ -1296,7 +1298,7 @@ moves a device's topic within that window.
 | Variable | Default | |
 | :--- | :--- | :--- |
 | `UNS_MQTT_ENABLED` | unset (off) | `1`/`true`/`yes`/`on` turns it on |
-| `UNS_MQTT_TOPIC_ROOT` | `uns` | Must stay inside the `ingestion` role's `uns/#` grant in `mosquitto/dynsec-roles.json`, or publishes are dropped silently at QoS 0 |
+| `UNS_MQTT_TOPIC_ROOT` | `uns` | Set by the chart from `ingestion.unsMqttTopicRoot`, which also gives the broker's `ingestion` role its `<root>/#` grant |
 | `UNS_CONTEXT_TTL_SECONDS` | `60` | How long a device's location and the site name are believed |
 
 ## Device Liveness Watchdog

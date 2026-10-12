@@ -241,6 +241,15 @@ const OTHER_HOST_ID = 'Someone-Else';
 const DIRECTORY_PREFIX = 'Check-Site/Directory/v1';
 const DIRECTORY_DOC = `${DIRECTORY_PREFIX}/device`;
 const DIRECTORY_FILTER = `${DIRECTORY_PREFIX}/#`;
+
+/**
+ * The Unified Namespace root, DELIBERATELY NOT the chart's default `uns` and two levels deep, for the
+ * Directory prefix's reason: a root that matched a literal grant would pass whether or not the
+ * derivation ran.
+ */
+const UNS_ROOT = 'Check-Site/uns';
+const UNS_DOC = `${UNS_ROOT}/Aber/Site/Area/Cell/dev1/Speed`;
+const UNS_FILTER = `${UNS_ROOT}/#`;
 const EXPECTED_CLIENTS = Object.keys(ACCOUNTS).sort();
 
 const INIT_ENV = {
@@ -260,6 +269,8 @@ const INIT_ENV = {
   PRIMARY_HOST_ID: PRIMARY_HOST_ID,
   // Derived by the chart from the site group; the reconcile grants `<prefix>/#` from it.
   DIRECTORY_MQTT_TOPIC_PREFIX: DIRECTORY_PREFIX,
+  // ingestion.unsMqttTopicRoot, rendered by the chart; the reconcile grants `<root>/#` from it.
+  UNS_MQTT_TOPIC_ROOT: UNS_ROOT,
 };
 
 /**
@@ -437,6 +448,13 @@ try {
       ok.push('the reconcile gives the plugin each ACL with the plugin\'s own keys, and no `why`');
     } else {
       problems.push(`the reconciled document carries ACL keys the plugin does not define: ${[...new Set(foreign)].join(', ')}`);
+    }
+    const ingestionTopics = (doc.roles.find((role) => role.rolename === 'ingestion')?.acls || []).map((a) => a.topic);
+    const unsGranted = ingestionTopics.filter((t) => t === UNS_FILTER).length;
+    if (unsGranted === 3 && !ingestionTopics.some((t) => t === 'uns/#' || t.startsWith('uns/'))) {
+      ok.push(`the ingestion role's UNS grant is ${UNS_FILTER}, from the root it is given, and no literal uns/# remains`);
+    } else {
+      problems.push(`the ingestion role's UNS grant does not follow UNS_MQTT_TOPIC_ROOT: ${unsGranted} rule(s) on ${UNS_FILTER}, topics ${ingestionTopics.join(', ')}`);
     }
     if (doc.defaultACLAccess?.publishClientReceive === false && doc.defaultACLAccess?.subscribe === false) {
       ok.push('the document denies by default (defaultACLAccess receive and subscribe are false)');
@@ -699,25 +717,23 @@ try {
         false
       );
 
-      // The Unified Namespace (ingestion/uns_publish.py): every reading in the clear under uns/.
-      // The same two halves, for the same reason: the daemon is the only writer, and a gateway
-      // reading the tree would read every machine's telemetry with one credential.
+      // The Unified Namespace (ingestion/uns_publish.py): every reading in the clear under the
+      // root the deployment names. The same two halves, for the same reason: the daemon is the only
+      // writer, and a gateway reading the tree would read every machine's telemetry with one
+      // credential.
       expect(
-        'the ingestion principal MAY publish the Unified Namespace (it is the only writer)',
-        (delivers('aber_ingestion', 'uns/Aber/Site/Area/Cell/dev1/Speed',
-          'aber_ingestion', 'uns/#')),
+        `the ingestion principal MAY publish the Unified Namespace under the root it is given (${UNS_ROOT})`,
+        (delivers('aber_ingestion', UNS_DOC, 'aber_ingestion', UNS_FILTER)),
         true
       );
       expect(
         'a gateway may NOT read the Unified Namespace (one credential would read the whole plant)',
-        (delivers('aber_ingestion', 'uns/Aber/Site/Area/Cell/dev1/Speed',
-          GATEWAY_A, 'uns/#')),
+        (delivers('aber_ingestion', UNS_DOC, GATEWAY_A, UNS_FILTER)),
         false
       );
       expect(
         'a gateway may NOT publish into the Unified Namespace (only decoded, verified readings belong there)',
-        (delivers(GATEWAY_A, `uns/Aber/Site/Area/Cell/${GATEWAY_A}/Speed`,
-          'aber_ingestion', 'uns/#')),
+        (delivers(GATEWAY_A, `${UNS_ROOT}/Aber/Site/Area/Cell/${GATEWAY_A}/Speed`, 'aber_ingestion', UNS_FILTER)),
         false
       );
 

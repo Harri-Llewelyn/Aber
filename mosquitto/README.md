@@ -42,7 +42,8 @@ request and not another node's.
 **There is no wildcard-write principal.** The ingestion daemon reads `spBv1.0/#` and writes two
 things inside Sparkplug — the rebirth request `spBv1.0/+/NCMD/+`, and its own primary-host STATE
 on one literal topic (below); it is the only writer of the
-Directory (`<group>/Directory/v1/#` by default) and the Unified Namespace (`uns/#`). The i3X server
+Directory (`<group>/Directory/v1/#` by default) and the Unified Namespace (`<root>/#`, `uns/#` by
+default). The i3X server
 reads `spBv1.0/#` and publishes nothing; it reads the Directory from the database, not from here. The
 monitoring account reads `$SYS/#` and publishes nothing. No gateway reads the Directory or the
 UNS: either is the whole plant behind one credential, and reading is silent.
@@ -53,6 +54,11 @@ since `0131`), which this repository does not choose. The chart renders one pref
 both this reconcile and the daemon that publishes into it, and `withDirectoryGrant()` adds
 `<prefix>/#` to the `ingestion` role. A broker granted one subtree while the daemon writes another
 would drop every Directory publish with no error anywhere, since refusal is silent at QoS 0.
+
+**Nor is the Unified Namespace's.** Its root is `ingestion.unsMqttTopicRoot`, `uns` by default,
+which the chart renders once through `aber.unsTopicRoot` for both the daemon and this reconcile,
+and `withUnsGrant()` adds `<root>/#` to the `ingestion` role. Until 1.4 the grant was a literal
+`uns/#` here, so any other root had every UNS publish dropped.
 
 **One grant is not in this file, and cannot be.** The ingestion daemon is the site's Sparkplug
 primary host application: it publishes a retained `online: true` on `spBv1.0/STATE/<host_id>` and
@@ -290,17 +296,17 @@ could not be reached, and the caller publishing a trust bundle has to tell those
 writes one. An issue on such a stack returns `ca_cert: null` rather than failing, since Remote
 gateways need the CA but a plaintext-only stack can still issue.
 
-**Two grants are injected at reconcile time and are not lines in `dynsec-roles.json`.** The
-primary host's write on `spBv1.0/STATE/<id>` and the Directory's `<prefix>/#` are both named by
-the deployment rather than by this repository, so the reconcile adds them to the `ingestion` role
-from the environment. The STATE grant is one literal topic rather than `spBv1.0/STATE/#`, because
+**Three grants are injected at reconcile time and are not lines in `dynsec-roles.json`.** The
+primary host's write on `spBv1.0/STATE/<id>`, the Directory's `<prefix>/#` and the Unified
+Namespace's `<root>/#` are named by the deployment rather than by this repository, so the
+reconcile adds them to the `ingestion` role from the environment. The STATE grant is one literal topic rather than `spBv1.0/STATE/#`, because
 a wildcard would let this principal announce the death of a host id belonging to someone else,
-and every gateway reads that subtree. Both values are required rather than defaulted: the
+and every gateway reads that subtree. All three values are required rather than defaulted: the
 ingestion daemon refuses to start without the same host id, so a broker reconciled without the
-grant would admit a daemon that cannot boot, and the Directory prefix is rendered once by the
-chart for both the daemon and the reconcile, so a broker granted one subtree while the daemon
-publishes another cannot happen, a mismatch that at QoS 0 would be silent. Both functions return a
-new policy and are no-ops when applied twice, which is what keeps the boot idempotent across
+grant would admit a daemon that cannot boot, and the Directory prefix and the UNS root are each
+rendered once by the chart for both the daemon and the reconcile, so a broker granted one subtree
+while the daemon publishes another cannot happen, a mismatch that at QoS 0 would be silent. The
+functions return a new policy and are no-ops when applied twice, which is what keeps the boot idempotent across
 restarts.
 
 **Hashing goes through the broker's own tool, positionally.** Passwords are hashed by
@@ -376,8 +382,8 @@ It hit both failures the issue set out. The allow-list swallowed the two roles w
 widest. And it answered wrongly on a real path, in the direction that hides an over-grant. Special
 cases bring it to five of the eight, at the price of more of them in a regex reader of four formats.
 
-**What the `why`s say today.** The ingestion role's read of `uns/#`, and of the Directory subtree
-the reconcile grants it beside the write, is used by no platform process. `check-broker-config.mjs`
+**What the `why`s say today.** The ingestion role's reads of the UNS and Directory subtrees, which
+the reconcile grants beside each write, are used by no platform process. `check-broker-config.mjs`
 reads both trees as that account to see the publishes delivered, and `capture.py --topic` could.
 
 ## Broker Topic Authorisation

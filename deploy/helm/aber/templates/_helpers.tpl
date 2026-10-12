@@ -256,6 +256,19 @@ cannot disagree.
 {{- $p -}}
 {{- end -}}
 
+{{/*
+The Unified Namespace's MQTT root, trimmed of slashes and `uns` when empty, as uns_publish.py reads
+it. The broker's ingestion role is granted <root>/# at reconcile time from this same value, so the
+two cannot disagree.
+*/}}
+{{- define "aber.unsTopicRoot" -}}
+{{- $r := .Values.ingestion.unsMqttTopicRoot | default "" | trim | trimAll "/" | default "uns" -}}
+{{- if regexMatch "[+#[:space:]]" $r -}}
+{{- fail (printf "\n\naber: ingestion.unsMqttTopicRoot is %q.\n\nIt becomes the broker grant `<root>/#`, so a '+', '#' or whitespace in it either grants a subtree\nnobody meant or matches nothing at all.\n" $r) -}}
+{{- end -}}
+{{- $r -}}
+{{- end -}}
+
 {{- define "aber.lokiUrl" -}}
 {{- if .Values.grafana.lokiUrl -}}
 {{- .Values.grafana.lokiUrl -}}

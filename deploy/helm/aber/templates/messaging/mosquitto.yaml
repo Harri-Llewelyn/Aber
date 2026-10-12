@@ -430,6 +430,9 @@ spec:
             */}}
             - name: DIRECTORY_MQTT_TOPIC_PREFIX
               value: {{ include "aber.directoryTopicPrefix" . | quote }}
+            {{/* The Unified Namespace grant likewise: <root>/#, from the helper the daemon's env uses. */}}
+            - name: UNS_MQTT_TOPIC_ROOT
+              value: {{ include "aber.unsTopicRoot" . | quote }}
             # The validator is a fixture: a production install leaves its password empty and gets
             # no account. The monitor is always required by the script itself.
             - name: DYNSEC_REQUIRED_PRINCIPALS

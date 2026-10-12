@@ -34,20 +34,14 @@
     },
     {
       "rolename": "ingestion",
-      "textDescription": "The ingestion daemon: reads every Sparkplug topic, publishes only rebirth NCMDs, and is the only writer of the Directory and the Unified Namespace. TWO of its grants are not in this file, because both are named by the deployment rather than by this repository and are injected at reconcile time: its write on spBv1.0/STATE/<host_id> from PRIMARY_HOST_ID, and the Directory subtree from DIRECTORY_MQTT_TOPIC_PREFIX, which is derived from the site's Sparkplug group.",
+      "textDescription": "The ingestion daemon: reads every Sparkplug topic, publishes only rebirth NCMDs, and is the only writer of the Directory and the Unified Namespace. THREE of its grants are not in this file, because each is named by the deployment rather than by this repository and is injected at reconcile time: its write on spBv1.0/STATE/<host_id> from PRIMARY_HOST_ID, the Directory subtree from DIRECTORY_MQTT_TOPIC_PREFIX, which is derived from the site's Sparkplug group, and the Unified Namespace subtree <root>/# from UNS_MQTT_TOPIC_ROOT (ingestion.unsMqttTopicRoot).",
       "acls": [
         { "acltype": "subscribePattern", "topic": "spBv1.0/#", "allow": true,
           "why": "ingestion.py subscribes once to spBv1.0/#. capture.py records as this account unless MQTT_CAPTURE_USER names another." },
         { "acltype": "publishClientReceive", "topic": "spBv1.0/#", "allow": true,
           "why": "Delivery for ingestion.py's spBv1.0/# subscription, and for capture.py's recordings." },
         { "acltype": "publishClientSend", "topic": "spBv1.0/+/NCMD/+", "allow": true,
-          "why": "ingestion.py's rebirth request to an edge node whose aliases it cannot resolve." },
-        { "acltype": "publishClientSend", "topic": "uns/#", "allow": true,
-          "why": "uns_publish.py, under UNS_MQTT_TOPIC_ROOT, which is uns unless ingestion.unsMqttTopicRoot names another root." },
-        { "acltype": "subscribePattern", "topic": "uns/#", "allow": true,
-          "why": "No platform process reads uns/ as this account. capture.py can record it with --topic, and check-broker-config.mjs reads it to see the UNS publish delivered." },
-        { "acltype": "publishClientReceive", "topic": "uns/#", "allow": true,
-          "why": "Delivery for that subscription: capture.py with --topic, and check-broker-config.mjs." }
+          "why": "ingestion.py's rebirth request to an edge node whose aliases it cannot resolve." }
       ]
     },
     {

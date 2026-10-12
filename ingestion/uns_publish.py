@@ -24,8 +24,8 @@ QoS 0 as every Sparkplug publisher on this stack is, and because the next readin
 
 OFF BY DEFAULT (`UNS_MQTT_ENABLED`), for the Directory publisher's reason: a topic has no caller,
 so the broker ACL is the only access control, and publishing the plant's readings on a readable tree
-is an exposure decision a deployment makes. The broker's roles grant the daemon write on `uns/#` and
-grants no gateway a read of it.
+is an exposure decision a deployment makes. The broker's roles grant the daemon write on
+`<UNS_MQTT_TOPIC_ROOT>/#`, derived from the same chart value, and grant no gateway a read of it.
 
 RUNS ON THE INGESTION CALLBACK THREAD, after the historian commit, which puts a second publish per
 message on the single-writer path (ingestion/README.md -> "The single-writer ceiling"). It is timed
