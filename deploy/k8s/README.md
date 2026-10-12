@@ -1444,7 +1444,6 @@ container gets back only the capabilities its process was shown to need, each na
 
 | Container (pod) | Added back | Why |
 |---|---|---|
-| `envoy` (supabase-envoy) | `CHOWN`, `SETGID`, `SETUID` | The image's entrypoint hands `/dev/stdout` and `/dev/stderr` to the envoy user, then drops to it. |
 | `realtime` (supabase-realtime) | `SETGID`, `SETUID` | `/app/run.sh` runs the migrations as `nobody` through `sudo`. Its start logs `sudo: unable to send audit message: Operation not permitted`, which is harmless. |
 | `supabase-db` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `SETGID`, `SETUID` | The entrypoint fixes the data directory's owner and mode, then drops to postgres (uid 100). tini, as root, forwards the stop signal to it. Why it starts as root is under *Users*, below. |
 | `gitea-init` (gitea) | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID`, `SETUID` | The image's setup rewrites `app.ini` and the git user's `.ssh`, and runs `gitea` as git (uid 1000). |
@@ -1498,27 +1497,39 @@ Loki (10001), Prometheus and postgres_exporter (65534), GoTrue and PostgREST (10
 (`eclipse-mosquitto`) starts as its own user, 1883, with every other container in its pod. The Jobs
 that run `supabase/postgres` or `node` tools run as those images' own users (100:101, 1000:1000).
 
+Four third-party images name no `USER`. The chart runs each as the user the image carries, with its
+init containers:
+
+- **Envoy** (`supabase-envoy`) as `envoy`, 101:101, `render-config` too. Started as 101, the image's
+  entrypoint neither hands `/dev/stdout` to that user nor drops to it, so the container gets no
+  capability back. The container runtime gives a non-root process its own log streams.
+- **storage-api** (`supabase-storage`) as `node`, 1000:1000, `wait-for-storage-role` too. It writes
+  the objects' volume; see *Volumes written by an earlier release*, below.
+- **postgres-meta** (`supabase-meta`) as `node`, 1000:1000. It writes nothing to disk.
+- **Studio** (`supabase-studio`) as `node`, 1000:1000. It writes snippets, and Next.js its cache,
+  to `emptyDir` volumes. Its Edge Functions folder is read, never written.
+
+`wait-for-realtime-schema` runs as `supabase/postgres`'s user, 100:101, though Realtime starts as
+root.
+
 These pods still start a container as root, each for the reason given:
 
 - **`alloy`** reads the node's `/`, `/proc` and `/sys`, which root owns.
 - **`gitea`**: the image's s6 supervisor and sshd start as root and drop to git (1000).
-- **`supabase-envoy`**: the image's entrypoint hands `/dev/stdout` to the envoy user and drops to it.
 - **`supabase-realtime`**: `/app/run.sh` runs the migrations through `sudo`.
 - **`supabase-db`**: its data directory is the volume's own root, because the image's
   `postgresql.conf` names `/var/lib/postgresql/data`. A provisioner creates that directory owned by
   root, and initdb as postgres (100) cannot take a directory it does not own. Started as root, the
   entrypoint gives it to postgres and drops to that uid. Measured: on a volume postgres already owns,
   the image also starts as 100.
-- **`supabase-storage`, `supabase-meta`, `supabase-studio`**: their images name no user, and the
-  chart has not been shown to run them as another.
 - **`backup-service`**, with `backup.includeForge` or `backup.includeBroker`: it reads files other
   uids own at 0600.
 
 **Pod Security admission.** A namespace that enforces the *restricted* level now admits every pod
 except the ones listed above. *baseline* admits every pod except Alloy, as before.
 
-**Volumes written by an earlier release.** 1.2.0 started several of these processes as root. Their
-volumes stay usable across `helm upgrade`:
+**Volumes written by an earlier release.** 1.2.0 started several of these processes as root, and
+1.3.0 still started storage-api as root. Their volumes stay usable across `helm upgrade`:
 
 - Each pod that writes a volume sets `fsGroup`, with `fsGroupChangePolicy: OnRootMismatch`. The
   kubelet gives the volume's root to that group, writable, so the new uid can create files in it.
@@ -1530,6 +1541,26 @@ volumes stay usable across `helm upgrade`:
   directory written as root becomes group-writable at every start, so the service can prune it.
   The backup CronJob writes flat files into the volume's root, which fsGroup already makes
   writable.
+- `supabase-storage` sets `fsGroupChangePolicy: Always`. Up to 1.3.0, storage-api wrote every
+  object as root, in group 1000: one directory per object at 0755, holding a file at 0644. As 1000
+  it can read those but not add, replace or delete beside them. At each start the kubelet makes
+  them group-writable, which it does by visiting every file and directory. Measured on an SSD:
+  about a second per 20,000 objects, where the server takes about five seconds to start. It is
+  `Always` at every start, not for one release, because a site may upgrade from 1.3.0 to any later
+  1.x directly ([`docs/releases.md`](../../docs/releases.md#upgrading-between-releases)). A site
+  with a very large bucket can set `supabaseStorage.podSecurityContext.fsGroupChangePolicy:
+  OnRootMismatch` once this prints nothing:
+  `kubectl exec deploy/supabase-storage -- find /var/lib/storage -type d ! -user 1000 ! -perm -g+w`.
+
+What happens if the kubelet does not apply `fsGroup` to the storage volume: reads keep working, and
+every upload, replacement and delete in an existing directory fails with `EACCES: permission
+denied`. A delete from the dashboard fails without a message. Some volume types ignore `fsGroup`:
+NFS, and the `hostPath` volumes k3s's `local-path` made before April 2024 (k3s 1.29.4). On a
+`local` volume, which it makes now, the kubelet also skips `fsGroup` while another pod has the
+volume mounted. The backup service does, with `backup.includeStorage`. What to do: scale
+`backup-service` to 0, delete the storage pod, wait until it is Ready, then scale the backup
+service back to 1. On a volume type that ignores `fsGroup`, give the volume's files to 1000 once, as
+root: `chown -R 1000:1000` on the volume's directory.
 
 What happens on a storage class that neither applies `fsGroup` nor creates a new volume
 world-writable (some NFS and CSI drivers; k3s's `local-path` creates it 0777): a new volume's root

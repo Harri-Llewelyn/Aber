@@ -85,7 +85,8 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      # M5. Node-based image running as uid/gid 1000; local-path hands over a root-owned directory.
+      # The image's node user (1000), for the wait too, and fsGroup on the objects' volume
+      # (values.yaml, supabaseStorage.podSecurityContext).
       securityContext:
         {{- include "aber.podSecurityContext" .Values.supabaseStorage.podSecurityContext | nindent 8 }}
       initContainers:

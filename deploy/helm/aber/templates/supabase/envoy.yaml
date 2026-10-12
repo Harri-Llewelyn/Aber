@@ -117,7 +117,12 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      # The image's envoy user, 101, for render-config too. Started as it, the entrypoint neither
+      # hands /dev/stdout to it nor drops privileges, so no capability comes back.
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
         seccompProfile:
           type: RuntimeDefault
       initContainers:
@@ -409,9 +414,6 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-              # The image's entrypoint starts as root, hands /dev/stdout and /dev/stderr to the
-              # envoy user and drops to it.
-              add: ["CHOWN", "SETGID", "SETUID"]
           {{- with .Values.supabaseEnvoy.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
