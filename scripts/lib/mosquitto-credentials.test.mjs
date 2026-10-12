@@ -26,7 +26,7 @@ import {
   PLAYBACK_CREDENTIAL_FILE,
 } from './mosquitto-credentials.mjs';
 
-/** A realistically-shaped mosquitto_passwd 2.0.x line. */
+/** A realistically-shaped mosquitto_passwd $7$ line. */
 const entryFor = (user, salt = 'c2FsdHNhbHQ=') =>
   `${user}:$7$101$${salt}$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaA==`;
 
@@ -114,11 +114,21 @@ describe('assertSafePassword', () => {
 });
 
 describe('hashScript', () => {
-  test('applies -c to a scratch file only', () => {
+  test('applies -c to a file that does not exist yet, in a scratch directory', () => {
+    // mosquitto_passwd 2.1 refuses -c on an existing file, and `mktemp` creates the file it names.
     const script = hashScript();
-    assert.match(script, /mosquitto_passwd -b -c "\$tmp"/);
+    assert.match(script, /dir=\$\(mktemp -d\)/);
+    assert.match(script, /-c "\$dir\/p"/);
     assert.ok(!script.includes('/mosquitto/'));
     assert.match(script, /^set -e/);
+  });
+
+  test('asks for the $7$ format the transplant reads, and keeps stdout to the entry', () => {
+    // 2.1 defaults to argon2id and prints "Adding password for user ..." on stdout in batch mode;
+    // either would stop assertEntry().
+    const script = hashScript();
+    assert.match(script, /mosquitto_passwd -H sha512-pbkdf2 /);
+    assert.match(script, /"\$2" >\/dev\/null;/);
   });
 
   test('takes its account from positional parameters, never from interpolation', () => {
@@ -126,7 +136,7 @@ describe('hashScript', () => {
     // which is the only way to notice, since an interpolated script keeps working perfectly right
     // up until an argument contains a quote.
     const script = hashScript();
-    assert.match(script, /mosquitto_passwd -b -c "\$tmp" "\$1" "\$2"/);
+    assert.match(script, /mosquitto_passwd -H sha512-pbkdf2 -b -c "\$dir\/p" "\$1" "\$2"/);
     assert.strictEqual(script, hashScript(), 'the script must not vary per account');
   });
 });

@@ -847,7 +847,7 @@ mosquitto:
   enabled: true
   image:
     repository: eclipse-mosquitto
-    tag: "2.0.22"
+    tag: "2.1.2-alpine"
     pullPolicy: IfNotPresent
   # Always one. Mosquitto does not cluster; Sparkplug state is per-connection.
   replicas: 1
