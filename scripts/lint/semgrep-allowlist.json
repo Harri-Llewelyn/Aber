@@ -105,6 +105,8 @@
   "sqlalchemy-execute-raw-query supabase/migrations/test_cold_archive_backlog.py 7ae995386f68": "Test SQL composed from the test's own constants (table and view names, fixture ids); no input reaches it.",
   "sqlalchemy-execute-raw-query supabase/migrations/test_role_permission_split.py f82bd8c3f35b": "Test SQL composed from the test's own constants (table and view names, fixture ids); no input reaches it.",
   "sqlalchemy-execute-raw-query supabase/migrations/test_replay_recreates_only_what_differs.py 58bc7af684d1": "A DROP composed with psycopg2.sql.Identifier from the policy and table names the migrations state; no input reaches it.",
+  "sqlalchemy-execute-raw-query supabase/migrations/test_replay_recreates_only_what_differs.py ab54bd03afce": "An ALTER TABLE composed with psycopg2.sql.Identifier from the constraint and table names the migrations state; no input reaches it.",
+  "sqlalchemy-execute-raw-query supabase/migrations/test_replay_recreates_only_what_differs.py bdfa7d3498ca": "An ALTER TABLE composed with psycopg2.sql.Identifier from the constraint and table names the migrations state; no input reaches it.",
   "sqlalchemy-execute-raw-query supabase/migrations/test_user_roles_rls.py 53b8a615d00b": "Test SQL composed from the test's own constants (table and view names, fixture ids); no input reaches it.",
   "sqlalchemy-execute-raw-query supabase/migrations/test_user_roles_rls.py 58e76a178739": "Test SQL composed from the test's own constants (table and view names, fixture ids); no input reaches it.",
   "sqlalchemy-execute-raw-query supabase/migrations/test_user_roles_rls.py d732da7893ff": "Test SQL composed from the test's own constants (table and view names, fixture ids); no input reaches it.",
