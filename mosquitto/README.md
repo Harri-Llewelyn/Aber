@@ -73,40 +73,59 @@ written also reads `#` and `$SYS/#`, which is every gateway's traffic; it is not
 which gateway; the daemon cannot stop a forged message reaching other subscribers. Neither is
 sufficient alone.
 
-## Verified on eclipse-mosquitto 2.0.22
+## Verified on eclipse-mosquitto 2.1.2-alpine
 
-Measured by `scripts/check-broker-config.mjs` on the pinned tag; bump the pin only alongside a
-re-run.
+Measured by `scripts/check-broker-config.mjs` on the pinned tag, unless a bullet names another
+measurement; bump the pin only alongside a re-run. Docker Hub publishes 2.1 only under `-alpine`
+tags, and `renovate.json` proposes the next one.
 
 - A gateway publishing under its own edge node is delivered; under another edge node it is
   dropped and no subscriber sees it. The ingestion principal cannot publish DBIRTH or DDATA and can
   publish NCMD. The i3X and monitoring principals can publish nothing. The monitoring principal
   can read `$SYS`; a gateway cannot.
-- **`%u` is not substituted in a role's ACL topic on 2.0.x.** A rule written as
-  `spBv1.0/+/+/%u/#` is a literal and matches nothing, so confinement is one role per gateway.
-  That is the finding the roadmap asked for before anything else was built on the plugin.
+- **`%u` was not substituted in a role's ACL topic before 2.1.** On 2.0.x a rule written as
+  `spBv1.0/+/+/%u/#` was a literal and matched nothing, so confinement is one role per gateway.
+  2.1 substitutes it in every ACL type except `subscribeLiteral` and `unsubscribeLiteral`.
 - A wildcard subscription is granted to a confined gateway and filtered per message at delivery.
 - **`disableClient` disconnects a live session** and refuses the next CONNECT; `enableClient`
   admits it again. This is what the ACL file could not do: revocation used to take effect only
   when the appliance next reconnected.
-- **`setClientPassword` disconnects a live session too**, about half a second after the re-issue,
-  and the old password is then refused on CONNECT. A re-issue is as loud as a revocation, which is
-  the better outcome: the holder goes stale on the dashboard inside the 90s threshold rather than
-  failing quietly at some later reconnect. The playback worker is the one holder this does not
-  reach — it keeps no session (`ingestion/playback_worker.py` polls), so there is nothing for the
-  broker to drop, which is why [issue #217](https://github.com/Harri-Llewelyn/Aber/issues/217)
-  is a playback problem and not a fleet one.
-- A `$7$` hash written by `mosquitto_passwd` authenticates when transplanted into a client's
-  `password`, `salt` and `iterations` fields. The boot reconcile relies on this for the platform
-  principals.
-- **`deleteRole` on a role a client still holds took the broker down.** Nothing in this repository
-  deletes a role; a gateway's role outlives its client and is regenerated at boot.
-- The plugin coexists with `password_file`: an account in the file alone still authenticates. Not
-  used: one authority is easier to reason about than two.
-- **`mosquitto_rr -s` and `-f` deliver a payload the plugin rejects** ("Payload not valid JSON");
-  the same bytes through `-m` are accepted. Every caller therefore puts the command on argv,
-  where a password is visible to the container's own process list for the request's duration,
-  the exposure `mosquitto_passwd -b` has always had.
+- **`setClientPassword` disconnects a live session too**, within the three seconds the check
+  allows, and the old password is then refused on CONNECT. A re-issue is as loud as a revocation,
+  which is the better outcome: the holder goes stale on the dashboard inside the 90s threshold
+  rather than failing quietly at some later reconnect. The playback worker is the one holder this
+  does not reach — it keeps no session (`ingestion/playback_worker.py` polls), so there is nothing
+  for the broker to drop, which is why
+  [issue #217](https://github.com/Harri-Llewelyn/Aber/issues/217) is a playback problem and not a
+  fleet one.
+- A `$7$` hash written by `mosquitto_passwd -H sha512-pbkdf2` authenticates when transplanted into
+  a client's `password`, `salt` and `iterations` fields. The boot reconcile relies on this for the
+  platform principals. 2.1's `mosquitto_passwd` defaults to argon2id, which this Alpine build cannot
+  compute (`-H argon2id` exits 10, "Unable to hash password"). It also refuses `-c` on a file that
+  exists, and prints `Adding password for user <name>` on stdout. So `hashScript()` names the
+  algorithm, writes into a fresh directory and discards stdout. Its hashes have 1,000 iterations and
+  a 64-byte salt; 2.0's had 101 and 12.
+- **A 2.0.22 document carries over** (measured with each release's own reconcile, in its own image).
+  A client hashed by 2.0 authenticates on 2.1.2, a wrong password is refused, and `listClients`
+  answers.
+- **2.1 rewrites every stored password in a form 2.0 cannot read, the first time anything
+  changes.** After one issue on 2.1.2, every client is saved as `encoded_password` in place of
+  `password`, `salt` and `iterations`. Rolled back to 1.3.0 on that document, 2.0.22 refused every
+  gateway account. The platform principals still authenticated, because the 1.3.0 reconcile hashes
+  them again from the environment. On its next save 2.0.22 wrote those gateways with no password at
+  all. Splitting `encoded_password` back into the three fields by hand recovers a gateway hashed
+  before the upgrade, and not one issued after it, because 2.0.22 refuses a 64-byte salt. So the
+  boot reconcile keeps the document 2.0 left as `dynamic-security.json.pre-2.1`, once, and a
+  rollback restores that copy (*The document, and who writes it*, below). With no
+  change made on 2.1.2, the 1.3.0 reconcile and 2.0.22 still read the document.
+- **`deleteRole` on a role a client still holds took the 2.0.22 broker down.** Nothing in this
+  repository deletes a role; a gateway's role outlives its client and is regenerated at boot.
+- `password_file` is not used: one authority is easier to reason about than two, and 2.1 deprecates
+  it for removal in 3.0.
+- **`mosquitto_rr -s` and `-f` delivered a payload the 2.0.22 plugin rejected** ("Payload not valid
+  JSON"); the same bytes through `-m` were accepted. 2.1.2 accepts all three. Every caller still
+  puts the command on argv, where a password is visible to the container's own process list for
+  the request's duration, the exposure `mosquitto_passwd -b` has always had.
 - **The ingestion daemon's will is prompt.** Opened as the daemon opens it (a clean session, a
   retained QoS 1 will with no Will Delay Interval) and killed outright, its death certificate
   reaches a gateway watching `spBv1.0/STATE/#` within a second. A gateway that buffers on STATE
@@ -115,13 +134,42 @@ re-run.
 - **A connected client may fall 20,000 messages behind** (`max_queued_messages`) before the broker
   drops what follows; Mosquitto's default is 1,000. The default shed the rebirth that follows a
   restart of ingestion: 1.1 % of readings at 500 msg/s, 3.9 % at 1,000. With 20,000 the same
-  restarts lost nothing and the broker's peak working set did not move
-  ([`test-harness/README.md`, "Restarts under load"](../test-harness/README.md#restarts-under-load)).
+  restarts lost nothing and the broker's peak working set did not move (measured on 2.0.22,
+  [`test-harness/README.md`, "Restarts under load"](../test-harness/README.md#restarts-under-load)).
   It is a queue for a client that is connected, not a session, so the host's clean session stands.
+- **No client may send a packet over 16 MiB** (`max_packet_size 16777216`, which the chart sets
+  from `mosquitto.maxPacketSize`). The broker holds each packet in memory whole, and its pod's limit
+  is 256 Mi, so the MQTT maximum of 256 MiB that 2.0.22 allowed meant one oversized message from any
+  signed-in client could take the broker down. 2.1's own default is 2,000,000 bytes, which a large
+  DBIRTH could exceed. Mosquitto refuses a packet when its remaining length plus one exceeds the
+  setting:
+  - an MQTT 3.1.1 NBIRTH whose packet is exactly 16,777,216 bytes is delivered; one byte more is
+    refused, the publisher is disconnected, and the broker logs `disconnected: oversize packet`.
+    An MQTT 5 PUBLISH carries one more byte of properties, so its payload ceiling is one byte lower;
+  - the client learns nothing at QoS 0 but a dropped connection, and the broker publishes its will,
+    so ingestion sees an NDEATH;
+  - a client that resends the message on reconnect, as a gateway resends its birth, never births.
+    MQTT.js 5.15.2 (Node-RED's) reconnected each period and was refused each time, over 3.1.1 and
+    5. paho 1.6.1 restarts its back-off after every accepted CONNECT, so it reconnected about once
+    a second (39 and 40 refusals in 40 s, over 3.1.1 and 5). The broker stayed up throughout.
+
+  To accept larger messages, raise `mosquitto.maxPacketSize` and the broker's memory limit with it.
+  `check-broker-config.mjs` asserts both edges and the log line, and that `mosquitto.conf`'s line is
+  the chart's default.
+- **`allow_duplicate_messages` is now on by default**, so a client whose subscriptions overlap
+  receives a copy per matching subscription. No platform client's subscriptions overlap: ingestion
+  and i3X subscribe once to `spBv1.0/#`, `validate.py` to `spBv1.0/+/NCMD/+` and `spBv1.0/STATE/#`
+  (no topic the platform publishes matches both), the playback worker subscribes to nothing, and
+  the appliance flow's STATE, NCMD and DCMD subscriptions are disjoint.
 - Refusal is still silent at QoS 0. The `Not authorized` reason code rides on PUBACK, which does
   not exist at QoS 0 under either protocol version, and Sparkplug B requires QoS 0 for every
   data and command message. A gateway publishing under the wrong edge node learns nothing from the broker by
   construction, so delivery stays the only way to assert this policy.
+- **Sparkplug is unchanged.** The broker stays a Sparkplug Compliant MQTT Server: publish and
+  subscribe at QoS 0 and 1, the retain flag, and Will Messages with retain and QoS 1
+  (tck-id-conformance-mqtt-qos0, tck-id-conformance-mqtt-qos1, tck-id-conformance-mqtt-retained,
+  tck-id-conformance-mqtt-will-messages). The will and retained-STATE assertions above pass on
+  2.1.2.
 
 ## The document, and who writes it
 
@@ -141,6 +189,14 @@ in the credential service's image, and:
   first two;
 - keeps every other stored client exactly as it is, ensuring a gateway client holds its two roles;
 - refuses to write a document that would lose a stored client.
+
+**It keeps the way back to 1.3.x.** The first boot that finds a stored document with no
+`encoded_password` in it, as Mosquitto 2.0 leaves it, copies it verbatim to
+`dynamic-security.json.pre-2.1` beside it, owned by the broker's uid at 0600, before anything
+rewrites it. No later boot touches the copy. 2.1 rewrites every password in a form 2.0 cannot read
+the first time anything changes, so restoring that copy is how a rollback to 1.3.x gets its
+gateways back; a gateway issued or re-issued since must be re-issued. It holds every gateway's hash,
+as the document does.
 
 **A renamed principal rolls every pod that uses it.** The usernames reach the broker's
 initContainer, the ingestion daemon and the i3X server as environment from the Secret, which a
@@ -235,7 +291,8 @@ restarts.
 **Hashing goes through the broker's own tool, positionally.** Passwords are hashed by
 `mosquitto_passwd` rather than a reimplementation, because the hash has to be read by the
 mosquitto that verifies it and that is the one implementation guaranteed to match. The script
-hashes one account into a `mktemp` file and prints it, and the username and password arrive as
+hashes one account with `-H sha512-pbkdf2` into a file in a fresh `mktemp -d` directory, discards
+the tool's own stdout, and prints the file. The username and password arrive as
 the positional parameters `$1` and `$2`, so nothing parses them as script text; `sh -c` assigns
 the first operand after the script to `$0`, so the vector is `['-c', script, '--', id, password]`
 and the `--` is consumed there. The line that comes back is validated before its hash is

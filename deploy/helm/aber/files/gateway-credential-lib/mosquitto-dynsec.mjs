@@ -12,9 +12,9 @@ export const CONTROL_RESPONSE_TOPIC = '$CONTROL/dynamic-security/v1/response';
 // Where the plugin keeps its document; mosquitto.conf names this path.
 export const DYNSEC_FILE = '/mosquitto/data/dynamic-security.json';
 
-// The role every gateway holds, and the prefix of the role only that gateway holds. The plugin on
-// 2.0.x does not substitute %u in an ACL topic (measured), so confinement is one literal role per
-// gateway rather than one pattern rule.
+// The role every gateway holds, and the prefix of the role only that gateway holds. The plugin did
+// not substitute %u in an ACL topic before 2.1 (measured on 2.0.x), so confinement is one literal
+// role per gateway rather than one pattern rule.
 export const GATEWAY_SHARED_ROLE = 'gateway';
 export const GATEWAY_ROLE_PREFIX = 'gateway-';
 
@@ -144,7 +144,7 @@ export function isGatewayRoleName(rolename) {
 
 // One user:$7$iterations$salt$hash line as the plugin's client fields. mosquitto_passwd and the
 // plugin share PBKDF2-SHA512 with the same framing, so a hash moves between them unchanged
-// (measured on 2.0.22: a transplanted entry authenticates).
+// (measured on 2.0.22 and 2.1.2: a transplanted entry authenticates).
 export function clientFromPasswordEntry(line, roles = []) {
   const m = /^([^:]+):\$7\$(\d+)\$([A-Za-z0-9+/=]+)\$([A-Za-z0-9+/=]+)$/.exec(String(line || '').trim());
   if (!m) {
@@ -292,10 +292,10 @@ export function parseControlResponse(text) {
   return parsed.responses;
 }
 
-// mosquitto_rr's argument vector for one request. The payload rides on argv with -m: measured on
-// 2.0.22, -s (stdin) and -f (file) both deliver a payload the plugin answers with "Payload not valid
-// JSON". A password on argv is visible to the container's own process list for the request's
-// duration, the exposure mosquitto_passwd -b has always had.
+// mosquitto_rr's argument vector for one request. The payload rides on argv with -m: before 2.1,
+// -s (stdin) and -f (file) delivered a payload the plugin answered with "Payload not valid JSON".
+// A password on argv is visible to the container's own process list for the request's duration,
+// the exposure mosquitto_passwd -b has always had.
 export function controlArgv({ host, port, username, password, timeoutSeconds = 5 }, payload) {
   return [
     '-h', String(host), '-p', String(port),

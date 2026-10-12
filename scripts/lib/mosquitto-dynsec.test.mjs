@@ -221,10 +221,10 @@ describe('the control API', () => {
     assert.throws(() => parseControlResponse('Connection Refused'), (e) => e.code === 'backend_unavailable');
   });
 
-  test('the payload rides on argv with -m, because -s and -f are broken on 2.0.22', () => {
-    // Measured: mosquitto_rr's stdin and file modes deliver a payload the plugin rejects as not
-    // JSON. scripts/check-broker-config.mjs drives the real binary, so a fix upstream that made
-    // -s usable would be noticed there, not here.
+  test('the payload rides on argv with -m', () => {
+    // Measured on 2.0.22: mosquitto_rr's stdin and file modes delivered a payload the plugin
+    // rejected as not JSON. 2.1.2 accepts both (mosquitto/README.md); every caller still uses -m,
+    // and scripts/check-broker-config.mjs drives the real binary.
     const payload = controlPayload([{ command: 'listClients' }]);
     const argv = controlArgv({ host: 'mosquitto', port: 1883, username: 'admin', password: 'pw' }, payload);
     assert.equal(argv[argv.indexOf('-m') + 1], payload);

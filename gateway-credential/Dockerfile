@@ -12,7 +12,7 @@
 #
 # THE TAG MUST MATCH THE CHART'S mosquitto PIN. check-docs-drift.mjs asserts this FROM against
 # `mosquitto.image.tag` in values.yaml, as it does for the database image.
-FROM eclipse-mosquitto:2.0.22
+FROM eclipse-mosquitto:2.1.2-alpine
 
 # The image is Alpine-based; only a runtime for the scripts is missing.
 RUN apk add --no-cache nodejs

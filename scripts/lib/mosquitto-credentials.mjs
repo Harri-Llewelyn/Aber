@@ -89,8 +89,8 @@ export function assertUsername(value) {
 
 // Validates one mosquitto_passwd line before its hash is transplanted into a client: an error
 // message, an empty string or a multi-line dump must not be taken for an account. $7$ is the
-// PBKDF2-SHA512 format 2.0.x writes, asserted because a plaintext entry is also valid to Mosquitto
-// and would be a stored credential.
+// PBKDF2-SHA512 format hashScript() asks for, asserted because a plaintext entry is also valid to
+// Mosquitto and would be a stored credential.
 export function assertEntry(entry, username) {
   const line = String(entry || '').trim();
 
@@ -113,16 +113,18 @@ export function assertEntry(entry, username) {
   return line;
 }
 
-// Hashes ONE account into a mktemp file and prints it. The username and the password arrive as
-// positional parameters $1 and $2, so nothing parses them as script text; the allow-lists are
-// defence in depth rather than the defence. Constant, and therefore argument-free.
+// Hashes ONE account into a file in a fresh mktemp directory and prints it. The username and the
+// password arrive as positional parameters $1 and $2, so nothing parses them as script text; the
+// allow-lists are defence in depth rather than the defence. Constant, and therefore argument-free.
+// mosquitto_passwd 2.1 refuses -c on a file that exists and prints a progress line on stdout, hence
+// the directory and the redirect; -H pins the $7$ format, since its default is now argon2id.
 export function hashScript() {
   return [
     'set -e',
-    'tmp=$(mktemp)',
-    'mosquitto_passwd -b -c "$tmp" "$1" "$2"',
-    'cat "$tmp"',
-    'rm -f "$tmp"',
+    'dir=$(mktemp -d)',
+    'mosquitto_passwd -H sha512-pbkdf2 -b -c "$dir/p" "$1" "$2" >/dev/null',
+    'cat "$dir/p"',
+    'rm -rf "$dir"',
   ].join('; ');
 }
 

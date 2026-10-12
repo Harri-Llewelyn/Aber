@@ -835,7 +835,7 @@ all.
 
 cert-manager renews at `renewBefore` and rewrites the Secret. The `certificate-reload` sidecar
 notices the certificate changing, and sends `SIGHUP`. **Mosquitto re-reads certificates on SIGHUP**
-(verified against `eclipse-mosquitto:2.0.20`), so no gateway is disconnected.
+(verified against `eclipse-mosquitto:2.1.2-alpine`), so no gateway is disconnected.
 
 Do not remove the sidecar. Without it, the broker would keep serving the old certificate until it
 expired, weeks after cert-manager reported the renewal as successful.

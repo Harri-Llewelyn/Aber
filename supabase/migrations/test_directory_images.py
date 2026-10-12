@@ -33,7 +33,7 @@ DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgr
 FULL_MAP = {
     "supabase-studio": "supabase/studio:2026.07.07-sha-a6a04f2",
     "node-red": "ghcr.io/harri-llewelyn/aber/node-red:0.1.0",
-    "mosquitto": "eclipse-mosquitto:2.0.22",
+    "mosquitto": "eclipse-mosquitto:2.1.2-alpine",
     "timescaledb": "timescale/timescaledb:2.29.2-pg17",
     "grafana": "grafana/grafana:13.2.0",
     "supabase-envoy": "envoyproxy/envoy:v1.39.1",

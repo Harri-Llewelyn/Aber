@@ -107,7 +107,7 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `ingestion` | `ghcr.io/harri-llewelyn/aber/ingestion` | no route; `ingestion-metrics:9108` is scraped |
 | `load-test` | `ghcr.io/harri-llewelyn/aber/test-runner` | Job (`loadTest.enabled`): synthetic Sparkplug load, applied by `scripts/load-test.mjs` |
 | `loki` | `grafana/loki:3.7.8` | `loki:3100`, read by Grafana |
-| `mosquitto` | `eclipse-mosquitto:2.0.22`, the `gateway-credential` sidecar, `jryberg/mosquitto-exporter:v0.7.9` when metrics are on | `mosquitto-external:1883` (LoadBalancer), 8883 with TLS; `mqtt.<domain>` for WebSockets |
+| `mosquitto` | `eclipse-mosquitto:2.1.2-alpine`, the `gateway-credential` sidecar, `jryberg/mosquitto-exporter:v0.7.9` when metrics are on | `mosquitto-external:1883` (LoadBalancer), 8883 with TLS; `mqtt.<domain>` for WebSockets |
 | `node-red` | `ghcr.io/harri-llewelyn/aber/node-red` | `nodered.<domain>` |
 | `playback` | `ghcr.io/harri-llewelyn/aber/ingestion` | the broker playback worker (`playback.enabled`) |
 | `prometheus` | `prom/prometheus:v3.15.0` | `prometheus:9090`, read by Grafana |
@@ -124,7 +124,7 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `supabase-studio` | `supabase/studio:2026.09.28-sha-5e59b60` | `studio.<domain>`, off by default, behind the gateway's login |
 | `swagger-ui` | `ghcr.io/harri-llewelyn/aber/swagger-ui` | `docs.<domain>`; the two specs are baked into the image |
 | `test-api` | `curlimages/curl:8.22.0` | `helm test` Pod: GoTrue's health and PostgREST with the publishable key answer 200 through the gateway |
-| `test-broker` | `eclipse-mosquitto:2.0.22` | `helm test` Pod: a wrong password gets CONNACK "not authorised", over TLS verified under the chart CA when broker TLS is on |
+| `test-broker` | `eclipse-mosquitto:2.1.2-alpine` | `helm test` Pod: a wrong password gets CONNACK "not authorised", over TLS verified under the chart CA when broker TLS is on |
 | `test-dashboard` | `curlimages/curl:8.22.0` | `helm test` Pod: the frontend Service serves the chart's `/config.js` |
 | `test-db-tls` | `supabase/postgres:17.6.1.175` | `helm test` Pod (`postgresTls.enabled`): both databases refuse plaintext and every remote backend is on TLS |
 | `test-fdw` | `supabase/postgres:17.6.1.175` | `helm test`: the postgres_fdw gate |

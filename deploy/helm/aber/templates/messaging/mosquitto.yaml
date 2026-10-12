@@ -3,6 +3,16 @@
 {{- $secretName := include "aber.secretName" . -}}
 {{- $fullname := include "aber.fullname" . -}}
 {{- $conf := .Files.Get "files/mosquitto/mosquitto.conf" -}}
+{{- /* The packet ceiling is the one line of mosquitto.conf a site sets. Mosquitto refuses a value
+     under 20, and MQTT cannot encode a packet over 268435456. */ -}}
+{{- $maxPacket := .Values.mosquitto.maxPacketSize | int -}}
+{{- if or (lt $maxPacket 20) (gt $maxPacket 268435456) }}
+{{- fail (printf "\n\naber: mosquitto.maxPacketSize is %v. It must be a whole number of bytes from 20 to 268435456 (16777216 is the default).\n" .Values.mosquitto.maxPacketSize) }}
+{{- end }}
+{{- if and $conf (not (regexMatch "(?m)^max_packet_size [0-9]+$" $conf)) }}
+{{- fail "\n\naber: files/mosquitto/mosquitto.conf has no single `max_packet_size <bytes>` line for mosquitto.maxPacketSize to replace.\n" }}
+{{- end }}
+{{- $conf = regexReplaceAll "(?m)^max_packet_size [0-9]+$" $conf (printf "max_packet_size %d" $maxPacket) -}}
 {{- $roles := .Files.Get "files/mosquitto/dynsec-roles.json" -}}
 {{- $tlsConf := .Files.Get "files/mosquitto/mosquitto-tls.conf" -}}
 {{- $init := .Files.Get "files/gateway-credential/mosquitto-dynsec-init.mjs" -}}
@@ -59,7 +69,7 @@ WHY A cert-manager Certificate AND NOT A HAND-MADE SECRET: renewal. One made by 
 mid-shift 90 days later, and the failure is every gateway refusing to connect at once, with an
 expiry the broker does not log -- the fleet simply goes quiet. cert-manager renews at renewBefore
 and the reload sidecar SIGHUPs the broker, which re-reads the certificate without dropping
-connected gateways (verified on eclipse-mosquitto 2.0.20, carried to the 2.0.22 pin unre-verified).
+connected gateways (verified on eclipse-mosquitto 2.1.2-alpine).
 
 THE SAN LIST IS THE WHOLE DIFFICULTY, and it is asymmetric in a way that hides the mistake:
 
@@ -584,11 +594,11 @@ spec:
           expires, and then every gateway fails verification at once, weeks after the renewal that
           was supposed to prevent it, with cert-manager reporting the certificate valid.
 
-          SIGHUP is enough: verified on eclipse-mosquitto 2.0.20 (not re-verified on the 2.0.22
-          pin, same 2.0.x line) that swapping the files and sending SIGHUP changes the certificate
-          served on an established listener, with no restart and no disconnection. That is why this
-          is a sidecar rather than a scheduled rollout restart, and the only reason the pod shares
-          a PID namespace.
+          SIGHUP is enough: verified on eclipse-mosquitto 2.1.2-alpine, with the files behind the
+          symlinks a projected Secret uses, that re-pointing them and sending SIGHUP changes the
+          certificate served on an established listener, with no restart and no disconnection.
+          That is why this is a sidecar rather than a scheduled rollout restart, and the only
+          reason the pod shares a PID namespace.
           =========================================================================================
         */}}
         - name: certificate-reload

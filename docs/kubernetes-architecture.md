@@ -658,9 +658,13 @@ listed there):
   `mosquitto_rr` request as an admin whose role reaches `$CONTROL/dynamic-security/#` only. Three
   verbs: issue, disable, list. Its Role on the API server is `get`/`patch` on one Secret, for the
   playback delivery file alone.
-- `%u` is **not** substituted by the plugin on 2.0.x (measured), so each gateway holds a shared
+- The plugin did not substitute `%u` before 2.1 (measured on 2.0.x), so each gateway holds a shared
   `gateway` role plus a `gateway-<id>` role generated for it. Roles are never deleted: deleting one a
-  client holds took the broker down when measured, so the reconcile regenerates orphaned ones.
+  client holds took the 2.0.22 broker down, so the reconcile regenerates orphaned ones.
+- The broker's version is load-bearing. 2.1 rewrites every stored password in a form 2.0 cannot
+  read, the first time anything changes. So the reconcile keeps the document 2.0 left, once, as
+  `dynamic-security.json.pre-2.1` on the same volume, and a rollback to 1.3.x restores it
+  (`mosquitto/README.md`, "The document, and who writes it").
 - `shareProcessNamespace` is set only with `tls.enabled`, for the `certificate-reload` sidecar; no
   credential path signals anything.
 

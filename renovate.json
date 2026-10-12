@@ -81,6 +81,14 @@
       "labels": ["dependencies", "data-path"]
     },
     {
+      "description": "THE BROKER. Docker Hub publishes Mosquitto 2.1 and later only under `-alpine` tags, and Renovate keeps a tag suffix as its own stream, so the unsuffixed 2.0.22 pin was never offered 2.1. This keeps proposals to exact `X.Y.Z-alpine` tags, never the floating `2.1-alpine`. One PR moves both pins, values.yaml and gateway-credential/Dockerfile, which check-docs-drift holds together because the credential image's mosquitto_passwd and mosquitto_rr must be the broker's own. A minor release has changed mosquitto_passwd's output before, so run `node scripts/check-broker-config.mjs` on the branch before merging.",
+      "minimumReleaseAge": "7 days",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["eclipse-mosquitto"],
+      "allowedVersions": "/^\\d+\\.\\d+\\.\\d+-alpine$/",
+      "labels": ["dependencies", "data-path"]
+    },
+    {
       "description": "A major version is a reading task before it is a merge task. Held on the dashboard so it is proposed deliberately -- Kong 3.0, for one, silently switched off every per-service Prometheus metric while leaving the scrape target green.",
       "matchUpdateTypes": ["major"],
       "dependencyDashboardApproval": true,
