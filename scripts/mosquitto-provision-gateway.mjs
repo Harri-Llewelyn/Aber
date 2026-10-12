@@ -6,8 +6,8 @@
  * a stack whose credential service is down or whose only Administrator cannot sign in. It sends
  * the same commands the service sends (scripts/lib/mosquitto-dynsec.mjs, issueWithControl) to the
  * broker's Dynamic Security plugin, through `mosquitto_rr` inside the broker pod, so the
- * account it issues is the account the service would have issued: its own role, confined to
- * `spBv1.0/+/+/<sparkplug_id>/#`, plus the shared gateway role.
+ * account it issues is the account the service would have issued: a client holding the gateway
+ * role, which confines it to `spBv1.0/+/+/<sparkplug_id>/#` through its username.
  *
  * Usage:
  *   node scripts/mosquitto-provision-gateway.mjs <sparkplug_id> [password]

@@ -71,7 +71,7 @@ RECORD_PASSWORD = (os.getenv("MQTT_CAPTURE_PASSWORD") or os.getenv("MQTT_INGESTI
                    or os.getenv("MQTT_PASSWORD") or "")
 
 # Playback authenticates as the gateway it publishes as -- username == sparkplug_id, which is what
-# makes the per-gateway role at the broker constrain anything at all. No fallback and no default:
+# makes the broker's %u rule constrain anything at all. No fallback and no default:
 # there is no gateway this tool should pick on an operator's behalf.
 PLAY_USER = os.getenv("MQTT_PLAYBACK_USER", "")
 PLAY_PASSWORD = os.getenv("MQTT_PLAYBACK_PASSWORD", "")

@@ -1098,8 +1098,8 @@ ingestion:
   directoryMqttTopicPrefix: ""
   directoryMqttIntervalSeconds: 60
   # The Unified Namespace bridge (ingestion/uns_publish.py). Off by default for the same reason:
-  # every decoded reading, retained under uns/..., behind the broker's roles alone. The root MUST
-  # stay inside the ingestion role's `uns/#` publish rule. The TTL bounds how long a relocation on the
+  # every decoded reading, retained under uns/..., behind the broker's roles alone. The broker's
+  # grant follows the root, so any root works. The TTL bounds how long a relocation on the
   # dashboard takes to move a device's topic.
   unsMqttEnabled: false
   unsMqttTopicRoot: uns

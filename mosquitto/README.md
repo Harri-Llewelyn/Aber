@@ -5,15 +5,16 @@ own account, confined to its own topics. Read this to understand a refused conne
 adding an account for a new service.
 
 Mosquitto authenticates and authorises every client through its Dynamic Security plugin. The
-roles are declared in [`dynsec-roles.json`](dynsec-roles.json) and applied at every boot; the
+roles are declared in [`dynsec-roles.json`](dynsec-roles.json), each ACL with a `why` naming what
+uses it ([*No check finds an unused ACL*](#no-check-finds-an-unused-acl)), and applied at every boot; the
 clients are the platform principals from the environment plus one account per gateway, issued by
 the credential service and persisted by the plugin in `/mosquitto/data/dynamic-security.json`.
 [`mosquitto.conf`](mosquitto.conf) is the listener policy and [`mosquitto-tls.conf`](mosquitto-tls.conf)
 the optional MQTTS listener; the chart's initContainer assembles the two, and rebinds 1883 to
 loopback once no client outside the broker's pod dials it. The document is the only copy of every
-issued account, so the backup service archives the broker's volume (`backup.includeBroker`) and
-the weekly restore rehearsal puts it back; `supabase/README.md`, "Backup and Recovery", is the
-runbook.
+issued account, so the backup service archives the broker's volume when `backup.includeBroker` is
+on (it is off by default) and the weekly restore rehearsal puts it back; `supabase/README.md`,
+"Backup and Recovery", is the runbook.
 
 `scripts/check-broker-config.mjs` starts this policy on the pinned image and asserts everything
 below by delivery. A config that starts is not a config that is safe.
@@ -23,24 +24,26 @@ below by delivery. A config that starts is not a config that is safe.
 **Default is deny.** `defaultACLAccess` refuses every publish, every delivery and every subscribe
 that no role allows, and `allow_anonymous false` means every client authenticates first.
 
-**A gateway holds two roles.** `gateway`, shared, grants a subscription anywhere under `spBv1.0/`
-and delivery of the primary-host `spBv1.0/STATE/#` topics. `gateway-<sparkplug_id>`, its own,
-grants publish and delivery beneath `spBv1.0/+/+/<sparkplug_id>/#` and nothing else. The
-username is always the gateway's `sparkplug_id`: it is a GENERATED column (`gwy` plus the first 21
-hex characters of the row's UUID), the edge-node segment of every topic must equal it or
-`verify_gateway_binding()` in `ingestion/ingestion.py` rejects the message, and the role is named
-for it. A friendly name would authenticate and then have every publish silently dropped.
+**A gateway holds one role, `gateway`, shared by every gateway.** It grants a subscription
+anywhere under `spBv1.0/`, delivery of the primary-host `spBv1.0/STATE/#` topics, and publish and
+delivery beneath `spBv1.0/+/+/%u/#`. The plugin reads `%u` as the client's own username, so each
+gateway may publish and receive beneath its own edge node and nowhere else. The username is
+always the gateway's `sparkplug_id`: it is a GENERATED column (`gwy` plus the first 21 hex
+characters of the row's UUID), and the edge-node segment of every topic must equal it or
+`verify_gateway_binding()` in `ingestion/ingestion.py` rejects the message. A friendly name would
+authenticate and then have every publish silently dropped.
 
 **Confinement is decided at delivery, not at subscribe.** A gateway may subscribe to
 `spBv1.0/+/NCMD/+` or to `spBv1.0/#`; the broker grants the subscription and then delivers only
-what the gateway's own role allows. That is the same behaviour the ACL file had, and it is what
+what the `%u` rule allows. That is the same behaviour the ACL file had, and it is what
 lets the seeded flow's wildcard NCMD subscription keep working: a gateway receives its own rebirth
 request and not another node's.
 
 **There is no wildcard-write principal.** The ingestion daemon reads `spBv1.0/#` and writes two
 things inside Sparkplug — the rebirth request `spBv1.0/+/NCMD/+`, and its own primary-host STATE
 on one literal topic (below); it is the only writer of the
-Directory (`<group>/Directory/v1/#` by default) and the Unified Namespace (`uns/#`). The i3X server
+Directory (`<group>/Directory/v1/#` by default) and the Unified Namespace (`<root>/#`, `uns/#` by
+default). The i3X server
 reads `spBv1.0/#` and publishes nothing; it reads the Directory from the database, not from here. The
 monitoring account reads `$SYS/#` and publishes nothing. No gateway reads the Directory or the
 UNS: either is the whole plant behind one credential, and reading is silent.
@@ -51,6 +54,11 @@ since `0131`), which this repository does not choose. The chart renders one pref
 both this reconcile and the daemon that publishes into it, and `withDirectoryGrant()` adds
 `<prefix>/#` to the `ingestion` role. A broker granted one subtree while the daemon writes another
 would drop every Directory publish with no error anywhere, since refusal is silent at QoS 0.
+
+**Nor is the Unified Namespace's.** Its root is `ingestion.unsMqttTopicRoot`, `uns` by default,
+which the chart renders once through `aber.unsTopicRoot` for both the daemon and this reconcile,
+and `withUnsGrant()` adds `<root>/#` to the `ingestion` role. Until 1.4 the grant was a literal
+`uns/#` here, so any other root had every UNS publish dropped.
 
 **One grant is not in this file, and cannot be.** The ingestion daemon is the site's Sparkplug
 primary host application: it publishes a retained `online: true` on `spBv1.0/STATE/<host_id>` and
@@ -83,9 +91,13 @@ tags, and `renovate.json` proposes the next one.
   dropped and no subscriber sees it. The ingestion principal cannot publish DBIRTH or DDATA and can
   publish NCMD. The i3X and monitoring principals can publish nothing. The monitoring principal
   can read `$SYS`; a gateway cannot.
-- **`%u` was not substituted in a role's ACL topic before 2.1.** On 2.0.x a rule written as
-  `spBv1.0/+/+/%u/#` was a literal and matched nothing, so confinement is one role per gateway.
-  2.1 substitutes it in every ACL type except `subscribeLiteral` and `unsubscribeLiteral`.
+- **`%u` confines every gateway through one role.** Two gateways holding only `gateway`: each
+  one's publish under its own edge node is delivered and under the other's is dropped, and each
+  receives the NCMD and DCMD for its own node and not the other's, through a wildcard subscription
+  and through the exact QoS 1 subscription Sparkplug requires
+  (tck-id-message-flow-edge-node-ncmd-subscribe). 2.1 substitutes `%u` in every ACL type except
+  `subscribeLiteral` and `unsubscribeLiteral`, which this policy does not use. On 2.0.x it was a
+  literal that matched nothing, which is why 1.3 and earlier generated a role per gateway.
 - A wildcard subscription is granted to a confined gateway and filtered per message at delivery.
 - **`disableClient` disconnects a live session** and refuses the next CONNECT; `enableClient`
   admits it again. This is what the ACL file could not do: revocation used to take effect only
@@ -107,7 +119,8 @@ tags, and `renovate.json` proposes the next one.
   a 64-byte salt; 2.0's had 101 and 12.
 - **A 2.0.22 document carries over** (measured with each release's own reconcile, in its own image).
   A client hashed by 2.0 authenticates on 2.1.2, a wrong password is refused, and `listClients`
-  answers.
+  answers. The reconcile retires a 1.3.0 document's `gateway-<id>` roles, and each gateway, holding
+  `gateway` alone, is confined exactly as before.
 - **2.1 rewrites every stored password in a form 2.0 cannot read, the first time anything
   changes.** After one issue on 2.1.2, every client is saved as `encoded_password` in place of
   `password`, `salt` and `iterations`. Rolled back to 1.3.0 on that document, 2.0.22 refused every
@@ -118,8 +131,15 @@ tags, and `renovate.json` proposes the next one.
   boot reconcile keeps the document 2.0 left as `dynamic-security.json.pre-2.1`, once, and a
   rollback restores that copy (*The document, and who writes it*, below). With no
   change made on 2.1.2, the 1.3.0 reconcile and 2.0.22 still read the document.
-- **`deleteRole` on a role a client still holds took the 2.0.22 broker down.** Nothing in this
-  repository deletes a role; a gateway's role outlives its client and is regenerated at boot.
+- **`deleteRole` on a role a connected client still holds is not safe on 2.1.2 either.** Measured
+  in six variants, three rounds each, every client connected with a will: with the holder publishing
+  every 50 ms the broker died (exit 135) in all three rounds, and in the `%u` and second-role
+  variants `getClient` afterwards returned corrupted role names in five rounds of six. On 2.0.22 the same calls corrupted the role
+  list and the broker died on a later command. **`removeClientRole` first, then `deleteRole`** was
+  clean ten times out of ten on 2.1.2 with the holder connected and publishing. So nothing in this
+  repository sends `deleteRole` to a running broker (`check-broker-config.mjs` holds that), and the
+  boot reconcile retires the per-gateway roles 1.3 generated by removing each membership and then
+  the role from the document, while the broker is down and nothing is connected.
 - `password_file` is not used: one authority is easier to reason about than two, and 2.1 deprecates
   it for removal in 3.0.
 - **`mosquitto_rr -s` and `-f` delivered a payload the 2.0.22 plugin rejected** ("Payload not valid
@@ -179,15 +199,16 @@ cost the plugin's inventory and revocation are bought with (`docs/kubernetes-arc
 **Boot reconciles; it never rewrites.** `scripts/mosquitto-dynsec-init.mjs` runs before the broker,
 in the credential service's image, and:
 
-- replaces every role `dynsec-roles.json` declares with the declared one, and regenerates
-  `gateway-<id>` for every gateway client; any other stored role is kept;
+- replaces every role `dynsec-roles.json` declares with the declared one, and drops every
+  `gateway-<id>` role 1.3 or earlier generated; any other stored role is kept;
 - replaces the admin client and each platform principal (`MQTT_*_USER` / `MQTT_*_PASSWORD`) with
   a client hashed from the environment, so a rotated password reaches the broker on the next
   restart; a principal with an empty password gets no account, except the admin, the monitoring
   account and those the chart lists in `DYNSEC_REQUIRED_PRINCIPALS` (ingestion and i3X), whose
   empty password stops the boot: the credential service and the health probes authenticate as the
   first two;
-- keeps every other stored client exactly as it is, ensuring a gateway client holds its two roles;
+- keeps every other stored client exactly as it is, except that a gateway client is made to hold
+  the `gateway` role and no `gateway-<id>` one;
 - refuses to write a document that would lose a stored client.
 
 **It keeps the way back to 1.3.x.** The first boot that finds a stored document with no
@@ -206,7 +227,7 @@ same `helm upgrade`. With `secrets.existingSecret` the chart cannot see the name
 are restarted by hand after a rename.
 
 **Only the credential service changes the document at run time**, over the control topic:
-`createRole` and `createClient` to issue, `setClientPassword` and `enableClient` to re-issue,
+`createClient` to issue, `setClientPassword` and `enableClient` to re-issue,
 `disableClient` to revoke, `listClients` and `listRoles` for the Access Control page. It speaks
 `mosquitto_rr` from the broker's own image, so the protocol and the binary match the broker. The
 operator CLI (`scripts/mosquitto-provision-gateway.mjs`) and the orphan sweep send the same
@@ -231,8 +252,8 @@ gateway. So the service holds it, behind four verbs that each name a gateway and
 issue, revoke, list, and read the CA. It holds no database credential, is not published outside
 the container network, and authenticates to the plugin as an account that reaches
 `$CONTROL/dynamic-security/#` and no other topic, so a holder of its bearer token can issue and
-revoke accounts and read the inventory, and cannot read a message. Nothing in it deletes a client
-or a role.
+revoke accounts and read the inventory, and cannot read a message. Nothing in it creates or
+deletes a role, or deletes a client.
 
 **It refuses to start without a token**, rather than defaulting to one or running open. A default
 would be in the file, therefore in the repository, therefore known; running open would let any
@@ -275,17 +296,17 @@ could not be reached, and the caller publishing a trust bundle has to tell those
 writes one. An issue on such a stack returns `ca_cert: null` rather than failing, since Remote
 gateways need the CA but a plaintext-only stack can still issue.
 
-**Two grants are injected at reconcile time and are not lines in `dynsec-roles.json`.** The
-primary host's write on `spBv1.0/STATE/<id>` and the Directory's `<prefix>/#` are both named by
-the deployment rather than by this repository, so the reconcile adds them to the `ingestion` role
-from the environment. The STATE grant is one literal topic rather than `spBv1.0/STATE/#`, because
+**Three grants are injected at reconcile time and are not lines in `dynsec-roles.json`.** The
+primary host's write on `spBv1.0/STATE/<id>`, the Directory's `<prefix>/#` and the Unified
+Namespace's `<root>/#` are named by the deployment rather than by this repository, so the
+reconcile adds them to the `ingestion` role from the environment. The STATE grant is one literal topic rather than `spBv1.0/STATE/#`, because
 a wildcard would let this principal announce the death of a host id belonging to someone else,
-and every gateway reads that subtree. Both values are required rather than defaulted: the
+and every gateway reads that subtree. All three values are required rather than defaulted: the
 ingestion daemon refuses to start without the same host id, so a broker reconciled without the
-grant would admit a daemon that cannot boot, and the Directory prefix is rendered once by the
-chart for both the daemon and the reconcile, so a broker granted one subtree while the daemon
-publishes another cannot happen, a mismatch that at QoS 0 would be silent. Both functions return a
-new policy and are no-ops when applied twice, which is what keeps the boot idempotent across
+grant would admit a daemon that cannot boot, and the Directory prefix and the UNS root are each
+rendered once by the chart for both the daemon and the reconcile, so a broker granted one subtree
+while the daemon publishes another cannot happen, a mismatch that at QoS 0 would be silent. The
+functions return a new policy and are no-ops when applied twice, which is what keeps the boot idempotent across
 restarts.
 
 **Hashing goes through the broker's own tool, positionally.** Passwords are hashed by
@@ -315,7 +336,8 @@ overwritten, since it is the fleet's credentials.
 
 ## Adding a principal
 
-A new platform consumer (a BI reader of `uns/#`, say) is a role in `dynsec-roles.json`; a
+A new platform consumer (a BI reader of `uns/#`, say) is a role in `dynsec-roles.json`, each ACL
+with a `why` naming what uses it; a
 `secrets.mqtt<Name>User` / `secrets.mqtt<Name>Password` pair in the chart's values, rendered as
 `MQTT_<NAME>_USER` / `MQTT_<NAME>_PASSWORD` by the chart's `templates/secret.yaml`; the name in
 `aber.mqttPrincipals` (`templates/_helpers.tpl`), which hands the pair to the reconcile, and in
@@ -326,14 +348,53 @@ line in `frontend/src/utils/serviceIdentities.js`; and an assertion in
 `scripts/check-broker-config.mjs`.
 `scripts/check-docs-drift.mjs` holds the roles file and the page's list to each other.
 
+## No check finds an unused ACL
+
+`check-broker-config.mjs` proves by delivery that each role confines its principal. An unused grant
+passes it by construction, because a grant only ever widens what arrives. So the one control on an
+over-grant is a person reading the role beside the code that holds it, and the `why` on every ACL
+in `dynsec-roles.json` is there to make that reading happen. `check-docs-drift.mjs` (check 62)
+requires each `why` to be present, never that it is true. The reconcile cuts every ACL down to the
+plugin's own keys before the plugin is given a role, and 2.1.2 ignores an ACL key it does not
+define in any case (measured).
+
+**An inventory was attempted and abandoned** ([issue #298](https://github.com/Harri-Llewelyn/Aber/issues/298),
+2026-10-12). It reported, for each ACL, whether anything in the repository exercises it:
+
+- **Connections.** Found by shape: a paho `mqtt.Client(`, a `mosquitto_sub`, `_pub`, `_rr` or
+  `_ctrl` call, a Node-RED broker node, `controlArgv()`. That is 19 files. Each one's identity had to
+  be declared by hand, because none is in the file: it arrives through an env var the chart maps from
+  a Secret key, through a function parameter, or as the username of whichever gateway is named.
+- **Topics.** 48 subscribe and publish uses were read as literal prefixes: string literals,
+  f-strings, `%` formats and `"/".join`, following one assignment or one same-file function. Ten
+  could not be read.
+- **On the shipped policy** it reported 16 of 21 ACLs exercised, 5 reachable only by something it
+  could not read, and none unused.
+- **Against eight over-grants added to test it**, it reported four unused, among them the i3X
+  Directory read issue #297 found by hand. It missed the other four. `capture.py --topic`, the
+  allow-list's first entry, can reach anything the ingestion account may read, and the topic
+  `uns_publish.py` assembles cannot be read. Host-run gateways run flows an operator writes. So no
+  new grant on the ingestion or gateway role could be reported unused. Worse, a gateway write on
+  `spBv1.0/STATE/#` was reported *exercised* by `validate.py` and `capture.py`, because a Sparkplug
+  group read as a placeholder matches the literal `STATE`.
+
+It hit both failures the issue set out. The allow-list swallowed the two roles whose grants are
+widest. And it answered wrongly on a real path, in the direction that hides an over-grant. Special
+cases bring it to five of the eight, at the price of more of them in a regex reader of four formats.
+
+**What the `why`s say today.** The ingestion role's reads of the UNS and Directory subtrees, which
+the reconcile grants beside each write, are used by no platform process. `check-broker-config.mjs`
+reads both trees as that account to see the publishes delivered, and `capture.py --topic` could.
+
 ## Broker Topic Authorisation
 
-The broker's Dynamic Security plugin confines each gateway to its own edge-node subtree through a
-role generated for it when its credential is issued (*The credential service and the boot reconcile*, above):
+The broker's Dynamic Security plugin confines each gateway to its own edge-node subtree through
+the one role every gateway account holds, whose `%u` is the account's own username:
 
 ```
-gateway-<sparkplug_id>:  publish and receive  spBv1.0/+/+/<sparkplug_id>/#
-gateway (shared):        subscribe            spBv1.0/#       receive spBv1.0/STATE/#
+gateway:  publish and receive  spBv1.0/+/+/%u/#
+          subscribe            spBv1.0/#
+          receive              spBv1.0/STATE/#
 ```
 
 So a gateway provisioned with **username == its `sparkplug_id`** can publish only beneath its own
@@ -371,14 +432,14 @@ So each principal is confined, holding a role from
 | Principal | May do |
 | :--- | :--- |
 | `aber_ingestion` | read `spBv1.0/#`; publish **only** `spBv1.0/+/NCMD/+` (rebirth), its own `spBv1.0/STATE/<primaryHostId>`, the Directory and the Unified Namespace |
-| `aber_i3x` | read `spBv1.0/#` and the Directory. Publish nothing — it refuses writes in code (405), and this is that stance where the broker can enforce it |
-| any `gwy…` account | one per gateway, each confined to its own edge node by a role generated for it. Issued against a row that already exists — from the dashboard for a host-run gateway, by the enrolment bundle for an appliance |
+| `aber_i3x` | read `spBv1.0/#`; it reads the Directory from the database. Publish nothing — it refuses writes in code (405), and this is that stance where the broker can enforce it |
+| any `gwy…` account | one per gateway, each confined to its own edge node by the `gateway` role's `%u` rule. Issued against a row that already exists — from the dashboard for a host-run gateway, by the enrolment bundle for an appliance |
 | `gwy110000000000400080000` | `validate.py`'s own gateway, a fixture it seeds itself |
 | `aber_monitor` | read `$SYS/#` only — the health probes and the metrics exporter. Publishes nothing |
 | `dynsec-admin` | the credential service's account: the plugin's control topic and nothing else |
 
-**The gateway usernames are `sparkplug_id`s and cannot be friendly names.** The gateway's role
-confines it to its own edge-node segment, and that segment must equal the gateway row's *generated*
+**The gateway usernames are `sparkplug_id`s and cannot be friendly names.** The gateway role
+confines it to the edge-node segment its username names, and that segment must equal the gateway row's *generated*
 `sparkplug_id` or ingestion rejects the message. Both rows therefore have **pinned UUIDs**, which is
 the only reason a credential can be issued before the row exists — that is what let the validator,
 which creates its gateway at runtime, move off the wildcard account at all. Only its *gateway* is

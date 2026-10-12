@@ -2046,10 +2046,8 @@ function edgeFunctionNames() {
   const ui = read('frontend/src/utils/serviceIdentities.js');
 
   const policyRoles = new Set((policy.roles || []).map((r) => r.rolename));
+  // The platform roles and the gateway role, each declared on the page as `role: '<name>'`.
   const uiRoles = new Set([...ui.matchAll(/^\s*role:\s*'([^']+)'/gm)].map((m) => m[1]));
-  // The shared gateway role is declared separately on the page, as it is held separately.
-  const shared = ui.match(/shared:\s*'([^']+)'/)?.[1];
-  if (shared) uiRoles.add(shared);
 
   if (policyRoles.size === 0 || uiRoles.size === 0) {
     fail(
@@ -2073,9 +2071,15 @@ function edgeFunctionNames() {
     }
     for (const role of policy.roles || []) {
       for (const acl of role.acls || []) {
-        // `%u` is not substituted by the plugin on 2.0.x (measured; mosquitto/README.md). A rule
-        // written with it grants nothing and fails nothing.
-        if (String(acl.topic).includes('%')) problems.push(`role ${role.rolename} uses '${acl.topic}': the plugin substitutes nothing in a topic`);
+        // The plugin substitutes %u and %c in every ACL type but the two literal ones (2.1;
+        // mosquitto/README.md); there a % is a literal that grants nothing and fails nothing. %c
+        // is refused as well: a client id is whatever the client chooses.
+        const topic = String(acl.topic);
+        if (/%(?!u)/.test(topic)) {
+          problems.push(`role ${role.rolename} uses '${topic}': %u is the only pattern this policy relies on`);
+        } else if (topic.includes('%u') && /Literal$/.test(acl.acltype)) {
+          problems.push(`role ${role.rolename} uses %u in ${acl.acltype}, where the plugin does not substitute it`);
+        }
       }
     }
 
@@ -2239,6 +2243,36 @@ function edgeFunctionNames() {
       `all ${declared.size} variable(s) the function registry declares are set on ` +
         `supabase-functions (${Object.keys(elsewhere).length} by something other than its env list)`
     );
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 62. Every broker ACL says what uses it.
+//
+// Each ACL in mosquitto/dynsec-roles.json carries a `why` naming what exercises it. Presence only,
+// never truth: no check can say an ACL is unused (mosquitto/README.md, "No check finds an unused
+// ACL"), so the sentence is the control. Writing "the Directory read is used by —" and finding no
+// end to it is how an over-grant is noticed. The reconcile strips `why` before the plugin sees it.
+// -------------------------------------------------------------------------------------------------
+{
+  const policy = JSON.parse(read('mosquitto/dynsec-roles.json'));
+  const acls = (policy.roles || []).flatMap((role) => (role.acls || []).map((acl) => ({ role: role.rolename, acl })));
+  // Two words at least: a placeholder ("x", "TODO") is presence without a sentence.
+  const said = (why) => typeof why === 'string' && why.trim().split(/\s+/).length >= 2;
+  const missing = acls.filter(({ acl }) => !said(acl.why));
+  if (!said('ingestion.py subscribes') || said('TODO') || said(undefined)) {
+    fail('check 62 no longer tells a sentence from a placeholder; its own fixtures disagree with it');
+  } else if (acls.length === 0) {
+    fail('mosquitto/dynsec-roles.json declares no ACL for check 62 to read; the file changed shape');
+  } else if (missing.length) {
+    fail(
+      `${missing.length} broker ACL(s) in mosquitto/dynsec-roles.json say nothing of what uses them: ` +
+        missing.map(({ role, acl }) => `${role} ${acl.acltype} ${acl.topic}`).join('; ') +
+        '.\n      Give each a `why` naming the code or the process that exercises it. If nothing ' +
+        'does, that is the finding.'
+    );
+  } else {
+    pass(`all ${acls.length} broker ACLs in mosquitto/dynsec-roles.json say what uses them`);
   }
 }
 

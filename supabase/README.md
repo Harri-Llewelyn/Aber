@@ -5960,7 +5960,7 @@ cannot use a capability should not hold it.
 ### The path is confined by the database, not by the uploader
 
 Every object must live under `<subject>/`, and that folder must name a gateway or device that
-exists (`is_capture_subject_prefix()`). Same idea as the broker's per-gateway role
+exists (`is_capture_subject_prefix()`). Same idea as the broker's per-gateway rule
 (`spBv1.0/+/+/<sparkplug_id>/#`) one layer up: **the client does not get to assert where its data
 belongs.** A convention the frontend happens to follow is not a control — Storage's REST API is
 reachable with any authenticated session.

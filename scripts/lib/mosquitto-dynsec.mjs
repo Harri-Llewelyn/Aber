@@ -1,9 +1,11 @@
-// The broker's Dynamic Security policy, as pure functions over its JSON document: one definition of a
-// gateway's roles, one parser for the control API's replies, and one reconcile that never drops a
-// client. Shared by the boot reconcile, the credential service, the operator CLI and the orphan
+// The broker's Dynamic Security policy, as pure functions over its JSON document: one definition of
+// what a gateway holds, one parser for the control API's replies, and one reconcile that never drops
+// a client. Shared by the boot reconcile, the credential service, the operator CLI and the orphan
 // sweep. Nothing here touches a filesystem, a broker or a shell. mosquitto/README.md is the
 // reasoning; this file is the shape.
-import { CredentialError, GATEWAY_ID_PATTERN, assertEntry, isGatewayId } from './mosquitto-credentials.mjs';
+import {
+  CredentialError, GATEWAY_ID_PATTERN, assertEntry, assertGatewayId, isGatewayId,
+} from './mosquitto-credentials.mjs';
 
 // The topic the plugin listens on, and where it answers.
 export const CONTROL_TOPIC = '$CONTROL/dynamic-security/v1';
@@ -12,14 +14,16 @@ export const CONTROL_RESPONSE_TOPIC = '$CONTROL/dynamic-security/v1/response';
 // Where the plugin keeps its document; mosquitto.conf names this path.
 export const DYNSEC_FILE = '/mosquitto/data/dynamic-security.json';
 
-// The role every gateway holds, and the prefix of the role only that gateway holds. The plugin did
-// not substitute %u in an ACL topic before 2.1 (measured on 2.0.x), so confinement is one literal
-// role per gateway rather than one pattern rule.
+// The one role every gateway holds. Its spBv1.0/+/+/%u/# rules confine a client to the edge node its
+// username names, and a gateway's username is its sparkplug_id. The plugin substitutes %u from 2.1,
+// in every ACL type but subscribeLiteral and unsubscribeLiteral.
 export const GATEWAY_SHARED_ROLE = 'gateway';
-export const GATEWAY_ROLE_PREFIX = 'gateway-';
+
+// The prefix of the role generated per gateway before %u worked. The boot reconcile retires them.
+export const RETIRED_GATEWAY_ROLE_PREFIX = 'gateway-';
 
 // The platform principals the boot reconcile owns: the env pair each is read from and the policy
-// role it holds. role: null marks a gateway account, which holds the gateway roles for its own id.
+// role it holds. role: null marks a gateway account, which holds the gateway role.
 export const PLATFORM_PRINCIPALS = [
   { env: 'INGESTION', role: 'ingestion' },
   { env: 'I3X', role: 'i3x' },
@@ -90,56 +94,71 @@ export function directoryTopicFilter(prefix) {
   return `${clean}/#`;
 }
 
-// Returns a NEW policy; applying it twice is a no-op.
-export function withDirectoryGrant(policy, prefix) {
-  const topic = directoryTopicFilter(prefix);
+// Publish, subscribe and receive on `topic` for one role. Returns a NEW policy; applying it twice
+// is a no-op.
+function withSubtreeGrant(policy, rolename, topic, what) {
   const acltypes = ['publishClientSend', 'subscribePattern', 'publishClientReceive'];
   const roles = (policy?.roles || []).map((role) => {
-    if (role.rolename !== DIRECTORY_ROLE) return role;
+    if (role.rolename !== rolename) return role;
     const acls = role.acls || [];
     const missing = acltypes
       .filter((acltype) => !acls.some((a) => a.acltype === acltype && a.topic === topic))
       .map((acltype) => ({ acltype, topic, allow: true }));
     return missing.length ? { ...role, acls: [...acls, ...missing] } : role;
   });
-  if (!roles.some((r) => r.rolename === DIRECTORY_ROLE)) {
+  if (!roles.some((r) => r.rolename === rolename)) {
     throw new CredentialError(
-      `the policy declares no '${DIRECTORY_ROLE}' role, so the Directory has nothing to grant`,
+      `the policy declares no '${rolename}' role, so ${what} has nothing to grant`,
       'invalid_policy',
     );
   }
   return { ...policy, roles };
 }
 
-export function gatewayRoleName(sparkplugId) {
-  if (!isGatewayId(sparkplugId)) {
-    throw new CredentialError(`'${sparkplugId}' is not a gateway sparkplug_id`, 'invalid_sparkplug_id');
+export function withDirectoryGrant(policy, prefix) {
+  return withSubtreeGrant(policy, DIRECTORY_ROLE, directoryTopicFilter(prefix), 'the Directory');
+}
+
+// The role that writes the Unified Namespace, and the subtree it may write. Not in the roles file
+// for the same reason: the root is the deployment's (ingestion.unsMqttTopicRoot), rendered once by
+// the chart for both uns_publish.py and this reconcile.
+export const UNS_ROLE = 'ingestion';
+
+// Trimmed of slashes at both ends, as uns_publish.py trims it; the root may span levels.
+export function unsTopicFilter(root) {
+  const clean = typeof root === 'string' ? root.trim().replace(/^\/+|\/+$/g, '') : '';
+  if (!clean || !DIRECTORY_PREFIX_PATTERN.test(clean)) {
+    throw new CredentialError(
+      `'${root}' is not a usable Unified Namespace root: it must be non-empty and contain no `
+      + "'+', '#' or whitespace",
+      'invalid_uns_root',
+    );
   }
-  return `${GATEWAY_ROLE_PREFIX}${sparkplugId}`;
+  return `${clean}/#`;
 }
 
-// Both roles a gateway client holds, shared first.
-export function gatewayRoleNames(sparkplugId) {
-  return [GATEWAY_SHARED_ROLE, gatewayRoleName(sparkplugId)];
+export function withUnsGrant(policy, root) {
+  return withSubtreeGrant(policy, UNS_ROLE, unsTopicFilter(root), 'the Unified Namespace');
 }
 
-// Publish and receive beneath its own edge node, and nothing else. Read of spBv1.0/STATE/# and the
-// subscribe grant come from the shared role.
-export function gatewayRole(sparkplugId) {
-  const topic = `spBv1.0/+/+/${sparkplugId}/#`;
-  return {
-    rolename: gatewayRoleName(sparkplugId),
-    acls: [
-      { acltype: 'publishClientSend', topic, allow: true },
-      { acltype: 'publishClientReceive', topic, allow: true },
-    ],
-  };
-}
-
-export function isGatewayRoleName(rolename) {
+// A role generated per gateway before 2.1: gateway-<sparkplug_id>, and nothing near it.
+export function isRetiredGatewayRoleName(rolename) {
   return typeof rolename === 'string'
-    && rolename.startsWith(GATEWAY_ROLE_PREFIX)
-    && GATEWAY_ID_PATTERN.test(rolename.slice(GATEWAY_ROLE_PREFIX.length));
+    && rolename.startsWith(RETIRED_GATEWAY_ROLE_PREFIX)
+    && GATEWAY_ID_PATTERN.test(rolename.slice(RETIRED_GATEWAY_ROLE_PREFIX.length));
+}
+
+// The keys the plugin defines for an ACL. The roles file also gives each ACL a `why` for people to
+// read; only these keys reach the document the plugin loads.
+const PLUGIN_ACL_KEYS = ['acltype', 'topic', 'priority', 'allow'];
+
+// A policy role as the plugin is given it: a copy, with each ACL cut down to PLUGIN_ACL_KEYS.
+export function pluginRole(role) {
+  const copy = JSON.parse(JSON.stringify(role));
+  copy.acls = (copy.acls || []).map((acl) => Object.fromEntries(
+    PLUGIN_ACL_KEYS.filter((key) => key in acl).map((key) => [key, acl[key]]),
+  ));
+  return copy;
 }
 
 // One user:$7$iterations$salt$hash line as the plugin's client fields. mosquitto_passwd and the
@@ -165,10 +184,9 @@ export function clientFromHash(entry, username, roles) {
   return clientFromPasswordEntry(assertEntry(entry, username), roles);
 }
 
-// The role list a platform principal holds: its named role, or the gateway pair.
-export function rolesFor(role, username) {
-  const names = role ? [role] : gatewayRoleNames(username);
-  return names.map((rolename) => ({ rolename }));
+// The role list a platform principal holds: its named role, or the gateway role.
+export function rolesFor(role) {
+  return [{ rolename: role || GATEWAY_SHARED_ROLE }];
 }
 
 export function emptyConfig() {
@@ -180,12 +198,12 @@ function roleNamesOf(client) {
 }
 
 // The document the broker should boot on, from the one it has and what the repository declares.
-// Roles: every policy role replaces the stored one of its name, a gateway-<id> role is regenerated
-// for every gateway client, any other stored role is kept. Clients: every managed client replaces
-// the stored one of its name, every other stored client is kept, a gateway client with the gateway
-// roles ensured. THROWS rather than return a document missing any other client: the stored document
-// is the fleet's credentials, and a boot that lost one would fail silently at the appliance's next
-// reconnect.
+// Roles: every policy role replaces the stored one of its name, a retired gateway-<id> role is
+// dropped, any other stored role is kept. Clients: every managed client replaces the stored one of
+// its name, every other stored client is kept, and a gateway client holds the gateway role and no
+// retired one. The broker is down while this runs, so no connected client holds what is dropped.
+// THROWS rather than return a document missing any other client: the stored document is the fleet's
+// credentials, and a boot that lost one would fail silently at the appliance's next reconnect.
 export function reconcile(existing, policy, managedClients) {
   const stored = existing && typeof existing === 'object' ? existing : emptyConfig();
   if (!Array.isArray(policy?.roles) || policy.roles.length === 0) {
@@ -211,7 +229,7 @@ export function reconcile(existing, policy, managedClients) {
 
   const before = new Set((stored.clients || []).map((c) => c.username));
   const clients = [];
-  const report = { managed: [], kept: [], gateways: [], unmanaged: [] };
+  const report = { managed: [], kept: [], gateways: [], unmanaged: [], retiredMemberships: 0, retiredRoles: [] };
 
   for (const c of managedByName.values()) {
     clients.push(c);
@@ -221,10 +239,10 @@ export function reconcile(existing, policy, managedClients) {
     if (managedByName.has(c.username)) continue;
     const client = { ...c, roles: (c.roles || []).map((r) => ({ ...r })) };
     if (isGatewayId(client.username)) {
-      const have = new Set(roleNamesOf(client));
-      for (const rolename of gatewayRoleNames(client.username)) {
-        if (!have.has(rolename)) client.roles.push({ rolename });
-      }
+      const held = client.roles.length;
+      client.roles = client.roles.filter((r) => !isRetiredGatewayRoleName(r.rolename));
+      report.retiredMemberships += held - client.roles.length;
+      if (!roleNamesOf(client).includes(GATEWAY_SHARED_ROLE)) client.roles.push({ rolename: GATEWAY_SHARED_ROLE });
       report.gateways.push(client.username);
     } else {
       report.unmanaged.push(client.username);
@@ -244,21 +262,16 @@ export function reconcile(existing, policy, managedClients) {
     throw new CredentialError('the stored document holds duplicate usernames; repair it by hand', 'duplicate_accounts');
   }
 
-  const roles = policy.roles.map((r) => JSON.parse(JSON.stringify(r)));
-  for (const c of clients) {
-    if (isGatewayId(c.username)) roles.push(gatewayRole(c.username));
-  }
-  const generated = new Set(roles.map((r) => r.rolename));
+  const roles = policy.roles.map(pluginRole);
+  const declared = new Set(roles.map((r) => r.rolename));
   for (const r of stored.roles || []) {
-    if (generated.has(r.rolename)) continue;
-    // A role for a gateway that no longer has a client: regenerated from the id so a client re-created
-    // by hand still confines, and never deleted, because deleting a role in use took the broker down.
-    if (isGatewayRoleName(r.rolename)) {
-      roles.push(gatewayRole(r.rolename.slice(GATEWAY_ROLE_PREFIX.length)));
-    } else {
-      roles.push(r);
+    if (declared.has(r.rolename)) continue;
+    if (isRetiredGatewayRoleName(r.rolename)) {
+      report.retiredRoles.push(r.rolename);
+      continue;
     }
-    generated.add(r.rolename);
+    roles.push(r);
+    declared.add(r.rolename);
   }
 
   const config = {
@@ -306,19 +319,16 @@ export function controlArgv({ host, port, username, password, timeoutSeconds = 5
   ];
 }
 
-// The commands that issue a gateway's account: its role, then the client holding both roles.
-// Idempotent through the replies: "already exists" is the signal to fall back to setClientPassword
-// and enableClient.
-export function issueCommands(sparkplugId, password) {
-  return [
-    { command: 'createRole', ...gatewayRole(sparkplugId) },
-    {
-      command: 'createClient',
-      username: sparkplugId,
-      password,
-      roles: gatewayRoleNames(sparkplugId).map((rolename) => ({ rolename })),
-    },
-  ];
+// The command that issues a gateway's account: a client holding the gateway role. Idempotent through
+// the reply: "already exists" is the signal to fall back to setClientPassword and enableClient.
+export function issueCommand(sparkplugId, password) {
+  assertGatewayId(sparkplugId);
+  return {
+    command: 'createClient',
+    username: sparkplugId,
+    password,
+    roles: [{ rolename: GATEWAY_SHARED_ROLE }],
+  };
 }
 
 // Whether a response is the plugin refusing with the given text.
@@ -334,17 +344,12 @@ export function assertOk(response) {
   return response || {};
 }
 
-// Issue through `send`, a function taking one command and returning its response. Creates the role
-// and the client; when the client exists already, sets its password first (a rotation that fails
-// part-way has still rotated), enables it, and makes sure it holds both roles. `replaced` says which
-// path was taken. Shared by the service and the operator CLI so the two cannot differ on the fallback.
+// Issue through `send`, a function taking one command and returning its response. Creates the
+// client; when it exists already, sets its password first (a rotation that fails part-way has still
+// rotated), enables it, and makes sure it holds the gateway role. `replaced` says which path was
+// taken. Shared by the service and the operator CLI so the two cannot differ on the fallback.
 export function issueWithControl(send, sparkplugId, password) {
-  const [roleCommand, clientCommand] = issueCommands(sparkplugId, password);
-
-  const role = send(roleCommand);
-  if (!isRefusal(role, 'already exists')) assertOk(role);
-
-  const created = send(clientCommand);
+  const created = send(issueCommand(sparkplugId, password));
   if (!isRefusal(created, 'already exists')) {
     assertOk(created);
     return { replaced: false };
@@ -354,10 +359,9 @@ export function issueWithControl(send, sparkplugId, password) {
   assertOk(send({ command: 'enableClient', username: sparkplugId }));
 
   const current = assertOk(send({ command: 'getClient', username: sparkplugId }));
-  const held = new Set((current.data?.client?.roles || []).map((r) => r.rolename));
-  for (const rolename of gatewayRoleNames(sparkplugId)) {
-    if (held.has(rolename)) continue;
-    assertOk(send({ command: 'addClientRole', username: sparkplugId, rolename }));
+  const held = (current.data?.client?.roles || []).map((r) => r.rolename);
+  if (!held.includes(GATEWAY_SHARED_ROLE)) {
+    assertOk(send({ command: 'addClientRole', username: sparkplugId, rolename: GATEWAY_SHARED_ROLE }));
   }
   return { replaced: true };
 }

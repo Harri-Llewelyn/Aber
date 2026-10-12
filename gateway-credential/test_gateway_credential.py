@@ -61,8 +61,8 @@ TEST_GW = "gwy2f0000000000400080000"
 def delete_client(username):
     """
     Remove an account from the plugin, through the service container's own admin credential. The
-    service never deletes, so this is the one place a delete is spoken; the per-gateway role is
-    left where it is, because deleting a role a client holds took the broker down when measured.
+    service never deletes, so this is the one place a delete is spoken. No role is left behind: a
+    gateway's account holds the shared gateway role alone.
     """
     stack_exec.run(
         "credential", "sh", "-c",
@@ -243,9 +243,9 @@ class TestIssuance(CredentialServiceBase):
             self.assertIn(account, after, f"issuing a credential LOST the account {account}")
         self.assertEqual(set(after), set(before) | {TEST_GW})
 
-        # Both roles, so the account is confined to its own edge node and can subscribe.
+        # The gateway role alone: its %u rules confine the account to its own edge node.
         entry = client_entry(TEST_GW)
-        self.assertEqual(set(entry["roles"]), {"gateway", f"gateway-{TEST_GW}"})
+        self.assertEqual(set(entry["roles"]), {"gateway"})
         self.assertFalse(entry["disabled"])
 
         # And it is a real credential. Published over MQTTS on 8883 under its OWN edge node, which
@@ -327,6 +327,9 @@ class TestInventory(CredentialServiceBase):
         self.assertIn("aber_ingestion", [c["username"] for c in payload["clients"]])
         gateway_role = next(r for r in payload["roles"] if r["rolename"] == "gateway")
         self.assertTrue(any(a["topic"] == "spBv1.0/#" for a in gateway_role["acls"]))
+        self.assertTrue(any(a["topic"] == "spBv1.0/+/+/%u/#" for a in gateway_role["acls"]))
+        # The boot reconcile retired the roles generated per gateway, and issuing makes none.
+        self.assertEqual([r["rolename"] for r in payload["roles"] if r["rolename"].startswith("gateway-")], [])
 
 
 class TestCertificateAuthority(CredentialServiceBase):

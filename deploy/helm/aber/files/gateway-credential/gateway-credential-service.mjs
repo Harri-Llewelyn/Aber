@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The broker credential service: the authority to issue and revoke gateway accounts, kept out of the
 // edge worker that enrols them and behind four verbs that name a gateway and nothing else:
-//   POST /credentials   issue (or re-issue) one gateway's account: its role, the client, a password
+//   POST /credentials   issue (or re-issue) one gateway's account: the client and a password
 //   POST /revocations   disable one gateway's account, which disconnects its live session
 //   GET  /clients       the broker's own list of clients and roles, for the Access Control page
 //   GET  /ca            the root the broker presents, its dates, and its public key's pin

@@ -354,7 +354,7 @@ describe('AccessControlTab', () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     api.listBrokerInventory.mockResolvedValue({
       clients: [
-        { username: 'gwy110000000000400080000', roles: ['gateway', 'gateway-gwy110000000000400080000'], disabled: false },
+        { username: 'gwy110000000000400080000', roles: ['gateway'], disabled: false },
         { username: 'gwy999999999999999999999', roles: ['gateway'], disabled: false },
       ],
       roles: [],
@@ -676,9 +676,40 @@ describe('AccessControlTab', () => {
     expect(screen.getByText('monitor', { selector: 'td' })).toBeTruthy()
     expect(screen.getByText('admin', { selector: 'td' })).toBeTruthy()
     expect(screen.getByText('gateway', { selector: 'td' })).toBeTruthy()
-    // With no live inventory the writes flag is the declared fallback: ingestion and admin publish.
-    expect(screen.getAllByText('CAN PUBLISH').length).toBe(2)
-    expect(screen.getAllByText('READ ONLY').length).toBe(3)
+    // With no live inventory the writes flag is the declared fallback: ingestion, admin and every
+    // gateway, under its own edge node, publish.
+    expect(screen.getAllByText('CAN PUBLISH').length).toBe(3)
+    expect(screen.getAllByText('READ ONLY').length).toBe(2)
+  })
+
+  /** One role confines every gateway, so the drawer says what its %u is. */
+  it('shows the gateway role’s %u rules and says whose username %u is', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [
+        { username: 'gwy120000000000400080000', roles: ['gateway'], disabled: false },
+        { username: 'gwy130000000000400080000', roles: ['gateway'], disabled: false },
+      ],
+      roles: [{
+        rolename: 'gateway',
+        acls: [
+          { acltype: 'subscribePattern', topic: 'spBv1.0/#', allow: true },
+          { acltype: 'publishClientReceive', topic: 'spBv1.0/STATE/#', allow: true },
+          { acltype: 'publishClientSend', topic: 'spBv1.0/+/+/%u/#', allow: true },
+          { acltype: 'publishClientReceive', topic: 'spBv1.0/+/+/%u/#', allow: true },
+        ],
+      }],
+    })
+    await renderTab('Broker roles')
+
+    await waitFor(() => expect(roleRow('gateway').className).toContain('row-selectable'))
+    expect(within(roleRow('gateway')).getByText('CAN PUBLISH')).toBeTruthy()
+    fireEvent.click(roleRow('gateway').firstElementChild)
+    const panel = await screen.findByRole('complementary', { name: 'gateway role' })
+    expect(within(panel).getAllByText('spBv1.0/+/+/%u/#').length).toBe(2)
+    expect(within(panel).getByText('2 accounts')).toBeTruthy()
+    expect(within(panel).getByText(/%u is the account’s own username/)).toBeTruthy()
+    expect(within(panel).queryByText(/gateway-</)).toBeNull()
   })
 
   const LIVE_ROLES = {

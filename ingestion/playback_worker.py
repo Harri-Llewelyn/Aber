@@ -25,9 +25,8 @@ that cannot make a new decision.
 
 Related: supabase/migrations/archive/0056_playback_orchestration.sql (every gate called here),
          capture.py (the plan, the identity rewrite, the rebasing),
-         README.md -> "Playback from the dashboard" (the three tiers of confinement, why the
-         per-gateway role is generated rather than a pattern, and what a failed playback looks
-         like).
+         README.md -> "Playback from the dashboard" (the three tiers of confinement, how one %u
+         rule confines every gateway, and what a failed playback looks like).
 """
 
 import json
