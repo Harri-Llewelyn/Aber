@@ -303,7 +303,8 @@ Measured on 2.29.2, with the shipped settings (raw chunks compressed after 12 ho
 The refresh rebuilds every series in the window, so a window costs the same however little of it
 the replay holds; the cost grows with the fleet.
 If a window was not recorded, `docs/remote-gateways.md` ("Late data after an outage") gives the
-refresh to run by hand.
+refresh to run by hand, and Grafana's *Late Replay Missing From the Rollups* fires. The restore
+rehearsal asserts the job is registered and scheduled after a restore; a dump carries it.
 
 **`telemetry_gapfill()` carries the last observation forward.** Under report-by-exception a metric
 that has not changed publishes nothing, so the aggregates emit one bucket in sixty for a steady
