@@ -12,9 +12,9 @@ the credential service and persisted by the plugin in `/mosquitto/data/dynamic-s
 [`mosquitto.conf`](mosquitto.conf) is the listener policy and [`mosquitto-tls.conf`](mosquitto-tls.conf)
 the optional MQTTS listener; the chart's initContainer assembles the two, and rebinds 1883 to
 loopback once no client outside the broker's pod dials it. The document is the only copy of every
-issued account, so the backup service archives the broker's volume (`backup.includeBroker`) and
-the weekly restore rehearsal puts it back; `supabase/README.md`, "Backup and Recovery", is the
-runbook.
+issued account, so the backup service archives the broker's volume when `backup.includeBroker` is
+on (it is off by default) and the weekly restore rehearsal puts it back; `supabase/README.md`,
+"Backup and Recovery", is the runbook.
 
 `scripts/check-broker-config.mjs` starts this policy on the pinned image and asserts everything
 below by delivery. A config that starts is not a config that is safe.
