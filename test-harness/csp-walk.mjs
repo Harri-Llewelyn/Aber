@@ -191,15 +191,17 @@ async function launch () {
       if (m) { clearTimeout(timer); resolveEndpoint(m[1]) }
     })
     chrome.on('exit', (code) => reject(new Error(`Chrome exited (${code}):\n${stderr.slice(-1500)}`)))
-  }).catch((e) => die(e.message))
+  }).catch((e) => { chrome.kill(); die(e.message) })
   const ws = new WebSocket(endpoint)
   await new Promise((r, reject) => { ws.onopen = r; ws.onerror = () => reject(new Error(`could not connect to ${endpoint}`)) })
-    .catch((e) => die(e.message))
-  const close = () => {
+    .catch((e) => { chrome.kill(); die(e.message) })
+  const close = async () => {
     try { ws.close() } catch { /* already closed */ }
+    const exited = new Promise((r) => { chrome.once('exit', r); setTimeout(r, 5000) })
     chrome.kill()
-    // Chrome holds the profile for a moment after the kill on Windows.
-    setTimeout(() => { try { rmSync(profile, { recursive: true, force: true }) } catch { /* left in tmp */ } }, 1000)
+    await exited
+    // Chrome's child processes hold the profile for a moment after it exits on Windows.
+    try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }) } catch { /* left in tmp */ }
   }
   return { ws, close }
 }
@@ -473,7 +475,7 @@ try {
 } catch (e) {
   problems.push(`${current}: ${e.message}`)
 } finally {
-  close()
+  await close()
 }
 
 // ---------------------------------------------------------------------------------------------
