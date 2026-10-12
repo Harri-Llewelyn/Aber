@@ -22,6 +22,7 @@ import re
 import unittest
 
 import psycopg2
+from psycopg2 import sql
 
 DB_HOST = os.getenv("SUPABASE_DB_HOST", os.getenv("DB_HOST", "localhost"))
 DB_PORT = os.getenv("SUPABASE_DB_PORT", os.getenv("DB_PORT", "54322"))
@@ -35,6 +36,19 @@ CALL = re.compile(
     r"(.*)\n\$ddl\$(?:, p_stated_by => '([^']+)')?\);$",
     re.M,
 )
+LIVE = {
+    "policy": "SELECT public.live_policy_statement(%s::regclass, %s)",
+    "trigger": "SELECT public.live_trigger_statement(%s::regclass, %s)",
+}
+ON_PROBE = {
+    "policy": "SELECT public.replay_policy('public.replay_probe', %s, %s)",
+    "trigger": "SELECT public.replay_trigger('public.replay_probe', %s, %s)",
+}
+DROP = {"policy": sql.SQL("DROP POLICY {} ON {}"), "trigger": sql.SQL("DROP TRIGGER {} ON {}")}
+
+
+def drop(cur, kind, table, name):
+    cur.execute(DROP[kind].format(sql.Identifier(name), sql.Identifier(*table.split("."))))
 
 
 def calls():
@@ -85,7 +99,7 @@ class ReplayTestCase(unittest.TestCase):
         self.conn.close()
 
     def live(self, kind, table, name):
-        self.cur.execute(f"SELECT public.live_{kind}_statement(%s::regclass, %s)", (table, name))
+        self.cur.execute(LIVE[kind], (table, name))
         return self.cur.fetchone()[0]
 
     def replay(self, call):
@@ -155,7 +169,7 @@ class AStalePolicyIsPutBack(ReplayTestCase):
                 with self.subTest(policy=c["name"], part=part):
                     self.assertNotEqual(changed, c["statement"], "the mutation changed nothing")
                     self.cur.execute("SAVEPOINT each")
-                    self.cur.execute(f"DROP POLICY {self.quote(c['name'])} ON {c['table']}")
+                    drop(self.cur, "policy", c["table"], c["name"])
                     self.cur.execute(changed)
                     self.assertNotEqual(self.live("policy", c["table"], c["name"]), c["statement"])
                     notices = self.replay(c)
@@ -165,14 +179,10 @@ class AStalePolicyIsPutBack(ReplayTestCase):
 
     def test_a_missing_policy_is_created(self):
         c = self.stated[("policy", "public.areas", "areas_select_authenticated")]
-        self.cur.execute(f"DROP POLICY {c['name']} ON {c['table']}")
+        drop(self.cur, "policy", c["table"], c["name"])
         notices = self.replay(c)
         self.assertEqual(self.live("policy", c["table"], c["name"]), c["statement"])
         self.assertTrue(any(n.rstrip().endswith("created") for n in notices), notices)
-
-    def quote(self, name):
-        self.cur.execute("SELECT quote_ident(%s)", (name,))
-        return self.cur.fetchone()[0]
 
 
 class AStaleTriggerIsPutBack(ReplayTestCase):
@@ -184,15 +194,17 @@ class AStaleTriggerIsPutBack(ReplayTestCase):
             timing = re.sub(r"^(CREATE TRIGGER \S+) (BEFORE|AFTER) ",
                             lambda m: f"{m.group(1)} {'AFTER' if m.group(2) == 'BEFORE' else 'BEFORE'} ",
                             c["statement"], count=1)
+            table, name = sql.Identifier(*c["table"].split(".")), sql.Identifier(c["name"])
             changes = {
-                "disabled": f"ALTER TABLE {c['table']} DISABLE TRIGGER {c['name']}",
-                "replica": f"ALTER TABLE {c['table']} ENABLE REPLICA TRIGGER {c['name']}",
-                "timing": f"DROP TRIGGER {c['name']} ON {c['table']}; {timing}",
+                "disabled": [sql.SQL("ALTER TABLE {} DISABLE TRIGGER {}").format(table, name)],
+                "replica": [sql.SQL("ALTER TABLE {} ENABLE REPLICA TRIGGER {}").format(table, name)],
+                "timing": [DROP["trigger"].format(name, table), timing],
             }
-            for part, sql in changes.items():
+            for part, statements in changes.items():
                 with self.subTest(trigger=c["name"], part=part):
                     self.cur.execute("SAVEPOINT each")
-                    self.cur.execute(sql)
+                    for statement in statements:
+                        self.cur.execute(statement)
                     self.assertNotEqual(self.live("trigger", c["table"], c["name"]), c["statement"])
                     notices = self.replay(c)
                     self.assertEqual(self.live("trigger", c["table"], c["name"]), c["statement"])
@@ -210,7 +222,7 @@ class TheComparison(ReplayTestCase):
 
     def call(self, name, statement, kind="policy"):
         del self.conn.notices[:]
-        self.cur.execute(f"SELECT public.replay_{kind}('public.replay_probe', %s, %s)", (name, statement))
+        self.cur.execute(ON_PROBE[kind], (name, statement))
         return list(self.conn.notices)
 
     def test_each_form_pg_dump_writes_matches_once_created(self):
