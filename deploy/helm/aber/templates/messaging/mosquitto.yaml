@@ -3,6 +3,16 @@
 {{- $secretName := include "aber.secretName" . -}}
 {{- $fullname := include "aber.fullname" . -}}
 {{- $conf := .Files.Get "files/mosquitto/mosquitto.conf" -}}
+{{- /* The packet ceiling is the one line of mosquitto.conf a site sets. Mosquitto refuses a value
+     under 20, and MQTT cannot encode a packet over 268435456. */ -}}
+{{- $maxPacket := .Values.mosquitto.maxPacketSize | int -}}
+{{- if or (lt $maxPacket 20) (gt $maxPacket 268435456) }}
+{{- fail (printf "\n\naber: mosquitto.maxPacketSize is %v. It must be a whole number of bytes from 20 to 268435456 (16777216 is the default).\n" .Values.mosquitto.maxPacketSize) }}
+{{- end }}
+{{- if and $conf (not (regexMatch "(?m)^max_packet_size [0-9]+$" $conf)) }}
+{{- fail "\n\naber: files/mosquitto/mosquitto.conf has no single `max_packet_size <bytes>` line for mosquitto.maxPacketSize to replace.\n" }}
+{{- end }}
+{{- $conf = regexReplaceAll "(?m)^max_packet_size [0-9]+$" $conf (printf "max_packet_size %d" $maxPacket) -}}
 {{- $roles := .Files.Get "files/mosquitto/dynsec-roles.json" -}}
 {{- $tlsConf := .Files.Get "files/mosquitto/mosquitto-tls.conf" -}}
 {{- $init := .Files.Get "files/gateway-credential/mosquitto-dynsec-init.mjs" -}}

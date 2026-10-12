@@ -942,6 +942,10 @@ mosquitto:
     # false and `tls.internalClients` on, nothing outside the broker's pod dials 1883 and the
     # listener binds to loopback.
     plaintext: true
+  # The largest MQTT packet any client may send, in bytes (16 MiB). A larger one is refused and the
+  # client is disconnected; a gateway that resends it on reconnect never births. The broker holds
+  # each packet in memory whole, so keep it well under `resources.limits.memory`. 20 at least.
+  maxPacketSize: 16777216
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { memory: 256Mi }

@@ -131,6 +131,32 @@ function principalMismatch(chart, platform) {
   }
 }
 
+// -------------------------------------------------------------------------------------------------
+// The packet ceiling is one line of mosquitto.conf that the chart replaces from
+// mosquitto.maxPacketSize. This check boots the file as it stands, so the file's line must be the
+// chart's default, and the template must still replace that line. Read from source.
+// -------------------------------------------------------------------------------------------------
+const CONF_SOURCE = 'mosquitto/mosquitto.conf';
+const BROKER_TEMPLATE = 'deploy/helm/aber/templates/messaging/mosquitto.yaml';
+const CEILING = Number(/^max_packet_size (\d+)$/m.exec(readFileSync(join(REPO, CONF_SOURCE), 'utf8'))?.[1] || NaN);
+{
+  const values = readFileSync(join(REPO, 'deploy', 'helm', 'aber', 'values.yaml'), 'utf8');
+  const block = values.slice(values.search(/^mosquitto:\s*$/m)).split(/\n(?=\S)/)[0];
+  const chartDefault = Number(/^ {2}maxPacketSize:\s*(\d+)\s*$/m.exec(block)?.[1] || NaN);
+  const template = readFileSync(join(REPO, BROKER_TEMPLATE), 'utf8');
+  const replaces = template.includes('.Values.mosquitto.maxPacketSize')
+    && template.includes('regexReplaceAll "(?m)^max_packet_size [0-9]+$" $conf');
+  if (!Number.isInteger(CEILING)) {
+    problems.push(`${CONF_SOURCE} has no single \`max_packet_size <bytes>\` line; the chart's render fails without one`);
+  } else if (CEILING !== chartDefault) {
+    problems.push(`${CONF_SOURCE} sets max_packet_size ${CEILING} and mosquitto.maxPacketSize defaults to ${chartDefault}; this check would boot a ceiling the chart does not ship`);
+  } else if (!replaces) {
+    problems.push(`${BROKER_TEMPLATE} no longer replaces the max_packet_size line from mosquitto.maxPacketSize`);
+  } else {
+    ok.push(`mosquitto.conf's packet ceiling (${CEILING} bytes) is the chart's mosquitto.maxPacketSize default, and the chart replaces it`);
+  }
+}
+
 /**
  * Without Docker only the principal-list check has run: its result decides the exit status, and the
  * broker is reported as not verified.
@@ -668,6 +694,34 @@ try {
         problems.push('the plugin\'s admin can read $SYS; its role must grant $CONTROL/dynamic-security/# and nothing else');
       } else {
         ok.push('the plugin\'s admin cannot read $SYS');
+      }
+
+      // The packet ceiling, at its edge: an NBIRTH whose MQTT 3.1.1 packet is exactly the ceiling
+      // is delivered, one byte more is refused with the publisher disconnected, and the broker says
+      // so in its log. Mosquitto refuses when the remaining length + 1 exceeds max_packet_size.
+      if (Number.isInteger(CEILING)) {
+        const birth = `spBv1.0/Aber/NBIRTH/${GATEWAY_A}`;
+        const largest = CEILING - 1 - 2 - birth.length;
+        const sized = (bytes) => {
+          docker(['exec', r.name, 'sh', '-c', `rm -f /tmp/big /tmp/big.out; head -c ${bytes} /dev/zero > /tmp/big`]);
+          docker(['exec', '-d', r.name, 'sh', '-c',
+            `mosquitto_sub -u aber_ingestion -P ${ACCOUNTS.aber_ingestion} -t '${birth}' -C 1 -W 15 -N > /tmp/big.out 2>/dev/null`]);
+          docker(['exec', r.name, 'sleep', '1']);
+          docker(['exec', r.name, 'mosquitto_pub', '-u', GATEWAY_A, '-P', ACCOUNTS[GATEWAY_A], '-t', birth, '-f', '/tmp/big']);
+          for (let i = 0; i < 15; i += 1) {
+            if ((docker(['exec', r.name, 'sh', '-c', 'pgrep mosquitto_sub >/dev/null || echo done']).stdout || '').includes('done')) break;
+            docker(['exec', r.name, 'sleep', '1']);
+          }
+          const got = Number((docker(['exec', r.name, 'sh', '-c', 'wc -c < /tmp/big.out']).stdout || '').trim() || 0);
+          docker(['exec', r.name, 'sh', '-c', 'pkill mosquitto_sub; rm -f /tmp/big /tmp/big.out; true']);
+          return got === bytes;
+        };
+        expect(`an NBIRTH exactly at the packet ceiling (${CEILING} bytes) is delivered`, sized(largest), true);
+        const refusedBefore = (docker(['logs', r.name]).stderr + docker(['logs', r.name]).stdout).split('oversize packet').length;
+        expect('an NBIRTH one byte over the packet ceiling is refused', sized(largest + 1), false);
+        const refusedAfter = (docker(['logs', r.name]).stderr + docker(['logs', r.name]).stdout).split('oversize packet').length;
+        if (refusedAfter > refusedBefore) ok.push('the broker logs the refusal ("disconnected: oversize packet")');
+        else problems.push('the broker refused the oversized NBIRTH without logging "oversize packet"; an operator would have nothing to find');
       }
 
       // 6. The control API, driven as the credential service drives it: mosquitto_rr, one command

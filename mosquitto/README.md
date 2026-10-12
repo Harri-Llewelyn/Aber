@@ -136,14 +136,25 @@ tags, and `renovate.json` proposes the next one.
   restarts lost nothing and the broker's peak working set did not move (measured on 2.0.22,
   [`test-harness/README.md`, "Restarts under load"](../test-harness/README.md#restarts-under-load)).
   It is a queue for a client that is connected, not a session, so the host's clean session stands.
-- **A client may send any packet MQTT can encode**, as on 2.0.22 (`max_packet_size 268435456` in
-  `mosquitto.conf`). 2.1 lowered the default to 2,000,000 bytes. At that default a 3,000,000-byte
-  publish cost the publisher its connection, with "oversize packet" in the broker's log and nothing
-  said to a QoS 0 publisher. The largest MQTT 3.1.1 payload on a one-letter topic, 268,435,452
-  bytes, was delivered by 2.0.22 at its defaults and by 2.1.2 at this setting. At 268435455 it was
-  refused, because Mosquitto compares the remaining length plus one. The pod's memory limit
-  (`mosquitto.resources`, 256 Mi by default) is far below that ceiling, so memory is the practical
-  bound on one message, as it always was.
+- **No client may send a packet over 16 MiB** (`max_packet_size 16777216`, which the chart sets
+  from `mosquitto.maxPacketSize`). The broker holds each packet in memory whole, and its pod's limit
+  is 256 Mi, so the MQTT maximum of 256 MiB that 2.0.22 allowed meant one oversized message from any
+  signed-in client could take the broker down. 2.1's own default is 2,000,000 bytes, which a large
+  DBIRTH could exceed. Mosquitto refuses a packet when its remaining length plus one exceeds the
+  setting:
+  - an MQTT 3.1.1 NBIRTH whose packet is exactly 16,777,216 bytes is delivered; one byte more is
+    refused, the publisher is disconnected, and the broker logs `disconnected: oversize packet`.
+    An MQTT 5 PUBLISH carries one more byte of properties, so its payload ceiling is one byte lower;
+  - the client learns nothing at QoS 0 but a dropped connection, and the broker publishes its will,
+    so ingestion sees an NDEATH;
+  - a client that resends the message on reconnect, as a gateway resends its birth, never births.
+    MQTT.js 5.15.2 (Node-RED's) reconnected each period and was refused each time, over 3.1.1 and
+    5. paho 1.6.1 restarts its back-off after every accepted CONNECT, so it reconnected about once
+    a second (39 and 40 refusals in 40 s, over 3.1.1 and 5). The broker stayed up throughout.
+
+  To accept larger messages, raise `mosquitto.maxPacketSize` and the broker's memory limit with it.
+  `check-broker-config.mjs` asserts both edges and the log line, and that `mosquitto.conf`'s line is
+  the chart's default.
 - **`allow_duplicate_messages` is now on by default**, so a client whose subscriptions overlap
   receives a copy per matching subscription. No platform client's subscriptions overlap: ingestion
   and i3X subscribe once to `spBv1.0/#`, `validate.py` to `spBv1.0/+/NCMD/+` and `spBv1.0/STATE/#`
