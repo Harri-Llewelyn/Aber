@@ -41,8 +41,9 @@ folded into that map would be installed on every appliance in the fleet.
 
 ## Provisioning the server
 
-[`scripts/gitea-init.sh`](../scripts/gitea-init.sh) runs in the chart's initContainer before the
-Gitea server starts, from a mirror `scripts/sync-helm-chart-files.mjs` keeps identical to it. It
+[`scripts/gitea-init.sh`](../scripts/gitea-init.sh) runs in the chart's two init containers before
+the Gitea server starts (`gitea-init`, then `gitea-token` for the machine account's token), from a
+mirror `scripts/sync-helm-chart-files.mjs` keeps identical to it. It
 is provisioning policy, which accounts exist and what they may do, and policy that lives in two
 hand-copied shell blocks drifts; the same arrangement `node-red-init.mjs` has, for the same reason.
 
@@ -56,19 +57,33 @@ as `git` through `su-exec`: the setup script chowns `/data` to the `git` user, w
 reason the server can read what this wrote, and every gitea command after it runs as that user so
 nothing in the database or the repository tree ends up owned by root.
 
-**Two accounts, and the second one is the point.** The administrator exists because
-`INSTALL_LOCK` closes the web installer: a forge on a plant network would otherwise be one HTTP
-request away from anybody making themselves its admin. It is for a human, rarely. The machine
-account is what the platform authenticates as, and it is deliberately not an admin: it owns the
-per-gateway repositories, which is all the authority it needs to create one and attach a deploy key
-and branch rules to it. An admin token would be able to read and rewrite every repository in the
-forge, including the playbook the whole fleet converges to, and it would be held by an edge
-function reachable from the network. The machine account is optional, and its absence is a
-deployment without the forge integration rather than a broken one: `enroll-gateway` creates a
-gateway's repository and registers its deploy key only when it holds these same credentials, so
-unset at both ends means enrolment behaves exactly as it did before the forge existed, and says so
-in its response. Setting the password at one end and not the other is the case worth being loud
-about, so the platform logs what it could not reach rather than silently skipping.
+**Two accounts: an administrator and a bot.** The administrator exists because `INSTALL_LOCK`
+closes the web installer: a forge on a plant network would otherwise be one HTTP request away from
+anybody making themselves its admin. It is for a human, rarely. The machine account,
+`gitea.machineUser` (`aber_platform`), is what the platform authenticates as. It is a Gitea **bot**,
+and deliberately not an admin: it owns the per-gateway repositories, which is all the authority it
+needs to create one and attach a deploy key and branch rules to it. An admin token would be able to
+read and rewrite every repository in the forge, including the playbook the whole fleet converges
+to, and it would be held by an edge function reachable from the network.
+
+A bot is the narrowest account Gitea 28 has for this, measured against `gitea/gitea:28.0.0`:
+
+- **It holds no password.** `gitea admin user create --user-type bot` refuses one, and so does
+  `change-password`. An account an earlier release made as a person, with a password, is converted
+  in place by `gitea admin user change-type`, and its stored password then answers 401.
+- **Nothing signs it in to the web UI.** A reverse-proxy header naming it gets the sign-in page,
+  even from the forge's own loopback, and a site admin cannot impersonate it.
+- **Its only credential is one scoped token**, below. `GET /api/v1/user` answers `"type": "Bot"`.
+
+The script acts only after checking the account's type in Gitea's database: absent, it creates the
+bot; a person (`type` 0), it converts it; a bot (`type` 4), it leaves it alone; anything else stops
+the forge, with a message. A site administrator cannot become a bot, so an account someone made one
+stops the forge the same way.
+
+The machine account is optional, and its absence is a deployment without the forge integration
+rather than a broken one: `gitea.machineUser: ""` creates no account and mints no token, and the
+functions pod is given no forge variables, so `enroll-gateway` enrols exactly as it did before the
+forge existed and says so in its response.
 
 **Idempotent by inspection, not by `|| true`.** Creating an account that already exists is the
 ordinary state of every boot after the first and exits non-zero; every other non-zero exit, an
@@ -108,6 +123,92 @@ sshd will present. A missing key is not fatal: a forge with no host key still se
 dashboard, the proposals and every existing appliance are unaffected. What is lost is new
 appliances, which enrol with no `known_hosts` entry and decline to converge rather than trusting an
 unverified forge, and the script says so because nothing else would.
+
+## The machine account's token
+
+Every call the platform makes to the forge carries one Gitea access token, named `aber-platform`,
+with four scopes. The forge mints it when it starts, and the edge runtime reads it from a file. This
+section is for an operator who rotates it or is reading why a forge call failed.
+
+### Rotating it
+
+Empty the Secret and restart the forge:
+
+```bash
+kubectl -n aber patch secret aber-forge-token --type merge -p '{"data":{"token":""}}'
+kubectl -n aber rollout restart deploy/gitea
+```
+
+The forge's next start deletes the old token, mints a new one and writes it into the Secret. The old
+token stops working at once (measured: 401). The functions pod reads the new one within about a
+minute; until then each forge call is skipped and logged as `the forge's token has not been
+delivered yet`. The Secret is `<release>-forge-token`, so `aber-forge-token` for a release named
+`aber`.
+
+Gitea 28's in-place regeneration (go-gitea/gitea#38907) does not reach this token. It is a web-UI
+action on your own tokens, and nobody can sign in as a bot or impersonate one (measured: 404 for
+another account's token, 400 for impersonating the bot).
+
+### The scopes
+
+`write:organization,write:issue,write:repository,read:user`, in the order Gitea normalises them to.
+Each was measured by driving the platform's own calls (`_shared/forge.ts`, `forge-membership`,
+`forge-sweep`, `forge-events`, `enroll-gateway`) against `gitea/gitea:28.0.0` with a token lacking it:
+
+| Scope | What needs it | Without it |
+| :--- | :--- | :--- |
+| `write:organization` | The `gateways` and `platform` organisations, their teams, every seat placed or removed, the repository listing | `POST /orgs` answers 403 with `read:organization`; `GET /orgs/gateways` with neither |
+| `write:repository` | Repositories, branch rules, deploy keys, the push webhook, commits, tags, commit statuses, the archive mark, raw reads | `POST /orgs/gateways/repos` answers 403 with `read:repository` |
+| `write:issue` | The *Incident* label enrolment creates | `POST /repos/…/labels` answers 403 |
+| `read:user` | Looking up a person's forge login before seating them | `GET /users/{name}` answers 403 |
+
+Everything else is refused. `test_forge_sweep.py` asserts two of the refusals: adding an SSH key to
+the account (`write:user`) and listing the site's users (`read:admin`). A refused call answers 403
+naming the scope it needed. A change that needs another scope adds it to `TOKEN_SCOPES` in
+[`scripts/gitea-init.sh`](../scripts/gitea-init.sh), in Gitea's order; the next forge start sees
+different scopes and mints a new token.
+
+### How it reaches the functions
+
+1. `gitea-init` makes the account a bot, as above.
+2. `gitea-token`, the pod's second init container, gives it its token. It runs as `git` with a
+   read-only root filesystem and no capabilities, and it is the only container in the pod holding a
+   ServiceAccount token. It reads the Secret through the API, and the `access_token` row named
+   `aber-platform` from Gitea's database.
+3. **It keeps the token** when the forge holds one under that name, with the same scopes, ending in
+   the same eight characters. Gitea stores only a hash and those eight, and the server has not
+   started yet, so that is as far as a check reaches. Otherwise it deletes the row by name, mints
+   with `gitea admin user generate-access-token --raw --scopes …`, and patches the Secret.
+4. The Role `<release>-gitea` grants `get` and `patch` on that one Secret. A Role cannot restrict
+   `create` by name, so the chart creates the Secret, empty, and carries its value through
+   `helm upgrade` with `lookup`, as the playback delivery Secret is. `resource-policy: keep` keeps it
+   through an uninstall. A render without the cluster (`helm template`, a GitOps tool) writes it
+   empty, and the forge mints a new token on its next start.
+5. The functions pod mounts the Secret at `/home/deno/forge`, marked optional so the pod starts
+   before it holds anything. `main/index.ts` reads the file at each worker spawn and hands the
+   forge functions `GITEA_MACHINE_TOKEN`. A file and not an environment variable, because the
+   kubelet refreshes a mounted Secret and never an environment variable.
+6. Under `networkPolicy.enabled` the forge pod joins the API-server egress policy.
+
+### When the token is missing
+
+- **An install or an upgrade.** The functions pod can start before the forge has minted the token.
+  For that minute or two, enrolment completes without a repository (enrol the appliance again), the
+  sweep answers 503 and is asked again within fifteen minutes, and the door lets people in with the
+  seats they already hold. It ends without a restart.
+- **An upgrade from 1.3.0.** A 1.3.0 functions pod still running sends the old password, which the
+  converted account refuses with 401, until the rollout replaces it.
+- **The API server cannot be reached.** `gitea-token` retries for a minute, then fails, and the
+  forge does not start until it can. The pod retries on its own. A 401, 403 or 404 fails at once:
+  the Role or the Secret is missing.
+- **A Gitea upgrade.** The script reads `user.type` and `access_token`'s `uid`, `name`,
+  `token_last_eight` and `scope` with the image's `sqlite3`, and deletes `access_token` rows by
+  `uid` and `name`. A Gitea release that moves them stops the forge with the failing statement in
+  the log, which the upgrade's own test run meets first.
+
+The conversion is in the audit log (`user:type:update`, actor `(gitea-cli)`); minting the token is
+not, because the CLI's `generate-access-token` records nothing. Every event the platform causes
+carries `actor_credential: access-token:<id>`, which names the token it used.
 
 ## The audit log
 

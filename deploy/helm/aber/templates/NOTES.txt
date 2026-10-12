@@ -130,6 +130,12 @@ if these are missing the PVC must be destroyed, not the pod restarted):
      db-init are all derived from it. Set it and upgrade — db-init is a post-upgrade hook, so it
      re-registers both OAuth clients in the same operation.
 {{- end }}
+{{- if .Values.secrets.giteaMachinePassword }}
+
+  ⚠  secrets.giteaMachinePassword is DEPRECATED and nothing reads it. Since 1.4.0 the forge's
+     machine account is a bot that holds a token the forge mints itself (forge/README.md). Remove
+     the key from your values; it goes away in 2.0.
+{{- end }}
 {{- if .Values.ingestion.allowHistorianSuperuser }}
 
   ⚠  ingestion.allowHistorianSuperuser is on. If ingestion.dbUser is a superuser, the ingestion

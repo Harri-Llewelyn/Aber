@@ -1,0 +1,72 @@
+{{- $tokenSecret := include "aber.forgeTokenSecretName" . -}}
+{{- if $tokenSecret }}
+{{- $fullname := include "aber.fullname" . -}}
+{{/*
+=================================================================================================
+THE PLATFORM'S FORGE TOKEN: the Secret it lives in, and the one identity allowed to write it.
+
+The machine account is a bot, so it has no password and Gitea mints its credential. The gitea pod's
+gitea-token init container mints it with `gitea admin user generate-access-token` and patches it in
+here through the API; the edge runtime mounts this Secret and reads the file at each spawn.
+forge/README.md, "The machine account's token", has the reasoning and the rotation recipe.
+
+`get` and `patch` on this Secret by name, nothing else: not `list` or `watch`, which resourceNames
+cannot restrict, and not `create`, which it cannot restrict either. So the chart creates the Secret.
+=================================================================================================
+*/}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ printf "%s-gitea" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" "gitea") | nindent 4 }}
+# The pod projects this token into the gitea-token container alone.
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ printf "%s-gitea" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" "gitea") | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - {{ $tokenSecret | quote }}
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ printf "%s-gitea" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" "gitea") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ printf "%s-gitea" $fullname }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ printf "%s-gitea" $fullname }}
+    namespace: {{ .Release.Namespace }}
+---
+{{/*
+CREATED EMPTY AND NEVER OVERWRITTEN, as the playback delivery Secret is (messaging/mosquitto.yaml):
+`helm upgrade` re-renders this document, so the `lookup` carries the minted value through it, and
+`resource-policy: keep` stops an uninstall taking it. A render without the cluster (`helm template`,
+a GitOps tool) writes it empty; the forge mints a new token on its next start.
+*/}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $tokenSecret }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $tokenSecret }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" "gitea") | nindent 4 }}
+  annotations:
+    "helm.sh/resource-policy": keep
+type: Opaque
+stringData:
+  token: {{ if $existing }}{{ index $existing.data "token" | default "" | b64dec | quote }}{{ else }}""{{ end }}
+{{- end }}

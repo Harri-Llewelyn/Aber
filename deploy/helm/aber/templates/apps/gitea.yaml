@@ -124,6 +124,7 @@ in one database and the server opens another, with nothing reporting a fault.
 {{- $secretName := include "aber.secretName" . -}}
 {{- $fullname := include "aber.fullname" . -}}
 {{- $giteaPublic := include "aber.giteaUrl" . -}}
+{{- $tokenSecret := include "aber.forgeTokenSecretName" . -}}
 {{- $initScript := .Files.Get "files/gitea-scripts/gitea-init.sh" -}}
 {{- if not $initScript }}
 {{- fail "\n\naber: files/gitea-scripts/gitea-init.sh is missing.\n\nMirror it with:  node scripts/sync-helm-chart-files.mjs\n\nWithout it the forge starts with its web installer LOCKED and no account able to open it -- a\nforge nobody can log into, on a pod that reports Ready.\n" }}
@@ -274,6 +275,12 @@ spec:
       # "permission denied" on a volume that mounted perfectly -- global.storageClass says so too.
       securityContext:
         {{- include "aber.podSecurityContext" .Values.gitea.podSecurityContext | nindent 8 }}
+      {{- if $tokenSecret }}
+      serviceAccountName: {{ printf "%s-gitea" $fullname }}
+      {{- end }}
+      # The server and its sshd hold no ServiceAccount token; gitea-token, when there is one, has its
+      # own projection (volumes).
+      automountServiceAccountToken: false
       initContainers:
         {{/*
           The administrator, created once and then left alone.
@@ -301,20 +308,19 @@ spec:
             - name: GITEA_ADMIN_EMAIL
               value: {{ .Values.gitea.adminEmail | quote }}
             {{- include "aber.secretEnv" (dict "name" "GITEA_ADMIN_PASSWORD" "secretName" $secretName "key" "GITEA_ADMIN_PASSWORD") | nindent 12 }}
-            {{/* THE ACCOUNT THE PLATFORM AUTHENTICATES AS, and deliberately not an admin: it owns
+            {{/* THE ACCOUNT THE PLATFORM AUTHENTICATES AS: a bot, deliberately not an admin. It owns
                  the per-gateway repositories and can attach a deploy key and branch rules to one,
                  which is all the authority enroll-gateway needs. An admin credential here would be able to
                  rewrite every repository in the forge -- including the playbook the whole fleet
                  converges to -- and it would be held by a function reachable from the network.
 
-                 OPTIONAL at both ends: no password means no machine account and no gateway
+                 OPTIONAL: an empty gitea.machineUser means no machine account and no gateway
                  repositories, which is a deployment without the forge integration rather than a
                  broken one. */}}
             - name: GITEA_MACHINE_USER
               value: {{ .Values.gitea.machineUser | quote }}
             - name: GITEA_MACHINE_EMAIL
               value: {{ .Values.gitea.machineEmail | quote }}
-            {{- include "aber.optionalSecretEnv" (dict "name" "GITEA_MACHINE_PASSWORD" "secretName" $secretName "key" "GITEA_MACHINE_PASSWORD") | nindent 12 }}
           {{/* THE SCRIPT IS MIRRORED, NOT INLINE. Which accounts the forge has -- and that the
                machine account is NOT an admin -- is provisioning policy, and policy copied into a
                shell block drifts. */}}
@@ -335,6 +341,48 @@ spec:
           resources:
             requests: { cpu: 10m, memory: 64Mi }
             limits: { memory: 256Mi }
+        {{- if $tokenSecret }}
+        {{- /* The machine account's token: kept while the forge holds the one in the Secret, minted
+             and patched in when not. The only container holding a ServiceAccount token, as git,
+             with nothing to write but the volume and /tmp. forge/README.md, "The machine account's
+             token". */}}
+        - name: gitea-token
+          image: "{{ .Values.gitea.image.repository }}:{{ .Values.gitea.image.tag }}"
+          imagePullPolicy: {{ .Values.gitea.image.pullPolicy }}
+          env:
+            {{- include "aber.giteaEnv" . | nindent 12 }}
+            - name: GITEA_WORK_DIR
+              value: /data/gitea
+            - name: GITEA_MACHINE_USER
+              value: {{ .Values.gitea.machineUser | quote }}
+            - name: GITEA_TOKEN_SECRET
+              value: {{ $tokenSecret | quote }}
+          command: ["/bin/bash", "/seed/gitea-init.sh", "token"]
+          volumeMounts:
+            - name: init-script
+              mountPath: /seed
+              readOnly: true
+            - name: data
+              mountPath: /data
+            - name: token-tmp
+              mountPath: /tmp
+            - name: forge-sa-token
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests: { cpu: 10m, memory: 64Mi }
+            limits: { memory: 256Mi }
+        {{- end }}
       containers:
         - name: gitea
           image: "{{ .Values.gitea.image.repository }}:{{ .Values.gitea.image.tag }}"
@@ -398,4 +446,27 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- if $tokenSecret }}
+        - name: token-tmp
+          emptyDir:
+            sizeLimit: 1Mi
+        # Short-lived and rotated by the kubelet; 0440 with fsGroup 1000, read by gitea-token as git.
+        - name: forge-sa-token
+          projected:
+            defaultMode: 0440
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        fieldPath: metadata.namespace
+        {{- end }}
 {{- end }}

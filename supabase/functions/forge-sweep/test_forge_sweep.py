@@ -53,7 +53,8 @@ from test_enroll_gateway import (  # noqa: E402
     PUBLISHABLE_KEY, SERVICE_ROLE_KEY, SUPABASE_URL, delete_broker_account, enroll, rest, sign_in,
 )
 from test_forge_membership import (  # noqa: E402
-    FORGE_URL, MACHINE_PASSWORD, MACHINE_USER, ORGANISATION, PERSONAS, members_of, request, through_the_door,
+    FORGE_URL, MACHINE_TOKEN, MACHINE_USER, ORGANISATION, PERSONAS, members_of, request, skip_or_fail,
+    through_the_door,
 )
 import stack_exec  # noqa: E402  -- on the path test_enroll_gateway puts there
 
@@ -138,8 +139,7 @@ def psql(sql):
 
 
 def forge(path, method="GET", body=None):
-    credentials = base64.b64encode(f"{MACHINE_USER}:{MACHINE_PASSWORD}".encode()).decode()
-    headers = {"Authorization": f"Basic {credentials}"}
+    headers = {"Authorization": f"token {MACHINE_TOKEN}"}
     if body is not None:
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(f"{FORGE_URL}/api/v1{path}", method=method, headers=headers,
@@ -224,6 +224,49 @@ class TestTheSecret(ForgeSweepBase):
         # retry that clears it, so it answers in `warnings` and this assertion stays meaningful on a
         # development forge whose playbook has moved on from its tag.
         self.assertEqual(body["errors"], [], body)
+
+
+class TestTheMachineAccount(unittest.TestCase):
+    """
+    The account the platform authenticates as is a bot holding one scoped token (forge/README.md,
+    "The machine account's token"). Needs only the forge and GITEA_MACHINE_TOKEN.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if not MACHINE_TOKEN:
+            skip_or_fail("GITEA_MACHINE_TOKEN is unset; read it from the <release>-forge-token Secret")
+        status, _ = forge("/version")
+        if status != 200:
+            skip_or_fail(f"no forge reachable at {FORGE_URL} with GITEA_MACHINE_TOKEN ({status})")
+
+    def test_it_is_a_bot(self):
+        status, me = forge("/user")
+        self.assertEqual(status, 200, me)
+        self.assertEqual(me["login"], MACHINE_USER, me)
+        self.assertEqual(me["type"], "Bot", me)
+
+    def test_a_call_outside_the_tokens_scopes_is_refused(self):
+        """An SSH key on its own account, and the site's user list: what a leaked password could do."""
+        # Refused on the scope before the key is read, so the key need not be a real one.
+        status, body = forge("/user/keys", method="POST", body={"title": "scope test", "key": "ssh-ed25519 AAAA"})
+        self.assertEqual(status, 403, body)
+        self.assertIn("write:user", (body or {}).get("message", ""), body)
+        status, body = forge("/admin/users")
+        self.assertEqual(status, 403, body)
+        self.assertIn("read:admin", (body or {}).get("message", ""), body)
+
+    def test_the_identity_header_does_not_sign_it_in(self):
+        """
+        From the forge's own loopback, where the header signs in anyone else: Gitea admits no bot
+        through it, so the header is no way into the web UI as the platform.
+        """
+        status = stack_exec.output(
+            "forge", "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+            "-H", f"X-WEBAUTH-USER: {MACHINE_USER}", "http://127.0.0.1:3000/user/settings")
+        self.assertEqual(status.strip(), "303", "the bot was signed in to the web UI by the header")
+        status = as_forge_admin("-o", "/dev/null", "-w", "%{http_code}", "http://127.0.0.1:3000/user/settings")
+        self.assertEqual(status.strip(), "200", "the header no longer signs anyone in, so the check above proves nothing")
 
 
 class TestOnePassAtATime(ForgeSweepBase):
@@ -590,6 +633,25 @@ class TestRepositories(ForgeSweepBase):
         status, body = sweep()
         self.assertEqual(status, 200, body)
         self.assertIn(f"{self.repo} (appliance)", body["protected"], body)
+
+    def test_what_the_machine_account_removes_is_logged_under_its_token(self):
+        """
+        A deploy key the platform removes is in the audit log under the machine account, with the
+        token it used as the credential: the account acts as a bot holding a token, not a person.
+        """
+        self.enrol()
+        (key,) = self.keys()
+        before = len(audit_events("repository:deploykey:remove", self.repo))
+        status, _ = forge(f"/repos/{ORGANISATION}/{self.repo}/keys/{key['id']}", method="DELETE")
+        self.assertEqual(status, 204)
+
+        events = audit_events("repository:deploykey:remove", self.repo)
+        self.assertEqual(len(events), before + 1, events)
+        event = events[-1]
+        self.assertEqual(event["actor"]["name"], MACHINE_USER, event)
+        self.assertEqual(event["origin"], "api", event)
+        self.assertTrue(event.get("actor_credential", "").startswith("access-token:"), event)
+        # No key is left on the repository; the next test's enrolment registers a new one.
 
     def test_main_requires_the_shape_check_beside_a_context_an_administrator_added(self):
         """

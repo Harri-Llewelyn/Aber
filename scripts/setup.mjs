@@ -119,7 +119,6 @@ const secrets = {
   gatewayRevokeSecret: hex(32),
   forgeSweepSecret: hex(32),
   giteaAdminPassword: hex(12),
-  giteaMachinePassword: hex(12),
   giteaOAuthClientSecret: hex(32),
   giteaProxyHmacSecret: hex(32),
   giteaWebhookSecret: hex(32),

@@ -165,8 +165,8 @@ secrets:
   # The forge administrator. Empty makes the initContainer refuse rather than create an
   # account with a blank password.
   giteaAdminPassword: ""
-  # The machine account enroll-gateway authenticates as. Empty turns the forge integration off
-  # at both ends.
+  # DEPRECATED since 1.4.0 and read by nothing; removed in 2.0. The machine account is a bot
+  # with a token the forge mints (gitea.machineUser). Accepted so an upgrade with it set renders.
   giteaMachinePassword: ""
   # The forge's door: the OAuth client the gateway's `forge` listener uses (hashed into
   # auth.oauth_clients by 0094) and its cookie-signing key. The route is on by default. Empty is
@@ -1283,9 +1283,9 @@ gitea:
   # `secrets.giteaAdminPassword`.
   adminUser: gitea_admin
   adminEmail: gitea-admin@aber.invalid
-  # The one account the platform authenticates as. Not an admin: it owns the per-gateway
-  # repositories and may attach a deploy key and branch rules. The password is
-  # `secrets.giteaMachinePassword`; empty means no forge integration.
+  # The one account the platform authenticates as: a bot, not an admin. It owns the per-gateway
+  # repositories and may attach a deploy key and branch rules, with a scoped token the forge
+  # mints into the <release>-forge-token Secret (forge/README.md). Empty means no forge integration.
   machineUser: aber_platform
   machineEmail: aber-platform@aber.invalid
   logLevel: info

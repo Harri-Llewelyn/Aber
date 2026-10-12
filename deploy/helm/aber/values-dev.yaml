@@ -100,7 +100,6 @@ secrets:
   mqttCredentialServiceToken: aber-dev-credential-service-token-not-a-secret
 
   giteaAdminPassword: gitea-admin
-  giteaMachinePassword: aber-platform-machine-account
   # The forge's door (0094).
   giteaOAuthClientSecret: change-me-gitea-oauth-client-secret
   giteaProxyHmacSecret: change-me-gitea-proxy-hmac-secret

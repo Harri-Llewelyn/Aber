@@ -636,6 +636,13 @@ function clusterSecrets () {
   return Object.fromEntries(Object.entries(data).map(([k, v]) => [k, Buffer.from(v, 'base64').toString('utf8')]))
 }
 
+// The forge's machine-account token, which the forge mints into a Secret of its own rather than the
+// release's (forge/README.md). '' when the forge has not written it yet.
+function forgeToken () {
+  const r = kubectl('get', 'secret', `${RELEASE}-forge-token`, '-o', 'jsonpath={.data.token}')
+  return r.ok && r.out ? Buffer.from(r.out, 'base64').toString('utf8') : ''
+}
+
 function tlsEnabled () {
   return releaseValues().mosquitto?.tls?.enabled === true
 }
@@ -704,6 +711,7 @@ function testEnvironment () {
     REBIRTH_REQUEST_INTERVAL_SECONDS: daemon.REBIRTH_REQUEST_INTERVAL_SECONDS,
     // The forge's door is an OAuth flow whose registered callback is the Ingress host.
     GITEA_TEST_URL: process.env.GITEA_TEST_URL || `http://git.${domain}`,
+    GITEA_MACHINE_TOKEN: forgeToken(),
     // Where a suite that acts as an appliance clones and pushes from this host: the load
     // balancer's port on a cluster `up` created, the forward on an older one.
     GITEA_TEST_SSH: `ssh://git@127.0.0.1:${FORGE_SSH_PORT}`,

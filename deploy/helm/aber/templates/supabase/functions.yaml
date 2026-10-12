@@ -2,6 +2,7 @@
 {{- $component := "supabase-functions" -}}
 {{- $secretName := include "aber.secretName" . -}}
 {{- $supabasePublic := include "aber.supabaseUrl" . -}}
+{{- $forgeToken := include "aber.forgeTokenSecretName" . -}}
 ---
 apiVersion: v1
 kind: Service
@@ -143,15 +144,19 @@ spec:
                    own answer, which is built from its ROOT_URL and SSH_DOMAIN, so these two never
                    have to agree.
 
-                   Rendered only when the forge is deployed. With no machine-account password the
-                   function skips its fourth step and says so in the response -- a gateway still
-                   enrols and still gets its broker credential. */}}
-            {{- if .Values.gitea.enabled }}
+                   Rendered only when the forge is deployed with a machine account (gitea.machineUser).
+                   Without one the function skips its fourth step and says so in the response -- a
+                   gateway still enrols and still gets its broker credential. */}}
+            {{- if $forgeToken }}
             - name: GITEA_INTERNAL_URL
               value: "http://gitea:3000"
             - name: GITEA_MACHINE_USER
               value: {{ .Values.gitea.machineUser | quote }}
-            {{- include "aber.optionalSecretEnv" (dict "name" "GITEA_MACHINE_PASSWORD" "secretName" $secretName "key" "GITEA_MACHINE_PASSWORD") | nindent 12 }}
+            {{- /* The machine account's token, as a file: the forge mints it after this pod may have
+                   started, and the kubelet refreshes a mounted Secret but never an env var.
+                   main/index.ts reads it at each spawn. */}}
+            - name: GITEA_MACHINE_TOKEN_FILE
+              value: /home/deno/forge/token
             {{- /* The push webhook enrolment registers on each gateway repository (0095): this
                    Service, reached by Gitea over the NetworkPolicy edge gitea -> supabase-functions,
                    and the secret forge-events verifies deliveries with. Optional: unset is no hook. */}}
@@ -233,8 +238,17 @@ spec:
               drop: ["ALL"]
           resources:
             {{- toYaml .Values.supabaseFunctions.resources | nindent 12 }}
-          {{- if .Values.ingress.tls.enabled }}
+          {{- if or .Values.ingress.tls.enabled $forgeToken }}
           volumeMounts:
+          {{- end }}
+          {{- if $forgeToken }}
+            {{- /* Optional, so the pod starts before the forge has written the token; the file is
+                   then empty and the forge functions skip the forge, saying so, until it arrives. */}}
+            - name: forge-token
+              mountPath: /home/deno/forge
+              readOnly: true
+          {{- end }}
+          {{- if .Values.ingress.tls.enabled }}
             {{- /* The platform's root, for the one-liner's pin: the CA that signs the API's own
                    certificate, which is the one an appliance must trust to reach this function.
                    ca.crt and tls.crt, never the Secret whole (it also holds tls.key); tls.crt
@@ -246,8 +260,19 @@ spec:
               mountPath: /home/deno/ca
               readOnly: true
           {{- end }}
-      {{- if .Values.ingress.tls.enabled }}
+      {{- if or .Values.ingress.tls.enabled $forgeToken }}
       volumes:
+      {{- end }}
+      {{- if $forgeToken }}
+        - name: forge-token
+          secret:
+            secretName: {{ $forgeToken }}
+            optional: true
+            items:
+              - key: token
+                path: token
+      {{- end }}
+      {{- if .Values.ingress.tls.enabled }}
         - name: platform-root
           secret:
             secretName: {{ .Values.ingress.tls.secretName }}

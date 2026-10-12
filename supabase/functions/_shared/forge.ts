@@ -31,7 +31,8 @@ import { spkiPin } from "./caPin.ts";
 export interface ForgeConfig {
   baseUrl: string;
   user: string;
-  password: string;
+  /** The machine account's API token. The account is a bot, so it has no password to send. */
+  token: string;
   /** Where Gitea delivers a push (forge-events), and the secret it signs with. Empty: no hook. */
   webhookUrl: string;
   webhookSecret: string;
@@ -55,21 +56,33 @@ export const FORGE_TEAMS = {
 export type ForgeTeamRole = keyof typeof FORGE_TEAMS;
 
 /**
- * The forge's configuration, or null when this deployment has none. All three or nothing: a
- * half-configured forge would answer 401 on every enrolment, so it is reported here.
+ * The forge's configuration, or null when this deployment has none or its token has not arrived.
+ * All three or nothing: a half-configured forge would answer 401 on every enrolment, so it is
+ * reported here. The forge mints the token when it starts, and main/index.ts reads it from its
+ * mount at each spawn; an empty one is a token not yet delivered, which on an install or an upgrade
+ * lasts a minute or two and ends without a restart.
  */
 export function forgeConfig(): ForgeConfig | null {
   const baseUrl = (Deno.env.get("GITEA_INTERNAL_URL") ?? "").replace(/\/+$/, "");
   const user = Deno.env.get("GITEA_MACHINE_USER") ?? "";
-  const password = Deno.env.get("GITEA_MACHINE_PASSWORD") ?? "";
+  const token = Deno.env.get("GITEA_MACHINE_TOKEN");
 
-  if (!baseUrl && !user && !password) return null;
+  if (!baseUrl && !user && token === undefined) return null;
 
-  if (!baseUrl || !user || !password) {
+  if (baseUrl && user && token === "") {
+    console.error(
+      "the forge's token has not been delivered yet, so this call skips the forge. The forge mints it " +
+        "when it starts and this pod reads it about a minute later; if it persists, read the log of the " +
+        "gitea pod's gitea-token container.",
+    );
+    return null;
+  }
+
+  if (!baseUrl || !user || !token) {
     const missing = [
       !baseUrl && "GITEA_INTERNAL_URL",
       !user && "GITEA_MACHINE_USER",
-      !password && "GITEA_MACHINE_PASSWORD",
+      !token && "GITEA_MACHINE_TOKEN",
     ].filter(Boolean).join(", ");
     console.error(
       `the forge is half-configured (${missing} unset), so gateway repositories are DISABLED. ` +
@@ -90,7 +103,7 @@ export function forgeConfig(): ForgeConfig | null {
   }
   const webhook = webhookUrl && webhookSecret ? { webhookUrl, webhookSecret } : { webhookUrl: "", webhookSecret: "" };
 
-  return { baseUrl, user, password, ...webhook };
+  return { baseUrl, user, token, ...webhook };
 }
 
 /**
@@ -199,9 +212,9 @@ export function validPublicKey(value: unknown): string | null {
   return /^ssh-(ed25519|rsa) [A-Za-z0-9+/=]+( [^\n\r]*)?$/.test(key) ? key : null;
 }
 
-/** Basic auth as the machine account. Gitea accepts it on the API, and it needs no token exchange. */
+/** The machine account's token. Gitea checks the token's scopes on every call. */
 function authHeader(cfg: ForgeConfig): string {
-  return `Basic ${btoa(`${cfg.user}:${cfg.password}`)}`;
+  return `token ${cfg.token}`;
 }
 
 /** One call to the forge's API as the machine account. Shared with forge-membership. */

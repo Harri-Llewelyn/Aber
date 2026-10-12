@@ -12,7 +12,6 @@ not the property that matters. The property is that a person who signs in sees t
 and that a person whose role has gone stops seeing them -- both of which need the door.
 """
 
-import base64
 import http.cookiejar
 import json
 import os
@@ -26,7 +25,9 @@ PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 FORGE_URL = os.getenv("GITEA_TEST_URL", "http://localhost:3003")
 MACHINE_USER = os.getenv("GITEA_MACHINE_USER", "aber_platform")
-MACHINE_PASSWORD = os.getenv("GITEA_MACHINE_PASSWORD", "aber-platform-machine-account")
+# The machine account's token, which the forge mints into the <release>-forge-token Secret; the dev
+# loop reads it from there. The account is a bot and has no password.
+MACHINE_TOKEN = os.getenv("GITEA_MACHINE_TOKEN", "")
 ORGANISATION = os.getenv("GITEA_ORGANISATION", "gateways")
 PASSWORD = os.getenv("ABER_SEED_PASSWORD", "aber123")
 
@@ -93,8 +94,7 @@ def request(url, method="GET", headers=None, body=None, jar=None):
 
 
 def forge_as_machine(path, method="GET"):
-    credentials = base64.b64encode(f"{MACHINE_USER}:{MACHINE_PASSWORD}".encode()).decode()
-    status, _, text = request(f"{FORGE_URL}{path}", method=method, headers={"Authorization": f"Basic {credentials}"})
+    status, _, text = request(f"{FORGE_URL}{path}", method=method, headers={"Authorization": f"token {MACHINE_TOKEN}"})
     return status, (json.loads(text) if text.strip() else None)
 
 
@@ -165,6 +165,8 @@ class TestTheDoor(unittest.TestCase):
     def setUpClass(cls):
         if not PUBLISHABLE_KEY or not SERVICE_ROLE_KEY:
             raise unittest.SkipTest("SUPABASE_PUBLISHABLE_KEY and SUPABASE_SERVICE_ROLE_KEY must be set")
+        if not MACHINE_TOKEN:
+            skip_or_fail("GITEA_MACHINE_TOKEN is unset; read it from the <release>-forge-token Secret")
         status, _ = forge_as_machine("/api/v1/version")
         if status != 200:
             skip_or_fail(f"no forge reachable at {FORGE_URL} ({status})")

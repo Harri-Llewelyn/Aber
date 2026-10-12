@@ -58,8 +58,8 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // holding a single-use token. It holds the service-role key because the token table is reachable
   // by nothing else, and the credential service's bearer token to mint the broker account.
   // MQTT_PUBLIC_HOST is the address an appliance connects to, which cannot be derived from the
-  // in-network SUPABASE_URL. The forge credential authenticates as a machine account that is not a
-  // Gitea administrator: it can create a gateway repository, attach a deploy key and the branch
+  // in-network SUPABASE_URL. The forge credential is a scoped token of a bot that is not a Gitea
+  // administrator: it can create a gateway repository, attach a deploy key and the branch
   // rules that confine it, and nothing else. All three forge variables or none; a variable omitted here looks to the function
   // like a deployment that chose not to run a forge.
   "enroll-gateway": [
@@ -73,7 +73,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "PRIMARY_HOST_ID",
     "GITEA_INTERNAL_URL",
     "GITEA_MACHINE_USER",
-    "GITEA_MACHINE_PASSWORD",
+    "GITEA_MACHINE_TOKEN",
     // The push webhook enrolment registers on each repository (0095): where Gitea should deliver,
     // and the secret it signs with. Both optional -- unset means no hook, and enrolment says so.
     "GITEA_WEBHOOK_URL",
@@ -174,7 +174,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "SUPABASE_SERVICE_ROLE_KEY",
     "GITEA_INTERNAL_URL",
     "GITEA_MACHINE_USER",
-    "GITEA_MACHINE_PASSWORD",
+    "GITEA_MACHINE_TOKEN",
   ],
   // The studio listener's ext_authz step: whether the caller is an Administrator in user_roles now.
   // The service key is for that lookup, after GoTrue has verified the caller's session.
@@ -191,7 +191,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "GITEA_WEBHOOK_SECRET",
     "GITEA_INTERNAL_URL",
     "GITEA_MACHINE_USER",
-    "GITEA_MACHINE_PASSWORD",
+    "GITEA_MACHINE_TOKEN",
   ],
   // The forge reconciled on a timer (0099): pg_cron asks through the gateway with
   // FORGE_SWEEP_SECRET, and the function walks the teams and repositories through the machine
@@ -204,7 +204,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "FORGE_SWEEP_SECRET",
     "GITEA_INTERNAL_URL",
     "GITEA_MACHINE_USER",
-    "GITEA_MACHINE_PASSWORD",
+    "GITEA_MACHINE_TOKEN",
     "GITEA_WEBHOOK_URL",
     "GITEA_WEBHOOK_SECRET",
     "ABER_PLATFORM_VERSION",
@@ -236,6 +236,25 @@ function readRoot(): { state: string; pem: string | null } | null {
 }
 
 /**
+ * The forge's token, read from the file GITEA_MACHINE_TOKEN_FILE names at each spawn. The forge mints
+ * it and writes its Secret after this pod may have started, and the kubelet refreshes a mounted
+ * Secret but never an environment variable. "" when the file is missing or empty, which forge.ts
+ * reports as not yet delivered; undefined when this pod has no forge.
+ */
+function readForgeToken(): string | undefined {
+  const file = Deno.env.get("GITEA_MACHINE_TOKEN_FILE");
+  if (!file) return undefined;
+  try {
+    return Deno.readTextFileSync(file).trim();
+  } catch (err) {
+    if (!(err instanceof Deno.errors.NotFound)) {
+      console.error(`could not read the forge's token at ${file}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return "";
+  }
+}
+
+/**
  * Build the environment for one worker: the common set plus that function's declared secrets. A
  * declared variable that is unset is skipped rather than forwarded as an empty string, so a
  * function's own configuration check sees the truth.
@@ -248,6 +267,7 @@ function envForFunction(serviceName: string): string[][] {
   for (const key of allowed) {
     const value = key === "ABER_CA_PEM" ? root?.pem ?? Deno.env.get(key)
       : key === "ABER_CA_STATE" ? root?.state
+      : key === "GITEA_MACHINE_TOKEN" ? readForgeToken()
       : Deno.env.get(key);
     if (value !== undefined) env.push([key, value]);
   }

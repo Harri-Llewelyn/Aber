@@ -4293,7 +4293,12 @@ in its own header, and the full name carries the email so the UI shows a person.
 `X-WEBAUTH-USER` from **any** peer — `REVERSE_PROXY_TRUSTED_PROXIES` governs `X-Forwarded-For`
 only — so the access control is reachability: the NetworkPolicy edge list admits only the gateway
 and the edge runtime. The API ignores the header (`ENABLE_REVERSE_PROXY_AUTHENTICATION_API` off), so the machine
-account's basic-auth path is not a second door. The listener overwrites or removes the identity
+account's token path is not a second door. The machine account is a bot, which no header signs in
+even on a web route, and its token carries four scopes and nothing else
+([`forge/README.md`](../forge/README.md#the-machine-accounts-token)). Measured against Gitea 28:
+the edge runtime, which may reach port 3000 for the API, could still sign in as anyone else,
+the administrator included, by sending the header on a web route, so the function code is trusted
+not to. The listener overwrites or removes the identity
 headers on every route, so a value a browser sent never reaches Gitea.
 
 **Membership is placed on the way through** by [`forge-membership`](functions/forge-membership),

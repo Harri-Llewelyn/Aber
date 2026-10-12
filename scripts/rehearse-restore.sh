@@ -35,7 +35,8 @@
 #
 # Environment: NS (namespace, default aber), RELEASE (default aber), and the credentials
 # the chart was installed with. The defaults match values-dev.yaml, which is what CI installs;
-# the forge and broker credentials are read from the release Secret when not set.
+# the broker credentials are read from the release Secret and the forge's token from its own
+# Secret when not set.
 #
 set -euo pipefail
 
@@ -167,17 +168,23 @@ rest() {
 # -------------------------------------------------------------------------------------------------
 # The forge, as the machine account: the same door enrolment uses.
 # -------------------------------------------------------------------------------------------------
+# The token is read from its own Secret at each call: a forge restored from a backup mints a new one
+# when it starts (forge/README.md, "The machine account's token").
 forge_credentials() {
-  FORGE_USER="${GITEA_MACHINE_USER:-$(kubectl -n "$NS" get deploy/gitea -o jsonpath='{.spec.template.spec.initContainers[0].env[?(@.name=="GITEA_MACHINE_USER")].value}')}"
-  FORGE_PASSWORD="${GITEA_MACHINE_PASSWORD:-$(secret_value GITEA_MACHINE_PASSWORD)}"
-  [ -n "$FORGE_USER" ] && [ -n "$FORGE_PASSWORD" ] || die "the forge's machine account is not configured (GITEA_MACHINE_USER / GITEA_MACHINE_PASSWORD)"
+  local i
+  for i in $(seq 1 30); do
+    FORGE_TOKEN="${GITEA_MACHINE_TOKEN:-$(kubectl -n "$NS" get secret "$RELEASE-forge-token" -o 'jsonpath={.data.token}' 2>/dev/null | base64 -d || true)}"
+    [ -n "$FORGE_TOKEN" ] && return 0
+    sleep 2
+  done
+  die "the forge's machine-account token is not in Secret $RELEASE-forge-token (set GITEA_MACHINE_TOKEN, or read the gitea pod's gitea-token log)"
 }
 
 # forge <method> <path> [json body]; prints the status code, leaves the body in /tmp/forge.json.
 forge() {
   local method="$1" path="$2" body="${3:-}"
   curl -s -o /tmp/forge.json -w '%{http_code}' -X "$method" "http://127.0.0.1:$FORGE_PORT/api/v1$path" \
-    -u "$FORGE_USER:$FORGE_PASSWORD" -H 'Content-Type: application/json' -H 'Accept: application/json' \
+    -H "Authorization: token $FORGE_TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json' \
     ${body:+-d "$body"} || true
 }
 

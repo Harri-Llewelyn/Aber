@@ -1318,6 +1318,20 @@ does not exempt kubelet probes from ingress policy. Add an ingress allow from th
   gateway. pg_net has no retries and no dead-letter queue (DLQ), so blocking this flow drops every
   notification silently.
 
+**`networkPolicy.apiServerCidr` admits the pods that call the Kubernetes API**, on
+`networkPolicy.apiServerPorts`: Alloy, the broker pod's credential sidecar, the backup service
+when `backup.ca` names a Secret, the e2e Job, and the forge pod. Each holds a ServiceAccount token in
+the one container that uses it, and a Role confined to named objects. The forge's is the
+`gitea-token` init container: its Role `<release>-gitea` may `get` and `patch` the
+`<release>-forge-token` Secret and nothing else, which is where it writes the machine account's
+token (`forge/README.md`, "The machine account's token"). If the forge pod cannot reach the API
+server, that container retries for a minute and fails. The forge pod then shows `Init:Error`, the
+kubelet retries it, and the cause is in that container's log:
+
+```bash
+kubectl -n aber logs deploy/gitea -c gitea-token
+```
+
 **With `ingress.tls.enabled`, the edge functions reach the ingress controller.** Before the gateway
 dialog offers the one-liner, `gateway-bundle` fetches the root certificate from the dashboard's
 public host, over plain HTTP, as a fresh appliance does. A rule admits the controller's namespace on
