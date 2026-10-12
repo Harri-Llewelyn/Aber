@@ -16,11 +16,11 @@ global:
   # http | https. Decides the scheme in every browser-facing URL the chart composes.
   scheme: http
 
-  # EXTRA browser origins for the gateway's CORS policy, appended to the derived ones (the
-  # dashboard's and Swagger UI's, from `publicBaseDomain` / `publicUrls.*`). For a reverse proxy
-  # or tunnel that presents the browser with a hostname the chart cannot know. Scheme and host
-  # only, no path. An origin missing here presents as a dashboard that logs in and shows empty
-  # tables while the gateway reports 200.
+  # EXTRA browser origins for the CORS policy of the gateway and the i3X server, appended to the
+  # derived ones (the dashboard's and Swagger UI's, from `publicBaseDomain` / `publicUrls.*`). For a
+  # browser-based i3X client, or a reverse proxy or tunnel that presents the browser with a
+  # hostname the chart cannot know. Scheme and host only, no path. An origin missing here
+  # presents as a dashboard that logs in and shows empty tables while the gateway reports 200.
   #   corsExtraOrigins:
   #     - https://aber.example.com
   corsExtraOrigins: []

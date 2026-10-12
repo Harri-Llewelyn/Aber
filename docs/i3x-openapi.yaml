@@ -96,11 +96,11 @@ info:
     Expect roughly one restart per platform release, plus cluster-operational events. See
     [`i3x/README.md`](https://github.com/Harri-Llewelyn/Aber/blob/main/i3x/README.md#availability).
 
-    > ⚠️ **"Try it out" will not work from this page.** The i3X server sends no CORS headers
-    > and answers `OPTIONS` with `501`, so a browser cannot call it cross-origin from Swagger
-    > UI. Use `curl`, the desktop [i3X Explorer](https://github.com/ace-technologies-inc/i3X-Explorer)
-    > (its Electron shell disables web security for exactly this reason), or the CESMII MCP
-    > server. This document is a reference, not a live console.
+    > ℹ️ **"Try it out" works from this page.** Click **Authorize** and paste a user access
+    > token. Then pick a server below: the first needs `npm run dev:forward` running, and the
+    > second takes your site's i3X URL, ending `/v1`. The i3X server answers this page's CORS
+    > preflight because the chart gives it Swagger UI's origin, the same list the gateway uses.
+    > A page on any other origin is refused until that origin is in `global.corsExtraOrigins`.
 
   contact:
     name: Aber
@@ -109,6 +109,11 @@ info:
 servers:
   - url: http://localhost:8090/v1
     description: The i3X server through `npm run dev:forward` — note the /v1 suffix is part of the base URL
+  - url: "{base}"
+    description: A site's i3X server through its Ingress, `i3x.` and the site's domain, plus /v1
+    variables:
+      base:
+        default: https://i3x.example.com/v1
 
 security:
   - bearerAuth: []

@@ -130,7 +130,9 @@ interval and the user would be signed out everywhere, at the cost of changing ho
 works.
 
 `GET /info` is unauthenticated, because the spec requires it and because it doubles as the health
-check. It reports capabilities and nothing about the address space.
+check. It reports capabilities and nothing about the address space. A CORS preflight (`OPTIONS`) is
+answered without a token too, because a browser sends it with no credentials; it returns headers
+only ([Browser clients](#browser-clients)).
 
 ## Address space
 
@@ -576,11 +578,38 @@ generic browse client for any i3X server, and the practical way to eyeball the a
 | Authentication | `Bearer Token` |
 | Token | the `access_token` above |
 
-**Use the desktop build, not `npx vite`.** This server sends no CORS headers and answers `OPTIONS`
-with `501`, so a browser cannot call it cross-origin. Explorer's Electron shell sets
-`webSecurity: false` specifically to reach arbitrary i3X servers, so the desktop app is unaffected;
-browser mode would fail every request at the preflight. The same limitation is why swagger-ui's
-"Try it out" does not work against this service.
+**The desktop build works as it is.** Its Electron shell sets `webSecurity: false` to reach any i3X
+server, so it sends no CORS preflight. **The browser build needs its origin allowed.**
+`npm run dev:web` serves it from `http://localhost:5173`, an origin this server does not know. Add
+it to `global.corsExtraOrigins` and upgrade, or every request fails at the preflight
+([Browser clients](#browser-clients)).
+
+### Browser clients
+
+A page on another origin can call this server when that origin is on its allow-list. The chart
+passes the list the gateway uses, `aber.corsOrigins`, as `I3X_CORS_ORIGINS`: the dashboard's and
+Swagger UI's origins, plus `global.corsExtraOrigins`. There is no second list to keep in step. So
+Swagger UI's "Try it out" works against i3X, and so would a dashboard page that called it. The
+spec offers two servers: the dev forward, and a site's i3X URL, which you type in.
+
+- **Only an exact match is answered.** The response then carries `Access-Control-Allow-Origin` with
+  that origin, never `*`, because requests carry a bearer token. Every response carries
+  `Vary: Origin`, so a cache never serves one origin's answer to another.
+- **A preflight is answered `204` on every `/v1` path, without a token**, with
+  `Access-Control-Allow-Methods: GET, POST`,
+  `Access-Control-Allow-Headers: Authorization, Content-Type, Accept, Accept-Encoding` and
+  `Access-Control-Max-Age: 600`. `PUT` is left out: writes are refused anyway ([Writes are
+  refused](#writes-are-refused)). An unknown path still gets its preflight, so the real request's
+  `404` reaches the client rather than a CORS failure.
+- **The headers are on every response**, the `401`, `404`, `409` and `429` refusals and the SSE
+  stream included. A browser discards a response without them, and the client would see a CORS
+  failure where the status says what went wrong.
+- **An origin not on the list gets no CORS header**, and the browser refuses the answer. `curl` and
+  the other non-browser clients send no `Origin` and are unaffected.
+
+Outside the chart, with `I3X_CORS_ORIGINS` unset or empty, no CORS header is sent at all. The
+value is a JSON array, the shape the gateway's `ENVOY_CORS_ORIGINS` takes; anything else stops
+startup.
 
 ## MCP
 
@@ -874,6 +903,7 @@ On Kubernetes each setting comes from the chart: the tunables from `i3xService.*
 | `I3X_SERVER_VERSION` | the chart's `appVersion` | `dev` | `GET /info` `serverVersion` |
 | `SUPABASE_URL` | set by the chart | `http://supabase-envoy:8000` | |
 | `SUPABASE_PUBLISHABLE_KEY` | the release Secret | — | For the gateway's key check. **Not** the secret key |
+| `I3X_CORS_ORIGINS` | `aber.corsOrigins`, the gateway's list (`global.corsExtraOrigins` adds to it) | empty | JSON array of browser origins; empty sends no CORS header ([Browser clients](#browser-clients)) |
 | `MQTT_HOST` / `MQTT_PORT` | set by the chart | `mosquitto` / `1883` | |
 | `MQTT_TLS_ENABLED` / `MQTT_TLS_CA_FILE` | `mosquitto.tls` | off | Fails closed: a missing CA stops startup |
 | `I3X_SUBSCRIPTION_TTL_SECONDS` | `i3xService.subscriptionTtlSeconds` | `300` | Spec MUST — abandoned subscriptions are deleted |

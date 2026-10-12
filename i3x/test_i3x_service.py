@@ -20,6 +20,7 @@ Run: python -m unittest discover -s i3x
 """
 import base64
 import http.client
+import io
 import json
 import os
 import re
@@ -344,6 +345,209 @@ class TestStrictTransportSecurity(unittest.TestCase):
     def test_absent_when_empty(self):
         i3x_service.STRICT_TRANSPORT_SECURITY = ""
         self.assertEqual(self.headers("GET", "/v1/info"), (200, None))
+
+
+class _InMemoryHandler(i3x_service.Handler):
+    """The real handler over in-memory streams: every request in `raw`, on one keep-alive connection."""
+
+    def __init__(self, raw: bytes):
+        self.rfile = io.BytesIO(raw)
+        self.wfile = io.BytesIO()
+        self.client_address = ("127.0.0.1", 0)
+        self.server = None
+        self.handle()
+
+
+class _Responses(io.BytesIO):
+    """Responses read back one after another: http.client closes its file after each body."""
+
+    def makefile(self, *args, **kwargs):
+        return self
+
+    def close(self):
+        pass
+
+
+class TestBrowserClients(unittest.TestCase):
+    """
+    CORS for a page on another origin. An allow-listed Origin is echoed, never `*`, on the preflight
+    and on every real response, refusals and the stream included; any other origin gets none, and
+    with no list nothing is sent. The token probe is faked; all but the stream run in memory.
+    """
+
+    ALLOWED = "https://docs.site.example"
+    REFUSED = "https://elsewhere.example"
+    CORS = ("Access-Control-Allow-Origin", "Access-Control-Allow-Methods",
+            "Access-Control-Allow-Headers", "Access-Control-Max-Age", "Vary")
+
+    def setUp(self):
+        self.token = _jwt(sub="a1ice000-0000-4000-8000-000000000001", exp=int(time.time()) + 3600)
+        self.probes = []
+
+        def fake_probe(bearer):
+            self.probes.append(bearer)
+            if bearer != self.token:
+                raise i3x_service.Problem(401, "Unauthorized", "The data layer refused this token.")
+
+        self._saved = (i3x_service.registry, i3x_service._probe, i3x_service.CORS_ORIGINS,
+                       i3x_service.STRICT_TRANSPORT_SECURITY)
+        i3x_service._probe = fake_probe
+        i3x_service.CORS_ORIGINS = i3x_service.cors_origins(
+            json.dumps(["https://app.site.example", self.ALLOWED + "/"]))
+        i3x_service.STRICT_TRANSPORT_SECURITY = ""
+        self.registry = SubscriptionRegistry(max_per_principal=1)
+        self.registry.on_stream_close = i3x_service._on_registry_stream_close
+        i3x_service.registry = self.registry
+        i3x_service._auth_cache.clear()
+
+    def tearDown(self):
+        (i3x_service.registry, i3x_service._probe, i3x_service.CORS_ORIGINS,
+         i3x_service.STRICT_TRANSPORT_SECURITY) = self._saved
+        i3x_service._auth_cache.clear()
+
+    @staticmethod
+    def request(method, path, origin=None, auth=None, body=None, extra=None) -> bytes:
+        data = json.dumps(body).encode("utf-8") if body is not None else b""
+        headers = {"Host": "i3x.site.example", "Content-Length": str(len(data))}
+        if origin:
+            headers["Origin"] = origin
+        if auth:
+            headers["Authorization"] = auth
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        headers.update(extra or {})
+        head = f"{method} {path} HTTP/1.1\r\n" + "".join(f"{k}: {v}\r\n" for k, v in headers.items())
+        return (head + "\r\n").encode("latin-1") + data
+
+    def exchange(self, *requests):
+        """Each (method, path, ...) on one connection: [(status, {CORS header: value or None})]."""
+        out = _Responses(_InMemoryHandler(b"".join(self.request(*r) for r in requests)).wfile.getvalue())
+        answers = []
+        for method, *_ in requests:
+            resp = http.client.HTTPResponse(out, method=method)
+            resp.begin()
+            resp.read()
+            headers = {h: resp.getheader(h) for h in self.CORS}
+            headers["Strict-Transport-Security"] = resp.getheader("Strict-Transport-Security")
+            answers.append((resp.status, headers))
+        return answers
+
+    def call(self, *request):
+        return self.exchange(request)[0]
+
+    def preflight(self, path, origin, method="POST"):
+        return self.call("OPTIONS", path, origin, None, None, {
+            "Access-Control-Request-Method": method,
+            "Access-Control-Request-Headers": "authorization, content-type",
+        })
+
+    @staticmethod
+    def sent(headers):
+        return {h: v for h, v in headers.items() if v is not None}
+
+    def test_a_preflight_from_an_allowed_origin_is_answered_without_a_token(self):
+        for path in ("/v1/objects/value", "/v1/subscriptions/stream", "/v1/info", "/v1/nope"):
+            with self.subTest(path=path):
+                status, headers = self.preflight(path, self.ALLOWED)
+                self.assertEqual(status, 204)
+                self.assertEqual(self.sent(headers), {
+                    "Access-Control-Allow-Origin": self.ALLOWED,
+                    "Access-Control-Allow-Methods": "GET, POST",
+                    "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, Accept-Encoding",
+                    "Access-Control-Max-Age": "600",
+                    "Vary": "Origin",
+                })
+        self.assertEqual(self.probes, [], "a preflight asked the data layer about a token")
+
+    def test_a_preflight_from_any_other_origin_gets_no_cors_header(self):
+        for origin in (self.REFUSED, "null", self.ALLOWED + ".evil.example", "*", None):
+            with self.subTest(origin=origin):
+                status, headers = self.preflight("/v1/objects/value", origin)
+                self.assertEqual((status, self.sent(headers)), (204, {"Vary": "Origin"}))
+
+    def test_a_preflight_outside_v1_is_a_404(self):
+        status, headers = self.preflight("/objects/value", self.ALLOWED)
+        self.assertEqual((status, headers["Access-Control-Allow-Origin"]), (404, self.ALLOWED))
+
+    def test_with_no_list_nothing_is_sent(self):
+        i3x_service.CORS_ORIGINS = i3x_service.cors_origins("")
+        for method, path, body, status in (("OPTIONS", "/v1/objects/value", None, 204),
+                                           ("GET", "/v1/info", None, 200),
+                                           ("POST", "/v1/subscriptions", {}, 401)):
+            with self.subTest(method=method, path=path):
+                got, headers = self.call(method, path, self.ALLOWED, None, body)
+                self.assertEqual((got, self.sent(headers)), (status, {}))
+
+    def test_every_real_response_carries_it_refusals_included(self):
+        # The cap is one subscription, so the second create is the 429.
+        self.assertEqual(self.call("POST", "/v1/subscriptions", None, self.token, {"clientId": "c"})[0], 200)
+        sync = {"clientId": "c", "subscriptionId": "x"}
+        cases = (
+            ("GET", "/v1/info", None, None, 200),
+            ("POST", "/v1/subscriptions", None, {"clientId": "c"}, 401),
+            ("POST", "/v1/subscriptions", "not-a-token", {"clientId": "c"}, 401),
+            ("POST", "/v1/subscriptions/sync", self.token, sync, 404),
+            ("POST", "/v1/subscriptions", self.token, {"clientId": "c"}, 429),
+            ("POST", "/v1/nope", self.token, {}, 404),
+            ("GET", "/info", None, None, 404),
+            ("PUT", "/v1/objects/value", self.token, {}, 405),
+            ("BREW", "/v1/info", None, None, 501),
+        )
+        for method, path, auth, body, status in cases:
+            with self.subTest(method=method, path=path, status=status):
+                got, headers = self.call(method, path, self.ALLOWED, auth, body)
+                self.assertEqual(got, status)
+                self.assertEqual((headers["Access-Control-Allow-Origin"], headers["Vary"]),
+                                 (self.ALLOWED, "Origin"))
+                self.assertIsNone(headers["Access-Control-Allow-Methods"], "only a preflight lists them")
+                got, headers = self.call(method, path, self.REFUSED, auth, body)
+                self.assertEqual((got, headers["Access-Control-Allow-Origin"]), (status, None))
+
+    def test_a_preflight_leaves_its_connection_usable(self):
+        (first, _), (second, headers) = self.exchange(
+            ("OPTIONS", "/v1/subscriptions", self.ALLOWED, None, {"stray": "body"}),
+            ("POST", "/v1/subscriptions", self.ALLOWED, self.token, {"clientId": "c"}),
+        )
+        self.assertEqual((first, second, headers["Access-Control-Allow-Origin"]), (204, 200, self.ALLOWED))
+
+    def test_strict_transport_security_is_still_sent(self):
+        i3x_service.STRICT_TRANSPORT_SECURITY = "max-age=31536000"
+        for method in ("OPTIONS", "GET"):
+            with self.subTest(method=method):
+                _, headers = self.call(method, "/v1/info", self.ALLOWED)
+                self.assertEqual((headers["Strict-Transport-Security"], headers["Access-Control-Allow-Origin"]),
+                                 ("max-age=31536000", self.ALLOWED))
+
+    def test_the_list_is_a_json_array_of_origins(self):
+        parse = i3x_service.cors_origins
+        self.assertEqual(parse(""), frozenset())
+        self.assertEqual(parse("  "), frozenset())
+        self.assertEqual(parse("[]"), frozenset())
+        self.assertEqual(parse('["https://a.example/", " http://b.example ", ""]'),
+                         frozenset({"https://a.example", "http://b.example"}))
+        for bad in ("https://a.example", '"https://a.example"', '{"a": 1}', "[1]", "[", "*"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError) as ctx:
+                parse(bad)
+            self.assertIn("I3X_CORS_ORIGINS", str(ctx.exception))
+
+    def test_the_stream_carries_it(self):
+        """Over a real server, since a stream waits on its socket."""
+        server = ThreadingHTTPServer(("127.0.0.1", 0), i3x_service.Handler)
+        server.daemon_threads = True
+        threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        sub = self.registry.create("c", principal=i3x_service._authenticate(self.token).principal)
+        conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+        self.addCleanup(conn.close)
+        conn.request("POST", "/v1/subscriptions/stream",
+                     body=json.dumps({"clientId": "c", "subscriptionId": sub.subscription_id}).encode(),
+                     headers={"Authorization": self.token, "Content-Type": "application/json",
+                              "Origin": self.ALLOWED})
+        resp = conn.getresponse()
+        self.assertEqual((resp.status, resp.getheader("Content-Type")), (200, "text/event-stream"))
+        self.assertEqual((resp.getheader("Access-Control-Allow-Origin"), resp.getheader("Vary")),
+                         (self.ALLOWED, "Origin"))
 
 
 class TestASubscriptionDeliversOnlyWhatItsOwnerCanSee(unittest.TestCase):

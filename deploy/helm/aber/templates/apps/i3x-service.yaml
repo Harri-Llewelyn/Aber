@@ -117,6 +117,10 @@ spec:
             # Sent on every response; empty, and so not sent, unless global.scheme is https.
             - name: ABER_STRICT_TRANSPORT_SECURITY
               value: {{ include "aber.strictTransportSecurity" . | quote }}
+            # The browser origins it answers cross-origin: the gateway's list, from the same helper,
+            # so the two cannot disagree. Its route bypasses the gateway and so the gateway's CORS.
+            - name: I3X_CORS_ORIGINS
+              value: {{ include "aber.corsOrigins" . | quote }}
             - name: PYTHONUNBUFFERED
               value: "1"
           # GET /info is the health probe, and that is a design property rather than a convenience:

@@ -1632,7 +1632,8 @@ has nothing behind it to compensate. Deriving it from the dashboard's and Swagge
 helpers makes it impossible for the list to name a host the chart does not serve or miss one it
 does; a four-origin localhost literal shipped here for as long as Kubernetes did, so on a real
 cluster the dashboard authenticated and then could not read a single response, and nothing caught
-it because `curl` sends no Origin and does not enforce the answer. `corsExtraOrigins` is appended
+it because `curl` sends no Origin and does not enforce the answer. The i3X server's route bypasses
+the gateway, so the chart hands it the same list. `corsExtraOrigins` is appended
 rather than replacing, so adding a proxy or a tunnel cannot drop the dashboard's own origin. An
 empty list is refused, since `origins: []` renders a gateway that starts and refuses every browser
 request; but only when there is something to refuse for, because an install with no public
