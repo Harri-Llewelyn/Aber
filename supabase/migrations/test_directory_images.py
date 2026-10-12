@@ -1,5 +1,5 @@
 """
-The Directory's Version column, and the name of its Node-RED entry.
+The Directory's Version column, its known-CVE badge, and the name of its Node-RED entry.
 
 `record_directory_images()` writes `directory_services.image` from the chart's component -> image
 map on every db-init run. Four properties, each of which would fail quietly:
@@ -12,6 +12,9 @@ map on every db-init run. Four properties, each of which would fail quietly:
   write into.
 - Nothing but db-init can call it. It is revoked from every API role, so no signed-in user can
   rewrite the versions the page shows.
+
+`record_directory_image_scans()` (0180) then writes the release's scan summary beside each image,
+matched on the exact reference, so an overridden tag reads "not scanned" rather than zero.
 
 Runs against the Supabase database, not the historian:
 
@@ -157,6 +160,138 @@ class TestDirectoryImages(unittest.TestCase):
             cur.execute("SET LOCAL ROLE authenticated")
             cur.execute("SELECT image FROM public.directory_services WHERE id = %s", (GRAFANA,))
             self.assertEqual(cur.fetchone()[0], "grafana/grafana:13.2.0")
+
+
+def scan(critical, high, upstream=None):
+    entry = {
+        "critical": critical,
+        "high": high,
+        "scanned_at": "2026-10-02T07:12:40.118Z",
+        "vulnerability_db_at": "2026-10-01T18:41:02.000Z",
+    }
+    if upstream:
+        entry["upstream"] = upstream
+    return entry
+
+
+# A release's files/image-scans.json, as scripts/image-scan-summary.mjs writes it.
+SUMMARY = {
+    "release": "0.1.0",
+    "scanner": "Trivy 0.74.0",
+    "images": {
+        "grafana/grafana:13.2.0": scan(0, 3),
+        "gitea/gitea:1.27.3": scan(1, 2),
+        "ghcr.io/harri-llewelyn/aber/ingestion:0.1.0": scan(0, 0),
+        "ghcr.io/harri-llewelyn/aber/node-red:0.1.0": scan(0, 0, upstream="5.0.7"),
+    },
+}
+
+SCAN_COLUMNS = ("image_fixable_critical", "image_fixable_high", "image_scanned_at",
+                "image_vulnerability_db_at", "upstream_version")
+
+
+class TestDirectoryImageScans(unittest.TestCase):
+    """
+    `record_directory_image_scans()` (0180) writes the release's known-CVE summary beside each
+    row's image, matching the exact reference. A row whose reference the release did not scan has
+    no scan at all, so the page says "not scanned" rather than showing a zero nobody measured.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.conn = get_connection()
+        cls.conn.autocommit = False
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.conn.close()
+
+    def tearDown(self):
+        self.conn.rollback()
+
+    def record(self, cur, summary, images=FULL_MAP):
+        cur.execute("SELECT public.record_directory_images(%s::jsonb)", (json.dumps(images),))
+        cur.execute("SELECT public.record_directory_image_scans(%s::jsonb)", (json.dumps(summary),))
+        return cur.fetchone()[0]
+
+    def scan_of(self, cur, row_id):
+        cur.execute(
+            f"SELECT {', '.join(SCAN_COLUMNS)} FROM public.directory_services WHERE id = %s", (row_id,)
+        )
+        return dict(zip(SCAN_COLUMNS, cur.fetchone()))
+
+    def test_a_scanned_image_carries_its_counts_and_dates(self):
+        with self.conn.cursor() as cur:
+            self.record(cur, SUMMARY)
+            got = self.scan_of(cur, GRAFANA)
+            self.assertEqual((got["image_fixable_critical"], got["image_fixable_high"]), (0, 3))
+            self.assertEqual(got["image_scanned_at"].isoformat(), "2026-10-02T07:12:40.118000+00:00")
+            self.assertEqual(got["image_vulnerability_db_at"].isoformat(), "2026-10-01T18:41:02+00:00")
+            self.assertIsNone(got["upstream_version"])
+            self.assertEqual(self.scan_of(cur, FORGE)["image_fixable_critical"], 1)
+            for row in INGESTION_ROWS:
+                self.assertEqual(self.scan_of(cur, row)["image_fixable_high"], 0)
+
+    def test_an_image_aber_builds_carries_its_upstream_version(self):
+        with self.conn.cursor() as cur:
+            self.record(cur, SUMMARY)
+            self.assertEqual(self.scan_of(cur, NODE_RED)["upstream_version"], "5.0.7")
+
+    def test_an_overridden_tag_reads_as_not_scanned_rather_than_zero(self):
+        with self.conn.cursor() as cur:
+            self.record(cur, SUMMARY)
+            hotfix = {**FULL_MAP, "grafana": "grafana/grafana:13.2.0-hotfix.1"}
+            self.assertEqual(self.record(cur, SUMMARY, images=hotfix), 1)
+            self.assertEqual(set(self.scan_of(cur, GRAFANA).values()), {None})
+
+    def test_an_image_the_summary_does_not_name_has_no_scan(self):
+        with self.conn.cursor() as cur:
+            self.record(cur, SUMMARY)
+            self.assertEqual(set(self.scan_of(cur, STUDIO).values()), {None})
+
+    def test_a_replay_of_the_same_summary_changes_nothing(self):
+        with self.conn.cursor() as cur:
+            self.record(cur, SUMMARY)
+            self.assertEqual(self.record(cur, SUMMARY), 0)
+
+    def test_a_chart_without_a_summary_clears_every_scan(self):
+        # db-init passes {} when the chart carries no files/image-scans.json, as on a checkout.
+        with self.conn.cursor() as cur:
+            self.record(cur, SUMMARY)
+            self.assertGreater(self.record(cur, {}), 0)
+            cur.execute(
+                "SELECT count(*) FROM public.directory_services"
+                " WHERE image_scanned_at IS NOT NULL OR upstream_version IS NOT NULL"
+            )
+            self.assertEqual(cur.fetchone()[0], 0)
+
+    def test_an_entry_missing_its_date_is_not_a_scan(self):
+        with self.conn.cursor() as cur:
+            undated = {k: v for k, v in scan(0, 0).items() if k != "scanned_at"}
+            self.record(cur, {"images": {**SUMMARY["images"], "grafana/grafana:13.2.0": undated}})
+            got = self.scan_of(cur, GRAFANA)
+            self.assertIsNone(got["image_fixable_high"])
+            self.assertIsNone(got["image_scanned_at"])
+
+    def test_no_api_role_can_call_it(self):
+        with self.conn.cursor() as cur:
+            for role in ("anon", "authenticated", "service_role"):
+                cur.execute(
+                    "SELECT has_function_privilege(%s, 'public.record_directory_image_scans(jsonb)', 'EXECUTE')",
+                    (role,),
+                )
+                self.assertFalse(cur.fetchone()[0], f"{role} can execute record_directory_image_scans()")
+
+    def test_a_signed_in_user_reads_the_scan(self):
+        with self.conn.cursor() as cur:
+            self.record(cur, SUMMARY)
+            cur.execute("SET LOCAL ROLE authenticated")
+            cur.execute(
+                "SELECT image_fixable_high, image_scanned_at IS NOT NULL"
+                " FROM public.directory_services WHERE id = %s",
+                (GRAFANA,),
+            )
+            self.assertEqual(cur.fetchone(), (3, True))
 
 
 NODE_RED = "f1111111-0000-0000-0000-000000000003"

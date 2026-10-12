@@ -165,6 +165,25 @@ when its node_exporter collectors run. check-docs-drift.mjs holds the list equal
 {{- end -}}
 
 {{/*
+The known-CVE summary release.yml packages as files/image-scans.json, as JSON for db-init to record
+beside each Directory row's image (0180). `{}` when the chart carries none, as on a checkout, which
+clears every row to "not scanned". A file that is not that summary fails the render rather than
+reading as no scan at all.
+*/}}
+{{- define "aber.directoryImageScans" -}}
+{{- $raw := .Files.Get "files/image-scans.json" | trim -}}
+{{- if not $raw -}}
+{}
+{{- else -}}
+{{- $doc := fromJson $raw -}}
+{{- if or (hasKey $doc "Error") (not (kindIs "map" (get $doc "images"))) -}}
+{{- fail "files/image-scans.json is not the summary scripts/image-scan-summary.mjs writes: delete it, or write it again with that script" -}}
+{{- end -}}
+{{- toJson $doc -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 How the chart publishes the Directory rows behind an ingress route, as JSON from route name to
 NETWORK or INTERNAL, for db-init to write into directory_services.exposure (0002). A route counts
 as published under the rule ingress.yaml applies: ingress on, the route not turned off in

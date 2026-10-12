@@ -42,6 +42,8 @@ deploy/helm/**/values-local.yaml
 deploy/helm/**/values-try.yaml
 deploy/helm/**/charts/
 deploy/helm/**/*.tgz
+# The known-CVE summary release.yml writes into the chart it packages. A checkout carries none.
+deploy/helm/aber/files/image-scans.json
 
 # Generated Protobuf files
 *_pb2.py
