@@ -1277,6 +1277,11 @@ gitea:
   machineUser: aber_platform
   machineEmail: aber-platform@aber.invalid
   logLevel: info
+  # The forge's audit log: who changed a branch rule, a deploy key or a team seat. Kept in gitea.db
+  # and read through a port-forward (forge/README.md, "The audit log"). Days an event is kept; 0
+  # keeps every event. Gitea's own default is 30, shorter than the gap before someone asks why.
+  audit:
+    retentionDays: 365
   # Off, and nothing here needs them. Actions is a build runner that executes whatever a
   # repository tells it to, on a host beside the database; the registry is a fourth credential
   # plane. The one thing that looked like it needed a runner -- the required status check on a

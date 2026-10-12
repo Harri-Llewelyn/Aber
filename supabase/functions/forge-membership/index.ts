@@ -102,8 +102,15 @@ async function placeInTeams(
         throw new Error(`could not place '${username}' in '${team}' (${added.status})`);
       }
     } else {
+      // Asked before removing: Gitea answers 204 to removing a non-member and records the removal
+      // in its audit log anyway, which on every placement would log one that never happened.
+      const member = await forgeApi(cfg, "GET", `/teams/${id}/members/${username}`);
+      await member.body?.cancel();
+      if (member.status === 404) continue;
+      if (!member.ok) {
+        throw new Error(`could not read whether '${username}' is in '${team}' (${member.status})`);
+      }
       const removed = await forgeApi(cfg, "DELETE", `/teams/${id}/members/${username}`);
-      // 404 is "was not a member", which is what almost every request answers.
       if (!removed.ok && removed.status !== 404) {
         throw new Error(`could not remove '${username}' from '${team}' (${removed.status})`);
       }

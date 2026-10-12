@@ -12,7 +12,9 @@ whose `appliance` and `**` rules were deleted and whose `main` was opened to dep
 three back the way enrolment set them; a `main` whose required contexts were replaced by hand
 requires the shape check again; a key somebody re-registered read-only is read-write again;
 an archived gateway's key is removed and its repository is put into the forge's archive, read-only
-with every branch kept, and taken back out when the gateway is restored (#197); and the database's
+with every branch kept, and taken back out when the gateway is restored (#197); a rule changed in
+the web UI is in the forge's audit log under its author, read from inside the forge's pod (stack_exec)
+as an operator's port-forward reads it, and one changed through the API is not; and the database's
 own sweep_forge() answers true, which is
 "asked" -- that call is asynchronous, and the function itself is what the rest of this file drives
 directly.
@@ -149,6 +151,27 @@ def forge(path, method="GET", body=None):
     except urllib.error.HTTPError as err:
         text = err.read().decode()
         return err.code, (json.loads(text) if text.strip() else None)
+
+
+# The forge's administrator, gitea.adminUser.
+ADMIN_USER = os.getenv("GITEA_ADMIN_USER", "gitea_admin")
+
+
+def as_forge_admin(*curl_args):
+    """
+    One request to the forge's own port from inside its pod, signed in as the administrator by the
+    reverse-proxy header: what forge/README.md's port-forward recipe does. The gateway's listener
+    cannot stand in, because it replaces that header with the session's id.
+    """
+    return stack_exec.output("forge", "curl", "-s", "-H", f"X-WEBAUTH-USER: {ADMIN_USER}", *curl_args)
+
+
+def audit_events(action, repository):
+    """The audit export's events for one action prefix on one repository, oldest first."""
+    query = urllib.parse.urlencode({"action": action})
+    lines = as_forge_admin("-f", f"http://127.0.0.1:3000/-/admin/monitor/audit_logs/export?{query}")
+    events = [json.loads(line) for line in lines.splitlines() if line.strip()]
+    return [e for e in events if e.get("scope", {}).get("name") == f"{ORGANISATION}/{repository}"]
 
 
 @unittest.skipIf(not SERVICE_ROLE_KEY or not PUBLISHABLE_KEY, "SUPABASE_SERVICE_ROLE_KEY and SUPABASE_PUBLISHABLE_KEY must be set")
@@ -515,6 +538,54 @@ class TestRepositories(ForgeSweepBase):
         status, body = sweep()
         self.assertEqual(status, 200, body)
         self.assertNotIn(self.repo, body["protected"], body)
+
+    def test_a_rule_changed_in_the_web_ui_is_in_the_audit_log_under_its_author(self):
+        """
+        Who changed a rule the sweep puts back (forge/README.md, "The audit log"). The catch-all
+        rule opened to deploy keys in the web UI is found in the audit export under the
+        administrator who did it, and the next pass closes it again.
+        """
+        self.enrol()
+        before = len(audit_events("repository:branch:protection", self.repo))
+        status = as_forge_admin(
+            "-o", "/dev/null", "-w", "%{http_code}", "-X", "POST",
+            "--data-urlencode", "rule_name=**", "--data-urlencode", "enable_push=whitelist",
+            "--data-urlencode", "whitelist_deploy_keys=true",
+            f"http://127.0.0.1:3000/{ORGANISATION}/{self.repo}/settings/branches/edit")
+        self.assertEqual(status.strip(), "303", "the web form did not accept the change")
+        status, catch_all = self.rule("**")
+        self.assertTrue(catch_all["push_whitelist_deploy_keys"], catch_all)
+
+        events = audit_events("repository:branch:protection", self.repo)
+        self.assertEqual(len(events), before + 1, events)
+        event = events[-1]
+        self.assertEqual(event["action"], "repository:branch:protection:update", event)
+        self.assertEqual(event["actor"]["name"], ADMIN_USER, event)
+        self.assertEqual(event["origin"], "ui", event)
+        self.assertEqual(event["metadata"], {"rule": "**"}, event)
+
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertIn(f"{self.repo} (appliance)", body["protected"], body)
+        status, catch_all = self.rule("**")
+        self.assertFalse(catch_all["push_whitelist_deploy_keys"], catch_all)
+
+    def test_a_rule_changed_through_the_api_is_not_in_the_audit_log(self):
+        """
+        Gitea 28.0.0 records a branch rule changed through its API nowhere, which forge/README.md
+        states. A Gitea that starts recording it fails here, and that table is then updated.
+        """
+        self.enrol()
+        before = len(audit_events("repository:branch:protection", self.repo))
+        status, _ = forge(f"/repos/{ORGANISATION}/{self.repo}/branch_protections/{urllib.parse.quote('**', safe='')}",
+                          method="PATCH", body={"push_whitelist_deploy_keys": True})
+        self.assertEqual(status, 200)
+        self.assertEqual(len(audit_events("repository:branch:protection", self.repo)), before,
+                         "the API change was recorded: update forge/README.md, \"What it records here\"")
+
+        status, body = sweep()
+        self.assertEqual(status, 200, body)
+        self.assertIn(f"{self.repo} (appliance)", body["protected"], body)
 
     def test_main_requires_the_shape_check_beside_a_context_an_administrator_added(self):
         """
