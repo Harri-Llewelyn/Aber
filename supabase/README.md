@@ -168,11 +168,12 @@ DROP and CREATE.
 **Nothing else in the replay leaves a gap a request can fall into.** Three more were measured with a
 probe that reads and writes as a signed-in Administrator while the chain replays:
 
-- **Policies and triggers.** `0001` drops and re-creates 80 policies and 47 triggers on every boot.
-  Each statement used to commit on its own. Between a policy's DROP and CREATE a reader found the
-  table empty and an UPDATE matched no row. Between a trigger's, a write skipped it: one audited
-  write in the probe's first run left no audit row. Each table's policy pairs, and its trigger
-  pairs, now commit as one transaction, 56 in all (0177's eight do the same).
+- **Policies and triggers.** `0001` dropped and re-created 80 policies and 46 triggers on every
+  boot. Each statement used to commit on its own. Between a policy's DROP and CREATE a reader found
+  the table empty and an UPDATE matched no row. Between a trigger's, a write skipped it: one audited
+  write in the probe's first run left no audit row. Each table's policies, and its triggers, now
+  commit as one transaction, 56 in all (0177's eight do the same). Since then, one is re-created
+  only when it differs, below.
 - **`auth_pre_request()`**, PostgREST's hook for every request, was revoked and granted again in
   two statements. They are now one `DO` block.
 - **`audit_trail.id` lost its default.** The table block dropped every default its `CREATE TABLE`
@@ -180,18 +181,104 @@ probe that reads and writes as a signed-in Administrator while the chain replays
   on, so every audited write failed `NOT NULL` in between (88 to 221 of the probe's updates per
   replay). A column whose default arrives that way is now left alone; `roles.id` had the same gap.
 
-**Each policy statement, and each DROP TRIGGER, locks up to 24 tables it does not name.** The image's `supautils`
-extension gives `postgres` its policy and trigger rights on GoTrue's, Storage's and Realtime's
-tables (`supautils.policy_grants`, `supautils.drop_trigger_grants`). To do so it takes `ACCESS
-EXCLUSIVE` on every table in those lists that exists, for each `CREATE POLICY`, `DROP POLICY` and `DROP TRIGGER`,
-whatever the target: `auth.users`, `auth.sessions`, `auth.refresh_tokens`, `storage.objects`,
-`realtime.subscription` and the rest. An audited write takes the table it writes, then
-`audit_trail`, then `auth.users` for the foreign key. The lock orders cross, and the deadlock
-detector aborts one side. With a writer updating an area every 2 ms during the replay, db-init's
-`0001` died on a deadlock in 6 of 9 replays when each statement committed alone, and in 2 of 9 with
-one transaction per table, which takes those locks 56 times per boot instead of 207. db-init
-retries a deadlock twice. The writer lost up to three updates per replay to a deadlock before, and one or two after. Re-creating
-only what changed would take none of these locks on a boot that changes nothing.
+### Constraints, policies and triggers are re-created only when they differ
+
+A boot that changes no constraint, policy or trigger takes no lock for one. Each migration states a
+policy or trigger as a call that compares it with the live one and acts only on a difference, and
+`0001` guards each constraint the same way.
+
+**Why: each policy statement, and each DROP TRIGGER, locks up to 24 tables it does not name.** The
+image's `supautils` extension gives `postgres` its policy and trigger rights on GoTrue's,
+Storage's and Realtime's tables (`supautils.policy_grants`, `supautils.drop_trigger_grants`). To do
+so it takes `ACCESS EXCLUSIVE` on every table in those lists that exists. It does this for each
+`CREATE POLICY`, `DROP POLICY` and `DROP TRIGGER`, whatever the target: `auth.users`,
+`auth.sessions`, `auth.refresh_tokens`, `storage.objects`, `realtime.subscription` and the rest.
+An audited write takes the table it writes, then `audit_trail`, then `auth.users` for the foreign
+key. The lock orders cross, and the deadlock detector aborts one side. With a writer updating an
+area every 2 ms during the replay, db-init's `0001` died on a deadlock in 6 of 9 replays when each
+statement committed alone. It died in 2 of 9 with one transaction per table, which takes those
+locks 56 times per boot instead of 207. db-init retries a deadlock twice. The writer lost up to
+three updates per replay to a deadlock before, and one or two after.
+
+**How.** Every policy and trigger in the chain is a call with its `CREATE` on a line of its own:
+
+```sql
+SELECT public.replay_policy('public.areas', 'areas_select_authenticated', $ddl$
+CREATE POLICY areas_select_authenticated ON public.areas FOR SELECT TO authenticated USING (true);
+$ddl$);
+```
+
+`0001` declares the functions in section 3c. `live_policy_statement()` writes the live policy as
+pg_dump does, under `search_path = ''`: its name and table, `AS RESTRICTIVE`, the command, the
+roles in the order it was given them, and `pg_get_expr()` of each clause. `live_trigger_statement()`
+is `pg_get_triggerdef()`, with a marker when the trigger is disabled or fires only on a replica. If
+the text equals the statement, the call does nothing, and reading the catalogs takes no lock a
+reader or writer waits for. A missing object is created. One that differs is dropped and created
+in the same statement, so no request meets the table without it. A table's calls still commit
+together. Each change prints a NOTICE in db-init's log.
+
+**Constraints.** Each of `0001`'s 190 constraint guards drops its constraint only when
+`live_constraint_definition()` differs from the definition pg_dump wrote, then adds back a missing
+one. That function is `pg_get_constraintdef()` under `search_path = ''`, the path the dump was
+written under. The guards used to call `pg_get_constraintdef()` under db-init's own path,
+`auth, public, extensions`, where a visible table is left unqualified: `REFERENCES users(id)`, not
+`REFERENCES auth.users(id)`. So 35 foreign keys never matched. Two CHECKs never matched either,
+because the generator compared them after restoring `BETWEEN` or collapsing whitespace. Every boot
+dropped and added back those 37 constraints. Dropping a foreign key takes `ACCESS EXCLUSIVE` on
+both tables, so the seven keys to `auth.users` locked GoTrue's table, and adding a key back scans
+every row: `audit_trail_changed_by_fkey` read the whole audit trail on every boot.
+
+**The comparison is exact text, so its only fault is the safe one.** A statement in any other form
+than pg_dump's never matches. It is re-created on every boot, and the call says so with a WARNING
+that quotes pg_dump's form. A different policy cannot compare equal, because every part of its
+catalog row is in the text. Two things hold this:
+
+- `supabase/migrations/test_replay_recreates_only_what_differs.py` (db lane). It changes every
+  policy the chain states in each part (roles, command, `AS RESTRICTIVE`, `USING`, `WITH CHECK`),
+  every trigger (disabled, replica-only, BEFORE and AFTER swapped), and every guarded CHECK and
+  foreign key (replaced by another constraint under its name). The file's own call or guard must
+  put each back. After the chain, every statement and guard must equal its live object. Running
+  every call again must take no `ACCESS EXCLUSIVE` lock, and running every guard again must keep
+  every constraint's oid.
+- Check-docs-drift's check 59. Every `CREATE POLICY` and `CREATE TRIGGER` in an applied migration
+  is a call's one line, no file drops one at the top level, one file states each in full, and no
+  guard compares `pg_get_constraintdef()` itself.
+
+**A policy that two files state is created by the first only where it is missing.** `0177` states
+eight of `0001`'s policies again, so that each checks the caller once per query. Compared in both
+files, each would be re-created twice on every boot. `0001` passes `p_stated_by => '0177_…'` for
+them, so it creates them only on a fresh install, and `0177` keeps them current. `STATED_LATER` in
+`scripts/generate-baseline-section.mjs` emits that argument, and the next squash empties it.
+
+**Writing one in a new migration:**
+
+1. State it as `0001` does: the call, then the `CREATE` on one line, then `$ddl$);`.
+2. Take the `CREATE` from the database. Create the object once on a test database, then read
+   `SELECT public.live_policy_statement('public.t', 'name');` (or `live_trigger_statement`).
+   pg_dump orders a trigger's events INSERT, DELETE, UPDATE, so `UPDATE OR DELETE` comes back as
+   `DELETE OR UPDATE`.
+3. If an earlier file states the same object, that file needs `p_stated_by`. For `0001`, add it to
+   `STATED_LATER`. Check 59 fails until one file states it in full.
+4. To retire one, drop it in a `DO` block guarded on `pg_policy` or `pg_trigger`, as `0175` does.
+   A bare `DROP ... IF EXISTS` takes supautils' locks on every boot, even when there is nothing to
+   drop.
+
+**Measured** on a private test database (supabase/postgres 17.6.1.175). A writer updated an area
+every 2 ms as an Administrator through 9 no-change replays of the whole chain, while a sampler read
+`pg_locks`:
+
+| | replays aborted on a deadlock | writer aborted on a deadlock, per replay | (transaction, auth table) pairs seen holding `ACCESS EXCLUSIVE` |
+| --- | ---: | ---: | ---: |
+| every constraint, policy and trigger re-created (1.3.0) | 5 of 9 | 0 to 6 | 16 to 345 (an aborted replay stops early) |
+| policies and triggers compared, constraints still re-added | 0 of 9 | 0 to 1 | 7 or 8, all held by the guards on keys to `auth.users` |
+| constraints, policies and triggers compared | 0 of 9 | 0 | 0 |
+
+The test database has five of supautils' 24 tables; a stack with Storage and Realtime has more.
+Across one no-change replay, 37 of the 210 constraints in `public` came back with a new oid in
+1.3.0, and none of 220 do now (partition copies counted). A changed `USING` clause in a scratch copy
+of `0001` was live after one replay, and the next replay changed nothing. A no-change replay took
+2.7 to 3.0 seconds inside the container, against 2.8 to 3.4 before; the test database's tables are
+small, so the scans the guards no longer make cost little there.
 
 ### Seeding is audited now
 
@@ -319,8 +406,10 @@ stack deployed"* with *"the stack conforms"*.
 
 The db-init Job replays **every** `/migrations/*.sql` on every boot — there is no
 applied-migrations ledger. A raw `pg_dump` baseline installs on the first boot and takes the stack
-down on the second. Every statement uses `CREATE TABLE IF NOT EXISTS`, `CREATE OR REPLACE`, or
-`DROP … IF EXISTS` ahead of every constraint, policy and trigger.
+down on the second. Every statement uses `CREATE TABLE IF NOT EXISTS`, `CREATE OR REPLACE`, or a
+guard on the catalog ahead of every constraint. Every policy and trigger is a `replay_policy()` or
+`replay_trigger()` call (see
+[Constraints, policies and triggers are re-created only when they differ](#constraints-policies-and-triggers-are-re-created-only-when-they-differ)).
 
 The glob does **not** recurse, so `archive/` is never applied: the db-init image copies only the
 top-level `*.sql`, and `npm run test:db` applies only those.

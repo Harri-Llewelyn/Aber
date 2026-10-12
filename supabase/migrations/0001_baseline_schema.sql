@@ -9,14 +9,15 @@
 --
 -- IDEMPOTENT, AND THAT IS NOT OPTIONAL. The db-init Job (`aber-db-init`) replays every
 -- `/migrations/*.sql` on every install and upgrade with no ledger, so every statement survives
--- re-execution: `CREATE TABLE IF NOT EXISTS`, `CREATE OR REPLACE` for functions and views,
--- `DROP ... IF EXISTS` ahead of every constraint, policy and trigger. Each table's policy pairs,
--- and its trigger pairs, commit as one transaction, so no reader or writer meets the gap between.
+-- re-execution: `CREATE TABLE IF NOT EXISTS`, `CREATE OR REPLACE` for functions and views, and
+-- every constraint, policy and trigger re-created only when it differs from the statement here
+-- (section 3c). Each table's policies, and its triggers, commit as one transaction, so no reader
+-- or writer meets a table between two of them.
 --
 -- Not here: the `storage.buckets` row (storage-api owns that schema and migrates it after
 -- db-init has finished; `scripts/storage-init.mjs` creates the bucket), and anything owned by
--- GoTrue, Realtime or storage-api. The policies on `storage.objects` are here, because that
--- table exists from the image's stub onward.
+-- GoTrue, Realtime or storage-api. The policies on `storage.objects` are in
+-- `supabase/storage-policies.sql`, which a Job applies once storage-api has created the table.
 --
 -- PSQL VARIABLES. db-init passes `-v ts_host ts_port ts_dbname ts_user ts_password`.
 -- Each is defaulted below so this file is still runnable standalone.
@@ -279,6 +280,145 @@ BEGIN
     EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', v_role);
 END
 $roles$;
+
+-- ---------------------------------------------------------------------------------------------
+-- 3c. Constraints, policies and triggers, re-created only when they differ
+-- ---------------------------------------------------------------------------------------------
+-- Every policy and trigger in the chain is a call to replay_policy() or replay_trigger() with its
+-- CREATE as pg_dump writes it. Only a missing or different object is dropped and created: each
+-- DROP POLICY, CREATE POLICY and DROP TRIGGER makes supautils lock up to 24 GoTrue, Storage and
+-- Realtime tables. A statement in another form never matches and is re-created on every boot.
+-- p_stated_by: a later migration states the object, so this call only creates a missing one.
+-- Each constraint guard in section 4 compares live_constraint_definition() with pg_dump's text.
+-- supabase/README.md, "Constraints, policies and triggers are re-created only when they differ".
+
+CREATE OR REPLACE FUNCTION public.live_constraint_definition(p_table regclass, p_name name) RETURNS text
+    LANGUAGE sql STABLE
+    SET search_path TO ''
+    AS $$
+  -- pg_get_constraintdef() with every name qualified, as pg_dump prints it. Under db-init's own
+  -- search path a key to auth.users reads `REFERENCES users(id)` and never matches. NULL when the
+  -- table has no such constraint.
+  SELECT pg_catalog.pg_get_constraintdef(c.oid)
+    FROM pg_catalog.pg_constraint c
+   WHERE c.conrelid = p_table AND c.conname = p_name;
+$$;
+
+CREATE OR REPLACE FUNCTION public.live_policy_statement(p_table regclass, p_name name) RETURNS text
+    LANGUAGE sql STABLE
+    SET search_path TO ''
+    AS $$
+  -- pg_dump's CREATE POLICY, with the roles in the order the policy was given them. NULL when the
+  -- table has no such policy.
+  SELECT 'CREATE POLICY ' || pg_catalog.quote_ident(pol.polname)
+      || ' ON ' || pg_catalog.quote_ident(n.nspname) || '.' || pg_catalog.quote_ident(c.relname)
+      || CASE WHEN pol.polpermissive THEN '' ELSE ' AS RESTRICTIVE' END
+      || CASE pol.polcmd WHEN 'r' THEN ' FOR SELECT' WHEN 'a' THEN ' FOR INSERT'
+                         WHEN 'w' THEN ' FOR UPDATE' WHEN 'd' THEN ' FOR DELETE' ELSE '' END
+      || CASE WHEN pol.polroles = '{0}' THEN ''
+              ELSE coalesce(' TO ' || (SELECT pg_catalog.string_agg(pg_catalog.quote_ident(r.rolname), ', '
+                                                                    ORDER BY u.ord)
+                                         FROM pg_catalog.unnest(pol.polroles) WITH ORDINALITY AS u(roleid, ord)
+                                         JOIN pg_catalog.pg_roles r ON r.oid = u.roleid),
+                            ' TO <no role>') END
+      || coalesce(' USING (' || pg_catalog.pg_get_expr(pol.polqual, pol.polrelid) || ')', '')
+      || coalesce(' WITH CHECK (' || pg_catalog.pg_get_expr(pol.polwithcheck, pol.polrelid) || ')', '')
+      || ';'
+    FROM pg_catalog.pg_policy pol
+    JOIN pg_catalog.pg_class c ON c.oid = pol.polrelid
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+   WHERE pol.polrelid = p_table AND pol.polname = p_name;
+$$;
+
+CREATE OR REPLACE FUNCTION public.live_trigger_statement(p_table regclass, p_name name) RETURNS text
+    LANGUAGE sql STABLE
+    SET search_path TO ''
+    AS $$
+  -- pg_dump's CREATE TRIGGER. A trigger disabled or set to fire on replica never matches, so the
+  -- replay re-creates it as stated. NULL when the table has no such trigger.
+  SELECT pg_catalog.pg_get_triggerdef(t.oid, false) || ';'
+      || CASE t.tgenabled WHEN 'O' THEN '' ELSE ' -- tgenabled ' || t.tgenabled::text END
+    FROM pg_catalog.pg_trigger t
+   WHERE t.tgrelid = p_table AND t.tgname = p_name AND NOT t.tgisinternal;
+$$;
+
+CREATE OR REPLACE FUNCTION public.replay_policy(p_table regclass, p_name name, p_statement text,
+                                                p_stated_by text DEFAULT NULL) RETURNS void
+    LANGUAGE plpgsql
+    SET search_path TO ''
+    AS $$
+DECLARE
+  v_statement text := pg_catalog.btrim(p_statement, E' \t\r\n');
+  v_head      text := 'CREATE POLICY ' || pg_catalog.quote_ident(p_name) || ' ON ' || p_table::text;
+  v_live      text := public.live_policy_statement(p_table, p_name);
+  v_now       text;
+BEGIN
+  IF NOT pg_catalog.starts_with(v_statement, v_head)
+     OR pg_catalog.substr(v_statement, pg_catalog.length(v_head) + 1, 1) NOT IN (' ', ';') THEN
+    RAISE EXCEPTION 'replay_policy(%, %): the statement does not begin "%"', p_table, p_name, v_head;
+  END IF;
+  IF v_live = v_statement OR (v_live IS NOT NULL AND p_stated_by IS NOT NULL) THEN
+    RETURN;
+  END IF;
+
+  IF v_live IS NOT NULL THEN
+    EXECUTE pg_catalog.format('DROP POLICY %I ON %s', p_name, p_table);
+  END IF;
+  EXECUTE v_statement;
+
+  v_now := public.live_policy_statement(p_table, p_name);
+  IF v_now IS NULL THEN
+    RAISE EXCEPTION 'replay_policy(%, %): the statement created no such policy', p_table, p_name;
+  ELSIF v_now <> v_statement THEN
+    RAISE WARNING 'policy % on % is re-created on every boot: pg_dump writes it as %', p_name, p_table, v_now;
+  END IF;
+  RAISE NOTICE 'policy % on %: %', p_name, p_table,
+    CASE WHEN v_live IS NULL THEN 'created' ELSE 're-created, its definition differed' END;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.replay_trigger(p_table regclass, p_name name, p_statement text,
+                                                 p_stated_by text DEFAULT NULL) RETURNS void
+    LANGUAGE plpgsql
+    SET search_path TO ''
+    AS $$
+DECLARE
+  v_statement text := pg_catalog.btrim(p_statement, E' \t\r\n');
+  v_name      text := pg_catalog.quote_ident(p_name) || ' ';
+  v_live      text := public.live_trigger_statement(p_table, p_name);
+  v_now       text;
+BEGIN
+  IF NOT (pg_catalog.starts_with(v_statement, 'CREATE TRIGGER ' || v_name)
+          OR pg_catalog.starts_with(v_statement, 'CREATE CONSTRAINT TRIGGER ' || v_name))
+     OR pg_catalog.strpos(v_statement, ' ON ' || p_table::text || ' ') = 0 THEN
+    RAISE EXCEPTION 'replay_trigger(%, %): the statement does not create that trigger on that table', p_table, p_name;
+  END IF;
+  IF v_live = v_statement OR (v_live IS NOT NULL AND p_stated_by IS NOT NULL) THEN
+    RETURN;
+  END IF;
+
+  IF v_live IS NOT NULL THEN
+    EXECUTE pg_catalog.format('DROP TRIGGER %I ON %s', p_name, p_table);
+  END IF;
+  EXECUTE v_statement;
+
+  v_now := public.live_trigger_statement(p_table, p_name);
+  IF v_now IS NULL THEN
+    RAISE EXCEPTION 'replay_trigger(%, %): the statement created no such trigger', p_table, p_name;
+  ELSIF v_now <> v_statement THEN
+    RAISE WARNING 'trigger % on % is re-created on every boot: pg_dump writes it as %', p_name, p_table, v_now;
+  END IF;
+  RAISE NOTICE 'trigger % on %: %', p_name, p_table,
+    CASE WHEN v_live IS NULL THEN 'created' ELSE 're-created, its definition differed' END;
+END;
+$$;
+
+-- db-init's alone: it runs them as the owner.
+REVOKE ALL ON FUNCTION public.live_constraint_definition(regclass, name) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.live_policy_statement(regclass, name) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.live_trigger_statement(regclass, name) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.replay_policy(regclass, name, text, text) FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION public.replay_trigger(regclass, name, text, text) FROM PUBLIC, anon, authenticated, service_role;
 
 -- ---------------------------------------------------------------------------------------------
 -- 4. public and timescale, generated from the end state of the chain
@@ -3467,7 +3607,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateways_area_wide_has_no_cell'
                 AND conrelid = 'public.gateways'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((location_scope <> ''area_wide''::text) OR (cell_id IS NULL)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((location_scope <> ''area_wide''::text) OR (cell_id IS NULL)))') THEN
     ALTER TABLE public.gateways DROP CONSTRAINT gateways_area_wide_has_no_cell;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -3483,7 +3623,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateways_area_wide_names_its_area'
                 AND conrelid = 'public.gateways'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((location_scope = ''area_wide''::text) = (area_id IS NOT NULL)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((location_scope = ''area_wide''::text) = (area_id IS NOT NULL)))') THEN
     ALTER TABLE public.gateways DROP CONSTRAINT gateways_area_wide_names_its_area;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -3499,7 +3639,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateways_deployment_valid'
                 AND conrelid = 'public.gateways'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((deployment = ANY (ARRAY[''host''::text, ''remote''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((deployment = ANY (ARRAY[''host''::text, ''remote''::text])))') THEN
     ALTER TABLE public.gateways DROP CONSTRAINT gateways_deployment_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -3515,7 +3655,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateways_location_scope_valid'
                 AND conrelid = 'public.gateways'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((location_scope = ANY (ARRAY[''cell''::text, ''site_wide''::text, ''area_wide''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((location_scope = ANY (ARRAY[''cell''::text, ''site_wide''::text, ''area_wide''::text])))') THEN
     ALTER TABLE public.gateways DROP CONSTRAINT gateways_location_scope_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -3531,7 +3671,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateways_shadow_is_simulated'
                 AND conrelid = 'public.gateways'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((NOT is_shadow) OR is_simulated))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((NOT is_shadow) OR is_simulated))') THEN
     ALTER TABLE public.gateways DROP CONSTRAINT gateways_shadow_is_simulated;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -3547,7 +3687,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateways_simulated_is_host'
                 AND conrelid = 'public.gateways'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((NOT is_simulated) OR (deployment = ''host''::text)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((NOT is_simulated) OR (deployment = ''host''::text)))') THEN
     ALTER TABLE public.gateways DROP CONSTRAINT gateways_simulated_is_host;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -3563,7 +3703,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateways_site_wide_has_no_cell'
                 AND conrelid = 'public.gateways'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((location_scope <> ''site_wide''::text) OR (cell_id IS NULL)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((location_scope <> ''site_wide''::text) OR (cell_id IS NULL)))') THEN
     ALTER TABLE public.gateways DROP CONSTRAINT gateways_site_wide_has_no_cell;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -3579,7 +3719,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateways_sparkplug_group_format'
                 AND conrelid = 'public.gateways'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((sparkplug_group <> ''''::text) AND (sparkplug_group !~ ''[/+#]''::text)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((sparkplug_group <> ''''::text) AND (sparkplug_group !~ ''[/+#]''::text)))') THEN
     ALTER TABLE public.gateways DROP CONSTRAINT gateways_sparkplug_group_format;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -3595,7 +3735,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateways_status_valid'
                 AND conrelid = 'public.gateways'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((btrim(status) <> ''''::text) AND (length(status) <= 32) AND ((upper(status) <> ALL (ARRAY[''PENDING_ENROLLMENT''::text, ''AWAITING_BIRTH''::text, ''STALE''::text])) OR (status = ANY (ARRAY[''PENDING_ENROLLMENT''::text, ''AWAITING_BIRTH''::text])))))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((btrim(status) <> ''''::text) AND (length(status) <= 32) AND ((upper(status) <> ALL (ARRAY[''PENDING_ENROLLMENT''::text, ''AWAITING_BIRTH''::text, ''STALE''::text])) OR (status = ANY (ARRAY[''PENDING_ENROLLMENT''::text, ''AWAITING_BIRTH''::text])))))') THEN
     ALTER TABLE public.gateways DROP CONSTRAINT gateways_status_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -3611,7 +3751,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateways_synthetic_has_no_cell'
                 AND conrelid = 'public.gateways'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((((NOT is_simulated) AND (NOT is_shadow)) OR (cell_id IS NULL)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((((NOT is_simulated) AND (NOT is_shadow)) OR (cell_id IS NULL)))') THEN
     ALTER TABLE public.gateways DROP CONSTRAINT gateways_synthetic_has_no_cell;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -9421,7 +9561,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'areas_icon_valid'
                 AND conrelid = 'public.areas'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((icon = ANY (ARRAY[''Building2''::text, ''Factory''::text, ''Warehouse''::text, ''FlaskConical''::text, ''Truck''::text, ''Parking''::text, ''Trees''::text, ''Zap''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((icon = ANY (ARRAY[''Building2''::text, ''Factory''::text, ''Warehouse''::text, ''FlaskConical''::text, ''Truck''::text, ''Parking''::text, ''Trees''::text, ''Zap''::text])))') THEN
     ALTER TABLE public.areas DROP CONSTRAINT areas_icon_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -9437,7 +9577,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'areas_name_topic_safe'
                 AND conrelid = 'public.areas'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((name <> ''''::text) AND (name !~ ''[/+#]''::text)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((name <> ''''::text) AND (name !~ ''[/+#]''::text)))') THEN
     ALTER TABLE public.areas DROP CONSTRAINT areas_name_topic_safe;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -9453,7 +9593,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'areas_plan_aspect_positive'
                 AND conrelid = 'public.areas'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((plan_aspect IS NULL) OR (plan_aspect > (0)::numeric)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((plan_aspect IS NULL) OR (plan_aspect > (0)::numeric)))') THEN
     ALTER TABLE public.areas DROP CONSTRAINT areas_plan_aspect_positive;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -9469,7 +9609,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'areas_plan_has_aspect'
                 AND conrelid = 'public.areas'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((plan_path IS NULL) = (plan_aspect IS NULL)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((plan_path IS NULL) = (plan_aspect IS NULL)))') THEN
     ALTER TABLE public.areas DROP CONSTRAINT areas_plan_has_aspect;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -9558,7 +9698,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'ashrae223_vocabulary_kind_valid'
                 AND conrelid = 'public.ashrae223_vocabulary'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((concept_kind = ANY (ARRAY[''Class''::text, ''AbstractClass''::text, ''Concept''::text, ''Relation''::text, ''EnumerationKind''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((concept_kind = ANY (ARRAY[''Class''::text, ''AbstractClass''::text, ''Concept''::text, ''Relation''::text, ''EnumerationKind''::text])))') THEN
     ALTER TABLE public.ashrae223_vocabulary DROP CONSTRAINT ashrae223_vocabulary_kind_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -9574,7 +9714,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'ashrae223_vocabulary_semantic_id_namespace'
                 AND conrelid = 'public.ashrae223_vocabulary'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((semantic_id ~~ ''http://data.ashrae.org/standard223#%''::text))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((semantic_id ~~ ''http://data.ashrae.org/standard223#%''::text))') THEN
     ALTER TABLE public.ashrae223_vocabulary DROP CONSTRAINT ashrae223_vocabulary_semantic_id_namespace;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -9694,7 +9834,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'asset_exports_format_valid'
                 AND conrelid = 'public.asset_exports'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((format = ''aasx''::text))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((format = ''aasx''::text))') THEN
     ALTER TABLE public.asset_exports DROP CONSTRAINT asset_exports_format_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -9710,7 +9850,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'asset_exports_type_known'
                 AND conrelid = 'public.asset_exports'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((entity_type = ''devices''::text))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((entity_type = ''devices''::text))') THEN
     ALTER TABLE public.asset_exports DROP CONSTRAINT asset_exports_type_known;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -9779,7 +9919,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'audit_trail_actor_source_check'
                 AND conrelid = 'public.audit_trail'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((actor_source IS NULL) OR (actor_source = ANY (ARRAY[''user''::text, ''ingestion''::text, ''migration''::text, ''service''::text]))))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((actor_source IS NULL) OR (actor_source = ANY (ARRAY[''user''::text, ''ingestion''::text, ''migration''::text, ''service''::text]))))') THEN
     ALTER TABLE public.audit_trail DROP CONSTRAINT audit_trail_actor_source_check;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -9795,7 +9935,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'audit_trail_audit_domain_check'
                 AND conrelid = 'public.audit_trail'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((audit_domain = ANY (ARRAY[''asset''::text, ''security''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((audit_domain = ANY (ARRAY[''asset''::text, ''security''::text])))') THEN
     ALTER TABLE public.audit_trail DROP CONSTRAINT audit_trail_audit_domain_check;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -9924,7 +10064,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'backup_jobs_origin_valid'
                 AND conrelid = 'public.backup_jobs'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((origin = ANY (ARRAY[''requested''::text, ''scheduled''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((origin = ANY (ARRAY[''requested''::text, ''scheduled''::text])))') THEN
     ALTER TABLE public.backup_jobs DROP CONSTRAINT backup_jobs_origin_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -9940,7 +10080,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'backup_jobs_status_valid'
                 AND conrelid = 'public.backup_jobs'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((status = ANY (ARRAY[''PENDING''::text, ''RUNNING''::text, ''COMPLETED''::text, ''FAILED''::text, ''CANCELLED''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((status = ANY (ARRAY[''PENDING''::text, ''RUNNING''::text, ''COMPLETED''::text, ''FAILED''::text, ''CANCELLED''::text])))') THEN
     ALTER TABLE public.backup_jobs DROP CONSTRAINT backup_jobs_status_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10092,7 +10232,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'backups_components_is_an_array'
                 AND conrelid = 'public.backups'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((jsonb_typeof(components) = ''array''::text))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((jsonb_typeof(components) = ''array''::text))') THEN
     ALTER TABLE public.backups DROP CONSTRAINT backups_components_is_an_array;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10108,7 +10248,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'backups_offsite_state_valid'
                 AND conrelid = 'public.backups'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((offsite_state = ANY (ARRAY[''PENDING''::text, ''COPIED''::text, ''FAILED''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((offsite_state = ANY (ARRAY[''PENDING''::text, ''COPIED''::text, ''FAILED''::text])))') THEN
     ALTER TABLE public.backups DROP CONSTRAINT backups_offsite_state_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10124,7 +10264,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'backups_origin_valid'
                 AND conrelid = 'public.backups'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((origin = ANY (ARRAY[''requested''::text, ''scheduled''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((origin = ANY (ARRAY[''requested''::text, ''scheduled''::text])))') THEN
     ALTER TABLE public.backups DROP CONSTRAINT backups_origin_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10140,7 +10280,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'backups_size_is_not_negative'
                 AND conrelid = 'public.backups'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((size_bytes >= 0))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((size_bytes >= 0))') THEN
     ALTER TABLE public.backups DROP CONSTRAINT backups_size_is_not_negative;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10156,7 +10296,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'backups_stamp_is_a_directory_name'
                 AND conrelid = 'public.backups'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((stamp ~ ''^[0-9]{8}T[0-9]{6}Z$''::text))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((stamp ~ ''^[0-9]{8}T[0-9]{6}Z$''::text))') THEN
     ALTER TABLE public.backups DROP CONSTRAINT backups_stamp_is_a_directory_name;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10311,7 +10451,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'capture_jobs_caps_are_bounded'
                 AND conrelid = 'public.capture_jobs'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((max_seconds BETWEEN 5 AND 7200) AND (max_messages BETWEEN 1 AND 100000) AND (max_bytes BETWEEN 1024 AND 52428800)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((((max_seconds >= 5) AND (max_seconds <= 7200)) AND ((max_messages >= 1) AND (max_messages <= 100000)) AND ((max_bytes >= 1024) AND (max_bytes <= 52428800))))') THEN
     ALTER TABLE public.capture_jobs DROP CONSTRAINT capture_jobs_caps_are_bounded;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10327,7 +10467,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'capture_jobs_status_valid'
                 AND conrelid = 'public.capture_jobs'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((status = ANY (ARRAY[''PENDING''::text, ''RECORDING''::text, ''COMPLETED''::text, ''FAILED''::text, ''CANCELLED''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((status = ANY (ARRAY[''PENDING''::text, ''RECORDING''::text, ''COMPLETED''::text, ''FAILED''::text, ''CANCELLED''::text])))') THEN
     ALTER TABLE public.capture_jobs DROP CONSTRAINT capture_jobs_status_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10343,7 +10483,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'capture_jobs_subject_is_coherent'
                 AND conrelid = 'public.capture_jobs'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((((subject_kind = ''gateway''::text) AND (gateway_id IS NOT NULL) AND (device_sparkplug_id IS NULL)) OR ((subject_kind = ''device''::text) AND (device_id IS NOT NULL) AND (device_sparkplug_id IS NOT NULL))))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((((subject_kind = ''gateway''::text) AND (gateway_id IS NOT NULL) AND (device_sparkplug_id IS NULL)) OR ((subject_kind = ''device''::text) AND (device_id IS NOT NULL) AND (device_sparkplug_id IS NOT NULL))))') THEN
     ALTER TABLE public.capture_jobs DROP CONSTRAINT capture_jobs_subject_is_coherent;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10359,7 +10499,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'capture_jobs_subject_kind_valid'
                 AND conrelid = 'public.capture_jobs'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((subject_kind = ANY (ARRAY[''gateway''::text, ''device''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((subject_kind = ANY (ARRAY[''gateway''::text, ''device''::text])))') THEN
     ALTER TABLE public.capture_jobs DROP CONSTRAINT capture_jobs_subject_kind_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10445,7 +10585,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'captures_message_count_check'
                 AND conrelid = 'public.captures'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((message_count >= 0))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((message_count >= 0))') THEN
     ALTER TABLE public.captures DROP CONSTRAINT captures_message_count_check;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10461,7 +10601,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'captures_size_bytes_check'
                 AND conrelid = 'public.captures'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((size_bytes >= 0))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((size_bytes >= 0))') THEN
     ALTER TABLE public.captures DROP CONSTRAINT captures_size_bytes_check;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10477,7 +10617,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'captures_source_valid'
                 AND conrelid = 'public.captures'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((source = ANY (ARRAY[''recorded''::text, ''uploaded''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((source = ANY (ARRAY[''recorded''::text, ''uploaded''::text])))') THEN
     ALTER TABLE public.captures DROP CONSTRAINT captures_source_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10493,7 +10633,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'captures_subject_is_coherent'
                 AND conrelid = 'public.captures'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((((subject_kind = ''gateway''::text) AND (gateway_id IS NOT NULL) AND (device_id IS NULL)) OR ((subject_kind = ''device''::text) AND (device_id IS NOT NULL))))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((((subject_kind = ''gateway''::text) AND (gateway_id IS NOT NULL) AND (device_id IS NULL)) OR ((subject_kind = ''device''::text) AND (device_id IS NOT NULL))))') THEN
     ALTER TABLE public.captures DROP CONSTRAINT captures_subject_is_coherent;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10509,7 +10649,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'captures_subject_kind_valid'
                 AND conrelid = 'public.captures'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((subject_kind = ANY (ARRAY[''gateway''::text, ''device''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((subject_kind = ANY (ARRAY[''gateway''::text, ''device''::text])))') THEN
     ALTER TABLE public.captures DROP CONSTRAINT captures_subject_kind_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10590,7 +10730,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'cells_icon_valid'
                 AND conrelid = 'public.cells'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((icon = ANY (ARRAY[''Factory''::text, ''Bot''::text, ''Cog''::text, ''CircuitBoard''::text, ''Gauge''::text, ''Building2''::text, ''Truck''::text, ''Zap''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((icon = ANY (ARRAY[''Factory''::text, ''Bot''::text, ''Cog''::text, ''CircuitBoard''::text, ''Gauge''::text, ''Building2''::text, ''Truck''::text, ''Zap''::text])))') THEN
     ALTER TABLE public.cells DROP CONSTRAINT cells_icon_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10606,7 +10746,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'cells_place_is_a_pair'
                 AND conrelid = 'public.cells'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((plan_x IS NULL) = (plan_y IS NULL)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((plan_x IS NULL) = (plan_y IS NULL)))') THEN
     ALTER TABLE public.cells DROP CONSTRAINT cells_place_is_a_pair;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10622,7 +10762,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'cells_place_needs_an_area'
                 AND conrelid = 'public.cells'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((plan_x IS NULL) OR (area_id IS NOT NULL)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((plan_x IS NULL) OR (area_id IS NOT NULL)))') THEN
     ALTER TABLE public.cells DROP CONSTRAINT cells_place_needs_an_area;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10638,7 +10778,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'cells_place_within_plan'
                 AND conrelid = 'public.cells'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((((plan_x IS NULL) OR ((plan_x >= (0)::numeric) AND (plan_x <= (1)::numeric))) AND ((plan_y IS NULL) OR ((plan_y >= (0)::numeric) AND (plan_y <= (1)::numeric)))))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((((plan_x IS NULL) OR ((plan_x >= (0)::numeric) AND (plan_x <= (1)::numeric))) AND ((plan_y IS NULL) OR ((plan_y >= (0)::numeric) AND (plan_y <= (1)::numeric)))))') THEN
     ALTER TABLE public.cells DROP CONSTRAINT cells_place_within_plan;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10737,7 +10877,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'change_proposals_closed_rows_are_decided'
                 AND conrelid = 'public.change_proposals'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((status = ''open''::text) OR (decided_at IS NOT NULL)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((status = ''open''::text) OR (decided_at IS NOT NULL)))') THEN
     ALTER TABLE public.change_proposals DROP CONSTRAINT change_proposals_closed_rows_are_decided;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10753,7 +10893,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'change_proposals_entity_type_known'
                 AND conrelid = 'public.change_proposals'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((entity_type = ANY (ARRAY[''devices''::text, ''device_nameplate''::text, ''areas''::text, ''cells''::text, ''gateways''::text, ''schemas''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((entity_type = ANY (ARRAY[''devices''::text, ''device_nameplate''::text, ''areas''::text, ''cells''::text, ''gateways''::text, ''schemas''::text])))') THEN
     ALTER TABLE public.change_proposals DROP CONSTRAINT change_proposals_entity_type_known;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10769,7 +10909,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'change_proposals_open_rows_are_undecided'
                 AND conrelid = 'public.change_proposals'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((status <> ''open''::text) OR ((decided_by IS NULL) AND (decided_at IS NULL) AND (decision_reason IS NULL) AND (applied_trail_id IS NULL))))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((status <> ''open''::text) OR ((decided_by IS NULL) AND (decided_at IS NULL) AND (decision_reason IS NULL) AND (applied_trail_id IS NULL))))') THEN
     ALTER TABLE public.change_proposals DROP CONSTRAINT change_proposals_open_rows_are_undecided;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10785,7 +10925,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'change_proposals_patch_is_an_object'
                 AND conrelid = 'public.change_proposals'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((jsonb_typeof(patch) = ''object''::text) AND (patch <> ''{}''::jsonb)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((jsonb_typeof(patch) = ''object''::text) AND (patch <> ''{}''::jsonb)))') THEN
     ALTER TABLE public.change_proposals DROP CONSTRAINT change_proposals_patch_is_an_object;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10801,7 +10941,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'change_proposals_rejection_carries_a_reason'
                 AND conrelid = 'public.change_proposals'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((status <> ''rejected''::text) OR ((decision_reason IS NOT NULL) AND (btrim(decision_reason) <> ''''::text))))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((status <> ''rejected''::text) OR ((decision_reason IS NOT NULL) AND (btrim(decision_reason) <> ''''::text))))') THEN
     ALTER TABLE public.change_proposals DROP CONSTRAINT change_proposals_rejection_carries_a_reason;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10817,7 +10957,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'change_proposals_status_known'
                 AND conrelid = 'public.change_proposals'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((status = ANY (ARRAY[''open''::text, ''applied''::text, ''rejected''::text, ''withdrawn''::text, ''expired''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((status = ANY (ARRAY[''open''::text, ''applied''::text, ''rejected''::text, ''withdrawn''::text, ''expired''::text])))') THEN
     ALTER TABLE public.change_proposals DROP CONSTRAINT change_proposals_status_known;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10967,7 +11107,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'devices_area_wide_has_no_cell'
                 AND conrelid = 'public.devices'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((location_scope <> ''area_wide''::text) OR (cell_id IS NULL)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((location_scope <> ''area_wide''::text) OR (cell_id IS NULL)))') THEN
     ALTER TABLE public.devices DROP CONSTRAINT devices_area_wide_has_no_cell;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10983,7 +11123,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'devices_area_wide_names_its_area'
                 AND conrelid = 'public.devices'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((location_scope = ''area_wide''::text) = (area_id IS NOT NULL)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((location_scope = ''area_wide''::text) = (area_id IS NOT NULL)))') THEN
     ALTER TABLE public.devices DROP CONSTRAINT devices_area_wide_names_its_area;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -10999,7 +11139,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'devices_conformance_policy_valid'
                 AND conrelid = 'public.devices'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((conformance_policy = ANY (ARRAY[''audit''::text, ''enforce''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((conformance_policy = ANY (ARRAY[''audit''::text, ''enforce''::text])))') THEN
     ALTER TABLE public.devices DROP CONSTRAINT devices_conformance_policy_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -11015,7 +11155,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'devices_location_scope_valid'
                 AND conrelid = 'public.devices'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((location_scope = ANY (ARRAY[''cell''::text, ''site_wide''::text, ''area_wide''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((location_scope = ANY (ARRAY[''cell''::text, ''site_wide''::text, ''area_wide''::text])))') THEN
     ALTER TABLE public.devices DROP CONSTRAINT devices_location_scope_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -11031,7 +11171,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'devices_model_3d_path_shape'
                 AND conrelid = 'public.devices'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((model_3d_path IS NULL) OR (model_3d_path ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[^/]+\.(gltf|glb|obj|stl)$''::text)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((model_3d_path IS NULL) OR (model_3d_path ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[^/]+\.(gltf|glb|obj|stl)$''::text)))') THEN
     ALTER TABLE public.devices DROP CONSTRAINT devices_model_3d_path_shape;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -11047,7 +11187,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'devices_online_implies_born'
                 AND conrelid = 'public.devices'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((status IS DISTINCT FROM ''ONLINE''::text) OR (first_dbirth_at IS NOT NULL)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((status IS DISTINCT FROM ''ONLINE''::text) OR (first_dbirth_at IS NOT NULL)))') THEN
     ALTER TABLE public.devices DROP CONSTRAINT devices_online_implies_born;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -11063,7 +11203,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'devices_shadow_of_is_not_self'
                 AND conrelid = 'public.devices'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((shadow_of IS NULL) OR (shadow_of <> id)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((shadow_of IS NULL) OR (shadow_of <> id)))') THEN
     ALTER TABLE public.devices DROP CONSTRAINT devices_shadow_of_is_not_self;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -11079,7 +11219,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'devices_site_wide_has_no_cell'
                 AND conrelid = 'public.devices'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((location_scope <> ''site_wide''::text) OR (cell_id IS NULL)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((location_scope <> ''site_wide''::text) OR (cell_id IS NULL)))') THEN
     ALTER TABLE public.devices DROP CONSTRAINT devices_site_wide_has_no_cell;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -11263,7 +11403,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'device_nameplate_uri_shape'
                 AND conrelid = 'public.device_nameplate'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((uri_of_the_product IS NULL) OR (uri_of_the_product ~* ''^[a-z][a-z0-9+.-]*:''::text)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((uri_of_the_product IS NULL) OR (uri_of_the_product ~* ''^[a-z][a-z0-9+.-]*:''::text)))') THEN
     ALTER TABLE public.device_nameplate DROP CONSTRAINT device_nameplate_uri_shape;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -11279,7 +11419,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'device_nameplate_year_shape'
                 AND conrelid = 'public.device_nameplate'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((year_of_construction IS NULL) OR (year_of_construction ~ ''^[0-9]{4}$''::text)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((year_of_construction IS NULL) OR (year_of_construction ~ ''^[0-9]{4}$''::text)))') THEN
     ALTER TABLE public.device_nameplate DROP CONSTRAINT device_nameplate_year_shape;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -11334,7 +11474,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'device_submodels_key_is_id_short'
                 AND conrelid = 'public.device_submodels'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((submodel_key IS NULL) OR (submodel_key ~ ''^[A-Za-z_][A-Za-z0-9_]*$''::text)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((submodel_key IS NULL) OR (submodel_key ~ ''^[A-Za-z_][A-Za-z0-9_]*$''::text)))') THEN
     ALTER TABLE public.device_submodels DROP CONSTRAINT device_submodels_key_is_id_short;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -11396,7 +11536,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'directory_liveness_probe_id_check'
                 AND conrelid = 'public.directory_liveness_probe'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (id)') THEN
     ALTER TABLE public.directory_liveness_probe DROP CONSTRAINT directory_liveness_probe_id_check;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -11459,7 +11599,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'directory_services_exposure_valid'
                 AND conrelid = 'public.directory_services'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((exposure = ANY (ARRAY[''NETWORK''::text, ''HOST''::text, ''INTERNAL''::text, ''UNKNOWN''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((exposure = ANY (ARRAY[''NETWORK''::text, ''HOST''::text, ''INTERNAL''::text, ''UNKNOWN''::text])))') THEN
     ALTER TABLE public.directory_services DROP CONSTRAINT directory_services_exposure_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -11475,7 +11615,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'directory_services_status_valid'
                 AND conrelid = 'public.directory_services'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((status = ANY (ARRAY[''ACTIVE''::text, ''DOWN''::text, ''UNKNOWN''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((status = ANY (ARRAY[''ACTIVE''::text, ''DOWN''::text, ''UNKNOWN''::text])))') THEN
     ALTER TABLE public.directory_services DROP CONSTRAINT directory_services_status_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -11537,7 +11677,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'forge_sweep_lease_one_row'
                 AND conrelid = 'public.forge_sweep_lease'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (id)') THEN
     ALTER TABLE public.forge_sweep_lease DROP CONSTRAINT forge_sweep_lease_one_row;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -11609,7 +11749,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateway_enrollment_tokens_expiry_after_creation'
                 AND conrelid = 'public.gateway_enrollment_tokens'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((expires_at > created_at))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((expires_at > created_at))') THEN
     ALTER TABLE public.gateway_enrollment_tokens DROP CONSTRAINT gateway_enrollment_tokens_expiry_after_creation;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -11625,7 +11765,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateway_enrollment_tokens_hash_is_sha256'
                 AND conrelid = 'public.gateway_enrollment_tokens'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((token_hash ~ ''^[0-9a-f]{64}$''::text))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((token_hash ~ ''^[0-9a-f]{64}$''::text))') THEN
     ALTER TABLE public.gateway_enrollment_tokens DROP CONSTRAINT gateway_enrollment_tokens_hash_is_sha256;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -11765,7 +11905,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'idta_submodel_templates_id_short_shape'
                 AND conrelid = 'public.idta_submodel_templates'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((id_short ~ ''^[A-Za-z][A-Za-z0-9_]*$''::text))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((id_short ~ ''^[A-Za-z][A-Za-z0-9_]*$''::text))') THEN
     ALTER TABLE public.idta_submodel_templates DROP CONSTRAINT idta_submodel_templates_id_short_shape;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -11781,7 +11921,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'idta_submodel_templates_semantic_id_type_valid'
                 AND conrelid = 'public.idta_submodel_templates'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((semantic_id_type = ANY (ARRAY[''IRI''::text, ''IRDI''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((semantic_id_type = ANY (ARRAY[''IRI''::text, ''IRDI''::text])))') THEN
     ALTER TABLE public.idta_submodel_templates DROP CONSTRAINT idta_submodel_templates_semantic_id_type_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -11918,7 +12058,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'machine_principals_name_bounded'
                 AND conrelid = 'public.machine_principals'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((length(btrim(name)) >= 1) AND (length(btrim(name)) <= 80)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((length(btrim(name)) >= 1) AND (length(btrim(name)) <= 80)))') THEN
     ALTER TABLE public.machine_principals DROP CONSTRAINT machine_principals_name_bounded;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -11934,7 +12074,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'machine_principals_purpose_bounded'
                 AND conrelid = 'public.machine_principals'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((purpose IS NULL) OR (length(purpose) <= 500)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((purpose IS NULL) OR (length(purpose) <= 500)))') THEN
     ALTER TABLE public.machine_principals DROP CONSTRAINT machine_principals_purpose_bounded;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -12039,7 +12179,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'metric_catalog_category_valid'
                 AND conrelid = 'public.metric_catalog'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((category IS NULL) OR (category = ANY (ARRAY[''SAMPLE''::text, ''EVENT''::text, ''CONDITION''::text]))))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((category IS NULL) OR (category = ANY (ARRAY[''SAMPLE''::text, ''EVENT''::text, ''CONDITION''::text]))))') THEN
     ALTER TABLE public.metric_catalog DROP CONSTRAINT metric_catalog_category_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -12055,7 +12195,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'metric_catalog_name_format'
                 AND conrelid = 'public.metric_catalog'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((name ~ ''^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*$''::text))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((name ~ ''^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*$''::text))') THEN
     ALTER TABLE public.metric_catalog DROP CONSTRAINT metric_catalog_name_format;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -12071,7 +12211,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'metric_catalog_permitted_values_shape'
                 AND conrelid = 'public.metric_catalog'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((permitted_values IS NULL) OR ((cardinality(permitted_values) > 0) AND (array_position(permitted_values, NULL::text) IS NULL) AND (''''::text <> ALL (permitted_values)))))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((permitted_values IS NULL) OR ((cardinality(permitted_values) > 0) AND (array_position(permitted_values, NULL::text) IS NULL) AND (''''::text <> ALL (permitted_values)))))') THEN
     ALTER TABLE public.metric_catalog DROP CONSTRAINT metric_catalog_permitted_values_shape;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -12087,7 +12227,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'metric_catalog_semantic_id_type_valid'
                 AND conrelid = 'public.metric_catalog'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY[''IRI''::text, ''IRDI''::text, ''ExpandedNodeId''::text]))))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY[''IRI''::text, ''IRDI''::text, ''ExpandedNodeId''::text]))))') THEN
     ALTER TABLE public.metric_catalog DROP CONSTRAINT metric_catalog_semantic_id_type_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -12147,7 +12287,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'metric_groups_name_is_one_segment'
                 AND conrelid = 'public.metric_groups'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((name <> ''''::text) AND (strpos(name, ''/''::text) = 0)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((name <> ''''::text) AND (strpos(name, ''/''::text) = 0)))') THEN
     ALTER TABLE public.metric_groups DROP CONSTRAINT metric_groups_name_is_one_segment;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -12342,7 +12482,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'platform_alerts_asset_has_wire_id'
                 AND conrelid = 'public.platform_alerts'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((entity_type = ''platform''::text) OR (sparkplug_id IS NOT NULL)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((entity_type = ''platform''::text) OR (sparkplug_id IS NOT NULL)))') THEN
     ALTER TABLE public.platform_alerts DROP CONSTRAINT platform_alerts_asset_has_wire_id;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -12358,7 +12498,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'platform_alerts_entity_type_valid'
                 AND conrelid = 'public.platform_alerts'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((entity_type = ANY (ARRAY[''device''::text, ''gateway''::text, ''platform''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((entity_type = ANY (ARRAY[''device''::text, ''gateway''::text, ''platform''::text])))') THEN
     ALTER TABLE public.platform_alerts DROP CONSTRAINT platform_alerts_entity_type_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -12374,7 +12514,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'platform_alerts_resolved_has_end'
                 AND conrelid = 'public.platform_alerts'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((status <> ''resolved''::text) OR (ends_at IS NOT NULL)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((status <> ''resolved''::text) OR (ends_at IS NOT NULL)))') THEN
     ALTER TABLE public.platform_alerts DROP CONSTRAINT platform_alerts_resolved_has_end;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -12390,7 +12530,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'platform_alerts_severity_valid'
                 AND conrelid = 'public.platform_alerts'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((severity = ANY (ARRAY[''critical''::text, ''warning''::text, ''info''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((severity = ANY (ARRAY[''critical''::text, ''warning''::text, ''info''::text])))') THEN
     ALTER TABLE public.platform_alerts DROP CONSTRAINT platform_alerts_severity_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -12406,7 +12546,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'platform_alerts_status_valid'
                 AND conrelid = 'public.platform_alerts'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((status = ANY (ARRAY[''firing''::text, ''resolved''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((status = ANY (ARRAY[''firing''::text, ''resolved''::text])))') THEN
     ALTER TABLE public.platform_alerts DROP CONSTRAINT platform_alerts_status_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -12578,7 +12718,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'playback_jobs_device_map_is_object'
                 AND conrelid = 'public.playback_jobs'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((jsonb_typeof(device_map) = ''object''::text))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((jsonb_typeof(device_map) = ''object''::text))') THEN
     ALTER TABLE public.playback_jobs DROP CONSTRAINT playback_jobs_device_map_is_object;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -12594,7 +12734,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'playback_jobs_out_of_window_is_sane'
                 AND conrelid = 'public.playback_jobs'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((messages_out_of_window >= 0))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((messages_out_of_window >= 0))') THEN
     ALTER TABLE public.playback_jobs DROP CONSTRAINT playback_jobs_out_of_window_is_sane;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -12610,7 +12750,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'playback_jobs_speed_is_sane'
                 AND conrelid = 'public.playback_jobs'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((speed > (0)::numeric) AND (speed <= (60)::numeric)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((speed > (0)::numeric) AND (speed <= (60)::numeric)))') THEN
     ALTER TABLE public.playback_jobs DROP CONSTRAINT playback_jobs_speed_is_sane;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -12626,7 +12766,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'playback_jobs_status_valid'
                 AND conrelid = 'public.playback_jobs'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((status = ANY (ARRAY[''PENDING''::text, ''RUNNING''::text, ''COMPLETED''::text, ''FAILED''::text, ''CANCELLED''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((status = ANY (ARRAY[''PENDING''::text, ''RUNNING''::text, ''COMPLETED''::text, ''FAILED''::text, ''CANCELLED''::text])))') THEN
     ALTER TABLE public.playback_jobs DROP CONSTRAINT playback_jobs_status_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -12678,7 +12818,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'playback_worker_status_id_check'
                 AND conrelid = 'public.playback_worker_status'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (id)') THEN
     ALTER TABLE public.playback_worker_status DROP CONSTRAINT playback_worker_status_id_check;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -12787,7 +12927,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'rebirth_requests_status_valid'
                 AND conrelid = 'public.rebirth_requests'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((status = ANY (ARRAY[''PENDING''::text, ''SENT''::text, ''FAILED''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((status = ANY (ARRAY[''PENDING''::text, ''SENT''::text, ''FAILED''::text])))') THEN
     ALTER TABLE public.rebirth_requests DROP CONSTRAINT rebirth_requests_status_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -12852,7 +12992,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'retired_entities_type_known'
                 AND conrelid = 'public.retired_entities'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((entity_type = ANY (ARRAY[''areas''::text, ''cells''::text, ''gateways''::text, ''devices''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((entity_type = ANY (ARRAY[''areas''::text, ''cells''::text, ''gateways''::text, ''devices''::text])))') THEN
     ALTER TABLE public.retired_entities DROP CONSTRAINT retired_entities_type_known;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -13023,7 +13163,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'schema_bootstrap_id_check'
                 AND conrelid = 'public.schema_bootstrap'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (id)') THEN
     ALTER TABLE public.schema_bootstrap DROP CONSTRAINT schema_bootstrap_id_check;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -13100,7 +13240,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'schemas_parent_not_self'
                 AND conrelid = 'public.schemas'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((parent_schema_id IS NULL) OR (parent_schema_id <> id)))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((parent_schema_id IS NULL) OR (parent_schema_id <> id)))') THEN
     ALTER TABLE public.schemas DROP CONSTRAINT schemas_parent_not_self;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -13116,7 +13256,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'schemas_semantic_id_type_valid'
                 AND conrelid = 'public.schemas'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY[''IRI''::text, ''IRDI''::text, ''ExpandedNodeId''::text]))))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((semantic_id_type IS NULL) OR (semantic_id_type = ANY (ARRAY[''IRI''::text, ''IRDI''::text, ''ExpandedNodeId''::text]))))') THEN
     ALTER TABLE public.schemas DROP CONSTRAINT schemas_semantic_id_type_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -13132,7 +13272,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'schemas_status_valid'
                 AND conrelid = 'public.schemas'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((status)::text = ANY (ARRAY[(''draft''::character varying)::text, (''active''::character varying)::text, (''archived''::character varying)::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((status)::text = ANY (ARRAY[(''draft''::character varying)::text, (''active''::character varying)::text, (''archived''::character varying)::text])))') THEN
     ALTER TABLE public.schemas DROP CONSTRAINT schemas_status_valid;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -13148,7 +13288,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'schemas_version_lineage_coherent'
                 AND conrelid = 'public.schemas'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((((version = 1) AND (parent_schema_id IS NULL)) OR ((version > 1) AND (parent_schema_id IS NOT NULL))))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((((version = 1) AND (parent_schema_id IS NULL)) OR ((version > 1) AND (parent_schema_id IS NOT NULL))))') THEN
     ALTER TABLE public.schemas DROP CONSTRAINT schemas_version_lineage_coherent;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -13164,7 +13304,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'schemas_version_positive'
                 AND conrelid = 'public.schemas'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((version >= 1))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((version >= 1))') THEN
     ALTER TABLE public.schemas DROP CONSTRAINT schemas_version_positive;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -13375,7 +13515,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'system_settings_key_format'
                 AND conrelid = 'public.system_settings'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((key ~ ''^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$''::text))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((key ~ ''^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$''::text))') THEN
     ALTER TABLE public.system_settings DROP CONSTRAINT system_settings_key_format;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -13391,7 +13531,14 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'system_settings_value_matches_type'
                 AND conrelid = 'public.system_settings'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ( CASE value_type WHEN ''string''::text THEN (jsonb_typeof(value) = ''string''::text) WHEN ''number''::text THEN (jsonb_typeof(value) = ''number''::text) WHEN ''boolean''::text THEN (jsonb_typeof(value) = ''boolean''::text) WHEN ''json''::text THEN (jsonb_typeof(value) = ANY (ARRAY[''object''::text, ''array''::text])) ELSE NULL::boolean END)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (
+CASE value_type
+    WHEN ''string''::text THEN (jsonb_typeof(value) = ''string''::text)
+    WHEN ''number''::text THEN (jsonb_typeof(value) = ''number''::text)
+    WHEN ''boolean''::text THEN (jsonb_typeof(value) = ''boolean''::text)
+    WHEN ''json''::text THEN (jsonb_typeof(value) = ANY (ARRAY[''object''::text, ''array''::text]))
+    ELSE NULL::boolean
+END)') THEN
     ALTER TABLE public.system_settings DROP CONSTRAINT system_settings_value_matches_type;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -13414,7 +13561,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'system_settings_value_type_known'
                 AND conrelid = 'public.system_settings'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK ((value_type = ANY (ARRAY[''string''::text, ''number''::text, ''boolean''::text, ''json''::text])))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK ((value_type = ANY (ARRAY[''string''::text, ''number''::text, ''boolean''::text, ''json''::text])))') THEN
     ALTER TABLE public.system_settings DROP CONSTRAINT system_settings_value_type_known;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -13430,7 +13577,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'system_settings_value_within_bounds'
                 AND conrelid = 'public.system_settings'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((value_type <> ''number''::text) OR (((min_value IS NULL) OR (((value #>> ''{}''::text[]))::numeric >= min_value)) AND ((max_value IS NULL) OR (((value #>> ''{}''::text[]))::numeric <= max_value)))))') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((value_type <> ''number''::text) OR (((min_value IS NULL) OR (((value #>> ''{}''::text[]))::numeric >= min_value)) AND ((max_value IS NULL) OR (((value #>> ''{}''::text[]))::numeric <= max_value)))))') THEN
     ALTER TABLE public.system_settings DROP CONSTRAINT system_settings_value_within_bounds;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14116,7 +14263,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'areas_name_key'
                 AND conrelid = 'public.areas'::regclass
-                AND pg_get_constraintdef(oid) <> 'UNIQUE (name)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'UNIQUE (name)') THEN
     ALTER TABLE public.areas DROP CONSTRAINT areas_name_key;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14135,7 +14282,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'areas_pkey'
                 AND conrelid = 'public.areas'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.areas DROP CONSTRAINT areas_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14154,7 +14301,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'ashrae223_vocabulary_pkey'
                 AND conrelid = 'public.ashrae223_vocabulary'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (name)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (name)') THEN
     ALTER TABLE public.ashrae223_vocabulary DROP CONSTRAINT ashrae223_vocabulary_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14173,7 +14320,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'asset_config_pkey'
                 AND conrelid = 'public.asset_config'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.asset_config DROP CONSTRAINT asset_config_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14192,7 +14339,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'asset_exports_object_unique'
                 AND conrelid = 'public.asset_exports'::regclass
-                AND pg_get_constraintdef(oid) <> 'UNIQUE (object_bucket, object_key)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'UNIQUE (object_bucket, object_key)') THEN
     ALTER TABLE public.asset_exports DROP CONSTRAINT asset_exports_object_unique;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14211,7 +14358,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'asset_exports_pkey'
                 AND conrelid = 'public.asset_exports'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.asset_exports DROP CONSTRAINT asset_exports_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14230,7 +14377,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'audit_trail_pkey'
                 AND conrelid = 'public.audit_trail'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id, recorded_at)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id, recorded_at)') THEN
     ALTER TABLE public.audit_trail DROP CONSTRAINT audit_trail_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14249,7 +14396,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'backup_jobs_pkey'
                 AND conrelid = 'public.backup_jobs'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.backup_jobs DROP CONSTRAINT backup_jobs_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14268,7 +14415,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'backups_pkey'
                 AND conrelid = 'public.backups'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.backups DROP CONSTRAINT backups_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14287,7 +14434,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'backups_stamp_key'
                 AND conrelid = 'public.backups'::regclass
-                AND pg_get_constraintdef(oid) <> 'UNIQUE (stamp)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'UNIQUE (stamp)') THEN
     ALTER TABLE public.backups DROP CONSTRAINT backups_stamp_key;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14306,7 +14453,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'capture_jobs_pkey'
                 AND conrelid = 'public.capture_jobs'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.capture_jobs DROP CONSTRAINT capture_jobs_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14325,7 +14472,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'captures_pkey'
                 AND conrelid = 'public.captures'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.captures DROP CONSTRAINT captures_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14344,7 +14491,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'captures_storage_path_key'
                 AND conrelid = 'public.captures'::regclass
-                AND pg_get_constraintdef(oid) <> 'UNIQUE (storage_path)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'UNIQUE (storage_path)') THEN
     ALTER TABLE public.captures DROP CONSTRAINT captures_storage_path_key;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14363,7 +14510,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'cells_name_key'
                 AND conrelid = 'public.cells'::regclass
-                AND pg_get_constraintdef(oid) <> 'UNIQUE (name)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'UNIQUE (name)') THEN
     ALTER TABLE public.cells DROP CONSTRAINT cells_name_key;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14382,7 +14529,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'cells_name_topic_safe'
                 AND conrelid = 'public.cells'::regclass
-                AND pg_get_constraintdef(oid) <> 'CHECK (((name <> ''''::text) AND (name !~ ''[/+#]''::text))) NOT VALID') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'CHECK (((name <> ''''::text) AND (name !~ ''[/+#]''::text))) NOT VALID') THEN
     ALTER TABLE public.cells DROP CONSTRAINT cells_name_topic_safe;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14401,7 +14548,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'cells_pkey'
                 AND conrelid = 'public.cells'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.cells DROP CONSTRAINT cells_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14420,7 +14567,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'change_proposals_pkey'
                 AND conrelid = 'public.change_proposals'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.change_proposals DROP CONSTRAINT change_proposals_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14439,7 +14586,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'device_nameplate_pkey'
                 AND conrelid = 'public.device_nameplate'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (device_id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (device_id)') THEN
     ALTER TABLE public.device_nameplate DROP CONSTRAINT device_nameplate_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14458,7 +14605,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'device_submodels_pkey'
                 AND conrelid = 'public.device_submodels'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.device_submodels DROP CONSTRAINT device_submodels_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14477,7 +14624,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'devices_pkey'
                 AND conrelid = 'public.devices'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.devices DROP CONSTRAINT devices_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14496,7 +14643,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'directory_liveness_probe_pkey'
                 AND conrelid = 'public.directory_liveness_probe'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.directory_liveness_probe DROP CONSTRAINT directory_liveness_probe_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14515,7 +14662,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'directory_services_pkey'
                 AND conrelid = 'public.directory_services'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.directory_services DROP CONSTRAINT directory_services_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14534,7 +14681,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'directory_services_service_name_key'
                 AND conrelid = 'public.directory_services'::regclass
-                AND pg_get_constraintdef(oid) <> 'UNIQUE (service_name)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'UNIQUE (service_name)') THEN
     ALTER TABLE public.directory_services DROP CONSTRAINT directory_services_service_name_key;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14553,7 +14700,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'forge_sweep_lease_pkey'
                 AND conrelid = 'public.forge_sweep_lease'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.forge_sweep_lease DROP CONSTRAINT forge_sweep_lease_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14572,7 +14719,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateway_enrollment_tokens_pkey'
                 AND conrelid = 'public.gateway_enrollment_tokens'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.gateway_enrollment_tokens DROP CONSTRAINT gateway_enrollment_tokens_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14591,7 +14738,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateway_revocation_requests_pkey'
                 AND conrelid = 'public.gateway_revocation_requests'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (gateway_id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (gateway_id)') THEN
     ALTER TABLE public.gateway_revocation_requests DROP CONSTRAINT gateway_revocation_requests_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14610,7 +14757,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateways_pkey'
                 AND conrelid = 'public.gateways'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.gateways DROP CONSTRAINT gateways_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14629,7 +14776,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'idta_submodel_templates_pkey'
                 AND conrelid = 'public.idta_submodel_templates'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (template_id, id_short)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (template_id, id_short)') THEN
     ALTER TABLE public.idta_submodel_templates DROP CONSTRAINT idta_submodel_templates_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14648,7 +14795,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'iso22400_vocabulary_pkey'
                 AND conrelid = 'public.iso22400_vocabulary'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (name)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (name)') THEN
     ALTER TABLE public.iso22400_vocabulary DROP CONSTRAINT iso22400_vocabulary_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14667,7 +14814,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'links_pkey'
                 AND conrelid = 'public.links'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.links DROP CONSTRAINT links_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14686,7 +14833,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'machine_principals_pkey'
                 AND conrelid = 'public.machine_principals'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (principal_id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (principal_id)') THEN
     ALTER TABLE public.machine_principals DROP CONSTRAINT machine_principals_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14705,7 +14852,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'metric_catalog_name_key'
                 AND conrelid = 'public.metric_catalog'::regclass
-                AND pg_get_constraintdef(oid) <> 'UNIQUE (name)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'UNIQUE (name)') THEN
     ALTER TABLE public.metric_catalog DROP CONSTRAINT metric_catalog_name_key;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14724,7 +14871,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'metric_catalog_pkey'
                 AND conrelid = 'public.metric_catalog'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.metric_catalog DROP CONSTRAINT metric_catalog_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14743,7 +14890,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'metric_groups_pkey'
                 AND conrelid = 'public.metric_groups'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.metric_groups DROP CONSTRAINT metric_groups_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14762,7 +14909,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'mtconnect_vocabulary_pkey'
                 AND conrelid = 'public.mtconnect_vocabulary'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (kind, name)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (kind, name)') THEN
     ALTER TABLE public.mtconnect_vocabulary DROP CONSTRAINT mtconnect_vocabulary_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14781,7 +14928,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'one_shot_migrations_pkey'
                 AND conrelid = 'public.one_shot_migrations'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (key)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (key)') THEN
     ALTER TABLE public.one_shot_migrations DROP CONSTRAINT one_shot_migrations_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14800,7 +14947,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'opcua_vocabulary_pkey'
                 AND conrelid = 'public.opcua_vocabulary'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (companion_spec, name)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (companion_spec, name)') THEN
     ALTER TABLE public.opcua_vocabulary DROP CONSTRAINT opcua_vocabulary_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14819,7 +14966,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'permissions_name_key'
                 AND conrelid = 'public.permissions'::regclass
-                AND pg_get_constraintdef(oid) <> 'UNIQUE (name)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'UNIQUE (name)') THEN
     ALTER TABLE public.permissions DROP CONSTRAINT permissions_name_key;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14838,7 +14985,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'permissions_pkey'
                 AND conrelid = 'public.permissions'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.permissions DROP CONSTRAINT permissions_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14857,7 +15004,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'platform_alerts_pkey'
                 AND conrelid = 'public.platform_alerts'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.platform_alerts DROP CONSTRAINT platform_alerts_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14876,7 +15023,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'playback_jobs_pkey'
                 AND conrelid = 'public.playback_jobs'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.playback_jobs DROP CONSTRAINT playback_jobs_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14895,7 +15042,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'playback_worker_status_pkey'
                 AND conrelid = 'public.playback_worker_status'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.playback_worker_status DROP CONSTRAINT playback_worker_status_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14914,7 +15061,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'principal_permissions_pkey'
                 AND conrelid = 'public.principal_permissions'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (principal_id, permission_id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (principal_id, permission_id)') THEN
     ALTER TABLE public.principal_permissions DROP CONSTRAINT principal_permissions_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14933,7 +15080,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'rebirth_requests_pkey'
                 AND conrelid = 'public.rebirth_requests'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.rebirth_requests DROP CONSTRAINT rebirth_requests_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14952,7 +15099,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'retired_entities_pkey'
                 AND conrelid = 'public.retired_entities'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (entity_type, entity_id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (entity_type, entity_id)') THEN
     ALTER TABLE public.retired_entities DROP CONSTRAINT retired_entities_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14971,7 +15118,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'revoked_service_principals_pkey'
                 AND conrelid = 'public.revoked_service_principals'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (principal_id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (principal_id)') THEN
     ALTER TABLE public.revoked_service_principals DROP CONSTRAINT revoked_service_principals_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -14990,7 +15137,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'revoked_service_tokens_pkey'
                 AND conrelid = 'public.revoked_service_tokens'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (jti)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (jti)') THEN
     ALTER TABLE public.revoked_service_tokens DROP CONSTRAINT revoked_service_tokens_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15009,7 +15156,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'role_permissions_pkey'
                 AND conrelid = 'public.role_permissions'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (role_id, permission_id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (role_id, permission_id)') THEN
     ALTER TABLE public.role_permissions DROP CONSTRAINT role_permissions_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15028,7 +15175,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'roles_name_key'
                 AND conrelid = 'public.roles'::regclass
-                AND pg_get_constraintdef(oid) <> 'UNIQUE (name)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'UNIQUE (name)') THEN
     ALTER TABLE public.roles DROP CONSTRAINT roles_name_key;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15047,7 +15194,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'roles_pkey'
                 AND conrelid = 'public.roles'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.roles DROP CONSTRAINT roles_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15066,7 +15213,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'schema_bootstrap_pkey'
                 AND conrelid = 'public.schema_bootstrap'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.schema_bootstrap DROP CONSTRAINT schema_bootstrap_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15085,7 +15232,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'schemas_pkey'
                 AND conrelid = 'public.schemas'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.schemas DROP CONSTRAINT schemas_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15104,7 +15251,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'schemas_schema_name_key'
                 AND conrelid = 'public.schemas'::regclass
-                AND pg_get_constraintdef(oid) <> 'UNIQUE (schema_name)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'UNIQUE (schema_name)') THEN
     ALTER TABLE public.schemas DROP CONSTRAINT schemas_schema_name_key;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15123,7 +15270,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'system_settings_key_key'
                 AND conrelid = 'public.system_settings'::regclass
-                AND pg_get_constraintdef(oid) <> 'UNIQUE (key)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'UNIQUE (key)') THEN
     ALTER TABLE public.system_settings DROP CONSTRAINT system_settings_key_key;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15142,7 +15289,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'system_settings_pkey'
                 AND conrelid = 'public.system_settings'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.system_settings DROP CONSTRAINT system_settings_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15161,7 +15308,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'uq_asset_config_metric'
                 AND conrelid = 'public.asset_config'::regclass
-                AND pg_get_constraintdef(oid) <> 'UNIQUE (asset_id, metric_name)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'UNIQUE (asset_id, metric_name)') THEN
     ALTER TABLE public.asset_config DROP CONSTRAINT uq_asset_config_metric;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15180,7 +15327,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'uq_device_submodels'
                 AND conrelid = 'public.device_submodels'::regclass
-                AND pg_get_constraintdef(oid) <> 'UNIQUE (device_id, schema_id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'UNIQUE (device_id, schema_id)') THEN
     ALTER TABLE public.device_submodels DROP CONSTRAINT uq_device_submodels;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15199,7 +15346,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'uq_platform_alerts_event'
                 AND conrelid = 'public.platform_alerts'::regclass
-                AND pg_get_constraintdef(oid) <> 'UNIQUE (fingerprint, starts_at)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'UNIQUE (fingerprint, starts_at)') THEN
     ALTER TABLE public.platform_alerts DROP CONSTRAINT uq_platform_alerts_event;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15218,7 +15365,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'user_roles_pkey'
                 AND conrelid = 'public.user_roles'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (user_id, role_id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (user_id, role_id)') THEN
     ALTER TABLE public.user_roles DROP CONSTRAINT user_roles_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15237,7 +15384,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'webhook_endpoints_event_key_url_key'
                 AND conrelid = 'public.webhook_endpoints'::regclass
-                AND pg_get_constraintdef(oid) <> 'UNIQUE (event_key, url)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'UNIQUE (event_key, url)') THEN
     ALTER TABLE public.webhook_endpoints DROP CONSTRAINT webhook_endpoints_event_key_url_key;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15256,7 +15403,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'webhook_endpoints_pkey'
                 AND conrelid = 'public.webhook_endpoints'::regclass
-                AND pg_get_constraintdef(oid) <> 'PRIMARY KEY (id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'PRIMARY KEY (id)') THEN
     ALTER TABLE public.webhook_endpoints DROP CONSTRAINT webhook_endpoints_pkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15491,310 +15638,356 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_schemas_one_draft_per_parent ON public.sche
 
 -- system_settings archive_destination_guard_trg :: TRIGGER
 BEGIN;
-DROP TRIGGER IF EXISTS archive_destination_guard_trg ON public.system_settings;
+SELECT public.replay_trigger('public.system_settings', 'archive_destination_guard_trg', $ddl$
 CREATE TRIGGER archive_destination_guard_trg BEFORE UPDATE ON public.system_settings FOR EACH ROW EXECUTE FUNCTION public.archive_destination_guard();
+$ddl$);
 
 --
 
 -- system_settings backup_offsite_setting_guard_trg :: TRIGGER
-DROP TRIGGER IF EXISTS backup_offsite_setting_guard_trg ON public.system_settings;
+SELECT public.replay_trigger('public.system_settings', 'backup_offsite_setting_guard_trg', $ddl$
 CREATE TRIGGER backup_offsite_setting_guard_trg BEFORE UPDATE ON public.system_settings FOR EACH ROW EXECUTE FUNCTION public.backup_offsite_setting_guard();
+$ddl$);
 
 --
 
 -- system_settings system_settings_read_only_trg :: TRIGGER
-DROP TRIGGER IF EXISTS system_settings_read_only_trg ON public.system_settings;
+SELECT public.replay_trigger('public.system_settings', 'system_settings_read_only_trg', $ddl$
 CREATE TRIGGER system_settings_read_only_trg BEFORE UPDATE ON public.system_settings FOR EACH ROW EXECUTE FUNCTION public.system_settings_read_only_guard();
+$ddl$);
 
 --
 
 -- system_settings system_settings_stamp_trg :: TRIGGER
-DROP TRIGGER IF EXISTS system_settings_stamp_trg ON public.system_settings;
+SELECT public.replay_trigger('public.system_settings', 'system_settings_stamp_trg', $ddl$
 CREATE TRIGGER system_settings_stamp_trg BEFORE UPDATE ON public.system_settings FOR EACH ROW EXECUTE FUNCTION public.system_settings_stamp();
+$ddl$);
 COMMIT;
 
 --
 
 -- areas trg_areas_audit_trail :: TRIGGER
 BEGIN;
-DROP TRIGGER IF EXISTS trg_areas_audit_trail ON public.areas;
+SELECT public.replay_trigger('public.areas', 'trg_areas_audit_trail', $ddl$
 CREATE TRIGGER trg_areas_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.areas FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
+$ddl$);
 
 --
 
 -- areas trg_areas_retired :: TRIGGER
-DROP TRIGGER IF EXISTS trg_areas_retired ON public.areas;
+SELECT public.replay_trigger('public.areas', 'trg_areas_retired', $ddl$
 CREATE TRIGGER trg_areas_retired AFTER DELETE ON public.areas FOR EACH ROW EXECUTE FUNCTION public.record_retired_entity();
+$ddl$);
 COMMIT;
 
 --
 
 -- asset_exports trg_asset_exports_audit_trail :: TRIGGER
 BEGIN;
-DROP TRIGGER IF EXISTS trg_asset_exports_audit_trail ON public.asset_exports;
+SELECT public.replay_trigger('public.asset_exports', 'trg_asset_exports_audit_trail', $ddl$
 CREATE TRIGGER trg_asset_exports_audit_trail AFTER INSERT ON public.asset_exports FOR EACH ROW EXECUTE FUNCTION public.log_asset_export();
+$ddl$);
 COMMIT;
 
 --
 
 -- audit_trail trg_audit_trail_append_only :: TRIGGER
 BEGIN;
-DROP TRIGGER IF EXISTS trg_audit_trail_append_only ON public.audit_trail;
+SELECT public.replay_trigger('public.audit_trail', 'trg_audit_trail_append_only', $ddl$
 CREATE TRIGGER trg_audit_trail_append_only BEFORE DELETE OR UPDATE ON public.audit_trail FOR EACH ROW EXECUTE FUNCTION public.enforce_audit_trail_append_only();
+$ddl$);
 
 --
 
 -- audit_trail trg_audit_trail_stamp_domain :: TRIGGER
-DROP TRIGGER IF EXISTS trg_audit_trail_stamp_domain ON public.audit_trail;
+SELECT public.replay_trigger('public.audit_trail', 'trg_audit_trail_stamp_domain', $ddl$
 CREATE TRIGGER trg_audit_trail_stamp_domain BEFORE INSERT ON public.audit_trail FOR EACH ROW EXECUTE FUNCTION public.stamp_audit_domain();
+$ddl$);
 COMMIT;
 
 --
 
 -- cells trg_cells_audit_trail :: TRIGGER
 BEGIN;
-DROP TRIGGER IF EXISTS trg_cells_audit_trail ON public.cells;
+SELECT public.replay_trigger('public.cells', 'trg_cells_audit_trail', $ddl$
 CREATE TRIGGER trg_cells_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.cells FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
+$ddl$);
 
 --
 
 -- cells trg_cells_place_in_area :: TRIGGER
-DROP TRIGGER IF EXISTS trg_cells_place_in_area ON public.cells;
+SELECT public.replay_trigger('public.cells', 'trg_cells_place_in_area', $ddl$
 CREATE TRIGGER trg_cells_place_in_area BEFORE INSERT OR UPDATE OF area_id, plan_x, plan_y, is_archived ON public.cells FOR EACH ROW EXECUTE FUNCTION public.place_cell_in_its_area();
+$ddl$);
 
 --
 
 -- cells trg_cells_retired :: TRIGGER
-DROP TRIGGER IF EXISTS trg_cells_retired ON public.cells;
+SELECT public.replay_trigger('public.cells', 'trg_cells_retired', $ddl$
 CREATE TRIGGER trg_cells_retired AFTER DELETE ON public.cells FOR EACH ROW EXECUTE FUNCTION public.record_retired_entity();
+$ddl$);
 COMMIT;
 
 --
 
 -- change_proposals trg_change_proposals_author :: TRIGGER
 BEGIN;
-DROP TRIGGER IF EXISTS trg_change_proposals_author ON public.change_proposals;
+SELECT public.replay_trigger('public.change_proposals', 'trg_change_proposals_author', $ddl$
 CREATE TRIGGER trg_change_proposals_author BEFORE INSERT ON public.change_proposals FOR EACH ROW EXECUTE FUNCTION public.stamp_proposal_author();
+$ddl$);
 
 --
 
 -- change_proposals trg_change_proposals_cap :: TRIGGER
-DROP TRIGGER IF EXISTS trg_change_proposals_cap ON public.change_proposals;
+SELECT public.replay_trigger('public.change_proposals', 'trg_change_proposals_cap', $ddl$
 CREATE TRIGGER trg_change_proposals_cap BEFORE INSERT ON public.change_proposals FOR EACH ROW WHEN ((new.status = 'open'::text)) EXECUTE FUNCTION public.enforce_open_proposal_cap();
+$ddl$);
 
 --
 
 -- change_proposals trg_change_proposals_transition :: TRIGGER
-DROP TRIGGER IF EXISTS trg_change_proposals_transition ON public.change_proposals;
+SELECT public.replay_trigger('public.change_proposals', 'trg_change_proposals_transition', $ddl$
 CREATE TRIGGER trg_change_proposals_transition BEFORE UPDATE ON public.change_proposals FOR EACH ROW EXECUTE FUNCTION public.guard_change_proposal_transition();
+$ddl$);
 
 --
 
 -- change_proposals trg_change_proposals_validate :: TRIGGER
-DROP TRIGGER IF EXISTS trg_change_proposals_validate ON public.change_proposals;
+SELECT public.replay_trigger('public.change_proposals', 'trg_change_proposals_validate', $ddl$
 CREATE TRIGGER trg_change_proposals_validate BEFORE INSERT OR UPDATE OF patch, entity_type, entity_id ON public.change_proposals FOR EACH ROW EXECUTE FUNCTION public.validate_change_proposal();
+$ddl$);
 COMMIT;
 
 --
 
 -- device_nameplate trg_device_nameplate_audit_trail :: TRIGGER
 BEGIN;
-DROP TRIGGER IF EXISTS trg_device_nameplate_audit_trail ON public.device_nameplate;
+SELECT public.replay_trigger('public.device_nameplate', 'trg_device_nameplate_audit_trail', $ddl$
 CREATE TRIGGER trg_device_nameplate_audit_trail AFTER INSERT OR DELETE ON public.device_nameplate FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event('device_id');
+$ddl$);
 
 --
 
 -- device_nameplate trg_device_nameplate_audit_trail_update :: TRIGGER
-DROP TRIGGER IF EXISTS trg_device_nameplate_audit_trail_update ON public.device_nameplate;
+SELECT public.replay_trigger('public.device_nameplate', 'trg_device_nameplate_audit_trail_update', $ddl$
 CREATE TRIGGER trg_device_nameplate_audit_trail_update AFTER UPDATE ON public.device_nameplate FOR EACH ROW WHEN ((((to_jsonb(new.*) - 'updated_at'::text) - 'updated_by'::text) IS DISTINCT FROM ((to_jsonb(old.*) - 'updated_at'::text) - 'updated_by'::text))) EXECUTE FUNCTION public.log_audit_trail_event('device_id');
+$ddl$);
 COMMIT;
 
 --
 
 -- devices trg_device_quarantine_webhook_insert :: TRIGGER
 BEGIN;
-DROP TRIGGER IF EXISTS trg_device_quarantine_webhook_insert ON public.devices;
+SELECT public.replay_trigger('public.devices', 'trg_device_quarantine_webhook_insert', $ddl$
 CREATE TRIGGER trg_device_quarantine_webhook_insert AFTER INSERT ON public.devices FOR EACH ROW WHEN ((new.is_quarantined IS TRUE)) EXECUTE FUNCTION public.dispatch_device_quarantine_webhook();
+$ddl$);
 
 --
 
 -- devices trg_device_quarantine_webhook_update :: TRIGGER
-DROP TRIGGER IF EXISTS trg_device_quarantine_webhook_update ON public.devices;
+SELECT public.replay_trigger('public.devices', 'trg_device_quarantine_webhook_update', $ddl$
 CREATE TRIGGER trg_device_quarantine_webhook_update AFTER UPDATE OF is_quarantined ON public.devices FOR EACH ROW WHEN (((new.is_quarantined IS TRUE) AND (old.is_quarantined IS DISTINCT FROM true))) EXECUTE FUNCTION public.dispatch_device_quarantine_webhook();
+$ddl$);
 COMMIT;
 
 --
 
 -- device_submodels trg_device_submodels_reject_archived_schema :: TRIGGER
 BEGIN;
-DROP TRIGGER IF EXISTS trg_device_submodels_reject_archived_schema ON public.device_submodels;
+SELECT public.replay_trigger('public.device_submodels', 'trg_device_submodels_reject_archived_schema', $ddl$
 CREATE TRIGGER trg_device_submodels_reject_archived_schema BEFORE INSERT OR UPDATE OF schema_id ON public.device_submodels FOR EACH ROW EXECUTE FUNCTION public.reject_archived_schema_assignment();
+$ddl$);
 COMMIT;
 
 --
 
 -- devices trg_devices_audit_trail :: TRIGGER
 BEGIN;
-DROP TRIGGER IF EXISTS trg_devices_audit_trail ON public.devices;
+SELECT public.replay_trigger('public.devices', 'trg_devices_audit_trail', $ddl$
 CREATE TRIGGER trg_devices_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.devices FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
+$ddl$);
 
 --
 
 -- devices trg_devices_delete_asset_config :: TRIGGER
-DROP TRIGGER IF EXISTS trg_devices_delete_asset_config ON public.devices;
+SELECT public.replay_trigger('public.devices', 'trg_devices_delete_asset_config', $ddl$
 CREATE TRIGGER trg_devices_delete_asset_config AFTER DELETE ON public.devices FOR EACH ROW EXECUTE FUNCTION public.delete_device_asset_config();
+$ddl$);
 
 --
 
 -- devices trg_devices_replay_lane_is_minted :: TRIGGER
-DROP TRIGGER IF EXISTS trg_devices_replay_lane_is_minted ON public.devices;
+SELECT public.replay_trigger('public.devices', 'trg_devices_replay_lane_is_minted', $ddl$
 CREATE TRIGGER trg_devices_replay_lane_is_minted BEFORE INSERT OR UPDATE OF gateway_id ON public.devices FOR EACH ROW EXECUTE FUNCTION public.refuse_hand_assigning_a_replay_lane();
+$ddl$);
 
 --
 
 -- devices trg_devices_retired :: TRIGGER
-DROP TRIGGER IF EXISTS trg_devices_retired ON public.devices;
+SELECT public.replay_trigger('public.devices', 'trg_devices_retired', $ddl$
 CREATE TRIGGER trg_devices_retired AFTER DELETE ON public.devices FOR EACH ROW EXECUTE FUNCTION public.record_retired_entity();
+$ddl$);
 
 --
 
 -- devices trg_devices_shadow_follows_archive :: TRIGGER
-DROP TRIGGER IF EXISTS trg_devices_shadow_follows_archive ON public.devices;
+SELECT public.replay_trigger('public.devices', 'trg_devices_shadow_follows_archive', $ddl$
 CREATE TRIGGER trg_devices_shadow_follows_archive AFTER UPDATE OF is_archived ON public.devices FOR EACH ROW EXECUTE FUNCTION public.shadow_follows_its_original();
+$ddl$);
 
 --
 
 -- devices trg_devices_shadow_follows_delete :: TRIGGER
-DROP TRIGGER IF EXISTS trg_devices_shadow_follows_delete ON public.devices;
+SELECT public.replay_trigger('public.devices', 'trg_devices_shadow_follows_delete', $ddl$
 CREATE TRIGGER trg_devices_shadow_follows_delete BEFORE DELETE ON public.devices FOR EACH ROW EXECUTE FUNCTION public.shadow_follows_its_original();
+$ddl$);
 COMMIT;
 
 --
 
 -- schemas trg_enforce_schema_version_provenance :: TRIGGER
 BEGIN;
-DROP TRIGGER IF EXISTS trg_enforce_schema_version_provenance ON public.schemas;
+SELECT public.replay_trigger('public.schemas', 'trg_enforce_schema_version_provenance', $ddl$
 CREATE TRIGGER trg_enforce_schema_version_provenance BEFORE INSERT ON public.schemas FOR EACH ROW EXECUTE FUNCTION public.enforce_schema_version_provenance();
+$ddl$);
 COMMIT;
 
 --
 
 -- gateways trg_gateways_audit_trail :: TRIGGER
 BEGIN;
-DROP TRIGGER IF EXISTS trg_gateways_audit_trail ON public.gateways;
+SELECT public.replay_trigger('public.gateways', 'trg_gateways_audit_trail', $ddl$
 CREATE TRIGGER trg_gateways_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
+$ddl$);
 
 --
 
 -- gateways trg_gateways_clear_credential_revoked :: TRIGGER
-DROP TRIGGER IF EXISTS trg_gateways_clear_credential_revoked ON public.gateways;
+SELECT public.replay_trigger('public.gateways', 'trg_gateways_clear_credential_revoked', $ddl$
 CREATE TRIGGER trg_gateways_clear_credential_revoked BEFORE UPDATE OF is_archived ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.clear_credential_revoked_on_enrolment();
+$ddl$);
 
 --
 
 -- gateways trg_gateways_forge_follows_archive :: TRIGGER
-DROP TRIGGER IF EXISTS trg_gateways_forge_follows_archive ON public.gateways;
+SELECT public.replay_trigger('public.gateways', 'trg_gateways_forge_follows_archive', $ddl$
 CREATE TRIGGER trg_gateways_forge_follows_archive AFTER UPDATE OF is_archived ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.sweep_forge_on_archive_change();
+$ddl$);
 
 --
 
 -- gateways trg_gateways_keep_a_playback_target :: TRIGGER
-DROP TRIGGER IF EXISTS trg_gateways_keep_a_playback_target ON public.gateways;
+SELECT public.replay_trigger('public.gateways', 'trg_gateways_keep_a_playback_target', $ddl$
 CREATE TRIGGER trg_gateways_keep_a_playback_target BEFORE UPDATE OF is_archived ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.refuse_archiving_the_last_shadow_gateway();
+$ddl$);
 
 --
 
 -- gateways trg_gateways_retired :: TRIGGER
-DROP TRIGGER IF EXISTS trg_gateways_retired ON public.gateways;
+SELECT public.replay_trigger('public.gateways', 'trg_gateways_retired', $ddl$
 CREATE TRIGGER trg_gateways_retired AFTER DELETE ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.record_retired_entity();
+$ddl$);
 
 --
 
 -- gateways trg_gateways_revoke_credential_delete :: TRIGGER
-DROP TRIGGER IF EXISTS trg_gateways_revoke_credential_delete ON public.gateways;
+SELECT public.replay_trigger('public.gateways', 'trg_gateways_revoke_credential_delete', $ddl$
 CREATE TRIGGER trg_gateways_revoke_credential_delete BEFORE DELETE ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.revoke_credential_on_decommission();
+$ddl$);
 
 --
 
 -- gateways trg_gateways_revoke_credential_update :: TRIGGER
-DROP TRIGGER IF EXISTS trg_gateways_revoke_credential_update ON public.gateways;
+SELECT public.replay_trigger('public.gateways', 'trg_gateways_revoke_credential_update', $ddl$
 CREATE TRIGGER trg_gateways_revoke_credential_update AFTER UPDATE OF is_archived ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.revoke_credential_on_decommission();
+$ddl$);
 
 --
 
 -- gateways trg_gateways_withdraw_enrolment :: TRIGGER
-DROP TRIGGER IF EXISTS trg_gateways_withdraw_enrolment ON public.gateways;
+SELECT public.replay_trigger('public.gateways', 'trg_gateways_withdraw_enrolment', $ddl$
 CREATE TRIGGER trg_gateways_withdraw_enrolment AFTER UPDATE OF is_archived ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.withdraw_gateway_enrollment_tokens();
+$ddl$);
 COMMIT;
 
 --
 
 -- metric_catalog trg_metric_catalog_audit_trail :: TRIGGER
 BEGIN;
-DROP TRIGGER IF EXISTS trg_metric_catalog_audit_trail ON public.metric_catalog;
+SELECT public.replay_trigger('public.metric_catalog', 'trg_metric_catalog_audit_trail', $ddl$
 CREATE TRIGGER trg_metric_catalog_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.metric_catalog FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
+$ddl$);
 
 --
 
 -- metric_catalog trg_metric_catalog_immutability :: TRIGGER
-DROP TRIGGER IF EXISTS trg_metric_catalog_immutability ON public.metric_catalog;
+SELECT public.replay_trigger('public.metric_catalog', 'trg_metric_catalog_immutability', $ddl$
 CREATE TRIGGER trg_metric_catalog_immutability BEFORE UPDATE ON public.metric_catalog FOR EACH ROW EXECUTE FUNCTION public.enforce_metric_catalog_immutability();
+$ddl$);
 
 --
 
 -- metric_catalog trg_metric_group_spelling :: TRIGGER
-DROP TRIGGER IF EXISTS trg_metric_group_spelling ON public.metric_catalog;
+SELECT public.replay_trigger('public.metric_catalog', 'trg_metric_group_spelling', $ddl$
 CREATE TRIGGER trg_metric_group_spelling BEFORE INSERT ON public.metric_catalog FOR EACH ROW EXECUTE FUNCTION public.enforce_metric_group_spelling();
+$ddl$);
 COMMIT;
 
 --
 
 -- playback_jobs trg_playback_target_must_be_shadow :: TRIGGER
 BEGIN;
-DROP TRIGGER IF EXISTS trg_playback_target_must_be_shadow ON public.playback_jobs;
+SELECT public.replay_trigger('public.playback_jobs', 'trg_playback_target_must_be_shadow', $ddl$
 CREATE TRIGGER trg_playback_target_must_be_shadow BEFORE INSERT ON public.playback_jobs FOR EACH ROW EXECUTE FUNCTION public.playback_target_must_be_shadow();
+$ddl$);
 COMMIT;
 
 --
 
 -- schemas trg_prevent_active_schema_mutation :: TRIGGER
 BEGIN;
-DROP TRIGGER IF EXISTS trg_prevent_active_schema_mutation ON public.schemas;
+SELECT public.replay_trigger('public.schemas', 'trg_prevent_active_schema_mutation', $ddl$
 CREATE TRIGGER trg_prevent_active_schema_mutation BEFORE UPDATE ON public.schemas FOR EACH ROW EXECUTE FUNCTION public.prevent_active_schema_mutation();
+$ddl$);
 
 --
 
 -- schemas trg_schemas_audit_trail :: TRIGGER
-DROP TRIGGER IF EXISTS trg_schemas_audit_trail ON public.schemas;
+SELECT public.replay_trigger('public.schemas', 'trg_schemas_audit_trail', $ddl$
 CREATE TRIGGER trg_schemas_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.schemas FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
+$ddl$);
 COMMIT;
 
 --
 
 -- system_settings trg_system_settings_audit_trail :: TRIGGER
 BEGIN;
-DROP TRIGGER IF EXISTS trg_system_settings_audit_trail ON public.system_settings;
+SELECT public.replay_trigger('public.system_settings', 'trg_system_settings_audit_trail', $ddl$
 CREATE TRIGGER trg_system_settings_audit_trail AFTER INSERT OR DELETE ON public.system_settings FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event();
+$ddl$);
 
 --
 
 -- system_settings trg_system_settings_audit_trail_update :: TRIGGER
-DROP TRIGGER IF EXISTS trg_system_settings_audit_trail_update ON public.system_settings;
+SELECT public.replay_trigger('public.system_settings', 'trg_system_settings_audit_trail_update', $ddl$
 CREATE TRIGGER trg_system_settings_audit_trail_update AFTER UPDATE ON public.system_settings FOR EACH ROW WHEN ((((to_jsonb(new.*) - 'updated_at'::text) - 'updated_by'::text) IS DISTINCT FROM ((to_jsonb(old.*) - 'updated_at'::text) - 'updated_by'::text))) EXECUTE FUNCTION public.log_audit_trail_event();
+$ddl$);
 COMMIT;
 
 --
 
 -- user_roles trg_user_roles_audit_trail :: TRIGGER
 BEGIN;
-DROP TRIGGER IF EXISTS trg_user_roles_audit_trail ON public.user_roles;
+SELECT public.replay_trigger('public.user_roles', 'trg_user_roles_audit_trail', $ddl$
 CREATE TRIGGER trg_user_roles_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.user_roles FOR EACH ROW EXECUTE FUNCTION public.log_role_assignment();
+$ddl$);
 
 --
 
 -- user_roles trg_user_roles_refuse_machine_principal :: TRIGGER
-DROP TRIGGER IF EXISTS trg_user_roles_refuse_machine_principal ON public.user_roles;
+SELECT public.replay_trigger('public.user_roles', 'trg_user_roles_refuse_machine_principal', $ddl$
 CREATE TRIGGER trg_user_roles_refuse_machine_principal BEFORE INSERT OR UPDATE ON public.user_roles FOR EACH ROW EXECUTE FUNCTION public.refuse_role_for_machine_principal();
+$ddl$);
 COMMIT;
 
 --
@@ -15805,7 +15998,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'audit_trail_changed_by_fkey'
                 AND conrelid = 'public.audit_trail'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (changed_by) REFERENCES auth.users(id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (changed_by) REFERENCES auth.users(id)') THEN
     ALTER TABLE public.audit_trail DROP CONSTRAINT audit_trail_changed_by_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15824,7 +16017,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'backup_jobs_requested_by_fkey'
                 AND conrelid = 'public.backup_jobs'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (requested_by) REFERENCES auth.users(id) ON DELETE SET NULL') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (requested_by) REFERENCES auth.users(id) ON DELETE SET NULL') THEN
     ALTER TABLE public.backup_jobs DROP CONSTRAINT backup_jobs_requested_by_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15843,7 +16036,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'backups_job_id_fkey'
                 AND conrelid = 'public.backups'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (job_id) REFERENCES public.backup_jobs(id) ON DELETE SET NULL') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (job_id) REFERENCES public.backup_jobs(id) ON DELETE SET NULL') THEN
     ALTER TABLE public.backups DROP CONSTRAINT backups_job_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15862,7 +16055,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'backups_released_by_fkey'
                 AND conrelid = 'public.backups'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (released_by) REFERENCES auth.users(id) ON DELETE SET NULL') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (released_by) REFERENCES auth.users(id) ON DELETE SET NULL') THEN
     ALTER TABLE public.backups DROP CONSTRAINT backups_released_by_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15881,7 +16074,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'backups_requested_by_fkey'
                 AND conrelid = 'public.backups'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (requested_by) REFERENCES auth.users(id) ON DELETE SET NULL') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (requested_by) REFERENCES auth.users(id) ON DELETE SET NULL') THEN
     ALTER TABLE public.backups DROP CONSTRAINT backups_requested_by_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15900,7 +16093,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'capture_jobs_capture_id_fkey'
                 AND conrelid = 'public.capture_jobs'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (capture_id) REFERENCES public.captures(id) ON DELETE SET NULL') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (capture_id) REFERENCES public.captures(id) ON DELETE SET NULL') THEN
     ALTER TABLE public.capture_jobs DROP CONSTRAINT capture_jobs_capture_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15919,7 +16112,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'capture_jobs_device_id_fkey'
                 AND conrelid = 'public.capture_jobs'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE') THEN
     ALTER TABLE public.capture_jobs DROP CONSTRAINT capture_jobs_device_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15938,7 +16131,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'capture_jobs_gateway_id_fkey'
                 AND conrelid = 'public.capture_jobs'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE') THEN
     ALTER TABLE public.capture_jobs DROP CONSTRAINT capture_jobs_gateway_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15957,7 +16150,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'captures_device_id_fkey'
                 AND conrelid = 'public.captures'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE') THEN
     ALTER TABLE public.captures DROP CONSTRAINT captures_device_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15976,7 +16169,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'captures_gateway_id_fkey'
                 AND conrelid = 'public.captures'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE') THEN
     ALTER TABLE public.captures DROP CONSTRAINT captures_gateway_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -15995,7 +16188,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'cells_area_id_fkey'
                 AND conrelid = 'public.cells'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (area_id) REFERENCES public.areas(id) ON DELETE SET NULL') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (area_id) REFERENCES public.areas(id) ON DELETE SET NULL') THEN
     ALTER TABLE public.cells DROP CONSTRAINT cells_area_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16014,7 +16207,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'device_nameplate_device_id_fkey'
                 AND conrelid = 'public.device_nameplate'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE') THEN
     ALTER TABLE public.device_nameplate DROP CONSTRAINT device_nameplate_device_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16033,7 +16226,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'device_submodels_device_id_fkey'
                 AND conrelid = 'public.device_submodels'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE CASCADE') THEN
     ALTER TABLE public.device_submodels DROP CONSTRAINT device_submodels_device_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16052,7 +16245,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'device_submodels_schema_id_fkey'
                 AND conrelid = 'public.device_submodels'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (schema_id) REFERENCES public.schemas(id) ON DELETE CASCADE') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (schema_id) REFERENCES public.schemas(id) ON DELETE CASCADE') THEN
     ALTER TABLE public.device_submodels DROP CONSTRAINT device_submodels_schema_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16071,7 +16264,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'devices_area_id_fkey'
                 AND conrelid = 'public.devices'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (area_id) REFERENCES public.areas(id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (area_id) REFERENCES public.areas(id)') THEN
     ALTER TABLE public.devices DROP CONSTRAINT devices_area_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16090,7 +16283,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'devices_cell_id_fkey'
                 AND conrelid = 'public.devices'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (cell_id) REFERENCES public.cells(id) ON DELETE SET NULL') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (cell_id) REFERENCES public.cells(id) ON DELETE SET NULL') THEN
     ALTER TABLE public.devices DROP CONSTRAINT devices_cell_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16109,7 +16302,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'devices_gateway_id_fkey'
                 AND conrelid = 'public.devices'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE SET NULL') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE SET NULL') THEN
     ALTER TABLE public.devices DROP CONSTRAINT devices_gateway_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16128,7 +16321,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'devices_shadow_of_fkey'
                 AND conrelid = 'public.devices'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (shadow_of) REFERENCES public.devices(id) ON DELETE SET NULL') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (shadow_of) REFERENCES public.devices(id) ON DELETE SET NULL') THEN
     ALTER TABLE public.devices DROP CONSTRAINT devices_shadow_of_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16147,7 +16340,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'directory_services_registered_schema_id_fkey'
                 AND conrelid = 'public.directory_services'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (registered_schema_id) REFERENCES public.schemas(id) ON DELETE SET NULL') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (registered_schema_id) REFERENCES public.schemas(id) ON DELETE SET NULL') THEN
     ALTER TABLE public.directory_services DROP CONSTRAINT directory_services_registered_schema_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16166,7 +16359,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateway_enrollment_tokens_gateway_fk'
                 AND conrelid = 'public.gateway_enrollment_tokens'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE') THEN
     ALTER TABLE public.gateway_enrollment_tokens DROP CONSTRAINT gateway_enrollment_tokens_gateway_fk;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16185,7 +16378,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateway_revocation_requests_gateway_id_fkey'
                 AND conrelid = 'public.gateway_revocation_requests'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE') THEN
     ALTER TABLE public.gateway_revocation_requests DROP CONSTRAINT gateway_revocation_requests_gateway_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16204,7 +16397,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateways_area_id_fkey'
                 AND conrelid = 'public.gateways'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (area_id) REFERENCES public.areas(id)') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (area_id) REFERENCES public.areas(id)') THEN
     ALTER TABLE public.gateways DROP CONSTRAINT gateways_area_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16223,7 +16416,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'gateways_cell_id_fkey'
                 AND conrelid = 'public.gateways'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (cell_id) REFERENCES public.cells(id) ON DELETE SET NULL') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (cell_id) REFERENCES public.cells(id) ON DELETE SET NULL') THEN
     ALTER TABLE public.gateways DROP CONSTRAINT gateways_cell_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16242,7 +16435,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'machine_principals_created_by_fkey'
                 AND conrelid = 'public.machine_principals'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE SET NULL') THEN
     ALTER TABLE public.machine_principals DROP CONSTRAINT machine_principals_created_by_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16261,7 +16454,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'machine_principals_principal_id_fkey'
                 AND conrelid = 'public.machine_principals'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (principal_id) REFERENCES auth.users(id) ON DELETE CASCADE') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (principal_id) REFERENCES auth.users(id) ON DELETE CASCADE') THEN
     ALTER TABLE public.machine_principals DROP CONSTRAINT machine_principals_principal_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16280,7 +16473,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'metric_catalog_superseded_by_fkey'
                 AND conrelid = 'public.metric_catalog'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (superseded_by) REFERENCES public.metric_catalog(id) ON DELETE SET NULL') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (superseded_by) REFERENCES public.metric_catalog(id) ON DELETE SET NULL') THEN
     ALTER TABLE public.metric_catalog DROP CONSTRAINT metric_catalog_superseded_by_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16299,7 +16492,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'playback_jobs_capture_id_fkey'
                 AND conrelid = 'public.playback_jobs'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (capture_id) REFERENCES public.captures(id) ON DELETE SET NULL') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (capture_id) REFERENCES public.captures(id) ON DELETE SET NULL') THEN
     ALTER TABLE public.playback_jobs DROP CONSTRAINT playback_jobs_capture_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16318,7 +16511,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'playback_jobs_target_gateway_id_fkey'
                 AND conrelid = 'public.playback_jobs'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (target_gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (target_gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE') THEN
     ALTER TABLE public.playback_jobs DROP CONSTRAINT playback_jobs_target_gateway_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16337,7 +16530,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'principal_permissions_permission_id_fkey'
                 AND conrelid = 'public.principal_permissions'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (permission_id) REFERENCES public.permissions(id) ON DELETE RESTRICT') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (permission_id) REFERENCES public.permissions(id) ON DELETE RESTRICT') THEN
     ALTER TABLE public.principal_permissions DROP CONSTRAINT principal_permissions_permission_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16356,7 +16549,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'principal_permissions_principal_id_fkey'
                 AND conrelid = 'public.principal_permissions'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (principal_id) REFERENCES auth.users(id) ON DELETE CASCADE') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (principal_id) REFERENCES auth.users(id) ON DELETE CASCADE') THEN
     ALTER TABLE public.principal_permissions DROP CONSTRAINT principal_permissions_principal_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16375,7 +16568,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'rebirth_requests_gateway_id_fkey'
                 AND conrelid = 'public.rebirth_requests'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (gateway_id) REFERENCES public.gateways(id) ON DELETE CASCADE') THEN
     ALTER TABLE public.rebirth_requests DROP CONSTRAINT rebirth_requests_gateway_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16394,7 +16587,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'role_permissions_permission_id_fkey'
                 AND conrelid = 'public.role_permissions'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (permission_id) REFERENCES public.permissions(id) ON DELETE CASCADE') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (permission_id) REFERENCES public.permissions(id) ON DELETE CASCADE') THEN
     ALTER TABLE public.role_permissions DROP CONSTRAINT role_permissions_permission_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16413,7 +16606,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'role_permissions_role_id_fkey'
                 AND conrelid = 'public.role_permissions'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE') THEN
     ALTER TABLE public.role_permissions DROP CONSTRAINT role_permissions_role_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16432,7 +16625,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'schemas_parent_schema_id_fkey'
                 AND conrelid = 'public.schemas'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (parent_schema_id) REFERENCES public.schemas(id) ON DELETE SET NULL') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (parent_schema_id) REFERENCES public.schemas(id) ON DELETE SET NULL') THEN
     ALTER TABLE public.schemas DROP CONSTRAINT schemas_parent_schema_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16451,7 +16644,7 @@ DO $c$ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint
               WHERE conname = 'user_roles_role_id_fkey'
                 AND conrelid = 'public.user_roles'::regclass
-                AND pg_get_constraintdef(oid) <> 'FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE') THEN
+                AND public.live_constraint_definition(conrelid, conname) <> 'FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE') THEN
     ALTER TABLE public.user_roles DROP CONSTRAINT user_roles_role_id_fkey;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -16471,26 +16664,30 @@ ALTER TABLE public.areas ENABLE ROW LEVEL SECURITY;
 
 -- areas areas_delete_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS areas_delete_privileged ON public.areas;
+SELECT public.replay_policy('public.areas', 'areas_delete_privileged', $ddl$
 CREATE POLICY areas_delete_privileged ON public.areas FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 
 --
 
 -- areas areas_insert_privileged :: POLICY
-DROP POLICY IF EXISTS areas_insert_privileged ON public.areas;
+SELECT public.replay_policy('public.areas', 'areas_insert_privileged', $ddl$
 CREATE POLICY areas_insert_privileged ON public.areas FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 
 --
 
 -- areas areas_select_authenticated :: POLICY
-DROP POLICY IF EXISTS areas_select_authenticated ON public.areas;
+SELECT public.replay_policy('public.areas', 'areas_select_authenticated', $ddl$
 CREATE POLICY areas_select_authenticated ON public.areas FOR SELECT TO authenticated USING (true);
+$ddl$);
 
 --
 
 -- areas areas_update_privileged :: POLICY
-DROP POLICY IF EXISTS areas_update_privileged ON public.areas;
+SELECT public.replay_policy('public.areas', 'areas_update_privileged', $ddl$
 CREATE POLICY areas_update_privileged ON public.areas FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -16502,8 +16699,9 @@ ALTER TABLE public.ashrae223_vocabulary ENABLE ROW LEVEL SECURITY;
 
 -- ashrae223_vocabulary ashrae223_vocabulary_select_authenticated :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS ashrae223_vocabulary_select_authenticated ON public.ashrae223_vocabulary;
+SELECT public.replay_policy('public.ashrae223_vocabulary', 'ashrae223_vocabulary_select_authenticated', $ddl$
 CREATE POLICY ashrae223_vocabulary_select_authenticated ON public.ashrae223_vocabulary FOR SELECT TO authenticated USING (true);
+$ddl$);
 COMMIT;
 
 --
@@ -16515,26 +16713,30 @@ ALTER TABLE public.asset_config ENABLE ROW LEVEL SECURITY;
 
 -- asset_config asset_config_delete_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS asset_config_delete_privileged ON public.asset_config;
+SELECT public.replay_policy('public.asset_config', 'asset_config_delete_privileged', $ddl$
 CREATE POLICY asset_config_delete_privileged ON public.asset_config FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 
 --
 
 -- asset_config asset_config_insert_privileged :: POLICY
-DROP POLICY IF EXISTS asset_config_insert_privileged ON public.asset_config;
+SELECT public.replay_policy('public.asset_config', 'asset_config_insert_privileged', $ddl$
 CREATE POLICY asset_config_insert_privileged ON public.asset_config FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 
 --
 
 -- asset_config asset_config_select_authenticated :: POLICY
-DROP POLICY IF EXISTS asset_config_select_authenticated ON public.asset_config;
+SELECT public.replay_policy('public.asset_config', 'asset_config_select_authenticated', $ddl$
 CREATE POLICY asset_config_select_authenticated ON public.asset_config FOR SELECT TO authenticated USING (true);
+$ddl$);
 
 --
 
 -- asset_config asset_config_update_privileged :: POLICY
-DROP POLICY IF EXISTS asset_config_update_privileged ON public.asset_config;
+SELECT public.replay_policy('public.asset_config', 'asset_config_update_privileged', $ddl$
 CREATE POLICY asset_config_update_privileged ON public.asset_config FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -16546,8 +16748,9 @@ ALTER TABLE public.asset_exports ENABLE ROW LEVEL SECURITY;
 
 -- asset_exports asset_exports_select_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS asset_exports_select_privileged ON public.asset_exports;
+SELECT public.replay_policy('public.asset_exports', 'asset_exports_select_privileged', $ddl$
 CREATE POLICY asset_exports_select_privileged ON public.asset_exports FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -16559,14 +16762,16 @@ ALTER TABLE public.audit_trail ENABLE ROW LEVEL SECURITY;
 
 -- audit_trail audit_trail_select_asset :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS audit_trail_select_asset ON public.audit_trail;
+SELECT public.replay_policy('public.audit_trail', 'audit_trail_select_asset', $ddl$
 CREATE POLICY audit_trail_select_asset ON public.audit_trail FOR SELECT TO authenticated USING (((audit_domain = 'asset'::text) AND (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]) OR public.has_authority(ARRAY['audit_trail:read'::text]))));
+$ddl$, p_stated_by => '0177_policies_check_the_caller_once_per_query.sql');
 
 --
 
 -- audit_trail audit_trail_select_security :: POLICY
-DROP POLICY IF EXISTS audit_trail_select_security ON public.audit_trail;
+SELECT public.replay_policy('public.audit_trail', 'audit_trail_select_security', $ddl$
 CREATE POLICY audit_trail_select_security ON public.audit_trail FOR SELECT TO authenticated USING (((audit_domain = 'security'::text) AND public.has_role(ARRAY['Administrator'::text, 'Auditor'::text])));
+$ddl$, p_stated_by => '0177_policies_check_the_caller_once_per_query.sql');
 COMMIT;
 
 --
@@ -16578,8 +16783,9 @@ ALTER TABLE public.backup_jobs ENABLE ROW LEVEL SECURITY;
 
 -- backup_jobs backup_jobs_select_administrator :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS backup_jobs_select_administrator ON public.backup_jobs;
+SELECT public.replay_policy('public.backup_jobs', 'backup_jobs_select_administrator', $ddl$
 CREATE POLICY backup_jobs_select_administrator ON public.backup_jobs FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -16591,8 +16797,9 @@ ALTER TABLE public.backups ENABLE ROW LEVEL SECURITY;
 
 -- backups backups_select_administrator :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS backups_select_administrator ON public.backups;
+SELECT public.replay_policy('public.backups', 'backups_select_administrator', $ddl$
 CREATE POLICY backups_select_administrator ON public.backups FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -16604,8 +16811,9 @@ ALTER TABLE public.capture_jobs ENABLE ROW LEVEL SECURITY;
 
 -- capture_jobs capture_jobs_select_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS capture_jobs_select_privileged ON public.capture_jobs;
+SELECT public.replay_policy('public.capture_jobs', 'capture_jobs_select_privileged', $ddl$
 CREATE POLICY capture_jobs_select_privileged ON public.capture_jobs FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -16617,14 +16825,16 @@ ALTER TABLE public.captures ENABLE ROW LEVEL SECURITY;
 
 -- captures captures_delete_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS captures_delete_privileged ON public.captures;
+SELECT public.replay_policy('public.captures', 'captures_delete_privileged', $ddl$
 CREATE POLICY captures_delete_privileged ON public.captures FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 
 --
 
 -- captures captures_select_privileged :: POLICY
-DROP POLICY IF EXISTS captures_select_privileged ON public.captures;
+SELECT public.replay_policy('public.captures', 'captures_select_privileged', $ddl$
 CREATE POLICY captures_select_privileged ON public.captures FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -16636,26 +16846,30 @@ ALTER TABLE public.cells ENABLE ROW LEVEL SECURITY;
 
 -- cells cells_delete_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS cells_delete_privileged ON public.cells;
+SELECT public.replay_policy('public.cells', 'cells_delete_privileged', $ddl$
 CREATE POLICY cells_delete_privileged ON public.cells FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 
 --
 
 -- cells cells_insert_privileged :: POLICY
-DROP POLICY IF EXISTS cells_insert_privileged ON public.cells;
+SELECT public.replay_policy('public.cells', 'cells_insert_privileged', $ddl$
 CREATE POLICY cells_insert_privileged ON public.cells FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 
 --
 
 -- cells cells_select_authenticated :: POLICY
-DROP POLICY IF EXISTS cells_select_authenticated ON public.cells;
+SELECT public.replay_policy('public.cells', 'cells_select_authenticated', $ddl$
 CREATE POLICY cells_select_authenticated ON public.cells FOR SELECT TO authenticated USING (true);
+$ddl$);
 
 --
 
 -- cells cells_update_privileged :: POLICY
-DROP POLICY IF EXISTS cells_update_privileged ON public.cells;
+SELECT public.replay_policy('public.cells', 'cells_update_privileged', $ddl$
 CREATE POLICY cells_update_privileged ON public.cells FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -16667,20 +16881,23 @@ ALTER TABLE public.change_proposals ENABLE ROW LEVEL SECURITY;
 
 -- change_proposals change_proposals_insert_proposer :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS change_proposals_insert_proposer ON public.change_proposals;
+SELECT public.replay_policy('public.change_proposals', 'change_proposals_insert_proposer', $ddl$
 CREATE POLICY change_proposals_insert_proposer ON public.change_proposals FOR INSERT TO authenticated WITH CHECK ((public.has_authority(ARRAY['proposal:create'::text]) AND (proposed_by = auth.uid()) AND (status = 'open'::text)));
+$ddl$, p_stated_by => '0177_policies_check_the_caller_once_per_query.sql');
 
 --
 
 -- change_proposals change_proposals_select_own_or_approver :: POLICY
-DROP POLICY IF EXISTS change_proposals_select_own_or_approver ON public.change_proposals;
+SELECT public.replay_policy('public.change_proposals', 'change_proposals_select_own_or_approver', $ddl$
 CREATE POLICY change_proposals_select_own_or_approver ON public.change_proposals FOR SELECT TO authenticated USING (((proposed_by = auth.uid()) OR public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])));
+$ddl$, p_stated_by => '0177_policies_check_the_caller_once_per_query.sql');
 
 --
 
 -- change_proposals change_proposals_update_own_open :: POLICY
-DROP POLICY IF EXISTS change_proposals_update_own_open ON public.change_proposals;
+SELECT public.replay_policy('public.change_proposals', 'change_proposals_update_own_open', $ddl$
 CREATE POLICY change_proposals_update_own_open ON public.change_proposals FOR UPDATE TO authenticated USING (((proposed_by = auth.uid()) AND (status = 'open'::text))) WITH CHECK ((proposed_by = auth.uid()));
+$ddl$, p_stated_by => '0177_policies_check_the_caller_once_per_query.sql');
 COMMIT;
 
 --
@@ -16692,26 +16909,30 @@ ALTER TABLE public.device_nameplate ENABLE ROW LEVEL SECURITY;
 
 -- device_nameplate device_nameplate_delete_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS device_nameplate_delete_privileged ON public.device_nameplate;
+SELECT public.replay_policy('public.device_nameplate', 'device_nameplate_delete_privileged', $ddl$
 CREATE POLICY device_nameplate_delete_privileged ON public.device_nameplate FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 
 --
 
 -- device_nameplate device_nameplate_insert_privileged :: POLICY
-DROP POLICY IF EXISTS device_nameplate_insert_privileged ON public.device_nameplate;
+SELECT public.replay_policy('public.device_nameplate', 'device_nameplate_insert_privileged', $ddl$
 CREATE POLICY device_nameplate_insert_privileged ON public.device_nameplate FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 
 --
 
 -- device_nameplate device_nameplate_select_authenticated :: POLICY
-DROP POLICY IF EXISTS device_nameplate_select_authenticated ON public.device_nameplate;
+SELECT public.replay_policy('public.device_nameplate', 'device_nameplate_select_authenticated', $ddl$
 CREATE POLICY device_nameplate_select_authenticated ON public.device_nameplate FOR SELECT TO authenticated USING (true);
+$ddl$);
 
 --
 
 -- device_nameplate device_nameplate_update_privileged :: POLICY
-DROP POLICY IF EXISTS device_nameplate_update_privileged ON public.device_nameplate;
+SELECT public.replay_policy('public.device_nameplate', 'device_nameplate_update_privileged', $ddl$
 CREATE POLICY device_nameplate_update_privileged ON public.device_nameplate FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -16723,26 +16944,30 @@ ALTER TABLE public.device_submodels ENABLE ROW LEVEL SECURITY;
 
 -- device_submodels device_submodels_delete_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS device_submodels_delete_privileged ON public.device_submodels;
+SELECT public.replay_policy('public.device_submodels', 'device_submodels_delete_privileged', $ddl$
 CREATE POLICY device_submodels_delete_privileged ON public.device_submodels FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 
 --
 
 -- device_submodels device_submodels_insert_privileged :: POLICY
-DROP POLICY IF EXISTS device_submodels_insert_privileged ON public.device_submodels;
+SELECT public.replay_policy('public.device_submodels', 'device_submodels_insert_privileged', $ddl$
 CREATE POLICY device_submodels_insert_privileged ON public.device_submodels FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 
 --
 
 -- device_submodels device_submodels_select_authenticated :: POLICY
-DROP POLICY IF EXISTS device_submodels_select_authenticated ON public.device_submodels;
+SELECT public.replay_policy('public.device_submodels', 'device_submodels_select_authenticated', $ddl$
 CREATE POLICY device_submodels_select_authenticated ON public.device_submodels FOR SELECT TO authenticated USING (true);
+$ddl$);
 
 --
 
 -- device_submodels device_submodels_update_privileged :: POLICY
-DROP POLICY IF EXISTS device_submodels_update_privileged ON public.device_submodels;
+SELECT public.replay_policy('public.device_submodels', 'device_submodels_update_privileged', $ddl$
 CREATE POLICY device_submodels_update_privileged ON public.device_submodels FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -16754,26 +16979,30 @@ ALTER TABLE public.devices ENABLE ROW LEVEL SECURITY;
 
 -- devices devices_delete_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS devices_delete_privileged ON public.devices;
+SELECT public.replay_policy('public.devices', 'devices_delete_privileged', $ddl$
 CREATE POLICY devices_delete_privileged ON public.devices FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 
 --
 
 -- devices devices_insert_privileged :: POLICY
-DROP POLICY IF EXISTS devices_insert_privileged ON public.devices;
+SELECT public.replay_policy('public.devices', 'devices_insert_privileged', $ddl$
 CREATE POLICY devices_insert_privileged ON public.devices FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 
 --
 
 -- devices devices_select_authenticated :: POLICY
-DROP POLICY IF EXISTS devices_select_authenticated ON public.devices;
+SELECT public.replay_policy('public.devices', 'devices_select_authenticated', $ddl$
 CREATE POLICY devices_select_authenticated ON public.devices FOR SELECT TO authenticated USING (true);
+$ddl$);
 
 --
 
 -- devices devices_update_privileged :: POLICY
-DROP POLICY IF EXISTS devices_update_privileged ON public.devices;
+SELECT public.replay_policy('public.devices', 'devices_update_privileged', $ddl$
 CREATE POLICY devices_update_privileged ON public.devices FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -16790,26 +17019,30 @@ ALTER TABLE public.directory_services ENABLE ROW LEVEL SECURITY;
 
 -- directory_services directory_services_delete_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS directory_services_delete_privileged ON public.directory_services;
+SELECT public.replay_policy('public.directory_services', 'directory_services_delete_privileged', $ddl$
 CREATE POLICY directory_services_delete_privileged ON public.directory_services FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 
 --
 
 -- directory_services directory_services_insert_privileged :: POLICY
-DROP POLICY IF EXISTS directory_services_insert_privileged ON public.directory_services;
+SELECT public.replay_policy('public.directory_services', 'directory_services_insert_privileged', $ddl$
 CREATE POLICY directory_services_insert_privileged ON public.directory_services FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 
 --
 
 -- directory_services directory_services_select_authenticated :: POLICY
-DROP POLICY IF EXISTS directory_services_select_authenticated ON public.directory_services;
+SELECT public.replay_policy('public.directory_services', 'directory_services_select_authenticated', $ddl$
 CREATE POLICY directory_services_select_authenticated ON public.directory_services FOR SELECT TO authenticated USING (true);
+$ddl$);
 
 --
 
 -- directory_services directory_services_update_privileged :: POLICY
-DROP POLICY IF EXISTS directory_services_update_privileged ON public.directory_services;
+SELECT public.replay_policy('public.directory_services', 'directory_services_update_privileged', $ddl$
 CREATE POLICY directory_services_update_privileged ON public.directory_services FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -16836,26 +17069,30 @@ ALTER TABLE public.gateways ENABLE ROW LEVEL SECURITY;
 
 -- gateways gateways_delete_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS gateways_delete_privileged ON public.gateways;
+SELECT public.replay_policy('public.gateways', 'gateways_delete_privileged', $ddl$
 CREATE POLICY gateways_delete_privileged ON public.gateways FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 
 --
 
 -- gateways gateways_insert_privileged :: POLICY
-DROP POLICY IF EXISTS gateways_insert_privileged ON public.gateways;
+SELECT public.replay_policy('public.gateways', 'gateways_insert_privileged', $ddl$
 CREATE POLICY gateways_insert_privileged ON public.gateways FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 
 --
 
 -- gateways gateways_select_authenticated :: POLICY
-DROP POLICY IF EXISTS gateways_select_authenticated ON public.gateways;
+SELECT public.replay_policy('public.gateways', 'gateways_select_authenticated', $ddl$
 CREATE POLICY gateways_select_authenticated ON public.gateways FOR SELECT TO authenticated USING (true);
+$ddl$);
 
 --
 
 -- gateways gateways_update_privileged :: POLICY
-DROP POLICY IF EXISTS gateways_update_privileged ON public.gateways;
+SELECT public.replay_policy('public.gateways', 'gateways_update_privileged', $ddl$
 CREATE POLICY gateways_update_privileged ON public.gateways FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -16867,8 +17104,9 @@ ALTER TABLE public.idta_submodel_templates ENABLE ROW LEVEL SECURITY;
 
 -- idta_submodel_templates idta_submodel_templates_select_authenticated :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS idta_submodel_templates_select_authenticated ON public.idta_submodel_templates;
+SELECT public.replay_policy('public.idta_submodel_templates', 'idta_submodel_templates_select_authenticated', $ddl$
 CREATE POLICY idta_submodel_templates_select_authenticated ON public.idta_submodel_templates FOR SELECT TO authenticated USING (true);
+$ddl$);
 COMMIT;
 
 --
@@ -16880,8 +17118,9 @@ ALTER TABLE public.iso22400_vocabulary ENABLE ROW LEVEL SECURITY;
 
 -- iso22400_vocabulary iso22400_vocabulary_select_authenticated :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS iso22400_vocabulary_select_authenticated ON public.iso22400_vocabulary;
+SELECT public.replay_policy('public.iso22400_vocabulary', 'iso22400_vocabulary_select_authenticated', $ddl$
 CREATE POLICY iso22400_vocabulary_select_authenticated ON public.iso22400_vocabulary FOR SELECT TO authenticated USING (true);
+$ddl$);
 COMMIT;
 
 --
@@ -16893,26 +17132,30 @@ ALTER TABLE public.links ENABLE ROW LEVEL SECURITY;
 
 -- links links_delete_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS links_delete_privileged ON public.links;
+SELECT public.replay_policy('public.links', 'links_delete_privileged', $ddl$
 CREATE POLICY links_delete_privileged ON public.links FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 
 --
 
 -- links links_insert_privileged :: POLICY
-DROP POLICY IF EXISTS links_insert_privileged ON public.links;
+SELECT public.replay_policy('public.links', 'links_insert_privileged', $ddl$
 CREATE POLICY links_insert_privileged ON public.links FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 
 --
 
 -- links links_select_authenticated :: POLICY
-DROP POLICY IF EXISTS links_select_authenticated ON public.links;
+SELECT public.replay_policy('public.links', 'links_select_authenticated', $ddl$
 CREATE POLICY links_select_authenticated ON public.links FOR SELECT TO authenticated USING (true);
+$ddl$);
 
 --
 
 -- links links_update_privileged :: POLICY
-DROP POLICY IF EXISTS links_update_privileged ON public.links;
+SELECT public.replay_policy('public.links', 'links_update_privileged', $ddl$
 CREATE POLICY links_update_privileged ON public.links FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -16924,8 +17167,9 @@ ALTER TABLE public.machine_principals ENABLE ROW LEVEL SECURITY;
 
 -- machine_principals machine_principals_select_admin_or_auditor :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS machine_principals_select_admin_or_auditor ON public.machine_principals;
+SELECT public.replay_policy('public.machine_principals', 'machine_principals_select_admin_or_auditor', $ddl$
 CREATE POLICY machine_principals_select_admin_or_auditor ON public.machine_principals FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Auditor'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -16937,20 +17181,23 @@ ALTER TABLE public.metric_catalog ENABLE ROW LEVEL SECURITY;
 
 -- metric_catalog metric_catalog_insert_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS metric_catalog_insert_privileged ON public.metric_catalog;
+SELECT public.replay_policy('public.metric_catalog', 'metric_catalog_insert_privileged', $ddl$
 CREATE POLICY metric_catalog_insert_privileged ON public.metric_catalog FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+$ddl$);
 
 --
 
 -- metric_catalog metric_catalog_select_authenticated :: POLICY
-DROP POLICY IF EXISTS metric_catalog_select_authenticated ON public.metric_catalog;
+SELECT public.replay_policy('public.metric_catalog', 'metric_catalog_select_authenticated', $ddl$
 CREATE POLICY metric_catalog_select_authenticated ON public.metric_catalog FOR SELECT TO authenticated USING (true);
+$ddl$);
 
 --
 
 -- metric_catalog metric_catalog_update_privileged :: POLICY
-DROP POLICY IF EXISTS metric_catalog_update_privileged ON public.metric_catalog;
+SELECT public.replay_policy('public.metric_catalog', 'metric_catalog_update_privileged', $ddl$
 CREATE POLICY metric_catalog_update_privileged ON public.metric_catalog FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -16962,20 +17209,23 @@ ALTER TABLE public.metric_groups ENABLE ROW LEVEL SECURITY;
 
 -- metric_groups metric_groups_insert_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS metric_groups_insert_privileged ON public.metric_groups;
+SELECT public.replay_policy('public.metric_groups', 'metric_groups_insert_privileged', $ddl$
 CREATE POLICY metric_groups_insert_privileged ON public.metric_groups FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+$ddl$);
 
 --
 
 -- metric_groups metric_groups_select_authenticated :: POLICY
-DROP POLICY IF EXISTS metric_groups_select_authenticated ON public.metric_groups;
+SELECT public.replay_policy('public.metric_groups', 'metric_groups_select_authenticated', $ddl$
 CREATE POLICY metric_groups_select_authenticated ON public.metric_groups FOR SELECT TO authenticated USING (true);
+$ddl$);
 
 --
 
 -- metric_groups metric_groups_update_privileged :: POLICY
-DROP POLICY IF EXISTS metric_groups_update_privileged ON public.metric_groups;
+SELECT public.replay_policy('public.metric_groups', 'metric_groups_update_privileged', $ddl$
 CREATE POLICY metric_groups_update_privileged ON public.metric_groups FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -16987,8 +17237,9 @@ ALTER TABLE public.mtconnect_vocabulary ENABLE ROW LEVEL SECURITY;
 
 -- mtconnect_vocabulary mtconnect_vocabulary_select_authenticated :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS mtconnect_vocabulary_select_authenticated ON public.mtconnect_vocabulary;
+SELECT public.replay_policy('public.mtconnect_vocabulary', 'mtconnect_vocabulary_select_authenticated', $ddl$
 CREATE POLICY mtconnect_vocabulary_select_authenticated ON public.mtconnect_vocabulary FOR SELECT TO authenticated USING (true);
+$ddl$);
 COMMIT;
 
 --
@@ -17005,8 +17256,9 @@ ALTER TABLE public.opcua_vocabulary ENABLE ROW LEVEL SECURITY;
 
 -- opcua_vocabulary opcua_vocabulary_select_authenticated :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS opcua_vocabulary_select_authenticated ON public.opcua_vocabulary;
+SELECT public.replay_policy('public.opcua_vocabulary', 'opcua_vocabulary_select_authenticated', $ddl$
 CREATE POLICY opcua_vocabulary_select_authenticated ON public.opcua_vocabulary FOR SELECT TO authenticated USING (true);
+$ddl$);
 COMMIT;
 
 --
@@ -17018,8 +17270,9 @@ ALTER TABLE public.permissions ENABLE ROW LEVEL SECURITY;
 
 -- permissions permissions_select_authenticated :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS permissions_select_authenticated ON public.permissions;
+SELECT public.replay_policy('public.permissions', 'permissions_select_authenticated', $ddl$
 CREATE POLICY permissions_select_authenticated ON public.permissions FOR SELECT TO authenticated USING (true);
+$ddl$);
 COMMIT;
 
 --
@@ -17031,14 +17284,16 @@ ALTER TABLE public.platform_alerts ENABLE ROW LEVEL SECURITY;
 
 -- platform_alerts platform_alerts_all_service_role :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS platform_alerts_all_service_role ON public.platform_alerts;
+SELECT public.replay_policy('public.platform_alerts', 'platform_alerts_all_service_role', $ddl$
 CREATE POLICY platform_alerts_all_service_role ON public.platform_alerts TO service_role USING (true) WITH CHECK (true);
+$ddl$);
 
 --
 
 -- platform_alerts platform_alerts_select_authenticated :: POLICY
-DROP POLICY IF EXISTS platform_alerts_select_authenticated ON public.platform_alerts;
+SELECT public.replay_policy('public.platform_alerts', 'platform_alerts_select_authenticated', $ddl$
 CREATE POLICY platform_alerts_select_authenticated ON public.platform_alerts FOR SELECT TO authenticated USING (true);
+$ddl$);
 COMMIT;
 
 --
@@ -17050,8 +17305,9 @@ ALTER TABLE public.playback_jobs ENABLE ROW LEVEL SECURITY;
 
 -- playback_jobs playback_jobs_select_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS playback_jobs_select_privileged ON public.playback_jobs;
+SELECT public.replay_policy('public.playback_jobs', 'playback_jobs_select_privileged', $ddl$
 CREATE POLICY playback_jobs_select_privileged ON public.playback_jobs FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -17063,8 +17319,9 @@ ALTER TABLE public.playback_worker_status ENABLE ROW LEVEL SECURITY;
 
 -- playback_worker_status playback_worker_status_select_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS playback_worker_status_select_privileged ON public.playback_worker_status;
+SELECT public.replay_policy('public.playback_worker_status', 'playback_worker_status_select_privileged', $ddl$
 CREATE POLICY playback_worker_status_select_privileged ON public.playback_worker_status FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -17076,8 +17333,9 @@ ALTER TABLE public.principal_permissions ENABLE ROW LEVEL SECURITY;
 
 -- principal_permissions principal_permissions_select_own_or_admin :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS principal_permissions_select_own_or_admin ON public.principal_permissions;
+SELECT public.replay_policy('public.principal_permissions', 'principal_permissions_select_own_or_admin', $ddl$
 CREATE POLICY principal_permissions_select_own_or_admin ON public.principal_permissions FOR SELECT TO authenticated USING (((principal_id = auth.uid()) OR public.has_role(ARRAY['Administrator'::text])));
+$ddl$, p_stated_by => '0177_policies_check_the_caller_once_per_query.sql');
 COMMIT;
 
 --
@@ -17089,8 +17347,9 @@ ALTER TABLE public.rebirth_requests ENABLE ROW LEVEL SECURITY;
 
 -- rebirth_requests rebirth_requests_select_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS rebirth_requests_select_privileged ON public.rebirth_requests;
+SELECT public.replay_policy('public.rebirth_requests', 'rebirth_requests_select_privileged', $ddl$
 CREATE POLICY rebirth_requests_select_privileged ON public.rebirth_requests FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text, 'Auditor'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -17102,8 +17361,9 @@ ALTER TABLE public.retired_entities ENABLE ROW LEVEL SECURITY;
 
 -- retired_entities retired_entities_select_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS retired_entities_select_privileged ON public.retired_entities;
+SELECT public.replay_policy('public.retired_entities', 'retired_entities_select_privileged', $ddl$
 CREATE POLICY retired_entities_select_privileged ON public.retired_entities FOR SELECT TO authenticated USING (public.has_authority(ARRAY['archive:manage'::text, 'audit_trail:read'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -17115,8 +17375,9 @@ ALTER TABLE public.revoked_service_principals ENABLE ROW LEVEL SECURITY;
 
 -- revoked_service_principals revoked_service_principals_select_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS revoked_service_principals_select_privileged ON public.revoked_service_principals;
+SELECT public.replay_policy('public.revoked_service_principals', 'revoked_service_principals_select_privileged', $ddl$
 CREATE POLICY revoked_service_principals_select_privileged ON public.revoked_service_principals FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Auditor'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -17128,8 +17389,9 @@ ALTER TABLE public.revoked_service_tokens ENABLE ROW LEVEL SECURITY;
 
 -- revoked_service_tokens revoked_service_tokens_select_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS revoked_service_tokens_select_privileged ON public.revoked_service_tokens;
+SELECT public.replay_policy('public.revoked_service_tokens', 'revoked_service_tokens_select_privileged', $ddl$
 CREATE POLICY revoked_service_tokens_select_privileged ON public.revoked_service_tokens FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Auditor'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -17141,8 +17403,9 @@ ALTER TABLE public.role_permissions ENABLE ROW LEVEL SECURITY;
 
 -- role_permissions role_permissions_select_authenticated :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS role_permissions_select_authenticated ON public.role_permissions;
+SELECT public.replay_policy('public.role_permissions', 'role_permissions_select_authenticated', $ddl$
 CREATE POLICY role_permissions_select_authenticated ON public.role_permissions FOR SELECT TO authenticated USING (true);
+$ddl$);
 COMMIT;
 
 --
@@ -17154,8 +17417,9 @@ ALTER TABLE public.roles ENABLE ROW LEVEL SECURITY;
 
 -- roles roles_select_authenticated :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS roles_select_authenticated ON public.roles;
+SELECT public.replay_policy('public.roles', 'roles_select_authenticated', $ddl$
 CREATE POLICY roles_select_authenticated ON public.roles FOR SELECT TO authenticated USING (true);
+$ddl$);
 COMMIT;
 
 --
@@ -17172,26 +17436,30 @@ ALTER TABLE public.schemas ENABLE ROW LEVEL SECURITY;
 
 -- schemas schemas_delete_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS schemas_delete_privileged ON public.schemas;
+SELECT public.replay_policy('public.schemas', 'schemas_delete_privileged', $ddl$
 CREATE POLICY schemas_delete_privileged ON public.schemas FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text]));
+$ddl$);
 
 --
 
 -- schemas schemas_insert_privileged :: POLICY
-DROP POLICY IF EXISTS schemas_insert_privileged ON public.schemas;
+SELECT public.replay_policy('public.schemas', 'schemas_insert_privileged', $ddl$
 CREATE POLICY schemas_insert_privileged ON public.schemas FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+$ddl$);
 
 --
 
 -- schemas schemas_select_authenticated :: POLICY
-DROP POLICY IF EXISTS schemas_select_authenticated ON public.schemas;
+SELECT public.replay_policy('public.schemas', 'schemas_select_authenticated', $ddl$
 CREATE POLICY schemas_select_authenticated ON public.schemas FOR SELECT TO authenticated USING (true);
+$ddl$);
 
 --
 
 -- schemas schemas_update_privileged :: POLICY
-DROP POLICY IF EXISTS schemas_update_privileged ON public.schemas;
+SELECT public.replay_policy('public.schemas', 'schemas_update_privileged', $ddl$
 CREATE POLICY schemas_update_privileged ON public.schemas FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -17203,20 +17471,23 @@ ALTER TABLE public.system_settings ENABLE ROW LEVEL SECURITY;
 
 -- system_settings system_settings_all_service_role :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS system_settings_all_service_role ON public.system_settings;
+SELECT public.replay_policy('public.system_settings', 'system_settings_all_service_role', $ddl$
 CREATE POLICY system_settings_all_service_role ON public.system_settings TO service_role USING (true) WITH CHECK (true);
+$ddl$);
 
 --
 
 -- system_settings system_settings_select_authenticated :: POLICY
-DROP POLICY IF EXISTS system_settings_select_authenticated ON public.system_settings;
+SELECT public.replay_policy('public.system_settings', 'system_settings_select_authenticated', $ddl$
 CREATE POLICY system_settings_select_authenticated ON public.system_settings FOR SELECT TO authenticated USING (((NOT sensitive) OR public.has_role(ARRAY['Administrator'::text])));
+$ddl$, p_stated_by => '0177_policies_check_the_caller_once_per_query.sql');
 
 --
 
 -- system_settings system_settings_update_admin :: POLICY
-DROP POLICY IF EXISTS system_settings_update_admin ON public.system_settings;
+SELECT public.replay_policy('public.system_settings', 'system_settings_update_admin', $ddl$
 CREATE POLICY system_settings_update_admin ON public.system_settings FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text]));
+$ddl$);
 COMMIT;
 
 --
@@ -17228,8 +17499,9 @@ ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
 
 -- user_roles user_roles_select_own_or_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS user_roles_select_own_or_privileged ON public.user_roles;
+SELECT public.replay_policy('public.user_roles', 'user_roles_select_own_or_privileged', $ddl$
 CREATE POLICY user_roles_select_own_or_privileged ON public.user_roles FOR SELECT TO authenticated USING (((user_id = (auth.uid())::text) OR public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])));
+$ddl$, p_stated_by => '0177_policies_check_the_caller_once_per_query.sql');
 COMMIT;
 
 --
@@ -17241,8 +17513,9 @@ ALTER TABLE public.webhook_endpoints ENABLE ROW LEVEL SECURITY;
 
 -- webhook_endpoints webhook_endpoints_select_privileged :: POLICY
 BEGIN;
-DROP POLICY IF EXISTS webhook_endpoints_select_privileged ON public.webhook_endpoints;
+SELECT public.replay_policy('public.webhook_endpoints', 'webhook_endpoints_select_privileged', $ddl$
 CREATE POLICY webhook_endpoints_select_privileged ON public.webhook_endpoints FOR SELECT TO authenticated USING (public.has_role(ARRAY['Administrator'::text]));
+$ddl$);
 COMMIT;
 
 --

@@ -126,9 +126,12 @@ previous baseline each time, and the rules below had to be rediscovered each tim
    That is `pg_dump --schema-only --schema=public --schema=timescale` against the same probe the
    comparison builds; the script's header says why each precondition is load-bearing.
 
-2. `node scripts/generate-baseline-section.mjs <dump.sql> > section4.sql`
+2. Empty `STATED_LATER` in the generator: it names policies a migration after the baseline states
+   again, and that migration is now folded in. Then
+   `node scripts/generate-baseline-section.mjs <dump.sql> > section4.sql`.
 
-3. Assemble: the hand-written head (sections 1–3: extensions, roles, default privileges), the
+3. Assemble: the hand-written head (sections 1–3c: extensions, roles, default privileges, and the
+   `replay_policy()` and `replay_trigger()` functions section 4's policies and triggers call), the
    generated section 4, then the hand-written tail (sections 5–8: the Realtime publication, the
    privileges withdrawn, the structural self-checks, and what `grafana_reader` may read).
 

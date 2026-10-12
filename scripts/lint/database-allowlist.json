@@ -89,6 +89,8 @@
     "function_search_path_mutable_public_may_decide_proposal_d7fde3c4fae00c3db39d838aed0a1b70": "Unpinned on purpose: a SET clause stops the planner inlining it, and list_proposer_names() calls it once per proposal, four times slower pinned. SECURITY INVOKER, every function it calls schema-qualified; 0176 records the reason in its COMMENT."
   },
   "plpgsql_check": {
+    "replay_policy(regclass,name,text,text) | security | text type variable is not sanitized": "EXECUTEs the CREATE POLICY a migration file states, which is its purpose (0001, section 3c). Executable by no API role; db-init calls it as the owner.",
+    "replay_trigger(regclass,name,text,text) | security | text type variable is not sanitized": "EXECUTEs the CREATE TRIGGER a migration file states, which is its purpose (0001, section 3c). Executable by no API role; db-init calls it as the owner.",
     "active_schema_version(uuid) | warning extra | control reached end of function without RETURN": "The LOOP exits only by RETURN or RAISE; the end is unreachable.",
     "capped_capture_manifest(jsonb) | warning | routine is marked as IMMUTABLE, but expression is STABLE": "Marked IMMUTABLE and calls to_jsonb(), which is STABLE. Harmless for its integer argument; relabel STABLE when the function is next touched.",
     "ensure_audit_trail_partitions(integer) | warning | unused variable \"v_i\"": "The FOR loop declares its own v_i, so the DECLAREd one is unused. Cosmetic; drop it when the function is next touched.",
