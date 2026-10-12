@@ -559,6 +559,15 @@ export const SUITES = {
       'is refused a value the service could not use and whose view counts how long the newest backup ' +
       'has gone without one.',
   },
+  'supabase/migrations/test_backup_summary.py': {
+    lanes: ['db'],
+    why:
+      "0179's stat strip on the Backups page. backup_summary() is an Administrator's and answers " +
+      '403 to anybody else; successes count the runs that ended in 30 days and not a cancelled ' +
+      'one, the median is of the last 14 completed runs and no older one, the newest copy off ' +
+      "site is at the current destination once one is set; and the service's report is a " +
+      'backup_* gate no API role reaches, one row, with a figure statfs could not give left NULL.',
+  },
   'supabase/migrations/test_platform_physical_backup.py': {
     lanes: ['db', 'stack'],
     why:
@@ -886,7 +895,9 @@ export const SUITES = {
       'and says why; a pinned backup is released once; the prune after a failed job leaves the ' +
       'newest three; and a backup reaches a MinIO encrypted, decrypts to its digest, and a pruned ' +
       'one takes its copy with it; a service started after a missed scheduled slot queues it once, ' +
-      'and does not retry it before the next slot when it fails. Stops the service container briefly.',
+      'and does not retry it before the next slot when it fails; and after a backup the service ' +
+      "reports df's figures for its volume and its schedule (0179), which backup_summary() returns. " +
+      'Stops the service container briefly.',
   },
   'supabase/functions/gateway-bundle/test_gateway_bundle.py': {
     lanes: ['stack'],

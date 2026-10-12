@@ -10,8 +10,10 @@ claimed is refused a twin, can be cancelled, and says why; a pinned backup is re
 RUNNING job no service is running is failed, so a restored database does not refuse backups; a
 failed job is followed by a prune that leaves the newest three backups alone; with a MinIO of
 the test's own as the destination, a backup is copied off site encrypted to a key the stack never
-holds, and a pruned backup takes its copy with it; and a service started after a missed scheduled
-slot queues that backup once, and does not retry it before the next slot when it fails.
+holds, and a pruned backup takes its copy with it; a service started after a missed scheduled
+slot queues that backup once, and does not retry it before the next slot when it fails; and after a
+backup the service reports df's figures for its volume and its schedule, which the Backups page's
+summary returns to an Administrator and refuses to an Operator.
 
 Needs the stack up with the backup-service container, the seeded personas and both keys. The
 cancel and catch-up tests stop the service container for a few seconds. The off-site test applies
@@ -131,6 +133,9 @@ class BackupServiceTests(unittest.TestCase):
         # And the tables are theirs to read as little as to write.
         self.assertEqual(query("/backups?select=id", operator), [])
         self.assertEqual(query("/backup_jobs?select=id", operator), [])
+        # The page's summary refuses, rather than reading as a stack with no backups.
+        status, _ = rpc("backup_summary", {}, operator)
+        self.assertEqual(status, 403)
 
     def test_02_the_gates_are_closed_to_every_postgrest_role(self):
         for name, body in [
@@ -143,6 +148,7 @@ class BackupServiceTests(unittest.TestCase):
             ("backup_offsite_next", {}),
             ("backup_offsite_record", {"p_backup_id": "00000000-0000-0000-0000-000000000000",
                                        "p_location": None, "p_objects": None, "p_error": "x"}),
+            ("backup_report", {"p_volume_free_bytes": 1, "p_volume_total_bytes": 2, "p_schedule": "x"}),
         ]:
             for bearer in (self.admin, SERVICE_ROLE_KEY):
                 status, _ = rpc(name, body, bearer)
@@ -235,6 +241,35 @@ class BackupServiceTests(unittest.TestCase):
             f"SELECT actor_source || ' ' || (changed_by IS NULL)::text FROM public.audit_trail "
             f"WHERE entity_type = 'backups' AND entity_id = '{backup['id']}' AND action = 'BACKUP_TAKEN'"
         ), "service true")
+
+    def test_03b_the_service_reports_its_volume_and_schedule_after_the_backup(self):
+        """What the Backups page's stat strip reads: df's figures for /backups, and the schedule."""
+        finished = psql("SELECT max(finished_at) FROM public.backup_jobs WHERE status = 'COMPLETED'")
+        self.assertTrue(finished, "test_03 took no backup")
+        row = ""
+        deadline = time.time() + 60
+        while time.time() < deadline and not row:
+            row = psql("SELECT volume_free_bytes || '|' || volume_total_bytes || '|' || schedule "
+                       f"FROM public.backup_service_report WHERE reported_at >= '{finished}'::timestamptz")
+            if not row:
+                time.sleep(2)
+        self.assertTrue(row, "the service reported nothing after the backup")
+        free, total, schedule = row.split("|", 2)
+        free, total = int(free), int(total)
+
+        # df's Available and 1024-blocks, in the pod, a moment later: the disk moves in between.
+        fields = service("df", "-kP", "/backups").splitlines()[-1].split()
+        df_total, df_free = int(fields[1]) * 1024, int(fields[3]) * 1024
+        self.assertEqual(total, df_total)
+        self.assertLessEqual(abs(free - df_free), max(df_total // 100, 2**30), (free, df_free))
+        self.assertLessEqual(free, total)
+        expected = service("sh", "-c", 'printf %s "${BACKUP_SCHEDULE-30 2 * * *}"').strip()
+        self.assertEqual(schedule, expected)
+
+        status, summary = rpc("backup_summary", {}, self.admin)
+        self.assertEqual(status, 200, summary)
+        self.assertEqual(summary["service"]["volume_total_bytes"], total)
+        self.assertGreaterEqual(summary["backups_held"], 1)
 
     def test_04_a_queued_request_refuses_a_twin_and_can_be_cancelled(self):
         stack_exec.stop("backup-service")

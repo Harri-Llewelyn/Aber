@@ -5559,6 +5559,35 @@ and no table, and `backup_jobs` is Administrator-only; the view runs as its owne
 row, `last_success_at` and `age_seconds`, and none while no job exists. The *Backup Stale* rule
 fires past 36 hours; its reasoning is in [`grafana/README.md`](../grafana/README.md).
 
+**The page shows a trend, from one call (0179).** A stat strip above the list answers whether
+backups are heading for trouble, which the one-line state cannot: that line clears on the next
+success, so a backup failing every other night never shows as a state. `backup_summary()` returns
+the strip in one object, Administrator only (`insufficient_privilege`, 403), as the two tables are:
+
+- the last success on `backup_health`'s clock, and successes out of the runs that ended in the last
+  30 days, completed or failed (a cancelled run never ran);
+- the last completed run's duration beside the median of the last 14 completed runs;
+- the backups held and their bytes, the oldest `taken_at` (how far back a restore goes, which
+  retention, pinning and the floor decide between them) and the newest backup's size;
+- the newest backup copied off site, at the current destination once one is set, as the list's
+  *Off site* column counts it;
+- the backup service's report: free and total bytes on `/backups` and its schedule.
+
+**Free space comes from the service, because nothing else can see it.** The service has no Service
+object and the page reads only Postgres. At start, and after each backup and each prune, it calls
+`statfs` on its volume and records `bavail × bsize` (what `df` calls Available) and
+`blocks × bsize` with `BACKUP_SCHEDULE` through `backup_report()`, a `backup_*` gate like
+`backup_finalise()`, into the one-row `backup_service_report`. A figure `statfs` could not give is
+NULL, never a zero. On `local-path` every claim reports the node's disk as its capacity
+(`deploy/k8s/README.md`, *Self-monitoring*), so the free figure is the node's whole disk, shared
+with the databases, and `backup.persistence.size` is a request rather than a limit.
+
+**Two warnings, computed by the page.** A last run longer than half the shortest gap between
+scheduled runs (the page reads the cron expression with `utils/cronInterval.js`): a dump that
+cannot finish inside its window arrives slowly, and this sees it months ahead. And free space
+below the newest backup plus a margin (a fifth of it, at least 1 GiB): the next backup would
+probably fail. No Grafana rule watches the free figure; *Volume Filling* covers the disk itself.
+
 **What was decided, and why the alternatives were not taken.**
 
 - *The artefact lives on a volume, not in a Storage bucket.* Uploading to a bucket needs the

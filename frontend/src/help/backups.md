@@ -36,6 +36,24 @@ Either line clears itself at the next successful backup. If the backup service h
 
 **A scheduled backup missed while Aber was off is taken late, once.** If no scheduled backup was queued in the last 25 hours, the service queues one as soon as it is running. So if Aber is switched off overnight, it takes its backup when it is next up. That backup is listed as **Scheduled**, at the time it was taken. If a late backup fails, it is not tried again before the next night, and the line above reports it.
 
+## The figures above the list
+
+A row of figures sits at the top of the page. It shows whether backups are heading for trouble, which the line above the list cannot: that line clears at the next success.
+
+- **Last good backup** is how long ago the last backup that completed was taken.
+- **Succeeded, 30 days** counts the runs that ended in the last 30 days, such as `29 of 30`. A cancelled run is not counted. Any failure turns it amber, so a backup that fails every other night shows here.
+- **Last run** is how long the last completed backup took, with the median of the last 14 under it.
+- **Oldest restorable** is the date of the oldest backup still on the volume. That is how far back a restore can go.
+- **Space held** is the size of every backup on the volume together.
+- **Free on the volume** is the free space on the backup volume, and its size. The backup service reports it at start, and after each backup and each prune.
+- **On local-path, the free figure is the node's whole disk.** local-path is the storage k3s uses by default. That disk is shared with the databases, so they use up the same space.
+- **Newest off site** is how long ago the newest backup with an off-site copy was taken. It says **None** until a copy is made.
+
+Two warnings can appear under the line about now:
+
+- **The last backup took** too long: more than half the time between scheduled backups. Backups grow with the data. One that keeps growing will run into the next, so look at what has grown.
+- **The next backup may not fit**: the free space is less than the last backup plus a margin. The margin is a fifth of that backup, and at least 1 GiB. Release pinned backups you no longer need, shorten the retention window, or give the volume more space.
+
 ## The historian's own backup
 
 Where the historian has its own physical backup, a **Historian** line sits above the list. It shows:

@@ -1820,6 +1820,71 @@ paths:
               schema: { type: boolean }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /rest/v1/rpc/backup_summary:
+    post:
+      tags: [Storage]
+      summary: The Backups page's figures in one object
+      description: |
+        Whether backups are heading for trouble, which the run list cannot say: the last success
+        (when the newest completed job started, `backup_health`'s clock) and the latest outcome;
+        successes out of the runs that ended in the last 30 days, completed or failed; the median
+        duration of the last 14 completed runs; the backups held, their bytes, the oldest
+        `taken_at` and the newest backup's size; the newest copy off site, at the current
+        destination once one is set; and `service`, what the backup service last reported of its
+        volume (`statfs` on `/backups`; on local-path the node's whole disk) and its schedule, or
+        null before its first report. Administrator only.
+      responses:
+        '200':
+          description: The summary. Times are ISO 8601, sizes bytes, durations seconds.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  first_recorded_at: { type: string, format: date-time, nullable: true }
+                  last_success:
+                    type: object
+                    nullable: true
+                    properties:
+                      id: { type: string, format: uuid }
+                      status: { type: string }
+                      started_at: { type: string, format: date-time }
+                      finished_at: { type: string, format: date-time }
+                      duration_seconds: { type: number }
+                  latest_outcome:
+                    type: object
+                    nullable: true
+                    properties:
+                      id: { type: string, format: uuid }
+                      status: { type: string, enum: [COMPLETED, FAILED] }
+                      started_at: { type: string, format: date-time, nullable: true }
+                      finished_at: { type: string, format: date-time }
+                  runs_30d: { type: integer }
+                  succeeded_30d: { type: integer }
+                  median_duration_seconds: { type: number, nullable: true }
+                  median_runs: { type: integer }
+                  backups_held: { type: integer }
+                  bytes_held: { type: integer }
+                  oldest_taken_at: { type: string, format: date-time, nullable: true }
+                  newest_size_bytes: { type: integer, nullable: true }
+                  offsite_destination_set: { type: boolean }
+                  newest_offsite:
+                    type: object
+                    nullable: true
+                    properties:
+                      stamp: { type: string }
+                      taken_at: { type: string, format: date-time }
+                      copied_at: { type: string, format: date-time }
+                  service:
+                    type: object
+                    nullable: true
+                    properties:
+                      reported_at: { type: string, format: date-time }
+                      volume_free_bytes: { type: integer, nullable: true }
+                      volume_total_bytes: { type: integer, nullable: true }
+                      schedule: { type: string, description: 'BACKUP_SCHEDULE as the service runs it; empty when scheduled backups are off.' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /rest/v1/playback_jobs:
     get:
       tags: [Storage]

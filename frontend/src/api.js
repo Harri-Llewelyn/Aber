@@ -1191,25 +1191,38 @@ const apiMethods = {
   },
 
   /**
-   * What the Backups page's current-state line needs, whatever the list's filter and page:
-   * the first job ever recorded, the latest completed one, and the latest that completed or failed.
+   * What the Backups page's current-state line and stat strip need, whatever the list's filter and
+   * page, in one call (`backup_summary()`, 0179): the first job ever recorded, the latest completed
+   * one and the latest that completed or failed; successes out of the runs that ended in the last 30
+   * days; the median duration of the last 14 completed runs; the backups held, their bytes, the
+   * oldest and the newest one's size; the newest copy off site; and the backup service's report of
+   * its volume and schedule, null until it has made one.
    */
   backupRunSummary: async () => {
-    const columns = 'id, status, created_at, started_at, finished_at';
-    const [first, success, outcome] = await Promise.all([
-      supabase.from('backup_jobs').select(columns)
-        .order('created_at', { ascending: true }).limit(1).maybeSingle(),
-      supabase.from('backup_jobs').select(columns).eq('status', 'COMPLETED')
-        .order('finished_at', { ascending: false }).limit(1).maybeSingle(),
-      supabase.from('backup_jobs').select(columns).in('status', ['COMPLETED', 'FAILED'])
-        .order('finished_at', { ascending: false }).limit(1).maybeSingle()
-    ]);
-    const error = first.error || success.error || outcome.error;
-    if (error) throw new Error(error.message || 'Could not read backup jobs');
+    const { data, error } = await supabase.rpc('backup_summary');
+    if (error) throw new Error(error.message || 'Could not read the backup summary');
+    const s = data || {};
+    const service = s.service || null;
     return {
-      firstRecordedAt: first.data?.created_at || null,
-      lastSuccess: success.data || null,
-      latestOutcome: outcome.data || null
+      firstRecordedAt: s.first_recorded_at || null,
+      lastSuccess: s.last_success || null,
+      latestOutcome: s.latest_outcome || null,
+      runs30d: s.runs_30d ?? 0,
+      succeeded30d: s.succeeded_30d ?? 0,
+      medianDurationSeconds: s.median_duration_seconds ?? null,
+      medianRuns: s.median_runs ?? 0,
+      backupsHeld: s.backups_held ?? 0,
+      bytesHeld: s.bytes_held ?? 0,
+      oldestTakenAt: s.oldest_taken_at || null,
+      newestSizeBytes: s.newest_size_bytes ?? null,
+      offsiteDestinationSet: s.offsite_destination_set === true,
+      newestOffsite: s.newest_offsite || null,
+      service: service && {
+        reportedAt: service.reported_at || null,
+        volumeFreeBytes: service.volume_free_bytes ?? null,
+        volumeTotalBytes: service.volume_total_bytes ?? null,
+        schedule: service.schedule ?? ''
+      }
     };
   },
 

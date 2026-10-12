@@ -214,7 +214,8 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=..
 # and that the service wrote it; a queued request refuses a twin and can be cancelled; a pinned
 # backup is released once; a job that fails is followed by a prune that leaves the newest three
 # backups alone (0150); a backup is copied off site, age-encrypted, to a MinIO the test starts, and a
-# pruned backup's copy goes with it (0151). Takes real backups and removes them afterwards; stops the
+# pruned backup's copy goes with it (0151); after a backup the service reports df's figures for its
+# volume and its schedule, which backup_summary() returns (0179). Takes real backups and removes them afterwards; stops the
 # service container for a few seconds for the cancel case, fails one job with a trigger it drops
 # afterwards, and deletes the MinIO's namespace when done.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... python backup-service/test_backup_service.py
@@ -343,6 +344,12 @@ python supabase/migrations/test_directory_images.py
 # copy and back off a failed one; and Off-site Backup Stale's view counts from the later of the
 # newest backup and the last destination change.
 python supabase/migrations/test_backup_health.py
+# The Backups page's stat strip (0179). backup_summary() is an Administrator's and refuses anybody
+# else with the code PostgREST answers 403. Successes count the runs that ended in the last 30 days,
+# not a cancelled one; the median is of the last 14 completed runs; the newest copy off site is at
+# the current destination once one is set. The service's report goes through a backup_* gate no
+# API role reaches, keeps one row, and leaves a figure statfs could not give NULL.
+python supabase/migrations/test_backup_summary.py
 # The platform database's physical backup (0173): the sidecar's schedule rules with the historian's
 # bodies, the one-row schedule, platform_backup_state() for Administrators only, and no API role
 # reaching the runs or the gates. On a stack with supabaseDb.physicalBackup on, also a full backup

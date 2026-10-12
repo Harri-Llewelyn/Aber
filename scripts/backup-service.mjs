@@ -11,7 +11,7 @@ import { spawnSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync,
-  rmSync, statSync, writeFileSync, copyFileSync,
+  rmSync, statSync, statfsSync, writeFileSync, copyFileSync,
 } from 'node:fs';
 import { createServer } from 'node:http';
 import { request as httpsRequest } from 'node:https';
@@ -143,6 +143,11 @@ const db = {
     const out = sql('SELECT public.backup_offsite_next()');
     return out ? JSON.parse(out) : null;
   },
+  // Empty bytes arrive as NULL: a figure statfs could not give is not a full disk.
+  report: (free, total, schedule) => sql(
+    "SELECT public.backup_report(NULLIF(:'free', '')::bigint, NULLIF(:'total', '')::bigint, :'schedule')",
+    { free, total, schedule }
+  ),
   offsiteRecord: (id, location, objects, error) => sql(
     "SELECT public.backup_offsite_record(:'id'::uuid, NULLIF(:'location', ''), NULLIF(:'objects', '')::jsonb, NULLIF(:'error', ''))",
     { id, location: location || '', objects: objects ? JSON.stringify(objects) : '', error: error || '' }
@@ -608,6 +613,20 @@ async function prune() {
   }
 }
 
+// The free and total bytes on BACKUP_DIR, and the schedule, for the Backups page: at start and after
+// each backup and each prune. Free is what an unprivileged writer may still use (df's Available);
+// on local-path the volume is the node's whole disk. A failure is logged and fails nothing.
+function reportVolume() {
+  let free = '';
+  let total = '';
+  try {
+    const fs = statfsSync(BACKUP_DIR);
+    free = String(fs.bavail * fs.bsize);
+    total = String(fs.blocks * fs.bsize);
+  } catch (err) { log(`report: statfs ${BACKUP_DIR}: ${err.message}`); }
+  try { db.report(free, total, SCHEDULE); } catch (err) { log(`report: ${err.message}`); }
+}
+
 // A .partial-* directory at start is a backup the previous process did not finish, and a staged
 // ciphertext is a copy it did not finish.
 function sweepPartials() {
@@ -681,6 +700,7 @@ async function tick() {
     abandon(err.message);
   }
   await prune();
+  reportVolume();
 }
 
 async function waitForDatabase() {
@@ -706,6 +726,7 @@ async function main() {
   }
   log(`retention: ${RETENTION_DAYS > 0 ? `${RETENTION_DAYS} days` : 'off'}; format: ${FORMAT}; polling every ${POLL_SECONDS}s`);
   await prune();
+  reportVolume();
 
   const loop = async () => {
     await tick();
