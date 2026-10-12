@@ -5,7 +5,8 @@ own account, confined to its own topics. Read this to understand a refused conne
 adding an account for a new service.
 
 Mosquitto authenticates and authorises every client through its Dynamic Security plugin. The
-roles are declared in [`dynsec-roles.json`](dynsec-roles.json) and applied at every boot; the
+roles are declared in [`dynsec-roles.json`](dynsec-roles.json), each ACL with a `why` naming what
+uses it ([*No check finds an unused ACL*](#no-check-finds-an-unused-acl)), and applied at every boot; the
 clients are the platform principals from the environment plus one account per gateway, issued by
 the credential service and persisted by the plugin in `/mosquitto/data/dynamic-security.json`.
 [`mosquitto.conf`](mosquitto.conf) is the listener policy and [`mosquitto-tls.conf`](mosquitto-tls.conf)
@@ -329,7 +330,8 @@ overwritten, since it is the fleet's credentials.
 
 ## Adding a principal
 
-A new platform consumer (a BI reader of `uns/#`, say) is a role in `dynsec-roles.json`; a
+A new platform consumer (a BI reader of `uns/#`, say) is a role in `dynsec-roles.json`, each ACL
+with a `why` naming what uses it; a
 `secrets.mqtt<Name>User` / `secrets.mqtt<Name>Password` pair in the chart's values, rendered as
 `MQTT_<NAME>_USER` / `MQTT_<NAME>_PASSWORD` by the chart's `templates/secret.yaml`; the name in
 `aber.mqttPrincipals` (`templates/_helpers.tpl`), which hands the pair to the reconcile, and in
@@ -339,6 +341,44 @@ same set as `aber.mqttPrincipals`; a purpose
 line in `frontend/src/utils/serviceIdentities.js`; and an assertion in
 `scripts/check-broker-config.mjs`.
 `scripts/check-docs-drift.mjs` holds the roles file and the page's list to each other.
+
+## No check finds an unused ACL
+
+`check-broker-config.mjs` proves by delivery that each role confines its principal. An unused grant
+passes it by construction, because a grant only ever widens what arrives. So the one control on an
+over-grant is a person reading the role beside the code that holds it, and the `why` on every ACL
+in `dynsec-roles.json` is there to make that reading happen. `check-docs-drift.mjs` (check 62)
+requires each `why` to be present, never that it is true. The reconcile cuts every ACL down to the
+plugin's own keys before the plugin is given a role, and 2.1.2 ignores an ACL key it does not
+define in any case (measured).
+
+**An inventory was attempted and abandoned** ([issue #298](https://github.com/Harri-Llewelyn/Aber/issues/298),
+2026-10-12). It reported, for each ACL, whether anything in the repository exercises it:
+
+- **Connections.** Found by shape: a paho `mqtt.Client(`, a `mosquitto_sub`, `_pub`, `_rr` or
+  `_ctrl` call, a Node-RED broker node, `controlArgv()`. That is 19 files. Each one's identity had to
+  be declared by hand, because none is in the file: it arrives through an env var the chart maps from
+  a Secret key, through a function parameter, or as the username of whichever gateway is named.
+- **Topics.** 48 subscribe and publish uses were read as literal prefixes: string literals,
+  f-strings, `%` formats and `"/".join`, following one assignment or one same-file function. Ten
+  could not be read.
+- **On the shipped policy** it reported 16 of 21 ACLs exercised, 5 reachable only by something it
+  could not read, and none unused.
+- **Against eight over-grants added to test it**, it reported four unused, among them the i3X
+  Directory read issue #297 found by hand. It missed the other four. `capture.py --topic`, the
+  allow-list's first entry, can reach anything the ingestion account may read, and the topic
+  `uns_publish.py` assembles cannot be read. Host-run gateways run flows an operator writes. So no
+  new grant on the ingestion or gateway role could be reported unused. Worse, a gateway write on
+  `spBv1.0/STATE/#` was reported *exercised* by `validate.py` and `capture.py`, because a Sparkplug
+  group read as a placeholder matches the literal `STATE`.
+
+It hit both failures the issue set out. The allow-list swallowed the two roles whose grants are
+widest. And it answered wrongly on a real path, in the direction that hides an over-grant. Special
+cases bring it to five of the eight, at the price of more of them in a regex reader of four formats.
+
+**What the `why`s say today.** The ingestion role's read of `uns/#`, and of the Directory subtree
+the reconcile grants it beside the write, is used by no platform process. `check-broker-config.mjs`
+reads both trees as that account to see the publishes delivered, and `capture.py --topic` could.
 
 ## Broker Topic Authorisation
 

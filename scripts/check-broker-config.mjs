@@ -430,6 +430,14 @@ try {
     } else {
       problems.push('a stored client lacks salt or iterations, so its password field is not a mosquitto_passwd hash');
     }
+    // dynsec-roles.json gives each ACL a `why` for people; the plugin is given its own keys only.
+    const foreign = doc.roles.flatMap((role) => role.acls || [])
+      .flatMap((acl) => Object.keys(acl).filter((key) => !['acltype', 'topic', 'priority', 'allow'].includes(key)));
+    if (foreign.length === 0) {
+      ok.push('the reconcile gives the plugin each ACL with the plugin\'s own keys, and no `why`');
+    } else {
+      problems.push(`the reconciled document carries ACL keys the plugin does not define: ${[...new Set(foreign)].join(', ')}`);
+    }
     if (doc.defaultACLAccess?.publishClientReceive === false && doc.defaultACLAccess?.subscribe === false) {
       ok.push('the document denies by default (defaultACLAccess receive and subscribe are false)');
     } else {

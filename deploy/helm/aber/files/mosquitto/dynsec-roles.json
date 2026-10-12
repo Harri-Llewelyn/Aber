@@ -10,47 +10,64 @@
       "rolename": "admin",
       "textDescription": "The credential service. Speaks to the plugin and reads nothing else.",
       "acls": [
-        { "acltype": "publishClientSend", "topic": "$CONTROL/dynamic-security/#", "allow": true },
-        { "acltype": "publishClientReceive", "topic": "$CONTROL/dynamic-security/#", "allow": true },
-        { "acltype": "subscribePattern", "topic": "$CONTROL/dynamic-security/#", "allow": true }
+        { "acltype": "publishClientSend", "topic": "$CONTROL/dynamic-security/#", "allow": true,
+          "why": "The credential service, the operator CLI and the orphan sweep send each command here (mosquitto_rr -t, scripts/lib/mosquitto-control.mjs)." },
+        { "acltype": "publishClientReceive", "topic": "$CONTROL/dynamic-security/#", "allow": true,
+          "why": "The plugin's reply on $CONTROL/dynamic-security/v1/response, which mosquitto_rr waits for (-e)." },
+        { "acltype": "subscribePattern", "topic": "$CONTROL/dynamic-security/#", "allow": true,
+          "why": "mosquitto_rr subscribes to the reply topic before it sends the command." }
       ]
     },
     {
       "rolename": "gateway",
       "textDescription": "Every gateway. Its %u rules confine what a gateway publishes and receives to the edge node its username names, which is its sparkplug_id. It may subscribe anywhere under spBv1.0/ so wildcard subscriptions succeed, and it receives the primary-host STATE topics.",
       "acls": [
-        { "acltype": "subscribePattern", "topic": "spBv1.0/#", "allow": true },
-        { "acltype": "publishClientReceive", "topic": "spBv1.0/STATE/#", "allow": true },
-        { "acltype": "publishClientSend", "topic": "spBv1.0/+/+/%u/#", "allow": true },
-        { "acltype": "publishClientReceive", "topic": "spBv1.0/+/+/%u/#", "allow": true }
+        { "acltype": "subscribePattern", "topic": "spBv1.0/#", "allow": true,
+          "why": "Every gateway subscription: the appliance flow's STATE, NCMD and DCMD inputs, validate.py and the load generator. Wide so a wildcard subscription succeeds; the receive rules decide what is delivered." },
+        { "acltype": "publishClientReceive", "topic": "spBv1.0/STATE/#", "allow": true,
+          "why": "The primary host's STATE, which the appliance flow, validate.py and the load generator watch to learn whether ingestion is online." },
+        { "acltype": "publishClientSend", "topic": "spBv1.0/+/+/%u/#", "allow": true,
+          "why": "Births, data and deaths under the gateway's own edge node: the appliance flow, the playback worker (it connects as the target gateway), validate.py and the load generator." },
+        { "acltype": "publishClientReceive", "topic": "spBv1.0/+/+/%u/#", "allow": true,
+          "why": "NCMD and DCMD for the gateway's own edge node: the appliance flow's command inputs, validate.py's rebirth check and the load generator." }
       ]
     },
     {
       "rolename": "ingestion",
       "textDescription": "The ingestion daemon: reads every Sparkplug topic, publishes only rebirth NCMDs, and is the only writer of the Directory and the Unified Namespace. TWO of its grants are not in this file, because both are named by the deployment rather than by this repository and are injected at reconcile time: its write on spBv1.0/STATE/<host_id> from PRIMARY_HOST_ID, and the Directory subtree from DIRECTORY_MQTT_TOPIC_PREFIX, which is derived from the site's Sparkplug group.",
       "acls": [
-        { "acltype": "subscribePattern", "topic": "spBv1.0/#", "allow": true },
-        { "acltype": "publishClientReceive", "topic": "spBv1.0/#", "allow": true },
-        { "acltype": "publishClientSend", "topic": "spBv1.0/+/NCMD/+", "allow": true },
-        { "acltype": "publishClientSend", "topic": "uns/#", "allow": true },
-        { "acltype": "subscribePattern", "topic": "uns/#", "allow": true },
-        { "acltype": "publishClientReceive", "topic": "uns/#", "allow": true }
+        { "acltype": "subscribePattern", "topic": "spBv1.0/#", "allow": true,
+          "why": "ingestion.py subscribes once to spBv1.0/#. capture.py records as this account unless MQTT_CAPTURE_USER names another." },
+        { "acltype": "publishClientReceive", "topic": "spBv1.0/#", "allow": true,
+          "why": "Delivery for ingestion.py's spBv1.0/# subscription, and for capture.py's recordings." },
+        { "acltype": "publishClientSend", "topic": "spBv1.0/+/NCMD/+", "allow": true,
+          "why": "ingestion.py's rebirth request to an edge node whose aliases it cannot resolve." },
+        { "acltype": "publishClientSend", "topic": "uns/#", "allow": true,
+          "why": "uns_publish.py, under UNS_MQTT_TOPIC_ROOT, which is uns unless ingestion.unsMqttTopicRoot names another root." },
+        { "acltype": "subscribePattern", "topic": "uns/#", "allow": true,
+          "why": "No platform process reads uns/ as this account. capture.py can record it with --topic, and check-broker-config.mjs reads it to see the UNS publish delivered." },
+        { "acltype": "publishClientReceive", "topic": "uns/#", "allow": true,
+          "why": "Delivery for that subscription: capture.py with --topic, and check-broker-config.mjs." }
       ]
     },
     {
       "rolename": "i3x",
       "textDescription": "The i3X server: reads the whole Sparkplug namespace and publishes nothing. It reads the Directory from the database over PostgREST, not from the broker, so it holds no Directory grant here.",
       "acls": [
-        { "acltype": "subscribePattern", "topic": "spBv1.0/#", "allow": true },
-        { "acltype": "publishClientReceive", "topic": "spBv1.0/#", "allow": true }
+        { "acltype": "subscribePattern", "topic": "spBv1.0/#", "allow": true,
+          "why": "i3x_service.py subscribes once to spBv1.0/# to assemble its address space." },
+        { "acltype": "publishClientReceive", "topic": "spBv1.0/#", "allow": true,
+          "why": "Delivery for i3x_service.py's spBv1.0/# subscription." }
       ]
     },
     {
       "rolename": "monitor",
       "textDescription": "The health probes and the metrics exporter: $SYS only.",
       "acls": [
-        { "acltype": "subscribePattern", "topic": "$SYS/#", "allow": true },
-        { "acltype": "publishClientReceive", "topic": "$SYS/#", "allow": true }
+        { "acltype": "subscribePattern", "topic": "$SYS/#", "allow": true,
+          "why": "The broker container's startup, readiness and liveness probes (mosquitto_sub on $SYS/broker/version), and the metrics exporter sidecar, which subscribes to $SYS/#." },
+        { "acltype": "publishClientReceive", "topic": "$SYS/#", "allow": true,
+          "why": "Delivery for the probes' and the exporter's subscriptions." }
       ]
     }
   ]
