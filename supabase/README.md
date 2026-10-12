@@ -248,6 +248,22 @@ them, so it creates them only on a fresh install, and `0177` keeps them current.
    A bare `DROP ... IF EXISTS` takes supautils' locks on every boot, even when there is nothing to
    drop.
 
+**Measured** on a private test database (supabase/postgres 17.6.1.175). A writer updated an area
+every 2 ms as an Administrator through 9 no-change replays of the whole chain, while a sampler read
+`pg_locks`:
+
+| | replays aborted on a deadlock | writer aborted on a deadlock, per replay | (transaction, auth table) pairs seen holding `ACCESS EXCLUSIVE` |
+| --- | ---: | ---: | ---: |
+| every policy and trigger re-created | 5 of 9 | 0 to 6 | 16 to 345 (an aborted replay stops early) |
+| re-created only when they differ | 0 of 9 | 0 to 1 | 7 or 8 |
+
+The test database has five of supautils' 24 tables; a stack with Storage and Realtime has more. The
+seven left are held by `0001`'s guards on foreign keys to `auth.users`. Those compare a key's
+definition under db-init's search path, so they drop and add it back on every boot, which is a
+separate fault. A changed `USING` clause in a scratch copy of `0001` was live after one replay,
+and the next replay changed nothing. A no-change replay took 2.8 to 3.0 seconds inside the
+container, before and after.
+
 ### Seeding is audited now
 
 The baseline creates every trigger before `0002` runs, so a fresh install records an `audit_trail`
