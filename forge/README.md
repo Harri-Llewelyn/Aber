@@ -124,6 +124,43 @@ dashboard, the proposals and every existing appliance are unaffected. What is lo
 appliances, which enrol with no `known_hosts` entry and decline to converge rather than trusting an
 unverified forge, and the script says so because nothing else would.
 
+## How the platform reaches the forge
+
+The edge functions call Gitea's API through the gateway's `forge-api` listener, on
+`supabase-envoy:8003`. They never reach Gitea's own port 3000. This section is for anyone changing
+how a function talks to the forge.
+
+**Why not port 3000.** Gitea signs in whoever the `X-WEBAUTH-USER` header names on its web routes,
+from any peer that reaches port 3000. A function that reached that port could become any user, the
+site administrator included. Measured against `gitea/gitea:28.0.0`: the header fetched the audit
+export from another container on the same network.
+
+**What the listener does**, measured with `envoyproxy/envoy:v1.39.2` running the shipped
+`supabase/envoy.yaml`:
+
+- It serves `/api/` and `/assets/ssh_host_key.pub`, the host key enrolment hands an appliance.
+- It answers 403 to every other path, after normalising it. `/api/../-/admin`,
+  `/api/%2e%2e/-/admin` and `/API/v1/version` all answer 403, and an escaped slash (`%2f`) answers
+  400.
+- It removes `X-WEBAUTH-USER`, `X-WEBAUTH-EMAIL` and `X-WEBAUTH-FULLNAME` from every request. So
+  even a path that reached Gitea would sign nobody in.
+- It removes `X-Real-IP`, `True-Client-IP` and `Forwarded`, and sets `X-Forwarded-For` to the
+  caller's own address. Gitea's audit log then records the function pod's address, not one a
+  request chose. Without this, a request's own `X-Real-IP` was what Gitea recorded (measured).
+- It logs refusals only (400, 401, 403 and 5xx) as `aber-forge-api` lines. The 404s the platform's
+  look-before-create calls draw on every pass are not logged.
+
+**Who reaches it.** Under `networkPolicy.enabled`, only `supabase-functions`, on the edge
+`supabase-functions → supabase-envoy:8003`. Port 3000 admits the gateway alone, whether or not that
+layer is on, through the forge policy the chart always renders. With the layer off, any pod can
+reach 8003, as any pod can reach the `forge` listener's own `/api/` route on 8002. Neither serves a
+web route or passes the header on.
+
+The push webhook is unchanged: Gitea delivers it to `forge-events` directly, on
+`gitea → supabase-functions:9000`. `test_forge_sweep.py` (`TestTheEdgeRuntimesPathToTheForge`) asks
+from inside the functions pod: a web route with the header is refused, the API and the host key
+answer, and `gitea:3000` does not answer at all.
+
 ## The machine account's token
 
 Every call the platform makes to the forge carries one Gitea access token, named `aber-platform`,
@@ -241,8 +278,8 @@ different header value here.
 **Why this works, and why only for an operator.** Gitea signs in whoever the `X-WEBAUTH-USER` header
 names, from any peer that reaches port 3000. A port-forward arrives from the pod's own loopback, so
 the forge treats it like any other peer. The NetworkPolicy edge list keeps every pod but the gateway
-and the edge runtime off that port, and the gateway's `forge` listener replaces the header with the
-signed-in person's id. So the path is open to someone who may port-forward in the namespace, and that
+off that port. The gateway's `forge` listener replaces the header with the signed-in person's id, and
+its `forge-api` listener, the edge functions' path, removes it. So the path is open to someone who may port-forward in the namespace, and that
 person can already do anything there. Measured against `gitea/gitea:28.0.0` on 2026-10-12: the
 header fetched the export from the pod's loopback and from another container on the same network,
 and a request without it was sent to the sign-in page.

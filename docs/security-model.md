@@ -22,7 +22,7 @@ unrecognised role produces `403`.
 | **Edge functions** | Explicit router allow-list; per-function secret scoping; role resolved from the database, never a stale JWT claim |
 | **Edge automation** | Node-RED's editor, admin API and webhook receiver each authenticate separately |
 | **Supabase Studio** | Behind the gateway's `studio` listener: an OAuth login against this stack's GoTrue and an `Administrator` check (`0081`). Off the Ingress by default |
-| **The forge** | Behind the gateway's `forge` listener: the same login, admitting `Administrator` and `Shopfloor_Manager` (`0094`). Gitea's own HTTP port is reachable only from the gateway and the edge runtime |
+| **The forge** | Behind the gateway's `forge` listener: the same login, admitting `Administrator` and `Shopfloor_Manager` (`0094`). Gitea's own HTTP port is reachable only from the gateway; the edge functions reach its API through the gateway's `forge-api` listener, which serves `/api/` alone and removes the identity headers |
 
 **An error tells the caller what to fix, never how the platform is built.** A refusal the caller
 can act on says what to change. An edge function that fails unexpectedly answers a fixed sentence

@@ -3,8 +3,9 @@
 Envoy is the API gateway on the cluster. Its template is
 [`supabase/envoy.yaml`](../supabase/envoy.yaml), mirrored into the chart by
 `scripts/sync-helm-chart-files.mjs` and rendered by the initContainer in
-[`templates/supabase/envoy.yaml`](../deploy/helm/aber/templates/supabase/envoy.yaml). Three
-listeners: the API on 8000, Studio's login on 8001 and the forge's login on 8002 (the last two are
+[`templates/supabase/envoy.yaml`](../deploy/helm/aber/templates/supabase/envoy.yaml). Four
+listeners: the API on 8000, Studio's login on 8001, the forge's login on 8002, and the forge's API
+for the edge functions on 8003, which no browser reaches (the middle two are
 documented with [Studio's door](../supabase/README.md#the-second-listener-which-is-studios-login-archived-migration-0081)
 and [the forge's door](../supabase/README.md#the-forges-door-and-the-room-behind-it-archived-migration-0094)).
 
@@ -146,7 +147,7 @@ there. `enabled: false` turns the gateway's limit off and leaves GoTrue's.
 | :--- | :--- | :--- |
 | `X-Content-Type-Options: nosniff` | every response the API listener routes, its own refusals included | always |
 | `Cache-Control: no-store` | `/auth/v1/` | always |
-| `Strict-Transport-Security: max-age=31536000` | all three listeners | `global.scheme: https` |
+| `Strict-Transport-Security: max-age=31536000` | the three browser listeners (8000, 8001, 8002) | `global.scheme: https` |
 
 The same `Strict-Transport-Security` value comes from every other web host the chart serves, each
 set by the chart: the dashboard's nginx, Grafana, Node-RED (the editor and its http-in routes), the

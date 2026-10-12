@@ -795,12 +795,21 @@ jobs:
               ('cold-archive', 'timescaledb', 5432, 'cold chunk export'),
               ('cold-archive', 'supabase-envoy', 8000, 'the cold archive destination'),
               ('e2e-validate', 'i3x-service', 8090, 'validate.py checks 12-12f'),
+              # Enrolment's repository, the sweep and the door's placement: blocked, each skips the forge.
+              ('supabase-functions', 'supabase-envoy', 8003, "the forge's API through the forge-api listener"),
           ]
           for src, dst, port, why in REQUIRED:
               if (src, dst, port) not in egress:
                   errors.append(f"MISSING required flow {src} -> {dst}:{port} — {why}")
               else:
                   print(f"  ok  {src} -> {dst}:{port}  ({why})")
+
+          # Gitea's web routes sign in whoever one header names, so only the gateway may reach 3000.
+          on_forge_port = sorted(src for src, dst, port in ingress if dst == 'gitea' and port == 3000)
+          if on_forge_port != ['supabase-envoy']:
+              errors.append(f"gitea:3000 must admit the gateway alone; it admits {on_forge_port}")
+          else:
+              print("  ok  gitea:3000 admits the gateway alone")
 
           # Check 7b signs in at the browser-facing URLs, which the ingress controller serves: a
           # namespace peer, so the pod-to-pod sets above cannot hold it.
@@ -871,9 +880,10 @@ jobs:
           allowed = peers_by_port(spec)
           if spec.get('policyTypes') != ['Ingress']:
               errors.append(f"the forge policy must be Ingress-only; got {spec.get('policyTypes')}")
-          # The door and the API, and NOTHING else on 3000: every other pod that reaches it is a user.
-          if allowed.get(3000) != {'supabase-envoy', 'supabase-functions'}:
-              errors.append(f"3000 must be reachable by exactly {{supabase-envoy, supabase-functions}}; got {allowed.get(3000)}")
+          # The gateway, and NOTHING else on 3000: every other pod that reaches it is a user. The edge
+          # functions reach the API through the gateway's forge-api listener, which removes the header.
+          if allowed.get(3000) != {'supabase-envoy'}:
+              errors.append(f"3000 must be reachable by the gateway alone; got {allowed.get(3000)}")
           # PORT 22, AND THE REASON THIS ASSERTION EXISTS. A policy is a whitelist for the pod it
           # SELECTS, not the ports it names -- so selecting the Gitea pod closes 22 unless 22 is
           # listed. A draft that named only 3000 took an appliance's clone from an SSH banner to

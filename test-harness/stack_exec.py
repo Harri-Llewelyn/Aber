@@ -38,6 +38,7 @@ TARGETS = {
     "supabase-db": {"workload": "statefulset/supabase-db", "container": "supabase-db", "service": "supabase-db"},
     "backup-service": {"workload": "deploy/backup-service", "container": "backup-service", "service": None},
     "forge": {"workload": "deploy/gitea", "container": "gitea", "service": "gitea"},
+    "functions": {"workload": "deploy/supabase-functions", "container": "edge-runtime", "service": "supabase-functions"},
 }
 
 

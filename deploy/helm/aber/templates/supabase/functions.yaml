@@ -139,17 +139,18 @@ spec:
             {{- /* The broker as an APPLIANCE dials it. Falls back to the MQTT subdomain the chart
                    already derives for the external broker route, which is the address the
                    certificate's SAN carries -- see mosquitto.tls in values.yaml. */}}
-            {{- /* THE FORGE, for enrolment's fourth step (docs/remote-gateways.md). The in-cluster Service, not
-                   the ingress hostname: the clone URL an appliance is handed comes from the forge's
-                   own answer, which is built from its ROOT_URL and SSH_DOMAIN, so these two never
-                   have to agree.
+            {{- /* THE FORGE, for enrolment's fourth step (docs/remote-gateways.md). The gateway's
+                   forge-api listener, never gitea:3000: Gitea's web routes sign in whoever a header
+                   names, and that listener serves the API alone with the identity headers removed.
+                   Not the ingress hostname either: the clone URL an appliance is handed comes from
+                   the forge's own answer, built from its ROOT_URL and SSH_DOMAIN.
 
                    Rendered only when the forge is deployed with a machine account (gitea.machineUser).
                    Without one the function skips its fourth step and says so in the response -- a
                    gateway still enrols and still gets its broker credential. */}}
             {{- if $forgeToken }}
             - name: GITEA_INTERNAL_URL
-              value: "http://gitea:3000"
+              value: "http://supabase-envoy:8003"
             - name: GITEA_MACHINE_USER
               value: {{ .Values.gitea.machineUser | quote }}
             {{- /* The machine account's token, as a file: the forge mints it after this pod may have

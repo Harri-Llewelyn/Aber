@@ -64,7 +64,8 @@ in one database and the server opens another, with nothing reporting a fault.
 # measurements are in supabase/README.md (the forge). What this adds is the NetworkPolicy edge
 # list: the identity
 # header is trusted from ANY peer (REVERSE_PROXY_TRUSTED_PROXIES governs X-Forwarded-For only,
-# measured), so the gateway and the edge runtime are the only pods allowed to reach port 3000.
+# measured), so the gateway is the only pod allowed to reach port 3000. The edge functions reach
+# the API through its forge-api listener, which removes the header.
 - name: GITEA__service__ENABLE_REVERSE_PROXY_AUTHENTICATION
   value: "true"
 - name: GITEA__service__ENABLE_REVERSE_PROXY_AUTO_REGISTRATION

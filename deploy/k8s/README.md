@@ -1342,7 +1342,8 @@ only the bundle, and says the root could not be fetched.
 **The forge's login depends on a policy, so it gets one whether or not you enable this layer.** With
 `gitea.enabled: true`, the chart renders **one** NetworkPolicy even when
 `networkPolicy.enabled: false` (#172). It covers ingress to the Gitea pod only: port 3000 from the
-gateway and `supabase-functions`, and port 22 from `giteaSshAllowedCidrs`. Port 22 here, and below,
+gateway alone, and port 22 from `giteaSshAllowedCidrs`. The edge functions reach the forge's API
+through the gateway's `forge-api` listener (8003), which removes the identity headers. Port 22 here, and below,
 is the container's: a policy matches the port after the Service has translated it, so it is 22
 whatever `gitea.ssh.external.port` publishes.
 
