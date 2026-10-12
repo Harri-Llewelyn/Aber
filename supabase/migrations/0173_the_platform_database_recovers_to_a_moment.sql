@@ -41,9 +41,9 @@ ALTER TABLE public.physical_backup_runs ENABLE ROW LEVEL SECURITY;
 -- pg_monitor) and by platform_backup_state().
 REVOKE ALL ON TABLE public.physical_backup_runs FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT ON TABLE public.physical_backup_runs TO pg_monitor;
-DROP POLICY IF EXISTS physical_backup_runs_select_monitor ON public.physical_backup_runs;
-CREATE POLICY physical_backup_runs_select_monitor ON public.physical_backup_runs
-    FOR SELECT TO pg_monitor USING (true);
+SELECT public.replay_policy('public.physical_backup_runs', 'physical_backup_runs_select_monitor', $ddl$
+CREATE POLICY physical_backup_runs_select_monitor ON public.physical_backup_runs FOR SELECT TO pg_monitor USING (true);
+$ddl$);
 
 COMMENT ON TABLE public.physical_backup_runs IS
   'One row per run of the platform database''s pgBackRest sidecar (supabaseDb.physicalBackup), '

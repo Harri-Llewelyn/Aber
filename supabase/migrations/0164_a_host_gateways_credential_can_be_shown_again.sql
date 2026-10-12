@@ -146,10 +146,9 @@ $$;
 ALTER FUNCTION public.forget_gateway_credential() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.forget_gateway_credential() FROM PUBLIC, anon, authenticated;
 
-DROP TRIGGER IF EXISTS trg_gateways_forget_credential ON public.gateways;
-CREATE TRIGGER trg_gateways_forget_credential
-  AFTER UPDATE OF is_archived OR DELETE ON public.gateways
-  FOR EACH ROW EXECUTE FUNCTION public.forget_gateway_credential();
+SELECT public.replay_trigger('public.gateways', 'trg_gateways_forget_credential', $ddl$
+CREATE TRIGGER trg_gateways_forget_credential AFTER DELETE OR UPDATE OF is_archived ON public.gateways FOR EACH ROW EXECUTE FUNCTION public.forget_gateway_credential();
+$ddl$);
 
 DO $$
 DECLARE

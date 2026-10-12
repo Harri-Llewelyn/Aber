@@ -631,6 +631,13 @@ export const SUITES = {
       'registered with a missing or wrong semantic id breaks nothing at runtime -- it asserts an ' +
       'interoperability claim that is simply untrue, which no other check would notice.',
   },
+  'supabase/migrations/test_replay_recreates_only_what_differs.py': {
+    lanes: ['db'],
+    why:
+      'That db-init re-creates a policy or trigger only when it differs (0001, section 3c), in ' +
+      'both directions: a changed one is put back, so no stale policy stays live, and an ' +
+      'unchanged one takes no lock, so a boot does not lock GoTrue\'s tables 56 times.',
+  },
   'supabase/migrations/test_anon_privilege_baseline.py': {
     lanes: ['db'],
     why:

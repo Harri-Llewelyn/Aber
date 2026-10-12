@@ -296,8 +296,9 @@ COMMENT ON FUNCTION public.set_device_schemas(p_device_id uuid, p_schema_ids uui
 -- -------------------------------------------------------------------------------------------------
 -- The Devices page changes a device's schemas in device_submodels, so that table is audited, keyed
 -- by its device as device_nameplate is, and filed in the asset lane.
-DROP TRIGGER IF EXISTS trg_device_submodels_audit_trail ON public.device_submodels;
+SELECT public.replay_trigger('public.device_submodels', 'trg_device_submodels_audit_trail', $ddl$
 CREATE TRIGGER trg_device_submodels_audit_trail AFTER INSERT OR DELETE OR UPDATE ON public.device_submodels FOR EACH ROW EXECUTE FUNCTION public.log_audit_trail_event('device_id');
+$ddl$);
 
 -- Unchanged from 0001 but for `device_submodels` in the asset list.
 CREATE OR REPLACE FUNCTION public.audit_domain_for(p_entity_type text, p_action text) RETURNS text

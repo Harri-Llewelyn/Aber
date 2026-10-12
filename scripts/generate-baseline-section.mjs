@@ -10,8 +10,10 @@
  *   FUNCTION     CREATE OR REPLACE FUNCTION
  *   VIEW         CREATE OR REPLACE VIEW, or a call to the function that builds it (REBUILT_BY)
  *   INDEX        CREATE [UNIQUE] INDEX IF NOT EXISTS
- *   TRIGGER      DROP TRIGGER IF EXISTS ... ON ...; CREATE TRIGGER ...  (one transaction per table)
- *   POLICY       DROP POLICY IF EXISTS ... ON ...; CREATE POLICY ...    (one transaction per table)
+ *   TRIGGER      SELECT public.replay_trigger(table, name, $ddl$CREATE TRIGGER ...$ddl$)  (one
+ *                transaction per table)
+ *   POLICY       SELECT public.replay_policy(table, name, $ddl$CREATE POLICY ...$ddl$)    (one
+ *                transaction per table)
  *   CONSTRAINT   a DO block guarded on pg_constraint -- rule 2, added guarded, never re-added
  *   the rest     already idempotent (GRANT, REVOKE, COMMENT, ALTER ... ENABLE ROW LEVEL SECURITY)
  *
@@ -36,6 +38,11 @@
  * came from. The expansion is undone only where the dump bracketed it as its own pair, which is
  * exactly where it came from a BETWEEN: a hand-written `x >= a AND x <= b` sitting in a larger
  * AND was flattened by the ORIGINAL parse and is printed without those brackets.
+ *
+ * A POLICY OR TRIGGER IS RE-CREATED ONLY WHEN IT DIFFERS. Its CREATE, exactly as dumped and on a
+ * line of its own (tests read it there), is passed to replay_policy() or replay_trigger(), which
+ * compare it with the live object as pg_dump writes it. Section 3c of the baseline declares both by
+ * hand, so their own blocks in a dump are skipped here.
  *
  *   node generate-baseline.mjs <dump.sql> > section4.sql
  */
@@ -89,6 +96,39 @@ const AROUND_PARTITION = {
 
 const esc = (s) => s.replace(/'/g, "''");
 const bare = (s) => (s || '').replace(/^public\./, '').replace(/"/g, '');
+const unquoteIdent = (s) => (/^".*"$/.test(s) ? s.slice(1, -1).replace(/""/g, '"') : s);
+
+/** Routines section 3c of the baseline declares by hand; their blocks in a dump are skipped. */
+const DECLARED_IN_3C = /^(?:FUNCTION )?(?:live_policy_statement|live_trigger_statement|replay_policy|replay_trigger)\(/;
+
+/**
+ * `<table> <name>` of each policy or trigger a later applied migration states again, with that
+ * file. The baseline then only creates it where it is missing, so a boot does not re-create it
+ * twice. Empty after a squash: the dump holds each one's final form.
+ */
+const STATED_LATER = {
+  'public.audit_trail audit_trail_select_asset': '0177_policies_check_the_caller_once_per_query.sql',
+  'public.audit_trail audit_trail_select_security': '0177_policies_check_the_caller_once_per_query.sql',
+  'public.change_proposals change_proposals_insert_proposer': '0177_policies_check_the_caller_once_per_query.sql',
+  'public.change_proposals change_proposals_select_own_or_approver': '0177_policies_check_the_caller_once_per_query.sql',
+  'public.change_proposals change_proposals_update_own_open': '0177_policies_check_the_caller_once_per_query.sql',
+  'public.principal_permissions principal_permissions_select_own_or_admin': '0177_policies_check_the_caller_once_per_query.sql',
+  'public.system_settings system_settings_select_authenticated': '0177_policies_check_the_caller_once_per_query.sql',
+  'public.user_roles user_roles_select_own_or_privileged': '0177_policies_check_the_caller_once_per_query.sql',
+};
+const statedLaterSeen = new Set();
+
+/** A policy or trigger's CREATE as the call that re-creates it only when it differs. */
+function replayCall(kind, table, name, statement) {
+  if (statement.includes('$ddl$') || statement.includes('\n')) {
+    throw new Error(`${kind} ${name} on ${table}: the CREATE is not one line free of $ddl$`);
+  }
+  const key = `${table} ${unquoteIdent(name)}`;
+  const later = STATED_LATER[key];
+  if (later) statedLaterSeen.add(key);
+  return `SELECT public.replay_${kind}('${esc(table)}', '${esc(unquoteIdent(name))}', $ddl$\n${statement}\n$ddl$`
+    + `${later ? `, p_stated_by => '${esc(later)}'` : ''});`;
+}
 
 /**
  * Pass one: which tables are partitions, of what, and on what bound. A CONSTRAINT or INDEX on one
@@ -286,12 +326,12 @@ function rewrite(b) {
   if (t === 'TRIGGER') {
     const m = s.match(/CREATE(?:\s+OR\s+REPLACE)?(?:\s+CONSTRAINT)?\s+TRIGGER\s+(\S+)[\s\S]*?\bON\s+(\S+)/i);
     if (!m) return s;
-    return `DROP TRIGGER IF EXISTS ${m[1]} ON ${m[2]};\n${s}`;
+    return replayCall('trigger', m[2], m[1], s);
   }
   if (t === 'POLICY') {
     const m = s.match(/CREATE\s+POLICY\s+("[^"]+"|\S+)\s+ON\s+(\S+)/i);
     if (!m) return s;
-    return `DROP POLICY IF EXISTS ${m[1]} ON ${m[2]};\n${s}`;
+    return replayCall('policy', m[2], m[1], s);
   }
   if (t === 'CONSTRAINT' || t === 'FK CONSTRAINT' || t === 'CHECK CONSTRAINT') {
     const m = s.match(/ADD\s+CONSTRAINT\s+(\S+)/i);
@@ -352,15 +392,15 @@ const SEPARATE_DEFAULTS = new Set(blocks(dump)
   .map((b) => `${b.schema}.${b.name.replace(/\s+/, '.')}`));
 
 /**
- * The table a TRIGGER or POLICY block's DROP/CREATE pair is on, or null for any other block.
- * Consecutive pairs of one kind on one table are wrapped in BEGIN/COMMIT below: between a separate
- * DROP and CREATE a reader finds no policy and reads no rows, and a write skips the trigger. One
- * table per transaction, so no lock is held while another table's is awaited.
+ * The table a TRIGGER or POLICY block's replay call is on, or null for any other block.
+ * Consecutive calls of one kind on one table are wrapped in BEGIN/COMMIT below, so a table's
+ * policies, or its triggers, change together when more than one differs. One table per
+ * transaction, so no lock is held while another table's is awaited.
  */
 function pairKey(type, s) {
   const t = type.toUpperCase();
   if (t !== 'TRIGGER' && t !== 'POLICY') return null;
-  const m = s.match(/^DROP (?:TRIGGER|POLICY) IF EXISTS \S+ ON (\S+);/);
+  const m = s.match(/^SELECT public\.replay_(?:trigger|policy)\('((?:[^']|'')+)'/);
   return m ? `${t} ${m[1]}` : null;
 }
 
@@ -372,6 +412,7 @@ for (const b of blocks(dump)) {
   // Default privileges are hand-carried BEFORE section 4, because they apply only to objects
   // created after they run -- and the `supabase_admin` ones cannot be set by `postgres` at all.
   if (b.type.toUpperCase() === 'DEFAULT ACL') { dropped++; continue; }
+  if (b.schema === 'public' && DECLARED_IN_3C.test(b.name)) { dropped++; continue; }
   let s = rewrite(b);
   if (s === null) { dropped++; continue; }
   if (/PARTITION OF/.test(s)) parts++;
@@ -410,6 +451,7 @@ for (let i = 0; i < pairKeys.length; i++) {
 // (`has_role(allowed_roles text[])`), so comparing against it drops every function in the list.
 const declared = blocks(dump)
   .filter((b) => ['FUNCTION', 'PROCEDURE'].includes(b.type.toUpperCase()) && b.schema === 'public')
+  .filter((b) => !DECLARED_IN_3C.test(b.name))
   .map((b) => b.name);
 if (declared.length) {
   const names = [...new Set(declared.map((s) => s.replace(/\(.*$/s, '')))].sort();
@@ -439,6 +481,15 @@ if (declared.length) {
   kept++;
 }
 
+const unseen = Object.keys(STATED_LATER).filter((k) => !statedLaterSeen.has(k));
+if (unseen.length) {
+  process.stderr.write(`STATED_LATER names what the dump does not hold: ${unseen.join(', ')}\n`);
+  process.exit(1);
+}
+if (statedLaterSeen.size) {
+  process.stderr.write(`${statedLaterSeen.size} policy or trigger call(s) only create a missing object: STATED_LATER `
+    + 'names a later migration for each. Empty it when that migration is folded into the baseline.\n');
+}
 process.stderr.write(
   `kept ${kept} object(s), dropped ${dropped} (monthly partitions, inherited indexes, default ACLs); `
   + `${partitionOf.size} partition(s) seen, ${parts} written as PARTITION OF; ${readerGrants} object(s) whose grafana_reader grant section 8 makes\n`);

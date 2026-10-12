@@ -401,6 +401,10 @@ python supabase/migrations/test_cold_archive_destination.py
 # playback. Since 0124 the lane is deleted with its original rather than orphaned by the FK.
 python supabase/migrations/test_shadow_lane_is_not_assignable.py
 python supabase/migrations/test_metric_catalog_seed.py
+# A policy or trigger is re-created only when it differs from its migration (0001, section 3c).
+# Every one the chain states is changed live in each part pg_dump writes, and its own call must put
+# it back; after the chain, every call matches and running them all takes no ACCESS EXCLUSIVE lock.
+python supabase/migrations/test_replay_recreates_only_what_differs.py
 python supabase/migrations/test_gateway_enrollment.py
 # The machine-path credential recorder (0062), and the grant that decides whether it is a fix.
 # Every test rolls back: the rows it writes are audit rows, and that table cannot be pruned.
