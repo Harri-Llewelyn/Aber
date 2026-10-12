@@ -18,6 +18,12 @@ the replica count exists to prevent.
 */}}
 {{- if .Values.i3xService.enabled }}
 {{- $component := "i3x-service" }}
+{{- /* The queues' ceiling must sit inside the pod's limit; at or above it, the limit is an OOM kill. */}}
+{{- $queuedMiB := dig "maxQueuedMiB" 128 .Values.i3xService | int }}
+{{- $memoryLimit := dig "limits" "memory" "" (.Values.i3xService.resources | default dict) }}
+{{- if and $memoryLimit (ge (mul $queuedMiB 1048576) (include "aber.memBytes" $memoryLimit | int64)) }}
+{{- fail (printf "\n\naber: i3xService.maxQueuedMiB (%d MiB) is not below i3xService.resources.limits.memory (%s).\n\nThe subscription queues could then fill the i3X pod's memory, and the kubelet would OOM-kill\nit, ending every client's subscriptions. Lower maxQueuedMiB, or raise the limit with it,\nleaving room for the process itself (i3x/README.md -> Memory).\n" $queuedMiB (toString $memoryLimit)) }}
+{{- end }}
 {{- $fullname := include "aber.fullname" . }}
 apiVersion: apps/v1
 kind: Deployment
@@ -105,6 +111,12 @@ spec:
               value: {{ .Values.i3xService.maxSubscriptions | quote }}
             - name: I3X_MAX_STREAMS
               value: {{ .Values.i3xService.maxStreams | quote }}
+            # Read through dig with values.yaml's defaults: `helm upgrade --reuse-values` from a
+            # release without these keys carries none.
+            - name: I3X_MAX_QUEUED_MIB_PER_PRINCIPAL
+              value: {{ dig "maxQueuedMiBPerPrincipal" 32 .Values.i3xService | int | quote }}
+            - name: I3X_MAX_QUEUED_MIB
+              value: {{ $queuedMiB | quote }}
             - name: I3X_HISTORY_MAX_ROWS
               value: {{ .Values.i3xService.historyMaxRows | quote }}
             - name: I3X_MAX_COMPONENTS

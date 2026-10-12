@@ -1129,9 +1129,17 @@ i3xService:
   subscriptionTtlSeconds: 300
   # How many update batches one subscription may queue before the oldest are dropped. Dropping
   # is reported: the next /sync answers 206 and the client backfills from /objects/history.
-  # A count, not bytes: raising it or maxSubscriptions is a memory decision (i3x/README.md ->
-  # What causes a restart).
+  # A count: the bytes the queues hold are bounded by maxQueuedMiB below.
   subscriptionQueueLimit: 500
+  # The memory the subscription queues may hold, in MiB: for one principal, and on the server.
+  # They bound every queue whatever its device's size, which a count cannot: a batch for a
+  # 20-metric device is about 2 KB at maxDepth 1 and 9 KB at maxDepth 0. Past a ceiling the
+  # largest queue under it drops its oldest batches, reported like any overflow. The process
+  # idles near 40 MiB and its caches and requests need the rest of resources.limits.memory, so
+  # keep maxQueuedMiB well inside it; the chart refuses one at or above it (i3x/README.md ->
+  # Memory).
+  maxQueuedMiBPerPrincipal: 32
+  maxQueuedMiB: 128
   # Past these, creating a subscription or opening a stream answers 429 naming the limit. A
   # principal is the token's `sub`, so every token minted for one service principal shares its
   # allowance. Each open stream holds a server thread.
@@ -1148,8 +1156,8 @@ i3xService:
   maxComponents: 10000
   resources:
     requests: { cpu: 100m, memory: 128Mi }
-    # The subscription queues are bounded by count, not by memory; the defaults above keep them
-    # well inside this. Past it the pod is OOM-killed and every client loses its subscriptions.
+    # maxQueuedMiB keeps the subscription queues inside this. Past it the pod is OOM-killed and
+    # every client loses its subscriptions.
     limits: { memory: 512Mi }
 
 # ---------------------------------------------------------------------------------------------

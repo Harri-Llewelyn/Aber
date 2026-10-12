@@ -929,8 +929,10 @@ paths:
         3. `-1` clears everything.
 
         **Overflow is reported, not hidden.** Past `I3X_SUBSCRIPTION_QUEUE_LIMIT` (default
-        500) the oldest batches drop and the next sync answers **206**. Compute the gap
-        from `lastSequenceNumber + 1` to `result[0].sequenceNumber - 1`.
+        500) the oldest batches drop and the next sync answers **206**. They drop too when the
+        queues of your token's `sub` pass `I3X_MAX_QUEUED_MIB_PER_PRINCIPAL` (32 MiB), or the
+        server's pass `I3X_MAX_QUEUED_MIB` (128 MiB), from the largest queue first. Compute the
+        gap from `lastSequenceNumber + 1` to `result[0].sequenceNumber - 1`.
 
         **What it delivers is checked against your view first.** Each call reads your address
         space as you (cached per token for `I3X_ADDRESS_SPACE_TTL_SECONDS`). A registered element
