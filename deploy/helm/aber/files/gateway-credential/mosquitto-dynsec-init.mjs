@@ -45,6 +45,27 @@ const POLICY_FILE = process.env.DYNSEC_POLICY_FILE || '/policy/dynsec-roles.json
 const BROKER_UID = Number.parseInt(process.env.MQTT_BROKER_UID || '1883', 10);
 const REQUIRED = new Set(['MONITOR', ...(process.env.DYNSEC_REQUIRED_PRINCIPALS || '').split(/\s+/).filter(Boolean)]);
 
+// The document as it stood before Mosquitto 2.1 first rewrote it. 2.1 saves every password as
+// encoded_password on its first change and 2.0 cannot read that, so this copy is a rollback's way
+// back to 1.3. Taken once, from a document with no encoded_password, and never overwritten.
+const PRE_21_COPY = `${FILE}.pre-2.1`;
+
+function keepPre21Copy(text, doc) {
+  if (existsSync(PRE_21_COPY) || (doc.clients || []).some((c) => 'encoded_password' in c)) return;
+  const tmp = `${PRE_21_COPY}.tmp`;
+  writeFileSync(tmp, text, { mode: 0o600 });
+  if (process.getuid() !== BROKER_UID) {
+    try {
+      chownSync(tmp, BROKER_UID, BROKER_UID);
+    } catch (err) {
+      log(`could not chown to uid ${BROKER_UID}: ${err.message}`);
+    }
+  }
+  chmodSync(tmp, 0o600);
+  renameSync(tmp, PRE_21_COPY);
+  log(`kept a copy of the document as Mosquitto 2.0 left it at ${PRE_21_COPY}: restoring it is the way back to 1.3.x`);
+}
+
 // Hashed by the broker's own mosquitto_passwd, the one implementation guaranteed to match the
 // mosquitto that verifies it. The password rides argv positionally and never touches the shell as
 // text; the PBKDF2 parameters are whatever the tool writes.
@@ -136,13 +157,16 @@ function main() {
   // The stored document, or nothing.
   let existing = null;
   if (existsSync(FILE)) {
+    let text = '';
     try {
-      existing = JSON.parse(readFileSync(FILE, 'utf8'));
+      text = readFileSync(FILE, 'utf8');
+      existing = JSON.parse(text);
     } catch (err) {
       fail(`${FILE} exists and cannot be parsed (${err.message}). Refusing to overwrite the fleet's `
         + 'credentials; repair or move the file by hand.');
     }
     log(`reconciling ${FILE} (${(existing.clients || []).length} client(s) stored)`);
+    keepPre21Copy(text, existing);
   } else {
     log(`no ${FILE}; starting from the policy and the environment`);
   }

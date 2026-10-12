@@ -662,8 +662,9 @@ listed there):
   `gateway` role plus a `gateway-<id>` role generated for it. Roles are never deleted: deleting one a
   client holds took the 2.0.22 broker down, so the reconcile regenerates orphaned ones.
 - The broker's version is load-bearing. 2.1 rewrites every stored password in a form 2.0 cannot
-  read, the first time anything changes, so a rollback across 2.1 needs the broker volume from
-  before the upgrade (`mosquitto/README.md`, "Verified on").
+  read, the first time anything changes. So the reconcile keeps the document 2.0 left, once, as
+  `dynamic-security.json.pre-2.1` on the same volume, and a rollback to 1.3.x restores it
+  (`mosquitto/README.md`, "The document, and who writes it").
 - `shareProcessNamespace` is set only with `tls.enabled`, for the `certificate-reload` sidecar; no
   credential path signals anything.
 

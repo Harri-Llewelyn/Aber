@@ -432,6 +432,39 @@ try {
       problems.push(`a second boot ${second.status === 0 ? 'changed the client set' : `failed: ${(second.stderr || '').trim().slice(0, 300)}`}`);
     }
 
+    // The way back to 1.3.x: the first boot on a document 2.0 left keeps a copy of it, byte for
+    // byte, and no later boot touches it. Both boots above have run, and the document changed in
+    // between, so a copy equal to the stored document was taken once and kept.
+    {
+      const copy = (dir) => docker(['run', '--rm', '-v', `${dir}:/out:ro`, IMAGE, 'sh', '-c',
+        'cat /out/dynamic-security.json.pre-2.1 && stat -c "%a %u" /out/dynamic-security.json.pre-2.1 >&2']);
+      const kept = copy(dynsecDir);
+      const owner = (kept.stderr || '').trim();
+      if (kept.status !== 0) {
+        problems.push('the reconcile kept no dynamic-security.json.pre-2.1 beside a document 2.0 left; a rollback to 1.3.x has nothing to restore');
+      } else if (kept.stdout !== JSON.stringify(stored, null, '\t')) {
+        problems.push('dynamic-security.json.pre-2.1 is not the document the first boot found; a later boot rewrote it, or the copy is not verbatim');
+      } else if (process.platform === 'linux' && owner !== '600 1883') {
+        problems.push(`dynamic-security.json.pre-2.1 is mode and owner '${owner}'; it holds every gateway's hash and must be 600 1883`);
+      } else {
+        ok.push('the first boot keeps the document 2.0 left as dynamic-security.json.pre-2.1, verbatim, and a second boot leaves it alone');
+      }
+      const rewritten = join(work, 'rewritten');
+      mkdirSync(rewritten, { recursive: true });
+      chmodSync(rewritten, 0o777);
+      writeFileSync(join(rewritten, 'dynamic-security.json'), JSON.stringify({
+        clients: [{ username: GATEWAY_B, encoded_password: '$7$1000$c2FsdA==$aGFzaA==', roles: [{ rolename: 'gateway' }] }],
+        roles: [],
+        groups: [],
+      }));
+      const afterRewrite = runInit({ outDir: rewritten });
+      if (afterRewrite.status === 0 && copy(rewritten).status !== 0) {
+        ok.push('a document 2.1 has already rewritten gets no pre-2.1 copy');
+      } else {
+        problems.push(`a document 2.1 had already rewritten ${afterRewrite.status === 0 ? 'was copied as if 2.0 had left it' : `failed the reconcile: ${(afterRewrite.stderr || '').trim().slice(0, 200)}`}`);
+      }
+    }
+
     // A document that exists and cannot be parsed is the fleet's credentials in an unknown state;
     // the reconcile must refuse rather than write a fresh one over it.
     writeFileSync(join(brokenDir, 'dynamic-security.json'), '{ this is not json');

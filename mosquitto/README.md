@@ -114,8 +114,9 @@ tags, and `renovate.json` proposes the next one.
   gateway account. The platform principals still authenticated, because the 1.3.0 reconcile hashes
   them again from the environment. On its next save 2.0.22 wrote those gateways with no password at
   all. Splitting `encoded_password` back into the three fields by hand recovers a gateway hashed
-  before the upgrade, and not one issued after it, because 2.0.22 refuses a 64-byte salt. A rollback
-  across 2.1 therefore needs the broker volume from before the upgrade, or a backup of it. With no
+  before the upgrade, and not one issued after it, because 2.0.22 refuses a 64-byte salt. So the
+  boot reconcile keeps the document 2.0 left as `dynamic-security.json.pre-2.1`, once, and a
+  rollback restores that copy (*The document, and who writes it*, below). With no
   change made on 2.1.2, the 1.3.0 reconcile and 2.0.22 still read the document.
 - **`deleteRole` on a role a client still holds took the 2.0.22 broker down.** Nothing in this
   repository deletes a role; a gateway's role outlives its client and is regenerated at boot.
@@ -188,6 +189,14 @@ in the credential service's image, and:
   first two;
 - keeps every other stored client exactly as it is, ensuring a gateway client holds its two roles;
 - refuses to write a document that would lose a stored client.
+
+**It keeps the way back to 1.3.x.** The first boot that finds a stored document with no
+`encoded_password` in it, as Mosquitto 2.0 leaves it, copies it verbatim to
+`dynamic-security.json.pre-2.1` beside it, owned by the broker's uid at 0600, before anything
+rewrites it. No later boot touches the copy. 2.1 rewrites every password in a form 2.0 cannot read
+the first time anything changes, so restoring that copy is how a rollback to 1.3.x gets its
+gateways back; a gateway issued or re-issued since must be re-issued. It holds every gateway's hash,
+as the document does.
 
 **A renamed principal rolls every pod that uses it.** The usernames reach the broker's
 initContainer, the ingestion daemon and the i3X server as environment from the Secret, which a
