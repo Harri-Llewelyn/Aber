@@ -1,18 +1,21 @@
 """
-Policies and triggers are re-created only when they differ (0001, section 3c).
+Constraints, policies and triggers are re-created only when they differ (0001, section 3c).
 
 db-init replays every file on every boot. Each DROP POLICY, CREATE POLICY and DROP TRIGGER makes
 the image's supautils take ACCESS EXCLUSIVE on up to 24 GoTrue, Storage and Realtime tables, so
 every policy and trigger is a call to replay_policy() or replay_trigger(). Each compares the live
-object, as pg_dump writes it, with the statement it is given, and acts only on a difference. Two
+object, as pg_dump writes it, with the statement it is given, and acts only on a difference.
+0001's constraint guards do the same through live_constraint_definition(): dropping a foreign key
+to auth.users takes ACCESS EXCLUSIVE on it, and adding it back scans the referencing table. Two
 faults are possible, and this suite holds both off:
 
-  * A FALSE "SAME" leaves a stale policy live for good: an RLS hole nothing reports. Every policy
-    and trigger the chain states is changed in each part pg_dump writes, in turn, and its own
-    call must put it back.
+  * A FALSE "SAME" leaves a stale policy or constraint live for good: an RLS hole, or a rule the
+    migrations no longer state, and nothing reports it. Every policy, trigger, CHECK and foreign
+    key the chain states is changed in turn, and its own call or guard must put it back.
   * A STATEMENT THAT NEVER MATCHES is re-created on every boot. Nothing fails, and the locks are
-    back. After the chain, every call's statement equals the live object, and running every call
-    again takes no ACCESS EXCLUSIVE lock at all.
+    back. After the chain, every statement and guard equals its live object, running every call
+    again takes no ACCESS EXCLUSIVE lock, and running every guard again keeps every constraint's
+    oid.
 
 The calls are read from the applied migrations, as db-init runs them. Every test rolls back.
 """
@@ -45,6 +48,14 @@ ON_PROBE = {
     "trigger": "SELECT public.replay_trigger('public.replay_probe', %s, %s)",
 }
 DROP = {"policy": sql.SQL("DROP POLICY {} ON {}"), "trigger": sql.SQL("DROP TRIGGER {} ON {}")}
+GUARD = re.compile(r"^DO \$c\$ BEGIN\n.*?^END \$c\$;$", re.M | re.S)
+GUARD_COMPARES = re.compile(
+    r"WHERE conname = '((?:[^']|'')+)'\n\s+AND conrelid = '((?:[^']|'')+)'::regclass\n"
+    r"\s+AND public\.live_constraint_definition\(conrelid, conname\) <> '((?:[^']|'')*)'\) THEN")
+CONSTRAINT_OIDS = """
+    SELECT c.conrelid::regclass::text || ' ' || c.conname, c.oid
+      FROM pg_constraint c JOIN pg_namespace n ON n.oid = c.connamespace
+     WHERE n.nspname = 'public'"""
 
 
 def drop(cur, kind, table, name):
@@ -61,6 +72,21 @@ def calls():
                 "file": path.name, "kind": kind, "table": table.replace("''", "'"),
                 "name": name.replace("''", "'"), "statement": statement, "stated_by": stated_by,
                 "sql": m.group(0),
+            })
+    return out
+
+
+def guards():
+    """Every constraint guard in the applied migrations, with what it compares."""
+    out = []
+    for path in sorted(MIGRATIONS.glob("[0-9][0-9][0-9][0-9]_*.sql")):
+        for m in GUARD.finditer(path.read_text(encoding="utf-8")):
+            compares = GUARD_COMPARES.search(m.group(0))
+            out.append({
+                "file": path.name, "sql": m.group(0),
+                "name": compares.group(1).replace("''", "'") if compares else None,
+                "table": compares.group(2).replace("''", "'") if compares else None,
+                "definition": compares.group(3).replace("''", "'") if compares else None,
             })
     return out
 
@@ -89,6 +115,7 @@ class ReplayTestCase(unittest.TestCase):
             raise unittest.SkipTest(f"cannot reach Supabase Postgres ({exc}); is the stack up?")
         cls.calls = calls()
         cls.stated = stated()
+        cls.guards = guards()
 
     def setUp(self):
         self.conn = connect()
@@ -212,6 +239,59 @@ class AStaleTriggerIsPutBack(ReplayTestCase):
                     self.cur.execute("ROLLBACK TO SAVEPOINT each")
 
 
+class EveryConstraintKeepsItsOid(ReplayTestCase):
+    """0001's guards: the same two directions, for every constraint they guard."""
+
+    def oids(self):
+        self.cur.execute(CONSTRAINT_OIDS)
+        return dict(self.cur.fetchall())
+
+    def test_every_guard_compares_the_definition_it_adds(self):
+        self.assertGreater(len(self.guards), 150)
+        unparsed = [g["sql"].splitlines()[2] for g in self.guards if g["name"] is None]
+        self.assertEqual(unparsed, [], "a guard that does not compare live_constraint_definition()")
+
+    def test_every_guard_matches_its_live_constraint(self):
+        differ = []
+        for g in self.guards:
+            self.cur.execute("SELECT public.live_constraint_definition(%s::regclass, %s)", (g["table"], g["name"]))
+            live = self.cur.fetchone()[0]
+            if live != g["definition"]:
+                differ.append(f"{g['file']}: {g['name']} on {g['table']}\n    guard: {g['definition']}\n"
+                              f"    live:  {live}")
+        self.assertEqual(differ, [], "these are dropped and added back on every boot:\n  " + "\n  ".join(differ))
+
+    def test_running_every_guard_again_keeps_every_oid_and_takes_no_lock(self):
+        before = self.oids()
+        for g in self.guards:
+            self.cur.execute(g["sql"])
+        after = self.oids()
+        self.assertEqual(sorted(k for k in before if after.get(k) != before[k]), [],
+                         "a guard dropped and added back a constraint that had not changed")
+        self.cur.execute(
+            "SELECT l.relation::regclass::text FROM pg_locks l"
+            " WHERE l.pid = pg_backend_pid() AND l.locktype = 'relation' AND l.mode = 'AccessExclusiveLock'")
+        self.assertEqual([r[0] for r in self.cur.fetchall()], [])
+
+    def test_every_check_and_foreign_key_comes_back_from_a_change(self):
+        self.cur.execute("SELECT n.nspname || '.' || r.relname || ' ' || c.conname FROM pg_constraint c"
+                         " JOIN pg_class r ON r.oid = c.conrelid JOIN pg_namespace n ON n.oid = r.relnamespace"
+                         " WHERE c.contype IN ('c', 'f') AND c.conparentid = 0")
+        changeable = {r[0] for r in self.cur.fetchall()}
+        targets = [g for g in self.guards if f"{g['table']} {g['name']}" in changeable]
+        self.assertGreater(len(targets), 50)
+        for g in targets:
+            with self.subTest(constraint=g["name"]):
+                table, name = sql.Identifier(*g["table"].split(".")), sql.Identifier(g["name"])
+                self.cur.execute("SAVEPOINT each")
+                self.cur.execute(sql.SQL("ALTER TABLE {} DROP CONSTRAINT {}").format(table, name))
+                self.cur.execute(sql.SQL("ALTER TABLE {} ADD CONSTRAINT {} CHECK (true)").format(table, name))
+                self.cur.execute(g["sql"])
+                self.cur.execute("SELECT public.live_constraint_definition(%s::regclass, %s)", (g["table"], g["name"]))
+                self.assertEqual(self.cur.fetchone()[0], g["definition"])
+                self.cur.execute("ROLLBACK TO SAVEPOINT each")
+
+
 class TheComparison(ReplayTestCase):
     """On a scratch table: the forms the chain does not use yet, and the refusals."""
 
@@ -279,7 +359,8 @@ class TheComparison(ReplayTestCase):
         self.assertEqual(self.live("policy", "public.replay_probe", "later"), new)
 
     def test_no_api_role_may_call_them(self):
-        for fn in ("public.replay_policy(regclass, name, text, text)",
+        for fn in ("public.live_constraint_definition(regclass, name)",
+                   "public.replay_policy(regclass, name, text, text)",
                    "public.replay_trigger(regclass, name, text, text)",
                    "public.live_policy_statement(regclass, name)",
                    "public.live_trigger_statement(regclass, name)"):

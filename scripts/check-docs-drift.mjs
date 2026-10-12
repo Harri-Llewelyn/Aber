@@ -985,7 +985,9 @@ function edgeFunctionNames() {
 // replay_policy() or replay_trigger() call (0001, section 3c), which re-creates it only when the
 // live one differs, in one statement with its DROP. No file drops one at the top level. One file
 // states each in full: an earlier file passes p_stated_by naming it, or every boot re-creates the
-// object twice. And 0001 never drops the historian's server, which would take the telemetry views.
+// object twice. A constraint guard compares live_constraint_definition(), never pg_get_constraintdef()
+// under db-init's search path, which leaves a key to auth.users unqualified so it never matches. And
+// 0001 never drops the historian's server, which would take the telemetry views.
 // -------------------------------------------------------------------------------------------------
 {
   const dir = 'supabase/migrations';
@@ -1004,6 +1006,9 @@ function edgeFunctionNames() {
     const lines = read(`${dir}/${name}`).split('\n');
     lines.forEach((line, i) => {
       const at = `${name}:${i + 1}`;
+      if (/\bpg_get_constraintdef\(oid\) <> '/.test(line)) {
+        offences.push(`${at} compares pg_get_constraintdef() under db-init's search path, so the guard drops and adds the constraint back on every boot: compare public.live_constraint_definition(conrelid, conname)`);
+      }
       if (/^DROP (POLICY|TRIGGER)\b/.test(line)) {
         offences.push(`${at} drops a ${line.split(' ')[1].toLowerCase()} at the top level, which takes supautils' locks on every boot, gone or not: drop it in a DO block guarded on pg_policy or pg_trigger`);
       }
@@ -1047,7 +1052,7 @@ function edgeFunctionNames() {
   if (dropsServer) fail('0001 drops the historian\'s foreign server, which takes every telemetry view with it until section 4 rebuilds them; alter it in place');
   if (!stated.size) fail('check 59 found no replay_policy() or replay_trigger() call in the applied migrations');
   if (!offences.length && !dropsServer && stated.size) {
-    pass(`all ${stated.size} replayed policies and triggers are re-created only when they differ, each stated in full once, and 0001 alters the historian's server in place`);
+    pass(`all ${stated.size} replayed policies and triggers are re-created only when they differ, each stated in full once, every constraint guard compares live_constraint_definition(), and 0001 alters the historian's server in place`);
   }
 }
 

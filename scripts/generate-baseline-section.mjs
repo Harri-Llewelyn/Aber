@@ -14,7 +14,8 @@
  *                transaction per table)
  *   POLICY       SELECT public.replay_policy(table, name, $ddl$CREATE POLICY ...$ddl$)    (one
  *                transaction per table)
- *   CONSTRAINT   a DO block guarded on pg_constraint -- rule 2, added guarded, never re-added
+ *   CONSTRAINT   a DO block guarded on pg_constraint, comparing live_constraint_definition() --
+ *                rule 2, added guarded, re-added only when its definition differs
  *   the rest     already idempotent (GRANT, REVOKE, COMMENT, ALTER ... ENABLE ROW LEVEL SECURITY)
  *
  * MONTHLY PARTITIONS ARE DROPPED ON THE FLOOR. `audit_trail` is partitioned by month and its
@@ -99,7 +100,7 @@ const bare = (s) => (s || '').replace(/^public\./, '').replace(/"/g, '');
 const unquoteIdent = (s) => (/^".*"$/.test(s) ? s.slice(1, -1).replace(/""/g, '"') : s);
 
 /** Routines section 3c of the baseline declares by hand; their blocks in a dump are skipped. */
-const DECLARED_IN_3C = /^(?:FUNCTION )?(?:live_policy_statement|live_trigger_statement|replay_policy|replay_trigger)\(/;
+const DECLARED_IN_3C = /^(?:FUNCTION )?(?:live_constraint_definition|live_policy_statement|live_trigger_statement|replay_policy|replay_trigger)\(/;
 
 /**
  * `<table> <name>` of each policy or trigger a later applied migration states again, with that
@@ -191,9 +192,16 @@ function restoreBetween(s) {
  * Table constraints, LIKE clauses and the partition tail are skipped: only lines that declare a
  * column are lifted.
  */
-function widenTable(b, createSql) {
+function widenTable(b, createSql, dumpedSql = createSql) {
   const m = createSql.match(/^CREATE (?:TABLE|FOREIGN TABLE) IF NOT EXISTS \S+ \(\n([\s\S]*?)\n\)/m);
   if (!m) return null;
+  // Each inline constraint as the dump wrote it, before BETWEEN was restored: its guard compares that.
+  const dumpedBody = new Map();
+  const dm = dumpedSql.match(/^CREATE (?:TABLE|FOREIGN TABLE) IF NOT EXISTS \S+ \(\n([\s\S]*?)\n\)/m);
+  for (const raw of dm ? splitTopLevel(dm[1]) : []) {
+    const con = raw.trim().match(/^CONSTRAINT\s+(\S+)\s+([\s\S]+)$/i);
+    if (con) dumpedBody.set(con[1], con[2]);
+  }
   const cols = [];
   const constraints = [];
   for (const raw of splitTopLevel(m[1])) {
@@ -240,8 +248,8 @@ function widenTable(b, createSql) {
     }
   }
   for (const [name, body] of constraints) {
-    parts.push(guardedConstraint(`${b.schema}.${b.name}`, name,
-      `ALTER TABLE ${b.schema}.${b.name}\n    ADD CONSTRAINT ${name} ${body};`));
+    const add = (text) => `ALTER TABLE ${b.schema}.${b.name}\n    ADD CONSTRAINT ${name} ${text};`;
+    parts.push(guardedConstraint(`${b.schema}.${b.name}`, name, add(body), add(dumpedBody.get(name) ?? body)));
   }
   return parts.join('\n\n');
 }
@@ -309,8 +317,9 @@ function rewrite(b) {
     }
     // A CHECK written inline in the table rather than as its own ALTER still went through the
     // dump's BETWEEN expansion.
-    s = restoreBetween(s.replace(/^CREATE (TABLE|FOREIGN TABLE) /m, 'CREATE $1 IF NOT EXISTS '));
-    const widen = widenTable(b, s);
+    const dumped = s.replace(/^CREATE (TABLE|FOREIGN TABLE) /m, 'CREATE $1 IF NOT EXISTS ');
+    s = restoreBetween(dumped);
+    const widen = widenTable(b, s, dumped);
     return widen ? `${s}\n\n${widen}` : s;
   }
   if (t === 'FUNCTION' || t === 'PROCEDURE') {
@@ -337,7 +346,7 @@ function rewrite(b) {
     const m = s.match(/ADD\s+CONSTRAINT\s+(\S+)/i);
     const tbl = s.match(/ALTER TABLE(?:\s+ONLY)?\s+(\S+)/i);
     if (!m || !tbl) return s;
-    return guardedConstraint(tbl[1], m[1], restoreBetween(s));
+    return guardedConstraint(tbl[1], m[1], restoreBetween(s), s);
   }
   return s;
 }
@@ -354,16 +363,19 @@ function rewrite(b) {
  * and only a disagreement drops. The scan that follows is the point: it is validating the new rule
  * against the existing rows, which is exactly what the migration that widened it did.
  */
-function guardedConstraint(table, name, statement) {
+function guardedConstraint(table, name, statement, dumped = statement) {
   const indented = statement.split('\n').map((l) => (l.trim() ? `    ${l}` : l)).join('\n');
-  // `pg_get_constraintdef` renders what the dump's ADD CONSTRAINT clause says, so the two are
-  // comparable as text. Anything this cannot parse falls back to the name-only guard.
-  const def = statement.match(/ADD CONSTRAINT \S+\s+([\s\S]+?);\s*$/);
+  // live_constraint_definition() (the baseline's section 3c) is pg_get_constraintdef() under
+  // search_path '', the path the dump was written under, so it equals the dumped clause exactly:
+  // before BETWEEN is restored, whitespace and all. Under db-init's own path a key to auth.users
+  // reads `REFERENCES users(id)`, and the guard dropped and added it back on every boot. Anything
+  // this cannot parse falls back to the name-only guard.
+  const def = dumped.match(/ADD CONSTRAINT \S+\s+([\s\S]+?);\s*$/);
   const compare = def
     ? `\n  IF EXISTS (SELECT 1 FROM pg_constraint\n`
       + `              WHERE conname = '${esc(name)}'\n`
       + `                AND conrelid = '${esc(table)}'::regclass\n`
-      + `                AND pg_get_constraintdef(oid) <> '${esc(def[1].replace(/\s+/g, ' ').trim())}') THEN\n`
+      + `                AND public.live_constraint_definition(conrelid, conname) <> '${esc(def[1].trim())}') THEN\n`
       + `    ALTER TABLE ${table} DROP CONSTRAINT ${name};\n`
       + `  END IF;\n`
     : '';
