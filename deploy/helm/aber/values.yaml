@@ -757,10 +757,9 @@ supabaseStorage:
   #   podAnnotations:
   #     backup.velero.io/backup-volumes: data
   podAnnotations: {}
-  # storage-api's image names no user; the pod runs as its node user, 1000. fsGroup `Always`: the
-  # kubelet makes every object directory group-writable at each start, including those 1.3.0 and
-  # earlier wrote as root at 0755, so 1000 can add and delete beside them. It walks every object,
-  # about a second per 20,000 (deploy/k8s/README.md, Users).
+  # storage-api's image names no user; the pod runs as its node user, 1000. fsGroup `Always`: at
+  # each start the kubelet makes every object directory group-writable, so 1000 can add and delete
+  # beside objects a root server wrote at 0755. It walks every object (deploy/k8s/README.md, Users).
   podSecurityContext:
     runAsNonRoot: true
     runAsUser: 1000
