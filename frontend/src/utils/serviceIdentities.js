@@ -49,18 +49,16 @@ export const BROKER_PRINCIPALS = [
 ]
 
 /**
- * The two roles every gateway account holds. Not a principal, so it is separate rather than a
- * fifth row: the shared role is one account-independent grant, and the per-gateway role is
- * generated from the username when the credential is issued, which is what lets a gateway be
- * created at runtime with no policy edit.
+ * The role every gateway account holds. Not a principal, so it is separate rather than a fifth
+ * row: one grant for every account, whose `%u` the broker reads as each account's own username,
+ * which is what lets a gateway be created at runtime with no policy edit.
  */
-export const GATEWAY_ROLES = {
-  shared: 'gateway',
-  perGateway: 'gateway-<sparkplug_id>',
-  perGatewayTopic: 'spBv1.0/+/+/<sparkplug_id>/#',
-  purpose: 'Every gateway. The shared role lets it subscribe across spBv1.0/ and receive the '
-    + 'primary host’s STATE topics; its own role confines what it publishes and receives to the '
-    + 'edge node named by its username. Both are created when the credential is issued.',
+export const GATEWAY_ROLE = {
+  role: 'gateway',
+  usernameRule: 'spBv1.0/+/+/%u/#, where %u is the account’s own username: its sparkplug_id',
+  purpose: 'Every gateway. It may subscribe across spBv1.0/ and receive the primary host’s STATE '
+    + 'topics, and what it publishes and receives is confined to the edge node its username '
+    + 'names. Held by every gateway account from the moment it is issued.',
 }
 
 /**

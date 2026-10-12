@@ -540,8 +540,8 @@ function down () {
 
   step('Deleting the broker accounts');
   // deleteClient, not disableClient: a disabled account with no gateway row reads as an orphan on
-  // the Access Control page forever. The per-gateway ROLE is left behind -- nothing in this
-  // repository sends deleteRole, which takes a 2.0.x broker down (mosquitto/README.md).
+  // the Access Control page forever. No role is left behind: each account holds the shared gateway
+  // role alone.
   const send = brokerControl();
   for (const gateway of present) {
     const response = send({ command: 'deleteClient', username: gateway.sparkplugId });

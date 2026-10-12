@@ -151,7 +151,7 @@ function main() {
       log(`MQTT_${env}_PASSWORD is empty; not creating an account for '${username}'.`);
       continue;
     }
-    managed.push(hashed(username, password, rolesFor(role, username).map((r) => r.rolename)));
+    managed.push(hashed(username, password, rolesFor(role).map((r) => r.rolename)));
   }
 
   // The stored document, or nothing.
@@ -201,6 +201,9 @@ function main() {
   log(
     `wrote ${FILE}: ${config.clients.length} client(s), ${config.roles.length} role(s); `
     + `${report.managed.length} managed, ${report.gateways.length} gateway(s) kept`
+    + (report.retiredRoles.length || report.retiredMemberships
+      ? `, retired ${report.retiredRoles.length} per-gateway role(s) and ${report.retiredMemberships} membership(s)`
+      : '')
     + (report.unmanaged.length ? `, unmanaged kept as-is: ${report.unmanaged.join(', ')}` : ''),
   );
 }

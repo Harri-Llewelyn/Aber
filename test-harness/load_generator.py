@@ -467,8 +467,8 @@ class Publisher(threading.Thread):
     """
     One MQTT connection, publishing for one gateway's devices.
 
-    One connection per gateway because that is the unit the broker authorises: the per-gateway
-    role confines an account to `spBv1.0/+/+/<its own id>/#`. It is also what keeps the generator
+    One connection per gateway because that is the unit the broker authorises: the gateway role's
+    %u rule confines an account to `spBv1.0/+/+/<its own id>/#`. It is also what keeps the generator
     off the critical path -- a single connection's socket writes would be measured instead of the
     stack.
 

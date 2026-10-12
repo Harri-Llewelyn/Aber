@@ -53,6 +53,7 @@ People has a row of controls under the tabs, with **Refresh** and **Add Person**
 - A dash under **Tokens** means no token is on record. That is not the same as none existing: hover over it for why.
 - **Withdraw** takes a whole machine identity out of use, with an optional reason. **Reinstate** puts it back. **New Machine Identity**, **Issue Token**, **Withdraw** and **Reinstate** are each recorded in the Audit Trail.
 - **Rules** on a broker role is the number of rules the broker reports for it. To see the rules exactly as the broker holds them, click the role's row, or press Enter or Space on it. They open in a side panel. A row ending in a chevron opens a panel. Leaving the **Broker roles** tab closes the panel.
+- Every gateway account holds the one **gateway** role. In its rules, **%u** stands for the account's own username, which is the gateway's Sparkplug ID. So each gateway can publish and receive only under its own edge node.
 
 ## What the states mean
 

@@ -658,9 +658,11 @@ listed there):
   `mosquitto_rr` request as an admin whose role reaches `$CONTROL/dynamic-security/#` only. Three
   verbs: issue, disable, list. Its Role on the API server is `get`/`patch` on one Secret, for the
   playback delivery file alone.
-- The plugin did not substitute `%u` before 2.1 (measured on 2.0.x), so each gateway holds a shared
-  `gateway` role plus a `gateway-<id>` role generated for it. Roles are never deleted: deleting one a
-  client holds took the 2.0.22 broker down, so the reconcile regenerates orphaned ones.
+- Every gateway holds one shared `gateway` role, whose `spBv1.0/+/+/%u/#` rules confine it to the
+  edge node its username names; the plugin substitutes `%u` from 2.1. 1.3 and earlier generated a
+  `gateway-<id>` role per gateway, and the reconcile retires those from the document while the
+  broker is down. Nothing sends `deleteRole` to a running broker: deleting a role a connected
+  client holds still crashes 2.1.2 (measured).
 - The broker's version is load-bearing. 2.1 rewrites every stored password in a form 2.0 cannot
   read, the first time anything changes. So the reconcile keeps the document 2.0 left, once, as
   `dynamic-security.json.pre-2.1` on the same volume, and a rollback to 1.3.x restores it

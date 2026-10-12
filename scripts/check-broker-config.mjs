@@ -380,11 +380,18 @@ try {
       throw new Error(`could not build gateway-credential/Dockerfile: ${(build.stderr || '').trim().slice(0, 300)}`);
     }
 
-    // The stored document every boot after the first starts from. GATEWAY_B holds only the shared
-    // role, so the reconcile must add its own; `probe` holds none and must be kept as it is.
+    // The stored document every boot after the first starts from, as a 1.3.0 site left it: GATEWAY_B
+    // holds the shared role and the role generated for it, which the reconcile must retire. `probe`
+    // holds none and must be kept as it is.
+    const retired = `gateway-${GATEWAY_B}`;
     const stored = {
-      clients: [storedClient(GATEWAY_B, ['gateway']), storedClient('probe', [])],
-      roles: [],
+      clients: [storedClient(GATEWAY_B, ['gateway', retired]), storedClient('probe', [])],
+      roles: [{
+        rolename: retired,
+        acls: ['publishClientSend', 'publishClientReceive'].map((acltype) => ({
+          acltype, topic: `spBv1.0/+/+/${GATEWAY_B}/#`, allow: true,
+        })),
+      }],
       groups: [],
     };
     writeFileSync(join(dynsecDir, 'dynamic-security.json'), JSON.stringify(stored, null, '\t'));
@@ -402,10 +409,16 @@ try {
       problems.push(`the reconciled document holds ${names.join(', ')}; expected ${EXPECTED_CLIENTS.join(', ')}`);
     }
     const rolesOf = (u) => (doc.clients.find((c) => c.username === u)?.roles || []).map((r) => r.rolename).sort();
-    if (JSON.stringify(rolesOf(GATEWAY_B)) === JSON.stringify(['gateway', `gateway-${GATEWAY_B}`].sort())) {
-      ok.push('a stored gateway client is given its own role beside the shared one, once each');
+    if (JSON.stringify(rolesOf(GATEWAY_B)) === JSON.stringify(['gateway'])) {
+      ok.push('a stored gateway client holds the gateway role alone, its generated role retired');
     } else {
       problems.push(`stored gateway ${GATEWAY_B} holds roles ${rolesOf(GATEWAY_B).join(', ') || '(none)'}`);
+    }
+    const generatedRoles = doc.roles.map((r) => r.rolename).filter((name) => name.startsWith('gateway-'));
+    if (generatedRoles.length === 0) {
+      ok.push('the reconcile drops the per-gateway roles a 1.3.0 document holds');
+    } else {
+      problems.push(`the reconciled document still holds ${generatedRoles.join(', ')}`);
     }
     if (rolesOf('probe').length === 0) {
       ok.push('a stored client matching no principal is kept with no role');
@@ -536,10 +549,10 @@ try {
        * as delivered.
        */
       const MARKER = 'FP-ACL-PROBE';
-      const delivers = (pubUser, topic, subUser = 'aber_ingestion', subTopic = 'spBv1.0/#') => {
+      const delivers = (pubUser, topic, subUser = 'aber_ingestion', subTopic = 'spBv1.0/#', qos = 0) => {
         const out = `/tmp/acl-${Date.now()}.txt`;
         docker(['exec', '-d', r.name, 'sh', '-c',
-          `mosquitto_sub -u ${subUser} -P ${ACCOUNTS[subUser]} -t '${subTopic}' -C 1 -W 5 > ${out} 2>&1`]);
+          `mosquitto_sub -u ${subUser} -P ${ACCOUNTS[subUser]} -t '${subTopic}' -q ${qos} -C 1 -W 5 > ${out} 2>&1`]);
         docker(['exec', r.name, 'sleep', '2']);
         docker(['exec', r.name, 'mosquitto_pub', '-u', pubUser, '-P', ACCOUNTS[pubUser],
           '-t', topic, '-m', MARKER]);
@@ -568,6 +581,11 @@ try {
         'a stored gateway client is confined exactly as an issued one',
         (delivers(GATEWAY_B, `spBv1.0/Aber/DDATA/${GATEWAY_B}/dev1`)),
         true
+      );
+      expect(
+        'a stored gateway client, its generated role retired, may NOT publish under another edge node',
+        (delivers(GATEWAY_B, `spBv1.0/Aber/DDATA/${GATEWAY_A}/dev1`)),
+        false
       );
       expect(
         'a stored client with no role authenticates and reaches nothing (publish)',
@@ -609,10 +627,10 @@ try {
         (delivers('aber_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_A}`, ADMIN, 'spBv1.0/#')),
         false
       );
-      // A gateway's own NCMD must reach it through the wildcard subscription the simulator flow and
-      // validate.py use. The shared `gateway` role grants the subscription across spBv1.0/ and the
-      // per-gateway role decides delivery per message; if a future version refuses the SUBACK
-      // instead, rebirth recovery breaks silently.
+      // A gateway's own NCMD must reach it through the wildcard subscription validate.py uses. The
+      // `gateway` role grants the subscription across spBv1.0/ and its %u receive rule decides
+      // delivery per message; if a future version refuses the SUBACK instead, rebirth recovery
+      // breaks silently.
       expect(
         'a gateway receives its own NCMD through a wildcard subscription',
         (delivers('aber_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_A}`,
@@ -623,6 +641,27 @@ try {
         'a gateway does NOT receive another edge node\'s NCMD through that same subscription',
         (delivers('aber_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_B}`,
           GATEWAY_A, 'spBv1.0/+/NCMD/+')),
+        false
+      );
+      // The subscription Sparkplug requires of an edge node before its NBIRTH: its own NCMD topic at
+      // QoS 1 (tck-id-message-flow-edge-node-ncmd-subscribe), which the appliance flow makes.
+      expect(
+        'a gateway receives its own NCMD on the exact topic Sparkplug has it subscribe to, at QoS 1',
+        (delivers('aber_ingestion', `spBv1.0/Aber/NCMD/${GATEWAY_A}`,
+          GATEWAY_A, `spBv1.0/Aber/NCMD/${GATEWAY_A}`, 1)),
+        true
+      );
+      // The same rule covers a device beneath it: DCMD for its own devices arrives, another's does not.
+      expect(
+        'a gateway receives a DCMD for its own device',
+        (delivers(GATEWAY_A, `spBv1.0/Aber/DCMD/${GATEWAY_A}/dev1`,
+          GATEWAY_A, 'spBv1.0/+/DCMD/+/+')),
+        true
+      );
+      expect(
+        'a gateway does NOT receive a DCMD for another edge node\'s device',
+        (delivers(GATEWAY_B, `spBv1.0/Aber/DCMD/${GATEWAY_B}/dev1`,
+          GATEWAY_A, 'spBv1.0/+/DCMD/+/+')),
         false
       );
 
@@ -793,6 +832,15 @@ try {
         } else {
           problems.push('listRoles verbose did not return the gateway role with ACLs');
         }
+        // One role confines every gateway: the broker holds the %u rules and no role per gateway.
+        const gatewayRole = listed.roles.find((role) => role.rolename === 'gateway');
+        const own = (gatewayRole?.acls || []).filter((a) => a.topic === 'spBv1.0/+/+/%u/#').map((a) => a.acltype).sort();
+        const perGateway = listed.roles.filter((role) => role.rolename.startsWith('gateway-'));
+        if (JSON.stringify(own) === JSON.stringify(['publishClientReceive', 'publishClientSend']) && perGateway.length === 0) {
+          ok.push('listRoles holds the gateway role\'s %u rules and no role per gateway');
+        } else {
+          problems.push(`listRoles: the gateway role's %u rules are [${own.join(', ')}], and ${perGateway.length} per-gateway role(s) remain`);
+        }
       }
 
       // Issue, as the service does; then re-issue with a new password, as a rotation does.
@@ -807,7 +855,7 @@ try {
         problems.push(`issuing ${GATEWAY_C} over the control API failed: ${err.message}`);
       }
       if (issued) {
-        if (issued.replaced === false) ok.push('issuing a new gateway creates its role and client');
+        if (issued.replaced === false) ok.push('issuing a new gateway creates its client, holding the gateway role');
         else problems.push('issuing a gateway that did not exist reported replaced: true');
         ACCOUNTS[GATEWAY_C] = passwordC1;
         expect(
@@ -820,6 +868,9 @@ try {
           (delivers(GATEWAY_C, `spBv1.0/Aber/DDATA/${GATEWAY_A}/dev1`)),
           false
         );
+        const madeRoles = inventory().roles.filter((role) => role.rolename.startsWith('gateway-'));
+        if (madeRoles.length === 0) ok.push('issuing a gateway creates no role');
+        else problems.push(`issuing created ${madeRoles.map((role) => role.rolename).join(', ')}`);
 
         // A re-issue drops the live session as well, and the mint dialog promises an operator
         // exactly that (issue #291). Nothing here asserted it: the block below checks the next
@@ -1124,9 +1175,10 @@ try {
     }
   }
 
-  // 7. Nothing in the repository deletes a role. Measured on 2.0.22: deleteRole on a role a client
-  // holds took the broker down (mosquitto/README.md). The reconcile regenerates orphaned gateway
-  // roles instead, and every caller of the control API must keep to that.
+  // 7. Nothing in the repository sends deleteRole to a running broker. Deleting a role a connected
+  // client holds took 2.0.22 down, and on 2.1.2 still crashed it or corrupted the client's role list
+  // (mosquitto/README.md). The boot reconcile drops retired roles from the document instead, while
+  // the broker is down.
   {
     const forbidden = new RegExp('command[\'"]?\\s*:\\s*[\'"]delete' + 'Role');
     const roots = ['scripts', 'supabase/functions', 'deploy', 'gateway-credential', 'ingestion', 'frontend/src'];
@@ -1148,7 +1200,7 @@ try {
     if (offenders.length === 0) {
       ok.push('no repository script issues deleteRole to the plugin');
     } else {
-      problems.push(`deleteRole is issued by ${offenders.join(', ')}; a role a client holds cannot be deleted safely on 2.0.x`);
+      problems.push(`deleteRole is issued by ${offenders.join(', ')}; deleting a role a connected client holds is not safe on 2.1.2 either`);
     }
   }
 } catch (err) {

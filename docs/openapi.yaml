@@ -5172,9 +5172,9 @@ components:
           type: string
           description: |
             The target's `sparkplug_id`, and also the MQTT USERNAME the worker connects as — which
-            is what confines a playback to one edge node with no policy change: the broker
-            generates a role per gateway granting `spBv1.0/+/+/<that id>/#`, and a client holding
-            it can publish nowhere else.
+            is what confines a playback to one edge node with no policy change: the broker's
+            gateway role grants `spBv1.0/+/+/%u/#`, where `%u` is the connecting username, so a
+            client holding it can publish nowhere else.
           example: gwy130000000000400080000
         sparkplug_group: { type: string, example: Aber }
         device_map:

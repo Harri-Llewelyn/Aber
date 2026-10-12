@@ -104,7 +104,7 @@ real machines without a flag of its own.
 
 Each gateway gets **its own broker account**, issued with the same commands
 `scripts/mosquitto-provision-gateway.mjs` sends, because that is the unit the broker authorises:
-the per-gateway role confines an account to `spBv1.0/+/+/<its own id>/#`. One connection per
+the gateway role's `%u` rule confines an account to `spBv1.0/+/+/<its own id>/#`. One connection per
 gateway is also what keeps the *generator* off the critical path — a single socket's writes would
 become the thing being measured.
 

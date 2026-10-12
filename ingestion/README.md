@@ -33,7 +33,7 @@ allowed to be heard at all.
 Sparkplug B device
       │  DBIRTH / DDATA / DDEATH  on  spBv1.0/<group>/<type>/<edge_node>/<device>
       ▼
-  Mosquitto ──── a role per gateway confines it to spBv1.0/+/+/<own-id>/#
+  Mosquitto ──── the gateway role confines it to spBv1.0/+/+/<own-id>/#
       │
       ▼  subscribe spBv1.0/#
   ingestion.py
@@ -594,21 +594,20 @@ is. One says what the worker may do in the database, the other what the broker w
 | :--- | :--- |
 | the job gate | `playback_jobs` refuses a target that is not `is_simulated`, in the database rather than the UI |
 | credential possession | the worker holds credentials only for gateways issued as playback targets, so it cannot authenticate as a real one |
-| the broker role | `spBv1.0/+/+/<sparkplug_id>/#` confines each credential to its own edge node, so even a compromised worker reaches one gateway |
+| the broker role | `spBv1.0/+/+/%u/#`, the username being the `sparkplug_id`, confines each credential to its own edge node, so even a compromised worker reaches one gateway |
 
-**That third tier is a generated role, not a pattern, and the difference is measurable.** The
-Dynamic Security plugin does **not** substitute `%u` in a role's topic (`mosquitto/README.md`
-records the measurement), so there is no single rule that says "your own edge node". Every gateway
-gets a role of its own — `gateway-<sparkplug_id>`, granting `publishClientSend` and
-`publishClientReceive` on `spBv1.0/+/+/<that id>/#` — and holds it alongside a shared `gateway`
-role. Confinement is per-role and per-account rather than per-pattern, which is why issuing a
-credential also generates a role and why nothing in this repository ever deletes one.
+**That third tier is one pattern for every gateway, and it holds because the username is the id.**
+The shared `gateway` role grants `publishClientSend` and `publishClientReceive` on
+`spBv1.0/+/+/%u/#`, and the Dynamic Security plugin reads `%u` as the connecting client's
+username. Before 2.1 the plugin did not substitute `%u`, so every gateway held a generated role of
+its own; `mosquitto/README.md` records both measurements. Confinement is now per account through one
+rule, which is why issuing a credential creates a client and no role.
 
 **A playback worker can therefore subscribe widely and receive narrowly, and that is deliberate.**
 The shared role grants `subscribePattern spBv1.0/#` so that a client's wildcard subscription
 succeeds rather than being refused outright; what is *delivered* is decided separately by
-`publishClientReceive`, which the shared role grants only for `spBv1.0/STATE/#` and the per-gateway
-role only for that gateway's own subtree. `defaultACLAccess` denies both. So a worker holding a
+`publishClientReceive`, which the shared role grants only for `spBv1.0/STATE/#` and, through `%u`,
+that gateway's own subtree. `defaultACLAccess` denies both. So a worker holding a
 target's credential may issue `spBv1.0/#` and still be handed nothing outside that edge node — the
 confinement claim above holds, and it holds at delivery rather than at subscription.
 

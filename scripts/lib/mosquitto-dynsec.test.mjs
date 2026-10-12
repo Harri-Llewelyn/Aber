@@ -20,12 +20,11 @@ import {
   clientFromPasswordEntry,
   controlArgv,
   controlPayload,
-  gatewayRole,
-  gatewayRoleName,
-  gatewayRoleNames,
-  isGatewayRoleName,
-  issueCommands,
+  isRetiredGatewayRoleName,
+  issueCommand,
+  issueWithControl,
   parseControlResponse,
+  pluginRole,
   primaryHostStateTopic,
   reconcile,
   rolesFor,
@@ -53,10 +52,15 @@ describe('the shipped policy', () => {
     assert.ok(names.includes(ADMIN_ROLE));
   });
 
-  test('carries no %u, which the plugin does not substitute on 2.0.x', () => {
+  test('%u appears only in the gateway role, and only where the plugin substitutes it', () => {
+    // 2.1 substitutes %u in every ACL type but subscribeLiteral and unsubscribeLiteral, where it
+    // would be a literal that matches nothing.
     for (const role of POLICY.roles) {
       for (const acl of role.acls) {
-        assert.ok(!acl.topic.includes('%'), `${role.rolename} has a pattern topic: ${acl.topic}`);
+        if (!acl.topic.includes('%')) continue;
+        assert.equal(role.rolename, GATEWAY_SHARED_ROLE, `${role.rolename} has a pattern topic: ${acl.topic}`);
+        assert.ok(!/%[^u]/.test(acl.topic), `${acl.topic} uses a pattern other than %u`);
+        assert.ok(!/Literal$/.test(acl.acltype), `%u in ${acl.acltype} is not substituted`);
       }
     }
   });
@@ -74,37 +78,33 @@ describe('the shipped policy', () => {
   });
 });
 
-describe('gateway roles', () => {
-  test('one literal role per gateway, publish and receive beneath its own edge node only', () => {
-    const role = gatewayRole(GW_A);
-    assert.equal(role.rolename, `gateway-${GW_A}`);
-    assert.deepEqual(role.acls.map((a) => a.acltype).sort(), ['publishClientReceive', 'publishClientSend']);
-    for (const a of role.acls) assert.equal(a.topic, `spBv1.0/+/+/${GW_A}/#`);
+describe('the gateway role', () => {
+  const gateway = POLICY.roles.find((r) => r.rolename === GATEWAY_SHARED_ROLE);
+
+  test('publishes and receives beneath the edge node its username names, and nowhere else', () => {
+    // What the per-gateway roles granted, with the id as %u: the username is the sparkplug_id.
+    const own = gateway.acls.filter((a) => a.topic === 'spBv1.0/+/+/%u/#');
+    assert.deepEqual(own.map((a) => a.acltype).sort(), ['publishClientReceive', 'publishClientSend']);
+    const sends = gateway.acls.filter((a) => a.acltype === 'publishClientSend');
+    assert.deepEqual(sends.map((a) => a.topic), ['spBv1.0/+/+/%u/#']);
   });
 
-  test('a client holds the shared role and its own', () => {
-    assert.deepEqual(gatewayRoleNames(GW_A), [GATEWAY_SHARED_ROLE, `gateway-${GW_A}`]);
-  });
-
-  test('refuses an id the broker could not confine', () => {
-    assert.throws(() => gatewayRoleName('val_gateway_01'), CredentialError);
-  });
-
-  test('recognises its own role names and nothing near them', () => {
-    assert.ok(isGatewayRoleName(gatewayRoleName(GW_A)));
-    assert.ok(!isGatewayRoleName('gateway'));
-    assert.ok(!isGatewayRoleName('gateway-notanid'));
+  test('recognises a retired per-gateway role name and nothing near it', () => {
+    assert.ok(isRetiredGatewayRoleName(`gateway-${GW_A}`));
+    assert.ok(!isRetiredGatewayRoleName('gateway'));
+    assert.ok(!isRetiredGatewayRoleName('gateway-notanid'));
+    assert.ok(!isRetiredGatewayRoleName(`gateway-${GW_A}x`));
   });
 });
 
 describe('clientFromPasswordEntry', () => {
   test('transplants the three hash fields and assigns roles', () => {
-    const c = clientFromPasswordEntry(entry(GW_A), gatewayRoleNames(GW_A));
+    const c = clientFromPasswordEntry(entry(GW_A), [GATEWAY_SHARED_ROLE]);
     assert.equal(c.username, GW_A);
     assert.equal(c.iterations, 101);
     assert.equal(c.salt, 'c2FsdHNhbHRzYWx0');
     assert.match(c.password, /^[A-Za-z0-9+/=]+$/);
-    assert.deepEqual(c.roles, [{ rolename: 'gateway' }, { rolename: `gateway-${GW_A}` }]);
+    assert.deepEqual(c.roles, [{ rolename: 'gateway' }]);
   });
 
   test('refuses an unhashed entry', () => {
@@ -127,11 +127,12 @@ describe('reconcile', () => {
     assert.deepEqual(report.kept, []);
   });
 
-  test('keeps every gateway client verbatim and regenerates its role', () => {
+  test('keeps every gateway client verbatim, holding the gateway role and nothing retired', () => {
+    // GW_A is a 1.3.0 site's gateway: the shared role and its own generated one, with the role
+    // stored widened. GW_B's stored role list is incomplete, as an import by hand might leave it.
     const stored = {
       clients: [
-        clientFromPasswordEntry(entry(GW_A, 'b2xkc2FsdHNhbHQ='), gatewayRoleNames(GW_A)),
-        // A gateway whose stored role list is incomplete, as an import by hand might leave it.
+        clientFromPasswordEntry(entry(GW_A, 'b2xkc2FsdHNhbHQ='), [GATEWAY_SHARED_ROLE, `gateway-${GW_A}`]),
         clientFromPasswordEntry(entry(GW_B), []),
         { ...clientFromPasswordEntry(entry('aber_ingestion', 'b2xkc2FsdHNhbHQ='), ['ingestion']) },
       ],
@@ -142,14 +143,27 @@ describe('reconcile', () => {
     const byName = Object.fromEntries(config.clients.map((c) => [c.username, c]));
 
     assert.equal(byName[GW_A].salt, 'b2xkc2FsdHNhbHQ=', 'the gateway hash was replaced');
-    assert.deepEqual(byName[GW_B].roles.map((r) => r.rolename), gatewayRoleNames(GW_B), 'roles were not ensured');
+    assert.deepEqual(byName[GW_A].roles, [{ rolename: GATEWAY_SHARED_ROLE }], 'the retired role is still held');
+    assert.deepEqual(byName[GW_B].roles, [{ rolename: GATEWAY_SHARED_ROLE }], 'the gateway role was not ensured');
     assert.equal(byName.aber_ingestion.salt, 'c2FsdHNhbHRzYWx0', 'the managed principal was not replaced');
 
-    const roleA = config.roles.find((r) => r.rolename === `gateway-${GW_A}`);
-    assert.deepEqual(roleA, gatewayRole(GW_A), 'a widened stored role survived the boot');
-    assert.ok(config.roles.some((r) => r.rolename === `gateway-${GW_B}`));
+    assert.ok(!config.roles.some((r) => isRetiredGatewayRoleName(r.rolename)), 'a per-gateway role survived the boot');
     assert.deepEqual(config.groups, stored.groups);
     assert.deepEqual(report.gateways.sort(), [GW_A, GW_B].sort());
+    assert.deepEqual(report.retiredRoles, [`gateway-${GW_A}`]);
+    assert.equal(report.retiredMemberships, 1);
+  });
+
+  test('a second boot retires nothing more and changes nothing', () => {
+    const stored = {
+      clients: [clientFromPasswordEntry(entry(GW_A), [GATEWAY_SHARED_ROLE, `gateway-${GW_A}`])],
+      roles: [{ rolename: `gateway-${GW_A}`, acls: [] }],
+    };
+    const first = reconcile(stored, POLICY, managed).config;
+    const { config, report } = reconcile(first, POLICY, managed);
+    assert.deepEqual(config, first);
+    assert.deepEqual(report.retiredRoles, []);
+    assert.equal(report.retiredMemberships, 0);
   });
 
   test('keeps a client it does not manage, untouched and reported', () => {
@@ -168,25 +182,45 @@ describe('reconcile', () => {
     };
     const { config } = reconcile(stored, POLICY, managed);
     const i3x = config.roles.find((r) => r.rolename === 'i3x');
-    assert.deepEqual(i3x, POLICY.roles.find((r) => r.rolename === 'i3x'));
+    assert.deepEqual(i3x, pluginRole(POLICY.roles.find((r) => r.rolename === 'i3x')));
   });
 
-  test('regenerates an orphaned gateway role rather than deleting it', () => {
-    // A role in use cannot be deleted safely (mosquitto/README.md), and a role for a client that
-    // is gone must still confine if that client is ever re-created by hand.
-    const stored = { clients: [], roles: [{ rolename: `gateway-${GW_A}`, acls: [] }] };
+  test('drops an orphaned per-gateway role, and keeps a role that only looks like one', () => {
+    // The broker is down while the reconcile runs, so no connected client holds what it drops.
+    const stored = {
+      clients: [],
+      roles: [{ rolename: `gateway-${GW_A}`, acls: [] }, { rolename: 'gateway-readers', acls: [] }],
+    };
     const { config } = reconcile(stored, POLICY, managed);
-    assert.deepEqual(config.roles.find((r) => r.rolename === `gateway-${GW_A}`), gatewayRole(GW_A));
+    assert.ok(!config.roles.some((r) => r.rolename === `gateway-${GW_A}`));
+    assert.ok(config.roles.some((r) => r.rolename === 'gateway-readers'));
   });
 
-  test('scales to a fleet without losing anyone', () => {
+  test('scales to a fleet without losing anyone, and with one role for all of it', () => {
     const fleet = Array.from({ length: 250 }, (_, i) => {
       const id = `gwy${i.toString(16).padStart(21, '0')}`;
-      return clientFromPasswordEntry(entry(id), gatewayRoleNames(id));
+      return clientFromPasswordEntry(entry(id), [GATEWAY_SHARED_ROLE, `gateway-${id}`]);
     });
-    const { config } = reconcile({ clients: fleet, roles: [] }, POLICY, managed);
+    const roles = fleet.map((c) => ({ rolename: `gateway-${c.username}`, acls: [] }));
+    const { config, report } = reconcile({ clients: fleet, roles }, POLICY, managed);
     assert.equal(config.clients.length, 253);
-    assert.equal(config.roles.length, POLICY.roles.length + 250);
+    assert.equal(config.roles.length, POLICY.roles.length);
+    assert.equal(report.retiredRoles.length, 250);
+  });
+
+  test('gives the plugin each ACL with the plugin\'s keys only', () => {
+    // The roles file carries a `why` per ACL for people; the plugin is given none of it.
+    const policy = JSON.parse(JSON.stringify(POLICY));
+    policy.roles[0].acls[0].why = 'a note for people';
+    const { config } = reconcile(null, policy, managed);
+    for (const role of config.roles) {
+      for (const acl of role.acls) {
+        assert.deepEqual(Object.keys(acl).filter((k) => !['acltype', 'topic', 'priority', 'allow'].includes(k)), []);
+      }
+    }
+    assert.equal(policy.roles[0].acls[0].why, 'a note for people', 'the policy argument was mutated');
+    assert.deepEqual(pluginRole({ rolename: 'r', acls: [{ acltype: 'subscribePattern', topic: 't', priority: 2, allow: true, why: 'x' }] }),
+      { rolename: 'r', acls: [{ acltype: 'subscribePattern', topic: 't', priority: 2, allow: true }] });
   });
 
   test('refuses a document with duplicate usernames', () => {
@@ -205,13 +239,33 @@ describe('reconcile', () => {
 });
 
 describe('the control API', () => {
-  test('issue is the role then the client holding both roles', () => {
-    const [role, client] = issueCommands(GW_A, 'password-0000000000000000');
-    assert.equal(role.command, 'createRole');
-    assert.equal(role.rolename, `gateway-${GW_A}`);
+  test('issue is one client holding the gateway role, and no role of its own', () => {
+    const client = issueCommand(GW_A, 'password-0000000000000000');
     assert.equal(client.command, 'createClient');
     assert.equal(client.username, GW_A);
-    assert.deepEqual(client.roles.map((r) => r.rolename), gatewayRoleNames(GW_A));
+    assert.deepEqual(client.roles, [{ rolename: GATEWAY_SHARED_ROLE }]);
+  });
+
+  test('issue refuses an id the broker could not confine', () => {
+    assert.throws(() => issueCommand('val_gateway_01', 'password-0000000000000000'), (e) => e.code === 'invalid_sparkplug_id');
+  });
+
+  test('a re-issue sets the password, enables, and adds the gateway role only when it is missing', () => {
+    const run = (held) => {
+      const sent = [];
+      const send = (command) => {
+        sent.push(command.command);
+        if (command.command === 'createClient') return { command: 'createClient', error: 'Client already exists' };
+        if (command.command === 'getClient') return { data: { client: { roles: held.map((rolename) => ({ rolename })) } } };
+        return {};
+      };
+      return { result: issueWithControl(send, GW_A, 'password-0000000000000000'), sent };
+    };
+    const missing = run([]);
+    assert.deepEqual(missing.result, { replaced: true });
+    assert.deepEqual(missing.sent, ['createClient', 'setClientPassword', 'enableClient', 'getClient', 'addClientRole']);
+    assert.deepEqual(run([GATEWAY_SHARED_ROLE]).sent, ['createClient', 'setClientPassword', 'enableClient', 'getClient']);
+    assert.ok(!missing.sent.includes('createRole') && !missing.sent.includes('deleteRole'));
   });
 
   test('parses a reply and distinguishes a refusal from silence', () => {
@@ -248,9 +302,9 @@ describe('the control API', () => {
     assert.ok(!JSON.stringify(summary).includes('salt'));
   });
 
-  test('rolesFor names the role or the gateway pair', () => {
-    assert.deepEqual(rolesFor('ingestion', 'aber_ingestion'), [{ rolename: 'ingestion' }]);
-    assert.deepEqual(rolesFor(null, GW_A).map((r) => r.rolename), gatewayRoleNames(GW_A));
+  test('rolesFor names the role, or the gateway role', () => {
+    assert.deepEqual(rolesFor('ingestion'), [{ rolename: 'ingestion' }]);
+    assert.deepEqual(rolesFor(null), [{ rolename: GATEWAY_SHARED_ROLE }]);
   });
 });
 
@@ -259,11 +313,12 @@ describe('the primary host STATE grant', () => {
   // is granted `spBv1.0/STATE/#` so it can learn whether its consumer is there, and until this
   // grant existed nothing was allowed to write it (issue #149).
   test('the shipped policy grants every gateway READ of the STATE subtree and no write', () => {
+    // Its one write rule is beneath its own edge node, four levels deep; a host's STATE is three.
     const gateway = POLICY.roles.find((r) => r.rolename === GATEWAY_SHARED_ROLE);
     assert.ok(gateway.acls.some(
       (a) => a.acltype === 'publishClientReceive' && a.topic === 'spBv1.0/STATE/#' && a.allow,
     ));
-    assert.ok(!gateway.acls.some((a) => a.acltype === 'publishClientSend'));
+    assert.ok(!gateway.acls.some((a) => a.acltype === 'publishClientSend' && a.topic.startsWith('spBv1.0/STATE')));
   });
 
   test('the grant is ONE literal topic, not the subtree', () => {
@@ -312,7 +367,7 @@ describe('the primary host STATE grant', () => {
   });
 
   test('reconcile carries the grant through to the written document', () => {
-    const managed = [clientFromPasswordEntry(entry('aber_ingestion'), rolesFor('ingestion', 'aber_ingestion'))];
+    const managed = [clientFromPasswordEntry(entry('aber_ingestion'), rolesFor('ingestion'))];
     const { config } = reconcile(null, withPrimaryHostGrant(POLICY, 'Site-One'), managed);
     const ingestion = config.roles.find((r) => r.rolename === 'ingestion');
     assert.ok(ingestion.acls.some((a) => a.acltype === 'publishClientSend' && a.topic === 'spBv1.0/STATE/Site-One'));
@@ -380,7 +435,7 @@ describe('the Directory grant is derived from the site, not written in the polic
   });
 
   test('reconcile carries the grant through to the written document', () => {
-    const managed = [clientFromPasswordEntry(entry('aber_ingestion'), rolesFor('ingestion', 'aber_ingestion'))];
+    const managed = [clientFromPasswordEntry(entry('aber_ingestion'), rolesFor('ingestion'))];
     const { config } = reconcile(null, withDirectoryGrant(POLICY, 'Plant-7/Directory/v1'), managed);
     const ingestion = config.roles.find((r) => r.rolename === 'ingestion');
     assert.ok(ingestion.acls.some((a) => a.acltype === 'publishClientSend' && a.topic === 'Plant-7/Directory/v1/#'));

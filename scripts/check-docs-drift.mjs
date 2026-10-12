@@ -1951,10 +1951,8 @@ function edgeFunctionNames() {
   const ui = read('frontend/src/utils/serviceIdentities.js');
 
   const policyRoles = new Set((policy.roles || []).map((r) => r.rolename));
+  // The platform roles and the gateway role, each declared on the page as `role: '<name>'`.
   const uiRoles = new Set([...ui.matchAll(/^\s*role:\s*'([^']+)'/gm)].map((m) => m[1]));
-  // The shared gateway role is declared separately on the page, as it is held separately.
-  const shared = ui.match(/shared:\s*'([^']+)'/)?.[1];
-  if (shared) uiRoles.add(shared);
 
   if (policyRoles.size === 0 || uiRoles.size === 0) {
     fail(
@@ -1978,9 +1976,15 @@ function edgeFunctionNames() {
     }
     for (const role of policy.roles || []) {
       for (const acl of role.acls || []) {
-        // `%u` is not substituted by the plugin on 2.0.x (measured; mosquitto/README.md). A rule
-        // written with it grants nothing and fails nothing.
-        if (String(acl.topic).includes('%')) problems.push(`role ${role.rolename} uses '${acl.topic}': the plugin substitutes nothing in a topic`);
+        // The plugin substitutes %u and %c in every ACL type but the two literal ones (2.1;
+        // mosquitto/README.md); there a % is a literal that grants nothing and fails nothing. %c
+        // is refused as well: a client id is whatever the client chooses.
+        const topic = String(acl.topic);
+        if (/%(?!u)/.test(topic)) {
+          problems.push(`role ${role.rolename} uses '${topic}': %u is the only pattern this policy relies on`);
+        } else if (topic.includes('%u') && /Literal$/.test(acl.acltype)) {
+          problems.push(`role ${role.rolename} uses %u in ${acl.acltype}, where the plugin does not substitute it`);
+        }
       }
     }
 

@@ -36,7 +36,7 @@ import {
 } from '../../utils/credentialState'
 import {
   BROKER_PRINCIPALS,
-  GATEWAY_ROLES,
+  GATEWAY_ROLE,
   describeBrokerAccount,
   describePrincipal,
   isMintableFromPage,
@@ -61,16 +61,16 @@ const GATEWAY_USERNAME = /^gwy[0-9a-f]{21}$/
 
 /**
  * The declared broker roles in policy order, each annotated with the live rules the broker reports.
- * The gateway row stands for every gateway: the shared role plus the per-gateway role the reconcile
- * generates, which is what actually confines one.
+ * The gateway row stands for every gateway: one role, whose %u rules confine each account to the
+ * edge node its username names.
  */
 const ROLE_ENTRIES = [
   ...BROKER_PRINCIPALS.map(bp => ({ rolename: bp.role, purpose: bp.purpose, writes: bp.writes })),
   {
-    rolename: GATEWAY_ROLES.shared,
-    purpose: GATEWAY_ROLES.purpose,
-    writes: false,
-    perGateway: `${GATEWAY_ROLES.perGateway} — ${GATEWAY_ROLES.perGatewayTopic}`,
+    rolename: GATEWAY_ROLE.role,
+    purpose: GATEWAY_ROLE.purpose,
+    writes: true,
+    usernameRule: GATEWAY_ROLE.usernameRule,
   },
 ]
 
@@ -292,7 +292,7 @@ export function AccessControlTab({ showToast, initialSection = '', onClearSectio
     const purposeOf = c => {
       const declared = describeBrokerAccount(c.username)
       if (declared) return { name: declared.name, purpose: declared.purpose }
-      const role = (c.roles || []).find(r => order.has(r) && r !== GATEWAY_ROLES.shared)
+      const role = (c.roles || []).find(r => order.has(r) && r !== GATEWAY_ROLE.role)
       return role ? { name: null, purpose: ROLE_ENTRIES[order.get(role)].purpose } : { name: null, purpose: null }
     }
     const rank = c => Math.min(...(c.roles || []).map(r => order.has(r) ? order.get(r) : order.size), order.size)
@@ -885,12 +885,12 @@ export function AccessControlTab({ showToast, initialSection = '', onClearSectio
                 value: `${holders} account${holders === 1 ? '' : 's'}`,
                 title: 'Broker accounts holding this role at the moment of the read',
               },
-              ...(entry.perGateway ? [{
-                label: 'Per gateway',
-                value: entry.perGateway,
+              ...(entry.usernameRule ? [{
+                label: 'Own edge node',
+                value: entry.usernameRule,
                 mono: true,
                 full: true,
-                title: 'Generated when the credential is issued; it is what confines one gateway to its own edge node',
+                title: 'The broker reads %u as each account’s own username, so one role confines every gateway to its own edge node',
               }] : []),
             ] : []}
           >
