@@ -42,6 +42,8 @@ MIN_NODE=20.0
 INOTIFY_CONF=/etc/sysctl.d/60-aber-inotify.conf
 INOTIFY_INSTANCES=1280
 INOTIFY_WATCHES=655360
+# How many steps an install prints; check-docs-drift holds it to the `step` calls below.
+STEPS=9
 
 say() { printf '%s\n' "$*"; }
 warn() { printf '\nWARNING: %s\n' "$*" >&2; }
@@ -51,7 +53,7 @@ die() {
 }
 step() {
   STEP=$((STEP + 1))
-  printf '\n[%s/8] %s\n' "$STEP" "$*"
+  printf '\n[%s/%s] %s\n' "$STEP" "$STEPS" "$*"
 }
 kc() { k3s kubectl "$@"; }
 

@@ -1171,10 +1171,10 @@ RuntimeDefault`, and every container, init containers and hooks included, sets
 `allowPrivilegeEscalation: false` and `capabilities.drop: ["ALL"]`. A container gets back only what
 its image was shown to need. The runbook's *Security contexts* table lists each one with its
 reason, and `check-docs-drift.mjs` (check 51) holds that table and the templates together. In the
-second phase each image this repository builds ends with a numeric, non-root `USER`, and the chart
-runs it as that uid with `runAsNonRoot: true`. The runbook's *Users* table gives each uid and the
-pods that still start a container as root, with the reason; check 56 holds the Dockerfiles, the
-templates and that table together. The third phase makes each root filesystem read-only, one
+second phase each image this repository builds but `supabase-db` ends with a non-root `USER`, and
+the chart runs it as that uid with `runAsNonRoot: true`. The runbook's *Users* table gives each uid
+and the pods that still start a container as root, with the reason; check 56 holds the Dockerfiles,
+the templates and that table together. The third phase makes each root filesystem read-only, one
 workload at a time.
 
 **Each add-back was measured, not read off an entrypoint.** The pinned image ran in Docker with
