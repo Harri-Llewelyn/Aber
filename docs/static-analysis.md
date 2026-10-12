@@ -69,7 +69,7 @@ Two scans read what the stack serves rather than its source, so neither is part 
   Ingress routes: response headers, cookies and CORS, as a browser meets them, through the real
   Host header and the sign-in redirects between hosts. It needs the development cluster up
   (`npm run dev:up`) and reaches it on the k3d network. Its allow-list is
-  `scripts/lint/http-allowlist.json`, keyed by host label and ZAP alert reference (`app 10038-1`),
+  `scripts/lint/http-allowlist.json`, keyed by host label and ZAP alert reference (`app 90004-2`),
   with a `hosts` map for a host it skips.
 - **`npm run scan:images`** scans the third-party images the chart runs; see
   [`testing.md`](testing.md#keeping-the-pinned-versions-current).

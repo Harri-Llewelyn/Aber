@@ -347,6 +347,22 @@ Five things about it are load-bearing, and each has a comment in the file saying
 security change: it stands for the `anon` role, is public by construction, and is already readable
 in any built bundle.
 
+### The Content-Security-Policy names what a page may load
+
+The chart sends the dashboard's policy from nginx, built from the same addresses as `/config.js`
+([`deploy/k8s/README.md`](../deploy/k8s/README.md#what-a-browser-may-load-the-content-security-policy)
+lists each directive). Under it, the browser refuses:
+
+- a request to an origin `/config.js` does not name: a new `fetch`, image or WebSocket elsewhere;
+- an inline `<script>`, an event-handler attribute, or `eval`;
+- a `<style>` element, or a `style="..."` attribute in parsed markup. React's `style` prop and
+  Lit's adopted stylesheets are not affected.
+
+The one inline stylesheet admitted is the 3D viewer's, by its hash. Check 68 of
+`scripts/check-docs-drift.mjs` fails when an `@google/model-viewer` upgrade changes it, and names
+the new hash. `node test-harness/csp-walk.mjs` walks every page against a running stack and lists
+each refusal. `npm run dev` sends no policy, and nor does the image without the chart.
+
 ### The bundle's version and the release's are two different facts
 
 `src/version.js` states what **this bundle** is, baked at image build, and is the one setting that
