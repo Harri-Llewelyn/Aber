@@ -118,6 +118,9 @@ python ingestion/test_startup_healer.py
 # one. If the environment won, "issue a new credential" would be the one repair that could not fix
 # a refused playback.
 python ingestion/test_playback_credentials.py
+# The playback worker's Sparkplug session -- the NDEATH Will, the NDEATH that ends every job, and
+# the bdSeq the replayed NBIRTH shares with both, so the Playback gateway reads OFFLINE after a replay
+python ingestion/test_playback_session.py
 
 # A STORED CAPTURE REACHES THE HISTORIAN, through the real worker, broker and daemon. Needs the
 # stack up and `playback.enabled` (values-dev.yaml sets it); runs in the stack lane. The two suites

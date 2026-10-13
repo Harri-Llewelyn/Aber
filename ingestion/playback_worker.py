@@ -62,6 +62,14 @@ PROGRESS_INTERVAL_SECONDS = float(os.getenv("PLAYBACK_PROGRESS_INTERVAL_SECONDS"
 # that an operator watching a job does not read the pause as the playback having started.
 CONNACK_TIMEOUT_SECONDS = float(os.getenv("PLAYBACK_CONNACK_TIMEOUT_SECONDS", "5"))
 
+# How long a session's NDEATH may wait for its PUBACK before the connection is dropped instead, so
+# the broker delivers the Will.
+NDEATH_ACK_TIMEOUT_SECONDS = 5.0
+
+# The bdSeq the next CONNECT as each gateway carries: 0 for this process's first, then one more for
+# every CONNECT sent, wrapping 255 to 0 (tck-id-topics-nbirth-bdseq-increment).
+_next_bdseq = {}
+
 # How often this worker restates which gateways it can publish as.
 #
 # IT IS A HEARTBEAT, NOT A CHANGE FEED, and that is why it repeats rather than reporting once. The
@@ -228,7 +236,7 @@ def _storage():
     )
 
 
-def _connect(edge_node_id, password):
+def _connect(edge_node_id, password, will_topic, will_payload):
     """
     Connect AS the target gateway. Its `sparkplug_id` is the username, and that is the point.
 
@@ -244,6 +252,9 @@ def _connect(edge_node_id, password):
     """
     client = mqtt.Client(client_id="aber-playback-%s" % edge_node_id)
     client.username_pw_set(edge_node_id, password)
+    # The session's NDEATH as the Will, QoS 1 and not retained, so a worker that dies mid-replay is
+    # announced too (tck-id-payloads-ndeath-will-message, -will-message-qos, -will-message-retain).
+    client.will_set(will_topic, will_payload, qos=1, retain=False)
     # A list because the callback closes over it; `rc` stays None until the broker answers, which
     # is itself the third outcome -- no answer at all.
     client.aber_connack = []
@@ -255,6 +266,87 @@ def _connect(edge_node_id, password):
                        tls_version=ssl.PROTOCOL_TLS_CLIENT)
     client.connect(MQTT_HOST, MQTT_PORT, 60)
     return client
+
+
+def _open_session(edge_node, password, will_topic, bdseq):
+    """
+    One Sparkplug session as the target gateway: CONNECT with the NDEATH for `bdseq` as its Will,
+    then wait for the CONNACK. Returns (client, None), or (None, the reason the job fails).
+    """
+    try:
+        client = _connect(edge_node, password, will_topic,
+                          capture.node_death(bdseq, int(time.time() * 1000)))
+    except Exception as err:
+        return None, "could not connect to the broker as %s: %s" % (edge_node, err)
+
+    # The CONNECT carrying this bdSeq was sent, whatever the broker answers.
+    _next_bdseq[edge_node] = (bdseq + 1) % 256
+    client.loop_start()
+
+    # ------------------------------------------------------------------------------------------
+    # THE BROKER HAS TO ACCEPT US BEFORE A SINGLE MESSAGE IS COUNTED AS SENT. The credential check
+    # in _run_job refuses a MISSING password and cannot see a WRONG one, which is what a re-issued
+    # credential leaves behind until its delivery reaches this worker.
+    #
+    # rc 4 and 5 are the two that mean the password: 4 is bad username/password, 5 is not
+    # authorised. They are named rather than lumped in, because they are the ones an operator fixes
+    # by issuing a credential rather than by looking at the broker.
+    deadline = time.monotonic() + CONNACK_TIMEOUT_SECONDS
+    while not client.aber_connack and time.monotonic() < deadline:
+        time.sleep(0.05)
+
+    if not client.aber_connack:
+        client.loop_stop()
+        return None, (
+            "the broker never answered the connection as %s within %ss. It is reachable at %s:%s "
+            "or this would have failed above, so it accepted the socket and said nothing."
+            % (edge_node, CONNACK_TIMEOUT_SECONDS, MQTT_HOST, MQTT_PORT)
+        )
+
+    rc = client.aber_connack[0]
+    if rc != 0:
+        client.loop_stop()
+        detail = {
+            4: "the broker rejected the username or password",
+            5: "the broker refused this connection as not authorised",
+        }.get(rc, "the broker refused the connection")
+        return None, (
+            "%s for %s (CONNACK rc=%s), so the password this worker holds is not the one the "
+            "broker has. A credential issued for this gateway reaches the worker within about a "
+            "minute: if one was just issued, start the playback again then; otherwise issue a new "
+            "one from the gateway's drawer on the Gateways page (Generate Broker Credential)."
+            % (detail, edge_node, rc)
+        )
+    return client, None
+
+
+def _end_session(client, topic, death):
+    """
+    End a session as an intentional disconnect: the NDEATH at QoS 1, acknowledged, then DISCONNECT,
+    which tells the broker to discard the Will
+    (tck-id-operational-behavior-edge-node-intentional-disconnect-ndeath,
+    tck-id-payloads-ndeath-will-message-publisher-disconnect-mqtt311). A death the broker has not
+    acknowledged is left to the Will: the socket is closed without DISCONNECT.
+    """
+    acked = False
+    try:
+        info = client.publish(topic, death, qos=1, retain=False)
+        info.wait_for_publish(NDEATH_ACK_TIMEOUT_SECONDS)
+        acked = info.is_published()
+    except Exception as err:
+        logger.warning("Could not publish the NDEATH on %s: %s", topic, err)
+    client.loop_stop()
+    if acked:
+        try:
+            client.disconnect()
+        except Exception:
+            pass
+        return
+    logger.warning("The broker did not acknowledge the NDEATH on %s; closing the connection "
+                   "without DISCONNECT, so the broker publishes the Will instead.", topic)
+    sock = client.socket()
+    if sock is not None:
+        sock.close()
 
 
 def _run_job(supabase, storage, credentials, job):
@@ -300,10 +392,11 @@ def _run_job(supabase, storage, credentials, job):
     play_epoch_ms = int(time.time() * 1000)
     speed = float(job.get("speed") or 1.0)
     device_map = job.get("device_map") or {}
+    bdseq = _next_bdseq.get(edge_node, 0)
     try:
         plan = capture.plan_playback(
             document, edge_node, device_map, play_epoch_ms, speed=speed,
-            group=job.get("sparkplug_group"),
+            group=job.get("sparkplug_group"), bdseq=bdseq,
         )
     except capture.CaptureError as err:
         return 0, 0, str(err)
@@ -357,52 +450,15 @@ def _run_job(supabase, storage, credentials, job):
     # ------------------------------------------------------------------------------------------
     # Publishing
     # ------------------------------------------------------------------------------------------
-    try:
-        client = _connect(edge_node, password)
-    except Exception as err:
-        return 0, out_of_window, "could not connect to the broker as %s: %s" % (edge_node, err)
-
-    client.loop_start()
-
-    # ------------------------------------------------------------------------------------------
-    # THE BROKER HAS TO ACCEPT US BEFORE A SINGLE MESSAGE IS COUNTED AS SENT. The credential check
-    # above refuses a MISSING password and cannot see a WRONG one, which is what a re-issued
-    # credential leaves behind until its delivery reaches this worker.
-    #
-    # rc 4 and 5 are the two that mean the password: 4 is bad username/password, 5 is not
-    # authorised. They are named rather than lumped in, because they are the ones an operator fixes
-    # by issuing a credential rather than by looking at the broker.
-    deadline = time.monotonic() + CONNACK_TIMEOUT_SECONDS
-    while not client.aber_connack and time.monotonic() < deadline:
-        time.sleep(0.05)
-
-    if not client.aber_connack:
-        client.loop_stop()
-        return 0, out_of_window, (
-            "the broker never answered the connection as %s within %ss. It is reachable at %s:%s "
-            "or this would have failed above, so it accepted the socket and said nothing."
-            % (edge_node, CONNACK_TIMEOUT_SECONDS, MQTT_HOST, MQTT_PORT)
-        )
-
-    rc = client.aber_connack[0]
-    if rc != 0:
-        client.loop_stop()
-        detail = {
-            4: "the broker rejected the username or password",
-            5: "the broker refused this connection as not authorised",
-        }.get(rc, "the broker refused the connection")
-        return 0, out_of_window, (
-            "%s for %s (CONNACK rc=%s), so the password this worker holds is not the one the "
-            "broker has. A credential issued for this gateway reaches the worker within about a "
-            "minute: if one was just issued, start the playback again then; otherwise issue a new "
-            "one from the gateway's drawer on the Gateways page (Generate Broker Credential)."
-            % (detail, edge_node, rc)
-        )
+    # Every planned topic is under the job's group, so the first names the edge node's.
+    will_topic = "spBv1.0/%s/NDEATH/%s" % (capture.split_topic(plan[0][1])[0], edge_node)
+    client, error = _open_session(edge_node, password, will_topic, bdseq)
+    if error:
+        return 0, out_of_window, error
 
     sent = 0
     started = time.monotonic()
     last_report = 0.0
-    error = None
 
     try:
         for delay_ms, topic, payload_bytes, _ in plan:
@@ -415,10 +471,24 @@ def _run_job(supabase, storage, credentials, job):
             if target > now:
                 time.sleep(target - now)
 
-            # QoS 0, matching what the fleet publishes and what capture.py play uses. Worth knowing
-            # rather than assuming: a publish the ACL refuses is dropped WITHOUT a PUBACK, so the
-            # broker's refusal is invisible here. That is what the credential check above is for.
-            client.publish(topic, payload_bytes, qos=0, retain=False)
+            if client is None:
+                client, error = _open_session(edge_node, password, will_topic, bdseq)
+                if error:
+                    error = "publishing stopped after %d message(s): %s" % (sent, error)
+                    break
+
+            if capture.split_topic(topic)[1] == "NDEATH":
+                # A recorded death ends the session as it ended the recorded node's. The plan
+                # numbered the messages after it as the next session, which opens on the next one.
+                _end_session(client, topic, payload_bytes)
+                client = None
+                bdseq = (bdseq + 1) % 256
+            else:
+                # QoS 0, matching what the fleet publishes and what capture.py play uses. Worth
+                # knowing rather than assuming: a publish the ACL refuses is dropped WITHOUT a
+                # PUBACK, so the broker's refusal is invisible here. That is what the CONNACK check
+                # in _open_session is for.
+                client.publish(topic, payload_bytes, qos=0, retain=False)
             sent += 1
 
             elapsed = time.monotonic() - started
@@ -442,11 +512,10 @@ def _run_job(supabase, storage, credentials, job):
     except Exception as err:
         error = "publishing stopped after %d message(s): %s" % (sent, err)
     finally:
-        client.loop_stop()
-        try:
-            client.disconnect()
-        except Exception:
-            pass
+        # Finished, stopped by the operator or failed: the open session ends with its NDEATH, so
+        # the gateway reads OFFLINE rather than going stale.
+        if client is not None:
+            _end_session(client, will_topic, capture.node_death(bdseq, int(time.time() * 1000)))
 
     return sent, out_of_window, error
 

@@ -475,9 +475,52 @@ def timestamp_is_sane(ts_ms, now_ms):
 
 
 # ---------------------------------------------------------------------------------------------
+# The Sparkplug session a playback publishes in
+# ---------------------------------------------------------------------------------------------
+BDSEQ_METRIC = "bdSeq"
+# Sparkplug's Int64, the datatype bdSeq carries.
+INT64 = 4
+
+
+def with_bdseq(payload_dict, bdseq):
+    """
+    A copy of an NBIRTH or NDEATH payload whose bdSeq metric is `bdseq` as an Int64, added when the
+    recording carried none. A recorded bdSeq numbered the recorded node's connection; a replayed
+    NBIRTH repeats the bdSeq of the Will its own connection registered
+    (tck-id-topics-nbirth-bdseq-matching, tck-id-payloads-nbirth-bdseq-repeat).
+    """
+    out = dict(payload_dict)
+    metrics = [dict(m) for m in payload_dict.get("metrics", [])]
+    carried = [m for m in metrics if m.get("name") == BDSEQ_METRIC]
+    if not carried:
+        added = {"name": BDSEQ_METRIC}
+        if out.get("timestamp"):
+            added["timestamp"] = out["timestamp"]
+        metrics.insert(0, added)
+        carried = [added]
+    for metric in carried:
+        for key in VALUE_FIELDS + ("value",):
+            metric.pop(key, None)
+        metric["datatype"] = INT64
+        metric["long_value"] = bdseq
+    out["metrics"] = metrics
+    return out
+
+
+def node_death(bdseq, timestamp_ms):
+    """An NDEATH, protobuf-encoded as a Will must be: bdSeq is its only metric and it has no seq."""
+    return dict_to_payload_bytes({
+        "timestamp": timestamp_ms,
+        "metrics": [{"name": BDSEQ_METRIC, "datatype": INT64, "long_value": bdseq,
+                     "timestamp": timestamp_ms}],
+    })
+
+
+# ---------------------------------------------------------------------------------------------
 # The playback plan
 # ---------------------------------------------------------------------------------------------
-def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, group=None):
+def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, group=None,
+                  bdseq=None):
     """
     Turn a capture into an ordered list of (delay_ms, topic, payload_bytes).
 
@@ -485,6 +528,11 @@ def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, gro
     device, a rebasing that lands outside the sanity window, a malformed topic -- is decided here,
     with no broker and no clock, so the tests can assert it and `play --dry-run` can show it.
     Publishing is then a loop that cannot make a new decision.
+
+    `bdseq` is the bdSeq of the MQTT session the plan starts in; None leaves recorded numbers as
+    they are. Every NBIRTH and NDEATH carries its session's bdSeq, so births within one session
+    repeat it (tck-id-operational-behavior-data-commands-rebirth-action-3), and a recorded NDEATH
+    ends its session: the messages after it are numbered as the next one, wrapping 255 to 0.
     """
     version = capture.get("aber_capture_version")
     if version != CAPTURE_VERSION:
@@ -515,14 +563,19 @@ def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, gro
         raise CaptureError("capture has no capture_epoch_ms; it cannot be rebased")
 
     plan = []
+    session = bdseq
     for msg in messages:
         topic, payload = rewrite_identity(msg["topic"], msg["payload"], gateway_id, device_map)
+        _, msg_type, _, device = split_topic(topic)
         if group:
-            _, msg_type, _, device = split_topic(topic)
             topic = "spBv1.0/%s/%s/%s" % (group, msg_type, gateway_id)
             if device:
                 topic = "%s/%s" % (topic, device)
         payload = rebase_payload(payload, capture_epoch_ms, play_epoch_ms, speed)
+        if session is not None and device is None and msg_type in ("NBIRTH", "NDEATH"):
+            payload = with_bdseq(payload, session)
+            if msg_type == "NDEATH":
+                session = (session + 1) % 256
         delay_ms = int(msg["offset_ms"] / speed)
         # Defaulting an absent encoding to protobuf is for captures written before the field
         # existed, and for a hand-written one. It is the Sparkplug B default and the daemon's
