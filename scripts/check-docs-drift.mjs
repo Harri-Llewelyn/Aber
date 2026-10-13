@@ -606,6 +606,65 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 73. Every script a chart container runs from /opt/aber/ is copied there by the Dockerfile of the
+// image that container runs, with every relative import it makes. A missing COPY renders, lints and
+// builds, and the pod then crash-loops on ERR_MODULE_NOT_FOUND.
+// -------------------------------------------------------------------------------------------------
+{
+  const T = 'deploy/helm/aber/templates/';
+  // The values key an image is named by, to the Dockerfile that builds it.
+  const DOCKERFILES = {
+    nodeRed: 'node-red/Dockerfile',
+    gatewayCredential: 'gateway-credential/Dockerfile',
+    backupService: 'backup-service/Dockerfile',
+  };
+  // Each Dockerfile's build context, where its COPY sources resolve, from scripts/dev-cluster.mjs.
+  const CONTEXTS = Object.fromEntries([...read('scripts/dev-cluster.mjs').matchAll(/file: '([^']+)', context: '([^']+)'/g)]
+    .map((m) => [m[1], m[2] === '.' ? '' : `${m[2]}/`]));
+  const shipped = {};
+  const wrong = [];
+  for (const file of Object.values(DOCKERFILES)) {
+    shipped[file] = new Map();
+    if (!(file in CONTEXTS)) wrong.push(`scripts/dev-cluster.mjs's IMAGES names no build context for ${file}`);
+    for (const line of read(file).replace(/\\\r?\n/g, ' ').split(/\r?\n/)) {
+      if (!/^COPY\s/.test(line)) continue;
+      const args = line.trim().split(/\s+/).slice(1).filter((a) => !a.startsWith('--'));
+      const dest = args.pop();
+      if (!dest.startsWith('/opt/aber/')) continue;
+      for (const src of args) {
+        const from = (CONTEXTS[file] || '') + src;
+        if (!existsSync(join(REPO, from))) wrong.push(`${file} copies ${src}, which does not exist`);
+        shipped[file].set(dest.endsWith('/') ? dest + posix.basename(src) : dest, from);
+      }
+    }
+    for (const [at, from] of shipped[file]) {
+      if (!existsSync(join(REPO, from))) continue;
+      for (const m of read(from).matchAll(/^import\s[^;]*?from\s+['"](\.{1,2}\/[^'"]+)['"]/gm)) {
+        const target = posix.join(posix.dirname(at), m[1]);
+        if (!shipped[file].has(target)) wrong.push(`${from} imports ${m[1]}, and ${file} does not copy it to ${target}`);
+      }
+    }
+  }
+  let runs = 0;
+  for (const name of readdirSync(join(REPO, T), { recursive: true }).map((n) => n.replace(/\\/g, '/')).filter((n) => n.endsWith('.yaml'))) {
+    const template = read(T + name);
+    for (const m of template.matchAll(/\/opt\/aber\/[\w./-]+\.mjs/g)) {
+      const image = [...template.slice(0, m.index).matchAll(/image: .*\.Values\.(\w+)\.image\b/g)].pop()?.[1];
+      const file = DOCKERFILES[image];
+      runs += 1;
+      if (!file) wrong.push(`${T}${name} runs ${m[0]} on .Values.${image}.image, which check 73 maps to no Dockerfile`);
+      else if (!shipped[file].has(m[0])) wrong.push(`${T}${name} runs ${m[0]}, which ${file} does not copy there`);
+    }
+  }
+  if (!runs) wrong.push('check 73 found no template running a script from /opt/aber/, so it checks nothing');
+  if (wrong.length) {
+    fail('a container runs a script its image does not carry:\n' + wrong.map((w) => `        ${w}`).join('\n'));
+  } else {
+    pass(`the chart's ${runs} script command(s) under /opt/aber/ are each copied there by their image, with their imports`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 8b. The monthly scan (image-scan.yml, running scripts/scan-images.mjs) excludes this repository's
 // own images because release.yml scans them; this holds each build job to a scan on the same
 // policy, placed BEFORE its push, or the scan reports on an artefact the world can already pull.
@@ -830,6 +889,10 @@ function edgeFunctionNames() {
     'public.relocate_devices': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
     'public.withdraw_proposal': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
     'public.auth_pre_request': '0170 also refuses a subject in access_removals, so a removed person\'s unexpired token is refused at PostgREST; the baseline refused by subject only a withdrawn service principal',
+    'public.set_archive_credential': '0178 writes through set_foreign_credential(), the one writer every foreign credential shares; the baseline carried its own copy',
+    'public.archive_credential_is_set': '0178 asks foreign_credential_is_set(), the one probe every foreign credential shares; the baseline carried its own copy',
+    'public.set_backup_offsite_credential': '0178 writes through set_foreign_credential(), the one writer every foreign credential shares; the baseline carried its own copy',
+    'public.backup_offsite_credential_is_set': '0178 asks foreign_credential_is_set(), the one probe every foreign credential shares; the baseline carried its own copy',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
@@ -1298,6 +1361,10 @@ function edgeFunctionNames() {
     physical_backup_schedule:
       "one row holding the hour and weekday the platform database's backup sidecar started with (0173). " +
       'RLS on with no policy and nothing granted to an API role; read through platform_backup_state()',
+    backup_service_report:
+      "one row holding the backup volume's free and total bytes and the schedule, as the backup service " +
+      'last reported them (0179). RLS on with no policy and nothing granted to an API role; written by ' +
+      'the backup_report() gate and read through backup_summary(), Administrator-only',
     roles: 'RBAC internals — managed by migrations and Studio, not an app-facing endpoint',
     permissions: 'RBAC internals',
     role_permissions: 'RBAC internals',
@@ -3185,6 +3252,39 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 65. A foreign credential reaches the vault through set_foreign_credential() alone. A function
+// whose last declaration in the chain calls vault.create_secret() or vault.update_secret() is that
+// helper or a writer named below with its reason; the seeds in 0002 are DO blocks, not functions.
+// A third copy of the writer is the shape supabase/README.md's secrets rule replaced (0178): each
+// copy is one more place the Administrator gate or the in-place rotation can be got wrong.
+// -------------------------------------------------------------------------------------------------
+{
+  const dir = 'supabase/migrations';
+  const ALLOWED = {
+    'public.set_foreign_credential': 'the one writer every foreign credential shares',
+    'public.keep_gateway_credential': 'keeps a copy of a broker password the platform issued, which is not a foreign credential',
+  };
+  const files = readdirSync(join(REPO, dir)).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  const last = new Map();
+  for (const name of files) {
+    const text = read(`${dir}/${name}`);
+    for (const m of text.matchAll(/CREATE OR REPLACE FUNCTION\s+([a-z_]+\.[a-z_]+)\s*\([\s\S]*?\bAS\s+(\$[a-z_]*\$)([\s\S]*?)\2/gi)) {
+      last.set(m[1].toLowerCase(), { file: name, body: m[3] });
+    }
+  }
+  const writers = [...last].filter(([, d]) => /\bvault\.(create|update)_secret\s*\(/i.test(d.body));
+  const stray = writers.filter(([fn]) => !(fn in ALLOWED));
+  const stale = Object.keys(ALLOWED).filter((fn) => !writers.some(([w]) => w === fn));
+  for (const [fn, d] of stray) {
+    fail(`${fn}() writes the vault itself (${d.file}): a foreign credential's writer calls public.set_foreign_credential(), as set_archive_credential() does (0178)`);
+  }
+  for (const fn of stale) fail(`check 65 allows ${fn}() to write the vault, and its last declaration does not: remove it from the list`);
+  if (!stray.length && !stale.length) {
+    pass(`the vault is written by ${writers.length} function(s) in the chain, each named with its reason: ${writers.map(([fn]) => fn).join(', ')}`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 28. The Backups page and the Backup Stale alert agree about when backups have stopped
 //
 // The page's current-state line and the rule count from the same clock; the page holds the
@@ -3446,6 +3546,116 @@ function edgeFunctionNames() {
     );
   } else {
     pass(`all ${citations} repository path citation(s) name a path that exists`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 69. A pod that may start a container as root is one the runbook's *Users* section lists, after
+// "These pods still start a container as root", and that list names no other pod. A container is
+// non-root when it or its pod states runAsNonRoot: true (values.yaml's podSecurityContext included)
+// and neither states runAsUser: 0 in any branch; a helper's container, such as a wait-for, takes its
+// pod's. Pod Security "restricted" refuses every pod on that list, so it is the dry run's list too.
+// -------------------------------------------------------------------------------------------------
+{
+  const TEMPLATES = 'deploy/helm/aber/templates/';
+  const RUNBOOK = 'deploy/k8s/README.md';
+  const WORKLOAD = /^kind:\s*(Deployment|StatefulSet|DaemonSet|Job|CronJob)\s*$/;
+  const indent = (l) => l.match(/^ */)[0].length;
+  const skip = (l) => !l.trim() || /^\s*#/.test(l) || /^\s*\{\{.*\}\}\s*$/.test(l);
+  const blockText = (lines, i) => {
+    let t = '';
+    for (let j = i + 1; j < lines.length && (!lines[j].trim() || indent(lines[j]) > indent(lines[i])); j++) t += `${lines[j]}\n`;
+    return t;
+  };
+  const files = allFiles.filter((p) => p.startsWith(TEMPLATES) && /\.(ya?ml|tpl)$/.test(p));
+  const blank = (f) => read(f).replace(/\{\{-?\s*\/\*[\s\S]*?\*\/\s*-?\}\}/g, (c) => c.replace(/[^\n]/g, '')).split('\n');
+
+  // Helpers that render a container: a define whose body is a `- name:` item with an `image:`.
+  const containerHelpers = new Set();
+  for (const f of files.filter((p) => p.endsWith('.tpl'))) {
+    for (const m of read(f).matchAll(/\{\{-? define "([^"]+)" -?\}\}([\s\S]*?)\{\{-? end -?\}\}\n(?=\n|\{\{\/\*|\{\{-? define|$)/g)) {
+      if (/^- name:[^\n]*\n {2}image:/m.test(m[2])) containerHelpers.add(m[1]);
+    }
+  }
+  // values.yaml's <key>.podSecurityContext, for a pod that takes it through aber.podSecurityContext.
+  const VALUES = read('deploy/helm/aber/values.yaml').split('\n');
+  const podValues = (key) => {
+    const s = VALUES.findIndex((l) => l === `${key}:`);
+    const p = s === -1 ? -1 : VALUES.findIndex((l, j) => j > s && l === '  podSecurityContext:');
+    if (p === -1 || VALUES.slice(s + 1, p).some((l) => /^\S/.test(l))) return '';
+    let t = '';
+    for (let j = p + 1; j < VALUES.length && (/^ {4}/.test(VALUES[j]) || /^\s*#/.test(VALUES[j])); j++) t += `${VALUES[j]}\n`;
+    return t;
+  };
+
+  const rootPods = new Map();
+  let pods = 0;
+  for (const f of files) {
+    const lines = blank(f);
+    lines.forEach((line, i) => {
+      if (!/^ *containers:\s*$/.test(line)) return;
+      pods += 1;
+      const podIndent = indent(line);
+      let s = i;
+      while (s > 0 && (skip(lines[s - 1]) || indent(lines[s - 1]) >= podIndent)) s -= 1;
+      let e = i;
+      while (e + 1 < lines.length && (skip(lines[e + 1]) || indent(lines[e + 1]) >= podIndent)) e += 1;
+      const podSc = lines.findIndex((l, j) => j >= s && j <= e && indent(l) === podIndent && /^\s*securityContext:\s*$/.test(l));
+      let pod = podSc === -1 ? '' : blockText(lines, podSc);
+      const viaValues = pod.match(/include "aber\.podSecurityContext" \.Values\.(\w+)\.podSecurityContext/);
+      if (viaValues) pod += podValues(viaValues[1]);
+      // The pod's containers: its own items with an image, and the helpers that render one.
+      const why = [];
+      for (let j = s; j <= e; j++) {
+        const helper = lines[j].match(/include "([^"]+)"/);
+        if (helper && containerHelpers.has(helper[1]) && !/runAsNonRoot: true/.test(pod)) why.push(`${helper[1]} (a helper's container, in a pod that does not set runAsNonRoot)`);
+        const item = lines[j].match(/^( *)- name:\s*(.+?)\s*$/);
+        if (!item) continue;
+        let image = false;
+        let sc = '';
+        for (let k = j + 1; k < lines.length && (skip(lines[k]) || indent(lines[k]) > item[1].length); k++) {
+          if (indent(lines[k]) !== item[1].length + 2) continue;
+          if (/^\s*image:/.test(lines[k])) image = true;
+          if (/^\s*securityContext:\s*$/.test(lines[k])) sc = blockText(lines, k);
+        }
+        if (!image) continue;
+        if (/runAsUser:\s*0\b|runAsNonRoot:\s*false/.test(sc + pod)) why.push(`${item[2]} (runAsUser 0 or runAsNonRoot false, in some branch)`);
+        else if (!/runAsNonRoot: true/.test(sc + pod)) why.push(`${item[2]} (no runAsNonRoot: true)`);
+      }
+      if (!why.length) return;
+      // The workload: the nearest `kind:` above, its metadata name, and the file's $component.
+      let k = i;
+      while (k > 0 && !WORKLOAD.test(lines[k])) k -= 1;
+      const name = (lines.slice(k).find((l) => /^ {2}name:/.test(l)) || '').replace(/^ {2}name:\s*/, '').trim();
+      const component = (lines.join('\n').match(/\$component := "([^"]+)"/) || [])[1];
+      rootPods.set(`${f}:${i + 1}`, { names: [name, component].filter(Boolean), why });
+    });
+  }
+
+  // The runbook's list: the bullets after "These pods still start a container as root".
+  const section = (read(RUNBOOK).match(/\n### Users\n([\s\S]*?)(?=\n### )/) || [])[1] || '';
+  const after = section.split(/still start a container as root[^\n]*\n/)[1] || '';
+  const listed = [];
+  for (const l of after.replace(/^\n+/, '').split('\n')) {
+    if (!/^(- | {2}\S)/.test(l)) break;
+    const bold = l.match(/^- \*\*(.+?)\*\*/);
+    if (bold) listed.push(...[...bold[1].matchAll(/`([^`]+)`/g)].map((m) => m[1]));
+  }
+
+  const bad = [];
+  if (!listed.length) bad.push(`${RUNBOOK}'s *Users* section has no list after "These pods still start a container as root"`);
+  for (const [where, { names, why }] of rootPods) {
+    if (!names.some((n) => listed.includes(n))) bad.push(`${where} (${names.join(', ')}) may start ${why.join('; ')}, and ${RUNBOOK}'s Users list does not name it`);
+  }
+  for (const n of listed) {
+    if (![...rootPods.values()].some(({ names }) => names.includes(n))) bad.push(`${RUNBOOK}'s Users list names ${n}, whose pod starts every container as non-root`);
+  }
+  if (!pods) {
+    fail(`check 69 found no pod spec under ${TEMPLATES}, so it reads nothing`);
+  } else if (bad.length) {
+    fail(`a pod may start a container as root and the runbook does not say so, or the runbook lists a pod that does not:\n${bad.map((x) => `        ${x}`).join('\n')}`);
+  } else {
+    pass(`of the chart's ${pods} pod specs, the ${rootPods.size} that may start a container as root are the runbook's Users list (${listed.join(', ')})`);
   }
 }
 
@@ -4025,6 +4235,54 @@ function edgeFunctionNames() {
     );
   } else if (!broken.length) {
     pass(`no retired name is back (${RETIRED.length} names, ${KEPT.length} kept on purpose, ${scanned.length} files scanned)`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 68. The dashboard's Content-Security-Policy reaches nginx, and admits the 3D viewer's stylesheet.
+//
+// The chart mounts its rendered policy over the image's empty include, at the path nginx.conf
+// includes. A mount at any other path leaves the image's copy in place: no policy, and nothing
+// fails. And style-src carries the hash of each <style> in @google/model-viewer's template, the
+// one inline stylesheet the dashboard has; an upgrade that changes it leaves the viewer unstyled
+// under an enforced policy. The hash is read from frontend/node_modules, which CI's frontend job
+// installs; without it that half is skipped and says so.
+// -------------------------------------------------------------------------------------------------
+{
+  const NGINX = 'frontend/nginx.conf';
+  const DOCKERFILE = 'frontend/Dockerfile';
+  const CHART = 'deploy/helm/aber/templates/apps/frontend.yaml';
+  const TEMPLATE = 'frontend/node_modules/@google/model-viewer/lib/template.js';
+  const chart = read(CHART);
+  const included = read(NGINX).match(/^\s*include\s+(\S+content-security-policy\.conf);/m)?.[1];
+  const copied = read(DOCKERFILE).match(/^COPY\s+content-security-policy\.conf\s+(\S+)/m)?.[1];
+  const mounted = chart.match(/mountPath:\s*(\S+)\n\s*subPath:\s*content-security-policy\.conf/)?.[1];
+  const wrong = [];
+  if (!included) wrong.push(`${NGINX} includes no content-security-policy.conf`);
+  else {
+    if (copied !== included) wrong.push(`${DOCKERFILE} copies the image's include to ${copied}, and nginx.conf includes ${included}`);
+    if (mounted !== included) wrong.push(`${CHART} mounts the policy at ${mounted}, and nginx.conf includes ${included}`);
+  }
+  const named = [...chart.matchAll(/'(sha256-[A-Za-z0-9+/=]+)'/g)].map((m) => m[1]);
+  let hashes = 'skipped, frontend/node_modules is not installed';
+  if (existsSync(join(REPO, TEMPLATE))) {
+    const { createHash } = await import('node:crypto');
+    const wanted = [...read(TEMPLATE).matchAll(/<style>([\s\S]*?)<\/style>/g)]
+      .map((m) => `sha256-${createHash('sha256').update(m[1], 'utf8').digest('base64')}`);
+    if (!wanted.length) wrong.push(`${TEMPLATE} has no <style> any more: drop the hash from ${CHART}'s style-src`);
+    for (const h of wanted.filter((w) => !named.includes(w))) {
+      wrong.push(`${CHART}'s style-src lacks '${h}', the hash of a <style> in the installed model-viewer's template`);
+    }
+    for (const h of named.filter((n) => !wanted.includes(n))) {
+      wrong.push(`${CHART}'s style-src names '${h}', which no <style> in the installed model-viewer's template hashes to`);
+    }
+    hashes = `${wanted.length} model-viewer stylesheet hash(es) match`;
+  }
+  if (wrong.length) {
+    fail('the dashboard\'s Content-Security-Policy may not reach nginx, or refuses the 3D viewer\'s stylesheet:\n' +
+      wrong.map((w) => `        ${w}`).join('\n'));
+  } else {
+    pass(`the chart mounts the dashboard's policy where nginx includes it; ${hashes}`);
   }
 }
 
@@ -4852,12 +5110,49 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 67. The chart's known-CVE summary is one file, and a checkout carries none.
+//
+// release.yml writes files/image-scans.json into the chart before it packages it, and checks the
+// package for it, with scripts/image-scan-summary.mjs; the chart reads it for db-init. A name that
+// drifted on one side leaves every Directory row of a release reading "not scanned", with nothing
+// failing. .gitignore keeps a local copy out of a commit, or every dev cluster would date its rows
+// with a scan of images it does not run.
+// -------------------------------------------------------------------------------------------------
+{
+  const FILE = 'files/image-scans.json';
+  const CHART_FILE = `deploy/helm/aber/${FILE}`;
+  const release = read('.github/workflows/release.yml');
+  const written = release.indexOf(`--out ${CHART_FILE}`);
+  const packaged = release.indexOf('helm package deploy/helm/aber');
+  const offences = [
+    !read('deploy/helm/aber/templates/_helpers.tpl').includes(`.Files.Get "${FILE}"`) && `_helpers.tpl does not read ${FILE}`,
+    !read('scripts/image-scan-summary.mjs').includes(`const SUMMARY_FILE = '${FILE}'`) && `scripts/image-scan-summary.mjs does not check ${FILE}`,
+    written === -1 && `release.yml does not write ${CHART_FILE}`,
+    written > packaged && `release.yml writes ${CHART_FILE} after it packages the chart`,
+    !/image-scan-summary\.mjs --check '\$\{\{ steps\.package\.outputs\.package \}\}'/.test(release) && 'release.yml does not check the packaged chart\'s summary',
+    !gitignored(CHART_FILE) && `.gitignore does not keep ${CHART_FILE} out of a commit`,
+  ].filter(Boolean);
+  if (offences.length) {
+    fail('the known-CVE summary is not one file the release writes and the chart reads:\n'
+      + offences.map((o) => `        ${o}`).join('\n'));
+  } else {
+    pass(`release.yml packages ${FILE}, checks it and the chart reads it; a checkout carries none`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 23. Nothing in the stack reports usage or checks for updates by itself.
 //
 // Each service below does one or the other by default, and each switch is one line that an upgrade
 // or a regenerated config file can drop without anything failing. deploy/k8s/README.md,
 // "Outbound connections", lists them. Grafana's are also refused as GF_* variables in its
 // template, because an environment variable overrides grafana.ini silently.
+//
+// Aber's own release check is the one exception a site may opt into. It is held off by default:
+// false in values.yaml, not turned on by a committed values file, rendered only when on, and named
+// as off by default in the runbook. Only its script names api.github.com in the chart, and nothing
+// the browser runs does, so no other part of the stack or the page asks GitHub. It compares
+// versions on the pattern releaseVersion.js uses, so the menu and the check agree on "newer".
 // -------------------------------------------------------------------------------------------------
 {
   const GRAFANA_INI = 'grafana/grafana.ini';
@@ -4900,10 +5195,41 @@ function edgeFunctionNames() {
     if (!pattern.test(read(file))) offences.push(`${file}: expected ${what}`);
   }
 
+  const CHECK_TEMPLATE = 'deploy/helm/aber/templates/jobs/release-check-cronjob.yaml';
+  const CHECK_SCRIPT = 'deploy/helm/aber/files/scripts/release-check.mjs';
+  // The lines under `releaseCheck:` up to the next top-level key, read line by line rather than by
+  // one regular expression, whose nested repetition backtracks exponentially on blank lines.
+  const releaseCheckBlock = (text) => {
+    const lines = text.split('\n');
+    const start = lines.indexOf('releaseCheck:');
+    if (start < 0) return '';
+    const end = lines.findIndex((l, i) => i > start && l.trim() !== '' && !l.startsWith('  '));
+    return lines.slice(start + 1, end < 0 ? lines.length : end).join('\n');
+  };
+  if (!/^ {2}enabled: false$/m.test(releaseCheckBlock(read('deploy/helm/aber/values.yaml')))) {
+    offences.push('values.yaml: expected releaseCheck.enabled: false');
+  }
+  for (const file of ['deploy/helm/aber/values-dev.yaml', 'deploy/helm/aber/values-prod.yaml.example']) {
+    if (/^ {2}enabled: true$/m.test(releaseCheckBlock(read(file)))) offences.push(`${file} turns the release check on`);
+  }
+  if (!read(CHECK_TEMPLATE).startsWith('{{- if .Values.releaseCheck.enabled }}')) {
+    offences.push(`${CHECK_TEMPLATE}: expected to render nothing unless releaseCheck.enabled`);
+  }
+  if (!/\n- The release check, only when a site turns it on: `releaseCheck\.enabled` is off by default\./.test(read('deploy/k8s/README.md'))) {
+    offences.push('deploy/k8s/README.md: expected "What still leaves Aber" to name the release check as off by default');
+  }
+  const asksGitHub = allFiles.filter((f) => (f.startsWith('deploy/helm/aber/templates/') || f.startsWith('deploy/helm/aber/files/')
+    || (f.startsWith('frontend/src/') && !f.includes('/__tests__/'))) && /api\.github\.com/.test(read(f)));
+  for (const f of asksGitHub.filter((f) => f !== CHECK_SCRIPT)) offences.push(`${f} names api.github.com; only the release check may ask GitHub`);
+  const corePattern = (file) => read(file).match(/^const CORE = (\/.*\/)$/m)?.[1];
+  if (!corePattern(CHECK_SCRIPT) || corePattern(CHECK_SCRIPT) !== corePattern('frontend/src/utils/releaseVersion.js')) {
+    offences.push(`${CHECK_SCRIPT} and frontend/src/utils/releaseVersion.js compare versions on different patterns`);
+  }
+
   if (offences.length) {
     fail('a service would report usage or check for updates:\n' + offences.map((o) => `        ${o}`).join('\n'));
   } else {
-    pass(`all ${Object.keys(GRAFANA_OFF).length + SWITCHES.length} usage-report and update-check switches are off`);
+    pass(`all ${Object.keys(GRAFANA_OFF).length + SWITCHES.length} usage-report and update-check switches are off, and the opt-in release check is off by default`);
   }
 }
 

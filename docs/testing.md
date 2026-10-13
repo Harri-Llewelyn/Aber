@@ -132,6 +132,16 @@ python ingestion/test_playback_session.py
 # run can only have come from the replay, which is what makes "it landed under the replay lane and
 # under nothing else" checkable against a live historian.
 python ingestion/test_playback_replay.py
+# A CAPTURE RECORDED FROM THE BROKER REACHES STORAGE AND REPLAYS. The suite above replays a file it
+# uploaded; this one records one the way the Capture page does. A fixture Host gateway, its broker
+# credential issued as the Gateways page issues it, publishes live from the suite and answers the
+# rebirth request the daemon sends when the capture starts. An Administrator starts the capture with
+# start_capture_job() and stops it with request_capture_stop(). The stored file, the `captures` row
+# and its manifest are checked against what was published, and the file the daemon wrote is replayed
+# through the playback worker into the historian, under the replay lane and nowhere else. Same needs
+# and environment as the suite above, whose helpers it reuses; kubectl removes the fixture's broker
+# account afterwards.
+python ingestion/test_recorded_capture_replay.py
 # Cold telemetry archival -- the object LAYOUT and the Parquet round trip. Needs pytest and pyarrow.
 #
 # Deliberately narrow: the export path needs a historian, object storage and a chunk to mean
@@ -217,7 +227,8 @@ SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... FORGE_SWEEP_SECRET=..
 # and that the service wrote it; a queued request refuses a twin and can be cancelled; a pinned
 # backup is released once; a job that fails is followed by a prune that leaves the newest three
 # backups alone (0150); a backup is copied off site, age-encrypted, to a MinIO the test starts, and a
-# pruned backup's copy goes with it (0151). Takes real backups and removes them afterwards; stops the
+# pruned backup's copy goes with it (0151); after a backup the service reports df's figures for its
+# volume and its schedule, which backup_summary() returns (0179). Takes real backups and removes them afterwards; stops the
 # service container for a few seconds for the cancel case, fails one job with a trigger it drops
 # afterwards, and deletes the MinIO's namespace when done.
 SUPABASE_PUBLISHABLE_KEY=... SUPABASE_SERVICE_ROLE_KEY=... python backup-service/test_backup_service.py
@@ -335,8 +346,13 @@ python supabase/migrations/test_system_settings_rls.py
 python supabase/migrations/test_sparkplug_group_setting.py
 # The Directory's Version column (0140). The chart's component -> image map reaches every row it
 # manages, clears a component the chart stops deploying, leaves other registrations alone, and the
-# writer is callable by db-init only.
+# writer is callable by db-init only. Its known-CVE columns (0180) match the exact image reference,
+# so an overridden tag reads as not scanned rather than zero.
 python supabase/migrations/test_directory_images.py
+# The release check's one row (0181). Each check replaces it, a failure keeps only its reason, the
+# gate refuses a version, link or `newer` the account menu could not show, and only
+# Service_ReleaseCheck may call it; its key reaches nothing else.
+python supabase/migrations/test_release_check.py
 # The Backup Stale rule's clock (0144). No row while no backup job exists; the first job recorded
 # until one succeeds, then the start of the last success, which a later failure does not move; and
 # anon and authenticated cannot read a view that runs past backup_jobs' Administrator-only RLS.
@@ -346,6 +362,12 @@ python supabase/migrations/test_directory_images.py
 # copy and back off a failed one; and Off-site Backup Stale's view counts from the later of the
 # newest backup and the last destination change.
 python supabase/migrations/test_backup_health.py
+# The Backups page's stat strip (0179). backup_summary() is an Administrator's and refuses anybody
+# else with the code PostgREST answers 403. Successes count the runs that ended in the last 30 days,
+# not a cancelled one; the median is of the last 14 completed runs; the newest copy off site is at
+# the current destination once one is set. The service's report goes through a backup_* gate no
+# API role reaches, keeps one row, and leaves a figure statfs could not give NULL.
+python supabase/migrations/test_backup_summary.py
 # The platform database's physical backup (0173): the sidecar's schedule rules with the historian's
 # bodies, the one-row schedule, platform_backup_state() for Administrators only, and no API role
 # reaching the runs or the gates. On a stack with supabaseDb.physicalBackup on, also a full backup
@@ -402,6 +424,12 @@ python supabase/migrations/test_cold_archive_backlog.py
 # everything would pass the negative and break the Settings page for every role but one. The
 # credential is never asserted by value -- nothing reads it back, and that is the property.
 python supabase/migrations/test_cold_archive_destination.py
+# The foreign credentials' one writer and one probe (0178). The cold archive and off-site backup
+# keys are set by an Administrator only, refused otherwise with the code PostgREST answers 403; the
+# probe says false, then true, and false for anybody else; no API role can read a value back or
+# call either helper; and a second write rotates in place, which the backup service's reader
+# returns at its next call.
+python supabase/migrations/test_foreign_credentials.py
 # A device cannot be posted onto the replay lane by hand (0083, issue 144). The dashboard used to
 # offer the Playback gateway in three device pickers; choosing it produced a shadow device with no
 # `shadow_of` -- "an asset with no provenance, which is the thing this design exists to avoid
@@ -517,6 +545,15 @@ npm run dev:test
 # checks: what the server says about a seeded plant against the Directory, then its quality and
 # subscriptions against what the run publishes (i3x/README.md -> Testing).
 npm run dev:test -- --filter=i3x
+# The dashboard under its Content-Security-Policy, in a headless Chrome: the pages before sign-in,
+# every page navigation.jsx declares, an area plan and two 3D models it makes and then deletes,
+# and sign-out. Fails listing each refusal a page or one of its workers reports. Chrome is
+# --chrome=PATH, or CHROME. CI runs it after the stack lane. Chrome signs in as the walk's own
+# Administrator, csp-walk@aber.local, never as the seeded one: Sign Out ends every session of the
+# person who clicks it. The seeded Administrator (ABER_ADMIN_EMAIL) adds or restores that account
+# and sets its password through the API first, and removes its access after; that API session
+# ends alone.
+node test-harness/csp-walk.mjs --base=http://app.localhost
 ```
 
 **`validate.py` runs in-cluster as a Job (`e2e.enabled`) and from the host through the dev loop's
@@ -758,7 +795,7 @@ CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs nine jobs:
 | **frontend-build** | Vitest, the mirrored-logic drift guards, production bundle |
 | **helm-chart** | `helm lint`, render, API-schema validation, chart guard rails |
 | **edge-function-auth-test** | Auth ladders and RLS against a real Postgres |
-| **k8s-validation** | k3d cluster through `dev-cluster up --e2e --network-policy`: `helm test`, `validate.py` in-cluster, the stack lane through port-forwards, the i3X conformance suite, ingress assertions, all with NetworkPolicies on |
+| **k8s-validation** | k3d cluster through `dev-cluster up --e2e --network-policy`: `helm test`, `validate.py` in-cluster, the stack lane through port-forwards, the i3X conformance suite, ingress assertions, the dashboard walked in Chrome under its Content-Security-Policy, all with NetworkPolicies on |
 | **site-install-rehearsal** | `site-rehearsal install` on k3d: the checkout installed as a new site, with values from `setup.mjs`, never `values-dev.yaml`, then the i3X conformance suite through Traefik over HTTPS (*The install and upgrade rehearsals*, below) |
 | **upgrade-rehearsal** | `site-rehearsal upgrade` on k3d: the last release installed as published, then `helm upgrade` to the checkout with the same values |
 | **secret-scan** | gitleaks over every commit in a full clone and the working tree, on every push |
@@ -997,8 +1034,13 @@ never on a branch:
 | **prepare-release** | Derives the version from the tag, refuses a non-SemVer one or one `Chart.yaml` does not name, re-runs the static checks a published artefact must not violate |
 | **build-images** | The ten independent images, in parallel, each built to an OCI archive and **scanned** before it is pushed to GHCR with an SPDX SBOM and SLSA provenance in its index, then signed keyless with cosign and verified back |
 | **build-ingestion-chain** | `ingestion`, then `test-runner` `FROM` it, as one `docker buildx bake` of `docker-bake.hcl`; built to OCI archives first so the attestations are asserted and both images **scanned** before (and without) a push, then pushed, signed and verified |
-| **publish-chart** | Lint, render, package at the tag's version, push over OCI, pull it back, sign the pushed digest and verify it |
+| **scan-third-party-images** | Every third-party image the chart runs, by `scripts/scan-images.mjs --reports`, the monthly scan's script; a finding is recorded rather than stopping the release, an image that cannot be scanned stops it |
+| **publish-chart** | Summarise every scan report into the chart's `files/image-scans.json`, lint, render, package at the tag's version, check the package has a dated scan of every image it runs, push over OCI, pull it back, sign the pushed digest and verify it |
 | **attach-sboms** | Reads every image's SBOM and provenance back out of the registry and attaches them to the GitHub Release, opening it as a draft from the template if nothing has |
+
+Every scan's Trivy JSON report is kept as a workflow artifact. The packaged chart carries their
+summary, which db-init records and the Directory shows beside each version
+([`supabase/README.md`](../supabase/README.md)).
 
 The tag stamps the eleven image tags, the chart `version` and `appVersion` in one run, and the
 commit it points at already names that version in `Chart.yaml`. **Images publish before the chart**, because a chart naming

@@ -245,6 +245,13 @@ policy's shape), `mosquitto-credentials.mjs` (what every issuer shares) and
 the orphan sweep cannot differ on a role, a reply or a fallback. The files say what they do; this
 section is why.
 
+**The scripts ship in the `gateway-credential` image**, not in the chart. `gateway-credential/Dockerfile`
+copies the two scripts to `/opt/aber/` and the three libraries to `/opt/aber/lib/`, and the chart
+runs them from there. Helm stores the chart and the rendered manifest in one release Secret under a
+1 MiB cap, and a script carried in a ConfigMap is paid for twice (`docs/kubernetes-architecture.md`
+§3.6). An edit to any of the five needs the image rebuilt; `npm run dev:up` rebuilds it and restarts
+the broker.
+
 **Why the authority sits beside the broker.** `enroll-gateway` runs in a Deno edge worker with no
 way to reach the broker's control topic, and it must not be given the plugin's admin credential:
 that is authority over every principal on the broker, held by a component reachable through the

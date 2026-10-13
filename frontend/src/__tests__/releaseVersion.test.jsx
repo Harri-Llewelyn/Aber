@@ -19,25 +19,35 @@ const mockSession = {
   }
 }
 
-vi.mock('../lib/supabaseClient', () => ({
-  supabase: {
-    auth: {
-      getSession: vi.fn(),
-      getUser: vi.fn(),
-      onAuthStateChange: vi.fn(),
-      signInWithPassword: vi.fn(),
-      signUp: vi.fn(),
-      signOut: vi.fn()
-    },
-    channel: vi.fn().mockReturnValue({ on: vi.fn().mockReturnThis(), subscribe: vi.fn().mockReturnThis() }),
-    removeChannel: vi.fn(),
-    from: vi.fn().mockReturnValue({
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      order: vi.fn().mockResolvedValue({ data: [], error: null })
-    })
+/* The release_check row the menu reads, per test: null is a stack where the check never ran. */
+const checkState = vi.hoisted(() => ({ row: null, reads: 0 }))
+
+vi.mock('../lib/supabaseClient', () => {
+  const tables = {
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    order: vi.fn().mockResolvedValue({ data: [], error: null })
   }
-}))
+  const releaseCheck = {
+    select: () => releaseCheck,
+    maybeSingle: () => { checkState.reads += 1; return Promise.resolve({ data: checkState.row, error: null }) }
+  }
+  return {
+    supabase: {
+      auth: {
+        getSession: vi.fn(),
+        getUser: vi.fn(),
+        onAuthStateChange: vi.fn(),
+        signInWithPassword: vi.fn(),
+        signUp: vi.fn(),
+        signOut: vi.fn()
+      },
+      channel: vi.fn().mockReturnValue({ on: vi.fn().mockReturnThis(), subscribe: vi.fn().mockReturnThis() }),
+      removeChannel: vi.fn(),
+      from: vi.fn((table) => (table === 'release_check' ? releaseCheck : tables))
+    }
+  }
+})
 
 /* Pinned rather than read from the build: what version the test runner happens to bake is not
    what these assertions are about. */
@@ -50,7 +60,7 @@ vi.mock('../version', () => ({
 import { supabase } from '../lib/supabaseClient'
 import App from '../App'
 import {
-  RELEASE_STATES, releaseDrift, releaseDriftLabel, releaseDriftTitle,
+  RELEASE_STATES, releaseDrift, releaseDriftLabel, releaseDriftTitle, availableRelease, RELEASE_CHECK_FRESH_MS,
 } from '../utils/releaseVersion'
 
 const CHART_CONFIG = fs.readFileSync(
@@ -78,7 +88,11 @@ beforeEach(() => {
   supabase.auth.onAuthStateChange.mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } })
 })
 
-afterEach(() => { delete globalThis.__ABER_CONFIG__ })
+afterEach(() => {
+  delete globalThis.__ABER_CONFIG__
+  checkState.row = null
+  checkState.reads = 0
+})
 
 // The comparison
 
@@ -186,5 +200,88 @@ describe('the drift line in the account menu', () => {
     const line = document.querySelector('.user-popover-drift')
     expect(line.tagName).not.toBe('BUTTON')
     expect(line.closest('.user-popover-action')).toBeNull()
+  })
+})
+
+// The opt-in release check
+
+const NOTES = 'https://github.com/Harri-Llewelyn/Aber/releases/tag/v0.2.0'
+const checked = (overrides = {}) => ({
+  checked_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+  running_version: '0.1.0',
+  latest_version: '0.2.0',
+  latest_url: NOTES,
+  newer: true,
+  error: null,
+  ...overrides
+})
+
+describe('what the release check found', () => {
+  it('names a newer release from a recent, successful check, with its release notes', () => {
+    expect(availableRelease(checked(), '0.1.0')).toEqual({ version: '0.2.0', url: NOTES })
+  })
+
+  // Nothing at all rather than "up to date": the check is opt-in and may never have run.
+  it('says nothing when the check never ran, failed, or found nothing newer', () => {
+    expect(availableRelease(null, '0.1.0')).toBeNull()
+    expect(availableRelease(checked({ error: 'could not reach api.github.com', latest_version: null, latest_url: null }), '0.1.0')).toBeNull()
+    expect(availableRelease(checked({ latest_version: '0.1.0', newer: false }), '0.1.0')).toBeNull()
+  })
+
+  // A row recorded before an upgrade compares against the release the stack runs now.
+  it('says nothing once the stack runs the release the check found', () => {
+    expect(availableRelease(checked(), '0.2.0')).toBeNull()
+    expect(availableRelease(checked(), null)).toBeNull()
+  })
+
+  // Daily, so an answer older than two days means the check stopped, as when it is switched off.
+  it('says nothing from a check that has stopped running', () => {
+    const stale = new Date(Date.now() - RELEASE_CHECK_FRESH_MS - 60 * 1000).toISOString()
+    expect(availableRelease(checked({ checked_at: stale }), '0.1.0')).toBeNull()
+    expect(availableRelease(checked({ checked_at: null }), '0.1.0')).toBeNull()
+  })
+
+  it('links only to this repository\'s release notes', () => {
+    expect(availableRelease(checked({ latest_url: 'https://example.com/aber/0.2.0' }), '0.1.0')).toBeNull()
+    expect(availableRelease(checked({ latest_url: 'javascript:alert(1)' }), '0.1.0')).toBeNull()
+  })
+})
+
+describe('the release line in the account menu', () => {
+  it('says "Aber X.Y.Z is available" under the version, linking to the release notes', async () => {
+    deployedRelease('0.1.0')
+    checkState.row = checked()
+    const menu = await openMenu()
+
+    const link = await menu.findByRole('link', { name: /Aber 0\.2\.0 is available/ })
+    expect(link.getAttribute('href')).toBe(NOTES)
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('rel')).toContain('noreferrer')
+    expect(link.closest('.user-popover-head')).toBeTruthy()
+  })
+
+  it('shows nothing about updates where the check never ran, as with it switched off', async () => {
+    deployedRelease('0.1.0')
+    const menu = await openMenu()
+    await waitFor(() => expect(checkState.reads).toBe(1))
+    expect(document.querySelector('.user-popover-update')).toBeNull()
+    expect(menu.queryByText(/up to date|available/i)).toBeNull()
+  })
+
+  it('shows nothing for a failed check', async () => {
+    deployedRelease('0.1.0')
+    checkState.row = checked({ error: 'could not reach api.github.com: fetch failed (UND_ERR_CONNECT_TIMEOUT)', latest_version: null, latest_url: null, newer: null })
+    await openMenu()
+    await waitFor(() => expect(checkState.reads).toBe(1))
+    expect(document.querySelector('.user-popover-update')).toBeNull()
+  })
+
+  it('never says the stack is up to date', async () => {
+    deployedRelease('0.2.0')
+    checkState.row = checked({ running_version: '0.2.0', newer: false })
+    const menu = await openMenu()
+    await waitFor(() => expect(checkState.reads).toBe(1))
+    expect(document.querySelector('.user-popover-update')).toBeNull()
+    expect(menu.queryByText(/up to date|latest/i)).toBeNull()
   })
 })

@@ -122,6 +122,19 @@ seccomp profile every pod in the chart runs under unless that value names its ow
 {{- end -}}
 
 {{/*
+"true" when a backup pod mounts the storage objects' volume: the backup service, or the CronJob in
+its place, with backup.includeStorage on a file-backend PVC. Empty otherwise. Both mount it on this
+answer and the storage pod runs as root on it, so the three cannot disagree.
+  {{- $includeStorage := eq (include "aber.backupMountsStorage" .) "true" -}}
+*/}}
+{{- define "aber.backupMountsStorage" -}}
+{{- if and .Values.backup.enabled .Values.backup.includeStorage .Values.supabaseStorage.enabled
+      .Values.supabaseStorage.persistence.enabled (eq .Values.supabaseStorage.backend "file") -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
 The image serving each Directory row, as JSON keyed by component, for db-init to record in
 directory_services.image (archived migration 0140). Rendered by the same expression as each workload's own
 image:, and a component the chart does not deploy is left out so its row is cleared; Alloy only
@@ -162,6 +175,25 @@ when its node_exporter collectors run. check-docs-drift.mjs holds the list equal
 {{- end -}}
 {{- end -}}
 {{- toJson $out -}}
+{{- end -}}
+
+{{/*
+The known-CVE summary release.yml packages as files/image-scans.json, as JSON for db-init to record
+beside each Directory row's image (0180). `{}` when the chart carries none, as on a checkout, which
+clears every row to "not scanned". A file that is not that summary fails the render rather than
+reading as no scan at all.
+*/}}
+{{- define "aber.directoryImageScans" -}}
+{{- $raw := .Files.Get "files/image-scans.json" | trim -}}
+{{- if not $raw -}}
+{}
+{{- else -}}
+{{- $doc := fromJson $raw -}}
+{{- if or (hasKey $doc "Error") (not (kindIs "map" (get $doc "images"))) -}}
+{{- fail "files/image-scans.json is not the summary scripts/image-scan-summary.mjs writes: delete it, or write it again with that script" -}}
+{{- end -}}
+{{- toJson $doc -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -356,6 +388,13 @@ credential is correct for a stack that has issued no playback targets yet.
 */}}
 {{- if and .Values.playback.enabled (not .Values.secrets.playbackKey) -}}
 {{- $missing = append $missing "secrets.playbackKey (SUPABASE_PLAYBACK_KEY, required when playback.enabled -- a JWT signed by jwtSecret for subject b0000000-0000-4000-8000-000000000003, Service_Playback)" -}}
+{{- end -}}
+{{/*
+Conditional, because the release check is off by default: without the key every run fails at the
+gate, and the only sign is a menu that never says anything.
+*/}}
+{{- if and .Values.releaseCheck.enabled (not .Values.secrets.releaseCheckKey) -}}
+{{- $missing = append $missing "secrets.releaseCheckKey (SUPABASE_RELEASE_CHECK_KEY, required when releaseCheck.enabled -- a JWT signed by jwtSecret for subject b0000000-0000-4000-8000-000000000004, Service_ReleaseCheck)" -}}
 {{- end -}}
 {{- if $missing -}}
 {{- fail (printf "\n\naber: required credentials are not set:\n  - %s\n\nThese are a SET, not independent values: anonKey and serviceRoleKey are JWTs signed by\njwtSecret and publishableKey and secretKey are the keys the gateway translates to them, so\nsupplying some and not others yields a stack that reports healthy and rejects every request\nat the gateway. The chart deliberately does not generate them.\n\nFor a local k3s stack:   helm install ... -f values-dev.yaml\nFor anything else:       copy values-prod.yaml.example and supply a matching set.\n" (join "\n  - " $missing)) -}}

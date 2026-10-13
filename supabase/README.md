@@ -873,6 +873,66 @@ helper's lists, and
 `check-docs-drift.mjs` holds the two equal and checks that each component is one the chart
 renders. Adding a row the chart deploys means adding it to both.
 
+### The Directory shows each image's known CVEs (0180)
+
+Each row's version carries a count of the fixable HIGH and CRITICAL vulnerabilities the release
+found in that exact image, dated. It works offline, because the data ships with the chart:
+
+- `release.yml` scans every image the chart runs at release time: the ones it builds before pushing
+  them, and the third-party ones with `scripts/scan-images.mjs --reports`, which records findings
+  without gating the release. Every Trivy JSON report is kept.
+- `scripts/image-scan-summary.mjs` turns the reports into `files/image-scans.json` inside the chart
+  it packages: per image reference, the two counts, the scan time and the date of the
+  vulnerability database. An image Aber builds FROM a third-party product under Aber's own tag
+  (Node-RED, Swagger UI, TimescaleDB, the platform database) also gets that product's version,
+  read from its Dockerfile. The release fails unless the summary covers exactly the images the
+  packaged chart runs.
+- `aber.directoryImageScans` passes it to db-init as `directory_image_scans`, and `0180`'s
+  `record_directory_image_scans()` writes the five columns beside `image`: `image_fixable_critical`,
+  `image_fixable_high`, `image_scanned_at`, `image_vulnerability_db_at` and `upstream_version`.
+
+The match is on the exact reference. A row running an overridden tag, a mirror or a hotfix has no
+scan, and the page says "not scanned" rather than zero. A checkout's chart carries no summary, so
+on a dev cluster db-init passes `{}` and every row reads "not scanned". An entry missing a count or
+a date is not a scan either: an undated zero would read as a clean bill of health, and a CVE
+published after the release is not counted.
+
+The monthly `image-scan.yml` writes no summary. A published chart cannot change, so a later scan
+has nowhere to go without the stack fetching it, which nothing does.
+
+### The account menu shows a newer release (0181)
+
+With `releaseCheck.enabled` on (it is off by default), a CronJob asks GitHub once a day for the
+latest Aber release and records the answer in `release_check`, one row:
+
+- `scripts/release-check.mjs` runs on the chart's node image. It calls
+  `GET /repos/Harri-Llewelyn/Aber/releases/latest` with no token, which already leaves out drafts and
+  pre-releases, and compares the `MAJOR.MINOR.PATCH` core with the chart's appVersion on the pattern
+  `frontend/src/utils/releaseVersion.js` uses.
+- It records the result through `record_release_check()`, through the gateway, as
+  `Service_ReleaseCheck`: a machine principal of its own (`b0000000-0000-4000-8000-000000000004`),
+  which holds no role and no permission and which the gate admits alone, not even `service_role`.
+  The gate refuses a version that is not a release core, a link that is not a release of this
+  repository, and a `newer` the two versions contradict. Nothing else may write the table, and
+  every signed-in user may read it.
+- A failed check (GitHub unreachable, a NetworkPolicy with no `releaseCheck.githubEgress`) keeps
+  only its reason in `error`, for an operator, and the run exits 1.
+
+The account menu reads the row when it opens. It shows "Aber X.Y.Z is available", linking to the
+release notes, only from a successful check under two days old that names a release newer than the
+one the stack runs. It shows nothing otherwise: never "up to date", which would claim a check that
+may not have run. So the line also goes two days after the check is switched off, and as soon as
+the stack is upgraded to that release.
+
+The CronJob holds two keys and no other credential: the publishable key, for the gateway's own
+check, and `SUPABASE_RELEASE_CHECK_KEY` (`secrets.releaseCheckKey`) as the bearer. The second is a
+90-day JWT for `Service_ReleaseCheck`, signed by the stack's JWT secret: `npm run setup` mints it
+with the ingestion and playback keys, and `npm run keys:rotate` re-signs it with them. The chart
+requires it only with `releaseCheck.enabled`. A leaked key records a release check and nothing else:
+the principal has no role, no permission and no other gate, and `service_role` is not among the
+gate's callers. A stack set up before 0181 mints the key with `npm run keys:rotate`, which signs it
+with that stack's own JWT secret (`docs/upgrades.md`).
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
@@ -2232,7 +2292,7 @@ sites — the conversion and the monthly job — because otherwise the hole reop
 
 ## Machine Identities
 
-Five identities on this stack are held by software rather than people, and each is narrow by
+Six identities on this stack are held by software rather than people, and each is narrow by
 construction. They were built as roadmap items 13 and 16; that work is finished, so it is documented
 here rather than left on a checklist.
 
@@ -2240,11 +2300,12 @@ here rather than left on a checklist.
 | :--- | :--- | :--- |
 | `Service_Ingestor` (`0046`) | `telemetry:read` | Nothing directly. Eight `SECURITY DEFINER` functions -- seven gates in `0047` plus `record_ingestion_rejection()` from `0026`, brought under the same rule by `0051` -- each checking the caller **is** this principal |
 | `Service_Playback` (`0056`) | `telemetry:read` | Nothing directly. The `playback_*` gates, each checking `is_playback_caller()` |
+| `Service_ReleaseCheck` (`0181`) | nothing | Nothing directly. `record_release_check()`, which checks `is_release_check_caller()`; its key is read only with `releaseCheck.enabled` |
 | MCP reader (`0034`) | `telemetry:read` | Reads the five relations the i3X address space is assembled from. Writes nothing; cannot read `audit_trail` |
 | `aber_i3x` | broker account | Reads the namespace, publishes nothing |
 | `gateway-credential-service` | broker admin, scoped | Issues or disables one gateway's account at a time, lists the broker's clients and roles, and serves the CA; nothing else |
 
-The three database identities are `auth.users` rows with **no email, no password and no identity
+The four database identities are `auth.users` rows with **no email, no password and no identity
 provider**, so none can sign in. That is also `0042`'s predicate for listing them, and `0048`'s for
 keeping their writes out of the audit trail's `'user'` bucket.
 
@@ -2697,8 +2758,8 @@ can read `system_settings`, so no credential key is declared there and the endpo
 chart values rather than settings. The S3 secret itself lives in the Vault: `0134` seeds it once
 from `secrets.archiveS3SecretAccessKey` and never again, because an Administrator may have set it
 since through `set_archive_credential()` from the Cold Storage page, and `cold_archive.py` reads it
-back through `cold_archive_destination()`. #353 is where the rule that admits that writer is being
-settled. `archive.bucket` was a setting and is retired with the local bucket it named (`0132`).
+back through `cold_archive_destination()`. The secrets rule under *Runtime configuration* admits
+that writer, and since `0178` it shares one helper with the off-site backup key's. `archive.bucket` was a setting and is retired with the local bucket it named (`0132`).
 
 #### The destination is somewhere else, and only somewhere else (archived migration 0132)
 
@@ -3350,8 +3411,9 @@ pinned when every caller was a host script. The actor is **re-checked** against 
 rather than believed, so authorisation does not rest solely on a check made inside the component
 that holds the signing key.
 
-**The button is not offered on every row.** `Service_Ingestor` and `Service_Playback` read their
-keys from the environment, so a token minted for either is valid and unread —
+**The button is not offered on every row.** `Service_Ingestor`, `Service_Playback` and
+`Service_ReleaseCheck` read their keys from the environment, so a token minted for any of them is
+valid and unread —
 `isMintableFromPage()` is the rule, and those two keep `npm run keys:rotate`, which is what actually
 changes what those processes present.
 
@@ -5202,6 +5264,33 @@ Administrator-only `SELECT` would break that page for everyone else in a way tha
   `set_backup_offsite_credential()`. Each writer has an `..._is_set()` companion that answers
   whether a value is stored, never what it is; nothing reads the value back to a page.
 
+**Every foreign credential shares one writer and one probe (0178).** The writer is
+`set_foreign_credential(name, secret, label, description)`:
+
+- It refuses anybody but an `Administrator` with `insufficient_privilege`, which PostgREST answers
+  403, and it refuses an empty value.
+- It creates the vault row on the first write and updates it in place after, so a rotation keeps
+  the row's id.
+- It returns nothing.
+
+The probe is `foreign_credential_is_set(name)`, true only for an `Administrator`. No API role may
+call either helper. A page calls the credential's own writer and probe, each a few lines naming its
+vault secret, so no page can name a stack-internal one. The reader stays with the one principal that
+consumes the value: `cold_archive_destination()` returns a row to the ingestion principal alone, and
+`backup_offsite_destination()` answers the backup service and no PostgREST role. A new foreign
+credential is those three functions and the dashboard's `CredentialField` on the page that uses it.
+The field asks before it replaces a stored value, because a mistyped key is found only when its
+consumer fails, and the old one cannot be recovered from this stack.
+
+**A rotation takes effect when the consumer next reads the credential.** The writer stores the new
+value and returns, and nothing tells the consumer:
+
+| Credential | Consumer | A new value takes effect | Known by |
+| :--- | :--- | :--- | :--- |
+| The cold archive's S3 key | The `cold-archive` CronJob (`coldArchive.schedule`, 03:15 daily) | At the next run. `cold_archive.py` reads its destination once, when the process starts, so a run in progress finishes with the old key. A `--loop` process, which the chart does not run, needs a restart | Reading `s3_config()` and `main()` |
+| The off-site backup key | The backup service | At the next copy or prune, so within one poll (`BACKUP_POLL_SECONDS`, 15 seconds) while it is idle. An upload already running finishes with the old key | Reading `copyOffsite()` and `prune()`, which call `backup_offsite_destination()` each time; `test_foreign_credentials.py` measures the reader returning the new key at its next call |
+| The SMTP password | GoTrue | After a chart change and a GoTrue restart. `secrets.smtpPassword` (or the `SMTP_PASSWORD` key of `secrets.existingSecret`) reaches GoTrue as `GOTRUE_SMTP_PASS`. Kubernetes resolves that variable once, when the container starts, and the Deployment carries no checksum of the Secret, so `helm upgrade` changes the Secret and not the running pod. Run `kubectl -n aber rollout restart deploy/supabase-auth` after it | Reading `templates/supabase/auth.yaml` |
+
 Supabase Studio's Vault UI remains the escape hatch for anything else. **Note the trust boundary:**
 Studio is not gated by this schema's RLS. Its one door is the gateway's Studio listener, which
 admits only a token whose role is `Administrator` (archived migration `0081`); past it the console
@@ -5542,6 +5631,35 @@ and no table, and `backup_jobs` is Administrator-only; the view runs as its owne
 row, `last_success_at` and `age_seconds`, and none while no job exists. The *Backup Stale* rule
 fires past 36 hours; its reasoning is in [`grafana/README.md`](../grafana/README.md).
 
+**The page shows a trend, from one call (0179).** A stat strip above the list answers whether
+backups are heading for trouble, which the one-line state cannot: that line clears on the next
+success, so a backup failing every other night never shows as a state. `backup_summary()` returns
+the strip in one object, Administrator only (`insufficient_privilege`, 403), as the two tables are:
+
+- the last success on `backup_health`'s clock, and successes out of the runs that ended in the last
+  30 days, completed or failed (a cancelled run never ran);
+- the last completed run's duration beside the median of the last 14 completed runs;
+- the backups held and their bytes, the oldest `taken_at` (how far back a restore goes, which
+  retention, pinning and the floor decide between them) and the newest backup's size;
+- the newest backup copied off site, at the current destination once one is set, as the list's
+  *Off site* column counts it;
+- the backup service's report: free and total bytes on `/backups` and its schedule.
+
+**Free space comes from the service, because nothing else can see it.** The service has no Service
+object and the page reads only Postgres. At start, and after each backup and each prune, it calls
+`statfs` on its volume and records `bavail × bsize` (what `df` calls Available) and
+`blocks × bsize` with `BACKUP_SCHEDULE` through `backup_report()`, a `backup_*` gate like
+`backup_finalise()`, into the one-row `backup_service_report`. A figure `statfs` could not give is
+NULL, never a zero. On `local-path` every claim reports the node's disk as its capacity
+(`deploy/k8s/README.md`, *Self-monitoring*), so the free figure is the node's whole disk, shared
+with the databases, and `backup.persistence.size` is a request rather than a limit.
+
+**Two warnings, computed by the page.** A last run longer than half the shortest gap between
+scheduled runs (the page reads the cron expression with `utils/cronInterval.js`): a dump that
+cannot finish inside its window arrives slowly, and this sees it months ahead. And free space
+below the newest backup plus a margin (a fifth of it, at least 1 GiB): the next backup would
+probably fail. No Grafana rule watches the free figure; *Volume Filling* covers the disk itself.
+
 **What was decided, and why the alternatives were not taken.**
 
 - *The artefact lives on a volume, not in a Storage bucket.* Uploading to a bucket needs the
@@ -5590,7 +5708,8 @@ kubectl -n aber exec -i "$POD" -- tar -xzf - -C /var/lib/storage < ./backups/<st
 # A volume the workload holds open (the forge, then the broker): scale it to zero, replace the
 # volume's contents through a helper pod holding the same claim, scale it back. The forge archive
 # restores the host keys, so appliances keep cloning; the broker archive restores the document,
-# and the boot reconcile keeps every account it holds.
+# and the boot reconcile keeps every account it holds. A forge archive taken before 1.4.0 holds
+# gitea.db as root: the forge's gitea-init container gives it back to git, and its log says so.
 restore_volume() {   # <deployment> <archive>; the claim is the deployment's "data" volume
   CLAIM=$(kubectl -n aber get "deploy/$1" -o jsonpath='{.spec.template.spec.volumes[?(@.name=="data")].persistentVolumeClaim.claimName}')
   IMAGE=$(kubectl -n aber get "deploy/$1" -o jsonpath='{.spec.template.spec.containers[0].image}')
@@ -5781,9 +5900,9 @@ superuser credential, which is neither an edge function nor a browser. `scripts/
 is that process and does that one thing. It serves nothing but `/healthz` and hands no bytes to
 anybody: a dump holds `auth.users`, every OAuth secret's hash, the whole `audit_trail` and the
 historian's password, and "any Administrator session" is a wider audience than "a shell on the
-host". Restore is the runbook above, run from that shell against the volume. The chart projects
-the script through a ConfigMap over an image built from the database's own
-(`backup-service/Dockerfile`), so `pg_dump` is at least the server's version.
+host". Restore is the runbook above, run from that shell against the volume. The script is baked
+into an image built from the database's own (`backup-service/Dockerfile`), so `pg_dump` is at least
+the server's version, and an edit to the script needs that image rebuilt.
 
 **It talks to the database through psql, as `supabase_admin`**, the session `pg_dump` needs
 anyway: the event triggers are its, and a dump taken as `postgres` restores as nobody. Values are
@@ -5822,8 +5941,11 @@ mounted is absent from the backup and the manifest says so; an empty path variab
 deliberately.
 
 **The forge's SQLite database** is copied with sqlite3's online backup, which is consistent while
-Gitea writes, from a staging directory so that tar's second `-C` lands it at `gitea/gitea.db`
-inside the archive where a restore expects it. On a read-only volume SQLite cannot open the WAL
+Gitea writes, into a staging directory, and appended at `gitea/gitea.db` inside the archive where a
+restore expects it. The copy is made as root, and a restore keeps an archive's owners, so it is
+appended with the live file's owner (`git`, uid 1000). `--owner` holds for a whole tar run, so a
+second run appends it to the uncompressed archive and `gzip` compresses the result.
+On a read-only volume SQLite cannot open the WAL
 database for reading, so the raw `db`, `-wal` and `-shm` files are copied together, the WAL
 folded into the copy with a checkpoint, and the copy integrity-checked; the method used is in
 `manifest.json`. GNU tar exits 1 for "file changed as we read it", which an upload landing

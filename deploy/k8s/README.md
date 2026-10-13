@@ -696,6 +696,72 @@ This does **not** give Studio a second factor, or a per-user audit trail of what
 editor. It controls *who may open the console*, and everything inside it still runs as the
 database owner.
 
+### What a browser may load: the Content-Security-Policy
+
+**The dashboard tells browsers what its pages may load, and browsers refuse the rest.** It sends a
+`Content-Security-Policy` header naming its own origin, the API and the two sign-in doors. A script
+injected into a page can then load nothing from elsewhere, and send what it reads nowhere.
+
+The chart builds the policy from the addresses it hands the dashboard in `/config.js`
+(`publicUrls.supabase`, `publicUrls.studio` and `publicUrls.gitea`, or their defaults):
+
+| Directive | Allows | Because |
+| :--- | :--- | :--- |
+| `connect-src` | the API over HTTP and WebSocket, the Studio and forge doors, `blob:`, `data:` | Data, sign-in, files and live updates; the sign-out request to each door; a 3D model's own textures |
+| `script-src` | the dashboard, `'wasm-unsafe-eval'` | The 3D viewer's decoders are WebAssembly |
+| `worker-src` | the dashboard, `blob:` | The decoders run in a worker made from a `blob:` address |
+| `img-src` | the dashboard, `data:`, `blob:` | Icons in the stylesheet, and area plans |
+| `style-src` | the dashboard, one `sha256-` hash | The 3D viewer's own stylesheet, inside its element |
+| `default-src`, `font-src` | the dashboard | Everything else ships in the image |
+| `frame-ancestors`, `form-action`, `base-uri`, `object-src` | nothing else | No page may frame the dashboard, and no form posts elsewhere |
+
+**If the policy leaves out an address the dashboard uses, part of a page stops working.** The page
+still opens. Tables may stay empty, live updates stop, an area plan or a 3D model does not appear,
+or sign-out leaves Studio signed in. The browser's console (F12) names the cause in a line that
+mentions the Content Security Policy.
+
+This happens when browsers reach the API at an address the chart does not know, such as a reverse
+proxy with a hostname of its own. Set `publicUrls.supabase` to the address browsers use.
+`/config.js` takes the same value, so the dashboard needs it anyway.
+
+**To keep a site working while you find the cause, switch the policy to report-only:**
+
+```bash
+helm upgrade ... --set frontend.contentSecurityPolicy.mode=report-only
+```
+
+The dashboard's pods restart, and browsers then load everything and only log each refusal in the
+console. Set it back to `enforce` when the console lists none.
+
+To see which policy the dashboard sends:
+
+```bash
+curl -sI -H 'Host: app.localhost' http://127.0.0.1/ | grep -i content-security-policy
+```
+
+[`test-harness/csp-walk.mjs`](../../test-harness/csp-walk.mjs) opens every page of the dashboard
+in a headless Chrome and lists each refusal, and CI runs it on every change
+([`docs/testing.md`](../../docs/testing.md)). Run it against a development stack: it makes and then
+deletes an area and two devices. It signs in as an account of its own, `csp-walk@aber.local`, which
+the seeded Administrator adds or restores before each run and removes after. So the walk's Sign
+Out signs nobody else out.
+
+**Grafana and the Node-RED editor send their policies report-only.** Browsers refuse nothing there,
+and log in the console what the policy would refuse. Nothing collects those logs, because nothing
+in the stack sends them out.
+
+- **Grafana's** is Grafana's own template, in [`grafana/grafana.ini`](../../grafana/grafana.ini),
+  connecting to Grafana alone (no `grafana.com`, no map tiles), with images confined to Grafana,
+  and with framing refused. To enforce it, open every provisioned dashboard, Explore, Alerting, the bundled
+  Drilldown apps and Administration with the console open. When the console lists nothing, move
+  the template to `content_security_policy`. Grafana's plugin loader and its stylesheets need
+  `'unsafe-eval'` and `'unsafe-inline'`, so enforcing it limits framing, connections, images and
+  forms, not scripts.
+- **The Node-RED editor's** covers framing and connections only (`frame-ancestors 'self';
+  connect-src 'self'`): the editor runs on inline scripts and handlers, so a policy on scripts
+  would break it. Its console lists the editor fetching the palette catalogue from
+  `catalogue.nodered.org` each time it opens.
+
 ### TLS
 
 Every certificate comes from the **internal CA** created below. It is the only supported issuer,
@@ -1086,17 +1152,18 @@ docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
 # exists to work around, and one more independent image is cheaper than one more constraint.
 docker build -f i3x/Dockerfile                  -t $NS/i3x-service:$V .
 
-# Broker credential service and the broker's boot reconcile — context is gateway-credential/, and
-# the image is built FROM eclipse-mosquitto so it carries the broker's own mosquitto_passwd and
-# mosquitto_rr. That is not incidental: the `$7$` hash has to be readable by the mosquitto that
-# will verify it, and a reimplementation produces a hash that looks correct and refuses every login
-# with nothing logged at either end. The code is NOT baked in — the chart mounts it from a ConfigMap.
-docker build -f gateway-credential/Dockerfile   -t $NS/gateway-credential:$V gateway-credential
+# Broker credential service and the broker's boot reconcile — the image is built FROM
+# eclipse-mosquitto so it carries the broker's own mosquitto_passwd and mosquitto_rr. That is not
+# incidental: the `$7$` hash has to be readable by the mosquitto that will verify it, and a
+# reimplementation produces a hash that looks correct and refuses every login with nothing logged
+# at either end. Context is the repository root: the image copies both scripts and their libraries
+# from scripts/.
+docker build -f gateway-credential/Dockerfile   -t $NS/gateway-credential:$V .
 
 # The backup service -- supabase/postgres for its pg_dump, plus node, sqlite3, GNU tar, and age and
-# the AWS CLI for the off-site copy. The code itself is projected from a ConfigMap
-# (scripts/backup-service.mjs), so this is runtime only.
-docker build -f backup-service/Dockerfile       -t $NS/backup-service:$V backup-service
+# the AWS CLI for the off-site copy. Context is the repository root: the image copies
+# scripts/backup-service.mjs.
+docker build -f backup-service/Dockerfile       -t $NS/backup-service:$V .
 
 # The historian -- timescale/timescaledb with pgBackRest, which timescaledb.physicalBackup runs inside
 # the server's container (archive_command, restore_command) and in its backup sidecar.
@@ -1410,6 +1477,10 @@ that would, and where each is switched off:
 
 **What still leaves Aber**, each because something a person uses depends on it:
 
+- The release check, only when a site turns it on: `releaseCheck.enabled` is off by default. Once a
+  day one pod asks api.github.com for the latest Aber release, with no token. The account menu then
+  says "Aber X.Y.Z is available", and no browser contacts GitHub. Under `networkPolicy.enabled` the
+  check fails until `releaseCheck.githubEgress` lists GitHub's addresses or a proxy's.
 - Grafana installs any preinstalled plugin it lacks, once, at first boot; Logs Drilldown is one. A
   site with no route to grafana.com runs without them. The Prometheus, Loki and PostgreSQL
   datasources are bundled in the image. The `drop-shadowed-plugins` init container removes any
@@ -1444,7 +1515,6 @@ container gets back only the capabilities its process was shown to need, each na
 
 | Container (pod) | Added back | Why |
 |---|---|---|
-| `envoy` (supabase-envoy) | `CHOWN`, `SETGID`, `SETUID` | The image's entrypoint hands `/dev/stdout` and `/dev/stderr` to the envoy user, then drops to it. |
 | `realtime` (supabase-realtime) | `SETGID`, `SETUID` | `/app/run.sh` runs the migrations as `nobody` through `sudo`. Its start logs `sudo: unable to send audit message: Operation not permitted`, which is harmless. |
 | `supabase-db` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `SETGID`, `SETUID` | The entrypoint fixes the data directory's owner and mode, then drops to postgres (uid 100). tini, as root, forwards the stop signal to it. Why it starts as root is under *Users*, below. |
 | `gitea-init` (gitea) | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID`, `SETUID` | The image's setup rewrites `app.ini` and the git user's `.ssh`, and runs `gitea` as git (uid 1000). |
@@ -1498,27 +1568,45 @@ Loki (10001), Prometheus and postgres_exporter (65534), GoTrue and PostgREST (10
 (`eclipse-mosquitto`) starts as its own user, 1883, with every other container in its pod. The Jobs
 that run `supabase/postgres` or `node` tools run as those images' own users (100:101, 1000:1000).
 
+Four third-party images name no `USER`. The chart runs each as the user the image carries, with its
+init containers:
+
+- **Envoy** (`supabase-envoy`) as `envoy`, 101:101, `render-config` too. Started as 101, the image's
+  entrypoint neither hands `/dev/stdout` to that user nor drops to it, so the container gets no
+  capability back. The container runtime gives a non-root process its own log streams.
+- **storage-api** (`supabase-storage`) as `node`, 1000:1000, `wait-for-storage-role` too, unless a
+  backup pod mounts its volume (below). It writes the objects' volume; see *Volumes written by an
+  earlier release*, below.
+- **postgres-meta** (`supabase-meta`) as `node`, 1000:1000. It writes nothing to disk.
+- **Studio** (`supabase-studio`) as `node`, 1000:1000. It writes snippets, and Next.js its cache,
+  to `emptyDir` volumes. Its Edge Functions folder is read, never written.
+
+`wait-for-realtime-schema` runs as `supabase/postgres`'s user, 100:101, though Realtime starts as
+root.
+
 These pods still start a container as root, each for the reason given:
 
 - **`alloy`** reads the node's `/`, `/proc` and `/sys`, which root owns.
 - **`gitea`**: the image's s6 supervisor and sshd start as root and drop to git (1000).
-- **`supabase-envoy`**: the image's entrypoint hands `/dev/stdout` to the envoy user and drops to it.
 - **`supabase-realtime`**: `/app/run.sh` runs the migrations through `sudo`.
 - **`supabase-db`**: its data directory is the volume's own root, because the image's
   `postgresql.conf` names `/var/lib/postgresql/data`. A provisioner creates that directory owned by
   root, and initdb as postgres (100) cannot take a directory it does not own. Started as root, the
   entrypoint gives it to postgres and drops to that uid. Measured: on a volume postgres already owns,
   the image also starts as 100.
-- **`supabase-storage`, `supabase-meta`, `supabase-studio`**: their images name no user, and the
-  chart has not been shown to run them as another.
+- **`supabase-storage`**, with `backup.includeStorage` (and `backup.enabled`): the backup service,
+  or the CronJob in its place, mounts its volume. On a `local` volume the kubelet then does not
+  give it `fsGroup` (below), so objects stored as root stay root's at 0755. Started as root, as in
+  1.3.0, storage-api can still add and delete beside them.
 - **`backup-service`**, with `backup.includeForge` or `backup.includeBroker`: it reads files other
   uids own at 0600.
 
 **Pod Security admission.** A namespace that enforces the *restricted* level now admits every pod
 except the ones listed above. *baseline* admits every pod except Alloy, as before.
+`scripts/check-docs-drift.mjs` (check 69) holds the list to the templates.
 
-**Volumes written by an earlier release.** 1.2.0 started several of these processes as root. Their
-volumes stay usable across `helm upgrade`:
+**Volumes written by an earlier release.** 1.2.0 started several of these processes as root, and
+1.3.0 still started storage-api as root. Their volumes stay usable across `helm upgrade`:
 
 - Each pod that writes a volume sets `fsGroup`, with `fsGroupChangePolicy: OnRootMismatch`. The
   kubelet gives the volume's root to that group, writable, so the new uid can create files in it.
@@ -1530,6 +1618,33 @@ volumes stay usable across `helm upgrade`:
   directory written as root becomes group-writable at every start, so the service can prune it.
   The backup CronJob writes flat files into the volume's root, which fsGroup already makes
   writable.
+- `supabase-storage` sets `fsGroupChangePolicy: Always`. Up to 1.3.0, storage-api wrote every
+  object as root, in group 1000: one directory per object at 0755, holding a file at 0644. As 1000
+  it can read those but not add, replace or delete beside them. At each start the kubelet makes
+  them group-writable, which it does by visiting every file and directory. Measured on an SSD:
+  about a second per 20,000 objects, where the server takes about five seconds to start. It is
+  `Always` at every start, not for one release, because a site may upgrade from 1.3.0 to any later
+  1.x directly ([`docs/releases.md`](../../docs/releases.md#upgrading-between-releases)). A site
+  with a very large bucket can set `supabaseStorage.podSecurityContext.fsGroupChangePolicy:
+  OnRootMismatch` once this prints nothing:
+  `kubectl exec deploy/supabase-storage -- find /var/lib/storage -type d ! -user 1000 ! -perm -g+w`.
+  While a backup pod mounts the volume, the pod runs as root with 1.3.0's context instead: `fsGroup`
+  1000, `OnRootMismatch`. One helper, `aber.backupMountsStorage`, decides the mount and the user.
+
+What happens if the kubelet does not apply `fsGroup` to the storage volume while storage-api runs as
+1000: reads keep working, and every upload, replacement and delete in an existing directory fails
+with `EACCES: permission denied` in the storage pod's log. A delete from the dashboard fails without
+a message. The `find` above lists the directories. It has two causes:
+
+- **A volume type that ignores `fsGroup`**: NFS, and the `hostPath` volumes k3s's `local-path` made
+  before April 2024 (k3s 1.29.4). What to do: give the volume's files to 1000 once, as root:
+  `chown -R 1000:1000` on the volume's directory.
+- **Another pod holding a `local` volume**, which `local-path` makes now: the kubelet applies
+  `fsGroup` only when no other pod has the volume mounted. This can happen when a site turns
+  `backup.includeStorage` off. The same upgrade moves storage-api to 1000 and takes the volume from
+  the backup service, and nothing orders the two rollouts, so the old backup-service pod can still
+  hold the volume when the new storage pod starts. What to do: once `kubectl rollout status
+  deploy/backup-service` returns, run `kubectl rollout restart deploy/supabase-storage`.
 
 What happens on a storage class that neither applies `fsGroup` nor creates a new volume
 world-writable (some NFS and CSI drivers; k3s's `local-path` creates it 0777): a new volume's root
@@ -1969,11 +2084,12 @@ because any of these can be missing while the counts agree:
 | `asset-3d-models` bucket exists and is still public | every model URL 400s while `model_3d_path` looks right |
 | `telemetry` is still a hypertable, with chunks | no compression and no retention; it grows forever |
 | All three rollups exist **and return rows** | a dashboard that is a flat line on a healthy-looking stack |
-| Retention and refresh jobs registered **and scheduled** | present in every catalogue view, never running |
+| Retention, refresh and late-replay jobs registered **and scheduled** | present in every catalogue view, never running |
 | A user seeded before the backup can still sign in | GoTrue's schema or the JWT secret did not survive |
 | The storage object round-trips byte for byte | `devices.model_3d_path` pointing at objects that are gone |
 | The seeded gateway repository is back with its commit, and `main` is still closed to pushes behind its status check | a fleet whose flows are gone, or whose rules are open |
 | The forge's published SSH host key has the same digest as before the backup | every appliance refuses to clone: a host-key mismatch, which reads as an attack |
+| The restored forge mints its machine-account token into the reinstalled Secret, a write to `gitea.db` | a forge that answers every read and refuses every write, so enrolment creates no repository |
 | The seeded broker account is in the restored document and the plugin answers for it | every gateway re-issued |
 | The job the dump carried as RUNNING is FAILED, and a second backup completes | a restored stack that refuses every new backup |
 | The copy fetched from the bucket decrypts, matches its manifest and is the volume's byte for byte, and the restored stack copies its own backup there | a restore after losing the site starts from a copy that is incomplete, unreadable or different, or the restored Vault cannot decrypt the bucket's key |
@@ -2429,8 +2545,8 @@ document, which has every issued gateway account, as hashes. It is the only copy
 means re-issuing every gateway. The claim has `resource-policy: keep`, so an uninstall does not
 disconnect the fleet.
 
-On every start, the `assemble-config` initContainer runs `scripts/mosquitto-dynsec-init.mjs`. The
-script:
+On every start, the `assemble-config` initContainer runs `scripts/mosquitto-dynsec-init.mjs`, which
+the `gateway-credential` image carries. The script:
 
 - replaces the roles from the ConfigMap;
 - re-hashes the platform principals and the plugin's admin from `secrets.mqtt*`, so rotating one in

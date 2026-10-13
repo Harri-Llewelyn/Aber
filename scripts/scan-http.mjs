@@ -3,7 +3,7 @@
  * The HTTP surface as a browser meets it, with OWASP ZAP's baseline scan: the response headers,
  * cookies and CORS of every host the release's Ingress serves. ZAP spiders each host for a minute
  * and reports passively; it sends nothing a browser would not. Each finding is keyed by host label
- * and ZAP alert reference (`app 10038-1`); one accepted after review is listed in
+ * and ZAP alert reference (`app 90004-2`); one accepted after review is listed in
  * scripts/lint/http-allowlist.json with its reason, and anything else at Low or above fails.
  *
  *   node scripts/scan-http.mjs [--cluster=aber] [--namespace=aber] [--context=NAME]

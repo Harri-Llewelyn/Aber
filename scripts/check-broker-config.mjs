@@ -282,9 +282,8 @@ function runInit({ outDir = dynsecDir } = {}) {
   for (const [k, v] of Object.entries(INIT_ENV)) args.push('-e', `${k}=${v}`);
   args.push(
     '-v', `${outDir}:/out`,
-    '-v', `${join(REPO, 'scripts')}:/scripts:ro`,
     '-v', `${join(REPO, 'mosquitto', 'dynsec-roles.json')}:/policy/dynsec-roles.json:ro`,
-    CREDENTIAL_IMAGE, 'sh', '-c', 'exec node /scripts/mosquitto-dynsec-init.mjs',
+    CREDENTIAL_IMAGE, 'sh', '-c', 'exec node /opt/aber/mosquitto-dynsec-init.mjs',
   );
   return docker(args);
 }
@@ -386,7 +385,7 @@ try {
   // the real image, so the reconcile of a stored document, the transplant of mosquitto_passwd's hash
   // and the file's ownership are what the deployment will do, not a model of it.
   {
-    const build = docker(['build', '-q', '-t', CREDENTIAL_IMAGE, join(REPO, 'gateway-credential')]);
+    const build = docker(['build', '-q', '-t', CREDENTIAL_IMAGE, '-f', join(REPO, 'gateway-credential', 'Dockerfile'), REPO]);
     if (build.status !== 0) {
       throw new Error(`could not build gateway-credential/Dockerfile: ${(build.stderr || '').trim().slice(0, 300)}`);
     }

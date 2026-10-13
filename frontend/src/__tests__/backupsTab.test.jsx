@@ -1,7 +1,7 @@
 import React from 'react'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { BackupsTab, BACKUP_STALE_HOURS, physicalBackupState, keptBecause } from '../components/tabs/BackupsTab'
+import { BackupsTab, BACKUP_STALE_HOURS, physicalBackupState, keptBecause, backupWarnings } from '../components/tabs/BackupsTab'
 import { nextHistorianBackup } from '../utils/historianBackupSchedule'
 import { tabIsVisible, TABS, groupedNav } from '../navigation'
 
@@ -436,15 +436,47 @@ describe('the off-site copy', () => {
     await waitFor(() => expect(screen.queryByTestId('offsite-circularity')).toBeNull())
   })
 
-  it('keeps the stored key when the field is left empty, and shows a refusal in the dialog', async () => {
+  it('keeps the stored key unless it is replaced, and shows a refusal in the dialog', async () => {
     api.backupOffsiteDestination.mockResolvedValue(DESTINATION)
     api.setBackupOffsiteDestination.mockRejectedValue(new Error('backup_offsite.bucket must be an S3 bucket name'))
     renderTab()
     fireEvent.click(await screen.findByRole('button', { name: 'Change destination' }))
-    expect(screen.getByLabelText('Secret access key')).toHaveAttribute('placeholder', expect.stringMatching(/Stored/))
+    // Said to be stored, and never shown: there is no field until the person asks to replace it.
+    expect(screen.getByText('Stored in the vault')).toBeInTheDocument()
+    expect(document.querySelector('#offsite-secret')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(await screen.findByText(/must be an S3 bucket name/)).toBeInTheDocument()
     expect(api.setBackupOffsiteCredential).not.toHaveBeenCalled()
+  })
+
+  it('asks before replacing the stored key, and writes the new one after the destination', async () => {
+    api.backupOffsiteDestination.mockResolvedValue(DESTINATION)
+    api.setBackupOffsiteDestination.mockResolvedValue(true)
+    api.setBackupOffsiteCredential.mockResolvedValue(true)
+    renderTab()
+    fireEvent.click(await screen.findByRole('button', { name: 'Change destination' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Replace Key' }))
+    expect(screen.getByTestId('offsite-secret-replace')).toHaveTextContent('the next off-site copy failing')
+    fireEvent.click(screen.getByRole('button', { name: 'Replace It' }))
+    fireEvent.change(screen.getByLabelText('Secret access key'), { target: { value: 'rotated' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.setBackupOffsiteCredential).toHaveBeenCalledWith('rotated'))
+    expect(api.setBackupOffsiteDestination.mock.invocationCallOrder[0])
+      .toBeLessThan(api.setBackupOffsiteCredential.mock.invocationCallOrder[0])
+  })
+
+  it('names a refused key as a refusal and keeps the dialog open', async () => {
+    api.backupOffsiteDestination.mockResolvedValue(DESTINATION)
+    api.setBackupOffsiteDestination.mockResolvedValue(true)
+    api.setBackupOffsiteCredential.mockRejectedValue(Object.assign(new Error('forbidden'), { status: 403 }))
+    renderTab()
+    fireEvent.click(await screen.findByRole('button', { name: 'Change destination' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Replace Key' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Replace It' }))
+    fireEvent.change(screen.getByLabelText('Secret access key'), { target: { value: 'rotated' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('Only an Administrator can set the secret access key. The stored one is unchanged.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Secret access key').value).toBe('rotated')
   })
 
   it('removes the destination after asking', async () => {
@@ -456,6 +488,126 @@ describe('the off-site copy', () => {
     expect(screen.getByText(/Copies already made stay in the bucket/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
     await waitFor(() => expect(api.clearBackupOffsiteDestination).toHaveBeenCalled())
+  })
+})
+
+describe('the trend', () => {
+  const GiB = 1024 ** 3
+  /** A stack with a month of nightly backups, one failure among them, and a report from the service. */
+  const TREND = {
+    ...HEALTHY,
+    lastSuccess: { ...HEALTHY.lastSuccess, duration_seconds: 14 * 60 },
+    runs30d: 30,
+    succeeded30d: 29,
+    medianDurationSeconds: 12 * 60,
+    medianRuns: 14,
+    backupsHeld: 16,
+    bytesHeld: 48 * GiB,
+    oldestTakenAt: '2026-09-28T02:30:00.000Z',
+    newestSizeBytes: 3 * GiB,
+    offsiteDestinationSet: true,
+    newestOffsite: { stamp: '20260911T023000Z', taken_at: hoursAgo(26), copied_at: hoursAgo(25) },
+    service: { reportedAt: hoursAgo(2), volumeFreeBytes: 80 * GiB, volumeTotalBytes: 100 * GiB, schedule: '30 2 * * *' }
+  }
+  const stat = (label) => screen.getByText(label, { selector: '.stat-label' }).closest('.stat')
+
+  it('shows the figures in a strip above the list, and no warning while they are fine', async () => {
+    api.backupRunSummary.mockResolvedValue(TREND)
+    renderTab()
+    const strip = await screen.findByTestId('backup-stats')
+    expect(strip).toHaveClass('stat-strip')
+    expect(stat('Last good backup')).toHaveTextContent('2h ago')
+    expect(stat('Succeeded, 30 days')).toHaveTextContent('29 of 30')
+    expect(stat('Last run')).toHaveTextContent('14m')
+    expect(stat('Last run')).toHaveTextContent('median 12m')
+    expect(stat('Oldest restorable')).toHaveTextContent('2026')
+    expect(stat('Space held')).toHaveTextContent('48.0 GiB')
+    expect(stat('Space held')).toHaveTextContent('16 backups')
+    expect(stat('Free on the volume')).toHaveTextContent('80.0 GiB')
+    expect(stat('Free on the volume')).toHaveTextContent('of 100.0 GiB')
+    expect(stat('Free on the volume')).toHaveAttribute('title', expect.stringMatching(/local-path.*node's whole disk, shared with the databases/))
+    expect(stat('Newest off site')).toHaveTextContent('1d ago')
+    expect(screen.queryByTestId('backup-slow')).toBeNull()
+    expect(screen.queryByTestId('backup-space')).toBeNull()
+    expect(stat('Last run')).not.toHaveClass('stat-warning')
+    expect(stat('Free on the volume')).not.toHaveClass('stat-warning')
+  })
+
+  it('marks a failure in the last 30 days, which the current-state line no longer shows', async () => {
+    api.backupRunSummary.mockResolvedValue(TREND)
+    renderTab()
+    await screen.findByTestId('backup-stats')
+    expect(screen.queryByTestId('backup-state')).toBeNull()
+    expect(stat('Succeeded, 30 days')).toHaveClass('stat-warning')
+    expect(stat('Succeeded, 30 days').querySelector('svg')).not.toBeNull()
+  })
+
+  it('shows no strip on a stack that has never run the service', async () => {
+    api.backupRunSummary.mockResolvedValue({ ...TREND, firstRecordedAt: null })
+    renderTab()
+    await screen.findByText('No backups yet.')
+    expect(screen.queryByTestId('backup-stats')).toBeNull()
+  })
+
+  it('warns when the last run took more than half the time between scheduled backups', async () => {
+    api.backupRunSummary.mockResolvedValue({
+      ...TREND,
+      lastSuccess: { ...TREND.lastSuccess, duration_seconds: 4 * 3600 },
+      service: { ...TREND.service, schedule: '0 */6 * * *' }
+    })
+    renderTab()
+    const warning = await screen.findByTestId('backup-slow')
+    expect(warning).toHaveTextContent('The last backup took 4h 0m')
+    expect(warning).toHaveTextContent('more than half the 6h 0m between scheduled backups')
+    expect(stat('Last run')).toHaveClass('stat-warning')
+  })
+
+  it('does not warn about a run under half the interval, or with no schedule to compare it with', async () => {
+    api.backupRunSummary.mockResolvedValue({
+      ...TREND,
+      lastSuccess: { ...TREND.lastSuccess, duration_seconds: 2 * 3600 },
+      service: { ...TREND.service, schedule: '0 */6 * * *' }
+    })
+    const { unmount } = renderTab()
+    await screen.findByTestId('backup-stats')
+    expect(screen.queryByTestId('backup-slow')).toBeNull()
+    unmount()
+
+    api.backupRunSummary.mockResolvedValue({
+      ...TREND,
+      lastSuccess: { ...TREND.lastSuccess, duration_seconds: 20 * 3600 },
+      service: { ...TREND.service, schedule: '' }
+    })
+    renderTab()
+    await screen.findByTestId('backup-stats')
+    expect(screen.queryByTestId('backup-slow')).toBeNull()
+  })
+
+  it('warns when free space is below the last backup plus a margin', async () => {
+    // 3 GiB backups need 3 GiB and a margin of 1 GiB; 3.5 GiB free will not do.
+    api.backupRunSummary.mockResolvedValue({ ...TREND, service: { ...TREND.service, volumeFreeBytes: 3.5 * GiB } })
+    renderTab()
+    const warning = await screen.findByTestId('backup-space')
+    expect(warning).toHaveTextContent('The next backup may not fit')
+    expect(warning).toHaveTextContent('3.5 GiB free')
+    expect(warning).toHaveTextContent('the last backup was 3.0 GiB')
+    expect(stat('Free on the volume')).toHaveClass('stat-warning')
+  })
+
+  it('keeps a margin of a fifth of a large backup', () => {
+    const summary = { ...TREND, newestSizeBytes: 20 * GiB }
+    expect(backupWarnings({ ...summary, service: { ...TREND.service, volumeFreeBytes: 23 * GiB } }).space).not.toBeNull()
+    expect(backupWarnings({ ...summary, service: { ...TREND.service, volumeFreeBytes: 25 * GiB } }).space).toBeNull()
+  })
+
+  it('says the service has not reported yet, and warns about nothing it cannot see', async () => {
+    api.backupRunSummary.mockResolvedValue({ ...TREND, service: null })
+    renderTab()
+    await screen.findByTestId('backup-stats')
+    expect(stat('Free on the volume')).toHaveTextContent('—')
+    expect(stat('Free on the volume')).toHaveAttribute('title', expect.stringMatching(/has not reported/))
+    expect(screen.queryByTestId('backup-space')).toBeNull()
+    expect(screen.queryByTestId('backup-slow')).toBeNull()
   })
 })
 

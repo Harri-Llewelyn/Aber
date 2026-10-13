@@ -518,6 +518,14 @@ export const SUITES = {
       'that the credential is write-only -- it is never asserted by value because nothing returns ' +
       'it, which is the property rather than a gap.',
   },
+  'supabase/migrations/test_foreign_credentials.py': {
+    lanes: ['db'],
+    why:
+      "0178's one writer and one probe for the foreign credentials a page sets. Administrator " +
+      'only, refused with the code PostgREST answers 403; the probe answers whether and never ' +
+      'what; no API role reads a value back or calls either helper, so no page can name a ' +
+      "stack-internal secret; and a rotation is in place, read by the backup service's next call.",
+  },
   'supabase/migrations/test_cold_archive_backlog.py': {
     lanes: ['db'],
     why:
@@ -546,7 +554,18 @@ export const SUITES = {
       "0140's Directory versions. Every chart-managed row is reached by the component map, a " +
       'component the chart stops deploying is cleared rather than left showing the last release, a ' +
       'row the chart does not manage is left alone, and no API role can call the writer -- so the ' +
-      'versions on the page are the ones db-init recorded and nobody else.',
+      'versions on the page are the ones db-init recorded and nobody else. And 0180\'s known-CVE ' +
+      'columns: matched on the exact image reference, so an overridden tag has no scan rather than ' +
+      'a zero, and an entry without its date is not a scan.',
+  },
+  'supabase/migrations/test_release_check.py': {
+    lanes: ['db'],
+    why:
+      "0181's release check row, which the account menu reads. One row replaced by each check, a " +
+      'failed check keeping only its reason, a gate that refuses a version, a link or a `newer` the ' +
+      'menu could not show safely, and Service_ReleaseCheck the only caller, not even service_role, ' +
+      'with a key that reaches nothing else -- so "Aber X.Y.Z is available" is only ever what the ' +
+      'daily check found.',
   },
   'supabase/migrations/test_backup_health.py': {
     lanes: ['db'],
@@ -559,6 +578,15 @@ export const SUITES = {
       "0150's floor, the newest three never prunable, and 0151's off-site copy, whose destination " +
       'is refused a value the service could not use and whose view counts how long the newest backup ' +
       'has gone without one.',
+  },
+  'supabase/migrations/test_backup_summary.py': {
+    lanes: ['db'],
+    why:
+      "0179's stat strip on the Backups page. backup_summary() is an Administrator's and answers " +
+      '403 to anybody else; successes count the runs that ended in 30 days and not a cancelled ' +
+      'one, the median is of the last 14 completed runs and no older one, the newest copy off ' +
+      "site is at the current destination once one is set; and the service's report is a " +
+      'backup_* gate no API role reaches, one row, with a figure statfs could not give left NULL.',
   },
   'supabase/migrations/test_platform_physical_backup.py': {
     lanes: ['db', 'stack'],
@@ -895,7 +923,9 @@ export const SUITES = {
       'and says why; a pinned backup is released once; the prune after a failed job leaves the ' +
       'newest three; and a backup reaches a MinIO encrypted, decrypts to its digest, and a pruned ' +
       'one takes its copy with it; a service started after a missed scheduled slot queues it once, ' +
-      'and does not retry it before the next slot when it fails. Stops the service container briefly.',
+      'and does not retry it before the next slot when it fails; and after a backup the service ' +
+      "reports df's figures for its volume and its schedule (0179), which backup_summary() returns. " +
+      'Stops the service container briefly.',
   },
   'supabase/functions/gateway-bundle/test_gateway_bundle.py': {
     lanes: ['stack'],
@@ -954,6 +984,20 @@ export const SUITES = {
       'asserted directly -- a metric name unique to the run can only have come from this replay, ' +
       'which is what makes the identity rewrite checkable against a live historian. Needs ' +
       '`playback.enabled`, which values-dev.yaml sets.',
+  },
+  'ingestion/test_recorded_capture_replay.py': {
+    lanes: ['stack'],
+    why:
+      'THE ONLY CHECK THAT A CAPTURE RECORDED FROM THE BROKER REACHES STORAGE AND REPLAYS. ' +
+      'test_playback_replay.py replays a file it uploaded, so the recording half ran in no suite: the ' +
+      'daemon claiming the job and asking the edge node to rebirth, the upload to broker-captures as ' +
+      'the daemon, and the captures row with the manifest ensure_shadow_devices() reads. A recording ' +
+      'that never reached storage left every suite green, and so did a file the daemon writes that ' +
+      'playback cannot read. A fixture Host gateway, its credential issued as the Gateways page ' +
+      'issues it, publishes live from the suite and answers the rebirth; an Administrator records it ' +
+      'with start_capture_job() and stops it; the file and the row are checked against what was ' +
+      'published; and that file is replayed into the historian under the replay lane and nowhere ' +
+      'else. Needs `playback.enabled`, which values-dev.yaml sets.',
   },
   'test-harness/test_load_generator.py': {
     // UNIT, AND THAT IS THE POINT. The suite exists precisely because the run it guards cannot be

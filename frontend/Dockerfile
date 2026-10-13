@@ -110,6 +110,8 @@ ENV NGINX_ENVSUBST_FILTER=^ABER_ \
     ABER_STRICT_TRANSPORT_SECURITY=""
 RUN rm -f /etc/nginx/conf.d/default.conf
 COPY nginx.conf /etc/nginx/templates/default.conf.template
+# Read by nginx as it is, not rendered: the chart mounts its rendered policy over it.
+COPY content-security-policy.conf /etc/nginx/aber/content-security-policy.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 # NON-ROOT: nginx starts as its own user (101) rather than starting as root and dropping to it. The

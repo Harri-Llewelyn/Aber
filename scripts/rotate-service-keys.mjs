@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // =================================================================================================
-// Re-sign the two service keys the ingestion daemon and the playback worker authenticate with.
+// Re-sign the service keys the ingestion daemon, the playback worker and the release check
+// authenticate with.
 //
 // Issue #101. `npm run setup` used to sign these for TEN YEARS, past the 90-day ceiling
 // `service_token_max_days()` (0043) enforces on every other principal-bearing token in the stack --
@@ -42,12 +43,13 @@
 //
 // Usage:
 //   node scripts/rotate-service-keys.mjs --check     # report days remaining, exit 1 if near/past
-//   node scripts/rotate-service-keys.mjs             # re-sign both and print them, with the commands to apply
+//   node scripts/rotate-service-keys.mjs             # re-sign all three and print them, with the commands to apply
 //   node scripts/rotate-service-keys.mjs --apply     # ... and patch the release Secret, restart the workloads
 //   node scripts/rotate-service-keys.mjs --days 30   # shorter than the 90-day default
 //
 // --apply rewrites the Secret the pods read. A release installed from a values file must carry the
-// new keys there too (--values=<file> rewrites secrets.ingestionKey and .playbackKey in it, and
+// new keys there too (--values=<file> rewrites secrets.ingestionKey, .playbackKey and
+// .releaseCheckKey in it, adding the last where a file from before 0181 lacks it, and
 // deploy/helm/aber/values-local.yaml is rewritten when it exists), or the next `helm upgrade`
 // puts the old ones back; an externally managed Secret is updated where it lives.
 // =================================================================================================
@@ -65,7 +67,7 @@ import {
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * The two keys, their principals and which container reads each.
+ * The keys, their principals and which workload reads each.
  *
  * PINNED, matching scripts/setup.mjs -- the principals are seeded by migrations and looked up by
  * nobody. `restart` names what has to be bounced for the new value to take, because a rotation an
@@ -85,6 +87,17 @@ const KEYS = [
     principal: 'b0000000-0000-4000-8000-000000000003',
     name: 'Service_Playback',
     restart: 'playback',
+  },
+  // OPTIONAL: read only with releaseCheck.enabled, and by a CronJob, which reads the Secret at each
+  // run, so nothing restarts. Absent from a stack set up before 0181, which --check does not count
+  // against it, and minted here so an existing site can turn the check on (docs/upgrades.md).
+  {
+    env: 'SUPABASE_RELEASE_CHECK_KEY',
+    valuesKey: 'releaseCheckKey',
+    principal: 'b0000000-0000-4000-8000-000000000004',
+    name: 'Service_ReleaseCheck',
+    restart: null,
+    optional: 'releaseCheck.enabled',
   },
 ];
 
@@ -122,8 +135,12 @@ if (checkOnly) {
   console.log('Service key expiry:');
   for (const key of KEYS) {
     const token = envValue(key.env);
+    if (!token && key.optional) {
+      console.log(`  ${key.env.padEnd(26)} not set; read only with ${key.optional}`);
+      continue;
+    }
     if (!token) {
-      console.log(`  ${key.env.padEnd(24)} MISSING from the release Secret`);
+      console.log(`  ${key.env.padEnd(26)} MISSING from the release Secret`);
       worst = -Infinity;
       continue;
     }
@@ -132,14 +149,14 @@ if (checkOnly) {
     if (remaining === null) {
       // A KEY WITH NO `exp` IS THE WORST CASE, NOT THE BEST. It never expires, which means it can
       // never be withdrawn -- so it is reported as a failure rather than as "no action needed".
-      console.log(`  ${key.env.padEnd(24)} NO EXPIRY — this key can never be withdrawn`);
+      console.log(`  ${key.env.padEnd(26)} NO EXPIRY — this key can never be withdrawn`);
       worst = -Infinity;
       continue;
     }
     const whole = Math.floor(remaining);
     const state = remaining < 0 ? 'EXPIRED' : remaining < EXPIRY_WARN_DAYS ? 'DUE' : 'ok';
     console.log(
-      `  ${key.env.padEnd(24)} ${String(whole).padStart(5)} days  ${new Date(Date.now() + remaining * 86400000).toISOString().slice(0, 10)}  ${state}`
+      `  ${key.env.padEnd(26)} ${String(whole).padStart(5)} days  ${new Date(Date.now() + remaining * 86400000).toISOString().slice(0, 10)}  ${state}`
       + `  jti ${claims.jti ?? 'NONE'}`
     );
     worst = Math.min(worst, remaining);
@@ -154,7 +171,7 @@ if (checkOnly) {
     process.exit(1);
   }
   console.log('');
-  console.log('✅ Both service keys are valid well beyond the warning window.');
+  console.log('✅ Every service key set is valid well beyond the warning window.');
   process.exit(0);
 }
 
@@ -217,20 +234,30 @@ for (const key of minted) {
 // live. Either way a values file the release was installed from is rewritten when it exists, or
 // the next `helm upgrade` would put the old keys back.
 // -------------------------------------------------------------------------------------------------
-const restart = [...new Set(minted.map((k) => `deploy/${k.restart}`))];
+const restart = [...new Set(minted.filter((k) => k.restart).map((k) => `deploy/${k.restart}`))];
 if (existsSync(valuesPath)) {
   let values = readFileSync(valuesPath, 'utf8');
   const notFound = [];
   for (const key of minted) {
     const pattern = new RegExp(`^(\\s*${key.valuesKey}:\\s*)"?[^"\\n]*"?\\s*$`, 'm');
-    if (!pattern.test(values)) { notFound.push(key.valuesKey); continue; }
-    values = values.replace(pattern, (m, lead) => `${lead}"${key.token}"`);
+    if (pattern.test(values)) {
+      values = values.replace(pattern, (m, lead) => `${lead}"${key.token}"`);
+      continue;
+    }
+    // A file written before this key existed: added under the key before it, at its indent.
+    const before = minted[minted.indexOf(key) - 1];
+    const anchor = key.optional && before && new RegExp(`^(\\s*)${before.valuesKey}:.*$`, 'm');
+    if (anchor && anchor.test(values)) {
+      values = values.replace(anchor, (line, indent) => `${line}\n${indent}${key.valuesKey}: "${key.token}"`);
+      continue;
+    }
+    notFound.push(key.valuesKey);
   }
   if (notFound.length) {
     console.error(`⚠️  ${valuesPath} has no assignment for secrets.${notFound.join(', ')}; not rewritten.`);
   } else {
     writeFileSync(valuesPath, values, { mode: 0o600 });
-    console.log(`✅ Rewrote secrets.ingestionKey and secrets.playbackKey in ${valuesPath}.`);
+    console.log(`✅ Rewrote ${minted.map((k) => `secrets.${k.valuesKey}`).join(', ')} in ${valuesPath}.`);
   }
 }
 if (!apply) {
@@ -238,6 +265,7 @@ if (!apply) {
   console.error('');
   console.error(`Printed only. Put these in the release Secret (${RELEASE}-secrets in ${NAMESPACE}), or re-run`);
   console.error(`with --apply to patch it here; then:  kubectl -n ${NAMESPACE} rollout restart ${restart.join(' ')}`);
+  console.error('The release check reads its key at each run; nothing restarts for it.');
   process.exit(0);
 }
 const patch = { data: Object.fromEntries(minted.map((k) => [k.env, Buffer.from(k.token).toString('base64')])) };
@@ -249,9 +277,9 @@ if (patched.status !== 0) {
 const restarted = spawnSync('kubectl', ['-n', NAMESPACE, 'rollout', 'restart', ...restart], { encoding: 'utf8' });
 console.log(`✅ Re-signed ${minted.length} service keys for ${days} days, in the release Secret.`);
 for (const key of minted) {
-  console.log(`   ${key.env.padEnd(24)} ${key.name}  jti ${key.jti}`);
+  console.log(`   ${key.env.padEnd(26)} ${key.name}  jti ${key.jti}`);
 }
-console.log(`   Both expire ${minted[0].expiresAt.toISOString().slice(0, 10)}.`);
+console.log(`   All expire ${minted[0].expiresAt.toISOString().slice(0, 10)}.`);
 console.log(restarted.status === 0 ? `   Restarted ${restart.join(' ')}.` : `   Restart by hand: kubectl -n ${NAMESPACE} rollout restart ${restart.join(' ')}`);
 console.log('');
 
@@ -263,10 +291,11 @@ if (unrecorded.length) {
   console.log('');
 }
 
-// THE LAST LINE IS THE ONE THAT MATTERS. Both workers read their key once at import, so until
+// THE LAST LINE IS THE ONE THAT MATTERS. The two workers read their key once at import, so until
 // these restart they are still presenting the previous token -- which still works, and is exactly
 // what makes it easy to believe the rotation is finished when it is not.
-console.log('⚠️  NOT LIVE YET. Both workers read their key at boot, so restart them:');
-console.log(`   kubectl -n ${NAMESPACE} rollout restart ${KEYS.map(k => 'deploy/' + k.restart).join(' ')}`);
+console.log('⚠️  NOT LIVE YET. The two workers read their key at boot, so restart them:');
+console.log(`   kubectl -n ${NAMESPACE} rollout restart ${KEYS.filter((k) => k.restart).map((k) => 'deploy/' + k.restart).join(' ')}`);
+console.log('   The release check reads its key at its next run.');
 console.log('   The previous keys keep working until they expire — rotation shortens exposure,');
 console.log('   it cannot withdraw a token that is already out there.');

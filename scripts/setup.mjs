@@ -40,7 +40,7 @@ import path from 'path';
 import crypto from 'crypto';
 import readline from 'readline/promises';
 import { fileURLToPath } from 'url';
-// SHARED WITH scripts/rotate-service-keys.mjs, which signs the same two keys again on a live
+// SHARED WITH scripts/rotate-service-keys.mjs, which signs the same three keys again on a live
 // stack (issue #101). lib/service-jwt.mjs is node:crypto and nothing else.
 import {
   mintJwt, SERVICE_KEY_DEFAULT_DAYS, INFRASTRUCTURE_KEY_DAYS
@@ -69,16 +69,22 @@ if (fs.existsSync(outPath)) {
 
 const jwtSecret = hex(32);
 
-/** Service_Ingestor and Service_Playback, seeded by 0002. Pinned: this runs before any database
- *  exists. Two machine identities because the two hold different things at the broker. */
+/** Service_Ingestor and Service_Playback, seeded by 0002, and Service_ReleaseCheck, seeded by 0181.
+ *  Pinned: this runs before any database exists. Separate identities because each reaches its own
+ *  gates: the two workers hold different things at the broker, and the release check one RPC. */
 const INGESTION_PRINCIPAL = 'b0000000-0000-4000-8000-000000000002';
 const PLAYBACK_PRINCIPAL = 'b0000000-0000-4000-8000-000000000003';
+const RELEASE_CHECK_PRINCIPAL = 'b0000000-0000-4000-8000-000000000004';
 
 const ingestionKey = mintJwt({
   role: 'authenticated', secret: jwtSecret, subject: INGESTION_PRINCIPAL, days: SERVICE_KEY_DEFAULT_DAYS,
 });
 const playbackKey = mintJwt({
   role: 'authenticated', secret: jwtSecret, subject: PLAYBACK_PRINCIPAL, days: SERVICE_KEY_DEFAULT_DAYS,
+});
+// Read only with releaseCheck.enabled, which is off by default; minted so turning it on needs no key.
+const releaseCheckKey = mintJwt({
+  role: 'authenticated', secret: jwtSecret, subject: RELEASE_CHECK_PRINCIPAL, days: SERVICE_KEY_DEFAULT_DAYS,
 });
 
 /**
@@ -95,10 +101,11 @@ const secrets = {
   // strings, not JWTs. Upstream's prefixes, so a leaked `sb_secret_` is recognisable on sight.
   publishableKey: `sb_publishable_${hex(24)}`,
   secretKey: `sb_secret_${hex(24)}`,
-  // The two bounded principal keys (90 days): `authenticated` with a `sub`, which cannot write a
+  // The three bounded principal keys (90 days): `authenticated` with a `sub`, which cannot write a
   // row directly. `npm run keys:check` reports their expiry.
   ingestionKey: ingestionKey.token,
   playbackKey: playbackKey.token,
+  releaseCheckKey: releaseCheckKey.token,
   postgresPassword: hex(24),
   timescalePassword: hex(24),
   pgMetaCryptoKey: hex(32),
@@ -269,11 +276,12 @@ console.log('   The anon and service-role JWTs were signed with the new jwtSecre
 console.log('   matching set. A publishable/secret key pair was minted too; the gateway accepts both');
 console.log(`   formats. Left empty on purpose: ${deliberatelyEmpty.join(', ')} (break-glass only).`);
 console.log('');
-console.log('🔑 The two service keys expire, unlike the anon and service-role keys:');
-console.log(`   ingestionKey  jti ${ingestionKey.jti}`);
-console.log(`   playbackKey   jti ${playbackKey.jti}`);
-console.log(`   Both valid ${SERVICE_KEY_DEFAULT_DAYS} days, until ${ingestionKey.expiresAt.toISOString().slice(0, 10)}.`);
-console.log('   `npm run keys:check` reports the remaining days; `npm run keys:rotate` re-signs both.');
+console.log('🔑 The three service keys expire, unlike the anon and service-role keys:');
+console.log(`   ingestionKey     jti ${ingestionKey.jti}`);
+console.log(`   playbackKey      jti ${playbackKey.jti}`);
+console.log(`   releaseCheckKey  jti ${releaseCheckKey.jti}  (read only with releaseCheck.enabled)`);
+console.log(`   All valid ${SERVICE_KEY_DEFAULT_DAYS} days, until ${ingestionKey.expiresAt.toISOString().slice(0, 10)}.`);
+console.log('   `npm run keys:check` reports the remaining days; `npm run keys:rotate` re-signs them.');
 console.log('');
 if (domain && domain !== 'localhost') {
   console.log(`🌐 Every host is under ${domain}: browsers and Remote gateways dial it, and the broker`);

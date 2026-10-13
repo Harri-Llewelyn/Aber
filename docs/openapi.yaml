@@ -1820,6 +1820,71 @@ paths:
               schema: { type: boolean }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /rest/v1/rpc/backup_summary:
+    post:
+      tags: [Storage]
+      summary: The Backups page's figures in one object
+      description: |
+        Whether backups are heading for trouble, which the run list cannot say: the last success
+        (when the newest completed job started, `backup_health`'s clock) and the latest outcome;
+        successes out of the runs that ended in the last 30 days, completed or failed; the median
+        duration of the last 14 completed runs; the backups held, their bytes, the oldest
+        `taken_at` and the newest backup's size; the newest copy off site, at the current
+        destination once one is set; and `service`, what the backup service last reported of its
+        volume (`statfs` on `/backups`; on local-path the node's whole disk) and its schedule, or
+        null before its first report. Administrator only.
+      responses:
+        '200':
+          description: The summary. Times are ISO 8601, sizes bytes, durations seconds.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  first_recorded_at: { type: string, format: date-time, nullable: true }
+                  last_success:
+                    type: object
+                    nullable: true
+                    properties:
+                      id: { type: string, format: uuid }
+                      status: { type: string }
+                      started_at: { type: string, format: date-time }
+                      finished_at: { type: string, format: date-time }
+                      duration_seconds: { type: number }
+                  latest_outcome:
+                    type: object
+                    nullable: true
+                    properties:
+                      id: { type: string, format: uuid }
+                      status: { type: string, enum: [COMPLETED, FAILED] }
+                      started_at: { type: string, format: date-time, nullable: true }
+                      finished_at: { type: string, format: date-time }
+                  runs_30d: { type: integer }
+                  succeeded_30d: { type: integer }
+                  median_duration_seconds: { type: number, nullable: true }
+                  median_runs: { type: integer }
+                  backups_held: { type: integer }
+                  bytes_held: { type: integer }
+                  oldest_taken_at: { type: string, format: date-time, nullable: true }
+                  newest_size_bytes: { type: integer, nullable: true }
+                  offsite_destination_set: { type: boolean }
+                  newest_offsite:
+                    type: object
+                    nullable: true
+                    properties:
+                      stamp: { type: string }
+                      taken_at: { type: string, format: date-time }
+                      copied_at: { type: string, format: date-time }
+                  service:
+                    type: object
+                    nullable: true
+                    properties:
+                      reported_at: { type: string, format: date-time }
+                      volume_free_bytes: { type: integer, nullable: true }
+                      volume_total_bytes: { type: integer, nullable: true }
+                      schedule: { type: string, description: 'BACKUP_SCHEDULE as the service runs it; empty when scheduled backups are off.' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /rest/v1/playback_jobs:
     get:
       tags: [Storage]
@@ -2386,6 +2451,27 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/DirectoryService' } }
+
+  /rest/v1/release_check:
+    get:
+      tags: [Registry]
+      summary: The last answer of the opt-in release check
+      description: |
+        One row, or none where the check has never run: `releaseCheck.enabled` is off by default.
+        Once a day the release-check CronJob asks GitHub for the latest Aber release and records
+        the answer through `record_release_check()`, which only its own machine principal,
+        `Service_ReleaseCheck`, may call: not `service_role`. Every
+        signed-in user reads it, for the account menu's "Aber X.Y.Z is available", which shows only
+        a successful check under two days old. A failed check keeps only `error`.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: The row, or an empty array.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ReleaseCheck' } }
+        '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
 
   # ------------------------------------------------------------- Storage ----
   /storage/v1/object/asset-3d-models/{path}:
@@ -4764,9 +4850,68 @@ components:
             db-init from the chart on every install and upgrade (`0140`). It is the release's pin,
             not an observation of the running container. `null` when the chart does not deploy the
             service, or when something other than the chart registered it.
+        image_fixable_critical:
+          type: integer
+          nullable: true
+          example: 0
+          description: >-
+            Fixable CRITICAL vulnerabilities the release's scan found in `image`, from the summary
+            the packaged chart carries and db-init records on every run (`0180`). Matched on the
+            exact reference, so `null` means the release did not scan that image, as for an
+            overridden tag. It is never a zero nobody measured.
+        image_fixable_high:
+          type: integer
+          nullable: true
+          example: 3
+          description: Fixable HIGH vulnerabilities in `image`, on the same terms as `image_fixable_critical`.
+        image_scanned_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the release scanned `image`. A vulnerability published later is not counted. `null` when not scanned.
+        image_vulnerability_db_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: The date of the vulnerability database that scan used. `null` when not scanned.
+        upstream_version:
+          type: string
+          nullable: true
+          example: 5.0.7
+          description: >-
+            For an image Aber builds from a third-party product and tags with Aber's version, such
+            as Node-RED or Swagger UI, that product's version, from the same summary. `null` for
+            every other image.
         status: { type: string, example: ACTIVE }
         last_heartbeat: { type: string, format: date-time, nullable: true }
         registered_schema_id: { type: string, format: uuid, nullable: true }
+
+    ReleaseCheck:
+      type: object
+      properties:
+        checked_at: { type: string, format: date-time, description: 'When the check ran.' }
+        running_version:
+          type: string
+          example: 1.4.0
+          description: "The `MAJOR.MINOR.PATCH` of the chart's appVersion the check compared against."
+        latest_version:
+          type: string
+          nullable: true
+          example: 1.5.0
+          description: 'The latest published release. `null` when the check failed.'
+        latest_url:
+          type: string
+          nullable: true
+          example: 'https://github.com/Harri-Llewelyn/Aber/releases/tag/v1.5.0'
+          description: 'Its release notes, always a release of this repository. `null` when the check failed.'
+        newer:
+          type: boolean
+          nullable: true
+          description: 'Whether `latest_version` is newer than `running_version`. `null` when the check failed.'
+        error:
+          type: string
+          nullable: true
+          description: 'Why the check failed, for an operator. `null` when it succeeded.'
 
     Schema:
       type: object

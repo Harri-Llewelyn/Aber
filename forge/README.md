@@ -53,9 +53,23 @@ image. `/etc/s6/gitea/setup` is what the server runs to build one from the `GITE
 environment, so calling it here means the two containers cannot disagree about what they built.
 Re-running it is harmless: the template is expanded only when `app.ini` is absent, and the
 environment-to-ini step merges into it rather than replacing it. The script runs as root and then
-as `git` through `su-exec`: the setup script chowns `/data` to the `git` user, which is the whole
-reason the server can read what this wrote, and every gitea command after it runs as that user so
-nothing in the database or the repository tree ends up owned by root.
+as `git` through `su-exec`: the setup script chowns `/data/gitea` and `/data/git` to the `git`
+user, which is the whole reason the server can read what this wrote, and every gitea command after
+it runs as that user so nothing in the database or the repository tree ends up owned by root.
+
+**A restored database is given back to `git`.** After the setup, the script checks `gitea.db`, its
+`-journal`, `-wal` and `-shm` files, and `/data/gitea` itself. Whatever `git` does not own is
+chowned to it, and one log line names it. A normal start changes nothing.
+
+The setup misses this case: it chowns `/data/gitea` recursively only when the directory itself is
+not `git`'s. The backup service copies `gitea.db` as root, so a forge archive taken before 1.4.0
+holds it as root. A restore untars as root, which keeps an archive's owners, so the database came
+back unwritable inside a `git`-owned directory. Measured against `gitea/gitea:28.0.0`, the server
+then answered `/api/healthz` with 200 and failed every write with `attempt to write a readonly
+database`; nothing reported it. Since 1.4.0 `gitea-token` writes the database before the server
+starts, so without this step the pod stops in `Init:CrashLoopBackOff`. The token step and the gitea
+CLI write only the database and its directory (measured), so nothing else is changed: the
+repository tree and the host keys keep the owners the setup gives them.
 
 **Two accounts: an administrator and a bot.** The administrator exists because `INSTALL_LOCK`
 closes the web installer: a forge on a plant network would otherwise be one HTTP request away from

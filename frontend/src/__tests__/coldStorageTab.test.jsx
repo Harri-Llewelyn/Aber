@@ -319,7 +319,7 @@ describe('how far behind the archive is', () => {
 
   /** Whether the figure carries the warning tone, which is a class on the stat. */
   const backlogWarns = () =>
-    screen.getByText('Unexported since').closest('.cold-stat').classList.contains('cold-stat-warning')
+    screen.getByText('Unexported since').closest('.stat').classList.contains('stat-warning')
 
   it('stays neutral inside one chunk interval', async () => {
     // A chunk is not eligible until its whole span (up to seven days) has passed the threshold,
@@ -337,7 +337,7 @@ describe('how far behind the archive is', () => {
     await waitFor(() => expect(screen.getByText('Unexported since')).toBeInTheDocument())
     expect(backlogWarns()).toBe(true)
     // An icon as well as the colour, which is never the only signal.
-    expect(screen.getByText('Unexported since').closest('.cold-stat').querySelector('.cold-stat-value svg')).not.toBeNull()
+    expect(screen.getByText('Unexported since').closest('.stat').querySelector('.stat-value svg')).not.toBeNull()
   })
 
   it('renders the catalogue even when the backlog cannot be read', async () => {

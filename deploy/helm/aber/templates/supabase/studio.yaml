@@ -38,7 +38,12 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      # The image's node user, 1000. It writes only to the emptyDirs below; the image's files are
+      # root's.
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -124,12 +129,18 @@ spec:
               mountPath: /app/edge-functions
             - name: snippets
               mountPath: /app/snippets
+            # Next.js creates .next/cache under the image's root-owned .next on its first image
+            # request, and logs EACCES without this.
+            - name: next-cache
+              mountPath: /app/apps/studio/.next/cache
       volumes:
-        # Both are scratch: see EDGE_FUNCTIONS_MANAGEMENT_FOLDER above. Snippets are user SQL saved
-        # in the UI and are NOT persisted here deliberately -- a ReadWriteOnce PVC for a convenience
-        # cache would pin Studio to one node for no operational benefit.
+        # All three are scratch: see EDGE_FUNCTIONS_MANAGEMENT_FOLDER above. Snippets are user SQL
+        # saved in the UI and are NOT persisted here deliberately -- a ReadWriteOnce PVC for a
+        # convenience cache would pin Studio to one node for no operational benefit.
         - name: edge-functions
           emptyDir: {}
         - name: snippets
+          emptyDir: {}
+        - name: next-cache
           emptyDir: {}
 {{- end }}

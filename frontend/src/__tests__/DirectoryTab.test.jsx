@@ -1,7 +1,7 @@
 import React from 'react'
 import fs from 'node:fs'
 import path from 'node:path'
-import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, act, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   DirectoryTab,
@@ -9,6 +9,8 @@ import {
   endpointReach,
   viewerIsOnDeploymentHost,
   imageVersion,
+  imageScan,
+  imageScanSummary,
   serviceTypeLabel
 } from '../components/tabs/DirectoryTab'
 import { api } from '../api'
@@ -727,6 +729,121 @@ describe('the Version column', () => {
     await renderTab()
     const headers = [...document.querySelector('table').querySelectorAll('th')].map(th => th.textContent)
     expect(headers).toEqual(['Service Name', 'Service Type', 'Version', 'Endpoint URL', 'Reach', 'Liveness'])
+  })
+
+  it('shows the upstream product version for an image Aber builds, keeping its own reference in the tooltip', async () => {
+    api.get.mockResolvedValue([
+      { ...svc('Node-RED (Host-Run Gateways)', 'EDGE_NODE', 'http://localhost:1880'),
+        image: 'ghcr.io/harri-llewelyn/aber/node-red:1.4.0', upstream_version: '5.0.7' },
+      { ...svc('API Reference (Swagger UI)', 'DOCUMENTATION', 'http://localhost:8088'),
+        image: 'ghcr.io/harri-llewelyn/aber/swagger-ui:1.4.0', upstream_version: 'v5.33.0' }
+    ])
+    await renderTab()
+    const nodeRed = screen.getByText('5.0.7')
+    expect(nodeRed.getAttribute('title')).toMatch(/^ghcr\.io\/harri-llewelyn\/aber\/node-red:1\.4\.0 /)
+    expect(nodeRed.getAttribute('title')).toMatch(/built from 5\.0\.7/)
+    expect(screen.getByText('5.33.0')).toBeInTheDocument()
+    expect(screen.queryByText('1.4.0')).toBeNull()
+  })
+})
+
+describe('the known-CVE badge', () => {
+  const scanned = (critical, high) => ({
+    image_fixable_critical: critical,
+    image_fixable_high: high,
+    image_scanned_at: '2026-10-02T07:12:40.118+00:00',
+    image_vulnerability_db_at: '2026-10-01T18:41:02+00:00'
+  })
+
+  describe('imageScan', () => {
+    it('has nothing to say for a row with no image', () => {
+      expect(imageScan({ image: null })).toBeNull()
+    })
+
+    it('reads a row the release did not scan as not scanned, never as zero', () => {
+      expect(imageScan({ image: 'grafana/grafana:13.2.0-hotfix' })).toEqual({ scanned: false })
+      // A count without the date it was true on is not a scan either.
+      expect(imageScan({ image: 'grafana/grafana:13.2.0', image_fixable_critical: 0, image_fixable_high: 0 }))
+        .toEqual({ scanned: false })
+    })
+
+    it('reads the counts and dates of a scanned image', () => {
+      expect(imageScan({ image: 'grafana/grafana:13.2.0', ...scanned(1, 3) }))
+        .toEqual({ scanned: true, critical: 1, high: 3, date: '2026-10-02', dbDate: '2026-10-01' })
+    })
+  })
+
+  describe('imageScanSummary', () => {
+    it('states each severity it found, with the date', () => {
+      expect(imageScanSummary({ critical: 0, high: 3, date: '2026-10-02' })).toBe('3 fixable HIGH, as of 2026-10-02')
+      expect(imageScanSummary({ critical: 1, high: 0, date: '2026-10-02' })).toBe('1 fixable CRITICAL, as of 2026-10-02')
+      expect(imageScanSummary({ critical: 2, high: 5, date: '2026-10-02' }))
+        .toBe('2 fixable CRITICAL and 5 fixable HIGH, as of 2026-10-02')
+    })
+
+    it('dates a clean scan too, so a zero is never undated', () => {
+      expect(imageScanSummary({ critical: 0, high: 0, date: '2026-10-02' }))
+        .toBe('No fixable HIGH or CRITICAL, as of 2026-10-02')
+    })
+  })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    api.get.mockResolvedValue([
+      { ...svc('Grafana Dashboards', 'MONITORING', 'http://localhost:3002'), image: 'grafana/grafana:13.2.0', ...scanned(0, 3) },
+      { ...svc('Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323'), image: 'supabase/studio:2026.09.28', ...scanned(2, 5) },
+      { ...svc('Supabase Auth (GoTrue)', 'MONITORING', 'http://127.0.0.1:54321/auth/v1'), image: 'supabase/gotrue:v2.197.0', ...scanned(0, 0) },
+      { ...svc('Prometheus Metrics Store', 'MONITORING', 'http://prometheus:9090'), image: 'prom/prometheus:v3.15.0-mirror' },
+      { ...svc('Something Newly Registered', 'MONITORING', 'http://elsewhere.plant.local'), image: null }
+    ])
+  })
+
+  it('counts the fixable findings beside the version, with the scan date in the tooltip', async () => {
+    await renderTab()
+    const badge = screen.getByText('3 CVEs')
+    expect(badge.closest('td').className).toContain('cell-version')
+    expect(badge.getAttribute('title')).toMatch(/^3 fixable HIGH, as of 2026-10-02\./)
+    expect(badge.getAttribute('title')).toMatch(/vulnerability database of 2026-10-01/)
+    expect(badge.className).toContain('badge-warning')
+  })
+
+  it('marks an image with a CRITICAL finding as the more urgent', async () => {
+    await renderTab()
+    const badge = screen.getByText('7 CVEs')
+    expect(badge.className).toContain('badge-danger')
+    expect(badge.getAttribute('title')).toMatch(/^2 fixable CRITICAL and 5 fixable HIGH, as of 2026-10-02/)
+  })
+
+  it('shows a clean scan as zero with its date, quietly', async () => {
+    await renderTab()
+    const badge = screen.getByText('0 CVEs')
+    expect(badge.className).toContain('badge-neutral')
+    expect(badge.getAttribute('title')).toMatch(/^No fixable HIGH or CRITICAL, as of 2026-10-02/)
+  })
+
+  it('says "not scanned" in words for an image the release did not scan, and no count', async () => {
+    await renderTab()
+    const row = screen.getByText('Prometheus Metrics Store').closest('tr')
+    const words = within(row).getByText('not scanned')
+    expect(words.className).not.toContain('badge')
+    expect(words.getAttribute('title')).toMatch(/did not scan this exact image/)
+    expect(within(row).queryByText(/CVE/)).toBeNull()
+  })
+
+  it('adds nothing beside "not recorded", where there is no image to have scanned', async () => {
+    await renderTab()
+    const cell = screen.getByText('Something Newly Registered').closest('tr').querySelector('.cell-version')
+    expect(cell.textContent).toBe('not recorded')
+  })
+
+  it('reads every row as not scanned when the chart carried no summary', async () => {
+    api.get.mockResolvedValue([
+      { ...svc('Grafana Dashboards', 'MONITORING', 'http://localhost:3002'), image: 'grafana/grafana:13.2.0' },
+      { ...svc('Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323'), image: 'supabase/studio:2026.09.28' }
+    ])
+    await renderTab()
+    expect(screen.getAllByText('not scanned')).toHaveLength(2)
+    expect(screen.queryByText(/CVE/)).toBeNull()
   })
 })
 

@@ -101,7 +101,7 @@ export const KNOWN_PRINCIPALS = {
     mintCommand: 'node scripts/mint-mcp-token.mjs --principal {id}',
   },
   /*
-   * The two identities `npm run setup` signs keys for, so what this page says about them is what
+   * The identities `npm run setup` signs keys for, so what this page says about them is what
    * an operator reads when asking what a key is for. check-docs-drift.mjs (11d) asserts every
    * pinned principal has an entry here.
    */
@@ -132,6 +132,17 @@ export const KNOWN_PRINCIPALS = {
     mintCommand: 'npm run keys:rotate',
     secretKey: 'SUPABASE_PLAYBACK_KEY',
     deployment: 'playback',
+  },
+  'b0000000-0000-4000-8000-000000000004': {
+    name: 'Service_ReleaseCheck',
+    purpose: 'The opt-in release check\'s database identity (releaseCheck.enabled). It holds no role '
+      + 'and no permission: its key reaches one SECURITY DEFINER gate, record_release_check, which '
+      + 'admits this identity alone, so a leaked key records a release check and does nothing else.',
+    mintedBy: 'scripts/setup.mjs, re-signed by scripts/rotate-service-keys.mjs',
+    mintCommand: 'npm run keys:rotate',
+    secretKey: 'SUPABASE_RELEASE_CHECK_KEY',
+    // A CronJob, not a Deployment: it reads the Secret at each run, so a rotation restarts nothing.
+    readBy: 'the release-check CronJob at each run',
   },
 }
 

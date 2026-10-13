@@ -18,7 +18,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const DEPS = join(REPO, 'scripts', 'lint', 'eslint-deps')
 const CACHE = join(REPO, '.cache', 'lint', 'eslint')
-const TARGETS = ['frontend/src', 'scripts', 'forge']
+const TARGETS = ['frontend/src', 'scripts', 'forge', 'test-harness']
 
 const lock = readFileSync(join(DEPS, 'package-lock.json'))
 const stamp = createHash('sha256').update(lock).digest('hex')
