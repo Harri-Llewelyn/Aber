@@ -5561,6 +5561,18 @@ ol.gateway-steps {
 .cold-switch-reason { font-size: 12px; line-height: 1.45; color: var(--text-muted); }
 .cold-switch-reason-warning { color: var(--warning-text); }
 .cold-switch-reason svg { margin-right: 6px; vertical-align: -2px; }
+/* CREDENTIAL FIELD: a stored key is a status and a button, never a masked value. */
+.credential-stored {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  min-height: 34px;
+}
+.credential-status { font-size: 13px; color: var(--text-primary); }
+.credential-status svg { margin-right: 6px; vertical-align: -2px; }
+.credential-actions { display: flex; gap: 8px; margin-top: 10px; }
+.credential-keep { margin-top: 6px; }
 /* A badge whose meaning is its tooltip: the dotted underline says so. */
 .badge-hint {
   text-decoration: underline dotted var(--text-muted);

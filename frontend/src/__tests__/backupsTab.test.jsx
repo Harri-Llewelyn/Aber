@@ -436,15 +436,47 @@ describe('the off-site copy', () => {
     await waitFor(() => expect(screen.queryByTestId('offsite-circularity')).toBeNull())
   })
 
-  it('keeps the stored key when the field is left empty, and shows a refusal in the dialog', async () => {
+  it('keeps the stored key unless it is replaced, and shows a refusal in the dialog', async () => {
     api.backupOffsiteDestination.mockResolvedValue(DESTINATION)
     api.setBackupOffsiteDestination.mockRejectedValue(new Error('backup_offsite.bucket must be an S3 bucket name'))
     renderTab()
     fireEvent.click(await screen.findByRole('button', { name: 'Change destination' }))
-    expect(screen.getByLabelText('Secret access key')).toHaveAttribute('placeholder', expect.stringMatching(/Stored/))
+    // Said to be stored, and never shown: there is no field until the person asks to replace it.
+    expect(screen.getByText('Stored in the vault')).toBeInTheDocument()
+    expect(document.querySelector('#offsite-secret')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(await screen.findByText(/must be an S3 bucket name/)).toBeInTheDocument()
     expect(api.setBackupOffsiteCredential).not.toHaveBeenCalled()
+  })
+
+  it('asks before replacing the stored key, and writes the new one after the destination', async () => {
+    api.backupOffsiteDestination.mockResolvedValue(DESTINATION)
+    api.setBackupOffsiteDestination.mockResolvedValue(true)
+    api.setBackupOffsiteCredential.mockResolvedValue(true)
+    renderTab()
+    fireEvent.click(await screen.findByRole('button', { name: 'Change destination' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Replace Key' }))
+    expect(screen.getByTestId('offsite-secret-replace')).toHaveTextContent('the next off-site copy failing')
+    fireEvent.click(screen.getByRole('button', { name: 'Replace It' }))
+    fireEvent.change(screen.getByLabelText('Secret access key'), { target: { value: 'rotated' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.setBackupOffsiteCredential).toHaveBeenCalledWith('rotated'))
+    expect(api.setBackupOffsiteDestination.mock.invocationCallOrder[0])
+      .toBeLessThan(api.setBackupOffsiteCredential.mock.invocationCallOrder[0])
+  })
+
+  it('names a refused key as a refusal and keeps the dialog open', async () => {
+    api.backupOffsiteDestination.mockResolvedValue(DESTINATION)
+    api.setBackupOffsiteDestination.mockResolvedValue(true)
+    api.setBackupOffsiteCredential.mockRejectedValue(Object.assign(new Error('forbidden'), { status: 403 }))
+    renderTab()
+    fireEvent.click(await screen.findByRole('button', { name: 'Change destination' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Replace Key' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Replace It' }))
+    fireEvent.change(screen.getByLabelText('Secret access key'), { target: { value: 'rotated' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText('Only an Administrator can set the secret access key. The stored one is unchanged.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Secret access key').value).toBe('rotated')
   })
 
   it('removes the destination after asking', async () => {

@@ -509,6 +509,14 @@ export const SUITES = {
       'that the credential is write-only -- it is never asserted by value because nothing returns ' +
       'it, which is the property rather than a gap.',
   },
+  'supabase/migrations/test_foreign_credentials.py': {
+    lanes: ['db'],
+    why:
+      "0178's one writer and one probe for the foreign credentials a page sets. Administrator " +
+      'only, refused with the code PostgREST answers 403; the probe answers whether and never ' +
+      'what; no API role reads a value back or calls either helper, so no page can name a ' +
+      "stack-internal secret; and a rotation is in place, read by the backup service's next call.",
+  },
   'supabase/migrations/test_cold_archive_backlog.py': {
     lanes: ['db'],
     why:

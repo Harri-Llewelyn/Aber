@@ -838,9 +838,10 @@ const apiMethods = {
     const { error } = await supabase.rpc('set_archive_credential', { p_secret: secret });
     if (error) {
       // PostgREST maps the function's insufficient_privilege to 403; anything else is a fault.
-      throw new Error(error.code === '42501'
+      // `status` lets CredentialField name the refusal.
+      throw Object.assign(new Error(error.code === '42501'
         ? 'Only an Administrator can set the archive credential'
-        : (error.message || 'Could not set the archive credential'));
+        : (error.message || 'Could not set the archive credential')), error.code === '42501' ? { status: 403 } : {});
     }
     return true;
   },
@@ -1262,13 +1263,13 @@ const apiMethods = {
     return true;
   },
 
-  /** The secret key, into the vault. Write-only: nothing reads it back. */
+  /** The secret key, into the vault. Write-only: nothing reads it back. A refusal carries `status: 403`. */
   setBackupOffsiteCredential: async (secret) => {
     const { error } = await supabase.rpc('set_backup_offsite_credential', { p_secret: secret });
     if (error) {
-      throw new Error(error.code === '42501'
+      throw Object.assign(new Error(error.code === '42501'
         ? 'Only an Administrator can set the off-site credential'
-        : (error.message || 'Could not save the off-site credential'));
+        : (error.message || 'Could not save the off-site credential')), error.code === '42501' ? { status: 403 } : {});
     }
     return true;
   },

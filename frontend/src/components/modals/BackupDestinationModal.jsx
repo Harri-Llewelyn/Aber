@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
+import { CredentialField, useCredential } from '../common/CredentialField'
 import { Modal } from '../common/Modal'
 import { IconAlertTriangle, IconHardDrive } from '../common/Icons'
 
@@ -13,12 +14,13 @@ const FIELDS = [
 ]
 
 /**
- * Where every backup is copied, encrypted, and with what. The seven fields are settings, `path_style` among them; the secret
- * key goes to the vault and is never read back, so its field starts empty and an empty field keeps
- * what is stored. The circularity is stated here because this is where the credential is typed:
- * the vault holding it is inside every backup, so a restore after losing the site starts without it.
+ * Where every backup is copied, encrypted, and with what. The seven fields are settings, `path_style`
+ * among them, written by `onSave`; the secret key is a `CredentialField`, written after them by
+ * `writeCredential`, never read back, and replaced only after the field has asked. The circularity
+ * is stated here because this is where the credential is typed: the vault holding it is inside
+ * every backup, so a restore after losing the site starts without it.
  */
-export function BackupDestinationModal({ destination, credentialSet, onSave, onRemove, onClose }) {
+export function BackupDestinationModal({ destination, credentialSet, onSave, writeCredential, onSaved, onRemove, onClose }) {
   const [values, setValues] = useState(() => ({
     endpoint: destination?.endpoint || '',
     region: destination?.region || '',
@@ -28,18 +30,20 @@ export function BackupDestinationModal({ destination, credentialSet, onSave, onR
     recipient: destination?.recipient || '',
     path_style: !!destination?.path_style
   }))
-  const [secret, setSecret] = useState('')
+  const credential = useCredential({ stored: credentialSet, write: writeCredential, label: 'the secret access key' })
   const [error, setError] = useState(null)
   const [removing, setRemoving] = useState(false)
   const [pending, run] = usePendingAction()
 
   const set = (id) => (e) => setValues(v => ({ ...v, [id]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }))
-  const configured = Object.entries(values).some(([k, v]) => k !== 'path_style' && String(v).trim()) || credentialSet
+  const configured = Object.entries(values).some(([k, v]) => k !== 'path_style' && String(v).trim()) || credential.stored
 
   const save = () => run(async () => {
     setError(null)
     try {
-      await onSave({ values, secret: secret.trim() })
+      await onSave({ values })
+      await credential.commit()
+      await onSaved?.()
     } catch (err) {
       setError(err.message)
     }
@@ -114,23 +118,12 @@ export function BackupDestinationModal({ destination, credentialSet, onSave, onR
             {f.hint && <p className="form-hint">{f.hint}</p>}
           </div>
         ))}
-        <div className="form-group">
-          <label className="form-label" htmlFor="offsite-secret">Secret access key</label>
-          <input
-            id="offsite-secret"
-            className="form-control mono"
-            type="password"
-            value={secret}
-            onChange={e => setSecret(e.target.value)}
-            disabled={pending}
-            placeholder={credentialSet ? 'Stored. Leave empty to keep it' : 'Not set'}
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <p className="form-hint">
-            Written to the Vault and never shown again. A new one replaces the stored one.
-          </p>
-        </div>
+        <CredentialField
+          id="offsite-secret"
+          credential={credential}
+          disabled={pending}
+          consequence="If the new one is wrong, the first sign is the next off-site copy failing."
+        />
       </div>
 
       <div className="form-group">

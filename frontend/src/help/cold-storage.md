@@ -10,7 +10,9 @@ The line under the page's description says how long the historian keeps raw tele
 - The button reads **Complete the destination**, in amber with a warning icon, when archiving is on but part of the destination is missing. Its tooltip names what is missing.
 - Once archiving is on and the destination is complete, the button reads **Change destination**. Its tooltip names the address objects are written to: the endpoint, the bucket and this site's key.
 - **The destination dialog** holds the S3 endpoint, region, bucket, access key ID and path style, and the secret access key. It also holds the **Archive telemetry before dropping it** switch.
-- The secret key is stored in the vault, and never shown again. Leave the field empty to keep the stored one. The site key is fixed when Aber is installed, and is shown for reference.
+- The secret key is stored in the vault, and never shown again. Once one is stored, the dialog says so instead of showing a field.
+- **Replace Key** asks before it overwrites the stored key, because the old one cannot be recovered. A wrong key shows only when the nightly export fails to sign in.
+- The site key is fixed when Aber is installed, and is shown for reference.
 - The switch cannot be turned on until every part of the destination is set. The dialog says beside it what is still missing. Saving writes only the values you changed. Each one is an ordinary setting, recorded in the Audit Trail.
 - **The summary strip** above the catalogue reads **On cold storage** (chunks whose raw rows are gone), **Rows archived**, **Object storage used** and **Oldest span held**. Then comes **Unexported since**. **Awaiting drop** and **Failed** appear when either is above zero.
 - **Object** is the file on object storage, shown by its key. A long key is cut in the middle so its end stays visible. Click it to copy the whole key.
