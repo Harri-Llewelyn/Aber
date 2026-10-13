@@ -5890,9 +5890,9 @@ superuser credential, which is neither an edge function nor a browser. `scripts/
 is that process and does that one thing. It serves nothing but `/healthz` and hands no bytes to
 anybody: a dump holds `auth.users`, every OAuth secret's hash, the whole `audit_trail` and the
 historian's password, and "any Administrator session" is a wider audience than "a shell on the
-host". Restore is the runbook above, run from that shell against the volume. The chart projects
-the script through a ConfigMap over an image built from the database's own
-(`backup-service/Dockerfile`), so `pg_dump` is at least the server's version.
+host". Restore is the runbook above, run from that shell against the volume. The script is baked
+into an image built from the database's own (`backup-service/Dockerfile`), so `pg_dump` is at least
+the server's version, and an edit to the script needs that image rebuilt.
 
 **It talks to the database through psql, as `supabase_admin`**, the session `pg_dump` needs
 anyway: the event triggers are its, and a dump taken as `postgres` restores as nobody. Values are

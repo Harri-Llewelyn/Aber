@@ -80,8 +80,9 @@ export const IMAGES = [
   // which on a tree ahead of it would claim a release this bundle is not.
   { name: 'frontend', file: 'frontend/Dockerfile', context: 'frontend', args: ['VITE_RUNTIME_CONFIG=true', 'VITE_APP_VERSION=DESCRIBE'] },
   { name: 'i3x-service', file: 'i3x/Dockerfile', context: '.' },
-  { name: 'gateway-credential', file: 'gateway-credential/Dockerfile', context: 'gateway-credential' },
-  { name: 'backup-service', file: 'backup-service/Dockerfile', context: 'backup-service' },
+  // Both carry their scripts from scripts/, so a script edit needs this rebuild.
+  { name: 'gateway-credential', file: 'gateway-credential/Dockerfile', context: '.' },
+  { name: 'backup-service', file: 'backup-service/Dockerfile', context: '.' },
   // The historian: timescale/timescaledb with pgBackRest, for timescaledb.physicalBackup.
   { name: 'timescaledb', file: 'timescaledb/Dockerfile', context: 'timescaledb' },
   // The platform database: supabase/postgres with pgBackRest and tini, for supabaseDb.physicalBackup.

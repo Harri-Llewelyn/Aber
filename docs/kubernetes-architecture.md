@@ -457,14 +457,16 @@ over-stated the payload by about 27 KB and pointed the step's own advice at byte
 | `node-red-init.mjs` into the `node-red` image | **Taken** | The initContainer already runs on that image, and must, because it evaluates a `settings.js` that requires out of its `node_modules`. |
 | The templates' comment blocks | **Taken, as three sweeps** | Applied `CONTRIBUTING.md`'s comment rule rather than deleting comments. Worth roughly a tenth of the source, not the whole of it. |
 | The TimescaleDB maintenance SQL into an image | **Declined** | It would move to `db-init`, widening that image's build context to the repository root, and the historian's initdb bootstrap must stay a ConfigMap regardless. Revisit if headroom gets short. |
-| The broker and credential scripts into their image | **Declined** | `scripts/sync-helm-chart-files.mjs` records the trade: the image supplies the runtime and the chart supplies the code, so a script change needs no image rebuild. |
+| The broker's reconcile, the credential service and the backup service into their images | **Taken** | ~72 KB. Declined at first, so that a script change needed no image rebuild; taken when 1.4 passed the failure line. The containers that run them were already on the `gateway-credential` and `backup-service` images, so nothing moved between images. |
 | The Grafana dashboards and alert rules | **Kept** | There is no custom Grafana image, and this is the group that grows. It is what the headroom is for. Panel descriptions are held to about thirty words; the argument behind each lives in `ingestion/README.md` and `docs/remote-gateways.md`, not in the panel. |
 | The argument inside the chart's `files/` and `_helpers.tpl`, moved to the README beside each | **Taken, as eight PRs (#450)** | Half the payload was comment text. Moving each file's reasoning into its README and keeping one or two lines per decision recovered 40-76% of the delete-every-comment bound per file, where the three template sweeps above, which kept every fact in place, recovered a tenth. The bytes leave the release only when the argument leaves the file. The rule that came out of it: a comment states what is true at the line, and why is in the README. |
 | Helm's `sql` storage driver | **Declined** | It removes the ceiling, but it is a property of the operator's Helm client rather than of the chart, so every operator would have to set it. |
 
 **Result: 775,537 gzip bytes to 557,372, or 98.6% of the ceiling to 70.9%.** A week of
 additions then took it back to 628,884 (80.0%), past the warning; the comment sweep of 2026-09-27
-took it to **540,748, or 68.8%**, measured on `main` with the CI step's own method. The CI step's
+took it to **540,748, or 68.8%**, measured on `main` with the CI step's own method. 1.4 took it to
+669,089 (85.1%), past the failure line; moving the broker's and the backup service's scripts into
+their images took it to **596,582, or 75.9%**. The CI step's
 thresholds are set against the measured figure — a warning at 75% and a failure at 85% — leaving
 room for the roughly 1% it reads low, since the release also carries `info`, `config` and the hook
 objects' own framing that the estimate does not reconstruct.

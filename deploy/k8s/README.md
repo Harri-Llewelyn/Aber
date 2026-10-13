@@ -1152,17 +1152,18 @@ docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
 # exists to work around, and one more independent image is cheaper than one more constraint.
 docker build -f i3x/Dockerfile                  -t $NS/i3x-service:$V .
 
-# Broker credential service and the broker's boot reconcile — context is gateway-credential/, and
-# the image is built FROM eclipse-mosquitto so it carries the broker's own mosquitto_passwd and
-# mosquitto_rr. That is not incidental: the `$7$` hash has to be readable by the mosquitto that
-# will verify it, and a reimplementation produces a hash that looks correct and refuses every login
-# with nothing logged at either end. The code is NOT baked in — the chart mounts it from a ConfigMap.
-docker build -f gateway-credential/Dockerfile   -t $NS/gateway-credential:$V gateway-credential
+# Broker credential service and the broker's boot reconcile — the image is built FROM
+# eclipse-mosquitto so it carries the broker's own mosquitto_passwd and mosquitto_rr. That is not
+# incidental: the `$7$` hash has to be readable by the mosquitto that will verify it, and a
+# reimplementation produces a hash that looks correct and refuses every login with nothing logged
+# at either end. Context is the repository root: the image copies both scripts and their libraries
+# from scripts/.
+docker build -f gateway-credential/Dockerfile   -t $NS/gateway-credential:$V .
 
 # The backup service -- supabase/postgres for its pg_dump, plus node, sqlite3, GNU tar, and age and
-# the AWS CLI for the off-site copy. The code itself is projected from a ConfigMap
-# (scripts/backup-service.mjs), so this is runtime only.
-docker build -f backup-service/Dockerfile       -t $NS/backup-service:$V backup-service
+# the AWS CLI for the off-site copy. Context is the repository root: the image copies
+# scripts/backup-service.mjs.
+docker build -f backup-service/Dockerfile       -t $NS/backup-service:$V .
 
 # The historian -- timescale/timescaledb with pgBackRest, which timescaledb.physicalBackup runs inside
 # the server's container (archive_command, restore_command) and in its backup sidecar.
@@ -2544,8 +2545,8 @@ document, which has every issued gateway account, as hashes. It is the only copy
 means re-issuing every gateway. The claim has `resource-policy: keep`, so an uninstall does not
 disconnect the fleet.
 
-On every start, the `assemble-config` initContainer runs `scripts/mosquitto-dynsec-init.mjs`. The
-script:
+On every start, the `assemble-config` initContainer runs `scripts/mosquitto-dynsec-init.mjs`, which
+the `gateway-credential` image carries. The script:
 
 - replaces the roles from the ConfigMap;
 - re-hashes the platform principals and the plugin's admin from `secrets.mqtt*`, so rotating one in

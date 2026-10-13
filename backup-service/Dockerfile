@@ -1,4 +1,4 @@
-# The backup service's runtime.
+# The backup service.
 #
 # BUILT FROM THE DATABASE'S OWN IMAGE, for its pg_dump: the dumping client must be at least the
 # server's version, and this is the image the server runs. It is also why the historian's major
@@ -6,6 +6,8 @@
 #
 # THE TAG MUST MATCH THE CHART'S supabase-db PIN. check-docs-drift.mjs couples this FROM to
 # `supabaseDb.image.tag` in values.yaml, the same way it does supabase/db-init.
+#
+# The build context is the REPOSITORY ROOT, where the service's script lives.
 FROM supabase/postgres:17.6.1.175
 
 # gosu is the base entrypoint's tool for starting postgres as root and dropping to the postgres user.
@@ -24,5 +26,8 @@ RUN apk add --no-cache nodejs sqlite tar age aws-cli
 # as root, with DAC_OVERRIDE, only when it archives either of those.
 USER 100:101
 
-# No CMD: the chart supplies `node /scripts/backup-service.mjs` and mounts the script from a
-# ConfigMap, as gateway-credential does, so it is editable without a rebuild.
+# THE SERVICE, baked in rather than mounted from a ConfigMap: Helm stores the chart archive and the
+# rendered manifest in one release Secret under a 1 MiB cap. No CMD: the chart runs
+# `node /opt/aber/backup-service.mjs`, so an edit to it needs this image rebuilt, which the dev loop
+# does on `up`.
+COPY scripts/backup-service.mjs /opt/aber/backup-service.mjs

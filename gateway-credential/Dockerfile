@@ -12,6 +12,8 @@
 #
 # THE TAG MUST MATCH THE CHART'S mosquitto PIN. check-docs-drift.mjs asserts this FROM against
 # `mosquitto.image.tag` in values.yaml, as it does for the database image.
+#
+# The build context is the REPOSITORY ROOT, where the scripts below live.
 FROM eclipse-mosquitto:2.1.2-alpine
 
 # The image is Alpine-based; only a runtime for the scripts is missing.
@@ -22,5 +24,9 @@ RUN apk add --no-cache nodejs
 # service patches the playback delivery file through the Kubernetes API and writes nothing on disk.
 USER 1883:1883
 
-# No CMD: the chart supplies the script to run and mounts it from a ConfigMap, so it is editable
-# without a rebuild.
+# THE SCRIPTS, baked in rather than mounted from a ConfigMap: Helm stores the chart archive and the
+# rendered manifest in one release Secret under a 1 MiB cap. The reconcile and the service import
+# their libraries from `./lib/`. No CMD: the chart names the script each container runs, so an edit
+# to one needs this image rebuilt, which the dev loop does on `up`.
+COPY scripts/mosquitto-dynsec-init.mjs scripts/gateway-credential-service.mjs /opt/aber/
+COPY scripts/lib/mosquitto-credentials.mjs scripts/lib/mosquitto-dynsec.mjs scripts/lib/mosquitto-control.mjs /opt/aber/lib/
