@@ -407,7 +407,7 @@ async function prepareWalker () {
   let password = null
   let invited = false
   if (!person) {
-    const added = await must(`add ${WALKER_EMAIL}`, managePeople({ action: 'add', email: WALKER_EMAIL, role: 'Administrator' }))
+    const added = await must(`add the walk's account`, managePeople({ action: 'add', email: WALKER_EMAIL, role: 'Administrator' }))
     walkerId = added.user_id
     role = added.role
     password = added.password ?? null
@@ -415,15 +415,15 @@ async function prepareWalker () {
   } else {
     walkerId = person.user_id
     if (person.status === 'removed') {
-      role = (await must(`restore ${WALKER_EMAIL}'s access`, managePeople({ action: 'restore', user_id: walkerId }))).role
+      role = (await must(`restore the walk's account`, managePeople({ action: 'restore', user_id: walkerId }))).role
     }
   }
   if (role !== 'Administrator') {
-    await must(`make ${WALKER_EMAIL} an Administrator`, api(adminToken, 'POST', '/rest/v1/rpc/set_person_role',
+    await must(`make the walk's account an Administrator`, api(adminToken, 'POST', '/rest/v1/rpc/set_person_role',
       { json: { p_user_id: walkerId, p_role: 'Administrator' } }))
   }
   if (!password) {
-    password = (await must(`set ${WALKER_EMAIL}'s password`, managePeople({ action: 'set-password', user_id: walkerId }))).password
+    password = (await must(`set the walk's account a password`, managePeople({ action: 'set-password', user_id: walkerId }))).password
   }
   return { password, invited }
 }
@@ -440,7 +440,7 @@ async function putAway () {
   if (walkerId) {
     const r = await managePeople({ action: 'remove', user_id: walkerId }).catch((e) => ({ status: 0, text: e.message }))
     if (r.status !== 200) {
-      problems.push(`${WALKER_EMAIL} may still have access (HTTP ${r.status} ${r.text.slice(0, 200)}): ` +
+      problems.push(`the walk's account may still have access (HTTP ${r.status} ${r.text.slice(0, 200)}): ` +
         'remove it on the Access Control page')
     }
   }
@@ -516,7 +516,7 @@ try {
     })()`)
     if (!await until(SHELL, 45000)) {
       const said = await evaluate("document.querySelector('#root')?.innerText?.slice(0, 400)").catch(() => '')
-      throw new Error(`sign-in as ${WALKER_EMAIL} did not reach the dashboard.` +
+      throw new Error(`sign-in as the walk's account did not reach the dashboard.` +
         `${invited ? ' The stack has a mail relay, so the account was invited, and it signs in once the invitation is accepted.' : ''}` +
         ` The page says:\n${said}`)
     }
@@ -560,7 +560,7 @@ try {
 } finally {
   if (adminToken) {
     current = '(clean-up)'
-    await putAway().catch((e) => problems.push(`(clean-up): ${e.message}; ${WALKER_EMAIL} may still have access`))
+    await putAway().catch((e) => problems.push(`(clean-up): ${e.message}; the walk's account may still have access`))
   }
   await close()
 }
