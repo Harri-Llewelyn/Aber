@@ -1541,6 +1541,8 @@ where a volume is mounted:
 
 - `gotrue`, `postgrest`, `postgres-meta`, `envoy` and `realtime`, with `wait-for-realtime-schema`,
   write nothing. Nor do the `storage-init` and `storage-policies` Jobs.
+- Every `wait-for-*` init container that `aber.waitFor` or `aber.waitForPostgres` renders, in
+  every pod, writes nothing. Each runs `curl`, `nc`, `wget` or `psql` until a service answers.
 - `realtime` writes no Erlang crash dump: its start script names `/tmp`, which is read-only.
   Kubernetes discarded a dump there at the container's restart anyway.
 - `storage` (supabase-storage) writes only the objects' volume, `/var/lib/storage`.
