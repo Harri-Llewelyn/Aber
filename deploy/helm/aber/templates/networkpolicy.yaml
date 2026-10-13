@@ -115,6 +115,7 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "backup-service"     "to" "timescaledb"        "port" 5432 "why" "pg_dump, or asking the pgBackRest sidecar for a backup")
   (dict "from" "cold-archive"       "to" "timescaledb"        "port" 5432 "why" "exports, verifies and drops cold chunks, as ingest_writer")
   (dict "from" "cold-archive"       "to" $gw      "port" 8000 "why" "reads its S3 destination (cold_archive_destination) and the archive.* settings through PostgREST")
+  (dict "from" "release-check"      "to" $gw      "port" 8000 "why" "records the day's answer through record_release_check(), as Service_ReleaseCheck")
 
   (dict "from" "alloy"              "to" "prometheus"         "port" 9090 "why" "remote-write of every scraped series")
   (dict "from" "alloy"              "to" "loki"               "port" 3100 "why" "the log push")
@@ -159,6 +160,7 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
       "storage-policies" (and .Values.initJobs.enabled .Values.supabaseStorage.enabled)
       "timescaledb-maintenance" (and .Values.initJobs.enabled .Values.timescaledb.enabled .Values.timescaledb.retention.enabled)
       "cold-archive" .Values.coldArchive.enabled
+      "release-check" .Values.releaseCheck.enabled
       "test-fdw" (and .Values.supabaseDb.enabled .Values.timescaledb.enabled)
       "test-db-tls" .Values.postgresTls.enabled
       "test-api" (and .Values.supabaseEnvoy.enabled .Values.supabaseAuth.enabled .Values.supabaseRest.enabled)
@@ -612,6 +614,26 @@ spec:
     - Egress
   egress:
     {{- toYaml .Values.backupService.offsiteEgress | nindent 4 }}
+{{- end }}
+{{- if and .Values.releaseCheck.enabled .Values.releaseCheck.githubEgress }}
+---
+{{/* The release check's way to GitHub's API, whose host a NetworkPolicy cannot name: the rules
+     releaseCheck.githubEgress lists, for that one pod. Without them every check fails, and the
+     account menu shows nothing. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-github-egress-release-check" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" "release-check") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" . "component" "release-check") | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    {{- toYaml .Values.releaseCheck.githubEgress | nindent 4 }}
 {{- end }}
 {{- if and .Values.coldArchive.enabled .Values.coldArchive.offsiteEgress }}
 ---

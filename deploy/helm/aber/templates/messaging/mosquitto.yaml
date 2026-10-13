@@ -15,11 +15,6 @@
 {{- $conf = regexReplaceAll "(?m)^max_packet_size [0-9]+$" $conf (printf "max_packet_size %d" $maxPacket) -}}
 {{- $roles := .Files.Get "files/mosquitto/dynsec-roles.json" -}}
 {{- $tlsConf := .Files.Get "files/mosquitto/mosquitto-tls.conf" -}}
-{{- $init := .Files.Get "files/gateway-credential/mosquitto-dynsec-init.mjs" -}}
-{{- $service := .Files.Get "files/gateway-credential/gateway-credential-service.mjs" -}}
-{{- $libCredentials := .Files.Get "files/gateway-credential-lib/mosquitto-credentials.mjs" -}}
-{{- $libDynsec := .Files.Get "files/gateway-credential-lib/mosquitto-dynsec.mjs" -}}
-{{- $libControl := .Files.Get "files/gateway-credential-lib/mosquitto-control.mjs" -}}
 {{- $tls := .Values.mosquitto.tls -}}
 {{- /* True once no client outside this pod dials 1883: every in-cluster client is on 8883 and the
      external Service no longer publishes it. The listener then binds to loopback, for the two
@@ -29,8 +24,8 @@
 {{- if and $tls.enabled (not $tlsConf) }}
 {{- fail "\n\naber: mosquitto.tls.enabled is set but files/mosquitto/mosquitto-tls.conf is missing.\n\nMirror it with:  node scripts/sync-helm-chart-files.mjs\n\nFailing the render rather than silently omitting the listener: the Service would publish 8883, the\nNetworkPolicy would allow it, the certificate would be issued -- and nothing would be listening on\nit. Every gateway would fail to connect against a stack that reports entirely healthy.\n" }}
 {{- end }}
-{{- if or (not $conf) (not $roles) (not $init) (not $service) (not $libCredentials) (not $libDynsec) (not $libControl) }}
-{{- fail "\n\naber: one of files/mosquitto/{mosquitto.conf,dynsec-roles.json},\nfiles/gateway-credential/{mosquitto-dynsec-init.mjs,gateway-credential-service.mjs} or\nfiles/gateway-credential-lib/{mosquitto-credentials,mosquitto-dynsec,mosquitto-control}.mjs is missing.\n\nMirror them with:  node scripts/sync-helm-chart-files.mjs\n\nFailing the render is deliberate. Without mosquitto.conf the broker falls back to its BUILT-IN\nDEFAULTS -- which on 2.x means listening on loopback only, so every gateway simply cannot connect;\nwithout the roles the reconcile has no policy to write and the plugin admits nobody; and without\nthe scripts the initContainer has nothing to run.\n" }}
+{{- if or (not $conf) (not $roles) }}
+{{- fail "\n\naber: files/mosquitto/mosquitto.conf or files/mosquitto/dynsec-roles.json is missing.\n\nMirror them with:  node scripts/sync-helm-chart-files.mjs\n\nFailing the render is deliberate. Without mosquitto.conf the broker falls back to its BUILT-IN\nDEFAULTS -- which on 2.x means listening on loopback only, so every gateway simply cannot connect;\nwithout the roles the reconcile has no policy to write and the plugin admits nobody.\n" }}
 {{- end }}
 ---
 {{/*
@@ -189,34 +184,6 @@ spec:
       storage: {{ .Values.mosquitto.persistence.size }}
 ---
 {{- end }}
-{{/*
-The reconcile's and the credential service's code, mirrored from scripts/ by
-scripts/sync-helm-chart-files.mjs. Mounted rather than baked into the image, unlike node-red-init and
-storage-init are: the image supplies the runtime (node, mosquitto_passwd, mosquitto_rr) and the
-chart supplies the code, so a script change needs no image rebuild.
-
-Unconditional, because the initContainer runs the reconcile whether or not the credential service
-is enabled. The `lib/` subdirectory is flattened into keys (a ConfigMap key cannot hold a slash)
-and projected back into place by the volume's `items`, below.
-*/}}
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ printf "%s-mosquitto-scripts" $fullname }}
-  labels:
-    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
-data:
-  mosquitto-dynsec-init.mjs: |
-{{ $init | indent 4 }}
-  gateway-credential-service.mjs: |
-{{ $service | indent 4 }}
-  mosquitto-credentials.mjs: |
-{{ $libCredentials | indent 4 }}
-  mosquitto-dynsec.mjs: |
-{{ $libDynsec | indent 4 }}
-  mosquitto-control.mjs: |
-{{ $libControl | indent 4 }}
----
 apiVersion: v1
 kind: Service
 metadata:
@@ -339,9 +306,9 @@ spec:
       labels:
         {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
       annotations:
-        # Roll the broker when the policy or the scripts change. The roles are applied by the
-        # reconcile at start, a listener change needs a restart, and this makes a policy edit
-        # visible in rollout history.
+        # Roll the broker when the policy changes. The roles are applied by the reconcile at start,
+        # a listener change needs a restart, and this makes a policy edit visible in rollout
+        # history. The scripts are in the gateway-credential image, whose tag rolls the pod.
         #
         # The TLS stanza is in the checksum for exactly that reason: turning `tls.enabled` on ADDS A
         # LISTENER, which SIGHUP cannot do. Without it here, enabling TLS would update the ConfigMap,
@@ -349,7 +316,6 @@ spec:
         # connections" -- with the ConfigMap showing the listener plainly declared. The loopback
         # rebind of 1883 is a listener change too, so its flag is in the checksum for the same reason.
         checksum/policy: {{ printf "%s%s%s%s" $conf $roles (ternary $tlsConf "" $tls.enabled) (ternary "loopback" "" $plaintextLoopback) | sha256sum }}
-        checksum/scripts: {{ printf "%s%s%s%s%s" $init $service $libCredentials $libDynsec $libControl | sha256sum }}
         # The platform principals' usernames: a renamed account is created only by the reconcile at
         # start. Names only, never a password.
         {{- $s := .Values.secrets }}
@@ -388,9 +354,9 @@ spec:
       initContainers:
         {{/*
           Assembles /mosquitto/config as a WRITABLE emptyDir, then writes the plugin's document onto
-          the data PVC with the reconcile in scripts/mosquitto-dynsec-init.mjs: roles from the
-          ConfigMap, platform principals and the plugin's admin from the Secret, every existing
-          gateway account kept as it is.
+          the data PVC with the reconcile (scripts/mosquitto-dynsec-init.mjs, baked into the image):
+          roles from the ConfigMap, platform principals and the plugin's admin from the Secret, every
+          existing gateway account kept as it is.
 
           WHY NOT MOUNT mosquitto.conf DIRECTLY: the TLS stanza is appended to it when certificates
           exist, and a ConfigMap mount is read-only.
@@ -480,13 +446,10 @@ spec:
               echo "Assembled broker config."
 
               # The plugin's document.
-              exec node /scripts/mosquitto-dynsec-init.mjs
+              exec node /opt/aber/mosquitto-dynsec-init.mjs
           volumeMounts:
             - name: policy
               mountPath: /policy
-              readOnly: true
-            - name: scripts
-              mountPath: /scripts
               readOnly: true
             - name: config
               mountPath: /mosquitto/config
@@ -679,7 +642,7 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-          command: ["node", "/scripts/gateway-credential-service.mjs"]
+          command: ["node", "/opt/aber/gateway-credential-service.mjs"]
           env:
             - name: MQTT_CREDENTIAL_SERVICE_PORT
               value: {{ .Values.gatewayCredential.port | quote }}
@@ -708,9 +671,6 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 3
           volumeMounts:
-            - name: scripts
-              mountPath: /scripts
-              readOnly: true
             {{- if $tls.enabled }}
             # The CA only, returned to an enrolling appliance so it can verify the broker. Read
             # from the SAME projected Secret the broker serves from, so the two cannot drift --
@@ -785,27 +745,6 @@ spec:
         - name: policy
           configMap:
             name: {{ printf "%s-mosquitto-policy" $fullname }}
-        {{/*
-          `items` WITH AN EXPLICIT PATH, not a bare configMap mount. The scripts do
-          `import ... from './lib/<name>.mjs'`, and a ConfigMap key cannot contain a slash -- so
-          each library is stored under a flat key and projected back into `lib/` here. Mounted
-          flat instead, the import resolves to a file that is not there and the container
-          crash-loops on ERR_MODULE_NOT_FOUND naming a path that exists in the repository.
-        */}}
-        - name: scripts
-          configMap:
-            name: {{ printf "%s-mosquitto-scripts" $fullname }}
-            items:
-              - key: mosquitto-dynsec-init.mjs
-                path: mosquitto-dynsec-init.mjs
-              - key: gateway-credential-service.mjs
-                path: gateway-credential-service.mjs
-              - key: mosquitto-credentials.mjs
-                path: lib/mosquitto-credentials.mjs
-              - key: mosquitto-dynsec.mjs
-                path: lib/mosquitto-dynsec.mjs
-              - key: mosquitto-control.mjs
-                path: lib/mosquitto-control.mjs
         {{- if .Values.gatewayCredential.enabled }}
         {{/*
           THE TOKEN IS PROJECTED, NOT AUTOMOUNTED, so it exists in one container instead of all

@@ -16,8 +16,10 @@
 # SECURITY.md says what a consumer can check; .github/scripts/sign-and-verify.sh runs those same
 # checks here, so a release cannot report green with an artefact nothing signed or an image nothing
 # attested. Every image is scanned before it is pushed, on the policy image-scan.yml applies to the
-# third-party ones. The SBOMs are also attached to the GitHub Release as files, for the site that
-# asks for one without a registry client.
+# third-party ones. Those are scanned here too, without gating the release, and every report is
+# kept: the packaged chart carries a dated summary of each image's known CVEs
+# (files/image-scans.json), which the Directory shows. The SBOMs are also attached to the GitHub
+# Release as files, for the site that asks for one without a registry client.
 name: Release
 
 on:
@@ -167,20 +169,20 @@ jobs:
             dockerfile: i3x/Dockerfile
             context: .
             build_args: ''
-          # The broker credential-issuing sidecar. The service's code is mounted from a ConfigMap,
-          # so this image supplies only the runtime. Built FROM eclipse-mosquitto because it must
-          # carry the broker's own mosquitto_passwd: the `$7$` hash has to be produced by the
-          # mosquitto that will verify it.
+          # The broker credential-issuing sidecar and the broker's boot reconcile. Built FROM
+          # eclipse-mosquitto because it must carry the broker's own mosquitto_passwd: the `$7$`
+          # hash has to be produced by the mosquitto that will verify it. Repository root: the
+          # image copies its scripts from scripts/.
           - name: gateway-credential
             dockerfile: gateway-credential/Dockerfile
-            context: gateway-credential
+            context: .
             build_args: ''
-          # The backup service's runtime: supabase/postgres for a pg_dump at least the server's
-          # version, plus node, sqlite3 and GNU tar. The service's code is mounted from a
-          # ConfigMap, as the credential sidecar's is.
+          # The backup service: supabase/postgres for a pg_dump at least the server's version,
+          # plus node, sqlite3 and GNU tar. Repository root: the image copies
+          # scripts/backup-service.mjs.
           - name: backup-service
             dockerfile: backup-service/Dockerfile
-            context: backup-service
+            context: .
             build_args: ''
           # The historian: timescale/timescaledb with pgBackRest, which physical backup runs inside
           # the server's own container.
@@ -258,16 +260,27 @@ jobs:
         uses: ./.github/actions/install-trivy
 
       # image-scan.yml's policy: fixable HIGH and CRITICAL only, so a release is never blocked by a
-      # finding it cannot act on. Trivy reads an OCI layout directory, not the archive.
+      # finding it cannot act on. Trivy reads an OCI layout directory, not the archive. The JSON
+      # report and the database it used are kept for the chart's known-CVE summary; the table and
+      # the gate are read back from that one report.
       - name: Scan
         env:
           IMAGE: ${{ matrix.name }}
         run: |
           set -eu
-          mkdir -p "/tmp/oci/$IMAGE"
+          mkdir -p "/tmp/oci/$IMAGE" "/tmp/scans/$IMAGE"
           tar -xf "/tmp/oci/$IMAGE.tar" -C "/tmp/oci/$IMAGE"
-          trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
-            --no-progress --scanners vuln --input "/tmp/oci/$IMAGE"
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --no-progress --scanners vuln \
+            --format json --output "/tmp/scans/$IMAGE/$IMAGE.json" --input "/tmp/oci/$IMAGE"
+          trivy version --format json > "/tmp/scans/$IMAGE/trivy-version.json"
+          trivy convert --format table --exit-code 1 "/tmp/scans/$IMAGE/$IMAGE.json"
+
+      - name: Keep The Scan
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: scan-${{ matrix.name }}
+          path: /tmp/scans/${{ matrix.name }}
+          if-no-files-found: error
 
       - name: Build & Push
         id: build
@@ -380,24 +393,35 @@ jobs:
 
       # Both archives, on image-scan.yml's policy, before either is pushed. A finding in the
       # ingestion base is reported twice; skipping test-runner would leave its own layers unscanned.
+      # Each JSON report is kept for the chart's known-CVE summary, as build-images keeps its own.
       - name: Scan Both
         run: |
           # Each command's failure is caught with `||` (the runner's bash has -e): a finding in one
           # must not hide the other's result.
           set -uo pipefail
           FAILED=0
+          mkdir -p /tmp/scans/ingestion-chain
           for t in ingestion test-runner; do
             echo "::group::$t"
             mkdir -p "/tmp/oci/$t"
             tar -xf "/tmp/oci/$t.tar" -C "/tmp/oci/$t" || FAILED=1
-            trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
-              --no-progress --scanners vuln --input "/tmp/oci/$t" || FAILED=1
+            trivy image --severity HIGH,CRITICAL --ignore-unfixed --no-progress --scanners vuln \
+              --format json --output "/tmp/scans/ingestion-chain/$t.json" --input "/tmp/oci/$t" || FAILED=1
+            trivy convert --format table --exit-code 1 "/tmp/scans/ingestion-chain/$t.json" || FAILED=1
             echo "::endgroup::"
           done
+          trivy version --format json > /tmp/scans/ingestion-chain/trivy-version.json || FAILED=1
           if [ "$FAILED" -ne 0 ]; then
             echo "::error::A fixable HIGH or CRITICAL was found, or an archive could not be read. Nothing has been pushed."
             exit 1
           fi
+
+      - name: Keep The Scans
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: scan-ingestion-chain
+          path: /tmp/scans/ingestion-chain
+          if-no-files-found: error
 
       # Pushed only after BOTH have built and passed the scan. The metadata file names what was
       # pushed, by digest, for the signing step; `image.name` is the tagged reference and the tag is
@@ -419,10 +443,50 @@ jobs:
           EXPECTED_IDENTITY: ${{ github.server_url }}/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
         run: xargs .github/scripts/sign-and-verify.sh < /tmp/pushed.txt
 
+  # Every third-party image the chart runs, scanned by the script image-scan.yml runs monthly, with
+  # each Trivy JSON report kept for the chart's known-CVE summary. A finding here is recorded, not a
+  # reason to stop the release (exit 1); an image Trivy could not scan is (exit 2), or the summary
+  # would ship with a row unscanned.
+  scan-third-party-images:
+    name: Scan Third-Party Images
+    needs: prepare-release
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.16.3
+
+      - name: Install Trivy
+        uses: ./.github/actions/install-trivy
+
+      - name: Scan
+        run: |
+          set -u
+          STATUS=0
+          node scripts/scan-images.mjs --trivy-binary --reports /tmp/scans/third-party || STATUS=$?
+          if [ "$STATUS" -gt 1 ]; then exit "$STATUS"; fi
+
+      - name: Keep The Scans
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: scan-third-party
+          path: /tmp/scans/third-party
+          if-no-files-found: error
+
   # The chart, last, and only once every image it can name exists.
   publish-chart:
     name: Helm Chart
-    needs: [prepare-release, build-images, build-ingestion-chain]
+    needs: [prepare-release, build-images, build-ingestion-chain, scan-third-party-images]
     runs-on: ubuntu-26.04
     steps:
       - name: Checkout Code
@@ -434,6 +498,26 @@ jobs:
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.16.3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+
+      - name: Fetch The Scans
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: scan-*
+          path: /tmp/scans
+
+      # The known-CVE summary, as a chart file that exists only in the packaged chart: db-init
+      # records it beside each Directory row's image, offline. The release's version names the
+      # images built here, which their reports know only as OCI layouts.
+      - name: Summarise The Scans Into The Chart
+        run: |
+          node scripts/image-scan-summary.mjs --reports /tmp/scans \
+            --version '${{ needs.prepare-release.outputs.version }}' \
+            --out deploy/helm/aber/files/image-scans.json
 
       # A chart that does not render must not be packaged. values-dev.yaml is used because
       # values.yaml alone has no credentials and aber.validateSecrets fails the render without
@@ -487,6 +571,11 @@ jobs:
             fi
           done
           exit $MISSING
+
+      # Every image the packaged chart runs has a dated scan in its summary, and the summary names
+      # nothing else; the counts go to the run's summary page.
+      - name: Verify The Package Carries A Scan Of Every Image
+        run: node scripts/image-scan-summary.mjs --check '${{ steps.package.outputs.package }}'
 
       - name: Log In To GHCR
         if: needs.prepare-release.outputs.push == 'true'

@@ -3,6 +3,7 @@ import { api } from '../../api'
 import CopyableId from '../common/CopyableId'
 import { IconDatabase, IconAlertTriangle } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
+import { Stat } from '../common/Stat'
 import { Badge } from '../common/Badge'
 import { LoadingState } from '../common/LoadingState'
 import { formatBytes, formatDate } from '../../utils/format'
@@ -346,18 +347,5 @@ function BacklogStat({ backlog, align }) {
         `${ARCHIVE_BACKLOG_TOLERANCE_DAYS} days the Archive Backlog alert fires.`
       }
     />
-  )
-}
-
-/** One figure with its label. `align="center"` stands it alone; otherwise it takes a column. */
-function Stat({ label, value, title, tone, align }) {
-  const classes = ['cold-stat', align === 'center' && 'cold-stat-center', tone === 'warning' && 'cold-stat-warning']
-    .filter(Boolean).join(' ')
-  return (
-    <div title={title} className={classes}>
-      <div className="cold-stat-label">{label}</div>
-      {/* The icon as well as the colour: colour is never the only signal. */}
-      <div className="cold-stat-value">{tone === 'warning' && <IconAlertTriangle size={16} />}{value}</div>
-    </div>
   )
 }

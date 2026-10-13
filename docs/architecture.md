@@ -112,6 +112,7 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | `playback` | `ghcr.io/harri-llewelyn/aber/ingestion` | the broker playback worker (`playback.enabled`) |
 | `prometheus` | `prom/prometheus:v3.15.0` | `prometheus:9090`, read by Grafana |
 | `realtime` | `supabase/realtime:v2.134.10` | behind `api.<domain>/realtime/v1`; Service `realtime-dev:4000` |
+| `release-check` | `node:24.21.0-alpine3.24` | CronJob (`releaseCheck.enabled`, off by default): asks api.github.com once a day for the latest Aber release |
 | `storage-init` | `node:24.21.0-alpine3.24` | hook Job: the storage buckets |
 | `storage-policies` | `supabase/postgres:17.6.1.175` | hook Job: the storage RLS policies |
 | `supabase-auth` | `supabase/gotrue:v2.197.0` | behind `api.<domain>/auth/v1` |

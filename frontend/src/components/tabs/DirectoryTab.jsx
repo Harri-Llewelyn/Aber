@@ -300,21 +300,83 @@ export function imageVersion(ref) {
 }
 
 /**
- * The version of the image this release deploys for the service, with the full reference in the
- * tooltip. db-init records it from the chart, so it is the release's pin rather than an
- * observation of the running container. One leading "v" is dropped so `v3.14.0` reads like
- * `13.2.0`. No image is said in words.
+ * What the release's scan found in this row's exact image, or `{ scanned: false }` when it did not
+ * scan that reference (an overridden tag, or a build that is not a release). Null without an image.
+ * db-init matches the reference; a row missing a count or the date is treated as not scanned, so
+ * a zero is only ever shown with the date it was true on.
  */
-function VersionCell({ image }) {
-  const version = imageVersion(image)
-  if (version) {
+export function imageScan(service) {
+  if (!service?.image) return null
+  const { image_fixable_critical: critical, image_fixable_high: high } = service
+  const at = Date.parse(service.image_scanned_at ?? '')
+  const dbAt = Date.parse(service.image_vulnerability_db_at ?? '')
+  if (!Number.isInteger(critical) || !Number.isInteger(high) || Number.isNaN(at)) return { scanned: false }
+  return {
+    scanned: true,
+    critical,
+    high,
+    date: new Date(at).toISOString().slice(0, 10),
+    dbDate: Number.isNaN(dbAt) ? null : new Date(dbAt).toISOString().slice(0, 10)
+  }
+}
+
+/** "3 fixable HIGH, as of 2026-10-02": the counts, dated, since a later CVE is not counted. */
+export function imageScanSummary(scan) {
+  const parts = []
+  if (scan.critical) parts.push(`${scan.critical} fixable CRITICAL`)
+  if (scan.high) parts.push(`${scan.high} fixable HIGH`)
+  return `${parts.length ? parts.join(' and ') : 'No fixable HIGH or CRITICAL'}, as of ${scan.date}`
+}
+
+/** The badge beside a version: the count with its date in the tooltip, or "not scanned" in words. */
+function ScanBadge({ scan }) {
+  if (!scan) return null
+  if (!scan.scanned) {
     return (
       <span
-        className="mono"
-        title={`${image} -- the image this release deploys, recorded from the chart at the last install or upgrade`}
+        className="directory-unobserved directory-scan"
+        title="The release did not scan this exact image, so its known vulnerabilities are not counted here. A tag set in this deployment's values, or a build that is not a release, has no scan."
       >
-        {version.replace(/^[vV](?=\d)/, '')}
+        not scanned
       </span>
+    )
+  }
+  const count = scan.critical + scan.high
+  const tone = scan.critical ? 'badge-danger' : scan.high ? 'badge-warning' : 'badge-neutral'
+  const db = scan.dbDate ? ` against the vulnerability database of ${scan.dbDate}` : ''
+  return (
+    <span
+      className={`badge badge-sm ${tone} directory-scan`}
+      title={`${imageScanSummary(scan)}. Counted when the release was scanned${db}; a vulnerability published since is not counted.`}
+    >
+      {count} {count === 1 ? 'CVE' : 'CVEs'}
+    </span>
+  )
+}
+
+/**
+ * The version of the image this release deploys for the service, with the full reference in the
+ * tooltip. db-init records it from the chart, so it is the release's pin rather than an
+ * observation of the running container. An image Aber builds from a third-party product shows that
+ * product's version, from the release's scan summary. One leading "v" is dropped so `v3.14.0`
+ * reads like `13.2.0`. No image is said in words.
+ */
+function VersionCell({ service }) {
+  const { image } = service
+  const upstream = service.upstream_version || null
+  const version = upstream || imageVersion(image)
+  if (version) {
+    const built = upstream ? ` It is built from ${upstream} of the upstream product, the version shown.` : ''
+    return (
+      <>
+        <span
+          className="mono"
+          title={`${image} -- the image this release deploys, recorded from the chart at the last install or upgrade.${built}`}
+        >
+          {version.replace(/^[vV](?=\d)/, '')}
+        </span>
+        <ScanBadge scan={imageScan(service)} />
+      </>
     )
   }
   return (
@@ -342,7 +404,7 @@ function ServiceTable({ rows, onNotify }) {
           <tr>
             <th title="Service name">Service Name</th>
             <th title="Architecture category">Service Type</th>
-            <th title="The image tag this release deploys for the service; hover a version for the full image reference. Recorded from the chart by db-init on every install and upgrade">Version</th>
+            <th title="The version this release deploys for the service; hover it for the full image reference. The badge counts the fixable HIGH and CRITICAL vulnerabilities the release found in that image, dated">Version</th>
             <th title="Endpoints this browser can reach open in a new tab; everything else copies to the clipboard">Endpoint URL</th>
             <th title="Where the service can be reached from, as a property of how it is published. Recorded from the chart by db-init on every install and upgrade">Reach</th>
             <th title="Observed liveness. Written every minute from Prometheus's up series; services nothing scrapes read as not observed">Liveness</th>
@@ -354,7 +416,7 @@ function ServiceTable({ rows, onNotify }) {
               <td><strong>{s.service_name}</strong></td>
               <td title={`Registered as ${s.service_type}`}>{serviceTypeLabel(s.service_type)}</td>
               <td className="cell-version">
-                <VersionCell image={s.image} />
+                <VersionCell service={s} />
               </td>
               <td className="cell-endpoint">
                 <EndpointCell

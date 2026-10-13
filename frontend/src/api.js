@@ -838,9 +838,10 @@ const apiMethods = {
     const { error } = await supabase.rpc('set_archive_credential', { p_secret: secret });
     if (error) {
       // PostgREST maps the function's insufficient_privilege to 403; anything else is a fault.
-      throw new Error(error.code === '42501'
+      // `status` lets CredentialField name the refusal.
+      throw Object.assign(new Error(error.code === '42501'
         ? 'Only an Administrator can set the archive credential'
-        : (error.message || 'Could not set the archive credential'));
+        : (error.message || 'Could not set the archive credential')), error.code === '42501' ? { status: 403 } : {});
     }
     return true;
   },
@@ -1190,25 +1191,38 @@ const apiMethods = {
   },
 
   /**
-   * What the Backups page's current-state line needs, whatever the list's filter and page:
-   * the first job ever recorded, the latest completed one, and the latest that completed or failed.
+   * What the Backups page's current-state line and stat strip need, whatever the list's filter and
+   * page, in one call (`backup_summary()`, 0179): the first job ever recorded, the latest completed
+   * one and the latest that completed or failed; successes out of the runs that ended in the last 30
+   * days; the median duration of the last 14 completed runs; the backups held, their bytes, the
+   * oldest and the newest one's size; the newest copy off site; and the backup service's report of
+   * its volume and schedule, null until it has made one.
    */
   backupRunSummary: async () => {
-    const columns = 'id, status, created_at, started_at, finished_at';
-    const [first, success, outcome] = await Promise.all([
-      supabase.from('backup_jobs').select(columns)
-        .order('created_at', { ascending: true }).limit(1).maybeSingle(),
-      supabase.from('backup_jobs').select(columns).eq('status', 'COMPLETED')
-        .order('finished_at', { ascending: false }).limit(1).maybeSingle(),
-      supabase.from('backup_jobs').select(columns).in('status', ['COMPLETED', 'FAILED'])
-        .order('finished_at', { ascending: false }).limit(1).maybeSingle()
-    ]);
-    const error = first.error || success.error || outcome.error;
-    if (error) throw new Error(error.message || 'Could not read backup jobs');
+    const { data, error } = await supabase.rpc('backup_summary');
+    if (error) throw new Error(error.message || 'Could not read the backup summary');
+    const s = data || {};
+    const service = s.service || null;
     return {
-      firstRecordedAt: first.data?.created_at || null,
-      lastSuccess: success.data || null,
-      latestOutcome: outcome.data || null
+      firstRecordedAt: s.first_recorded_at || null,
+      lastSuccess: s.last_success || null,
+      latestOutcome: s.latest_outcome || null,
+      runs30d: s.runs_30d ?? 0,
+      succeeded30d: s.succeeded_30d ?? 0,
+      medianDurationSeconds: s.median_duration_seconds ?? null,
+      medianRuns: s.median_runs ?? 0,
+      backupsHeld: s.backups_held ?? 0,
+      bytesHeld: s.bytes_held ?? 0,
+      oldestTakenAt: s.oldest_taken_at || null,
+      newestSizeBytes: s.newest_size_bytes ?? null,
+      offsiteDestinationSet: s.offsite_destination_set === true,
+      newestOffsite: s.newest_offsite || null,
+      service: service && {
+        reportedAt: service.reported_at || null,
+        volumeFreeBytes: service.volume_free_bytes ?? null,
+        volumeTotalBytes: service.volume_total_bytes ?? null,
+        schedule: service.schedule ?? ''
+      }
     };
   },
 
@@ -1262,13 +1276,13 @@ const apiMethods = {
     return true;
   },
 
-  /** The secret key, into the vault. Write-only: nothing reads it back. */
+  /** The secret key, into the vault. Write-only: nothing reads it back. A refusal carries `status: 403`. */
   setBackupOffsiteCredential: async (secret) => {
     const { error } = await supabase.rpc('set_backup_offsite_credential', { p_secret: secret });
     if (error) {
-      throw new Error(error.code === '42501'
+      throw Object.assign(new Error(error.code === '42501'
         ? 'Only an Administrator can set the off-site credential'
-        : (error.message || 'Could not save the off-site credential'));
+        : (error.message || 'Could not save the off-site credential')), error.code === '42501' ? { status: 403 } : {});
     }
     return true;
   },
@@ -2262,9 +2276,25 @@ const apiMethods = {
         exposure: s.exposure,
         // The image the release deploys for the service (0140); null when nothing recorded one.
         image: s.image ?? null,
+        // The release's scan of that exact image (0180); all null when it did not scan it.
+        image_fixable_critical: s.image_fixable_critical ?? null,
+        image_fixable_high: s.image_fixable_high ?? null,
+        image_scanned_at: s.image_scanned_at ?? null,
+        image_vulnerability_db_at: s.image_vulnerability_db_at ?? null,
+        upstream_version: s.upstream_version ?? null,
         status: s.status,
         last_heartbeat: s.last_heartbeat
       }));
+    }
+
+    // The last daily release check (0181), or null where it has never run, as with the check off.
+    if (path.startsWith('/api/v1/release-check')) {
+      const { data, error } = await supabase
+        .from('release_check')
+        .select('checked_at,running_version,latest_version,latest_url,newer,error')
+        .maybeSingle();
+      if (error) throw error;
+      return data ?? null;
     }
 
     // How far back each resolution reaches. Four rows, evaluated on the TimescaleDB side (archived

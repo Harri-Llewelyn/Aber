@@ -85,7 +85,11 @@ spec:
                 sleep 3
               done
               echo "_realtime schema exists"
+          # The image's postgres user; only the server beside it starts as root.
           securityContext:
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 101
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]

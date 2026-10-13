@@ -83,6 +83,11 @@ secrets:
   # (Service_Playback). A separate identity because its broker rights differ from ingestion's.
   playbackKey: ""
 
+  # The release check's credential, subject b0000000-0000-4000-8000-000000000004
+  # (Service_ReleaseCheck). It reaches record_release_check() and nothing else. Required only
+  # with releaseCheck.enabled; signed by jwtSecret like the two above.
+  releaseCheckKey: ""
+
   # The broker passwords the playback worker holds, keyed by gateway sparkplug_id:
   #   mqttPlaybackCredentials: '{"gwy130000000000400080000":"..."}'
   # Empty is valid: the worker refuses each job naming the gateway it lacks a credential for.
@@ -757,11 +762,17 @@ supabaseStorage:
   #   podAnnotations:
   #     backup.velero.io/backup-volumes: data
   podAnnotations: {}
-  # storage-api's image names no user, so the server runs as root (deploy/k8s/README.md,
-  # Users); fsGroup gives what it writes group 1000.
+  # storage-api's image names no user; the pod runs as its node user, 1000. fsGroup `Always`: at
+  # each start the kubelet makes every object directory group-writable, so 1000 can add and delete
+  # beside objects a root server wrote at 0755. It walks every object (deploy/k8s/README.md, Users).
+  # While a backup pod mounts the volume (backup.includeStorage), the pod runs as root instead,
+  # with this fsGroup and OnRootMismatch.
   podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
     fsGroup: 1000
-    fsGroupChangePolicy: OnRootMismatch
+    fsGroupChangePolicy: Always
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 512Mi }
@@ -1219,6 +1230,13 @@ frontend:
   # There is no `allowSignup` (a frontend flag is not an access control; see
   # supabaseAuth.disableSignup) and no `grafanaUrl` (derived from publicUrls.grafana, the same
   # value Grafana's root_url and OAuth redirect come from).
+  #
+  # The dashboard's Content-Security-Policy, built from the API's, Studio's and the forge's
+  # addresses. enforce: browsers refuse what it does not list. report-only: the same policy, and
+  # browsers only log each refusal in the console. Set report-only while a page the policy breaks
+  # is put right (deploy/k8s/README.md).
+  contentSecurityPolicy:
+    mode: enforce
   resources:
     requests: { cpu: 10m, memory: 32Mi }
     limits: { memory: 128Mi }
@@ -1615,6 +1633,8 @@ gatewayCredential:
   image:
     repository: ghcr.io/harri-llewelyn/aber/gateway-credential
     # Built FROM eclipse-mosquitto so it carries the broker's own mosquitto_passwd and mosquitto_rr.
+    # It carries the reconcile and the service too: a tag from before 1.4.0 has neither, and the
+    # broker does not start.
     tag: ""
     pullPolicy: IfNotPresent
   port: 9010
@@ -1778,6 +1798,7 @@ backupService:
   enabled: false
   image:
     # Built FROM supabase/postgres for its pg_dump, plus node, sqlite3, GNU tar, age and the AWS CLI.
+    # It carries the service's script too: a tag from before 1.4.0 has none.
     repository: ghcr.io/harri-llewelyn/aber/backup-service
     tag: ""
     pullPolicy: IfNotPresent
@@ -1793,3 +1814,29 @@ backupService:
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 1Gi }
+
+# The release check (jobs/release-check-cronjob.yaml). Once a day, one pod asks GitHub's API for the
+# latest Aber release and records the answer, and the account menu says "Aber X.Y.Z is available"
+# with a link to its release notes. No token, and no browser contacts GitHub. OFF BY DEFAULT: it is
+# the one connection the stack would make to the internet by itself (deploy/k8s/README.md, Outbound
+# connections). Off renders nothing, and the menu says nothing about updates. Turned off after
+# running, the menu line goes once the last answer is two days old. On, it needs
+# secrets.releaseCheckKey, which `npm run setup` mints; a stack set up earlier mints it with
+# `npm run keys:rotate`.
+releaseCheck:
+  enabled: false
+  # Once a day, at a minute no other default job uses. Runs in the node image storage-init uses.
+  schedule: "17 6 * * *"
+  # NetworkPolicy egress rules for api.github.com, applied to this pod alone under
+  # networkPolicy.enabled. A NetworkPolicy cannot name a host, so list GitHub's addresses (the "api"
+  # ranges at https://api.github.com/meta), or the proxy's address with `proxy` below. With none,
+  # every check fails within 30 seconds: its Job fails, its log and the release_check row say
+  # "could not reach api.github.com", and the account menu shows nothing. For example:
+  #   - to: [{ ipBlock: { cidr: 203.0.113.0/24 } }]
+  #     ports: [{ protocol: TCP, port: 443 }]
+  githubEgress: []
+  # An HTTP proxy for the request, such as http://proxy.plant.example:3128. Empty: no proxy.
+  proxy: ""
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 128Mi }

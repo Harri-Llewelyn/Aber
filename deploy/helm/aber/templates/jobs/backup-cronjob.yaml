@@ -7,8 +7,7 @@
        the flag in those cases is right -- there is nothing to archive -- but it must not render a
        volume mount naming a PVC that does not exist, which would leave the CronJob permanently
        unschedulable. */ -}}
-{{- $includeStorage := and .Values.backup.includeStorage .Values.supabaseStorage.enabled
-      .Values.supabaseStorage.persistence.enabled (eq .Values.supabaseStorage.backend "file") -}}
+{{- $includeStorage := eq (include "aber.backupMountsStorage" .) "true" -}}
 {{/*
 =================================================================================================
 Scheduled logical backups -- AND THE ONLY RECOVERY PATH THIS STACK HAS.

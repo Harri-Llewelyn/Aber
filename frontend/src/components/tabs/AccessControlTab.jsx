@@ -715,7 +715,7 @@ export function AccessControlTab({ showToast, initialSection = '', onClearSectio
                               // The tooltip carries the distinction the label cannot: this is `npm
                               // run keys:rotate`, because the identity's key is in the release
                               // Secret and its Deployment reads it at start.
-                              title={`Copy \`${meta.mintCommand.replace('{id}', p.principal_id)}\` — this key is ${meta.secretKey || 'a key'} in the release Secret, read by the ${meta.deployment || 'worker'} Deployment at start. Rotating it, not minting a token, changes what the process presents. With --apply it patches the Secret and restarts the Deployment.`}
+                              title={`Copy \`${meta.mintCommand.replace('{id}', p.principal_id)}\` — this key is ${meta.secretKey || 'a key'} in the release Secret, read by ${meta.readBy || `the ${meta.deployment || 'worker'} Deployment at start`}. Rotating it, not minting a token, changes what the process presents. With --apply it patches the Secret${meta.readBy ? '' : ' and restarts the Deployment'}.`}
                               onNotify={showToast}
                             />
                           )}

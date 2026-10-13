@@ -48,6 +48,9 @@ secrets:
   #   NODERED_CREDENTIAL_SECRET    NODERED_OAUTH_CLIENT_SECRET
   #   NODERED_WEBHOOK_JWT_SECRET   NODERED_ADMIN_TOKEN
   #   FIRST_ADMINISTRATOR_PASSWORD (read only when supabaseAuth.firstAdministrator is created)
+  #   SUPABASE_RELEASE_CHECK_KEY   (read only when releaseCheck.enabled: a JWT signed by
+  #                                 SUPABASE_JWT_SECRET for Service_ReleaseCheck, as npm run setup
+  #                                 and npm run keys:rotate sign it)
   #
   # STILL A SET. SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are HS256 JWTs signed by
   # SUPABASE_JWT_SECRET, and SUPABASE_PUBLISHABLE_KEY / SUPABASE_SECRET_KEY are the keys callers

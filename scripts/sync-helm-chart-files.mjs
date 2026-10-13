@@ -117,8 +117,9 @@ const MIRRORS = [
   {
     source: 'scripts',
     dest: 'scripts',
-    match: (name) => name === 'storage-init.mjs',
-    why: 'Creates the asset-3d-models bucket through the Storage REST API',
+    match: (name) => name === 'storage-init.mjs' || name === 'release-check.mjs',
+    why: 'Creates the asset-3d-models bucket through the Storage REST API, and runs the daily '
+       + 'release check (releaseCheck.enabled); both run on the node image',
   },
   // THE API SPECS ARE NOT MIRRORED. docs/openapi.yaml and docs/i3x-openapi.yaml are copied into
   // swagger-ui/Dockerfile's image instead: swagger-ui is their only reader, and at ~270 KB the
@@ -152,40 +153,11 @@ const MIRRORS = [
   // NODE-RED'S PROVISIONING SCRIPT IS NOT MIRRORED. It lives at node-red/node-red-init.mjs and is
   // copied into that image, which is the same image the initContainer running it uses -- so the
   // release Secret carries neither the chart-file copy nor the rendered ConfigMap.
-  {
-    source: 'scripts',
-    dest: 'gateway-credential',
-    // The two scripts that run on the credential service's image: the boot reconcile (the
-    // broker's initContainer) and the service (a sidecar). The chart projects them from scripts/
-    // through a ConfigMap, with the libraries restored to `lib/` by the
-    // volume's `items` -- see templates/messaging/mosquitto.yaml. The image supplies the runtime
-    // (node, mosquitto_passwd, mosquitto_rr), the chart supplies the code, so a script change
-    // needs no image rebuild.
-    match: (name) => name === 'gateway-credential-service.mjs' || name === 'mosquitto-dynsec-init.mjs',
-    why: 'The broker\'s boot reconcile and the credential service; both run on the gateway-credential image in the broker pod',
-  },
-  {
-    source: 'scripts',
-    dest: 'backup-service',
-    // The same arrangement as gateway-credential: the chart projects it through a ConfigMap over an image that supplies pg_dump, node, sqlite3 and tar.
-    match: (name) => name === 'backup-service.mjs',
-    why: 'The backup service; takes a queued backup_jobs row to a tier 1 backup on the backup PVC',
-  },
-  {
-    source: join('scripts', 'lib'),
-    // A SEPARATE dest FROM THE ENTRY ABOVE, and it has to be. Each mirror OWNS its destination
-    // directory and deletes anything in it that its own source did not produce -- so two mirrors
-    // pointing at one directory alternately delete each other's file on every run. (Observed, not
-    // theorised: the first attempt shared `gateway-credential` and the sync reported
-    // "updated ... / removed ...' for the same path in a single pass.)
-    //
-    // The files are reunited at MOUNT time instead: the ConfigMap carries them all and the
-    // volume's `items` restores these to `lib/`. See templates/messaging/mosquitto.yaml.
-    dest: 'gateway-credential-lib',
-    match: (name) =>
-      name === 'mosquitto-credentials.mjs' || name === 'mosquitto-dynsec.mjs' || name === 'mosquitto-control.mjs',
-    why: 'The credential, policy and control-API libraries the reconcile and the service share',
-  },
+  //
+  // NOR ARE THE BROKER'S RECONCILE, THE CREDENTIAL SERVICE OR THE BACKUP SERVICE, for the same
+  // reason: gateway-credential/Dockerfile copies scripts/mosquitto-dynsec-init.mjs,
+  // scripts/gateway-credential-service.mjs and the three scripts/lib/mosquitto-*.mjs they import,
+  // and backup-service/Dockerfile copies scripts/backup-service.mjs.
   {
     source: 'loki',
     dest: 'loki',
