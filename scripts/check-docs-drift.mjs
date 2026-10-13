@@ -4910,10 +4910,20 @@ function edgeFunctionNames() {
 
   const CHECK_TEMPLATE = 'deploy/helm/aber/templates/jobs/release-check-cronjob.yaml';
   const CHECK_SCRIPT = 'deploy/helm/aber/files/scripts/release-check.mjs';
-  const releaseCheck = read('deploy/helm/aber/values.yaml').match(/^releaseCheck:\n((?: {2}.*\n|\s*\n)*)/m)?.[1] ?? '';
-  if (!/^ {2}enabled: false$/m.test(releaseCheck)) offences.push('values.yaml: expected releaseCheck.enabled: false');
+  // The lines under `releaseCheck:` up to the next top-level key, read line by line rather than by
+  // one regular expression, whose nested repetition backtracks exponentially on blank lines.
+  const releaseCheckBlock = (text) => {
+    const lines = text.split('\n');
+    const start = lines.indexOf('releaseCheck:');
+    if (start < 0) return '';
+    const end = lines.findIndex((l, i) => i > start && l.trim() !== '' && !l.startsWith('  '));
+    return lines.slice(start + 1, end < 0 ? lines.length : end).join('\n');
+  };
+  if (!/^ {2}enabled: false$/m.test(releaseCheckBlock(read('deploy/helm/aber/values.yaml')))) {
+    offences.push('values.yaml: expected releaseCheck.enabled: false');
+  }
   for (const file of ['deploy/helm/aber/values-dev.yaml', 'deploy/helm/aber/values-prod.yaml.example']) {
-    if (/^releaseCheck:\n(?: {2}.*\n|\s*\n)*? {2}enabled: true$/m.test(read(file))) offences.push(`${file} turns the release check on`);
+    if (/^ {2}enabled: true$/m.test(releaseCheckBlock(read(file)))) offences.push(`${file} turns the release check on`);
   }
   if (!read(CHECK_TEMPLATE).startsWith('{{- if .Values.releaseCheck.enabled }}')) {
     offences.push(`${CHECK_TEMPLATE}: expected to render nothing unless releaseCheck.enabled`);
