@@ -205,21 +205,33 @@ async function dumpDatabase(name, target, dir, stamp) {
 
 // GNU tar exits 1 for "file changed as we read it", which an upload landing mid-run produces and
 // which is acceptable for immutable blobs: the archive is complete except for that one object.
-// Anything else is a failure.
-async function tarDirectory(name, sourceDir, dir, stamp, extraArgs = [], appended = []) {
+// Anything else is a failure. `appended` ({ dir, path, uid, gid }) is one more file, archived with
+// that owner: --owner and --group hold for a whole tar run, so a second run appends it to the
+// uncompressed archive, and gzip compresses the result.
+async function tarDirectory(name, sourceDir, dir, stamp, extraArgs = [], appended = null) {
   const file = `${name}-${stamp}.tar.gz`;
   const out = join(dir, file);
-  const r = await run('tar', ['-czf', out, ...extraArgs, '-C', sourceDir, '.', ...appended]);
+  const tarred = appended ? out.slice(0, -'.gz'.length) : out;
+  const r = await run('tar', [appended ? '-cf' : '-czf', tarred, ...extraArgs, '-C', sourceDir, '.']);
   if (r.status !== 0 && r.status !== 1) throw new Error(`tar ${name} failed: ${r.stderr.split('\n').slice(-2).join(' ')}`);
   if (r.status === 1) log(`  ${name}: tar warned (a file changed while it was read): ${r.stderr.split('\n').pop()}`);
+  if (appended) {
+    const a = await run('tar', [
+      '-rf', tarred, `--owner=${appended.uid}`, `--group=${appended.gid}`, '-C', appended.dir, appended.path,
+    ]);
+    if (a.status !== 0) throw new Error(`tar ${name} could not append ${appended.path}: ${a.stderr.split('\n').slice(-2).join(' ')}`);
+    const z = await run('gzip', [tarred]);
+    if (z.status !== 0) throw new Error(`gzip ${name} failed: ${z.stderr.split('\n').slice(-2).join(' ')}`);
+  }
   const size = statSync(out).size;
   return { name, file, size_bytes: size, sha256: await sha256(out) };
 }
 
 // Everything under /data except the SQLite files and the logs, with a consistent copy of gitea.db
-// appended from a staging directory (tar's second -C lands it at gitea/gitea.db, where a restore
-// expects it). sqlite3's online backup is consistent while Gitea writes; on a read-only volume it
-// falls back to a raw copy of db, -wal and -shm with a checkpoint and an integrity check on the
+// appended from a staging directory at gitea/gitea.db, where a restore expects it, with the live
+// file's owner: the copy is root's, a restore keeps an archive's owners, and Gitea writes the
+// database as git. sqlite3's online backup is consistent while Gitea writes; on a read-only volume
+// it falls back to a raw copy of db, -wal and -shm with a checkpoint and an integrity check on the
 // copy. The method used is in manifest.json.
 async function archiveForge(dir, stamp) {
   const dbPath = join(FORGE_PATH, 'gitea', 'gitea.db');
@@ -249,10 +261,11 @@ async function archiveForge(dir, stamp) {
     } else {
       method = 'no-database';
     }
+    const owner = existsSync(staged) ? statSync(dbPath) : null;
     const component = await tarDirectory('forge', FORGE_PATH, dir, stamp, [
       '--exclude=./gitea/gitea.db', '--exclude=./gitea/gitea.db-wal', '--exclude=./gitea/gitea.db-shm',
       '--exclude=./gitea/log',
-    ], existsSync(staged) ? ['-C', stage, 'gitea/gitea.db'] : []);
+    ], owner && { dir: stage, path: 'gitea/gitea.db', uid: owner.uid, gid: owner.gid });
     return { ...component, sqlite: method };
   } finally {
     rmSync(stage, { recursive: true, force: true });

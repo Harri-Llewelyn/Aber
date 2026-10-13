@@ -208,6 +208,12 @@ class BackupServiceTests(unittest.TestCase):
         members = service("tar", "-tzf", f"{backup['location']}/{forge['file']}")
         self.assertIn("gitea/gitea.db", members)
         self.assertIn("./ssh/", members, "the host keys appliances pin are in the archive")
+        # With the live database's owner, not root's: the copy is made as root, a restore keeps an
+        # archive's owners, and Gitea writes the database as git.
+        live_owner = service("sh", "-c", 'stat -c %u/%g "$FORGE_PATH/gitea/gitea.db"').strip()
+        verbose = service("tar", "--numeric-owner", "-tvzf", f"{backup['location']}/{forge['file']}")
+        database = next(line for line in verbose.splitlines() if line.endswith(" gitea/gitea.db"))
+        self.assertEqual(database.split()[1], live_owner, database)
 
         # pgsodium's root key, as the file on the data volume holds it: Vault is ciphertext under it.
         self.assertIn("vault_key=vault-key-", manifest)
