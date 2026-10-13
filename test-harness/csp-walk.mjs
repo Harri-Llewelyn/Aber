@@ -445,7 +445,7 @@ async function putAway () {
     }
   }
   const r = await api(adminToken, 'POST', '/auth/v1/logout?scope=local').catch((e) => ({ status: 0, text: e.message }))
-  if (r.status > 299 || r.status === 0) notes.push(`the walk's own session for ${ADMIN_EMAIL} did not end (HTTP ${r.status}); it expires by itself`)
+  if (r.status > 299 || r.status === 0) notes.push(`the walk's own Administrator session did not end (HTTP ${r.status}); it expires by itself`)
 }
 
 const fixtures = { area: null, devices: [], objects: [] }
