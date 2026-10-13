@@ -506,8 +506,9 @@ returns) is the comparable figure; the working set adds file cache that moved be
 
 A full OTLP queue costs about five times its byte bound in memory, which is why it is 16 MiB.
 With it full, Alloy logged one error and one warning every five seconds or so, a batch apiece.
-The DaemonSet's 768 Mi limit is unchanged; whether a full queue fits beside the metrics
-write-ahead log is measured on a cluster, not here.
+On the dev stack, beside the metrics write-ahead log, a full queue cost about 100 MiB at matched
+ages. That took Alloy to its `GOMEMLIMIT` under the old 768Mi limit, which is why the limit is now
+1Gi for every site (`deploy/k8s/README.md`, *Self-monitoring*).
 
 **Egress.** Under `networkPolicy.enabled` the default-deny drops the forward's traffic, as it does
 every flow the chart cannot derive. `logForward.egress` holds the rules, applied to Alloy's pods

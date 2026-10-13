@@ -2206,8 +2206,8 @@ Four more things to know:
   An empty `apiServerCidr` leaves Alloy unable to discover anything. The DaemonSet is healthy, the
   dashboards are empty, and nothing logs a policy decision.
 - **Alloy's memory follows the series it holds, so three settings keep them few.** A host restart
-  once left the WAL holding 40,173 series against 12,965 in Prometheus, and Alloy reached 92% of its
-  768Mi limit. Each setting targets one source of new series:
+  once left the WAL holding 40,173 series against 12,965 in Prometheus, and Alloy reached 92% of the
+  768Mi limit it had then. Each setting targets one source of new series:
   - **Series carry the pod's name as `instance`, not its IP.** A restart gives every pod a new
     address, so an address in `instance` would create every series again. A pod that keeps its name
     keeps its series. That covers the StatefulSet pods and Alloy's own, which a restart only
@@ -2219,8 +2219,25 @@ Four more things to know:
     families, and its one-per-toggle info series. They were 1,843 of 13,888 series, and no dashboard
     or rule reads them.
 
-  Alloy sets its own `GOMEMLIMIT` at 90% of the limit. The rest of its working set is its own mapped
-  binary (about 170 MiB) and page cache, which is why the limit is 768Mi.
+  Alloy sets its own `GOMEMLIMIT` at 90% of the limit, so it collects harder as its heap nears it.
+  The rest of its working set is its own mapped binary (about 170 MiB) and page cache.
+- **Alloy's limit is 1Gi** (`observability.alloy.resources`), so the heap has room above its peaks.
+  These figures are Alloy's own memory on the dev stack, with `hostMetrics` and `kubeletMetrics`
+  on, in the first 20 minutes after a pod starts:
+
+  | Log forward | Anonymous memory | All memory charged |
+  | :--- | :--- | :--- |
+  | Off | 530 to 553 MiB, still creeping | 560 to 583 MiB |
+  | Delivering to Loki | about 488 MiB | about 617 MiB |
+  | Loki destination unreachable | about 530 MiB | about 655 MiB |
+  | OTLP destination unreachable, queue full | 615 to 654 MiB | about 690 MiB |
+
+  The anonymous memory is the heap. The charged memory adds the mapped binary and page cache.
+  At matched ages an OTLP destination that is down costs about 100 MiB, for its full 16 MiB queue
+  ([`grafana/README.md`](../../grafana/README.md#forwarding-the-logs-to-a-sites-store)). Under the
+  768Mi limit that peak sat at `GOMEMLIMIT`, about 691 MiB, so the collector spent the outage
+  collecting garbage. Under 1Gi it is about two thirds of the limit. The limit is not a request,
+  so the node's minimum (*Hardware*, above) is unchanged.
 - **Mosquitto's metrics are prefixed `broker_`, not `mosquitto_`.** Alerts and dashboards written
   against `mosquitto_` match nothing, and show as empty panels rather than as errors.
 - **Grafana is inside the thing being monitored.** A `supabase-db` failure takes Aber's dashboards

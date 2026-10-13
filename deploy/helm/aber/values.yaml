@@ -1527,12 +1527,14 @@ observability:
     kubeletMetrics: true
     # 15s matches the interval every dashboard and rule assumes for rate() windows.
     scrapeInterval: 15s
-    # 768Mi: hostMetrics and kubeletMetrics together hold enough of a WAL to sit against a 512Mi
-    # ceiling, where reclaim stalls /-/ready past the liveness probe and the container is killed
-    # as exit 137 with reason Error. Same shape as the Grafana limit above.
+    # 1Gi: with hostMetrics and kubeletMetrics on, the WAL keeps Alloy's heap near 550Mi, higher
+    # while a rollout's new series age out, and a log forward whose destination is down adds its
+    # full queue, about 100Mi. Alloy sets GOMEMLIMIT to 90% of the limit. At the limit, reclaim
+    # stalls /-/ready past the liveness probe: exit 137, reason Error. Measured figures:
+    # deploy/k8s/README.md, Self-monitoring.
     resources:
       requests: { cpu: 50m, memory: 128Mi }
-      limits: { memory: 768Mi }
+      limits: { memory: 1Gi }
     # A second copy of the logs, for a store the site runs: a SIEM, a central Loki, an OTLP
     # collector. Off by default, and nothing leaves the cluster until it is on. The local store
     # (30 days, the Logs panels) is unchanged either way: the forward has its own writer and
