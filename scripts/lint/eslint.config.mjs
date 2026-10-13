@@ -35,7 +35,7 @@ export default function config ({ js, react, hooks, globals }) {
       },
     },
     {
-      files: ['scripts/**/*.mjs', 'forge/**/*.mjs', 'supabase/**/*.mjs'],
+      files: ['scripts/**/*.mjs', 'forge/**/*.mjs', 'supabase/**/*.mjs', 'test-harness/**/*.mjs'],
       languageOptions: { ecmaVersion: 'latest', sourceType: 'module', globals: { ...globals.node } },
       rules: { 'no-unused-vars': unused },
     },

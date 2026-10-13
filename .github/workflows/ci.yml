@@ -1863,6 +1863,17 @@ jobs:
             | grep -i 'cache-control' | grep -q 'no-store' \
             || { echo "::error::/config.js is not served no-store"; exit 1; }
 
+      # The dashboard under its enforced Content-Security-Policy, in the runner's own Chrome
+      # (CHROME_BIN): the pages before sign-in, every page navigation.jsx declares, an area plan and
+      # two 3D models it makes through the API, then sign-out, as an Administrator account of its
+      # own that the seeded one restores and removes. Each violation is listed with its directive
+      # and URL; one is a page the policy breaks in every browser.
+      - name: Walk The Dashboard Under Its Content-Security-Policy
+        timeout-minutes: 10
+        run: |
+          "${CHROME_BIN:-/usr/bin/google-chrome}" --version
+          node test-harness/csp-walk.mjs --base=http://app.localhost
+
       # Shared with the two rehearsal jobs below: every pod's log, and for a container that
       # restarted, how its previous run ended and that run's last lines.
       - name: Diagnostics On Failure

@@ -696,6 +696,72 @@ This does **not** give Studio a second factor, or a per-user audit trail of what
 editor. It controls *who may open the console*, and everything inside it still runs as the
 database owner.
 
+### What a browser may load: the Content-Security-Policy
+
+**The dashboard tells browsers what its pages may load, and browsers refuse the rest.** It sends a
+`Content-Security-Policy` header naming its own origin, the API and the two sign-in doors. A script
+injected into a page can then load nothing from elsewhere, and send what it reads nowhere.
+
+The chart builds the policy from the addresses it hands the dashboard in `/config.js`
+(`publicUrls.supabase`, `publicUrls.studio` and `publicUrls.gitea`, or their defaults):
+
+| Directive | Allows | Because |
+| :--- | :--- | :--- |
+| `connect-src` | the API over HTTP and WebSocket, the Studio and forge doors, `blob:`, `data:` | Data, sign-in, files and live updates; the sign-out request to each door; a 3D model's own textures |
+| `script-src` | the dashboard, `'wasm-unsafe-eval'` | The 3D viewer's decoders are WebAssembly |
+| `worker-src` | the dashboard, `blob:` | The decoders run in a worker made from a `blob:` address |
+| `img-src` | the dashboard, `data:`, `blob:` | Icons in the stylesheet, and area plans |
+| `style-src` | the dashboard, one `sha256-` hash | The 3D viewer's own stylesheet, inside its element |
+| `default-src`, `font-src` | the dashboard | Everything else ships in the image |
+| `frame-ancestors`, `form-action`, `base-uri`, `object-src` | nothing else | No page may frame the dashboard, and no form posts elsewhere |
+
+**If the policy leaves out an address the dashboard uses, part of a page stops working.** The page
+still opens. Tables may stay empty, live updates stop, an area plan or a 3D model does not appear,
+or sign-out leaves Studio signed in. The browser's console (F12) names the cause in a line that
+mentions the Content Security Policy.
+
+This happens when browsers reach the API at an address the chart does not know, such as a reverse
+proxy with a hostname of its own. Set `publicUrls.supabase` to the address browsers use.
+`/config.js` takes the same value, so the dashboard needs it anyway.
+
+**To keep a site working while you find the cause, switch the policy to report-only:**
+
+```bash
+helm upgrade ... --set frontend.contentSecurityPolicy.mode=report-only
+```
+
+The dashboard's pods restart, and browsers then load everything and only log each refusal in the
+console. Set it back to `enforce` when the console lists none.
+
+To see which policy the dashboard sends:
+
+```bash
+curl -sI -H 'Host: app.localhost' http://127.0.0.1/ | grep -i content-security-policy
+```
+
+[`test-harness/csp-walk.mjs`](../../test-harness/csp-walk.mjs) opens every page of the dashboard
+in a headless Chrome and lists each refusal, and CI runs it on every change
+([`docs/testing.md`](../../docs/testing.md)). Run it against a development stack: it makes and then
+deletes an area and two devices. It signs in as an account of its own, `csp-walk@aber.local`, which
+the seeded Administrator adds or restores before each run and removes after. So the walk's Sign
+Out signs nobody else out.
+
+**Grafana and the Node-RED editor send their policies report-only.** Browsers refuse nothing there,
+and log in the console what the policy would refuse. Nothing collects those logs, because nothing
+in the stack sends them out.
+
+- **Grafana's** is Grafana's own template, in [`grafana/grafana.ini`](../../grafana/grafana.ini),
+  connecting to Grafana alone (no `grafana.com`, no map tiles), with images confined to Grafana,
+  and with framing refused. To enforce it, open every provisioned dashboard, Explore, Alerting, the bundled
+  Drilldown apps and Administration with the console open. When the console lists nothing, move
+  the template to `content_security_policy`. Grafana's plugin loader and its stylesheets need
+  `'unsafe-eval'` and `'unsafe-inline'`, so enforcing it limits framing, connections, images and
+  forms, not scripts.
+- **The Node-RED editor's** covers framing and connections only (`frame-ancestors 'self';
+  connect-src 'self'`): the editor runs on inline scripts and handlers, so a policy on scripts
+  would break it. Its console lists the editor fetching the palette catalogue from
+  `catalogue.nodered.org` each time it opens.
+
 ### TLS
 
 Every certificate comes from the **internal CA** created below. It is the only supported issuer,

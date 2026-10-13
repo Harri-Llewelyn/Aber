@@ -386,5 +386,13 @@ describe('the response headers', () => {
     assert.equal(HSTS in refused.headers, false);
     assert.equal(editor.headers['X-Content-Type-Options'], 'nosniff', 'the other headers still go');
   });
+
+  it('reports the editor\'s Content-Security-Policy and enforces none', () => {
+    const { editor } = responses('');
+    const policy = editor.headers['Content-Security-Policy-Report-Only'];
+    assert.match(policy, /frame-ancestors 'self'/);
+    assert.match(policy, /connect-src 'self'/);
+    assert.equal('Content-Security-Policy' in editor.headers, false, 'the editor runs on inline scripts');
+  });
 });
 

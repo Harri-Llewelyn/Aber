@@ -1219,6 +1219,13 @@ frontend:
   # There is no `allowSignup` (a frontend flag is not an access control; see
   # supabaseAuth.disableSignup) and no `grafanaUrl` (derived from publicUrls.grafana, the same
   # value Grafana's root_url and OAuth redirect come from).
+  #
+  # The dashboard's Content-Security-Policy, built from the API's, Studio's and the forge's
+  # addresses. enforce: browsers refuse what it does not list. report-only: the same policy, and
+  # browsers only log each refusal in the console. Set report-only while a page the policy breaks
+  # is put right (deploy/k8s/README.md).
+  contentSecurityPolicy:
+    mode: enforce
   resources:
     requests: { cpu: 10m, memory: 32Mi }
     limits: { memory: 128Mi }

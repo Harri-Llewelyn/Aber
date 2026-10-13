@@ -517,6 +517,15 @@ npm run dev:test
 # checks: what the server says about a seeded plant against the Directory, then its quality and
 # subscriptions against what the run publishes (i3x/README.md -> Testing).
 npm run dev:test -- --filter=i3x
+# The dashboard under its Content-Security-Policy, in a headless Chrome: the pages before sign-in,
+# every page navigation.jsx declares, an area plan and two 3D models it makes and then deletes,
+# and sign-out. Fails listing each refusal a page or one of its workers reports. Chrome is
+# --chrome=PATH, or CHROME. CI runs it after the stack lane. Chrome signs in as the walk's own
+# Administrator, csp-walk@aber.local, never as the seeded one: Sign Out ends every session of the
+# person who clicks it. The seeded Administrator (ABER_ADMIN_EMAIL) adds or restores that account
+# and sets its password through the API first, and removes its access after; that API session
+# ends alone.
+node test-harness/csp-walk.mjs --base=http://app.localhost
 ```
 
 **`validate.py` runs in-cluster as a Job (`e2e.enabled`) and from the host through the dev loop's
@@ -758,7 +767,7 @@ CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs nine jobs:
 | **frontend-build** | Vitest, the mirrored-logic drift guards, production bundle |
 | **helm-chart** | `helm lint`, render, API-schema validation, chart guard rails |
 | **edge-function-auth-test** | Auth ladders and RLS against a real Postgres |
-| **k8s-validation** | k3d cluster through `dev-cluster up --e2e --network-policy`: `helm test`, `validate.py` in-cluster, the stack lane through port-forwards, the i3X conformance suite, ingress assertions, all with NetworkPolicies on |
+| **k8s-validation** | k3d cluster through `dev-cluster up --e2e --network-policy`: `helm test`, `validate.py` in-cluster, the stack lane through port-forwards, the i3X conformance suite, ingress assertions, the dashboard walked in Chrome under its Content-Security-Policy, all with NetworkPolicies on |
 | **site-install-rehearsal** | `site-rehearsal install` on k3d: the checkout installed as a new site, with values from `setup.mjs`, never `values-dev.yaml`, then the i3X conformance suite through Traefik over HTTPS (*The install and upgrade rehearsals*, below) |
 | **upgrade-rehearsal** | `site-rehearsal upgrade` on k3d: the last release installed as published, then `helm upgrade` to the checkout with the same values |
 | **secret-scan** | gitleaks over every commit in a full clone and the working tree, on every push |

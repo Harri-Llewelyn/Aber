@@ -38,8 +38,9 @@ const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
 // forever. v2 adminAuth.users; v3 persisted username -> permissions map; v4 constant-time
 // NODERED_ADMIN_TOKEN comparison; v5 editorTheme.tours off; v6 telemetry off; v7 the editor's
 // response headers; v8 the editor's role re-checked every minute, the persisted map retired; v9
-// Strict-Transport-Security on the editor and the http-in routes.
-const SETTINGS_VERSION = 9;
+// Strict-Transport-Security on the editor and the http-in routes; v10 the editor's report-only
+// Content-Security-Policy.
+const SETTINGS_VERSION = 10;
 
 function fail(message) {
   console.error(`[node-red-init] ERROR: ${message}`);
@@ -532,6 +533,10 @@ module.exports = {
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
     res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    // Reported, never enforced: the editor runs on inline scripts and handlers. The browser's
+    // console lists what the editor frames or connects to beyond its own origin.
+    res.setHeader('Content-Security-Policy-Report-Only',
+      "frame-ancestors 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'");
     strictTransportSecurity(res);
     next();
   },
