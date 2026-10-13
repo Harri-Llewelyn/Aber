@@ -234,7 +234,8 @@ ALTER USER MAPPING FOR PUBLIC SERVER timescaledb_server
 
 -- Staged through a GUC: psql substitutes :variables while lexing and does NOT descend into
 -- dollar-quoted blocks, so a :'bi_reader_password' inside the DO below would never be replaced.
-SELECT set_config('aber.bi_reader_password', :'bi_reader_password', false);
+-- set_config() returns the password, and db-init prints psql's output: `\g /dev/null` discards it.
+SELECT set_config('aber.bi_reader_password', :'bi_reader_password', false) \g /dev/null
 
 -- ---------------------------------------------------------------------------------------------
 -- 3a. Default privileges, narrowed BEFORE anything is created
