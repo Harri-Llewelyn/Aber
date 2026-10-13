@@ -547,8 +547,10 @@ touched, and a job on the historian refreshes those hours in `telemetry_1m`, `te
 
 **If the rollups still show the outage as a gap** once the replay has finished and five minutes have
 passed, the hours were not recorded. `aber_ingestion_rollup_windows_failed_total` counts this, and
-the daemon logs a warning naming the cause. The readings are in the raw table. Refresh the outage's
-window on the historian by hand, using the start and end the outage report gave:
+the daemon logs a warning naming the cause. *Late Replay Missing From the Rollups* fires on it, and
+*Stack & Ingestion Health* shows it beside the outage readings. The readings are in the raw table.
+Refresh the outage's window on the historian by hand, using the start and end the outage report
+gave:
 
 ```sql
 CALL refresh_continuous_aggregate('telemetry_1m', '<start>', '<end>');

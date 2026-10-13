@@ -1969,7 +1969,7 @@ because any of these can be missing while the counts agree:
 | `asset-3d-models` bucket exists and is still public | every model URL 400s while `model_3d_path` looks right |
 | `telemetry` is still a hypertable, with chunks | no compression and no retention; it grows forever |
 | All three rollups exist **and return rows** | a dashboard that is a flat line on a healthy-looking stack |
-| Retention and refresh jobs registered **and scheduled** | present in every catalogue view, never running |
+| Retention, refresh and late-replay jobs registered **and scheduled** | present in every catalogue view, never running |
 | A user seeded before the backup can still sign in | GoTrue's schema or the JWT secret did not survive |
 | The storage object round-trips byte for byte | `devices.model_3d_path` pointing at objects that are gone |
 | The seeded gateway repository is back with its commit, and `main` is still closed to pushes behind its status check | a fleet whose flows are gone, or whose rules are open |

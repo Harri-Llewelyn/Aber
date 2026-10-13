@@ -18,3 +18,5 @@ SELECT 'jobs_retention=' || count(*) FROM timescaledb_information.jobs
  WHERE proc_name = 'telemetry_raw_retention';
 SELECT 'jobs_refresh='   || count(*) FROM timescaledb_information.jobs
  WHERE proc_name = 'policy_refresh_continuous_aggregate';
+SELECT 'jobs_late_replay=' || count(*) FROM timescaledb_information.jobs
+ WHERE proc_name = 'refresh_requested_rollups';

@@ -86,10 +86,19 @@ BEGIN
     RAISE EXCEPTION 'no retention job survived the restore -- the historian will grow without bound';
   END IF;
 
+  -- The late-replay job (timescaledb/aggregates.sql), also custom: it refreshes the hours a replay
+  -- wrote further back than the refresh policies reach.
+  SELECT count(*) INTO v_count FROM timescaledb_information.jobs
+   WHERE proc_name = 'refresh_requested_rollups';
+  IF v_count < 1 THEN
+    RAISE EXCEPTION 'no late-replay job (refresh_requested_rollups) survived the restore -- a replay more than a day late will be missing from the rollups';
+  END IF;
+
   -- Scheduled, not merely present. A job row with scheduled = false is a policy that exists and
   -- never runs, which reads as configured in every view an operator would check.
   SELECT count(*) INTO v_count FROM timescaledb_information.jobs
-   WHERE proc_name IN ('telemetry_raw_retention', 'policy_refresh_continuous_aggregate')
+   WHERE proc_name IN ('telemetry_raw_retention', 'policy_refresh_continuous_aggregate',
+                       'refresh_requested_rollups')
      AND NOT scheduled;
   IF v_count > 0 THEN
     RAISE EXCEPTION '% policy job(s) came back UNSCHEDULED -- present in every catalogue view and never running', v_count;
