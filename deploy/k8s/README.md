@@ -743,7 +743,8 @@ curl -sI -H 'Host: app.localhost' http://127.0.0.1/ | grep -i content-security-p
 in a headless Chrome and lists each refusal, and CI runs it on every change
 ([`docs/testing.md`](../../docs/testing.md)). Run it against a development stack: it makes and then
 deletes an area and two devices. It signs in as an account of its own, `csp-walk@aber.local`, which
-the seeded Administrator restores before each run and removes after, so nobody else is signed out.
+the seeded Administrator adds or restores before each run and removes after. So the walk's Sign
+Out signs nobody else out.
 
 **Grafana and the Node-RED editor send their policies report-only.** Browsers refuse nothing there,
 and log in the console what the policy would refuse. Nothing collects those logs, because nothing

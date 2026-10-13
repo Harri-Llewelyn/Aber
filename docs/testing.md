@@ -515,8 +515,9 @@ npm run dev:test -- --filter=i3x
 # and sign-out. Fails listing each refusal a page or one of its workers reports. Chrome is
 # --chrome=PATH, or CHROME. CI runs it after the stack lane. Chrome signs in as the walk's own
 # Administrator, csp-walk@aber.local, never as the seeded one: Sign Out ends every session of the
-# person who clicks it. The seeded Administrator (ABER_ADMIN_EMAIL) restores that account and sets
-# its password through the API first, and removes its access after; the API session ends alone.
+# person who clicks it. The seeded Administrator (ABER_ADMIN_EMAIL) adds or restores that account
+# and sets its password through the API first, and removes its access after; that API session
+# ends alone.
 node test-harness/csp-walk.mjs --base=http://app.localhost
 ```
 
