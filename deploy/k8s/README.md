@@ -1531,13 +1531,44 @@ What happens if a capability is missing: the container exits at start with `Oper
 permitted`, or, for `KILL`, a stop takes the whole grace period and the process is killed rather
 than shut down. What to do: add it back in that container's `securityContext`, and say why.
 
-One step of #419 follows: each root filesystem becomes read-only, one workload at a time, with an
-`emptyDir` for what the process writes. Until then `scripts/lint/config-allowlist.json` lists each
-writable root against #419.
+**Read-only root filesystems.** Every container the chart renders sets
+`readOnlyRootFilesystem: true`, so a process cannot change its own image, except the two named
+at the end of this section. Each writes only where a volume is mounted:
 
-These containers run with a read-only root filesystem (`readOnlyRootFilesystem: true`). Each writes
-only to its volumes and to the `emptyDir` named here:
-
+- `gotrue`, `postgrest`, `postgres-meta`, `envoy` and `realtime`, with `wait-for-realtime-schema`,
+  write nothing. Nor do the `storage-init` and `storage-policies` Jobs.
+- Every `wait-for-*` init container that `aber.waitFor` or `aber.waitForPostgres` renders, in
+  every pod, writes nothing. Each runs `curl`, `nc`, `wget` or `psql` until a service answers.
+- `realtime` writes no Erlang crash dump: its start script names `/tmp`, which is read-only.
+  Kubernetes discarded a dump there at the container's restart anyway.
+- `storage` (supabase-storage) writes only the objects' volume, `/var/lib/storage`.
+- `studio` writes saved snippets to `/app/snippets`, and Next.js its cache to `.next/cache`.
+- `render-config` (supabase-envoy) writes the gateway's configuration to `/config`, which `envoy`
+  reads.
+- `edge-runtime` (supabase-functions) writes a scratch directory per worker in `/tmp`, and its
+  analysis caches to `DENO_DIR` (`/home/deno/deno-dir`). The image ships the functions'
+  dependencies in `DENO_DIR`, so the `seed-deno-dir` init container copies them into the
+  `emptyDir` first.
+- `swagger-ui` rewrites files its image ships when it starts: `swagger-initializer.js` and a `.gz`
+  beside each page, script and stylesheet in the document root, and two snippets in
+  `/etc/nginx/templates`. The `seed-web-root` init container copies both directories into
+  `emptyDir`s first. nginx also writes `/etc/nginx/conf.d`, `/var/cache/nginx` and its pid file in
+  `/run`.
+- `db-init` and `db-roles-init` write small files to `/tmp`.
+- `frontend`: `/tmp`, `/var/cache/nginx` and `/etc/nginx/conf.d`, for nginx's pid, its temporary
+  files, and `nginx.conf` rendered at start.
+- `ingestion`: `/tmp`, for the liveness heartbeat and the objects `python -m cold_archive query`
+  fetches. It has no size limit, because reaching one would evict the daemon.
+- `playback` and the `cold-archive` CronJob: `/tmp`. They write no file of their own; Python and
+  OpenSSL use it when they need a temporary file.
+- `node-red`: `/tmp`, for what a flow's file or exec node writes there. It has no size limit, for
+  the same reason as `ingestion`'s.
+- `assemble-config` (mosquitto): `/tmp`. `mosquitto_passwd` hashes each managed account in a
+  temporary directory.
+- `backup-service`: `/tmp`, for the aws CLI's config for an off-site copy. Its 256 MiB leaves room
+  to fetch and decrypt a copy by hand.
+- `test-db-tls` (helm test): `/tmp`, for its plaintext probe's error output.
+- The e2e and load-test Jobs: `/tmp`, for the AAS suite's harness file and Python's temporary files.
 - **`supabase-db` and `timescaledb`**, every container in each pod. The server writes its socket and
   lock file to `/var/run/postgresql`. With the physical backup on, the `pgbackrest` sidecar shares
   that directory and keeps its output in `/tmp`. `certificate-reload` and `metrics` write nothing.
@@ -1549,6 +1580,26 @@ only to its volumes and to the `emptyDir` named here:
   storage path (its WAL and read positions) is an `emptyDir`. At start Alloy also tries to make
   `/root/.cache/snowflake`, a cache for a Snowflake exporter the chart does not run, and carries on
   without it.
+- `mosquitto`, `gateway-credential`, `certificate-reload` and `metrics` (mosquitto), `node-red-init`,
+  the `backup` CronJob, the `timescaledb-maintenance` Job and `test-fdw` write nothing outside their
+  volumes.
+
+Node-RED keeps its flows, the palette's installs and npm's cache in its `/data` volume. A flow's
+file node given a relative path writes under the working directory, `/usr/src/node-red`, which is
+read-only, and the node reports `EROFS`. Give it an absolute path under `/data`, or under `/tmp` for
+a scratch file.
+
+What happens if a process writes anywhere else: it fails with `Read-only file system`, often at its
+first request rather than at start. What to do: mount an `emptyDir` at that directory in that
+container, and add it to this list.
+
+These containers keep a writable root filesystem, each for the reason measured:
+
+- **`gitea` and `gitea-init`** (gitea): the image's own start-up writes outside `/data` every time.
+  Its setup changes the owner and mode of `/app/gitea`, the binary's directory, and renders
+  `/etc/ssh/sshd_config`. Its supervisor, s6, keeps a lock and state under `/etc/s6`. On
+  `gitea/gitea:28.0.0` with a read-only root, `gitea-init` fails at the first `chown` and `gitea`
+  exits at once (`s6-svscan: fatal: unable to open .s6-svscan/lock`). `gitea-token` runs read-only.
 
 ### Users
 

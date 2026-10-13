@@ -171,17 +171,20 @@ spec:
 {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
             requests: { cpu: 50m, memory: 64Mi }
             limits: { memory: 256Mi }
-          {{- if .Values.postgresTls.enabled }}
           volumeMounts:
-            {{- include "aber.dbClientCaMount" . | nindent 12 }}
-          {{- end }}
-      {{- if .Values.postgresTls.enabled }}
+            {{- with include "aber.dbClientCaMount" . }}{{ . | nindent 12 }}{{- end }}
+            # set-role-password.sql, written above.
+            - name: tmp
+              mountPath: /tmp
       volumes:
-        {{- include "aber.dbClientCaVolume" . | nindent 8 }}
-      {{- end }}
+        {{- with include "aber.dbClientCaVolume" . }}{{ . | nindent 8 }}{{- end }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Mi
 {{- end }}

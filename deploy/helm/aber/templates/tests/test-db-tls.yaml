@@ -96,8 +96,12 @@ spec:
           echo 'PASS: both databases refuse plaintext, verify under the chart CA, and hold no plaintext backend from beyond loopback.'
       volumeMounts:
         {{- include "aber.dbClientCaMount" . | nindent 8 }}
+        # The plaintext probe's stderr. Unwritable, the probe never runs and reads as refused.
+        - name: tmp
+          mountPath: /tmp
       securityContext:
         allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
         capabilities:
           drop: ["ALL"]
       resources:
@@ -105,4 +109,7 @@ spec:
         limits: { memory: 256Mi }
   volumes:
     {{- include "aber.dbClientCaVolume" . | nindent 4 }}
+    - name: tmp
+      emptyDir:
+        sizeLimit: 1Mi
 {{- end }}

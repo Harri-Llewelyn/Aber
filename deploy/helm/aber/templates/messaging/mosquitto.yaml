@@ -371,6 +371,7 @@ spec:
           imagePullPolicy: {{ .Values.gatewayCredential.image.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           env:
@@ -460,6 +461,9 @@ spec:
               mountPath: /mosquitto/certs
               readOnly: true
             {{- end }}
+            # mosquitto_passwd hashes each managed account into a mktemp directory.
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests: { cpu: 10m, memory: 48Mi }
             limits: { memory: 128Mi }
@@ -527,9 +531,11 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 4
           # Started as 1883, the entrypoint skips its chown and the broker its drop of privileges.
-          # It writes its plugin document on the data volume, which fsGroup makes group-writable.
+          # It writes its plugin document on the data volume, which fsGroup makes group-writable,
+          # and nothing else.
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
@@ -573,6 +579,7 @@ spec:
           # As 1883, the broker's own uid, so it may signal the broker with no capability.
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           command:
@@ -640,6 +647,7 @@ spec:
           # and the service writes nothing on this target.
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           command: ["node", "/opt/aber/gateway-credential-service.mjs"]
@@ -736,6 +744,7 @@ spec:
             failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
@@ -793,6 +802,9 @@ spec:
         # policy comes from the ConfigMap, which is the actual source of truth.
         - name: config
           emptyDir: {}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Mi
         # The plugin's document lives here, and it is the only copy of every issued gateway
         # account, so this is the one volume the broker keeps. Mosquitto's own `persistence` stays
         # off in mosquitto.conf: retained queues for offline subscribers are not part of this

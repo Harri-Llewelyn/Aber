@@ -1270,6 +1270,7 @@ template and kubeconform all passed.
       echo "{{ .describe }} is ready"
   securityContext:
     allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
     capabilities:
       drop: ["ALL"]
 {{- end -}}
@@ -1306,6 +1307,7 @@ refused connection; optional describe names what is waited for.
       echo "{{ .describe | default (printf "%s is accepting queries" .host) }} — ready"
   securityContext:
     allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
     capabilities:
       drop: ["ALL"]
 {{- end -}}

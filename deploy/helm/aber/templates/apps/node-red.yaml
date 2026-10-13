@@ -153,6 +153,7 @@ spec:
             {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
@@ -210,13 +211,18 @@ spec:
             failureThreshold: 4
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
             {{- toYaml .Values.nodeRed.resources | nindent 12 }}
           volumeMounts:
+            # The runtime writes /data alone, the palette manager's npm cache and installs included.
+            # /tmp is the flows' scratch space, for a file or exec node.
             - name: data
               mountPath: /data
+            - name: tmp
+              mountPath: /tmp
             {{- if and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients }}
             {{- /* The runtime reads this path when the flow is deployed -- tls-config's certType is
                    `files`, so `ca` is read with fs.readFileSync, not baked into the flow. */}}
@@ -226,6 +232,10 @@ spec:
         {{- if and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients }}
         {{- include "aber.brokerClientCaVolume" . | nindent 8 }}
         {{- end }}
+        # No sizeLimit: what a flow writes is the flow author's, and crossing a limit evicts the
+        # editor with every flow.
+        - name: tmp
+          emptyDir: {}
         - name: data
           {{- if .Values.nodeRed.persistence.enabled }}
           persistentVolumeClaim:

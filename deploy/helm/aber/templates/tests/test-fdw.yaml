@@ -116,6 +116,7 @@ spec:
           echo 'PASS: postgres_fdw reaches TimescaleDB at {{ include "aber.timescale.host" . }}:{{ include "aber.timescale.port" . }} and public.telemetry is queryable.'
       securityContext:
         allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
         capabilities:
           drop: ["ALL"]
       resources:
