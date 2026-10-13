@@ -2383,8 +2383,8 @@ UPDATE public.directory_services AS d
 \if :{?broker_public_url}    \else \set broker_public_url    '' \endif
 \if :{?broker_internal_url}  \else \set broker_internal_url  '' \endif
 
--- Every set_config() in this file ends `\g /dev/null`: it returns the value it sets, db-init prints
--- psql's output, and several of these values are secrets.
+-- Every set_config() of a psql variable in this file ends `\g /dev/null`: it returns the value it
+-- sets, db-init prints psql's output, and several of these values are secrets.
 SELECT set_config('aber.dir_gitea_public_url', :'gitea_public_url', false) \g /dev/null
 
 DO $$
