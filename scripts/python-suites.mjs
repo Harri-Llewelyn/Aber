@@ -772,6 +772,14 @@ export const SUITES = {
       'the database refuses it anyway, which is the half that holds for a PostgREST caller the ' +
       'dashboard never sees.',
   },
+  'supabase/migrations/test_a_shadow_gateway_is_never_stale.py': {
+    lanes: ['db'],
+    why:
+      "0182's shadow exclusion in platform_health's gateway_stale arm, the row Grafana's Gateway " +
+      'Stale rule fires on. A redeclaration lost it once and the rule fired after every replay; ' +
+      'this pins both directions, a shadow gateway never listed and an ordinary one that died ' +
+      'still listed, and that grafana_reader still reads the view.',
+  },
 
   // -----------------------------------------------------------------------------------------
   // Two lanes: an offline layer that always runs, a live layer that needs the stack

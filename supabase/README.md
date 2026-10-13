@@ -1109,6 +1109,16 @@ every boot and never cleared. `0061` adds `AND NOT g.is_shadow`, for exactly the
 already gives for archived appliances: *"alerting on it would train an operator to ignore the
 rule."*
 
+**`0074` lost the exclusion, and `0182` puts it back.** `0074` redeclared `platform_health_rows()`
+without the line, `0092` and `0133` copied that form, and the baseline carries it. A fresh stack
+showed nothing: the Playback gateway's heartbeat is NULL until a playback writes one, and
+`is_stale` is false for NULL. But every replay now ends with an NDEATH
+([#875](https://github.com/Harri-Llewelyn/Aber/issues/875)), which writes `last_heartbeat`, and
+`is_stale` reads heartbeat age whatever the stored status. Measured on a migrated database: an
+`OFFLINE` Playback gateway with a heartbeat 100 s old was reported as `gateway_stale`, so the rule
+fired about six minutes after every replay. Check 71 in `scripts/check-docs-drift.mjs` holds the
+last declaration of the function to the line.
+
 **`is_shadow`, and not one of the other three flags.** `is_simulated` is carried by every simulator
 gateway, and those do heartbeat — their silence is a real fault. `deployment` answers where the connector runs, not
 whether anything publishes as it. `is_archived` would mean

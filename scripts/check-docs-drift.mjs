@@ -814,6 +814,7 @@ function edgeFunctionNames() {
     'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited',
     'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline records the first alone',
     'public.reject_archived_schema_assignment': '0168 declares it as the baseline does, in its final form, so neither names devices.schema_id (0175)',
+    'public.platform_health_rows': '0182 puts back the shadow-gateway exclusion archived migration 0061 gave the gateway_stale arm and 0074 dropped; the baseline carries the form without it (check 71)',
     // Empty just after a squash: the baseline is generated from a dump of the finished database,
     // so every function appears in it exactly once, in its final form. Entries return as soon as
     // a migration added after the fold redeclares something the baseline holds, and each one
@@ -908,6 +909,34 @@ function edgeFunctionNames() {
     );
   } else {
     pass(`${seen.size} function(s) declared across the chain; all ${Object.keys(INTENDED_REDECLARATIONS).length} redeclarations are recorded as intended`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 71. The Playback gateway is never reported stale. The last declaration of platform_health_rows()
+// keeps `NOT g.is_shadow` in its gateway_stale arm: archived migration 0061 added it, 0074 lost it
+// in a redeclaration, and 0182 put it back. Comments are stripped, so only the SQL counts.
+// -------------------------------------------------------------------------------------------------
+{
+  const dir = 'supabase/migrations';
+  const files = readdirSync(join(REPO, dir)).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  const declaration = /CREATE OR REPLACE FUNCTION\s+public\.platform_health_rows\s*\(\)[\s\S]*?\bAS\s+(\$[a-z_]*\$)([\s\S]*?)\1/gi;
+  let last = null;
+  for (const name of files) {
+    for (const m of read(`${dir}/${name}`).matchAll(declaration)) last = { name, body: m[2] };
+  }
+  const arm = last && last.body.replace(/--[^\n]*/g, '').match(/'gateway_stale'::text[\s\S]*?(?=\bUNION\s+ALL\b|$)/i);
+  if (!arm) {
+    fail(`no applied migration declares a gateway_stale arm in public.platform_health_rows()${last ? ` (last declared in ${last.name})` : ''}, so check 71 compares nothing`);
+  } else if (!/\bNOT\s+g\.is_shadow\b/i.test(arm[0])) {
+    fail(
+      `${last.name} declares platform_health_rows() last, and its gateway_stale arm has no \`AND NOT g.is_shadow\`.\n` +
+        '      Nothing publishes as the Playback gateway between playbacks, so Gateway Stale would fire after\n' +
+        '      every replay and teach an operator to ignore it. 0074 dropped the line this way; keep it in\n' +
+        '      every redeclaration (0182).'
+    );
+  } else {
+    pass(`platform_health_rows()'s last declaration (${last.name}) keeps shadow gateways out of gateway_stale`);
   }
 }
 
