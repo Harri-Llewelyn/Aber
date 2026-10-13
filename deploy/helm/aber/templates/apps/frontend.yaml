@@ -259,11 +259,20 @@ spec:
             failureThreshold: 4
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
           volumeMounts:
+            # What nginx writes: its pid (/tmp), its temp directories (/var/cache/nginx), and the
+            # entrypoint's render of nginx.conf (conf.d, which the image leaves empty).
+            - name: tmp
+              mountPath: /tmp
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d
             # subPath, so this replaces ONE FILE rather than mounting over the whole web root --
             # mounting the directory would hide index.html and every hashed asset beside it. The
             # cost is that subPath mounts do not auto-update, which the checksum annotation covers.
@@ -291,6 +300,15 @@ spec:
         - name: config
           configMap:
             name: {{ printf "%s-frontend-config" $fullname }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Mi
+        - name: nginx-cache
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: nginx-conf
+          emptyDir:
+            sizeLimit: 1Mi
         {{- if .Values.ingress.tls.enabled }}
         - name: platform-root
           secret:
