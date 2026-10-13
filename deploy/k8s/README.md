@@ -1974,6 +1974,7 @@ because any of these can be missing while the counts agree:
 | The storage object round-trips byte for byte | `devices.model_3d_path` pointing at objects that are gone |
 | The seeded gateway repository is back with its commit, and `main` is still closed to pushes behind its status check | a fleet whose flows are gone, or whose rules are open |
 | The forge's published SSH host key has the same digest as before the backup | every appliance refuses to clone: a host-key mismatch, which reads as an attack |
+| The restored forge mints its machine-account token into the reinstalled Secret, a write to `gitea.db` | a forge that answers every read and refuses every write, so enrolment creates no repository |
 | The seeded broker account is in the restored document and the plugin answers for it | every gateway re-issued |
 | The job the dump carried as RUNNING is FAILED, and a second backup completes | a restored stack that refuses every new backup |
 | The copy fetched from the bucket decrypts, matches its manifest and is the volume's byte for byte, and the restored stack copies its own backup there | a restore after losing the site starts from a copy that is incomplete, unreadable or different, or the restored Vault cannot decrypt the bucket's key |
