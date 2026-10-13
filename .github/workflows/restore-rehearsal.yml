@@ -392,12 +392,17 @@ jobs:
           kubectl -n "$NS" get events --sort-by=.lastTimestamp | grep -E 'Evict|DiskPressure|ImageGC|FreeDiskSpace|Pull' | tail -20 || true
           kubectl -n "$NS" get pods -o wide || true
           kubectl -n "$NS" get pvc || true
-          kubectl -n "$NS" describe pods | tail -120 || true
+          # Every pod that is not running, in full: a stuck rollout leaves its init containers' exit
+          # codes here, and a tail of every pod cuts them off.
+          kubectl -n "$NS" get pods --no-headers | awk '$3 != "Running" && $3 != "Completed" {print $1}' \
+            | xargs -r -n1 kubectl -n "$NS" describe pod || true
           kubectl -n rehearsal-offsite logs deploy/minio --tail 40 || true
+          # --all-containers includes the init containers; --previous is a crash-looping one's last run.
           for c in supabase-db timescaledb supabase-storage supabase-auth supabase-realtime backup-service gitea mosquitto; do
             echo "--- logs: $c"
-            kubectl -n "$NS" logs "deploy/$c" --tail 60 2>/dev/null \
-              || kubectl -n "$NS" logs "statefulset/$c" --tail 60 2>/dev/null || true
+            kubectl -n "$NS" logs "deploy/$c" --all-containers --prefix --tail 60 2>/dev/null \
+              || kubectl -n "$NS" logs "statefulset/$c" --all-containers --prefix --tail 60 2>/dev/null || true
+            kubectl -n "$NS" logs "deploy/$c" --all-containers --prefix --previous --tail 60 2>/dev/null || true
           done
 
       # THE ARTEFACTS ARE THE EVIDENCE. A failed rehearsal is worth diagnosing from the actual dump

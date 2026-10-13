@@ -5634,7 +5634,8 @@ kubectl -n aber exec -i "$POD" -- tar -xzf - -C /var/lib/storage < ./backups/<st
 # A volume the workload holds open (the forge, then the broker): scale it to zero, replace the
 # volume's contents through a helper pod holding the same claim, scale it back. The forge archive
 # restores the host keys, so appliances keep cloning; the broker archive restores the document,
-# and the boot reconcile keeps every account it holds.
+# and the boot reconcile keeps every account it holds. A forge archive taken before 1.4.0 holds
+# gitea.db as root: the forge's gitea-init container gives it back to git, and its log says so.
 restore_volume() {   # <deployment> <archive>; the claim is the deployment's "data" volume
   CLAIM=$(kubectl -n aber get "deploy/$1" -o jsonpath='{.spec.template.spec.volumes[?(@.name=="data")].persistentVolumeClaim.claimName}')
   IMAGE=$(kubectl -n aber get "deploy/$1" -o jsonpath='{.spec.template.spec.containers[0].image}')
@@ -5866,8 +5867,11 @@ mounted is absent from the backup and the manifest says so; an empty path variab
 deliberately.
 
 **The forge's SQLite database** is copied with sqlite3's online backup, which is consistent while
-Gitea writes, from a staging directory so that tar's second `-C` lands it at `gitea/gitea.db`
-inside the archive where a restore expects it. On a read-only volume SQLite cannot open the WAL
+Gitea writes, into a staging directory, and appended at `gitea/gitea.db` inside the archive where a
+restore expects it. The copy is made as root, and a restore keeps an archive's owners, so it is
+appended with the live file's owner (`git`, uid 1000). `--owner` holds for a whole tar run, so a
+second run appends it to the uncompressed archive and `gzip` compresses the result.
+On a read-only volume SQLite cannot open the WAL
 database for reading, so the raw `db`, `-wal` and `-shm` files are copied together, the WAL
 folded into the copy with a checkpoint, and the copy integrity-checked; the method used is in
 `manifest.json`. GNU tar exits 1 for "file changed as we read it", which an upload landing

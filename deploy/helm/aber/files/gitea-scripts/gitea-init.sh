@@ -1,11 +1,12 @@
 #!/bin/bash
 # Gitea provisioning, run by the chart's init containers before the server starts, from a mirror of
 # this file. With no argument it calls the image's own setup rather than writing app.ini, runs as
-# root and then as git, creates the administrator (INSTALL_LOCK closes the web installer) and the
-# machine account the platform authenticates as, a bot, and publishes the SSH host key so an
-# appliance can verify this forge instead of trusting it on first use. With `token` it runs as git
-# and gives the bot its API token, written into one Secret through the Kubernetes API. Idempotent
-# by inspection, never by `|| true`. Reasoning: forge/README.md, "Provisioning the server".
+# root and then as git, gives git the database when a restore left it another user's, creates the
+# administrator (INSTALL_LOCK closes the web installer) and the machine account the platform
+# authenticates as, a bot, and publishes the SSH host key so an appliance can verify this forge
+# instead of trusting it on first use. With `token` it runs as git and gives the bot its API token,
+# written into one Secret through the Kubernetes API. Idempotent by inspection, never by `|| true`.
+# Reasoning: forge/README.md, "Provisioning the server".
 set -e
 
 DB="${GITEA__database__PATH:-/data/gitea/gitea.db}"
@@ -150,9 +151,22 @@ if [ -z "$GITEA_ADMIN_USER" ] || [ -z "$GITEA_ADMIN_PASSWORD" ]; then
 fi
 
 # The server's own setup builds app.ini from the GITEA__section__KEY environment, so the two
-# containers cannot disagree; re-running it is harmless. It chowns /data to git, which is why every
-# gitea command after it runs as that user.
+# containers cannot disagree; re-running it is harmless. It chowns /data/gitea and /data/git to git,
+# each only when the directory itself is not git's, and every gitea command after it runs as git.
 /etc/s6/gitea/setup
+
+# The database, its journals and its directory are git's before anything writes them as git: this
+# container, the token step and the server. A restore can bring gitea.db back as root inside a
+# directory that is git's, which the setup leaves alone. Only what is wrong changes.
+DB_DIR=$(dirname "$DB")
+DB_FILE=$(basename "$DB")
+fixed=$(find "$DB_DIR" -maxdepth 1 \( -path "$DB_DIR" -o -name "$DB_FILE" -o -name "$DB_FILE-wal" \
+  -o -name "$DB_FILE-shm" -o -name "$DB_FILE-journal" \) \( ! -user git -o ! -group git \) \
+  -print -exec chown git:git {} +)
+if [ -n "$fixed" ]; then
+  echo "[gitea-init] $(printf '%s' "$fixed" | tr '\n' ' ') belonged to another user, as a restore can leave it; now git's."
+fi
+
 su-exec git gitea migrate
 
 # The host key is public by construction (ssh-keyscan hands it to anyone). What makes it
