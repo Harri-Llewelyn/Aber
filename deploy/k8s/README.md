@@ -1535,6 +1535,46 @@ One step of #419 follows: each root filesystem becomes read-only, one workload a
 `emptyDir` for what the process writes. Until then `scripts/lint/config-allowlist.json` lists each
 writable root against #419.
 
+**Read-only root filesystems.** These containers set `readOnlyRootFilesystem: true`. Each can write
+only its volumes and the `emptyDir` volumes named here:
+
+- `frontend`: `/tmp`, `/var/cache/nginx` and `/etc/nginx/conf.d`, for nginx's pid, its temporary
+  files, and `nginx.conf` rendered at start.
+- `ingestion`: `/tmp`, for the liveness heartbeat and the objects `python -m cold_archive query`
+  fetches. It has no size limit, because reaching one would evict the daemon.
+- `playback` and the `cold-archive` CronJob: `/tmp`. They write no file of their own; Python and
+  OpenSSL use it when they need a temporary file.
+- `node-red`: `/tmp`, for what a flow's file or exec node writes there. It has no size limit, for
+  the same reason as `ingestion`'s.
+- `assemble-config` (mosquitto): `/tmp`. `mosquitto_passwd` hashes each managed account in a
+  temporary directory.
+- `backup-service`: `/tmp`, for the aws CLI's config for an off-site copy. Its 256 MiB leaves room
+  to fetch and decrypt a copy by hand.
+- `test-db-tls` (helm test): `/tmp`, for its plaintext probe's error output.
+- The e2e and load-test Jobs: `/tmp`, for the AAS suite's harness file and Python's temporary files.
+
+These run read-only with no `emptyDir`, because they write nothing outside their volumes:
+`mosquitto`, `gateway-credential`, `certificate-reload` and `metrics` (mosquitto), `node-red-init`,
+the `backup` CronJob, the `timescaledb-maintenance` Job, `test-fdw`, and every `wait-for-*` init
+container.
+
+Node-RED keeps its flows, the palette's installs and npm's cache in its `/data` volume. A flow's
+file node given a relative path writes under the working directory, `/usr/src/node-red`, which is
+read-only, and the node reports `EROFS`. Give it an absolute path under `/data`, or under `/tmp` for
+a scratch file.
+
+What happens if a process writes anywhere else: the write fails with `Read-only file system`
+(`EROFS`) in the container's log, at start or at the first request that writes. What to do: mount an
+`emptyDir` at exactly that directory in the container's template, and say why beside it.
+
+These containers keep a writable root filesystem, each for the reason measured:
+
+- **`gitea` and `gitea-init`** (gitea): the image's own start-up writes outside `/data` every time.
+  Its setup changes the owner and mode of `/app/gitea`, the binary's directory, and renders
+  `/etc/ssh/sshd_config`. Its supervisor, s6, keeps a lock and state under `/etc/s6`. On
+  `gitea/gitea:28.0.0` with a read-only root, `gitea-init` fails at the first `chown` and `gitea`
+  exits at once (`s6-svscan: fatal: unable to open .s6-svscan/lock`). `gitea-token` runs read-only.
+
 ### Users
 
 Every image this repository builds, except `supabase-db` (below), ends with a non-root `USER`. It is

@@ -339,6 +339,8 @@ spec:
               # Root, as the image's setup scripts expect: they rewrite app.ini and the git user's
               # .ssh, owned by git (uid 1000), chown what they create to it, and run gitea as git.
               add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]
+            # Root filesystem writable: the image's setup chowns /app/gitea at every start
+            # (deploy/k8s/README.md, Security contexts).
           resources:
             requests: { cpu: 10m, memory: 64Mi }
             limits: { memory: 256Mi }
@@ -430,6 +432,8 @@ spec:
               # sshd binds 22, chroots its pre-auth child and switches to git for each clone; KILL
               # lets the supervisor deliver SIGTERM to Gitea so SQLite closes cleanly on a stop.
               add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "KILL", "NET_BIND_SERVICE", "SETGID", "SETUID", "SYS_CHROOT"]
+            # Root filesystem writable: s6 keeps its state under /etc/s6, and the setup writes
+            # /app/gitea and /etc/ssh at every start (deploy/k8s/README.md, Security contexts).
           resources:
             {{- toYaml .Values.gitea.resources | nindent 12 }}
           volumeMounts:
