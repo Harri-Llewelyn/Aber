@@ -75,7 +75,9 @@ python ingestion/test_structured_logging.py
 # reason="quarantined_or_unregistered" increased, and that a line carrying that same reason AND
 # that device id arrived in the log store. Prometheus cannot name the device -- its endpoint is
 # unauthenticated and carries no device data by design -- so this is the assertion that the half
-# the log store exists to keep is actually being kept.
+# the log store exists to keep is actually being kept. Where observability.alloy.logForward is on,
+# it also checks the forward: pointed at the in-cluster Loki with an external label, a line arrives
+# twice; pointed at an address nothing answers, lines still reach the in-cluster store.
 python test-harness/test_log_pipeline.py
 # Sign-in is limited per client, through Traefik and the gateway. Needs the stack up. A probe pod
 # spends its limit and the host must still sign in: it fails if GoTrue limits nothing, and if

@@ -425,7 +425,95 @@ up and shipping nothing, which looks like a quiet plant; and a ceiling in `loki/
 biting, so lines are being lost now. The first two are a pair: `up == 0` cannot see a broken
 collector that still answers its scrape, and a rate on shipped entries cannot tell a dead collector
 from a cluster that never had one. All three are NoData OK because a cluster running its own log
-stack (`observability.enabled=false`) has no series here.
+stack (`observability.enabled=false`) has no series here. A fourth watches the optional forward to
+a site's own store, below.
+
+The second and third read the in-cluster writer alone, `component_id="loki.write.local"`: Alloy
+labels each component's own metrics with its id, and the forward's writer reports the same
+`loki_write_*` families. `check-docs-drift.mjs` (check 66) holds every `component_id` a rule names
+to a component the chart's collector config declares.
+
+### Forwarding the logs to a site's store
+
+`observability.alloy.logForward` sends a second copy of the lines to a store the site runs: a SIEM,
+a central Loki, or anything that takes OTLP. It is off by default, and with it off the collector
+config renders byte for byte as it did without the setting. The local store, its thirty days and
+the dashboards' log panels are the same either way. What it does not carry: the API listener's
+requests (it writes no access log yet) and the Audit Trail, which lives in the database.
+
+**The copy splits after `loki.process "pods"`.** The local writer is untouched. `loki.relabel
+"forward"` keeps the `service` values in `logForward.services` (all of them when the list is
+empty) and, for OTLP, adds `logForward.externalLabels`; a Loki destination gets them as
+`loki.write`'s `external_labels`. Either way they go on the forwarded copy alone.
+
+- **`loki`** is a second `loki.write` with its own write-ahead log on the pod's emptyDir, retried
+  as the local one is (`max_backoff_retries = 20`, about an hour).
+- **`otlp`** is `otelcol.receiver.loki`, then `otelcol.processor.transform`, which copies the
+  `service` label into the resource's `service.name` (the attribute OTLP stores key on; every label
+  is also an attribute of its record), then `otelcol.processor.batch` (five-second batches) and
+  `otelcol.exporter.otlphttp`, with a 16 MiB in-memory queue and an hour of retries.
+- **No syslog.** Alloy's `otelcol.exporter.syslog` is public preview, and using it means starting
+  all of Alloy at that stability level. A site that needs syslog runs a collector that takes OTLP
+  in and sends syslog out.
+
+**A destination that stops answering does not stop the local store.** Both writers take their
+lines from one `loki.process`, so a forward that blocked would hold back the in-cluster store for
+as long as the site's store is down. It does not: each forward has a queue of its own, and a full
+OTLP queue drops lines rather than waiting. Measured with Alloy v1.20.1 and Loki 3.7.8 in
+containers, at about 240 lines a second: with the forward pointed at an address nothing answers
+for ten minutes, under either protocol, the local writer kept the rate it has with the forward
+off. `test_log_pipeline.py` asserts the same against the cluster.
+
+**The batch processor is there for Alloy's own log.** `otelcol.receiver.loki` logs an error for
+every line its consumer refuses, and Alloy collects its own log. Wired straight to an exporter
+that could not start, it logged 16,321 errors in 80 seconds, one per line, each of them a line to
+forward. The batch processor accepts every line and reports a failure once a batch, and a batch
+closes every five seconds or at 2,000 lines.
+
+**Credentials come from a Secret, never from values,** and a missing one fails the forward alone.
+
+- `loki` reads `basic_auth { password_file }` or `bearer_token_file` from the Secret, mounted
+  `optional`: `loki.write` reads the file on each push, so with no file each push fails and the
+  local writer carries on (measured).
+- `otlp` takes the key as an environment variable, `optional` too. The file route fails Alloy's
+  whole start when the file is missing: `local.file` cannot load, and on v1.20.1 a `client_auth`
+  block in `otelcol.auth.basic` fails to build with "no credential source provided". An empty
+  password fails the start too, so an unset one becomes a placeholder the destination refuses.
+  The variable is read at start, so a rotated credential needs the pods restarted.
+- The CA Secret (`logForward.tls`) is mounted as required. A `loki.write` whose `ca_file` is
+  missing stops Alloy's start, so the pod waiting on the Secret, with an event naming it, is the
+  clearer failure.
+- `logForward.enabled` with no Secret, key or user name fails the render and names the setting.
+
+**Lines can be lost, and the values comment says so.** Each queue lives in the pod: the Loki
+write-ahead log on its emptyDir, the OTLP queue in memory. A rollout or a node restart drops what
+they still hold. A destination unreachable for longer than the retries loses what it missed, and
+OTLP drops sooner once its queue is full. That suits operations. A site that must keep every line
+for compliance needs a collector of its own beside its store.
+
+**Memory.** Measured in the same containers, the logs pipeline alone (no scrape), at about 240
+lines a second, once each figure had levelled. Anonymous memory (the heap, which no reclaim
+returns) is the comparable figure; the working set adds file cache that moved between runs.
+
+| Forward | Anonymous memory |
+| :--- | :--- |
+| Off | 64 to 67 MiB |
+| `loki`, delivering | 67 MiB |
+| `otlp`, delivering | 74 to 79 MiB |
+| `loki`, destination unreachable | 99 MiB, level from the sixth minute |
+| `otlp`, destination unreachable, 16 MiB queue | 155 MiB, level once the queue is full (two and a half minutes) |
+| `otlp`, destination unreachable, 32 MiB queue (not shipped) | 217 MiB |
+
+A full OTLP queue costs about five times its byte bound in memory, which is why it is 16 MiB.
+With it full, Alloy logged one error and one warning every five seconds or so, a batch apiece.
+On the dev stack, beside the metrics write-ahead log, a full queue cost about 100 MiB at matched
+ages. That took Alloy to its `GOMEMLIMIT` under the old 768Mi limit, which is why the limit is now
+1Gi for every site (`deploy/k8s/README.md`, *Self-monitoring*).
+
+**Egress.** Under `networkPolicy.enabled` the default-deny drops the forward's traffic, as it does
+every flow the chart cannot derive. `logForward.egress` holds the rules, applied to Alloy's pods
+alone, in the shape of `backupService.offsiteEgress`. With none, every push is refused and the
+lines are lost after the retries.
 
 ### Log Collector Down (`aber-log-collector-down`)
 
@@ -447,6 +535,26 @@ no byte ceiling and log volume scales with fault rate. `rate_limited` is `ingest
 have stayed a field. The `reason` filter excludes `ingester_error` on purpose: that counts the
 "entry too far behind" refusals a collector produces when it first attaches to long-running
 containers, which is self-limiting.
+
+### Log Forward Failing (`aber-log-forward-failing`)
+
+Warning, `for: 15m`. The sum of five terms, each `or vector(0)` so the rule reads zero while the
+forward is off:
+
+- the Loki writer's `loki_write_batch_retries_total` and `loki_write_dropped_entries_total`
+  (`loki.write.forward`);
+- the OTLP exporter's `otelcol_exporter_send_failed_log_records_total` and
+  `otelcol_exporter_enqueue_failed_log_records_total` (`otelcol.exporter.otlphttp.forward`);
+- one when `loki.relabel.forward` handed lines on in the window and neither writer sent any.
+
+Retries, not only drops: a Loki destination that stops answering is retried for about an hour
+before a line is dropped, and the retry count rises within the first minute. The last term is the
+OTLP case: the exporter counts nothing while it retries, only once its queue is full, which takes
+minutes at this stack's volume and hours for a narrow `services` list. Fifteen minutes on a
+ten-minute rate rides out a destination restarting. Measured on Prometheus v3.15.0 scraping the
+containers above, with two-minute windows: zero with the forward off and with each protocol
+delivering; non-zero with each protocol's destination unreachable, the last term reading one in
+both.
 
 ## Host
 

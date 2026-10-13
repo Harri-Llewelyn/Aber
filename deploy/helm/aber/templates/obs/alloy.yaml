@@ -1,4 +1,40 @@
 {{/*
+The log forward's settings, refused at render time. Its credential comes only from a Secret the
+operator names, so a destination with no Secret would send unauthenticated or not at all, and
+neither shows until a store's administrator asks where the logs went.
+*/}}
+{{- define "aber.validateAlloyLogForward" -}}
+{{- $fwd := .Values.observability.alloy.logForward -}}
+{{- $key := "observability.alloy.logForward" -}}
+{{- if not (has $fwd.protocol (list "loki" "otlp")) -}}
+{{- fail (printf "\n\naber: %s.protocol is %q; it must be loki or otlp.\n\nloki pushes to the Loki push API (a central Loki, Grafana Cloud). otlp sends OTLP over HTTP, which\nmost log platforms accept directly or through their own collector.\n" $key (toString $fwd.protocol)) -}}
+{{- end -}}
+{{- if not (regexMatch "^https?://[^ ]+$" (toString $fwd.url)) -}}
+{{- fail (printf "\n\naber: %s.enabled is true and %s.url is %q.\n\nSet the destination's full URL: for loki the push endpoint, https://logs.example/loki/api/v1/push;\nfor otlp the base URL, https://collector.example:4318, to which /v1/logs is added.\n" $key $key (toString $fwd.url)) -}}
+{{- end -}}
+{{- if not (has $fwd.auth.type (list "basic" "bearer")) -}}
+{{- fail (printf "\n\naber: %s.auth.type is %q; it must be basic or bearer.\n" $key (toString $fwd.auth.type)) -}}
+{{- end -}}
+{{- $secretKey := ternary "tokenKey" "passwordKey" (eq $fwd.auth.type "bearer") -}}
+{{- $missing := "" -}}
+{{- if not $fwd.auth.secretName -}}{{- $missing = "auth.secretName" -}}
+{{- else if not (get $fwd.auth $secretKey) -}}{{- $missing = printf "auth.%s" $secretKey -}}
+{{- else if and (eq $fwd.auth.type "basic") (not $fwd.auth.username) -}}{{- $missing = "auth.username" -}}
+{{- end -}}
+{{- if $missing -}}
+{{- fail (printf "\n\naber: %s.enabled is true and %s.%s is empty.\n\nThe forward sends every collected line to %s. Its credential is read from a Secret in\nthe release's namespace, never from values. Create the Secret, then set:\n  %s.auth.secretName   the Secret\n  %s.auth.%s   the key in it (default %s)\n  %s.auth.username     the user name, for basic\nFor example:\n  kubectl -n %s create secret generic aber-log-forward --from-literal=%s=...\n" $key $key $missing $fwd.url $key $key $secretKey (ternary "token" "password" (eq $fwd.auth.type "bearer")) $key .Release.Namespace (ternary "token" "password" (eq $fwd.auth.type "bearer"))) -}}
+{{- end -}}
+{{- if and $fwd.tls.caSecretName (not $fwd.tls.caKey) -}}
+{{- fail (printf "\n\naber: %s.tls.caSecretName is set and %s.tls.caKey is empty.\n\nName the key in that Secret holding the CA certificate (cert-manager writes ca.crt).\n" $key $key) -}}
+{{- end -}}
+{{- range $label, $value := $fwd.externalLabels -}}
+{{- if or (not (regexMatch "^[a-zA-Z_][a-zA-Z0-9_]*$" $label)) (has $label (list "service" "container")) -}}
+{{- fail (printf "\n\naber: %s.externalLabels has %q, which is not a label it can add.\n\nA label name is letters, digits and underscores, not starting with a digit. service and container\nare the streams' own labels and stay as collected.\n" $key $label) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The collector config, one text for two readers: the ConfigMap below, and the DaemonSet's pod
 checksum. Alloy does not reload on a ConfigMap change, and a config that only the ConfigMap read
 rolled the pods on a values change and never on an edit to the text itself.
@@ -6,6 +42,8 @@ rolled the pods on a values change and never on an edit to the text itself.
 {{- define "aber.alloyConfig" -}}
 {{- $cfg := .Values.observability.alloy -}}
 {{- $name := include "aber.name" . -}}
+{{- $fwd := $cfg.logForward | default dict -}}
+{{- if $fwd.enabled }}{{ include "aber.validateAlloyLogForward" . }}{{ end -}}
 logging {
   // WARN: Alloy's own stdout is collected by Alloy, so an info-level default writes about
   // writing, forever.
@@ -71,7 +109,7 @@ loki.source.kubernetes "pods" {
 }
 
 loki.process "pods" {
-  forward_to = [loki.write.local.receiver]
+  forward_to = [loki.write.local.receiver{{ if $fwd.enabled }}, loki.relabel.forward.receiver{{ end }}]
 
   // The source adds `job` (namespace/pod:container) and `instance` of its own. The stream
   // contract is `service` and `container`, nothing else: a per-pod label means a new stream
@@ -109,6 +147,149 @@ loki.write "local" {
     enabled = true
   }
 }
+{{- if $fwd.enabled }}
+{{- $auth := printf "/etc/alloy-forward/auth/%s" (ternary $fwd.auth.tokenKey $fwd.auth.passwordKey (eq $fwd.auth.type "bearer")) }}
+{{- $selected := list }}
+{{- range $fwd.services }}{{ $selected = append $selected (regexQuoteMeta (toString .)) }}{{ end }}
+
+// ------------------------------------------------------------------------------------------
+// The forward (observability.alloy.logForward): a copy of the lines for the site's own store.
+// It has its own writer and queue, so a destination that stops answering holds back only this
+// copy. The service selection and the external labels apply to this copy alone.
+// ------------------------------------------------------------------------------------------
+loki.relabel "forward" {
+  forward_to = [{{ ternary "otelcol.receiver.loki.forward.receiver" "loki.write.forward.receiver" (eq $fwd.protocol "otlp") }}]
+  {{- if $selected }}
+
+  rule {
+    source_labels = ["service"]
+    regex         = {{ join "|" $selected | quote }}
+    action        = "keep"
+  }
+  {{- end }}
+  {{- if eq $fwd.protocol "otlp" }}
+  {{- range $label, $value := $fwd.externalLabels }}
+
+  rule {
+    target_label = {{ $label | quote }}
+    replacement  = {{ toString $value | quote }}
+  }
+  {{- end }}
+  {{- end }}
+}
+{{- if eq $fwd.protocol "otlp" }}
+
+// Each label becomes an attribute of its log record; `service` is also the resource's
+// service.name, which OTLP stores key on.
+otelcol.receiver.loki "forward" {
+  output {
+    logs = [otelcol.processor.transform.forward.input]
+  }
+}
+
+otelcol.processor.transform "forward" {
+  error_mode = "ignore"
+
+  log_statements {
+    context    = "log"
+    statements = [
+      `set(resource.attributes["service.name"], attributes["service"])`,
+    ]
+  }
+
+  output {
+    logs = [otelcol.processor.batch.forward.input]
+  }
+}
+
+// Accepts every line and hands the exporter batches, so a failing destination is reported
+// once a batch, not once a line: Alloy collects its own log, and a line apiece would loop.
+otelcol.processor.batch "forward" {
+  timeout = "5s"
+
+  output {
+    logs = [otelcol.exporter.otlphttp.forward.input]
+  }
+}
+
+// The credential is the pod's environment, from the Secret. Missing, it is a placeholder the
+// destination refuses: a file local.file cannot read, or an empty credential, fails Alloy's start.
+{{- if eq $fwd.auth.type "bearer" }}
+otelcol.auth.bearer "forward" {
+  token = coalesce(sys.env("ALLOY_FORWARD_CREDENTIAL"), "unset")
+}
+{{- else }}
+// The top-level pair: on v1.20.1 a client_auth block fails to build ("no credential source").
+otelcol.auth.basic "forward" {
+  username = {{ $fwd.auth.username | quote }}
+  password = coalesce(sys.env("ALLOY_FORWARD_CREDENTIAL"), "unset")
+}
+{{- end }}
+
+otelcol.exporter.otlphttp "forward" {
+  client {
+    endpoint = {{ $fwd.url | quote }}
+    auth     = otelcol.auth.{{ $fwd.auth.type }}.forward.handler
+    {{- if $fwd.tls.caSecretName }}
+
+    tls {
+      ca_file = {{ printf "/etc/alloy-forward/ca/%s" $fwd.tls.caKey | quote }}
+    }
+    {{- end }}
+  }
+
+  // In memory and bounded: past this a stalled destination costs lines, never the pod. A full
+  // queue holds about five times its bytes in memory (grafana/README.md, Log Pipeline).
+  sending_queue {
+    sizer      = "bytes"
+    queue_size = 16777216 // 16 MiB
+  }
+
+  retry_on_failure {
+    max_elapsed_time = "1h"
+  }
+}
+{{- else }}
+
+loki.write "forward" {
+  endpoint {
+    url = {{ $fwd.url | quote }}
+    {{- if eq $fwd.auth.type "bearer" }}
+    bearer_token_file = {{ $auth | quote }}
+    {{- else }}
+
+    basic_auth {
+      username      = {{ $fwd.auth.username | quote }}
+      password_file = {{ $auth | quote }}
+    }
+    {{- end }}
+    {{- if $fwd.tls.caSecretName }}
+
+    tls_config {
+      ca_file = {{ printf "/etc/alloy-forward/ca/%s" $fwd.tls.caKey | quote }}
+    }
+    {{- end }}
+
+    // As the local writer's: a delay rather than a loss, for about an hour of retries.
+    max_backoff_period  = "5m"
+    max_backoff_retries = 20
+  }
+  {{- with $fwd.externalLabels }}
+
+  external_labels = {
+    {{- range $label, $value := . }}
+    {{ $label | quote }} = {{ toString $value | quote }},
+    {{- end }}
+  }
+  {{- end }}
+
+  // Its own write-ahead log on the emptyDir, apart from the local writer's.
+  wal {
+    enabled = true
+  }
+}
+{{- end }}
+{{- end }}
 
 // ------------------------------------------------------------------------------------------
 // Metrics: every pod annotated prometheus.io/scrape, on the port and path it names. A pod
@@ -331,6 +512,7 @@ prometheus.remote_write "local" {
 {{- $component := "alloy" -}}
 {{- $fullname := include "aber.fullname" . -}}
 {{- $cfg := .Values.observability.alloy -}}
+{{- $fwd := $cfg.logForward | default dict -}}
 {{- $name := include "aber.name" . -}}
 {{/*
 =================================================================================================
@@ -472,6 +654,15 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            {{- if and $fwd.enabled (eq $fwd.protocol "otlp") }}
+            # The OTLP forward's credential. Optional: missing, it fails the forward alone.
+            - name: ALLOY_FORWARD_CREDENTIAL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $fwd.auth.secretName }}
+                  key: {{ ternary $fwd.auth.tokenKey $fwd.auth.passwordKey (eq $fwd.auth.type "bearer") }}
+                  optional: true
+            {{- end }}
           ports:
             - name: http
               containerPort: 12345
@@ -500,6 +691,16 @@ spec:
               readOnly: true
             - name: data
               mountPath: /var/lib/alloy-data
+            {{- if and $fwd.enabled (ne $fwd.protocol "otlp") }}
+            - name: forward-auth
+              mountPath: /etc/alloy-forward/auth
+              readOnly: true
+            {{- end }}
+            {{- if and $fwd.enabled $fwd.tls.caSecretName }}
+            - name: forward-ca
+              mountPath: /etc/alloy-forward/ca
+              readOnly: true
+            {{- end }}
             {{- if $cfg.hostMetrics }}
             - name: host-proc
               mountPath: /host/proc
@@ -518,6 +719,19 @@ spec:
             name: {{ printf "%s-alloy-config" $fullname }}
         - name: data
           emptyDir: {}
+        {{- if and $fwd.enabled (ne $fwd.protocol "otlp") }}
+        # Optional: loki.write reads the file on each push, so a missing one fails the forward alone.
+        - name: forward-auth
+          secret:
+            secretName: {{ $fwd.auth.secretName }}
+            optional: true
+        {{- end }}
+        {{- if and $fwd.enabled $fwd.tls.caSecretName }}
+        # Required: the Loki writer will not start without its CA, and Alloy with it.
+        - name: forward-ca
+          secret:
+            secretName: {{ $fwd.tls.caSecretName }}
+        {{- end }}
         {{- if $cfg.hostMetrics }}
         - name: host-proc
           hostPath:
