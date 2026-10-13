@@ -112,6 +112,7 @@ spec:
               echo "telemetry hypertable exists"
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
@@ -304,25 +305,30 @@ spec:
           */}}
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
             {{- toYaml .Values.ingestion.resources | nindent 12 }}
           {{- $brokerTls := and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients }}
-          {{- if or $brokerTls .Values.postgresTls.enabled }}
           volumeMounts:
             {{- if $brokerTls }}
             {{- include "aber.brokerClientCaMount" . | nindent 12 }}
             {{- end }}
             {{- with include "aber.dbClientCaMount" . }}{{ . | nindent 12 }}{{- end }}
-          {{- end }}
-      {{- if or $brokerTls .Values.postgresTls.enabled }}
+            # The heartbeat file, and the objects `python -m cold_archive query` fetches when an
+            # operator runs it here with kubectl exec.
+            - name: tmp
+              mountPath: /tmp
       volumes:
         {{- if $brokerTls }}
         {{- include "aber.brokerClientCaVolume" . | nindent 8 }}
         {{- end }}
         {{- with include "aber.dbClientCaVolume" . }}{{ . | nindent 8 }}{{- end }}
-      {{- end }}
+        # No sizeLimit: a cold-archive query's objects can be large, and passing a limit evicts the
+        # daemon.
+        - name: tmp
+          emptyDir: {}
 
 {{- if .Values.ingestion.metrics.enabled }}
 ---

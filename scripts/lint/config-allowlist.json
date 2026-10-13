@@ -1,7 +1,6 @@
 {
   "DS-0002 supabase/db/Dockerfile": "The image ends without a USER, on purpose: the server starts as root. Its data directory is the volume's mount point, which a provisioner creates owned by root, and initdb as postgres (uid 100) cannot take a directory it does not own; the entrypoint gives it to postgres and drops to that uid before the server starts. Stated in deploy/k8s/README.md, Users.",
   "KSV-0014 CronJob/aber-backup container/backup": "Writable root filesystem: tracked in #419.",
-  "KSV-0014 CronJob/aber-cold-archive container/cold-archive": "Writable root filesystem: tracked in #419.",
   "KSV-0014 DaemonSet/alloy container/alloy": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Deployment/gitea container/gitea": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Deployment/gitea container/gitea-init": "Writable root filesystem: tracked in #419.",
@@ -11,9 +10,7 @@
   "KSV-0014 Deployment/grafana container/render-datasource": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Deployment/i3x-service container/wait-for-gateway": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Deployment/i3x-service container/wait-for-mosquitto": "Writable root filesystem: tracked in #419.",
-  "KSV-0014 Deployment/ingestion container/ingestion": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Deployment/ingestion container/wait-for-gateway": "Writable root filesystem: tracked in #419.",
-  "KSV-0014 Deployment/ingestion container/wait-for-telemetry-table": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Deployment/loki container/loki": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Deployment/mosquitto container/assemble-config": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Deployment/mosquitto container/certificate-reload": "Writable root filesystem: tracked in #419.",

@@ -112,6 +112,7 @@ spec:
               value: "1"
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
@@ -127,6 +128,9 @@ spec:
             - name: playback-credentials
               mountPath: /var/lib/aber/playback
               readOnly: true
+            # The worker writes no file; Python and OpenSSL take TMPDIR when they need one.
+            - name: tmp
+              mountPath: /tmp
       volumes:
         {{- if and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients }}
         {{- include "aber.brokerClientCaVolume" . | nindent 8 }}
@@ -152,4 +156,7 @@ spec:
             items:
               - key: playback_credentials.json
                 path: credentials.json
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
 {{- end }}

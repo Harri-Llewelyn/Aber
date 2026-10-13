@@ -1050,7 +1050,8 @@ ingestion:
     tag: ""
     pullPolicy: IfNotPresent
   # Liveness: ingestion.py writes this file every `healthIntervalSeconds` while its MQTT
-  # connection is up, so a wedged daemon goes stale and is restarted.
+  # connection is up, so a wedged daemon goes stale and is restarted. Keep it under /tmp, the
+  # container's one writable path: anywhere else the write fails and the probe restarts the pod.
   healthFile: /tmp/ingestion-health
   healthIntervalSeconds: 15
   # The Prometheus exposition endpoint. On by default (a pod-network port costs nothing);
