@@ -36,6 +36,11 @@ DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgr
 RELEASE_CHECK_PRINCIPAL = "b0000000-0000-4000-8000-000000000004"
 INGESTION_PRINCIPAL = "b0000000-0000-4000-8000-000000000002"
 GATE = "public.record_release_check(text, text, text, boolean, text)"
+# Written out, not formatted: the two API roles a caller is presented as.
+SET_ROLE = {
+    "authenticated": "SET LOCAL ROLE authenticated",
+    "service_role": "SET LOCAL ROLE service_role",
+}
 NOTES = "https://github.com/Harri-Llewelyn/Aber/releases/tag/v1.5.0"
 
 
@@ -64,7 +69,7 @@ class ReleaseCheckBase(unittest.TestCase):
         """Act as an API role, with a principal's claims when `sub` is given."""
         claims = {"role": role, **({"sub": sub} if sub else {})}
         cur.execute("SELECT set_config('request.jwt.claims', %s, true)", (json.dumps(claims),))
-        cur.execute(f"SET LOCAL ROLE {role}")
+        cur.execute(SET_ROLE[role])
 
     def call(self, cur, **args):
         cur.execute(
