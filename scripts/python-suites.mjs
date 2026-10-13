@@ -990,7 +990,9 @@ export const SUITES = {
       'testing nothing. WHY IT IS NOT COVERED BY THE STATIC SUITE: the first live run of this ' +
       'pipeline had the socket proxy refuse one API path, discovery fail WHOLESALE and nothing ' +
       'collected at all -- while the container stayed healthy, `alloy validate` passed and every ' +
-      'static check in this repository reported PASS.',
+      'static check in this repository reported PASS. Where observability.alloy.logForward is on, ' +
+      'it also checks that a forward to the in-cluster Loki delivers a second, labelled copy, and ' +
+      'that a forward nothing answers does not stop lines reaching the in-cluster store.',
   },
   'supabase/test_auth_rate_limit.py': {
     lanes: ['stack'],

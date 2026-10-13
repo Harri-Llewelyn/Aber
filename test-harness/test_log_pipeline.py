@@ -32,6 +32,7 @@ import json
 import time
 import shlex
 import secrets
+import subprocess
 import unittest
 import urllib.error
 import urllib.parse
@@ -55,6 +56,14 @@ REASON = "quarantined_or_unregistered"
 # refresh is 15s and its batch wait is a few seconds on top, so this is deliberately generous:
 # a flaky timeout here would be read as a broken pipeline, which is the opposite of useful.
 PROPAGATION_TIMEOUT = 90
+
+# Alloy labels a component's own metrics with its id. The in-cluster store's writer, as against
+# the log forward's (observability.alloy.logForward), whose failures are the site's store's.
+LOCAL_WRITER = 'component_id="loki.write.local"'
+FORWARD_WRITERS = {
+    "loki": 'component_id="loki.write.forward"',
+    "otlp": 'component_id="otelcol.exporter.otlphttp.forward"',
+}
 
 
 # THE FLAG THAT TURNS A SKIP INTO A FAILURE, and the reason it exists is the reason this suite
@@ -183,7 +192,7 @@ class CollectionTestCase(unittest.TestCase):
     def test_the_collector_has_shipped_something(self):
         """`sent > 0` is the whole-pipeline smoke test, and is what the Stalled alert watches."""
         self.assertGreater(
-            prom_scalar("sum(loki_write_sent_entries_total)"), 0,
+            prom_scalar(f"sum(loki_write_sent_entries_total{{{LOCAL_WRITER}}})"), 0,
             "the collector has shipped no entries at all -- discovery is the usual cause, and it "
             "fails wholesale rather than partially when the socket proxy refuses an API path",
         )
@@ -201,7 +210,7 @@ class CollectionTestCase(unittest.TestCase):
         for reason in ("rate_limited", "stream_limited"):
             self.assertEqual(
                 0.0,
-                prom_scalar(f'sum(loki_write_dropped_entries_total{{reason="{reason}"}})'),
+                prom_scalar(f'sum(loki_write_dropped_entries_total{{{LOCAL_WRITER}, reason="{reason}"}})'),
                 f"the log store is refusing lines ({reason}); they are being lost",
             )
 
@@ -550,6 +559,140 @@ class MultilineTestCase(unittest.TestCase):
             )
         finally:
             stack_exec.remove_probe(name)
+
+
+def forward_settings():
+    """
+    observability.alloy.logForward as the release has it, or None when it is off or unreadable.
+    Read from Helm rather than from the rendered Alloy config, so the test needs no parser for it.
+    """
+    try:
+        result = subprocess.run(
+            ["helm", "get", "values", stack_exec.RELEASE, "-n", stack_exec.NAMESPACE, "--all",
+             "-o", "json"], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    values = json.loads(result.stdout or "{}")
+    forward = ((values.get("observability") or {}).get("alloy") or {}).get("logForward") or {}
+    return forward if forward.get("enabled") else None
+
+
+def forwards_to_this_store(forward):
+    """Whether the forward's destination is the in-cluster Loki: the double-arrival setting."""
+    host = urllib.parse.urlsplit(forward.get("url", "")).hostname or ""
+    return host == "loki" or host.startswith(f"loki.{stack_exec.NAMESPACE}")
+
+
+class LogForwardTestCase(unittest.TestCase):
+    """
+    THE LOG FORWARD, which is off by default and so skipped unless the release turns it on: a
+    configuration, not a fault, whatever REQUIRE_LOG_PIPELINE says. Two settings, one per run:
+
+      the in-cluster store itself, with an external label (forward_copy: loopback). A line then
+        arrives twice, once as collected and once carrying the label, which proves the forward
+        delivers and that its labels go on its copy alone.
+      an unreachable destination (http://192.0.2.1:3100/loki/api/v1/push). Lines must still reach
+        the in-cluster store: one loki.process feeds both writers, and a forward that blocked it
+        would stop the local store for as long as the site's store is down.
+
+    Both need a Secret the chart can name; the in-cluster Loki ignores the credential.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.forward = forward_settings()
+        if not cls.forward:
+            raise unittest.SkipTest(
+                "observability.alloy.logForward is off on this release (or helm cannot read it); "
+                "the forward tests run only where it is on")
+        cls.protocol = cls.forward.get("protocol", "loki")
+        services = cls.forward.get("services") or []
+        # A probe pod the forward selects: the first forwarded service, or ingestion's label.
+        cls.component = services[0] if services else "ingestion"
+        cls.image = os.getenv("PROBE_IMAGE") or stack_exec.default_probe_image()
+        if not stack_exec.probe_image_available(cls.image):
+            skip_or_fail(cls, "the ingestion image is not in the cluster, so there is no probe")
+
+    def emit(self, name, lines, interval=0):
+        """A probe pod, labelled as a forwarded service, printing `lines` once it is discovered."""
+        body = "; ".join(f"echo {shlex.quote(line)}; sleep {interval}" for line in lines)
+        started = stack_exec.run_probe(name, self.image, f"sleep 25; {body}; sleep 15",
+                                       component=self.component)
+        self.assertEqual(started.returncode, 0, "could not start the probe: " + started.stderr.strip())
+        self.addCleanup(stack_exec.remove_probe, name)
+
+    def entries(self, token):
+        """(stream labels, line) for every entry carrying `token`, wherever its copy was filed."""
+        rows = loki_query(f'{{service="{self.component}"}} |= "{token}"', since_seconds=600, limit=50)
+        return [(s["stream"], v[1]) for s in rows for v in s["values"]]
+
+    def test_a_line_arrives_twice_when_the_forward_is_this_store(self):
+        if not forwards_to_this_store(self.forward):
+            self.skipTest("the forward goes elsewhere; this runs when it points at the in-cluster Loki")
+        if self.protocol != "loki":
+            self.skipTest("the in-cluster store files an OTLP copy under its own labels; run this "
+                          "with protocol loki")
+        labels = {k: str(v) for k, v in (self.forward.get("externalLabels") or {}).items()}
+        self.assertTrue(labels, "set observability.alloy.logForward.externalLabels: without one "
+                                "the two copies are the same stream and the store keeps one")
+
+        token = "forward-probe-" + secrets.token_hex(6)
+        self.emit("aber_forward_probe", [token])
+        deadline = time.time() + 25 + PROPAGATION_TIMEOUT
+        found = []
+        while time.time() < deadline:
+            found = self.entries(token)
+            if len(found) >= 2:
+                break
+            time.sleep(5)
+
+        local = [s for s, _ in found if not any(k in s for k in labels)]
+        forwarded = [s for s, _ in found if all(s.get(k) == v for k, v in labels.items())]
+        self.assertEqual(1, len(local),
+                         f"the line should be in the store once as collected; entries: {found}")
+        self.assertEqual(1, len(forwarded),
+                         f"the line should arrive once more through the forward, carrying {labels}. "
+                         f"Missing means the forward is not delivering: read Alloy's log and "
+                         f"loki_write_*{{{FORWARD_WRITERS['loki']}}}. Entries: {found}")
+
+    def test_an_unreachable_forward_does_not_stall_the_local_store(self):
+        if forwards_to_this_store(self.forward):
+            self.skipTest("the forward reaches the in-cluster Loki; this runs when it cannot reach "
+                          "its destination")
+        writer = FORWARD_WRITERS.get(self.protocol, FORWARD_WRITERS["loki"])
+        failing = " + ".join(
+            f"(sum({metric}{{{writer}}}) or vector(0))"
+            for metric in ("loki_write_batch_retries_total", "loki_write_dropped_entries_total",
+                           "otelcol_exporter_send_failed_log_records_total",
+                           "otelcol_exporter_enqueue_failed_log_records_total"))
+        deadline = time.time() + 300
+        while time.time() < deadline and prom_scalar(failing) <= 0:
+            time.sleep(10)
+        if prom_scalar(failing) <= 0:
+            self.skipTest(f"the forward to {self.forward.get('url')} is not failing, so this proves "
+                          f"nothing; point it at an address nothing answers")
+
+        sent_before = prom_scalar(f"sum(loki_write_sent_entries_total{{{LOCAL_WRITER}}})")
+        token = "stall-probe-" + secrets.token_hex(6)
+        lines = [f"{token}-{i}" for i in range(6)]
+        # A minute of lines, so they arrive after the forward's queue has been failing for a while.
+        self.emit("aber_stall_probe", lines, interval=10)
+        deadline = time.time() + 25 + 60 + PROPAGATION_TIMEOUT
+        arrived = set()
+        while time.time() < deadline:
+            arrived = {line.strip() for _, line in self.entries(token)}
+            if arrived >= set(lines):
+                break
+            time.sleep(5)
+
+        self.assertEqual(set(lines), arrived & set(lines),
+                         "lines stopped reaching the in-cluster store while the forward cannot "
+                         "reach its destination: the forward is blocking the pipeline both "
+                         f"writers share. Missing: {sorted(set(lines) - arrived)}")
+        self.assertGreater(prom_scalar(f"sum(loki_write_sent_entries_total{{{LOCAL_WRITER}}})"),
+                           sent_before, "the local writer's sent count did not move")
 
 
 if __name__ == "__main__":
