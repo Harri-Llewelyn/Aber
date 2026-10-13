@@ -933,6 +933,7 @@ Usage: (dict "ctx" . "image" "<repo:tag>" "pullPolicy" "IfNotPresent" "user" "po
     runAsGroup: {{ .gid }}
     {{- end }}
     allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
     capabilities:
       drop: ["ALL"]
   resources:
@@ -1001,6 +1002,7 @@ database out of service. Whether it works is the scrape's question.
     runAsUser: 65534
     runAsGroup: 65534
     allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
     capabilities:
       drop: ["ALL"]
   resources:

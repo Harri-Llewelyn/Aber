@@ -1535,6 +1535,15 @@ One step of #419 follows: each root filesystem becomes read-only, one workload a
 `emptyDir` for what the process writes. Until then `scripts/lint/config-allowlist.json` lists each
 writable root against #419.
 
+These containers run with a read-only root filesystem (`readOnlyRootFilesystem: true`). Each writes
+only to its volumes and to the `emptyDir` named here:
+
+- **`supabase-db` and `timescaledb`**, every container in each pod. The server writes its socket and
+  lock file to `/var/run/postgresql`. With the physical backup on, the `pgbackrest` sidecar shares
+  that directory and keeps its output in `/tmp`. `certificate-reload` and `metrics` write nothing.
+  The restore pods that `scripts/restore-platform-db.mjs` and `scripts/restore-historian.mjs` start
+  copy the sidecar's settings, so they run read-only too.
+
 ### Users
 
 Every image this repository builds, except `supabase-db` (below), ends with a non-root `USER`. It is
