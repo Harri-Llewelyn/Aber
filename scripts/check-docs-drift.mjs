@@ -1273,6 +1273,10 @@ function edgeFunctionNames() {
     physical_backup_schedule:
       "one row holding the hour and weekday the platform database's backup sidecar started with (0173). " +
       'RLS on with no policy and nothing granted to an API role; read through platform_backup_state()',
+    backup_service_report:
+      "one row holding the backup volume's free and total bytes and the schedule, as the backup service " +
+      'last reported them (0179). RLS on with no policy and nothing granted to an API role; written by ' +
+      'the backup_report() gate and read through backup_summary(), Administrator-only',
     roles: 'RBAC internals — managed by migrations and Studio, not an app-facing endpoint',
     permissions: 'RBAC internals',
     role_permissions: 'RBAC internals',

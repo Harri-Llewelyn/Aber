@@ -5502,24 +5502,26 @@ ol.gateway-steps {
   margin-top: 6px;
 }
 
-/* COLD STORAGE: the stat strip, the catalogue rows and the destination dialog. */
-.cold-stat { min-width: 120px; }
-.cold-stat-label {
+/* STAT: one figure in a .stat-strip (common/Stat.jsx), on Cold Storage and Backups. */
+.stat { min-width: 120px; }
+.stat-label {
   font-size: 11px;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.cold-stat-value {
+.stat-value {
   font-size: 20px;
   font-weight: 600;
   color: var(--text-primary);
 }
-.cold-stat-warning .cold-stat-value { color: var(--warning-text); }
-.cold-stat-value svg { margin-right: 6px; vertical-align: -1px; }
+.stat-warning .stat-value { color: var(--warning-text); }
+.stat-value svg { margin-right: 6px; vertical-align: -1px; }
+.stat-detail { font-size: 11px; color: var(--text-muted); }
 /* Alone above the empty state it is centred, with no column width to pad it off its label. */
-.cold-stat-center { min-width: 0; text-align: center; }
-.cold-stat-center .cold-stat-value { font-size: 26px; }
+.stat-center { min-width: 0; text-align: center; }
+.stat-center .stat-value { font-size: 26px; }
+/* COLD STORAGE: the catalogue rows and the destination dialog. */
 .cold-backlog-lead { margin-bottom: var(--stack); }
 /* The two commands sit on their own lines so a wrapped command is one a reader can select. */
 .cold-empty-commands { margin-top: 16px; font-size: 11px; line-height: 2; }

@@ -14,16 +14,26 @@ import { BackupDestinationModal } from '../modals/BackupDestinationModal'
 import { CardHeading } from '../common/CardHeading'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { IconAlertTriangle, IconChevronRight, IconDatabase, IconHardDrive, IconShieldAlert, IconX } from '../common/Icons'
-import { formatBytes, formatDateTime, formatRelative, NO_VALUE } from '../../utils/format'
+import { Stat } from '../common/Stat'
+import { cronIntervalSeconds } from '../../utils/cronInterval'
+import { formatBytes, formatDate, formatDateTime, formatDuration, formatRelative, NO_VALUE } from '../../utils/format'
 import { nextHistorianBackup } from '../../utils/historianBackupSchedule'
 import { readFlag, readSetting } from '../../config'
 
 /**
  * How old the last successful backup may be before the page says backups have stopped: the nightly
- * default schedule plus half a day. The page cannot read the service's schedule, so a sparser one
- * needs this changed. check-docs-drift.mjs holds it equal to the Backup Stale alert rule.
+ * default schedule plus half a day. The Backup Stale alert rule cannot read the service's schedule,
+ * so a sparser one needs this and the rule changed. check-docs-drift.mjs holds the two equal.
  */
 export const BACKUP_STALE_HOURS = 36
+
+/**
+ * The margin above the newest backup's size that free space on the backup volume must clear before
+ * the page says the next backup may not fit: a fifth of that backup, and at least 1 GiB, for growth
+ * since it was taken.
+ */
+export const FREE_SPACE_MARGIN_RATIO = 0.2
+export const FREE_SPACE_MARGIN_MIN_BYTES = 1024 ** 3
 
 /**
  * How many of the newest backups the retention prune never removes, whatever their age.
@@ -230,6 +240,8 @@ export function BackupsTab({ showToast }) {
             )}
           />
 
+          <BackupStats summary={summary} />
+
           <div className="card-body stack">
             {error && (
               <div className="callout callout-danger">
@@ -240,6 +252,7 @@ export function BackupsTab({ showToast }) {
 
             <RunningCard job={activeJob} onCancel={onCancel} cancelPending={cancelPending} historianOn={historianOn} />
             <CurrentState summary={summary} />
+            <BackupWarnings summary={summary} />
             {PHYSICAL.filter(db => physical[db.key] !== undefined).map(db => (
               <React.Fragment key={db.key}>
                 <PhysicalBackupState db={db} row={physical[db.key]} />
@@ -421,6 +434,124 @@ function CurrentState({ summary }) {
           : ' If nothing is queued or running, the backup service is probably not running.'}
       </div>
     </div>
+  )
+}
+
+/**
+ * The two warnings the strip raises, each null when it does not apply. `slow`: the last completed
+ * run took more than half the shortest gap between scheduled runs, so backups are heading for
+ * running into the next one. `space`: free space on the backup volume is below the newest backup
+ * plus the margin, so the next backup may not fit. Neither applies without the service's report.
+ */
+export function backupWarnings(summary) {
+  const interval = cronIntervalSeconds(summary?.service?.schedule)
+  const duration = Number(summary?.lastSuccess?.duration_seconds)
+  const slow = interval && Number.isFinite(duration) && duration > interval / 2 ? { duration, interval } : null
+  const free = summary?.service?.volumeFreeBytes
+  const size = summary?.newestSizeBytes
+  let space = null
+  if (free != null && size != null) {
+    const needed = Number(size) + Math.max(Number(size) * FREE_SPACE_MARGIN_RATIO, FREE_SPACE_MARGIN_MIN_BYTES)
+    if (Number(free) < needed) space = { free: Number(free), size: Number(size) }
+  }
+  return { slow, space }
+}
+
+/**
+ * The trend above the list, from one summary: the last good backup as an age, successes in 30 days,
+ * the last run's duration beside the median, the oldest restorable point, the space held, free
+ * space on the backup volume and the newest copy off site. Not on a stack that has never run.
+ */
+function BackupStats({ summary }) {
+  if (!summary?.firstRecordedAt) return null
+  const { slow, space } = backupWarnings(summary)
+  const last = summary.lastSuccess
+  const service = summary.service
+  const offsite = summary.newestOffsite
+  const reported = service?.reportedAt ? ` As of ${formatDateTime(service.reportedAt)}.` : ''
+  return (
+    <div className="card-body stat-strip" data-testid="backup-stats">
+      <Stat
+        label="Last good backup"
+        value={last ? formatRelative(last.started_at) : 'None yet'}
+        title={last ? `Taken ${formatDateTime(last.started_at)}.` : 'No backup has completed yet.'}
+      />
+      <Stat
+        label="Succeeded, 30 days"
+        value={summary.runs30d ? `${summary.succeeded30d} of ${summary.runs30d}` : NO_VALUE}
+        tone={summary.succeeded30d < summary.runs30d ? 'warning' : undefined}
+        title="Runs that ended in the last 30 days and completed, out of those that completed or failed. A cancelled run never ran and is not counted."
+        testId="stat-succeeded"
+      />
+      <Stat
+        label="Last run"
+        value={formatDuration(last?.duration_seconds)}
+        detail={summary.medianDurationSeconds != null ? `median ${formatDuration(summary.medianDurationSeconds)}` : undefined}
+        tone={slow ? 'warning' : undefined}
+        title={`How long the last completed backup took, beside the median of the last ${summary.medianRuns || 14} that completed.`}
+        testId="stat-duration"
+      />
+      <Stat
+        label="Oldest restorable"
+        value={summary.oldestTakenAt ? formatDate(summary.oldestTakenAt) : NO_VALUE}
+        title={summary.oldestTakenAt
+          ? `The oldest backup still on the volume, taken ${formatDateTime(summary.oldestTakenAt)}. Retention, pinning and the newest-three floor decide it.`
+          : 'No backup is on the volume.'}
+      />
+      <Stat
+        label="Space held"
+        value={formatBytes(summary.bytesHeld ?? 0)}
+        detail={`${summary.backupsHeld ?? 0} backup${summary.backupsHeld === 1 ? '' : 's'}`}
+        title="Every backup on the volume together."
+      />
+      <Stat
+        label="Free on the volume"
+        value={service?.volumeFreeBytes != null ? formatBytes(service.volumeFreeBytes) : NO_VALUE}
+        detail={service?.volumeTotalBytes != null ? `of ${formatBytes(service.volumeTotalBytes)}` : undefined}
+        tone={space ? 'warning' : undefined}
+        title={service
+          ? `Free space on the backup volume, as the backup service last reported it.${reported} On local-path this is the node's whole disk, shared with the databases.`
+          : 'The backup service has not reported its volume yet. It does at start, and after each backup and each prune.'}
+        testId="stat-free"
+      />
+      <Stat
+        label="Newest off site"
+        value={offsite ? formatRelative(offsite.taken_at) : 'None'}
+        title={offsite
+          ? `The newest backup with a copy off site, taken ${formatDateTime(offsite.taken_at)} and copied ${formatDateTime(offsite.copied_at)}.`
+          : summary.offsiteDestinationSet ? 'No backup has been copied to the destination yet.' : 'No off-site destination is set.'}
+      />
+    </div>
+  )
+}
+
+/** The strip's warnings in words, below the current-state line. */
+function BackupWarnings({ summary }) {
+  const { slow, space } = backupWarnings(summary)
+  return (
+    <>
+      {slow && (
+        <div className="callout callout-warning" role="status" data-testid="backup-slow">
+          <IconAlertTriangle size={14} className="callout-icon" />
+          <div>
+            <strong>The last backup took {formatDuration(slow.duration)}</strong>, more than half
+            the {formatDuration(slow.interval)} between scheduled backups. If backups keep growing,
+            one will soon run into the next.
+          </div>
+        </div>
+      )}
+      {space && (
+        <div className="callout callout-warning" role="status" data-testid="backup-space">
+          <IconAlertTriangle size={14} className="callout-icon" />
+          <div>
+            <strong>The next backup may not fit.</strong> The backup volume has{' '}
+            {formatBytes(space.free)} free, and the last backup was {formatBytes(space.size)}.
+            Release pinned backups you no longer need, shorten the retention window, or give the
+            volume more space.
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 
