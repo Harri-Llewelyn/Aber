@@ -45,14 +45,16 @@ import {
   IconTag,
   IconRefreshCw,
   IconAlertCircle,
+  IconDownload,
   IconLock,
   IconLogOut
 } from './components/common/Icons'
 
 import { APP_VERSION, VERSION_IS_KNOWN, versionTitle } from './version'
 import {
-  RELEASE_STATES, releaseDrift, releaseDriftLabel, releaseDriftTitle, releaseVersion,
+  RELEASE_STATES, releaseDrift, releaseDriftLabel, releaseDriftTitle, releaseVersion, availableRelease,
 } from './utils/releaseVersion'
+import { api } from './api'
 
 import { ToastStack } from './components/common/Toast'
 import { AlertPill } from './components/common/AlertPill'
@@ -285,6 +287,19 @@ function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReport
   const drift = releaseDrift(APP_VERSION, release)
   const driftLabel = releaseDriftLabel(drift, release)
 
+  /* The opt-in daily release check's last answer, read from the database each time the menu opens.
+     No row, a failed check or an unreadable one all show nothing. */
+  const [releaseCheck, setReleaseCheck] = useState(null)
+  useEffect(() => {
+    if (!open) return undefined
+    let current = true
+    api.get('/api/v1/release-check')
+      .then(row => { if (current) setReleaseCheck(row) })
+      .catch(() => { if (current) setReleaseCheck(null) })
+    return () => { current = false }
+  }, [open])
+  const update = availableRelease(releaseCheck, release)
+
   return (
     <div className="user-menu" ref={wrapRef}>
       {/* No visible text, so the accessible name comes from `title`, which leads with the address
@@ -324,6 +339,19 @@ function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReport
                   : <IconAlertCircle size={11} aria-hidden="true" />}
                 <span>{driftLabel}</span>
               </div>
+            )}
+            {/* Only when the daily release check found a newer release; never "up to date". */}
+            {update && (
+              <a
+                className="user-popover-update"
+                href={update.url}
+                target="_blank"
+                rel="noreferrer"
+                title={`Aber ${update.version} has been released. Open its release notes on GitHub, which say how to upgrade.`}
+              >
+                <IconDownload size={11} aria-hidden="true" />
+                <span>Aber {update.version} is available</span>
+              </a>
             )}
           </div>
 

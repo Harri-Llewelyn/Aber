@@ -920,6 +920,23 @@ describe('AccessControlTab', () => {
     expect(within(rowOf('MCP read-only client')).getByLabelText(/mint-mcp-token\.mjs --principal/)).toBeTruthy()
   })
 
+  /** The release check's key is rotated too, and read by a CronJob at each run, which no rotation restarts. */
+  it('names the release check identity, rotated and read by its CronJob, with no permission to show', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listServicePrincipals.mockResolvedValue([
+      { principal_id: 'b0000000-0000-4000-8000-000000000004', permissions: [], created_at: null, can_sign_in: false }
+    ])
+    await renderTab('Machine identities')
+
+    await waitFor(() => expect(screen.getByText('Service_ReleaseCheck')).toBeTruthy())
+    const row = screen.getByText('Service_ReleaseCheck').closest('tr')
+    const rotate = within(row).getByLabelText(/npm run keys:rotate/)
+    expect(rotate.getAttribute('title')).toMatch(/SUPABASE_RELEASE_CHECK_KEY in the release Secret/)
+    expect(rotate.getAttribute('title')).toMatch(/release-check CronJob at each run/)
+    expect(rotate.getAttribute('title')).not.toMatch(/Deployment/)
+    expect(within(row).queryByRole('button', { name: /Issue Token/i })).toBeNull()
+  })
+
   /**
    * The copy control is styled as a ghost button. `.copyable-id` is understated for identifiers in
    * dense cells; with a fixed label the element is the affordance. `.btn-ghost` is the pairing

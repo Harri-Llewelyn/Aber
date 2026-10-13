@@ -2387,6 +2387,27 @@ paths:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/DirectoryService' } }
 
+  /rest/v1/release_check:
+    get:
+      tags: [Registry]
+      summary: The last answer of the opt-in release check
+      description: |
+        One row, or none where the check has never run: `releaseCheck.enabled` is off by default.
+        Once a day the release-check CronJob asks GitHub for the latest Aber release and records
+        the answer through `record_release_check()`, which only its own machine principal,
+        `Service_ReleaseCheck`, may call: not `service_role`. Every
+        signed-in user reads it, for the account menu's "Aber X.Y.Z is available", which shows only
+        a successful check under two days old. A failed check keeps only `error`.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: The row, or an empty array.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ReleaseCheck' } }
+        '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
+
   # ------------------------------------------------------------- Storage ----
   /storage/v1/object/asset-3d-models/{path}:
     parameters:
@@ -4799,6 +4820,33 @@ components:
         status: { type: string, example: ACTIVE }
         last_heartbeat: { type: string, format: date-time, nullable: true }
         registered_schema_id: { type: string, format: uuid, nullable: true }
+
+    ReleaseCheck:
+      type: object
+      properties:
+        checked_at: { type: string, format: date-time, description: 'When the check ran.' }
+        running_version:
+          type: string
+          example: 1.4.0
+          description: "The `MAJOR.MINOR.PATCH` of the chart's appVersion the check compared against."
+        latest_version:
+          type: string
+          nullable: true
+          example: 1.5.0
+          description: 'The latest published release. `null` when the check failed.'
+        latest_url:
+          type: string
+          nullable: true
+          example: 'https://github.com/Harri-Llewelyn/Aber/releases/tag/v1.5.0'
+          description: 'Its release notes, always a release of this repository. `null` when the check failed.'
+        newer:
+          type: boolean
+          nullable: true
+          description: 'Whether `latest_version` is newer than `running_version`. `null` when the check failed.'
+        error:
+          type: string
+          nullable: true
+          description: 'Why the check failed, for an operator. `null` when it succeeded.'
 
     Schema:
       type: object

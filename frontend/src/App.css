@@ -514,6 +514,21 @@ html, body, #root {
   color: var(--warning-text);
 }
 
+/* A newer Aber release, from the opt-in daily check: a link to its release notes. */
+.user-popover-update {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent-text);
+  text-decoration: none;
+}
+
+.user-popover-update:hover,
+.user-popover-update:focus-visible { text-decoration: underline; }
+
 .user-popover-action {
   display: flex;
   align-items: center;

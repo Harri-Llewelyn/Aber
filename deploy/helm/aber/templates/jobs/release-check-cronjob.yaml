@@ -1,0 +1,103 @@
+{{- if .Values.releaseCheck.enabled }}
+{{- $component := "release-check" -}}
+{{- $fullname := include "aber.fullname" . -}}
+{{- $gateway := include "aber.supabase.internalUrl" . -}}
+{{/*
+=================================================================================================
+The release check, off by default (releaseCheck.enabled). Once a day, GET the latest Aber release
+from GitHub's API, compare its MAJOR.MINOR.PATCH core with this chart's appVersion, and record the
+answer through record_release_check() (0181): one row, which the account menu reads. With this on,
+it is the one connection the stack makes to the internet by itself; deploy/k8s/README.md,
+Outbound connections, says so, and check-docs-drift.mjs holds it to off by default.
+
+scripts/release-check.mjs, mirrored into files/scripts/, runs on the node image storage-init uses:
+nothing is installed and nothing is written. It calls through the gateway as Service_ReleaseCheck,
+a principal of its own and the only one the gate admits, with the publishable key for the
+gateway's own check. It holds no service_role key and no Kubernetes token.
+=================================================================================================
+*/}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-release-check" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+data:
+{{- range $path, $bytes := .Files.Glob "files/scripts/release-check.mjs" }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ printf "%s-release-check" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  schedule: {{ .Values.releaseCheck.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # One try a day. A failure is recorded, and a retry would ask the same blocked address again.
+      backoffLimit: 0
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          {{- with .Values.global.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # The node image's node user.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: release-check
+              image: {{ include "aber.image" (dict "image" .Values.initJobs.storageInitImage "ctx" .) | quote }}
+              imagePullPolicy: {{ .Values.initJobs.storageInitImage.pullPolicy }}
+              command: ["node", "/scripts/release-check.mjs"]
+              env:
+                - name: RELEASE_VERSION
+                  value: {{ .Chart.AppVersion | quote }}
+                - name: SUPABASE_URL
+                  value: {{ $gateway | quote }}
+                {{- include "aber.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" (include "aber.secretName" .) "key" "SUPABASE_PUBLISHABLE_KEY") | nindent 16 }}
+                {{- include "aber.secretEnv" (dict "name" "SUPABASE_RELEASE_CHECK_KEY" "secretName" (include "aber.secretName" .) "key" "SUPABASE_RELEASE_CHECK_KEY") | nindent 16 }}
+                {{- with .Values.releaseCheck.proxy }}
+                # GitHub through the proxy; the gateway, in the cluster, directly.
+                - name: HTTPS_PROXY
+                  value: {{ . | quote }}
+                - name: NO_PROXY
+                  value: {{ (urlParse $gateway).hostname | quote }}
+                - name: NODE_USE_ENV_PROXY
+                  value: "1"
+                {{- end }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                {{- toYaml .Values.releaseCheck.resources | nindent 16 }}
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: script
+              configMap:
+                name: {{ printf "%s-release-check" $fullname }}
+{{- end }}
