@@ -400,8 +400,12 @@ spec:
             - name: seed
               mountPath: /seed
               readOnly: true
+            # Each migration's output, kept to search for a deadlock before retrying.
+            - name: tmp
+              mountPath: /tmp
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
@@ -412,4 +416,7 @@ spec:
         - name: seed
           configMap:
             name: {{ printf "%s-seed" $fullname }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
 {{- end }}

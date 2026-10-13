@@ -366,6 +366,7 @@ spec:
               mountPath: /config
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
       containers:
@@ -412,6 +413,7 @@ spec:
             periodSeconds: 20
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           {{- with .Values.supabaseEnvoy.resources }}

@@ -91,6 +91,7 @@ spec:
             runAsUser: 100
             runAsGroup: 101
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
@@ -213,6 +214,7 @@ spec:
             failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
               # /app/run.sh runs the migrations as nobody through sudo.
