@@ -27,7 +27,6 @@
   "KSV-0014 Deployment/supabase-auth container/wait-for-auth-role": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Deployment/supabase-rest container/wait-for-authenticator": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Deployment/supabase-storage container/wait-for-storage-role": "Writable root filesystem: tracked in #419.",
-  "KSV-0014 Deployment/swagger-ui container/swagger-ui": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Job/aber-db-init container/db-init": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Job/aber-db-init container/wait-for-auth": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Job/aber-db-init container/wait-for-supabase-db": "Writable root filesystem: tracked in #419.",

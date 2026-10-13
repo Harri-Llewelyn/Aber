@@ -53,6 +53,26 @@ spec:
         runAsGroup: 101
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        # The entrypoint rewrites files the image ships: swagger-initializer.js and a .gz beside
+        # each page, script and stylesheet in the document root, and the CORS and embedding
+        # snippets in templates/. Both directories are emptyDirs, so this copies them in first.
+        - name: seed-web-root
+          image: {{ include "aber.image" (dict "image" .Values.swaggerUi.image "ctx" $) | quote }}
+          imagePullPolicy: {{ .Values.swaggerUi.image.pullPolicy }}
+          command: ["/bin/sh", "-e", "-c", "cp -R /usr/share/nginx/html/. /seed/html/ && cp -R /etc/nginx/templates/. /seed/templates/"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.swaggerUi.resources | nindent 12 }}
+          volumeMounts:
+            - name: html
+              mountPath: /seed/html
+            - name: templates
+              mountPath: /seed/templates
       containers:
         - name: swagger-ui
           image: {{ include "aber.image" (dict "image" .Values.swaggerUi.image "ctx" $) | quote }}
@@ -103,8 +123,38 @@ spec:
             failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
             {{- toYaml .Values.swaggerUi.resources | nindent 12 }}
+          volumeMounts:
+            - name: html
+              mountPath: /usr/share/nginx/html
+            - name: templates
+              mountPath: /etc/nginx/templates
+            # The server blocks, rendered here from templates/ at start.
+            - name: conf
+              mountPath: /etc/nginx/conf.d
+            # nginx's temporary files, and its pid file in /run.
+            - name: cache
+              mountPath: /var/cache/nginx
+            - name: run
+              mountPath: /run
+      volumes:
+        - name: html
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: templates
+          emptyDir:
+            sizeLimit: 1Mi
+        - name: conf
+          emptyDir:
+            sizeLimit: 1Mi
+        - name: cache
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: run
+          emptyDir:
+            sizeLimit: 1Mi
 {{- end }}
