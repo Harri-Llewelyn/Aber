@@ -788,6 +788,15 @@ host-run gateway's. It is `is_simulated`, so the issue also delivers the passwor
 ([above](#issuing-a-playback-credential-delivers-it-0078)); `MQTT_PLAYBACK_CREDENTIALS`
 (`secrets.mqttPlaybackCredentials`) is a manual fallback, and a delivered password overrides it.
 
+**Every job ends with the session's NDEATH, so the gateway reads `OFFLINE` between replays.** The
+worker registers that NDEATH as its Will at CONNECT and publishes it at QoS 1 before DISCONNECT,
+whether the job finished, was stopped or failed; a worker that dies mid-replay is announced by the
+Will. Its bdSeq is the worker's own, one more on every CONNECT, and every replayed NBIRTH and NDEATH
+is rewritten to carry it, because a recorded bdSeq numbered the recorded node's connection and the
+daemon ignores a death that does not match the open session
+([*A death from an earlier session*](#a-death-from-an-earlier-session)). A recorded NDEATH ends the
+session where it was recorded, and the next message opens the next one.
+
 **A re-issue reaches the worker within about a minute**, and until then the worker holds the
 previous password. That used to fail silently and is now caught: `connect()` returns after the
 TCP handshake and the CONNACK arrives later on the network loop, so a *wrong* password connected at

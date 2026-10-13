@@ -120,6 +120,9 @@ python ingestion/test_startup_healer.py
 # one. If the environment won, "issue a new credential" would be the one repair that could not fix
 # a refused playback.
 python ingestion/test_playback_credentials.py
+# The playback worker's Sparkplug session -- the NDEATH Will, the NDEATH that ends every job, and
+# the bdSeq the replayed NBIRTH shares with both, so the Playback gateway reads OFFLINE after a replay
+python ingestion/test_playback_session.py
 
 # A STORED CAPTURE REACHES THE HISTORIAN, through the real worker, broker and daemon. Needs the
 # stack up and `playback.enabled` (values-dev.yaml sets it); runs in the stack lane. The two suites
@@ -438,6 +441,10 @@ python supabase/migrations/test_foreign_credentials.py
 # edited: a gate written against the STATE rather than the ACT would break both with an error about
 # playback. Since 0124 the lane is deleted with its original rather than orphaned by the FK.
 python supabase/migrations/test_shadow_lane_is_not_assignable.py
+# A shadow gateway is never reported as gateway_stale, and an ordinary gateway that died still is
+# (0182). The exclusion was lost once in a redeclaration, and Gateway Stale then fired after every
+# replay.
+python supabase/migrations/test_a_shadow_gateway_is_never_stale.py
 python supabase/migrations/test_metric_catalog_seed.py
 # A constraint, policy or trigger is re-created only when it differs from its migration (0001,
 # section 3c). Every one the chain states is changed live, and its own call or guard must put it

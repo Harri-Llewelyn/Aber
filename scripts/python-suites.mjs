@@ -342,6 +342,15 @@ export const SUITES = {
       '-- it is an older one. If the environment won, "issue a new credential" would be the one ' +
       'repair that could not fix a refused playback (CONNACK rc=5).',
   },
+  'ingestion/test_playback_session.py': {
+    lanes: ['unit'],
+    why:
+      "The playback worker's Sparkplug session: the NDEATH Will registered at CONNECT, the NDEATH " +
+      'published before DISCONNECT at the end of every job, and the bdSeq the replayed NBIRTH and ' +
+      'both deaths share. Without the death the Playback gateway kept its stored ONLINE after every ' +
+      'replay and went STALE 90 seconds later; with a bdSeq the NBIRTH does not carry, the daemon ' +
+      "ignores the death as an earlier session's and the same thing happens.",
+  },
   'ingestion/test_archived_gateway.py': {
     lanes: ['unit'],
     why:
@@ -790,6 +799,14 @@ export const SUITES = {
       'avoid creating", in 0060’s own words. The pickers no longer offer it; this asserts ' +
       'the database refuses it anyway, which is the half that holds for a PostgREST caller the ' +
       'dashboard never sees.',
+  },
+  'supabase/migrations/test_a_shadow_gateway_is_never_stale.py': {
+    lanes: ['db'],
+    why:
+      "0182's shadow exclusion in platform_health's gateway_stale arm, the row Grafana's Gateway " +
+      'Stale rule fires on. A redeclaration lost it once and the rule fired after every replay; ' +
+      'this pins both directions, a shadow gateway never listed and an ordinary one that died ' +
+      'still listed, and that grafana_reader still reads the view.',
   },
 
   // -----------------------------------------------------------------------------------------
