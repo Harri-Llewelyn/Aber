@@ -2,8 +2,7 @@
 {{- $component := "backup-service" -}}
 {{- $secretName := include "aber.secretName" . -}}
 {{- $fullname := include "aber.fullname" . -}}
-{{- $includeStorage := and .Values.backup.includeStorage .Values.supabaseStorage.enabled
-      .Values.supabaseStorage.persistence.enabled (eq .Values.supabaseStorage.backend "file") -}}
+{{- $includeStorage := eq (include "aber.backupMountsStorage" .) "true" -}}
 {{- $includeForge := and .Values.backup.includeForge .Values.gitea.enabled -}}
 {{- $includeBroker := and .Values.backup.includeBroker .Values.mosquitto.enabled -}}
 {{- /* The forge's and the broker's volumes hold files other uids own at 0600: root reads them. */ -}}

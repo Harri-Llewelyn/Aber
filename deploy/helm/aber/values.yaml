@@ -757,11 +757,17 @@ supabaseStorage:
   #   podAnnotations:
   #     backup.velero.io/backup-volumes: data
   podAnnotations: {}
-  # storage-api's image names no user, so the server runs as root (deploy/k8s/README.md,
-  # Users); fsGroup gives what it writes group 1000.
+  # storage-api's image names no user; the pod runs as its node user, 1000. fsGroup `Always`: at
+  # each start the kubelet makes every object directory group-writable, so 1000 can add and delete
+  # beside objects a root server wrote at 0755. It walks every object (deploy/k8s/README.md, Users).
+  # While a backup pod mounts the volume (backup.includeStorage), the pod runs as root instead,
+  # with this fsGroup and OnRootMismatch.
   podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
     fsGroup: 1000
-    fsGroupChangePolicy: OnRootMismatch
+    fsGroupChangePolicy: Always
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 512Mi }

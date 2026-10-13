@@ -122,6 +122,19 @@ seccomp profile every pod in the chart runs under unless that value names its ow
 {{- end -}}
 
 {{/*
+"true" when a backup pod mounts the storage objects' volume: the backup service, or the CronJob in
+its place, with backup.includeStorage on a file-backend PVC. Empty otherwise. Both mount it on this
+answer and the storage pod runs as root on it, so the three cannot disagree.
+  {{- $includeStorage := eq (include "aber.backupMountsStorage" .) "true" -}}
+*/}}
+{{- define "aber.backupMountsStorage" -}}
+{{- if and .Values.backup.enabled .Values.backup.includeStorage .Values.supabaseStorage.enabled
+      .Values.supabaseStorage.persistence.enabled (eq .Values.supabaseStorage.backend "file") -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
 The image serving each Directory row, as JSON keyed by component, for db-init to record in
 directory_services.image (archived migration 0140). Rendered by the same expression as each workload's own
 image:, and a component the chart does not deploy is left out so its row is cleared; Alloy only
