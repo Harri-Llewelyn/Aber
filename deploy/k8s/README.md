@@ -1417,7 +1417,9 @@ that would, and where each is switched off:
   plugin catalogue page queries grafana.com when an administrator opens it.
 - Node-RED's editor loads the node catalogue from catalogue.nodered.org each time it opens. The
   palette manager's Install tab and its update badges read it.
-- Destinations a site configures itself, such as a remote cold archive or backup target.
+- Destinations a site configures itself, such as a remote cold archive or backup target, or a log
+  store the stack's logs are forwarded to (`observability.alloy.logForward`, off by default:
+  [`grafana/README.md`](../../grafana/README.md#forwarding-the-logs-to-a-sites-store)).
 
 The edge functions fetch nothing at run time: they load their dependencies from the image. The image
 build resolves them against a lock file and boots every function with no network. A function that

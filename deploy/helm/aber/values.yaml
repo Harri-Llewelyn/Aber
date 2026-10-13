@@ -1533,6 +1533,54 @@ observability:
     resources:
       requests: { cpu: 50m, memory: 128Mi }
       limits: { memory: 768Mi }
+    # A second copy of the logs, for a store the site runs: a SIEM, a central Loki, an OTLP
+    # collector. Off by default, and nothing leaves the cluster until it is on. The local store
+    # (30 days, the Logs panels) is unchanged either way: the forward has its own writer and
+    # queue, so a destination that stops answering delays only its own copy, and the Log
+    # Forward Failing alert fires. The API access log and the Audit Trail are not in it.
+    #
+    # LINES CAN BE LOST. The queue is on the pod's emptyDir (loki) or in memory (otlp, 16 MiB),
+    # so a rollout or a node restart drops what it still holds. A destination unreachable for
+    # longer than the retries (about an hour, max_backoff_retries) loses the lines it missed,
+    # and otlp drops lines sooner once its queue is full. That suits operations; a site that
+    # must keep every line for compliance needs a collector of its own beside its store.
+    logForward:
+      enabled: false
+      # loki: the Loki push API (a central Loki, Grafana Cloud). otlp: OTLP over HTTP, which
+      # most log platforms accept directly or through their own collector.
+      protocol: loki
+      # loki: the push URL, https://logs.example/loki/api/v1/push. otlp: the base URL,
+      # https://collector.example:4318, to which /v1/logs is added.
+      url: ""
+      # The credential, from a Secret you create in the release's namespace; never a value
+      # here. A missing Secret or key fails the forward alone. basic: `username`, and the
+      # password under `passwordKey`. bearer: the token under `tokenKey`. Create the value
+      # without a trailing newline (kubectl create secret generic ... --from-literal=password=...).
+      auth:
+        type: basic
+        username: ""
+        secretName: ""
+        passwordKey: password
+        tokenKey: token
+      # A Secret holding the CA that signed the destination's certificate, for a store behind
+      # a private CA. Empty trusts the image's public roots.
+      tls:
+        caSecretName: ""
+        caKey: ca.crt
+      # Labels on the forwarded copy only, so a store receiving from several sites can tell
+      # them apart; the local streams keep `service` and `container` alone. For example:
+      #   externalLabels: { site: plant-a }
+      externalLabels: {}
+      # The `service` label values to forward, e.g. [supabase-auth, supabase-envoy]. Empty
+      # forwards every service; the ingestion daemon's lines are most of the volume.
+      services: []
+      # NetworkPolicy egress rules for the destination, applied to Alloy alone under
+      # networkPolicy.enabled. The chart cannot derive an off-cluster address; with none,
+      # every push is dropped by the default-deny and the lines are lost after the retries.
+      # For example:
+      #   - to: [{ ipBlock: { cidr: 203.0.113.10/32 } }]
+      #     ports: [{ protocol: TCP, port: 443 }]
+      egress: []
 
 # ---------------------------------------------------------------------------------------------
 # ServiceMonitors for a cluster that runs the Prometheus Operator instead of the chart's own

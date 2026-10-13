@@ -1296,8 +1296,8 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # Log Collection Stalled: shipped-entry rate under 0.001/s for 15m. This stack logs about itself
-      # every 60s, so a silent quarter-hour is a fault.
+      # Log Collection Stalled: the local writer's shipped-entry rate under 0.001/s for 15m. This
+      # stack logs about itself every 60s, so a silent quarter-hour is a fault.
       - uid: aber-log-collection-stalled
         title: Log Collection Stalled
         condition: C
@@ -1323,7 +1323,7 @@ groups:
               datasource:
                 type: prometheus
                 uid: prometheus
-              expr: sum(rate(loki_write_sent_entries_total[10m]))
+              expr: sum(rate(loki_write_sent_entries_total{component_id="loki.write.local"}[10m]))
               instant: true
           - refId: B
             datasourceUid: __expr__
@@ -1349,8 +1349,8 @@ groups:
                 type: __expr__
                 uid: __expr__
 
-      # Log Store Refusing Lines: rate_limited or stream_limited drops for 10m. ingester_error is
-      # excluded on purpose (loki/loki.yaml).
+      # Log Store Refusing Lines: the local writer's rate_limited or stream_limited drops for 10m.
+      # ingester_error is excluded on purpose (loki/loki.yaml).
       - uid: aber-log-store-refusing
         title: Log Store Refusing Lines
         condition: C
@@ -1377,7 +1377,69 @@ groups:
               datasource:
                 type: prometheus
                 uid: prometheus
-              expr: sum by (reason) (rate(loki_write_dropped_entries_total{reason=~"rate_limited|stream_limited"}[10m]))
+              expr: sum by (reason) (rate(loki_write_dropped_entries_total{component_id="loki.write.local", reason=~"rate_limited|stream_limited"}[10m]))
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # Log Forward Failing: the forward's retries or losses, or lines handed to it and none sent,
+      # either protocol, for 15m. Zero while observability.alloy.logForward is off.
+      - uid: aber-log-forward-failing
+        title: Log Forward Failing
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            The log forward to the site's store has failed for fifteen minutes; lines it cannot
+            deliver within about an hour are lost. The in-cluster store is unaffected. Check the
+            destination, its Secret and observability.alloy.logForward.egress.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: >-
+                (sum(rate(loki_write_batch_retries_total{component_id="loki.write.forward"}[10m])) or vector(0))
+                + (sum(rate(loki_write_dropped_entries_total{component_id="loki.write.forward"}[10m])) or vector(0))
+                + (sum(rate(otelcol_exporter_send_failed_log_records_total{component_id="otelcol.exporter.otlphttp.forward"}[10m])) or vector(0))
+                + (sum(rate(otelcol_exporter_enqueue_failed_log_records_total{component_id="otelcol.exporter.otlphttp.forward"}[10m])) or vector(0))
+                + ((sum(rate(loki_relabel_entries_written{component_id="loki.relabel.forward"}[10m])) > bool 0)
+                   * ((sum(rate(loki_write_sent_entries_total{component_id="loki.write.forward"}[10m]))
+                       or sum(rate(otelcol_exporter_sent_log_records_total{component_id="otelcol.exporter.otlphttp.forward"}[10m]))
+                       or vector(0)) == bool 0)
+                   or vector(0))
               instant: true
           - refId: B
             datasourceUid: __expr__

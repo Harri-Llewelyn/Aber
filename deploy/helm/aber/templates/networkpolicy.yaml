@@ -545,6 +545,26 @@ spec:
           port: {{ . }}
         {{- end }}
 {{- end }}
+{{- $logForward := .Values.observability.alloy.logForward | default dict }}
+{{- if and .Values.observability.enabled $logForward.enabled $logForward.egress }}
+---
+{{/* Alloy's log forward, to a store the site names and so not derivable here: the rules
+     observability.alloy.logForward.egress lists, for Alloy alone. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-forward-egress-alloy" $fullname }}
+  labels:
+    {{- include "aber.componentLabels" (dict "ctx" . "component" "alloy") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "aber.selectorLabels" (dict "ctx" . "component" "alloy") | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    {{- toYaml $logForward.egress | nindent 4 }}
+{{- end }}
 {{- if and .Values.observability.enabled .Values.observability.alloy.kubeletMetrics .Values.networkPolicy.kubeletCidr }}
 ---
 {{/*
