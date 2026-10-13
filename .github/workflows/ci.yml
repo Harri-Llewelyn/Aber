@@ -1865,8 +1865,9 @@ jobs:
 
       # The dashboard under its enforced Content-Security-Policy, in the runner's own Chrome
       # (CHROME_BIN): the pages before sign-in, every page navigation.jsx declares, an area plan and
-      # two 3D models it makes through the API, then sign-out. Each violation is listed with its
-      # directive and URL; one is a page the policy breaks in every browser.
+      # two 3D models it makes through the API, then sign-out, as an Administrator account of its
+      # own that the seeded one restores and removes. Each violation is listed with its directive
+      # and URL; one is a page the policy breaks in every browser.
       - name: Walk The Dashboard Under Its Content-Security-Policy
         timeout-minutes: 10
         run: |

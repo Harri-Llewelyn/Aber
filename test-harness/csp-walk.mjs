@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * The dashboard under its Content-Security-Policy, in a real browser. Opens the pages served before
- * sign-in, signs in as the seeded Administrator, opens every page frontend/src/navigation.jsx
+ * sign-in, signs in as the walk's own Administrator, opens every page frontend/src/navigation.jsx
  * declares, an area plan and two 3D models, signs out, and fails listing each violation the
  * browser reported.
  *
@@ -9,14 +9,22 @@
  *
  * Headless Chrome over the DevTools protocol, through Node's own WebSocket: nothing to install.
  * Chrome is --chrome, else $CHROME or $CHROME_BIN (GitHub's Ubuntu runners set it), else the usual
- * install path. ABER_ADMIN_EMAIL and ABER_ADMIN_PASSWORD default to values-dev.yaml's seed.
+ * install path.
+ *
+ * The browser never signs in as a real person. Sign Out ends every session of whoever clicks it, so
+ * the walk signs in through the API as ABER_ADMIN_EMAIL / ABER_ADMIN_PASSWORD (values-dev.yaml's
+ * seed by default) and, as them, gives its own account (CSP_WALK_ACCOUNT, csp-walk@aber.local) the
+ * Administrator role and a new password through manage-people. Chrome signs in as that account.
+ * Afterwards its access is removed, as the People tab removes it, and the API session ends alone
+ * (scope=local). The account is kept, banned, and restored by the next walk: an account is never
+ * deleted, because the Audit Trail names it. The area, its plan and the two devices with their
+ * models are made and deleted through the API as ABER_ADMIN_EMAIL.
  *
  * A violation is a securitypolicyviolation event, a console, log or exception message from a page
  * or one of its workers naming the Content Security Policy, or a DevTools CSP issue. A report-only
  * refusal counts as one too, so the walk reads the same under either mode of
- * frontend.contentSecurityPolicy. The area, its plan and the two devices with their models are made
- * through the API as the signed-in Administrator, and deleted before sign-out. Exit 0 is a clean
- * walk, 1 a violation or a page that did not open, 2 a walk that could not start.
+ * frontend.contentSecurityPolicy. Exit 0 is a clean walk, 1 a violation, a page that did not open
+ * or an account left with access, 2 a walk that could not start.
  */
 import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
@@ -32,8 +40,9 @@ const arg = (name, fallback) => {
 }
 const BASE = arg('base', process.env.CSP_WALK_BASE || 'http://app.localhost').replace(/\/+$/, '')
 const PUBLIC_ONLY = process.argv.includes('--public-only')
-const EMAIL = process.env.ABER_ADMIN_EMAIL || 'admin@aber.local'
-const PASSWORD = process.env.ABER_ADMIN_PASSWORD || 'aber123'
+const ADMIN_EMAIL = process.env.ABER_ADMIN_EMAIL || 'admin@aber.local'
+const ADMIN_PASSWORD = process.env.ABER_ADMIN_PASSWORD || 'aber123'
+const WALKER_EMAIL = (process.env.CSP_WALK_ACCOUNT || 'csp-walk@aber.local').toLowerCase()
 const SETTLE_MS = Number(arg('settle-ms', '1500'))
 const BINDING = '__aberCspViolation'
 const CSP = /content[- ]security[- ]policy/i
@@ -244,11 +253,16 @@ const LISTENER = `document.addEventListener('securitypolicyviolation', (e) => {
 // ---------------------------------------------------------------------------------------------
 // The walk.
 // ---------------------------------------------------------------------------------------------
+if (!PUBLIC_ONLY && WALKER_EMAIL === ADMIN_EMAIL.toLowerCase()) {
+  die('CSP_WALK_ACCOUNT is ABER_ADMIN_EMAIL; the walk signs in as an account of its own')
+}
+
 const { tabs, publicPaths } = pagesToWalk()
 const { ws, close } = await launch()
 const cdp = protocol(ws)
 const reports = [] // { page, text }
-const problems = [] // pages that did not open, fixtures that could not be made
+const problems = [] // pages that did not open, fixtures not made, an account left with access
+const notes = [] // what the clean-up could not undo, which fails nothing
 const walked = []
 let current = '(start)'
 
@@ -329,20 +343,23 @@ const RENDERED = "document.querySelector('#root')?.childElementCount > 0"
 const SIGN_IN_FORM = "!!document.querySelector('#auth-email')"
 const SHELL = "!!document.querySelector('.sidebar')"
 
-/** A call to the API from the page, as the dashboard makes it: its config.js address, key and session. */
-async function api (method, path, { json, base64, type } = {}) {
-  const request = JSON.stringify({ method, path, json, base64, type })
+/**
+ * A call to the API from the page, at the address and with the key its config.js names, as the
+ * person `token` belongs to (none: anonymous). Prefer goes to PostgREST alone, and x-upsert to
+ * Storage alone.
+ */
+async function api (token, method, path, { json, base64, type } = {}) {
+  const request = JSON.stringify({ token, method, path, json, base64, type })
   return evaluate(`(async () => {
     const p = ${request};
     const cfg = window.__ABER_CONFIG__ || {};
-    const entry = Object.keys(localStorage).find((k) => /^sb-.+-auth-token$/.test(k));
-    const session = entry ? JSON.parse(localStorage.getItem(entry)) : null;
-    if (!cfg.VITE_SUPABASE_URL || !session) return { status: 0, text: 'no API address in config.js, or no session' };
-    const headers = { apikey: cfg.VITE_SUPABASE_PUBLISHABLE_KEY, Authorization: 'Bearer ' + session.access_token };
+    if (!cfg.VITE_SUPABASE_URL) return { status: 0, text: 'config.js names no API address' };
+    const headers = { apikey: cfg.VITE_SUPABASE_PUBLISHABLE_KEY };
+    if (p.token) headers.Authorization = 'Bearer ' + p.token;
     let body;
     if (p.json) {
       headers['Content-Type'] = 'application/json';
-      headers.Prefer = 'return=representation';
+      if (p.path.startsWith('/rest/')) headers.Prefer = 'return=representation';
       body = JSON.stringify(p.json);
     } else if (p.base64) {
       headers['Content-Type'] = p.type;
@@ -366,46 +383,110 @@ async function attach (what, call) {
   if (!rows?.length) throw new Error(`attach ${what}: no row was updated`)
 }
 
+// ---------------------------------------------------------------------------------------------
+// The walk's own account, prepared and put away by ABER_ADMIN_EMAIL through the API.
+// ---------------------------------------------------------------------------------------------
+let adminToken = null
+let walkerId = null
+
+/** A session for ABER_ADMIN_EMAIL that only this walk holds; it ends with scope=local. */
+async function signInThroughApi () {
+  const session = await must(`sign in through the API as ${ADMIN_EMAIL}`, api(null, 'POST',
+    '/auth/v1/token?grant_type=password', { json: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD } }))
+  adminToken = session.access_token
+}
+
+const managePeople = (body) => api(adminToken, 'POST', '/functions/v1/manage-people', { json: body })
+
+/** The walk's account, an Administrator with access and a new password: added the first time,
+ *  restored after the last walk removed it. Returns its password, which nothing keeps. */
+async function prepareWalker () {
+  const people = await must('list the people', api(adminToken, 'POST', '/rest/v1/rpc/list_people', { json: {} }))
+  const person = (people || []).find((p) => p.email?.toLowerCase() === WALKER_EMAIL)
+  let role = person?.role ?? null
+  let password = null
+  let invited = false
+  if (!person) {
+    const added = await must(`add ${WALKER_EMAIL}`, managePeople({ action: 'add', email: WALKER_EMAIL, role: 'Administrator' }))
+    walkerId = added.user_id
+    role = added.role
+    password = added.password ?? null
+    invited = added.invited === true
+  } else {
+    walkerId = person.user_id
+    if (person.status === 'removed') {
+      role = (await must(`restore ${WALKER_EMAIL}'s access`, managePeople({ action: 'restore', user_id: walkerId }))).role
+    }
+  }
+  if (role !== 'Administrator') {
+    await must(`make ${WALKER_EMAIL} an Administrator`, api(adminToken, 'POST', '/rest/v1/rpc/set_person_role',
+      { json: { p_user_id: walkerId, p_role: 'Administrator' } }))
+  }
+  if (!password) {
+    password = (await must(`set ${WALKER_EMAIL}'s password`, managePeople({ action: 'set-password', user_id: walkerId }))).password
+  }
+  return { password, invited }
+}
+
+/** Removes the walk account's access (its role, its sessions, and sign-in) and ends the API session
+ *  alone. Run whatever happened before, so a failed walk leaves no account that can sign in. */
+async function putAway () {
+  // The page may be mid-navigation, or gone; the API calls need one that has read config.js.
+  if (!await until('!!window.__ABER_CONFIG__?.VITE_SUPABASE_URL', 5000)) {
+    await page('Page.navigate', { url: `${BASE}/` }).catch(() => {})
+    await until('!!window.__ABER_CONFIG__?.VITE_SUPABASE_URL', 15000)
+  }
+  await removeFixtures()
+  if (walkerId) {
+    const r = await managePeople({ action: 'remove', user_id: walkerId }).catch((e) => ({ status: 0, text: e.message }))
+    if (r.status !== 200) {
+      problems.push(`${WALKER_EMAIL} may still have access (HTTP ${r.status} ${r.text.slice(0, 200)}): ` +
+        'remove it on the Access Control page')
+    }
+  }
+  const r = await api(adminToken, 'POST', '/auth/v1/logout?scope=local').catch((e) => ({ status: 0, text: e.message }))
+  if (r.status > 299 || r.status === 0) notes.push(`the walk's own session for ${ADMIN_EMAIL} did not end (HTTP ${r.status}); it expires by itself`)
+}
+
 const fixtures = { area: null, devices: [], objects: [] }
 
 async function makeFixtures () {
   const stamp = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)
-  const [area] = await must('create an area', api('POST', '/rest/v1/areas', { json: { name: `CSP walk ${stamp}` } }))
+  const [area] = await must('create an area', api(adminToken, 'POST', '/rest/v1/areas', { json: { name: `CSP walk ${stamp}` } }))
   fixtures.area = area.id
   const planPath = `${area.id}/plan-${Date.now()}.svg`
-  await must('upload its plan', api('POST', `/storage/v1/object/area-plans/${planPath}`,
+  await must('upload its plan', api(adminToken, 'POST', `/storage/v1/object/area-plans/${planPath}`,
     { base64: Buffer.from(PLAN).toString('base64'), type: 'image/svg+xml' }))
   fixtures.objects.push(['area-plans', planPath])
-  await attach('the plan', api('PATCH', `/rest/v1/areas?id=eq.${area.id}`, { json: { plan_path: planPath, plan_aspect: 400 / 300 } }))
+  await attach('the plan', api(adminToken, 'PATCH', `/rest/v1/areas?id=eq.${area.id}`,
+    { json: { plan_path: planPath, plan_aspect: 400 / 300 } }))
 
   const models = [['csp-walk.glb', 'model/gltf-binary', glb()],
     ['csp-walk.gltf', 'model/gltf+json', Buffer.from(JSON.stringify(gltf(true)))]]
   for (const [file, type, bytes] of models) {
-    const [device] = await must('create a device', api('POST', '/rest/v1/devices',
+    const [device] = await must('create a device', api(adminToken, 'POST', '/rest/v1/devices',
       { json: { name: `CSP walk ${file} ${stamp}`, location_scope: 'site_wide' } }))
     fixtures.devices.push(device.id)
     const path = `${device.id}/${file}`
-    await must(`upload ${file}`, api('POST', `/storage/v1/object/asset-3d-models/${path}`, { base64: bytes.toString('base64'), type }))
+    await must(`upload ${file}`, api(adminToken, 'POST', `/storage/v1/object/asset-3d-models/${path}`,
+      { base64: bytes.toString('base64'), type }))
     fixtures.objects.push(['asset-3d-models', path])
-    await attach(file, api('PATCH', `/rest/v1/devices?id=eq.${device.id}`, { json: { model_3d_path: path } }))
+    await attach(file, api(adminToken, 'PATCH', `/rest/v1/devices?id=eq.${device.id}`, { json: { model_3d_path: path } }))
   }
 }
 
 async function removeFixtures () {
   const left = []
+  const gone = async (what, call) => {
+    const r = await call.catch((e) => ({ status: 0, text: e.message }))
+    if (r.status > 299 || r.status === 0) left.push(what)
+  }
   for (const [bucket, path] of fixtures.objects) {
-    const r = await api('DELETE', `/storage/v1/object/${bucket}`, { json: { prefixes: [path] } }).catch((e) => ({ status: 0, text: e.message }))
-    if (r.status > 299 || r.status === 0) left.push(`${bucket}/${path}`)
+    await gone(`${bucket}/${path}`, api(adminToken, 'DELETE', `/storage/v1/object/${bucket}`, { json: { prefixes: [path] } }))
   }
-  for (const id of fixtures.devices) {
-    const r = await api('DELETE', `/rest/v1/devices?id=eq.${id}`).catch((e) => ({ status: 0, text: e.message }))
-    if (r.status > 299 || r.status === 0) left.push(`device ${id}`)
-  }
-  if (fixtures.area) {
-    const r = await api('DELETE', `/rest/v1/areas?id=eq.${fixtures.area}`).catch((e) => ({ status: 0, text: e.message }))
-    if (r.status > 299 || r.status === 0) left.push(`area ${fixtures.area}`)
-  }
-  if (left.length) console.log(`  left behind (delete by hand): ${left.join(', ')}`)
+  for (const id of fixtures.devices) await gone(`device ${id}`, api(adminToken, 'DELETE', `/rest/v1/devices?id=eq.${id}`))
+  if (fixtures.area) await gone(`area ${fixtures.area}`, api(adminToken, 'DELETE', `/rest/v1/areas?id=eq.${fixtures.area}`))
+  if (left.length) notes.push(`left behind, delete by hand: ${left.join(', ')}`)
 }
 
 let policy = null
@@ -420,20 +501,24 @@ try {
 
   if (!PUBLIC_ONLY) {
     await visit('/', SIGN_IN_FORM, 30000, '(sign-in)')
+    await signInThroughApi()
+    const { password, invited } = await prepareWalker()
     // React owns the inputs: a value goes through the native setter and an input event.
     await evaluate(`(() => {
       const set = (el, v) => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, v);
         el.dispatchEvent(new Event('input', { bubbles: true }));
       };
-      set(document.querySelector('#auth-email'), ${JSON.stringify(EMAIL)});
-      set(document.querySelector('#auth-password'), ${JSON.stringify(PASSWORD)});
+      set(document.querySelector('#auth-email'), ${JSON.stringify(WALKER_EMAIL)});
+      set(document.querySelector('#auth-password'), ${JSON.stringify(password)});
       document.querySelector('#auth-email').form.requestSubmit();
       return true;
     })()`)
     if (!await until(SHELL, 45000)) {
       const said = await evaluate("document.querySelector('#root')?.innerText?.slice(0, 400)").catch(() => '')
-      throw new Error(`sign-in as ${EMAIL} did not reach the dashboard. The page says:\n${said}`)
+      throw new Error(`sign-in as ${WALKER_EMAIL} did not reach the dashboard.` +
+        `${invited ? ' The stack has a mail relay, so the account was invited, and it signs in once the invitation is accepted.' : ''}` +
+        ` The page says:\n${said}`)
     }
 
     for (const tab of tabs) {
@@ -460,10 +545,8 @@ try {
       }
     }
 
-    current = '(clean-up)'
-    await removeFixtures()
-
-    // Sign-out also ends the gateway's Studio and forge sessions, with a request to each door.
+    // The dashboard's own Sign Out, which also fetches the Studio and forge doors' sign-out. It ends
+    // every session of the walk's account, and nobody else's.
     current = '(sign-out)'
     await evaluate("document.querySelector('.user-avatar').click()")
     await until("!!document.querySelector('.user-popover-action-danger')", 5000)
@@ -475,6 +558,10 @@ try {
 } catch (e) {
   problems.push(`${current}: ${e.message}`)
 } finally {
+  if (adminToken) {
+    current = '(clean-up)'
+    await putAway().catch((e) => problems.push(`(clean-up): ${e.message}; ${WALKER_EMAIL} may still have access`))
+  }
   await close()
 }
 
@@ -495,6 +582,7 @@ for (const label of labels) {
   for (const r of mine) console.log(`         ${r.text}`)
 }
 for (const p of problems) console.log(`  PROBLEM ${p}`)
+for (const n of notes) console.log(`  NOTE ${n}`)
 // The browser tells of one refusal several ways: an event, a console entry, a DevTools issue.
 const failing = new Set(reports.map((r) => r.page)).size
 console.log(`\n${failing} page(s) with a CSP violation (${reports.length} report(s)), ${problems.length} problem(s).`)
