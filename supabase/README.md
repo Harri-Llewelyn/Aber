@@ -873,6 +873,33 @@ helper's lists, and
 `check-docs-drift.mjs` holds the two equal and checks that each component is one the chart
 renders. Adding a row the chart deploys means adding it to both.
 
+### The Directory shows each image's known CVEs (0180)
+
+Each row's version carries a count of the fixable HIGH and CRITICAL vulnerabilities the release
+found in that exact image, dated. It works offline, because the data ships with the chart:
+
+- `release.yml` scans every image the chart runs at release time: the ones it builds before pushing
+  them, and the third-party ones with `scripts/scan-images.mjs --reports`, which records findings
+  without gating the release. Every Trivy JSON report is kept.
+- `scripts/image-scan-summary.mjs` turns the reports into `files/image-scans.json` inside the chart
+  it packages: per image reference, the two counts, the scan time and the date of the
+  vulnerability database. An image Aber builds FROM a third-party product under Aber's own tag
+  (Node-RED, Swagger UI, TimescaleDB, the platform database) also gets that product's version,
+  read from its Dockerfile. The release fails unless the summary covers exactly the images the
+  packaged chart runs.
+- `aber.directoryImageScans` passes it to db-init as `directory_image_scans`, and `0180`'s
+  `record_directory_image_scans()` writes the five columns beside `image`: `image_fixable_critical`,
+  `image_fixable_high`, `image_scanned_at`, `image_vulnerability_db_at` and `upstream_version`.
+
+The match is on the exact reference. A row running an overridden tag, a mirror or a hotfix has no
+scan, and the page says "not scanned" rather than zero. A checkout's chart carries no summary, so
+on a dev cluster db-init passes `{}` and every row reads "not scanned". An entry missing a count or
+a date is not a scan either: an undated zero would read as a clean bill of health, and a CVE
+published after the release is not counted.
+
+The monthly `image-scan.yml` writes no summary. A published chart cannot change, so a later scan
+has nowhere to go without the stack fetching it, which nothing does.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by

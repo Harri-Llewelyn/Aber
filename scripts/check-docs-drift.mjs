@@ -4860,6 +4860,37 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 67. The chart's known-CVE summary is one file, and a checkout carries none.
+//
+// release.yml writes files/image-scans.json into the chart before it packages it, and checks the
+// package for it, with scripts/image-scan-summary.mjs; the chart reads it for db-init. A name that
+// drifted on one side leaves every Directory row of a release reading "not scanned", with nothing
+// failing. .gitignore keeps a local copy out of a commit, or every dev cluster would date its rows
+// with a scan of images it does not run.
+// -------------------------------------------------------------------------------------------------
+{
+  const FILE = 'files/image-scans.json';
+  const CHART_FILE = `deploy/helm/aber/${FILE}`;
+  const release = read('.github/workflows/release.yml');
+  const written = release.indexOf(`--out ${CHART_FILE}`);
+  const packaged = release.indexOf('helm package deploy/helm/aber');
+  const offences = [
+    !read('deploy/helm/aber/templates/_helpers.tpl').includes(`.Files.Get "${FILE}"`) && `_helpers.tpl does not read ${FILE}`,
+    !read('scripts/image-scan-summary.mjs').includes(`const SUMMARY_FILE = '${FILE}'`) && `scripts/image-scan-summary.mjs does not check ${FILE}`,
+    written === -1 && `release.yml does not write ${CHART_FILE}`,
+    written > packaged && `release.yml writes ${CHART_FILE} after it packages the chart`,
+    !/image-scan-summary\.mjs --check '\$\{\{ steps\.package\.outputs\.package \}\}'/.test(release) && 'release.yml does not check the packaged chart\'s summary',
+    !gitignored(CHART_FILE) && `.gitignore does not keep ${CHART_FILE} out of a commit`,
+  ].filter(Boolean);
+  if (offences.length) {
+    fail('the known-CVE summary is not one file the release writes and the chart reads:\n'
+      + offences.map((o) => `        ${o}`).join('\n'));
+  } else {
+    pass(`release.yml packages ${FILE}, checks it and the chart reads it; a checkout carries none`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 23. Nothing in the stack reports usage or checks for updates by itself.
 //
 // Each service below does one or the other by default, and each switch is one line that an upgrade

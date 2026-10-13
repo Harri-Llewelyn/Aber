@@ -545,7 +545,9 @@ export const SUITES = {
       "0140's Directory versions. Every chart-managed row is reached by the component map, a " +
       'component the chart stops deploying is cleared rather than left showing the last release, a ' +
       'row the chart does not manage is left alone, and no API role can call the writer -- so the ' +
-      'versions on the page are the ones db-init recorded and nobody else.',
+      'versions on the page are the ones db-init recorded and nobody else. And 0180\'s known-CVE ' +
+      'columns: matched on the exact image reference, so an overridden tag has no scan rather than ' +
+      'a zero, and an entry without its date is not a scan.',
   },
   'supabase/migrations/test_backup_health.py': {
     lanes: ['db'],

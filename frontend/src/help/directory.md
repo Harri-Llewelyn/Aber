@@ -10,7 +10,12 @@ This page lists every service Aber runs, what each one is for, and how to reach 
 - **Service Name** and **Service Type** say what the service is. The type is a category in words, such as Edge node or REST API. Hover it to see the type the service was registered with.
 - **Endpoint URL** is where the service answers, for the deployment you are actually running.
 - **Version** is the image tag this release deploys for the service. It is shown without a leading `v`, so every row reads alike. Hover it for the full image reference, which is what a vulnerability scanner or a registry needs.
+- Some images are built by Aber from another product, such as Node-RED. For those, Version shows the product's version, not Aber's. The tooltip still gives the full image reference.
 - The version is recorded from the deployment at each install and upgrade. So it shows what the release asked for, not what a container reports about itself. If it reads **not recorded**, the service is switched off in this deployment, or something other than the deployment registered it.
+- The badge after a version counts the known vulnerabilities in that image that have a fix: **fixable HIGH and CRITICAL** ones. Red means at least one is CRITICAL. Hover it for the counts and the date, such as "3 fixable HIGH, as of 2026-10-02".
+- The count is from the scan made when the release was built. A vulnerability published after that date is not counted, so a zero means none were known on that date.
+- **not scanned**, in dim text, means the release did not scan that exact image. Usually the deployment sets its own image tag for that service. That is not the same as zero. A build that is not a release reads **not scanned** on every row.
+- A count is not a reason to change one service's image on its own. The fix arrives as a new Aber release, which upgrades the services together.
 - **Liveness** says whether the service is answering now: **ACTIVE**, **DOWN** or **not observed**. The page reads again every 3 seconds, so it changes without a reload.
 - **ACTIVE** and **DOWN** are observations, written every minute from the metrics store. ACTIVE means the metrics store checked the service and it answered; its tooltip gives the time. DOWN means it was checked and did not answer.
 - **not observed**, in dim text rather than a badge, means nothing in Aber watches that service. That is not the same as healthy.
@@ -34,4 +39,6 @@ The deployment registers the rows at each install and upgrade. You cannot add on
 
 Whether a service is **healthy** in the sense that matters to its users. The page shows only whether it answers. A service that is up but answering wrongly looks the same here as one that is up and correct.
 
-Whether a version is **current**. The page does not check for newer releases or known vulnerabilities. The services are built, tested and upgraded together, by upgrading Aber. So a newer version of one service is not, on its own, a reason to change it.
+Whether a version is **current**. The page does not check for a newer version of each service. The services are built, tested and upgraded together, by upgrading Aber. So a newer version of one service is not, on its own, a reason to change it.
+
+Whether a vulnerability was **published since the release**. The counts are as of the release's scan, and nothing on this page fetches a later one.

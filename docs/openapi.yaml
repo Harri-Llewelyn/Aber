@@ -4764,6 +4764,38 @@ components:
             db-init from the chart on every install and upgrade (`0140`). It is the release's pin,
             not an observation of the running container. `null` when the chart does not deploy the
             service, or when something other than the chart registered it.
+        image_fixable_critical:
+          type: integer
+          nullable: true
+          example: 0
+          description: >-
+            Fixable CRITICAL vulnerabilities the release's scan found in `image`, from the summary
+            the packaged chart carries and db-init records on every run (`0180`). Matched on the
+            exact reference, so `null` means the release did not scan that image, as for an
+            overridden tag. It is never a zero nobody measured.
+        image_fixable_high:
+          type: integer
+          nullable: true
+          example: 3
+          description: Fixable HIGH vulnerabilities in `image`, on the same terms as `image_fixable_critical`.
+        image_scanned_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the release scanned `image`. A vulnerability published later is not counted. `null` when not scanned.
+        image_vulnerability_db_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: The date of the vulnerability database that scan used. `null` when not scanned.
+        upstream_version:
+          type: string
+          nullable: true
+          example: 5.0.7
+          description: >-
+            For an image Aber builds from a third-party product and tags with Aber's version, such
+            as Node-RED or Swagger UI, that product's version, from the same summary. `null` for
+            every other image.
         status: { type: string, example: ACTIVE }
         last_heartbeat: { type: string, format: date-time, nullable: true }
         registered_schema_id: { type: string, format: uuid, nullable: true }

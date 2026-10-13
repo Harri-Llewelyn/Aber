@@ -332,7 +332,8 @@ python supabase/migrations/test_system_settings_rls.py
 python supabase/migrations/test_sparkplug_group_setting.py
 # The Directory's Version column (0140). The chart's component -> image map reaches every row it
 # manages, clears a component the chart stops deploying, leaves other registrations alone, and the
-# writer is callable by db-init only.
+# writer is callable by db-init only. Its known-CVE columns (0180) match the exact image reference,
+# so an overridden tag reads as not scanned rather than zero.
 python supabase/migrations/test_directory_images.py
 # The Backup Stale rule's clock (0144). No row while no backup job exists; the first job recorded
 # until one succeeds, then the start of the last success, which a later failure does not move; and
@@ -996,8 +997,13 @@ never on a branch:
 | **prepare-release** | Derives the version from the tag, refuses a non-SemVer one or one `Chart.yaml` does not name, re-runs the static checks a published artefact must not violate |
 | **build-images** | The ten independent images, in parallel, each built to an OCI archive and **scanned** before it is pushed to GHCR with an SPDX SBOM and SLSA provenance in its index, then signed keyless with cosign and verified back |
 | **build-ingestion-chain** | `ingestion`, then `test-runner` `FROM` it, as one `docker buildx bake` of `docker-bake.hcl`; built to OCI archives first so the attestations are asserted and both images **scanned** before (and without) a push, then pushed, signed and verified |
-| **publish-chart** | Lint, render, package at the tag's version, push over OCI, pull it back, sign the pushed digest and verify it |
+| **scan-third-party-images** | Every third-party image the chart runs, by `scripts/scan-images.mjs --reports`, the monthly scan's script; a finding is recorded rather than stopping the release, an image that cannot be scanned stops it |
+| **publish-chart** | Summarise every scan report into the chart's `files/image-scans.json`, lint, render, package at the tag's version, check the package has a dated scan of every image it runs, push over OCI, pull it back, sign the pushed digest and verify it |
 | **attach-sboms** | Reads every image's SBOM and provenance back out of the registry and attaches them to the GitHub Release, opening it as a draft from the template if nothing has |
+
+Every scan's Trivy JSON report is kept as a workflow artifact. The packaged chart carries their
+summary, which db-init records and the Directory shows beside each version
+([`supabase/README.md`](../supabase/README.md)).
 
 The tag stamps the eleven image tags, the chart `version` and `appVersion` in one run, and the
 commit it points at already names that version in `Chart.yaml`. **Images publish before the chart**, because a chart naming

@@ -2263,6 +2263,12 @@ const apiMethods = {
         exposure: s.exposure,
         // The image the release deploys for the service (0140); null when nothing recorded one.
         image: s.image ?? null,
+        // The release's scan of that exact image (0180); all null when it did not scan it.
+        image_fixable_critical: s.image_fixable_critical ?? null,
+        image_fixable_high: s.image_fixable_high ?? null,
+        image_scanned_at: s.image_scanned_at ?? null,
+        image_vulnerability_db_at: s.image_vulnerability_db_at ?? null,
+        upstream_version: s.upstream_version ?? null,
         status: s.status,
         last_heartbeat: s.last_heartbeat
       }));
