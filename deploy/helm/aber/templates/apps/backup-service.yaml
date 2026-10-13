@@ -27,8 +27,8 @@ Role in that namespace granting `get` on that one Secret by name. Nothing wider:
 resourceNames cannot restrict, and nothing in this namespace.
 
 THE SAME BASE IMAGE AS THE DATABASE, for its pg_dump (the client must be at least the server's
-version), plus node, sqlite3, GNU tar, age and the AWS CLI. The code is projected from a
-ConfigMap, as the credential service's is, so a script change needs no image rebuild.
+version), plus node, sqlite3, GNU tar, age and the AWS CLI. The service's script is baked into
+that image (backup-service/Dockerfile).
 
 NO SERVICE OBJECT. Nothing calls it; the liveness probe reads /healthz on the pod. Nothing leaves
 the PVC unencrypted: the off-site copy, when the Backups page sets a destination, is each file
@@ -40,16 +40,6 @@ preferred for the same reason. Including both on a cluster where those two pods 
 nodes leaves this one Pending, which is the honest outcome; the values file says so.
 =================================================================================================
 */}}
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ printf "%s-backup-service-scripts" $fullname }}
-  labels:
-    {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
-data:
-  backup-service.mjs: |
-{{ .Files.Get "files/backup-service/backup-service.mjs" | indent 4 }}
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -130,7 +120,7 @@ spec:
         - name: backup-service
           image: {{ include "aber.image" (dict "ctx" . "image" .Values.backupService.image) | quote }}
           imagePullPolicy: {{ .Values.backupService.image.pullPolicy }}
-          command: ["node", "/scripts/backup-service.mjs"]
+          command: ["node", "/opt/aber/backup-service.mjs"]
           env:
             {{- with include "aber.dbClientTlsEnv" . }}{{ . | nindent 12 }}{{- end }}
             - name: SUPABASE_DB_HOST
@@ -194,9 +184,6 @@ spec:
             {{- toYaml .Values.backupService.resources | nindent 12 }}
           volumeMounts:
             {{- with include "aber.dbClientCaMount" . }}{{ . | nindent 12 }}{{- end }}
-            - name: scripts
-              mountPath: /scripts
-              readOnly: true
             - name: backups
               mountPath: /backups
             {{- if $includeStorage }}
@@ -221,9 +208,6 @@ spec:
             {{- end }}
       volumes:
         {{- with include "aber.dbClientCaVolume" . }}{{ . | nindent 8 }}{{- end }}
-        - name: scripts
-          configMap:
-            name: {{ printf "%s-backup-service-scripts" $fullname }}
         - name: backups
           persistentVolumeClaim:
             claimName: {{ printf "%s-backup" $fullname }}

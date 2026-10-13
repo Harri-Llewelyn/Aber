@@ -1583,6 +1583,8 @@ gatewayCredential:
   image:
     repository: ghcr.io/harri-llewelyn/aber/gateway-credential
     # Built FROM eclipse-mosquitto so it carries the broker's own mosquitto_passwd and mosquitto_rr.
+    # It carries the reconcile and the service too: a tag from before 1.4.0 has neither, and the
+    # broker does not start.
     tag: ""
     pullPolicy: IfNotPresent
   port: 9010
@@ -1746,6 +1748,7 @@ backupService:
   enabled: false
   image:
     # Built FROM supabase/postgres for its pg_dump, plus node, sqlite3, GNU tar, age and the AWS CLI.
+    # It carries the service's script too: a tag from before 1.4.0 has none.
     repository: ghcr.io/harri-llewelyn/aber/backup-service
     tag: ""
     pullPolicy: IfNotPresent

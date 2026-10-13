@@ -4,6 +4,8 @@
 #   test-harness/Dockerfile         -> conformance test runner
 #   i3x/Dockerfile                  -> i3X server (compiles sparkplug_b.proto)
 #   swagger-ui/Dockerfile           -> the API documentation site (needs both docs/*.yaml)
+#   gateway-credential/Dockerfile   -> broker reconcile + credential service (needs scripts/)
+#   backup-service/Dockerfile       -> backup service (needs scripts/backup-service.mjs)
 #
 # ONE .dockerignore SERVES THEM ALL, so an exclusion added for one image can break another. That is
 # not hypothetical: excluding `test-harness` for the ingestion build broke the test-runner build,

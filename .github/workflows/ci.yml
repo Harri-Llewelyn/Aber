@@ -103,10 +103,12 @@ jobs:
               *) CODE=true ;;
             esac
             # What a site installs: the chart and the cluster manifests, the migrations, every image
-            # and the sources it is built from (the two API specs are baked into swagger-ui), the
-            # setup that writes a site's values, and the rehearsals themselves.
+            # and the sources it is built from (the two API specs are baked into swagger-ui, three
+            # scripts into gateway-credential and backup-service), the setup that writes a site's
+            # values, and the rehearsals themselves.
             case "$f" in
               docs/openapi.yaml|docs/i3x-openapi.yaml) INSTALL=true ;;
+              scripts/mosquitto-dynsec-init.mjs|scripts/gateway-credential-service.mjs|scripts/backup-service.mjs) INSTALL=true ;;
               *.md|docs/*) ;;
               deploy/*|supabase/*|ingestion/*|i3x/*|node-red/*|frontend/*|gateway-credential/*) INSTALL=true ;;
               backup-service/*|timescaledb/*|swagger-ui/*|sparkplug_b.proto|docker-bake.hcl) INSTALL=true ;;
