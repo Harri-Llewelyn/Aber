@@ -86,9 +86,19 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       # The image's node user (1000), for the wait too, and fsGroup on the objects' volume
-      # (values.yaml, supabaseStorage.podSecurityContext).
+      # (values.yaml, supabaseStorage.podSecurityContext). Root while a backup pod mounts the
+      # volume: the kubelet then skips fsGroup on a `local` volume, and objects a root server wrote
+      # stay 0755 (deploy/k8s/README.md, Users).
       securityContext:
+        {{- if eq (include "aber.backupMountsStorage" .) "true" }}
+        runAsUser: 0
+        fsGroup: {{ dig "fsGroup" 1000 (.Values.supabaseStorage.podSecurityContext | default dict) }}
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+        {{- else }}
         {{- include "aber.podSecurityContext" .Values.supabaseStorage.podSecurityContext | nindent 8 }}
+        {{- end }}
       initContainers:
         {{/*
           supabase_storage_admin HAS NO PASSWORD until db-roles-init sets one. Without it

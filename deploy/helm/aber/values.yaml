@@ -760,6 +760,8 @@ supabaseStorage:
   # storage-api's image names no user; the pod runs as its node user, 1000. fsGroup `Always`: at
   # each start the kubelet makes every object directory group-writable, so 1000 can add and delete
   # beside objects a root server wrote at 0755. It walks every object (deploy/k8s/README.md, Users).
+  # While a backup pod mounts the volume (backup.includeStorage), the pod runs as root instead,
+  # with this fsGroup and OnRootMismatch.
   podSecurityContext:
     runAsNonRoot: true
     runAsUser: 1000

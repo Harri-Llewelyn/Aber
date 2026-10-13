@@ -1503,8 +1503,9 @@ init containers:
 - **Envoy** (`supabase-envoy`) as `envoy`, 101:101, `render-config` too. Started as 101, the image's
   entrypoint neither hands `/dev/stdout` to that user nor drops to it, so the container gets no
   capability back. The container runtime gives a non-root process its own log streams.
-- **storage-api** (`supabase-storage`) as `node`, 1000:1000, `wait-for-storage-role` too. It writes
-  the objects' volume; see *Volumes written by an earlier release*, below.
+- **storage-api** (`supabase-storage`) as `node`, 1000:1000, `wait-for-storage-role` too, unless a
+  backup pod mounts its volume (below). It writes the objects' volume; see *Volumes written by an
+  earlier release*, below.
 - **postgres-meta** (`supabase-meta`) as `node`, 1000:1000. It writes nothing to disk.
 - **Studio** (`supabase-studio`) as `node`, 1000:1000. It writes snippets, and Next.js its cache,
   to `emptyDir` volumes. Its Edge Functions folder is read, never written.
@@ -1522,6 +1523,10 @@ These pods still start a container as root, each for the reason given:
   root, and initdb as postgres (100) cannot take a directory it does not own. Started as root, the
   entrypoint gives it to postgres and drops to that uid. Measured: on a volume postgres already owns,
   the image also starts as 100.
+- **`supabase-storage`**, with `backup.includeStorage` (and `backup.enabled`): the backup service,
+  or the CronJob in its place, mounts its volume. On a `local` volume the kubelet then does not
+  give it `fsGroup` (below), so objects stored as root stay root's at 0755. Started as root, as in
+  1.3.0, storage-api can still add and delete beside them.
 - **`backup-service`**, with `backup.includeForge` or `backup.includeBroker`: it reads files other
   uids own at 0600.
 
@@ -1552,16 +1557,23 @@ except the ones listed above. *baseline* admits every pod except Alloy, as befor
   with a very large bucket can set `supabaseStorage.podSecurityContext.fsGroupChangePolicy:
   OnRootMismatch` once this prints nothing:
   `kubectl exec deploy/supabase-storage -- find /var/lib/storage -type d ! -user 1000 ! -perm -g+w`.
+  While a backup pod mounts the volume, the pod runs as root with 1.3.0's context instead: `fsGroup`
+  1000, `OnRootMismatch`. One helper, `aber.backupMountsStorage`, decides the mount and the user.
 
-What happens if the kubelet does not apply `fsGroup` to the storage volume: reads keep working, and
-every upload, replacement and delete in an existing directory fails with `EACCES: permission
-denied`. A delete from the dashboard fails without a message. Some volume types ignore `fsGroup`:
-NFS, and the `hostPath` volumes k3s's `local-path` made before April 2024 (k3s 1.29.4). On a
-`local` volume, which it makes now, the kubelet also skips `fsGroup` while another pod has the
-volume mounted. The backup service does, with `backup.includeStorage`. What to do: scale
-`backup-service` to 0, delete the storage pod, wait until it is Ready, then scale the backup
-service back to 1. On a volume type that ignores `fsGroup`, give the volume's files to 1000 once, as
-root: `chown -R 1000:1000` on the volume's directory.
+What happens if the kubelet does not apply `fsGroup` to the storage volume while storage-api runs as
+1000: reads keep working, and every upload, replacement and delete in an existing directory fails
+with `EACCES: permission denied` in the storage pod's log. A delete from the dashboard fails without
+a message. The `find` above lists the directories. It has two causes:
+
+- **A volume type that ignores `fsGroup`**: NFS, and the `hostPath` volumes k3s's `local-path` made
+  before April 2024 (k3s 1.29.4). What to do: give the volume's files to 1000 once, as root:
+  `chown -R 1000:1000` on the volume's directory.
+- **Another pod holding a `local` volume**, which `local-path` makes now: the kubelet applies
+  `fsGroup` only when no other pod has the volume mounted. This can happen when a site turns
+  `backup.includeStorage` off. The same upgrade moves storage-api to 1000 and takes the volume from
+  the backup service, and nothing orders the two rollouts, so the old backup-service pod can still
+  hold the volume when the new storage pod starts. What to do: once `kubectl rollout status
+  deploy/backup-service` returns, run `kubectl rollout restart deploy/supabase-storage`.
 
 What happens on a storage class that neither applies `fsGroup` nor creates a new volume
 world-writable (some NFS and CSI drivers; k3s's `local-path` creates it 0777): a new volume's root
