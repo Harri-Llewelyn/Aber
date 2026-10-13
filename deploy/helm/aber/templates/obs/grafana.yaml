@@ -234,6 +234,7 @@ spec:
               mountPath: /datasources
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
@@ -297,6 +298,7 @@ spec:
               mountPath: /alerting
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
@@ -329,6 +331,7 @@ spec:
               mountPath: /var/lib/grafana
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
@@ -412,6 +415,7 @@ spec:
             failureThreshold: 4
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
@@ -439,6 +443,10 @@ spec:
               readOnly: true
             - name: data
               mountPath: /var/lib/grafana
+            # Grafana starts each backend plugin as a process and reaches it over a Unix socket it
+            # makes here.
+            - name: tmp
+              mountPath: /tmp
             {{- with include "aber.dbClientCaMount" . }}{{ . | nindent 12 }}{{- end }}
       volumes:
         {{- with include "aber.dbClientCaVolume" . }}{{ . | nindent 8 }}{{- end }}
@@ -454,6 +462,8 @@ spec:
         - name: datasources
           emptyDir: {}
         - name: alerting
+          emptyDir: {}
+        - name: tmp
           emptyDir: {}
         - name: data
           {{- if .Values.grafana.persistence.enabled }}

@@ -1543,6 +1543,12 @@ only to its volumes and to the `emptyDir` named here:
   that directory and keeps its output in `/tmp`. `certificate-reload` and `metrics` write nothing.
   The restore pods that `scripts/restore-platform-db.mjs` and `scripts/restore-historian.mjs` start
   copy the sidecar's settings, so they run read-only too.
+- **`grafana`**: `/tmp`, where Grafana makes a Unix socket for each backend plugin it starts. Its
+  three init containers write only to their `emptyDir` volumes and the data volume.
+- **`loki`**, **`prometheus`** and **`alloy`**: nothing outside their data directories. Alloy's
+  storage path (its WAL and read positions) is an `emptyDir`. At start Alloy also tries to make
+  `/root/.cache/snowflake`, a cache for a Snowflake exporter the chart does not run, and carries on
+  without it.
 
 ### Users
 
