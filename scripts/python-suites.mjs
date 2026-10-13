@@ -948,6 +948,20 @@ export const SUITES = {
       'which is what makes the identity rewrite checkable against a live historian. Needs ' +
       '`playback.enabled`, which values-dev.yaml sets.',
   },
+  'ingestion/test_recorded_capture_replay.py': {
+    lanes: ['stack'],
+    why:
+      'THE ONLY CHECK THAT A CAPTURE RECORDED FROM THE BROKER REACHES STORAGE AND REPLAYS. ' +
+      'test_playback_replay.py replays a file it uploaded, so the recording half ran in no suite: the ' +
+      'daemon claiming the job and asking the edge node to rebirth, the upload to broker-captures as ' +
+      'the daemon, and the captures row with the manifest ensure_shadow_devices() reads. A recording ' +
+      'that never reached storage left every suite green, and so did a file the daemon writes that ' +
+      'playback cannot read. A fixture Host gateway, its credential issued as the Gateways page ' +
+      'issues it, publishes live from the suite and answers the rebirth; an Administrator records it ' +
+      'with start_capture_job() and stops it; the file and the row are checked against what was ' +
+      'published; and that file is replayed into the historian under the replay lane and nowhere ' +
+      'else. Needs `playback.enabled`, which values-dev.yaml sets.',
+  },
   'test-harness/test_load_generator.py': {
     // UNIT, AND THAT IS THE POINT. The suite exists precisely because the run it guards cannot be
     // repeated cheaply: by the time anyone reads a load figure the stack has changed, so the

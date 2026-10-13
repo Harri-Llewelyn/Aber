@@ -129,6 +129,16 @@ python ingestion/test_playback_credentials.py
 # run can only have come from the replay, which is what makes "it landed under the replay lane and
 # under nothing else" checkable against a live historian.
 python ingestion/test_playback_replay.py
+# A CAPTURE RECORDED FROM THE BROKER REACHES STORAGE AND REPLAYS. The suite above replays a file it
+# uploaded; this one records one the way the Capture page does. A fixture Host gateway, its broker
+# credential issued as the Gateways page issues it, publishes live from the suite and answers the
+# rebirth request the daemon sends when the capture starts. An Administrator starts the capture with
+# start_capture_job() and stops it with request_capture_stop(). The stored file, the `captures` row
+# and its manifest are checked against what was published, and the file the daemon wrote is replayed
+# through the playback worker into the historian, under the replay lane and nowhere else. Same needs
+# and environment as the suite above, whose helpers it reuses; kubectl removes the fixture's broker
+# account afterwards.
+python ingestion/test_recorded_capture_replay.py
 # Cold telemetry archival -- the object LAYOUT and the Parquet round trip. Needs pytest and pyarrow.
 #
 # Deliberately narrow: the export path needs a historian, object storage and a chunk to mean
