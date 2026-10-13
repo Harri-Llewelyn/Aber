@@ -117,8 +117,9 @@ const MIRRORS = [
   {
     source: 'scripts',
     dest: 'scripts',
-    match: (name) => name === 'storage-init.mjs',
-    why: 'Creates the asset-3d-models bucket through the Storage REST API',
+    match: (name) => name === 'storage-init.mjs' || name === 'release-check.mjs',
+    why: 'Creates the asset-3d-models bucket through the Storage REST API, and runs the daily '
+       + 'release check (releaseCheck.enabled); both run on the node image',
   },
   // THE API SPECS ARE NOT MIRRORED. docs/openapi.yaml and docs/i3x-openapi.yaml are copied into
   // swagger-ui/Dockerfile's image instead: swagger-ui is their only reader, and at ~270 KB the

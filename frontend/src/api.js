@@ -2287,6 +2287,16 @@ const apiMethods = {
       }));
     }
 
+    // The last daily release check (0181), or null where it has never run, as with the check off.
+    if (path.startsWith('/api/v1/release-check')) {
+      const { data, error } = await supabase
+        .from('release_check')
+        .select('checked_at,running_version,latest_version,latest_url,newer,error')
+        .maybeSingle();
+      if (error) throw error;
+      return data ?? null;
+    }
+
     // How far back each resolution reaches. Four rows, evaluated on the TimescaleDB side (archived
     // migration 0111_how_far_back_each_telemetry_resolution_reaches.sql) -- the retention SETTINGS
     // cannot answer this, because a young stack holds less than its policy allows and a widened

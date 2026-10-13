@@ -900,6 +900,39 @@ published after the release is not counted.
 The monthly `image-scan.yml` writes no summary. A published chart cannot change, so a later scan
 has nowhere to go without the stack fetching it, which nothing does.
 
+### The account menu shows a newer release (0181)
+
+With `releaseCheck.enabled` on (it is off by default), a CronJob asks GitHub once a day for the
+latest Aber release and records the answer in `release_check`, one row:
+
+- `scripts/release-check.mjs` runs on the chart's node image. It calls
+  `GET /repos/Harri-Llewelyn/Aber/releases/latest` with no token, which already leaves out drafts and
+  pre-releases, and compares the `MAJOR.MINOR.PATCH` core with the chart's appVersion on the pattern
+  `frontend/src/utils/releaseVersion.js` uses.
+- It records the result through `record_release_check()`, through the gateway, as
+  `Service_ReleaseCheck`: a machine principal of its own (`b0000000-0000-4000-8000-000000000004`),
+  which holds no role and no permission and which the gate admits alone, not even `service_role`.
+  The gate refuses a version that is not a release core, a link that is not a release of this
+  repository, and a `newer` the two versions contradict. Nothing else may write the table, and
+  every signed-in user may read it.
+- A failed check (GitHub unreachable, a NetworkPolicy with no `releaseCheck.githubEgress`) keeps
+  only its reason in `error`, for an operator, and the run exits 1.
+
+The account menu reads the row when it opens. It shows "Aber X.Y.Z is available", linking to the
+release notes, only from a successful check under two days old that names a release newer than the
+one the stack runs. It shows nothing otherwise: never "up to date", which would claim a check that
+may not have run. So the line also goes two days after the check is switched off, and as soon as
+the stack is upgraded to that release.
+
+The CronJob holds two keys and no other credential: the publishable key, for the gateway's own
+check, and `SUPABASE_RELEASE_CHECK_KEY` (`secrets.releaseCheckKey`) as the bearer. The second is a
+90-day JWT for `Service_ReleaseCheck`, signed by the stack's JWT secret: `npm run setup` mints it
+with the ingestion and playback keys, and `npm run keys:rotate` re-signs it with them. The chart
+requires it only with `releaseCheck.enabled`. A leaked key records a release check and nothing else:
+the principal has no role, no permission and no other gate, and `service_role` is not among the
+gate's callers. A stack set up before 0181 mints the key with `npm run keys:rotate`, which signs it
+with that stack's own JWT secret (`docs/upgrades.md`).
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
@@ -2249,7 +2282,7 @@ sites — the conversion and the monthly job — because otherwise the hole reop
 
 ## Machine Identities
 
-Five identities on this stack are held by software rather than people, and each is narrow by
+Six identities on this stack are held by software rather than people, and each is narrow by
 construction. They were built as roadmap items 13 and 16; that work is finished, so it is documented
 here rather than left on a checklist.
 
@@ -2257,11 +2290,12 @@ here rather than left on a checklist.
 | :--- | :--- | :--- |
 | `Service_Ingestor` (`0046`) | `telemetry:read` | Nothing directly. Eight `SECURITY DEFINER` functions -- seven gates in `0047` plus `record_ingestion_rejection()` from `0026`, brought under the same rule by `0051` -- each checking the caller **is** this principal |
 | `Service_Playback` (`0056`) | `telemetry:read` | Nothing directly. The `playback_*` gates, each checking `is_playback_caller()` |
+| `Service_ReleaseCheck` (`0181`) | nothing | Nothing directly. `record_release_check()`, which checks `is_release_check_caller()`; its key is read only with `releaseCheck.enabled` |
 | MCP reader (`0034`) | `telemetry:read` | Reads the five relations the i3X address space is assembled from. Writes nothing; cannot read `audit_trail` |
 | `aber_i3x` | broker account | Reads the namespace, publishes nothing |
 | `gateway-credential-service` | broker admin, scoped | Issues or disables one gateway's account at a time, lists the broker's clients and roles, and serves the CA; nothing else |
 
-The three database identities are `auth.users` rows with **no email, no password and no identity
+The four database identities are `auth.users` rows with **no email, no password and no identity
 provider**, so none can sign in. That is also `0042`'s predicate for listing them, and `0048`'s for
 keeping their writes out of the audit trail's `'user'` bucket.
 
@@ -3367,8 +3401,9 @@ pinned when every caller was a host script. The actor is **re-checked** against 
 rather than believed, so authorisation does not rest solely on a check made inside the component
 that holds the signing key.
 
-**The button is not offered on every row.** `Service_Ingestor` and `Service_Playback` read their
-keys from the environment, so a token minted for either is valid and unread —
+**The button is not offered on every row.** `Service_Ingestor`, `Service_Playback` and
+`Service_ReleaseCheck` read their keys from the environment, so a token minted for any of them is
+valid and unread —
 `isMintableFromPage()` is the rule, and those two keep `npm run keys:rotate`, which is what actually
 changes what those processes present.
 

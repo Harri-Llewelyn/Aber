@@ -389,6 +389,13 @@ credential is correct for a stack that has issued no playback targets yet.
 {{- if and .Values.playback.enabled (not .Values.secrets.playbackKey) -}}
 {{- $missing = append $missing "secrets.playbackKey (SUPABASE_PLAYBACK_KEY, required when playback.enabled -- a JWT signed by jwtSecret for subject b0000000-0000-4000-8000-000000000003, Service_Playback)" -}}
 {{- end -}}
+{{/*
+Conditional, because the release check is off by default: without the key every run fails at the
+gate, and the only sign is a menu that never says anything.
+*/}}
+{{- if and .Values.releaseCheck.enabled (not .Values.secrets.releaseCheckKey) -}}
+{{- $missing = append $missing "secrets.releaseCheckKey (SUPABASE_RELEASE_CHECK_KEY, required when releaseCheck.enabled -- a JWT signed by jwtSecret for subject b0000000-0000-4000-8000-000000000004, Service_ReleaseCheck)" -}}
+{{- end -}}
 {{- if $missing -}}
 {{- fail (printf "\n\naber: required credentials are not set:\n  - %s\n\nThese are a SET, not independent values: anonKey and serviceRoleKey are JWTs signed by\njwtSecret and publishableKey and secretKey are the keys the gateway translates to them, so\nsupplying some and not others yields a stack that reports healthy and rejects every request\nat the gateway. The chart deliberately does not generate them.\n\nFor a local k3s stack:   helm install ... -f values-dev.yaml\nFor anything else:       copy values-prod.yaml.example and supply a matching set.\n" (join "\n  - " $missing)) -}}
 {{- end -}}

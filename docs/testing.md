@@ -346,6 +346,10 @@ python supabase/migrations/test_sparkplug_group_setting.py
 # writer is callable by db-init only. Its known-CVE columns (0180) match the exact image reference,
 # so an overridden tag reads as not scanned rather than zero.
 python supabase/migrations/test_directory_images.py
+# The release check's one row (0181). Each check replaces it, a failure keeps only its reason, the
+# gate refuses a version, link or `newer` the account menu could not show, and only
+# Service_ReleaseCheck may call it; its key reaches nothing else.
+python supabase/migrations/test_release_check.py
 # The Backup Stale rule's clock (0144). No row while no backup job exists; the first job recorded
 # until one succeeds, then the start of the last success, which a later failure does not move; and
 # anon and authenticated cannot read a view that runs past backup_jobs' Administrator-only RLS.

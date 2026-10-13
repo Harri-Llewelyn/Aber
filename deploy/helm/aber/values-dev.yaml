@@ -60,11 +60,13 @@ secrets:
   # replicas are available`, and a failure that names neither the chart nor this file.
   #
   # Demonstration JWTs signed by the jwtSecret above:
-  # Service_Ingestor is sub b0000000-...-0002 (0046) and Service_Playback is ...-0003 (0056).
-  # Neither is `service_role` -- that is the whole point of Machine Identities, and copying the
+  # Service_Ingestor is sub b0000000-...-0002 (0046), Service_Playback is ...-0003 (0056) and
+  # Service_ReleaseCheck is ...-0004 (0181).
+  # None is `service_role` -- that is the whole point of Machine Identities, and copying the
   # service key here instead would produce a working stack that proves nothing.
   ingestionKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoiYjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAyIiwiZXhwIjoyMDAwMDAwMDAwfQ.j-rSyTImEPP3Etuq304tYycMSKrk0mxcI_9Pmew3seI
   playbackKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoiYjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAzIiwiZXhwIjoyMDAwMDAwMDAwfQ.40LLl4zKVmdJOBBkG-sKUZjXkhESdgzEg8c0aK-DVr4
+  releaseCheckKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoiYjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDA0IiwiZXhwIjoyMDAwMDAwMDAwfQ._x9WpSqAU4DwSo940iqEnTkh8U-YPqAwhbflmQF4p3k
 
   # Realtime's own metrics endpoint, separate from the session JWT secret.
   realtimeMetricsJwtSecret: aber_realtime_metrics_jwt_secret_development_only

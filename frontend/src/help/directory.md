@@ -39,6 +39,6 @@ The deployment registers the rows at each install and upgrade. You cannot add on
 
 Whether a service is **healthy** in the sense that matters to its users. The page shows only whether it answers. A service that is up but answering wrongly looks the same here as one that is up and correct.
 
-Whether a version is **current**. The page does not check for a newer version of each service. The services are built, tested and upgraded together, by upgrading Aber. So a newer version of one service is not, on its own, a reason to change it.
+Whether a version is **current**. The page does not check for a newer version of each service. The services are built, tested and upgraded together, by upgrading Aber. So a newer version of one service is not, on its own, a reason to change it. If the deployment turns on the release check, the account menu says when a newer Aber release exists.
 
 Whether a vulnerability was **published since the release**. The counts are as of the release's scan, and nothing on this page fetches a later one.

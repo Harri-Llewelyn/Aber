@@ -549,6 +549,15 @@ export const SUITES = {
       'columns: matched on the exact image reference, so an overridden tag has no scan rather than ' +
       'a zero, and an entry without its date is not a scan.',
   },
+  'supabase/migrations/test_release_check.py': {
+    lanes: ['db'],
+    why:
+      "0181's release check row, which the account menu reads. One row replaced by each check, a " +
+      'failed check keeping only its reason, a gate that refuses a version, a link or a `newer` the ' +
+      'menu could not show safely, and Service_ReleaseCheck the only caller, not even service_role, ' +
+      'with a key that reaches nothing else -- so "Aber X.Y.Z is available" is only ever what the ' +
+      'daily check found.',
+  },
   'supabase/migrations/test_backup_health.py': {
     lanes: ['db'],
     why:

@@ -193,12 +193,13 @@ and so is what a new password does not reach ([below it](#a-new-password-does-no
 
 ## Machine identities
 
-Five identities here are held by software rather than people, and each is narrow by construction:
+Six identities here are held by software rather than people, and each is narrow by construction:
 `Service_Ingestor`, `Service_Playback` and the MCP reader hold `telemetry:read` **as a grant of their
-own** rather than a person's role (`0080`), `aber_i3x` reads the broker namespace and
+own** rather than a person's role (`0080`), `Service_ReleaseCheck` holds nothing and reaches one
+gate, `record_release_check()` (`0181`), `aber_i3x` reads the broker namespace and
 publishes nothing, and `gateway-credential-service` can issue, re-issue and disable gateway broker
 accounts, list them and serve the broker's root, and nothing else.
-The three database identities are `auth.users` rows with no email, no password and no identity
+The four database identities are `auth.users` rows with no email, no password and no identity
 provider, so none can sign in — and a trigger on `user_roles` refuses any of them a role, so widening
 `Operator` for the people who hold it cannot widen them by accident. An Administrator can create a
 further one from the **Access Control** page (`0125`): a name, a purpose and permissions from a

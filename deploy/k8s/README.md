@@ -1476,6 +1476,10 @@ that would, and where each is switched off:
 
 **What still leaves Aber**, each because something a person uses depends on it:
 
+- The release check, only when a site turns it on: `releaseCheck.enabled` is off by default. Once a
+  day one pod asks api.github.com for the latest Aber release, with no token. The account menu then
+  says "Aber X.Y.Z is available", and no browser contacts GitHub. Under `networkPolicy.enabled` the
+  check fails until `releaseCheck.githubEgress` lists GitHub's addresses or a proxy's.
 - Grafana installs any preinstalled plugin it lacks, once, at first boot; Logs Drilldown is one. A
   site with no route to grafana.com runs without them. The Prometheus, Loki and PostgreSQL
   datasources are bundled in the image. The `drop-shadowed-plugins` init container removes any
