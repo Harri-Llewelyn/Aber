@@ -307,9 +307,10 @@ class TestSuccessfulEnrolment(EnrollGatewayBase):
         token = self.issue_token()
         _, payload = enroll(token)
 
+        # The CA arrives on stdin: the container's root filesystem is read-only.
         verify = stack_exec.run(
             "credential", "sh", "-c",
-            "cat > /tmp/ca.pem && openssl verify -CAfile /tmp/ca.pem /mosquitto/certs/tls.crt",
+            "openssl verify -CAfile /dev/stdin /mosquitto/certs/tls.crt",
             input=payload["ca_cert"],
         )
         # openssl is not in this image; fall back to comparing against the CA on disk, which is the
