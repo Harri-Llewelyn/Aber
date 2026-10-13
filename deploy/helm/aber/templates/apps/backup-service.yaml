@@ -173,6 +173,7 @@ spec:
             periodSeconds: 30
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
               {{- if $asRoot }}
@@ -186,6 +187,9 @@ spec:
             {{- with include "aber.dbClientCaMount" . }}{{ . | nindent 12 }}{{- end }}
             - name: backups
               mountPath: /backups
+            # The aws CLI's config for an off-site copy; everything else is written to /backups.
+            - name: tmp
+              mountPath: /tmp
             {{- if $includeStorage }}
             - name: storage-objects
               mountPath: /storage
@@ -211,6 +215,10 @@ spec:
         - name: backups
           persistentVolumeClaim:
             claimName: {{ printf "%s-backup" $fullname }}
+        # Room for checking an off-site copy by hand: a fetched object and its decryption.
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
         {{- if $includeStorage }}
         - name: storage-objects
           persistentVolumeClaim:

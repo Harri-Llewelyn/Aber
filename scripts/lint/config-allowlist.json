@@ -1,6 +1,5 @@
 {
   "DS-0002 supabase/db/Dockerfile": "The image ends without a USER, on purpose: the server starts as root. Its data directory is the volume's mount point, which a provisioner creates owned by root, and initdb as postgres (uid 100) cannot take a directory it does not own; the entrypoint gives it to postgres and drops to that uid before the server starts. Stated in deploy/k8s/README.md, Users.",
-  "KSV-0014 CronJob/aber-backup container/backup": "Writable root filesystem: tracked in #419.",
   "KSV-0014 DaemonSet/alloy container/alloy": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Deployment/gitea container/gitea": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Deployment/gitea container/gitea-init": "Writable root filesystem: tracked in #419.",
@@ -36,8 +35,6 @@
   "KSV-0014 Job/aber-storage-init container/wait-for-storage": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Job/aber-storage-policies container/storage-policies": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Job/aber-storage-policies container/wait-for-storage": "Writable root filesystem: tracked in #419.",
-  "KSV-0014 Job/aber-timescaledb-maintenance container/maintenance": "Writable root filesystem: tracked in #419.",
-  "KSV-0014 Job/aber-timescaledb-maintenance container/wait-for-telemetry-table": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Pod/aber-test-db-tls container/test-db-tls": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Pod/aber-test-db-tls container/wait-for-supabase-db": "Writable root filesystem: tracked in #419.",
   "KSV-0014 Pod/aber-test-db-tls container/wait-for-timescaledb": "Writable root filesystem: tracked in #419.",
