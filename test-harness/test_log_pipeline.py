@@ -29,6 +29,7 @@ would have every publish discarded by the broker's ACL, silently.
 import os
 import sys
 import json
+import re
 import time
 import shlex
 import secrets
@@ -130,6 +131,78 @@ def prom_scalar(expr, default=0.0):
     return float(r[0]["value"][1]) if r else default
 
 
+def prom_by_pod(expr):
+    """{pod: value} for a query whose answer keeps the `pod` label."""
+    return {r["metric"].get("pod", ""): float(r["value"][1]) for r in prom_query(expr)}
+
+
+def fresh(selector):
+    """`selector`'s series sampled in the last minute: a scrape target replaced on a rollout marks
+    nothing stale, so its last value stays visible for Prometheus's five-minute lookback."""
+    return f"({selector} and (time() - timestamp({selector}) < 60))"
+
+
+def eventually(probe, timeout=PROPAGATION_TIMEOUT, interval=5):
+    """probe() until its answer is truthy or the time is up; returns the last answer."""
+    deadline = time.time() + timeout
+    while True:
+        answer = probe()
+        if answer or time.time() >= deadline:
+            return answer
+        time.sleep(interval)
+
+
+def running_pod_names(pod_list):
+    """The pods in a `kubectl get pods -o json` answer that are running and not being deleted."""
+    return sorted(
+        p["metadata"]["name"] for p in pod_list.get("items", [])
+        if (p.get("status") or {}).get("phase") == "Running"
+        and not p["metadata"].get("deletionTimestamp"))
+
+
+def pod_matcher(names):
+    """A label matcher for exactly these pods. A pod name is an RFC 1123 label: nothing to escape."""
+    for name in names:
+        if not re.fullmatch(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?", name):
+            raise ValueError(f"not a pod name: {name!r}")
+    return 'pod=~"' + "|".join(names) + '"'
+
+
+def current_alloy(testcase):
+    """
+    THE ALLOY PODS RUNNING NOW, as a label matcher, once Prometheus holds `up == 1` for each.
+
+    Alloy remote-writes what it scrapes, so a pod replaced on a rollout gets no staleness marker.
+    For about five minutes its series sit beside the new pod's: a sum of a counter across them
+    falls as they age out, and a lone `up{job="alloy"}` may be the old pod's last 0. So every
+    assertion on Alloy's own series reads these pods alone, named by the Kubernetes API. The wait
+    covers a new pod's first scrape of itself.
+    """
+    labels = {**stack_exec.RELEASE_LABELS, "app.kubernetes.io/component": "alloy"}
+    try:
+        result = subprocess.run(
+            ["kubectl", "-n", stack_exec.NAMESPACE, "get", "pods", "-o", "json",
+             "-l", ",".join(f"{k}={v}" for k, v in labels.items())],
+            capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        skip_or_fail(testcase, f"kubectl cannot list the Alloy pods ({exc})")
+    if result.returncode != 0:
+        skip_or_fail(testcase, f"kubectl cannot list the Alloy pods: {result.stderr.strip()}")
+    pods = running_pod_names(json.loads(result.stdout or "{}"))
+    testcase.assertTrue(pods, "no Alloy pod of this release is running")
+    matcher = pod_matcher(pods)
+
+    up_query = f'up{{job="alloy", {matcher}}}'
+
+    def all_up():
+        return all(prom_by_pod(up_query).get(p) == 1.0 for p in pods)
+
+    if not eventually(all_up):
+        testcase.fail(f"alloy is not up, or prometheus is not scraping it: up by pod "
+                      f"{prom_by_pod(up_query)}, pods running {pods}")
+    return matcher, pods
+
+
 def setUpModule():
     """
     SKIP ONLY WHEN THERE IS NO STACK AT ALL, and fail rather than skip once there is one.
@@ -160,10 +233,10 @@ class CollectionTestCase(unittest.TestCase):
         this store existed, which made the pair whose failure destroys the record of itself the
         only pair with no record of its own.
         """
-        self.assertEqual(1.0, prom_scalar('up{job="alloy"}'),
-                         "alloy is not up, or prometheus is not scraping it")
-        self.assertEqual(1.0, prom_scalar('up{job="loki"}'),
-                         "loki is not up, or prometheus is not scraping it")
+        current_alloy(self)
+        loki_up = "max(" + fresh('up{job="loki"}') + ")"
+        self.assertTrue(eventually(lambda: prom_scalar(loki_up) == 1.0),
+                        "loki is not up, or prometheus is not scraping it")
 
     def test_a_pod_series_is_named_by_its_pod_not_its_address(self):
         """
@@ -191,8 +264,10 @@ class CollectionTestCase(unittest.TestCase):
 
     def test_the_collector_has_shipped_something(self):
         """`sent > 0` is the whole-pipeline smoke test, and is what the Stalled alert watches."""
+        matcher, _ = current_alloy(self)
+        sent = f"sum(loki_write_sent_entries_total{{{LOCAL_WRITER}, {matcher}}})"
         self.assertGreater(
-            prom_scalar(f"sum(loki_write_sent_entries_total{{{LOCAL_WRITER}}})"), 0,
+            eventually(lambda: prom_scalar(sent)), 0,
             "the collector has shipped no entries at all -- discovery is the usual cause, and it "
             "fails wholesale rather than partially when the socket proxy refuses an API path",
         )
@@ -207,10 +282,12 @@ class CollectionTestCase(unittest.TestCase):
         `ingester_error` is deliberately not asserted on: it counts the benign "entry too far
         behind" refusals from a first attach to already-running containers.
         """
+        matcher, _ = current_alloy(self)
         for reason in ("rate_limited", "stream_limited"):
             self.assertEqual(
                 0.0,
-                prom_scalar(f'sum(loki_write_dropped_entries_total{{{LOCAL_WRITER}, reason="{reason}"}})'),
+                prom_scalar(f'sum(loki_write_dropped_entries_total{{{LOCAL_WRITER}, {matcher}, '
+                            f'reason="{reason}"}})'),
                 f"the log store is refusing lines ({reason}); they are being lost",
             )
 
@@ -661,9 +738,10 @@ class LogForwardTestCase(unittest.TestCase):
         if forwards_to_this_store(self.forward):
             self.skipTest("the forward reaches the in-cluster Loki; this runs when it cannot reach "
                           "its destination")
+        matcher, _ = current_alloy(self)
         writer = FORWARD_WRITERS.get(self.protocol, FORWARD_WRITERS["loki"])
         failing = " + ".join(
-            f"(sum({metric}{{{writer}}}) or vector(0))"
+            f"(sum({metric}{{{writer}, {matcher}}}) or vector(0))"
             for metric in ("loki_write_batch_retries_total", "loki_write_dropped_entries_total",
                            "otelcol_exporter_send_failed_log_records_total",
                            "otelcol_exporter_enqueue_failed_log_records_total"))
@@ -674,7 +752,9 @@ class LogForwardTestCase(unittest.TestCase):
             self.skipTest(f"the forward to {self.forward.get('url')} is not failing, so this proves "
                           f"nothing; point it at an address nothing answers")
 
-        sent_before = prom_scalar(f"sum(loki_write_sent_entries_total{{{LOCAL_WRITER}}})")
+        # Per pod, never summed: a pod the last rollout replaced still shows its final count.
+        sent = f"sum by (pod) (loki_write_sent_entries_total{{{LOCAL_WRITER}, {matcher}}})"
+        sent_before = prom_by_pod(sent)
         token = "stall-probe-" + secrets.token_hex(6)
         lines = [f"{token}-{i}" for i in range(6)]
         # A minute of lines, so they arrive after the forward's queue has been failing for a while.
@@ -691,8 +771,11 @@ class LogForwardTestCase(unittest.TestCase):
                          "lines stopped reaching the in-cluster store while the forward cannot "
                          "reach its destination: the forward is blocking the pipeline both "
                          f"writers share. Missing: {sorted(set(lines) - arrived)}")
-        self.assertGreater(prom_scalar(f"sum(loki_write_sent_entries_total{{{LOCAL_WRITER}}})"),
-                           sent_before, "the local writer's sent count did not move")
+        sent_after = prom_by_pod(sent)
+        self.assertTrue(
+            [p for p, before in sent_before.items() if sent_after.get(p, 0.0) > before],
+            f"no running Alloy pod's local writer sent anything while the forward was failing: "
+            f"before {sent_before}, after {sent_after}")
 
 
 if __name__ == "__main__":
