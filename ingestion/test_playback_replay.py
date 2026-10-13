@@ -103,6 +103,8 @@ CREDENTIAL_TIMEOUT = 240
 PROJECTION_MARGIN = 90
 JOB_TIMEOUT = 120
 HISTORIAN_TIMEOUT = 60
+# The worker's NDEATH is acknowledged before the job finishes; the daemon writes it a moment later.
+GATEWAY_OFFLINE_TIMEOUT = 30
 
 # The worker's heartbeat window, as the playback dialog reads it.
 WORKER_STALE_SECONDS = 120
@@ -327,6 +329,7 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
         cls._store_capture()
         cls.lane_map = cls._prepare_lanes()
         cls.job = cls._run_playback()
+        cls.gateway_after = cls._await_gateway_offline()
         cls.rows = cls._await_historian()
 
     @classmethod
@@ -390,7 +393,7 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
     @classmethod
     def _playback_gateway(cls):
         status, rows = cls.session.rest(
-            "/gateways?select=id,name,sparkplug_id,sparkplug_group"
+            "/gateways?select=id,name,sparkplug_id,sparkplug_group,last_heartbeat"
             "&is_shadow=eq.true&is_archived=eq.false&limit=1"
         )
         if status != 200 or not rows:
@@ -566,6 +569,27 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
         )
 
     @classmethod
+    def _await_gateway_offline(cls):
+        """
+        The Playback gateway's row once the daemon has written the job's NDEATH: OFFLINE, with a
+        heartbeat other than the one it had before the job. The fixture holds no node message, so
+        nothing else in the replay writes this row.
+        """
+        before = cls.playback_gateway.get("last_heartbeat")
+        deadline = time.monotonic() + GATEWAY_OFFLINE_TIMEOUT
+        row = {}
+        while time.monotonic() < deadline:
+            status, rows = cls.session.rest(
+                f"/gateway_status?select=status,live_status,last_heartbeat"
+                f"&id=eq.{cls.playback_gateway['id']}&limit=1")
+            if status == 200 and rows:
+                row = rows[0]
+                if row.get("last_heartbeat") != before and row.get("status") == "OFFLINE":
+                    return row
+            time.sleep(1)
+        return row
+
+    @classmethod
     def _await_historian(cls):
         """
         Which assets carry the sentinel metric, and what they were given.
@@ -634,6 +658,23 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
         self.assertEqual(
             self.job["messages_sent"], len(self.document["messages"]),
             "the worker reported a different number of messages than the capture holds",
+        )
+
+    def test_the_gateway_reads_offline_after_the_replay(self):
+        """
+        The worker ends every job with the session's NDEATH, so between replays the Playback gateway
+        is OFFLINE rather than STALE: gateway_status never ages a stored OFFLINE into STALE.
+        """
+        before = self.playback_gateway.get("last_heartbeat")
+        self.assertNotEqual(
+            self.gateway_after.get("last_heartbeat"), before,
+            f"the Playback gateway's heartbeat is still {before} after the job, so the daemon "
+            f"never received the NDEATH the worker ends a job with",
+        )
+        self.assertEqual(
+            (self.gateway_after.get("status"), self.gateway_after.get("live_status")),
+            ("OFFLINE", "OFFLINE"),
+            f"the Playback gateway reads {self.gateway_after} after the job, not OFFLINE",
         )
 
     def test_the_replayed_frames_reached_the_historian(self):
