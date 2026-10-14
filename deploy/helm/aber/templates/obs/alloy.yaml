@@ -681,6 +681,7 @@ spec:
           # Root without a capability: the host files it reads read-only belong to root.
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:

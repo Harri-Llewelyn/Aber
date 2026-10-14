@@ -1531,14 +1531,9 @@ What happens if a capability is missing: the container exits at start with `Oper
 permitted`, or, for `KILL`, a stop takes the whole grace period and the process is killed rather
 than shut down. What to do: add it back in that container's `securityContext`, and say why.
 
-One step of #419 follows: each root filesystem becomes read-only, one workload at a time, with an
-`emptyDir` for what the process writes. Until then `scripts/lint/config-allowlist.json` lists each
-writable root against #419.
-
-**Read-only root filesystems.** The Supabase services, Swagger UI and the database and storage init
-Jobs set `readOnlyRootFilesystem: true`, so a process cannot change its own image. So do the
-dashboard, ingestion, playback, Node-RED, the broker's pod, the backup service and Jobs, and the
-test and e2e pods. Each writes only where a volume is mounted:
+**Read-only root filesystems.** Every container the chart renders sets
+`readOnlyRootFilesystem: true`, so a process cannot change its own image, except the two named
+at the end of this section. Each writes only where a volume is mounted:
 
 - `gotrue`, `postgrest`, `postgres-meta`, `envoy` and `realtime`, with `wait-for-realtime-schema`,
   write nothing. Nor do the `storage-init` and `storage-policies` Jobs.
@@ -1574,6 +1569,17 @@ test and e2e pods. Each writes only where a volume is mounted:
   to fetch and decrypt a copy by hand.
 - `test-db-tls` (helm test): `/tmp`, for its plaintext probe's error output.
 - The e2e and load-test Jobs: `/tmp`, for the AAS suite's harness file and Python's temporary files.
+- **`supabase-db` and `timescaledb`**, every container in each pod. The server writes its socket and
+  lock file to `/var/run/postgresql`. With the physical backup on, the `pgbackrest` sidecar shares
+  that directory and keeps its output in `/tmp`. `certificate-reload` and `metrics` write nothing.
+  The restore pods that `scripts/restore-platform-db.mjs` and `scripts/restore-historian.mjs` start
+  copy the sidecar's settings, so they run read-only too.
+- **`grafana`**: `/tmp`, where Grafana makes a Unix socket for each backend plugin it starts. Its
+  three init containers write only to their `emptyDir` volumes and the data volume.
+- **`loki`**, **`prometheus`** and **`alloy`**: nothing outside their data directories. Alloy's
+  storage path (its WAL and read positions) is an `emptyDir`. At start Alloy also tries to make
+  `/root/.cache/snowflake`, a cache for a Snowflake exporter the chart does not run, and carries on
+  without it.
 - `mosquitto`, `gateway-credential`, `certificate-reload` and `metrics` (mosquitto), `node-red-init`,
   the `backup` CronJob, the `timescaledb-maintenance` Job and `test-fdw` write nothing outside their
   volumes.

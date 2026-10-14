@@ -217,6 +217,7 @@ spec:
           # which the owner may do; tini forwards the stop signal to a process of its own uid.
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
@@ -233,6 +234,11 @@ spec:
             {{- end }}
             {{- if include "aber.physicalBackupOn" . }}
             {{- include "aber.physicalBackupMounts" . | nindent 12 }}
+            {{- else }}
+            # The socket directory, the one path outside these volumes the server writes. With the
+            # physical backup on, physicalBackupMounts mounts it, shared with the sidecar.
+            - name: pgsocket
+              mountPath: /var/run/postgresql
             {{- end }}
         {{- if include "aber.physicalBackupOn" . }}
         {{- /*
@@ -247,6 +253,7 @@ spec:
           command: ["/bin/sh", "/opt/aber/historian-backup.sh"]
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           env:
@@ -268,6 +275,9 @@ spec:
               mountPath: /opt/aber
               readOnly: true
             {{- include "aber.physicalBackupMounts" . | nindent 12 }}
+            # The script's pgBackRest output, one file per run of it.
+            - name: pgbackrest-tmp
+              mountPath: /tmp
         {{- end }}
         {{- if .Values.postgresTls.enabled }}
         {{- include "aber.dbCertificateReload" (dict "ctx" . "image" (include "aber.image" (dict "image" .Values.timescaledb.image "ctx" .)) "pullPolicy" .Values.timescaledb.image.pullPolicy "user" .Values.timescaledb.username "db" .Values.timescaledb.database) | nindent 8 }}
@@ -289,6 +299,11 @@ spec:
         {{- end }}
         {{- if include "aber.physicalBackupOn" . }}
         {{- include "aber.physicalBackupVolumes" . | nindent 8 }}
+        - name: pgbackrest-tmp
+          emptyDir: {}
+        {{- else }}
+        - name: pgsocket
+          emptyDir: {}
         {{- end }}
       {{- with .Values.timescaledb.nodeSelector }}
       nodeSelector:

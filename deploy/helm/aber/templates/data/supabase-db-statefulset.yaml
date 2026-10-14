@@ -239,6 +239,7 @@ spec:
           # itself runs with none of them.
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
               add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "KILL", "SETGID", "SETUID"]
@@ -258,6 +259,11 @@ spec:
             {{- include "aber.physicalBackupMounts" . | nindent 12 }}
             - name: pgbackrest-spool
               mountPath: /var/spool/pgbackrest
+            {{- else }}
+            # The socket directory, the one path outside these volumes the server writes. With the
+            # physical backup on, physicalBackupMounts mounts it, shared with the sidecar.
+            - name: pgsocket
+              mountPath: /var/run/postgresql
             {{- end }}
         {{- if include "aber.platformBackupOn" . }}
         {{- /*
@@ -281,6 +287,7 @@ spec:
             runAsGroup: 101
             runAsNonRoot: true
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
@@ -292,6 +299,9 @@ spec:
               mountPath: /opt/aber
               readOnly: true
             {{- include "aber.physicalBackupMounts" . | nindent 12 }}
+            # The script's pgBackRest output, one file per run of it.
+            - name: pgbackrest-tmp
+              mountPath: /tmp
         {{- end }}
         {{- if .Values.postgresTls.enabled }}
         {{- include "aber.dbCertificateReload" (dict "ctx" . "image" (include "aber.image" (dict "image" .Values.supabaseDb.serverImage "ctx" .)) "pullPolicy" .Values.supabaseDb.serverImage.pullPolicy "user" "postgres" "db" "postgres" "runAs" (dict "uid" 100 "gid" 101)) | nindent 8 }}
@@ -314,6 +324,11 @@ spec:
         {{- end }}
         {{- if include "aber.platformBackupOn" . }}
         {{- include "aber.platformBackupVolumes" . | nindent 8 }}
+        - name: pgbackrest-tmp
+          emptyDir: {}
+        {{- else }}
+        - name: pgsocket
+          emptyDir: {}
         {{- end }}
       {{- with .Values.supabaseDb.nodeSelector }}
       nodeSelector:
