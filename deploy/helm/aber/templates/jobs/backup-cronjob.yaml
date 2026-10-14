@@ -242,8 +242,10 @@ spec:
                   mountPath: /storage
                   readOnly: true
                 {{- end }}
+              # Writes /backups alone: pg_dump and tar take their output path.
               securityContext:
                 allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
                 capabilities:
                   drop: ["ALL"]
               resources:

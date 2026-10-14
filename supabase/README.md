@@ -3008,9 +3008,11 @@ kubectl -n aber exec deploy/ingestion -- python -m cold_archive --drop
 kubectl -n aber exec deploy/ingestion -- python -m cold_archive query \
     --from 2026-04-01 --to 2026-05-01 \
     --asset dev220000000000400080000 --metric SpindleSpeed --limit 50
-# --csv writes the file in the pod's working directory
+# --csv writes under /tmp, the container's one writable path; copy the file out after
 kubectl -n aber exec deploy/ingestion -- python -m cold_archive query \
-    --from 2026-04-01 --to 2026-05-01 --csv april.csv
+    --from 2026-04-01 --to 2026-05-01 --csv /tmp/april.csv
+pod=$(kubectl -n aber get pod -l app.kubernetes.io/component=ingestion -o name | cut -d/ -f2)
+kubectl -n aber cp "$pod:/tmp/april.csv" april.csv
 ```
 
 The manifest's `range_start` / `range_end` are what make this cheap: they say which objects **overlap**

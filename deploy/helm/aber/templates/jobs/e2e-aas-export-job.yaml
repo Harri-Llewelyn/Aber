@@ -117,6 +117,7 @@ spec:
                   time.sleep(5)
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
@@ -148,10 +149,19 @@ spec:
               value: "1"
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
             {{- toYaml .Values.e2e.resources | nindent 12 }}
+          # The suite writes a harness file through tempfile.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
 ---
 {{/*
 RBAC for the wait-for-validate initContainer: read Job status in this namespace, nothing else.

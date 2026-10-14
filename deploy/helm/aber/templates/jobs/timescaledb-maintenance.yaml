@@ -105,6 +105,7 @@ spec:
               echo "telemetry hypertable exists"
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
@@ -249,6 +250,7 @@ spec:
               readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:

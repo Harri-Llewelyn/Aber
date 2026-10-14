@@ -111,22 +111,25 @@ spec:
               value: "1"
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
             {{- toYaml .Values.loadTest.resources | nindent 12 }}
-          {{- if or $brokerTls .Values.postgresTls.enabled }}
           volumeMounts:
             {{- if $brokerTls }}
             {{- include "aber.brokerClientCaMount" . | nindent 12 }}
             {{- end }}
             {{- with include "aber.dbClientCaMount" . }}{{ . | nindent 12 }}{{- end }}
-          {{- end }}
-      {{- if or $brokerTls .Values.postgresTls.enabled }}
+            # Python and OpenSSL take TMPDIR when they need one.
+            - name: tmp
+              mountPath: /tmp
       volumes:
         {{- if $brokerTls }}
         {{- include "aber.brokerClientCaVolume" . | nindent 8 }}
         {{- end }}
         {{- with include "aber.dbClientCaVolume" . }}{{ . | nindent 8 }}{{- end }}
-      {{- end }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
 {{- end }}
