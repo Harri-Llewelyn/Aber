@@ -829,10 +829,13 @@ def request_node_rebirth(client, group_id, edge_node_id, force=False):
     The alias table is in-memory, so this is what closes the cold start after a restart. Rate
     limited per node so a gateway that never responds is not asked once per message.
 
-    `force` skips the wait and still stamps the throttle. Used by broker capture and the
-    dashboard's rebirth requests, where the ceiling is a person pressing a button rather than the
-    plant's message rate; without it the startup and gap requests usually leave the throttle spent
-    by the time a capture opens. See ingestion/README.md -> "Rebirth Requests (NCMD)".
+    `force` skips the wait and still stamps the throttle. Used by request_operator_rebirth(), where
+    the ceiling is a person pressing a button rather than the plant's message rate; without it the
+    startup and gap requests usually leave the throttle spent by the time a capture opens. See
+    ingestion/README.md -> "Rebirth Requests (NCMD)".
+
+    `group_id` must be the group the node publishes under: the node subscribes to NCMD under that
+    group alone (Sparkplug 3.0.0 tck-id-message-flow-edge-node-ncmd-subscribe).
     """
     if client is None or not edge_node_id:
         return False
@@ -860,6 +863,38 @@ def request_node_rebirth(client, group_id, edge_node_id, force=False):
         REBIRTH_METRIC_NAME, topic, REBIRTH_REQUEST_INTERVAL_SECONDS
     )
     return True
+
+def publishing_group(edge_node_id, configured_group):
+    """
+    The Sparkplug group `edge_node_id` publishes under: gateways.observed_sparkplug_group, which
+    record_observed_group() keeps, else `configured_group`, which is also the answer when the read
+    fails. Ingestion accepts a node under any group, so its configured one can be a group it never
+    uses. Read per request, never on the message path.
+    """
+    if supabase_client is None or not edge_node_id:
+        return configured_group
+    try:
+        res = supabase_client.table("gateways").select("observed_sparkplug_group").eq(
+            "sparkplug_id", edge_node_id
+        ).execute()
+    except Exception as e:
+        logger.warning(
+            "Could not read the Sparkplug group edge node '%s' publishes under: %s. Using its "
+            "configured group '%s'.", edge_node_id, e, configured_group
+        )
+        return configured_group
+    rows = res.data if res else []
+    return (rows[0].get("observed_sparkplug_group") if rows else None) or configured_group
+
+def request_operator_rebirth(client, group_id, edge_node_id):
+    """
+    A rebirth a person asked for, by starting a capture or by Request Rebirth on the Gateways page.
+    `group_id` is the gateway's configured group; the request goes to the group the node publishes
+    under (tck-id-topics-ncmd-topic), past the throttle (see request_node_rebirth()).
+    """
+    return request_node_rebirth(
+        client, publishing_group(edge_node_id, group_id), edge_node_id, force=True
+    )
 
 # -----------------------------------------------------------------------------
 # Sparkplug Sequence Tracking
@@ -3562,9 +3597,9 @@ def start_rebirth_poller(client):
     Send the rebirth requests a person asked for from the dashboard.
 
     A browser cannot publish MQTT and `write spBv1.0/+/NCMD/+` is granted to this principal alone,
-    so a request is a row and this is what notices it. It sends exactly what
-    request_node_rebirth() already sends, with `force=True` for the same reason capture uses it:
-    the database permits one pending request per gateway.
+    so a request is a row and this is what notices it. It sends it as a capture does, through
+    request_operator_rebirth(): the database permits one pending request per gateway, and the
+    row's group is the configured one.
 
     A daemon thread, forgiving of its own errors.
     """
@@ -3585,7 +3620,7 @@ def start_rebirth_poller(client):
                 error = None
                 sent = False
                 try:
-                    sent = request_node_rebirth(client, group, edge_node, force=True)
+                    sent = request_operator_rebirth(client, group, edge_node)
                     if not sent:
                         # `force=True` only returns False when the publish itself failed -- the
                         # throttle is bypassed -- so this is a broker problem, not a rate limit.
@@ -4021,10 +4056,10 @@ def main():
     start_rebirth_poller(client)
     capture_reconciled = capture_worker.start(
         supabase_client,
-        # force=True: see request_node_rebirth(). A capture is one button press, single-flight
-        # across the stack, and worthless without the birth certificate it opens by asking for.
-        rebirth=lambda group_id, edge_node_id: request_node_rebirth(
-            client, group_id, edge_node_id, force=True),
+        # A capture is one button press, single-flight across the stack, and worthless without the
+        # birth certificate it opens by asking for.
+        rebirth=lambda group_id, edge_node_id: request_operator_rebirth(
+            client, group_id, edge_node_id),
     )
 
     # After the client exists, because it publishes. Off unless DIRECTORY_MQTT_ENABLED is set, and

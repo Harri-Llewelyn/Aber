@@ -106,6 +106,8 @@ python ingestion/test_directory_refresh.py
 python ingestion/test_capture_playback.py
 # The daemon-side recording engine -- subject matching, the caps, and the manifest
 python ingestion/test_capture_worker.py
+# The request the capture stack suites delete their stored file with, and that a refusal raises
+python ingestion/test_stack_capture_cleanup.py
 # The startup recovery loop. Nothing orders the daemon after the historian at boot, so a node
 # restart can start ingestion before the
 # historian -- measured at 453ms on a development stack. The daemon then reached its MQTT loop

@@ -803,6 +803,11 @@ it differs from `sparkplug_group`, so step 5 above shows each appliance still on
   `UPDATE` row attributed to ingestion. The column is not in `audit_telemetry_columns()`: a change of
   group is an event, as a change of status is.
 - **`gateway_status` is rebuilt** with `ensure_gateway_status_view()`, as check 10d requires.
+- **Ingestion reads it to address a rebirth a person asks for**, a capture opening or Request
+  Rebirth: the node hears NCMD only under the group it publishes in. `capture_jobs.sparkplug_group`
+  and `rebirth_requests.sparkplug_group` keep the configured group, which is used when this column
+  is NULL. A capture matches its edge node under any group, so the job's group never decides what
+  is recorded ([`ingestion/README.md`](../ingestion/README.md#rebirth-requests-ncmd)).
 - **Not this release:** a count in `platform_health` and an alert rule.
 
 `test_ingestion_rejection_rpc.py` (`GatewayGroupObservationTestCase`) holds the gate and the view.

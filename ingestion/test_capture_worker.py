@@ -29,7 +29,10 @@ stub; see test_capture_playback.py's header for why that is, at length.
 import json
 import os
 import sys
+import types
 import unittest
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 INGESTION_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, INGESTION_DIR)
@@ -54,14 +57,27 @@ import capture_worker  # noqa: E402
 if _is_stub:
     sys.modules["sparkplug_b_pb2"] = _installed
 
+# The daemon, for the rebirth request a capture opens with. Its broker and historian libraries are
+# stubbed as the sibling suites stub them; nothing reached here uses them.
+for _name in ("psycopg2", "psycopg2.extras", "paho", "paho.mqtt", "paho.mqtt.client"):
+    sys.modules.setdefault(_name, types.ModuleType(_name))
+sys.modules["psycopg2.extras"].execute_values = getattr(
+    sys.modules["psycopg2.extras"], "execute_values", None)
+sys.modules["paho.mqtt.client"].Client = getattr(sys.modules["paho.mqtt.client"], "Client", object)
+import ingestion  # noqa: E402
+
 
 GROUP = "Aber"
+# A group the edge node publishes under that is not the one its gateway row names.
+OTHER_GROUP = "Line2"
 GWY = "gwy120000000000400080000"
+OTHER_GWY = "gwy999999999999999999999"
 DEV = "dev270000000000400080000"
 OTHER_DEV = "dev990000000000400080000"
 
 
-def job(**over):
+def row(**over):
+    """A claimed capture_jobs row, as ingest_claim_capture_job() returns it."""
     base = {
         "id": "00000000-0000-4000-8000-0000000000aa",
         "sparkplug_group": GROUP,
@@ -73,7 +89,11 @@ def job(**over):
         "max_bytes": 52428800,
     }
     base.update(over)
-    return capture_worker._JobState(base)
+    return base
+
+
+def job(**over):
+    return capture_worker._JobState(row(**over))
 
 
 def wire(metrics=(("Temperature", 21.5),), seq=None, timestamp=1700000000000):
@@ -112,9 +132,24 @@ class SubjectMatching(unittest.TestCase):
         j = job()
         self.assertFalse(j.matches(parts("spBv1.0/%s/NDATA/gwy999999999999999999999" % GROUP)))
 
-    def test_a_gateway_capture_ignores_another_sparkplug_group(self):
+    def test_a_gateway_capture_takes_its_edge_node_under_another_group(self):
+        """
+        Ingestion accepts an edge node under any group, by its sparkplug_id, so a capture records
+        the same traffic. Matching the configured group recorded nothing from such a node.
+        """
         j = job()
-        self.assertFalse(j.matches(parts("spBv1.0/OtherGroup/NDATA/%s" % GWY)))
+        for topic in (
+            "spBv1.0/%s/NBIRTH/%s" % (OTHER_GROUP, GWY),
+            "spBv1.0/%s/NDATA/%s" % (OTHER_GROUP, GWY),
+            "spBv1.0/%s/DBIRTH/%s/%s" % (OTHER_GROUP, GWY, DEV),
+            "spBv1.0/%s/DDATA/%s/%s" % (OTHER_GROUP, GWY, OTHER_DEV),
+        ):
+            self.assertTrue(j.matches(parts(topic)), topic)
+
+    def test_another_edge_node_under_that_group_is_not_recorded(self):
+        j = job()
+        self.assertFalse(j.matches(parts("spBv1.0/%s/NDATA/%s" % (OTHER_GROUP, OTHER_GWY))))
+        self.assertFalse(j.matches(parts("spBv1.0/%s/DDATA/%s/%s" % (OTHER_GROUP, OTHER_GWY, DEV))))
 
     def test_a_device_capture_takes_its_own_device(self):
         j = job(device_sparkplug_id=DEV)
@@ -136,7 +171,13 @@ class SubjectMatching(unittest.TestCase):
 
     def test_a_device_capture_does_not_take_node_topics_of_another_gateway(self):
         j = job(device_sparkplug_id=DEV)
-        self.assertFalse(j.matches(parts("spBv1.0/%s/NBIRTH/gwy999999999999999999999" % GROUP)))
+        self.assertFalse(j.matches(parts("spBv1.0/%s/NBIRTH/%s" % (GROUP, OTHER_GWY))))
+
+    def test_a_device_capture_takes_its_device_and_node_under_another_group(self):
+        j = job(device_sparkplug_id=DEV)
+        self.assertTrue(j.matches(parts("spBv1.0/%s/DDATA/%s/%s" % (OTHER_GROUP, GWY, DEV))))
+        self.assertTrue(j.matches(parts("spBv1.0/%s/NBIRTH/%s" % (OTHER_GROUP, GWY))))
+        self.assertFalse(j.matches(parts("spBv1.0/%s/DDATA/%s/%s" % (OTHER_GROUP, GWY, OTHER_DEV))))
 
 
 class Buffering(unittest.TestCase):
@@ -265,6 +306,20 @@ class Observe(unittest.TestCase):
         capture_worker.observe(topic, wire(), parts(topic))
         self.assertEqual(len(j.messages), 1)
 
+    def test_it_buffers_its_edge_node_under_another_group(self):
+        j = job()
+        capture_worker._active = j
+        topic = "spBv1.0/%s/NDATA/%s" % (OTHER_GROUP, GWY)
+        capture_worker.observe(topic, wire(), parts(topic))
+        self.assertEqual([m["topic"] for m in j.messages], [topic])
+
+    def test_it_ignores_another_edge_node_under_that_group(self):
+        j = job()
+        capture_worker._active = j
+        topic = "spBv1.0/%s/NDATA/%s" % (OTHER_GROUP, OTHER_GWY)
+        capture_worker.observe(topic, wire(), parts(topic))
+        self.assertEqual(j.messages, [])
+
     def test_it_ignores_a_message_for_another_subject(self):
         j = job(device_sparkplug_id=DEV)
         capture_worker._active = j
@@ -279,6 +334,81 @@ class Observe(unittest.TestCase):
         topic = "spBv1.0/%s/NDATA/%s" % (GROUP, GWY)
         capture_worker.observe(topic, wire(), parts(topic))
         self.assertIn("message cap", j.cap_reason)
+
+
+class FakeGateways:
+    """`supabase_client.table("gateways").select(...).eq(...).execute()`, answering `rows`."""
+
+    def __init__(self, rows=(), error=None):
+        self.rows, self.error, self.reads = list(rows), error, []
+
+    def table(self, name):
+        self.reads.append([name])
+        return self
+
+    def select(self, columns):
+        self.reads[-1].append(columns)
+        return self
+
+    def eq(self, column, value):
+        self.reads[-1].append((column, value))
+        return self
+
+    def execute(self):
+        if self.error:
+            raise self.error
+        return SimpleNamespace(data=self.rows)
+
+
+class TheRebirthRequest(unittest.TestCase):
+    """
+    A capture opens by asking its edge node to rebirth, through the callable ingestion.py passes to
+    start(). An edge node subscribes to NCMD under its own group only (Sparkplug 3.0.0
+    tck-id-message-flow-edge-node-ncmd-subscribe, tck-id-topics-ncmd-topic), so a request under
+    the configured group is not heard from a node that publishes under another.
+    """
+
+    def setUp(self):
+        self.client = MagicMock()
+        for target, name, value in (
+            (ingestion, "build_rebirth_payload", lambda: b"rebirth"),
+            # As ingestion.main() wires it.
+            (capture_worker, "_rebirth", lambda group, node: ingestion.request_operator_rebirth(
+                self.client, group, node)),
+        ):
+            patcher = patch.object(target, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def tearDown(self):
+        capture_worker._active = None
+
+    def begin(self, gateways, **over):
+        with patch.object(ingestion, "supabase_client", gateways):
+            state = capture_worker._begin(row(**over))
+        return state, [c.args[0] for c in self.client.publish.call_args_list]
+
+    def test_it_goes_to_the_group_the_node_publishes_under(self):
+        gateways = FakeGateways([{"observed_sparkplug_group": OTHER_GROUP}])
+        state, topics = self.begin(gateways)
+        self.assertEqual(topics, ["spBv1.0/%s/NCMD/%s" % (OTHER_GROUP, GWY)])
+        self.assertTrue(state.rebirth_requested)
+        self.assertEqual(gateways.reads,
+                         [["gateways", "observed_sparkplug_group", ("sparkplug_id", GWY)]])
+
+    def test_a_device_capture_asks_its_gateway_in_that_group(self):
+        _, topics = self.begin(FakeGateways([{"observed_sparkplug_group": OTHER_GROUP}]),
+                               device_sparkplug_id=DEV, storage_path=DEV + "/capture.json")
+        self.assertEqual(topics, ["spBv1.0/%s/NCMD/%s" % (OTHER_GROUP, GWY)])
+
+    def test_a_node_with_no_recorded_group_is_asked_under_its_configured_one(self):
+        _, topics = self.begin(FakeGateways([{"observed_sparkplug_group": None}]))
+        self.assertEqual(topics, ["spBv1.0/%s/NCMD/%s" % (GROUP, GWY)])
+
+    def test_a_failed_read_falls_back_to_the_configured_group(self):
+        """An upgrade can run the daemon before db-init has added the column."""
+        _, topics = self.begin(FakeGateways(error=RuntimeError("column does not exist")))
+        self.assertEqual(topics, ["spBv1.0/%s/NCMD/%s" % (GROUP, GWY)])
 
 
 class DrainIsExclusive(unittest.TestCase):
