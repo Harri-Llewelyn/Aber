@@ -2383,7 +2383,9 @@ UPDATE public.directory_services AS d
 \if :{?broker_public_url}    \else \set broker_public_url    '' \endif
 \if :{?broker_internal_url}  \else \set broker_internal_url  '' \endif
 
-SELECT set_config('aber.dir_gitea_public_url', :'gitea_public_url', false);
+-- Every set_config() of a psql variable in this file ends `\g /dev/null`: it returns the value it
+-- sets, db-init prints psql's output, and several of these values are secrets.
+SELECT set_config('aber.dir_gitea_public_url', :'gitea_public_url', false) \g /dev/null
 
 DO $$
 DECLARE
@@ -2467,13 +2469,13 @@ WHERE public.directory_services.id = v.id
 --
 -- Staged through session GUCs because psql does not substitute `:variables` inside dollar-quoted
 -- blocks (archived migration 0026), which is the same staging this file uses for its OAuth rows.
-SELECT set_config('aber.dir_grafana_public_url', :'grafana_public_url',   false);
-SELECT set_config('aber.dir_studio_public_url',  :'studio_public_url',    false);
-SELECT set_config('aber.dir_nodered_redirect',   :'nodered_redirect_uri', false);
-SELECT set_config('aber.dir_docs_public_url',     :'docs_public_url',      false);
-SELECT set_config('aber.dir_supabase_public_url', :'supabase_public_url',  false);
-SELECT set_config('aber.dir_broker_public_url',   :'broker_public_url',    false);
-SELECT set_config('aber.dir_broker_internal_url', :'broker_internal_url',  false);
+SELECT set_config('aber.dir_grafana_public_url', :'grafana_public_url',   false) \g /dev/null
+SELECT set_config('aber.dir_studio_public_url',  :'studio_public_url',    false) \g /dev/null
+SELECT set_config('aber.dir_nodered_redirect',   :'nodered_redirect_uri', false) \g /dev/null
+SELECT set_config('aber.dir_docs_public_url',     :'docs_public_url',      false) \g /dev/null
+SELECT set_config('aber.dir_supabase_public_url', :'supabase_public_url',  false) \g /dev/null
+SELECT set_config('aber.dir_broker_public_url',   :'broker_public_url',    false) \g /dev/null
+SELECT set_config('aber.dir_broker_internal_url', :'broker_internal_url',  false) \g /dev/null
 
 DO $$
 DECLARE
@@ -2727,8 +2729,8 @@ REVOKE ALL ON vault.secrets           FROM anon, authenticated;
 
 -- psql does not substitute :variables inside dollar-quoted blocks (see archived migration 0026), so
 -- both values are staged through session GUCs where substitution does happen.
-SELECT set_config('aber.grafana_oauth_client_secret', :'grafana_oauth_client_secret', false);
-SELECT set_config('aber.grafana_public_url',          :'grafana_public_url',          false);
+SELECT set_config('aber.grafana_oauth_client_secret', :'grafana_oauth_client_secret', false) \g /dev/null
+SELECT set_config('aber.grafana_public_url',          :'grafana_public_url',          false) \g /dev/null
 
 DO $$
 DECLARE
@@ -2792,8 +2794,8 @@ SELECT set_config('aber.grafana_oauth_client_secret', '', false);
 -- login that cannot complete rather than with an error naming this row.
 \if :{?studio_oauth_client_secret} \else \set studio_oauth_client_secret '' \endif
 
-SELECT set_config('aber.studio_oauth_client_secret', :'studio_oauth_client_secret', false);
-SELECT set_config('aber.studio_public_url',          :'studio_public_url',          false);
+SELECT set_config('aber.studio_oauth_client_secret', :'studio_oauth_client_secret', false) \g /dev/null
+SELECT set_config('aber.studio_public_url',          :'studio_public_url',          false) \g /dev/null
 
 DO $$
 DECLARE
@@ -2853,8 +2855,8 @@ SELECT set_config('aber.studio_oauth_client_secret', '', false);
 -- login that cannot complete rather than with an error naming this row.
 \if :{?gitea_oauth_client_secret} \else \set gitea_oauth_client_secret '' \endif
 
-SELECT set_config('aber.gitea_oauth_client_secret', :'gitea_oauth_client_secret', false);
-SELECT set_config('aber.gitea_public_url',          :'gitea_public_url',          false);
+SELECT set_config('aber.gitea_oauth_client_secret', :'gitea_oauth_client_secret', false) \g /dev/null
+SELECT set_config('aber.gitea_public_url',          :'gitea_public_url',          false) \g /dev/null
 
 DO $$
 DECLARE
@@ -7482,13 +7484,13 @@ ON CONFLICT (template_id, id_short) DO UPDATE SET
 \if :{?archive_access_key_id}     \else \set archive_access_key_id     '' \endif
 \if :{?archive_path_style}        \else \set archive_path_style        '' \endif
 
-SELECT set_config('aber.sparkplug_group',       :'sparkplug_group',       false);
-SELECT set_config('aber.archive_site_key',      :'archive_site_key',      false);
-SELECT set_config('aber.archive_endpoint',      :'archive_endpoint',      false);
-SELECT set_config('aber.archive_region',        :'archive_region',        false);
-SELECT set_config('aber.archive_bucket',        :'archive_bucket',        false);
-SELECT set_config('aber.archive_access_key_id', :'archive_access_key_id', false);
-SELECT set_config('aber.archive_path_style',    :'archive_path_style',    false);
+SELECT set_config('aber.sparkplug_group',       :'sparkplug_group',       false) \g /dev/null
+SELECT set_config('aber.archive_site_key',      :'archive_site_key',      false) \g /dev/null
+SELECT set_config('aber.archive_endpoint',      :'archive_endpoint',      false) \g /dev/null
+SELECT set_config('aber.archive_region',        :'archive_region',        false) \g /dev/null
+SELECT set_config('aber.archive_bucket',        :'archive_bucket',        false) \g /dev/null
+SELECT set_config('aber.archive_access_key_id', :'archive_access_key_id', false) \g /dev/null
+SELECT set_config('aber.archive_path_style',    :'archive_path_style',    false) \g /dev/null
 
 SELECT public.seed_setting(
     'ui.audit_trail_poll_seconds',
@@ -8153,9 +8155,9 @@ SELECT public.ensure_cron_job(
 -- referenced directly from the DO blocks below -- it would be read as literal text. Stash them
 -- in session GUCs out here, where substitution does happen, and read them back inside. Same
 -- arrangement this file uses for the Grafana secret.
-SELECT set_config('aber.nodered_oauth_client_secret', :'nodered_oauth_client_secret', false);
-SELECT set_config('aber.nodered_webhook_jwt_secret',  :'nodered_webhook_jwt_secret',  false);
-SELECT set_config('aber.nodered_redirect_uri',        :'nodered_redirect_uri',        false);
+SELECT set_config('aber.nodered_oauth_client_secret', :'nodered_oauth_client_secret', false) \g /dev/null
+SELECT set_config('aber.nodered_webhook_jwt_secret',  :'nodered_webhook_jwt_secret',  false) \g /dev/null
+SELECT set_config('aber.nodered_redirect_uri',        :'nodered_redirect_uri',        false) \g /dev/null
 
 -- ---------------------------------------------------------------------------------------------
 -- 1. Node-RED OAuth client registration
@@ -8294,10 +8296,10 @@ SELECT set_config('aber.nodered_webhook_jwt_secret', '', false);
 \set forge_sweep_secret ''
 \endif
 
-SELECT set_config('aber.fn_url',      :'supabase_functions_url', false);
-SELECT set_config('aber.publishable_key', :'supabase_publishable_key', false);
-SELECT set_config('aber.revoke_key',  :'gateway_revoke_secret', false);
-SELECT set_config('aber.sweep_key',   :'forge_sweep_secret', false);
+SELECT set_config('aber.fn_url',      :'supabase_functions_url', false) \g /dev/null
+SELECT set_config('aber.publishable_key', :'supabase_publishable_key', false) \g /dev/null
+SELECT set_config('aber.revoke_key',  :'gateway_revoke_secret', false) \g /dev/null
+SELECT set_config('aber.sweep_key',   :'forge_sweep_secret', false) \g /dev/null
 
 -- ---------------------------------------------------------------------------------------------
 -- 1. Where the address and the credentials live

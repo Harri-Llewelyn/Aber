@@ -7,7 +7,9 @@
 -- postgres_fdw projection, and a GRANT there grants nothing here. Reasoning: timescaledb/README.md.
 \set ON_ERROR_STOP on
 
-SELECT set_config('aber.bi_reader_password', :'bi_reader_password', false);
+-- Each password reaches the DO blocks below as a session setting. set_config() returns the value it
+-- sets, so `\g /dev/null` discards the row rather than printing the password to the Job's log.
+SELECT set_config('aber.bi_reader_password', :'bi_reader_password', false) \g /dev/null
 
 -- Defaulted to empty so a caller that passes neither still runs; each role then skips itself rather
 -- than being created with a blank password.
@@ -19,8 +21,8 @@ SELECT set_config('aber.bi_reader_password', :'bi_reader_password', false);
 \else
   \set fdw_reader_password ''
 \endif
-SELECT set_config('aber.ingest_writer_password', :'ingest_writer_password', false);
-SELECT set_config('aber.fdw_reader_password', :'fdw_reader_password', false);
+SELECT set_config('aber.ingest_writer_password', :'ingest_writer_password', false) \g /dev/null
+SELECT set_config('aber.fdw_reader_password', :'fdw_reader_password', false) \g /dev/null
 
 DO $$
 DECLARE

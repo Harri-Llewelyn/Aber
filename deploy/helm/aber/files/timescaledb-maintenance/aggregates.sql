@@ -7,14 +7,15 @@
 -- Reasoning: timescaledb/README.md.
 \set ON_ERROR_STOP on
 
--- The variables cross into PL/pgSQL as GUCs, as retention.sql does.
-SELECT set_config('aber.rollup_1m_retain', :'rollup_1m_retain', false);
-SELECT set_config('aber.rollup_5m_retain', :'rollup_5m_retain', false);
-SELECT set_config('aber.rollup_1h_retain', :'rollup_1h_retain', false);
+-- The variables cross into PL/pgSQL as GUCs, as retention.sql does, each discarding the row
+-- set_config() returns (`\g /dev/null`), as every psql-run file does.
+SELECT set_config('aber.rollup_1m_retain', :'rollup_1m_retain', false) \g /dev/null
+SELECT set_config('aber.rollup_5m_retain', :'rollup_5m_retain', false) \g /dev/null
+SELECT set_config('aber.rollup_1h_retain', :'rollup_1h_retain', false) \g /dev/null
 -- Optional: a stack whose chart predates rollup compression passes no value, which keeps the
 -- rollups uncompressed as they were.
 \if :{?rollup_compress_after}
-SELECT set_config('aber.rollup_compress_after', :'rollup_compress_after', false);
+SELECT set_config('aber.rollup_compress_after', :'rollup_compress_after', false) \g /dev/null
 \endif
 
 -- Newest row per (asset, metric), evaluated here so one row per series crosses postgres_fdw rather

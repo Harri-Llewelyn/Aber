@@ -7,11 +7,11 @@
 \set ON_ERROR_STOP on
 
 -- psql interpolates :'var' while lexing and does not descend into dollar quotes, so the variables
--- cross into PL/pgSQL as GUCs.
-SELECT set_config('aber.compress_after', :'compress_after', false);
-SELECT set_config('aber.retain_after',   :'retain_after',   false);
+-- cross into PL/pgSQL as GUCs. `\g /dev/null` discards the value set_config() returns.
+SELECT set_config('aber.compress_after', :'compress_after', false) \g /dev/null
+SELECT set_config('aber.retain_after',   :'retain_after',   false) \g /dev/null
 \if :{?chunk_interval}
-SELECT set_config('aber.chunk_interval', :'chunk_interval', false);
+SELECT set_config('aber.chunk_interval', :'chunk_interval', false) \g /dev/null
 \else
 SELECT set_config('aber.chunk_interval', '', false);
 \endif
