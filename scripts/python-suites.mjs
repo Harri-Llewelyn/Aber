@@ -333,6 +333,14 @@ export const SUITES = {
       'manifest is what ensure_shadow_devices() reads to mint replay lanes, so an error here ' +
       'surfaces much later, as a playback naming devices this stack does not know.',
   },
+  'ingestion/test_stack_capture_cleanup.py': {
+    lanes: ['unit'],
+    why:
+      'The request the two capture stack suites delete their stored file with. It once carried a ' +
+      'JSON content type and no body, Storage answered 400, nothing checked the status, and every ' +
+      'run left its capture in broker-captures. The stack lane cannot see that from inside a ' +
+      'passing run, so the request shape is held here.',
+  },
   'ingestion/test_playback_credentials.py': {
     lanes: ['unit'],
     why:

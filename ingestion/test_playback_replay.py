@@ -152,7 +152,9 @@ def _request(url, method="GET", body=None, headers=None, timeout=30):
             raw = response.read().decode()
             return response.status, (json.loads(raw) if raw.strip() else None)
     except urllib.error.HTTPError as err:
-        raw = err.read().decode()
+        # Closed here: an unclosed error response is a ResourceWarning at exit.
+        with err:
+            raw = err.read().decode()
         try:
             return err.code, json.loads(raw)
         except json.JSONDecodeError:
@@ -219,10 +221,16 @@ class Session:
         )
 
     def remove(self, path):
-        return _request(
-            f"{SUPABASE_URL}/storage/v1/object/{BUCKET}/{path}",
-            method="DELETE", headers=self._headers(),
+        """Delete one stored object as the page's storage-js remove() does: a DELETE on the bucket
+        naming the paths in its body. Storage answers a JSON content type with no body 400.
+        Raises on anything but 200; returns the objects deleted, none when the path was absent."""
+        status, body = _request(
+            f"{SUPABASE_URL}/storage/v1/object/{BUCKET}",
+            method="DELETE", body={"prefixes": [path]}, headers=self._headers(),
         )
+        if status != 200:
+            raise AssertionError(f"could not delete {BUCKET}/{path}: {status} {body}")
+        return body
 
 
 # Every database connection here is bounded.
@@ -355,8 +363,6 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
             cls.session.rest(f"/devices?sparkplug_id=eq.{lane}", method="DELETE")
         if cls.capture_id:
             cls.session.rest(f"/captures?id=eq.{cls.capture_id}", method="DELETE")
-        if cls.storage_path:
-            cls.session.remove(cls.storage_path)
         cls.session.rest(f"/devices?id=eq.{SOURCE_DEVICE_ID}", method="DELETE")
         cls.session.rest(f"/gateways?id=eq.{SOURCE_GATEWAY_ID}", method="DELETE")
 
@@ -386,6 +392,10 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
             conn.close()
         except Exception as err:  # noqa: BLE001
             print(f"audit cleanup warning: {err}; fixture rows left in audit_trail")
+
+        # Last, because it raises: a stored file left behind fails the run, after the rest is gone.
+        if cls.storage_path:
+            cls.session.remove(cls.storage_path)
 
     # ------------------------------------------------------------------------------------------
     # The path
