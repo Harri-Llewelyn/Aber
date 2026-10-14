@@ -89,6 +89,15 @@
       "labels": ["dependencies", "data-path"]
     },
     {
+      "description": "GRAFANA. grafana.ini disables every bundled backend datasource plugin no provisioned datasource uses, and check-docs-drift fails while the chart pins a tag other than the one grafana/README.md's list of bundled plugins was read from. A new image can bundle a plugin the old one did not, so the pull request is finished by hand: the command and the steps are in grafana/README.md, Bundled plugins. A release waits seven days, as the broker's and the historian's do.",
+      "minimumReleaseAge": "7 days",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["grafana/grafana"],
+      "prBodyNotes": [
+        "Before merging: read the new image's bundled datasource plugins into `grafana/README.md` (Bundled plugins) and `disable_plugins` in `grafana/grafana.ini`. `node scripts/check-docs-drift.mjs` fails until they name this tag."
+      ]
+    },
+    {
       "description": "A major version is a reading task before it is a merge task. Held on the dashboard so it is proposed deliberately -- Kong 3.0, for one, silently switched off every per-service Prometheus metric while leaving the scrape target green.",
       "matchUpdateTypes": ["major"],
       "dependencyDashboardApproval": true,
