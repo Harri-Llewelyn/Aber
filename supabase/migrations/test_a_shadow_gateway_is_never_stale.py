@@ -1,5 +1,6 @@
 """
-A shadow gateway is never reported as gateway_stale; any other gateway still is (0182).
+A shadow gateway is never reported as gateway_stale; any other gateway still is (0182). Its devices,
+the replay lanes, are never counted in expected_publishers; any other device still is (0185).
 
     python supabase/migrations/test_a_shadow_gateway_is_never_stale.py
 
@@ -10,7 +11,8 @@ Requires the Supabase database (54322 by default) and the schema the chain decla
 ends every replay with an NDEATH, which leaves it OFFLINE with a heartbeat that ages, so without the
 shadow exclusion the rule fired after every replay. The exclusion has been lost once already, in a
 redeclaration, so this pins both directions: a shadow gateway is never listed, and an ordinary one
-that died the same way still is.
+that died the same way still is. The expected_publishers arm gates Ingestion Consuming Nothing, and
+is pinned the same way.
 
 Every test rolls back: writes to `gateways` fire the audit-trail trigger, and that table is
 append-only to every application role.
@@ -39,7 +41,7 @@ def get_connection():
     return conn
 
 
-class GatewayStaleArm(unittest.TestCase):
+class ShadowFixtures(unittest.TestCase):
     def setUp(self):
         self.conn = get_connection()
         self.cur = self.conn.cursor()
@@ -61,6 +63,8 @@ class GatewayStaleArm(unittest.TestCase):
         )
         return gid, self.cur.fetchone()[0]
 
+
+class GatewayStaleArm(ShadowFixtures):
     def _quiet(self, gid, status):
         """What an NDEATH (OFFLINE) or a silent gateway (ONLINE) leaves once QUIET has passed."""
         self.cur.execute(
@@ -120,6 +124,80 @@ class GatewayStaleArm(unittest.TestCase):
             "SELECT has_function_privilege('grafana_reader', 'public.platform_health_rows()', "
             "'EXECUTE'), has_table_privilege('grafana_reader', 'public.platform_health', 'SELECT');")
         self.assertEqual(self.cur.fetchone(), (True, True))
+
+
+class ExpectedPublishersArm(ShadowFixtures):
+    """
+    Replay lanes are not devices that should be publishing (0185).
+
+    Ingestion Consuming Nothing fires on silence while `expected_publishers` is above zero. A replay
+    leaves the Playback gateway with a heartbeat and its lanes with a first DBIRTH, so without the
+    exclusion a stack whose only devices were lanes raised the critical alert after every replay.
+    Each test reads the count before and after its fixture, since the database may hold others.
+    """
+
+    def _expected(self):
+        self.cur.execute(
+            "SELECT value FROM public.platform_health WHERE condition = 'expected_publishers';")
+        return self.cur.fetchone()[0]
+
+    def _device(self, gateway_id, shadow_of=None, published=False):
+        did = str(uuid.uuid4())
+        self.cur.execute(
+            "INSERT INTO public.devices (id, name, gateway_id, shadow_of, status, first_dbirth_at) "
+            "VALUES (%s, %s, %s, %s, 'OFFLINE', CASE WHEN %s THEN now() END);",
+            (did, f"Test_Expected_Dev_{did[:8]}", gateway_id, shadow_of, published),
+        )
+        return did
+
+    def _heard_from(self, gid):
+        """What a replay's NBIRTH, or any heartbeat, leaves on the gateway row."""
+        self.cur.execute("UPDATE public.gateways SET last_heartbeat = now() WHERE id = %s;", (gid,))
+
+    def test_a_replay_lane_behind_a_reporting_playback_gateway_does_not_count(self):
+        real_gw, _ = self._gateway(is_shadow=False)
+        original = self._device(real_gw)
+        playback_gw, _ = self._gateway(is_shadow=True)
+        self._heard_from(playback_gw)
+        before = self._expected()
+        self._device(playback_gw, shadow_of=original, published=True)
+        self.assertEqual(self._expected(), before,
+                         "a replay lane counts as a device that should be publishing; Ingestion "
+                         "Consuming Nothing fires after every replay")
+
+    def test_a_lane_on_the_seeded_playback_gateway_does_not_count(self):
+        self.cur.execute(
+            "SELECT id FROM public.gateways WHERE is_shadow AND NOT is_archived LIMIT 1;")
+        row = self.cur.fetchone()
+        if row is None:
+            self.skipTest("no live shadow gateway is seeded")
+        real_gw, _ = self._gateway(is_shadow=False)
+        original = self._device(real_gw)
+        self._heard_from(row[0])
+        before = self._expected()
+        self._device(row[0], shadow_of=original, published=True)
+        self.assertEqual(self._expected(), before)
+
+    def test_a_real_device_that_has_published_still_counts(self):
+        """The other direction: the device whose silence the rule exists for."""
+        real_gw, _ = self._gateway(is_shadow=False)
+        before = self._expected()
+        self._device(real_gw, published=True)
+        self.assertEqual(self._expected(), before + 1)
+
+    def test_a_real_device_behind_a_reporting_gateway_still_counts(self):
+        real_gw, _ = self._gateway(is_shadow=False)
+        self._heard_from(real_gw)
+        before = self._expected()
+        self._device(real_gw)
+        self.assertEqual(self._expected(), before + 1)
+
+    def test_a_device_behind_a_gateway_never_heard_from_still_does_not_count(self):
+        """0092's exclusion, which 0185 rewrote as a join, holds."""
+        real_gw, _ = self._gateway(is_shadow=False)
+        before = self._expected()
+        self._device(real_gw)
+        self.assertEqual(self._expected(), before)
 
 
 if __name__ == "__main__":

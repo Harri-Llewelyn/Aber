@@ -367,10 +367,12 @@ connection is up. Ten minutes against a 5m rate window is long enough to ride ou
 and short enough that a shift does not pass unnoticed.
 
 Gated on there being something to consume: `expected_publishers` counts devices that are
-registered, not archived, not quarantined, and bound to a gateway that has reported, each clause a
-reason a device legitimately publishes nothing. Zero devices disables the rule; the first device
-someone registers re-arms it. The count is read through `platform_health` rather than
-`public.devices` because `grafana_reader` holds `SELECT` on the view only.
+registered, not archived, not quarantined, not a replay lane, and bound to a gateway that has
+reported, each clause a reason a device legitimately publishes nothing. A replay lane publishes only
+while a playback runs, so a stack whose only devices are lanes does not raise this after a replay.
+Zero devices disables the rule; the first device someone registers re-arms it. The count is read
+through `platform_health` rather than `public.devices` because `grafana_reader` holds `SELECT` on
+the view only.
 
 The message rate is summed across `msg_type`, because a daemon receiving only NDATA is still
 consuming, and carries `or vector(0)` because the counter does not exist until the first message:

@@ -451,7 +451,8 @@ python supabase/migrations/test_foreign_credentials.py
 python supabase/migrations/test_shadow_lane_is_not_assignable.py
 # A shadow gateway is never reported as gateway_stale, and an ordinary gateway that died still is
 # (0182). The exclusion was lost once in a redeclaration, and Gateway Stale then fired after every
-# replay.
+# replay. Its replay lanes are never counted in expected_publishers, and a real device that has
+# published, or sits behind a gateway that has reported, still is (0185).
 python supabase/migrations/test_a_shadow_gateway_is_never_stale.py
 python supabase/migrations/test_metric_catalog_seed.py
 # A constraint, policy or trigger is re-created only when it differs from its migration (0001,

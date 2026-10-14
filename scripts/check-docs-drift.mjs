@@ -905,7 +905,7 @@ function edgeFunctionNames() {
     'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited',
     'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline records the first alone',
     'public.reject_archived_schema_assignment': '0168 declares it as the baseline does, in its final form, so neither names devices.schema_id (0175)',
-    'public.platform_health_rows': '0182 puts back the shadow-gateway exclusion archived migration 0061 gave the gateway_stale arm and 0074 dropped; the baseline carries the form without it (check 71)',
+    'public.platform_health_rows': '0182 puts back the shadow-gateway exclusion archived migration 0061 gave the gateway_stale arm and 0074 dropped, and 0185 gives it to the expected_publishers arm, so replay lanes do not count; the baseline carries neither (check 71)',
     'public.is_active_capture_object': '0184 answers false unless the caller could read the capture job: the ingestion daemon, a role capture_jobs\' RLS admits, or one RLS does not apply to; the baseline answered any signed-in account',
     'public.is_active_playback_capture': '0184 answers false unless the caller could read the playback job: the playback worker, a role playback_jobs\' RLS admits, or one RLS does not apply to; the baseline answered any signed-in account',
     'public.playback_stale_credentials': '0184 returns no rows to a caller playback_jobs\' RLS refuses; the baseline told any signed-in account when playback credentials were issued',
@@ -1011,9 +1011,10 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 71. The Playback gateway is never reported stale. The last declaration of platform_health_rows()
-// keeps `NOT g.is_shadow` in its gateway_stale arm: archived migration 0061 added it, 0074 lost it
-// in a redeclaration, and 0182 put it back. Comments are stripped, so only the SQL counts.
+// 71. The Playback gateway is never reported stale, and its replay lanes are never expected to
+// publish. The last declaration of platform_health_rows() keeps `NOT g.is_shadow` in its
+// gateway_stale arm (archived migration 0061 added it, 0074 lost it in a redeclaration, 0182 put it
+// back) and in its expected_publishers arm (0185). Comments are stripped, so only the SQL counts.
 // -------------------------------------------------------------------------------------------------
 {
   const dir = 'supabase/migrations';
@@ -1023,18 +1024,30 @@ function edgeFunctionNames() {
   for (const name of files) {
     for (const m of read(`${dir}/${name}`).matchAll(declaration)) last = { name, body: m[2] };
   }
-  const arm = last && last.body.replace(/--[^\n]*/g, '').match(/'gateway_stale'::text[\s\S]*?(?=\bUNION\s+ALL\b|$)/i);
-  if (!arm) {
-    fail(`no applied migration declares a gateway_stale arm in public.platform_health_rows()${last ? ` (last declared in ${last.name})` : ''}, so check 71 compares nothing`);
-  } else if (!/\bNOT\s+g\.is_shadow\b/i.test(arm[0])) {
-    fail(
-      `${last.name} declares platform_health_rows() last, and its gateway_stale arm has no \`AND NOT g.is_shadow\`.\n` +
-        '      Nothing publishes as the Playback gateway between playbacks, so Gateway Stale would fire after\n' +
-        '      every replay and teach an operator to ignore it. 0074 dropped the line this way; keep it in\n' +
-        '      every redeclaration (0182).'
-    );
-  } else {
-    pass(`platform_health_rows()'s last declaration (${last.name}) keeps shadow gateways out of gateway_stale`);
+  const why = {
+    gateway_stale:
+      'Nothing publishes as the Playback gateway between playbacks, so Gateway Stale would fire after\n' +
+      '      every replay and teach an operator to ignore it. 0074 dropped the line this way; keep it in\n' +
+      '      every redeclaration (0182).',
+    expected_publishers:
+      'A replay leaves its lanes with a first DBIRTH behind a gateway that has reported, so they would\n' +
+      '      count as devices that should be publishing, and the critical Ingestion Consuming Nothing would\n' +
+      '      fire after every replay on a stack with no other devices (0185).',
+  };
+  const sql = last && last.body.replace(/--[^\n]*/g, '');
+  const held = [];
+  for (const [condition, reason] of Object.entries(why)) {
+    const arm = sql && sql.match(new RegExp(`'${condition}'::text[\\s\\S]*?(?=\\bUNION\\s+ALL\\b|$)`, 'i'));
+    if (!arm) {
+      fail(`no applied migration declares a ${condition} arm in public.platform_health_rows()${last ? ` (last declared in ${last.name})` : ''}, so check 71 compares nothing`);
+    } else if (!/\bNOT\s+g\.is_shadow\b/i.test(arm[0])) {
+      fail(`${last.name} declares platform_health_rows() last, and its ${condition} arm has no \`AND NOT g.is_shadow\`.\n      ${reason}`);
+    } else {
+      held.push(condition);
+    }
+  }
+  if (held.length === Object.keys(why).length) {
+    pass(`platform_health_rows()'s last declaration (${last.name}) keeps shadow gateways out of ${held.join(' and ')}`);
   }
 }
 
