@@ -43,9 +43,12 @@ so they are not listed here.
 
 **A datasource of a disabled type stops working, and nothing is logged at start.** A site's own
 datasource of that type, added in the UI, keeps its row: it stays listed with a generic icon, and
-its health check and every query answer 404 `Plugin not registered`. Removing the plugin's id from
-`disable_plugins` brings it back unchanged. The chart has no value for that; it is a change to
-`grafana.ini`.
+its health check and every query answer 404 `Plugin not registered`. A site keeps such a plugin with
+the chart value `grafana.enablePlugins`, e.g. `[mysql]`, and the datasource answers again unchanged.
+The chart then sets `GF_PLUGINS_DISABLE_PLUGINS` to `disable_plugins` less those ids, read from
+`grafana.ini` so the list is written once, and an id it does not name fails the render. With
+`[mysql]` Grafana runs four plugin processes and MySQL registers again (measured). Grafana ignores
+an empty variable, so keeping all ten renders a lone comma.
 
 The bundled backend datasource plugins of `grafana/grafana:13.2.3`, as the image's `plugin.json`
 files declare them:
@@ -68,7 +71,8 @@ files declare them:
 
 `check-docs-drift.mjs` holds this table, `disable_plugins` and the provisioning together. Every
 plugin listed is provisioned or disabled, and no type a datasource, dashboard or alert rule uses is
-disabled. A plugin Aber starts provisioning comes out of `disable_plugins` and is marked Provisioned
+disabled. The chart overrides the line only as above, and `grafana.enablePlugins` is empty by
+default. A plugin Aber starts provisioning comes out of `disable_plugins` and is marked Provisioned
 here.
 
 **A new Grafana image means reading the list again.** The check fails while the chart pins a tag

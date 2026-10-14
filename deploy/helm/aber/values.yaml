@@ -1252,6 +1252,11 @@ grafana:
   # collector.
   prometheusUrl: ""
   lokiUrl: ""
+  # Bundled datasource plugins a site keeps running although grafana.ini disables them, e.g.
+  # [mysql] for a datasource of that type added in Grafana. Empty runs only the plugins Aber
+  # provisions (grafana/README.md, "Bundled plugins"); an id grafana.ini does not disable fails the
+  # render.
+  enablePlugins: []
   image:
     repository: grafana/grafana
     # Pinned: grafana.ini depends on

@@ -7,6 +7,34 @@
 {{- if or (not $ini) (not $dsTemplate) }}
 {{- fail "\n\naber: files/grafana/grafana.ini and/or files/grafana-datasources/datasources.template.yml are missing.\n\nMirror them with:  node scripts/sync-helm-chart-files.mjs\n\nWithout grafana.ini there is no [auth.generic_oauth] block, so Grafana comes up with SSO simply\nabsent -- local admin login still works, which is why this fails the render instead of being left\nto be noticed later.\n" }}
 {{- end }}
+{{- /* grafana.enablePlugins: grafana.ini's disable_plugins less the ids a site keeps, read from the
+       ini so the list is written once. Rendered only when the list is non-empty. */ -}}
+{{- $keepPlugins := .Values.grafana.enablePlugins -}}
+{{- $disablePlugins := "" -}}
+{{- if $keepPlugins }}
+{{- if not (kindIs "slice" $keepPlugins) }}
+{{- fail (printf "\n\naber: grafana.enablePlugins must be a list of plugin ids, e.g. [mysql]; it is %v.\n" $keepPlugins) }}
+{{- end }}
+{{- $line := regexFind "(?m)^disable_plugins *=.*$" $ini -}}
+{{- if not $line }}
+{{- fail "\n\naber: grafana.enablePlugins is set, but files/grafana/grafana.ini has no `disable_plugins = ...` line to take the ids out of.\n" }}
+{{- end }}
+{{- $iniDisabled := list -}}
+{{- range splitList "," (regexReplaceAll "^disable_plugins *= *" $line "") }}
+{{- if trim . }}{{- $iniDisabled = append $iniDisabled (trim .) }}{{- end }}
+{{- end }}
+{{- range $keepPlugins }}
+{{- if not (has (toString .) $iniDisabled) }}
+{{- fail (printf "\n\naber: grafana.enablePlugins names %q, which grafana.ini does not disable.\n\nIt disables: %s\n" (toString .) (join ", " $iniDisabled)) }}
+{{- end }}
+{{- end }}
+{{- $remaining := list -}}
+{{- range $iniDisabled }}
+{{- if not (has . ($keepPlugins | toStrings)) }}{{- $remaining = append $remaining . }}{{- end }}
+{{- end }}
+{{- /* Grafana ignores an empty variable, so keeping all of them is a lone comma. */ -}}
+{{- $disablePlugins = $remaining | join "," | default "," -}}
+{{- end }}
 {{- /* The alerting directory is rendered once, at pod start, by the initContainer below; the
        pod must roll for a changed rule, policy or contact point to be read. */ -}}
 {{- $alerting := "" -}}
@@ -389,6 +417,11 @@ spec:
               value: "true"
             - name: GF_INSTALL_PLUGINS
               value: ""
+            {{- if $keepPlugins }}
+            # grafana.ini's disable_plugins less grafana.enablePlugins (computed at the top).
+            - name: GF_PLUGINS_DISABLE_PLUGINS
+              value: {{ $disablePlugins | quote }}
+            {{- end }}
             # Provisioning lives in two directories rather than one; see the ConfigMap notes.
             - name: GF_PATHS_PROVISIONING
               value: /etc/grafana/provisioning

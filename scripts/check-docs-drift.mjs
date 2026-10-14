@@ -3973,7 +3973,8 @@ function edgeFunctionNames() {
 // every bundled backend datasource plugin it loads, so grafana.ini disables each one no provisioned
 // datasource needs. grafana/README.md lists the image's bundled plugins under the tag they were read
 // from: every one is provisioned or disabled, no provisioned type and no type a dashboard or rule
-// queries is disabled, and a chart pin other than that tag fails until the list is read again.
+// queries is disabled, and a chart pin other than that tag fails until the list is read again. The
+// chart overrides the line only as the ini's list less grafana.enablePlugins, which is empty by default.
 // -------------------------------------------------------------------------------------------------
 {
   const README = 'grafana/README.md';
@@ -4044,8 +4045,17 @@ function edgeFunctionNames() {
   for (const type of queried) {
     if (disabled.has(pluginOf(type)) || disabled.has(type)) problems81.push(`a datasource, dashboard or alert rule uses type ${type}, which is disabled`);
   }
-  if (read('deploy/helm/aber/templates/obs/grafana.yaml').includes('GF_PLUGINS_DISABLE_PLUGINS')) {
-    problems81.push('templates/obs/grafana.yaml sets GF_PLUGINS_DISABLE_PLUGINS, which overrides grafana.ini');
+  // The one override allowed: grafana.enablePlugins, empty by default, taken out of the ini's own list.
+  const template = read('deploy/helm/aber/templates/obs/grafana.yaml');
+  const derived = /\{\{- if \$keepPlugins \}\}\n(?: *#.*\n)* *- name: GF_PLUGINS_DISABLE_PLUGINS\n *value: \{\{ \$disablePlugins \| quote \}\}\n *\{\{- end \}\}/;
+  if (template.split('GF_PLUGINS_DISABLE_PLUGINS').length - 1 !== (derived.test(template) ? 1 : 0)) {
+    problems81.push('templates/obs/grafana.yaml sets GF_PLUGINS_DISABLE_PLUGINS other than as grafana.ini\'s list less grafana.enablePlugins');
+  }
+  if (derived.test(template) && !/regexFind "\(\?m\)\^disable_plugins [^"]*" \$ini/.test(template)) {
+    problems81.push('templates/obs/grafana.yaml no longer reads the list it overrides from grafana.ini');
+  }
+  if (!/^grafana:\n(?: .*\n|\n)*? {2}enablePlugins: \[\]$/m.test(CHART_VALUES)) {
+    problems81.push('values.yaml: grafana.enablePlugins is not empty by default, so the chart overrides grafana.ini');
   }
 
   if (problems81.length) {
