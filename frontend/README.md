@@ -667,7 +667,18 @@ corner and records the same message in the history behind the bell in the top ba
 Colours come from **CSS variables in `App.css`** (`:root` / `[data-theme="light"]`). There is no
 Tailwind in this project. Prefer `.card`, `.form-control`, `.form-label` over inline colour styles.
 
-Two rules that were each learned from a real bug:
+Three rules that were each learned from a real bug:
+
+- **Write a colour only in the two theme blocks.** Every other rule, and every `style={{…}}`, takes
+  a token: `var(--warning)`, a tint token (`--success-tint`, `--warning-tint`, `--danger-tint`, or
+  `--accent-dim` for the accent), or a tint of a token,
+  `color-mix(in srgb, var(--warning) 12%, transparent)`. 47 rules once wrote the dark theme's colour
+  with an alpha, so the light theme tinted its badges, chips and toasts in the dark theme's colours.
+  `colourLiterals.test.js` fails on a hex, `rgb()`, `rgba()` or `hsl()` value outside the two
+  blocks, in any other stylesheet under `src/`, and in any inline style. A token whose value holds
+  `var()` resolves on the element that declares it, so a tint token is declared in both blocks.
+  `themeContrast.test.js` reads each tint from the rule that paints it and measures the text on it
+  in both themes.
 
 - **A floating surface needs an opaque background.** A toast floats over arbitrary content, so its
   `rgba(…, 0.15)` tint composited against whatever table was underneath. Each of the four types
