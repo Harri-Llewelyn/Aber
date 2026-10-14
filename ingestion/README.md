@@ -601,8 +601,8 @@ is. One says what the worker may do in the database, the other what the broker w
 
 | tier | what it stops |
 | :--- | :--- |
-| the job gate | `playback_jobs` refuses a target that is not `is_simulated`, in the database rather than the UI |
-| credential possession | the worker holds credentials only for gateways issued as playback targets, so it cannot authenticate as a real one |
+| the job gate | `playback_jobs` refuses a target that is not `is_shadow` (a Playback gateway), in the database rather than the UI |
+| credential possession | the worker is delivered credentials only for Playback gateways, so it cannot authenticate as a real gateway or a simulator |
 | the broker role | `spBv1.0/+/+/%u/#`, the username being the `sparkplug_id`, confines each credential to its own edge node, so even a compromised worker reaches one gateway |
 
 **That third tier is one pattern for every gateway, and it holds because the username is the id.**
@@ -694,17 +694,21 @@ worker deletes that tier. So minting stays a human, Administrator-or-Shopfloor_M
 audit row; only delivery is automated.
 
 **Which credentials may be delivered is decided by the database.**
-`gateway_is_playback_delivery_target()` returns `is_simulated` — the same predicate
-`start_playback_job()` gates on — and the edge function passes it to the credential service as
-`deliver_to_playback`. Not computed in the edge function, and not in the service: the service holds
-a `sparkplug_id` and no database access by design, and two definitions of *"is this a playback
-target"* would eventually disagree. The disagreement is a real machine's broker password in a file
+`gateway_is_playback_delivery_target()` returns `is_shadow` on an unarchived gateway (`0183`) —
+the flag `playback_target_must_be_shadow()` admits a playback target by — and the edge function
+passes it to the credential service as `deliver_to_playback`. Not computed in the edge function,
+and not in the service: the service holds a `sparkplug_id` and no database access by design, and
+two definitions of *"is this a playback target"* would eventually disagree. The disagreement is a real machine's broker password in a file
 the replay worker reads. It is a **separate function** rather than a column on the authorisation
 gate for a migration-replay reason that cost this stack an outage — see
 [`supabase/README.md`](../supabase/README.md) under `0078`.
 
-`0078` carries a boot-time self-check that fails if `start_playback_job()` stops mentioning
-`is_simulated`, because the two moving apart is silent.
+**Each delivery prunes the file to the current targets.** The edge function also passes
+`playback_delivery_targets()`, the gateways the predicate is true for, as `playback_targets`, and
+the service drops every delivered password whose gateway is not on that list. Until `0183` the
+predicate was `is_simulated`, so every Node-RED simulator's password reached the worker; the first
+Playback gateway delivery after the upgrade removes them. `test_playback_credential_delivery.py`
+holds the predicate and the list to `is_shadow`.
 
 **The path is one string in four places** — the writer
 ([`mosquitto-credentials.mjs`](../scripts/lib/mosquitto-credentials.mjs)), the reader
@@ -793,7 +797,7 @@ asserting the same asset identity. A shadow is not a product and has no manufact
 resolved through `shadow_of` rather than duplicated, for the ordinary reason that a copy goes stale.
 
 **The Playback gateway needs its own broker credential**, issued from the dashboard like any
-host-run gateway's. It is `is_simulated`, so the issue also delivers the password to the worker
+host-run gateway's. It is `is_shadow`, so the issue also delivers the password to the worker
 ([above](#issuing-a-playback-credential-delivers-it-0078)); `MQTT_PLAYBACK_CREDENTIALS`
 (`secrets.mqttPlaybackCredentials`) is a manual fallback, and a delivered password overrides it.
 

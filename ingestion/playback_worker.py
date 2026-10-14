@@ -85,13 +85,13 @@ CREDENTIAL_REPORT_INTERVAL_SECONDS = float(
 MQTT_HOST = os.getenv("MQTT_HOST", "mosquitto")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 
-# Where the credential service drops passwords for simulated gateways (0078).
+# Where the credential service drops passwords for Playback (is_shadow) gateways (0078, 0183).
 #
 # THE FILE EXISTS BECAUSE THE ENVIRONMENT CANNOT BE RE-READ. A container's environment is fixed at
 # creation, so a newly-issued password reaches a running worker only through a file it can re-read.
 #
 # WRITTEN ONLY FOR GATEWAYS THE DATABASE CALLS PLAYBACK TARGETS. The filter is applied at issue time
-# by authorize_host_gateway_credential() (0078), not here, because `is_simulated` is the
+# by gateway_is_playback_delivery_target() (0183), not here, because `is_shadow` is the
 # database's fact and a worker deciding which passwords it is allowed to have would be deciding its
 # own blast radius. This end only reads what it was given.
 #
@@ -161,7 +161,7 @@ def _credentials():
     node; and this is the middle one -- the worker simply cannot authenticate as a gateway whose
     password it was not given, so a compromised queue cannot make it publish as a real machine.
 
-    THREE SOURCES, THE DELIVERED FILE WINNING. Issuing a credential for an `is_simulated` gateway
+    THREE SOURCES, THE DELIVERED FILE WINNING. Issuing a credential for an `is_shadow` gateway
     delivers its password to PLAYBACK_CREDENTIAL_FILE (archived migration 0078), re-read every pass.
     MQTT_PLAYBACK_CREDENTIALS (the chart's `secrets.mqttPlaybackCredentials`) carries passwords
     supplied by hand, as a JSON map because playback has as many identities as it has targets.

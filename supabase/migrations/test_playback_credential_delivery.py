@@ -1,9 +1,11 @@
 """
-The delivery gate on broker-credential issuance (0078).
+The delivery gate on broker-credential issuance (archived migration 0078; 0183).
 
 WHAT THIS PROTECTS, AND IT IS NOT THE HAPPY PATH. Issuing a credential now DELIVERS the password to
 the playback worker by writing it into a file that worker reads. The security of that rests on one
 predicate: only gateways the database calls playback targets may have their passwords delivered.
+Since 0183 that is an unarchived `is_shadow` gateway, the only target a playback may have; before,
+it was every `is_simulated` gateway, so each Node-RED simulator's password reached the worker.
 
 Get it wrong in the permissive direction and a real machine's broker password is written into a file
 the replay worker reads -- and the broker's roles confine an account to `spBv1.0/+/+/<sparkplug_id>/#`, so that is
@@ -75,14 +77,22 @@ class PlaybackCredentialDelivery(unittest.TestCase):
         self.conn.rollback()
         self.cur.close()
 
-    def _gateway(self, *, simulated, deployment="host", archived=False):
+    def _gateway(self, *, simulated, shadow=False, deployment="host", archived=False):
         gid = str(uuid.uuid4())
         self.cur.execute(
-            "INSERT INTO public.gateways (id, name, deployment, is_simulated, is_archived) "
-            "VALUES (%s, %s, %s, %s, %s) RETURNING id",
-            (gid, f"T{gid[:8]}", deployment, simulated, archived),
+            "INSERT INTO public.gateways (id, name, deployment, is_simulated, is_shadow, is_archived) "
+            "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+            (gid, f"T{gid[:8]}", deployment, simulated, shadow, archived),
         )
         return self.cur.fetchone()[0]
+
+    def _sparkplug_id(self, gateway_id):
+        self.cur.execute("SELECT sparkplug_id FROM public.gateways WHERE id = %s", (gateway_id,))
+        return self.cur.fetchone()[0]
+
+    def _targets(self):
+        self.cur.execute("SELECT sparkplug_id FROM public.playback_delivery_targets()")
+        return [r[0] for r in self.cur.fetchall()]
 
     def _authorize(self, gateway_id):
         """The gate, unchanged by 0078 -- deliberately, see `_deliverable`."""
@@ -101,10 +111,26 @@ class PlaybackCredentialDelivery(unittest.TestCase):
     # -----------------------------------------------------------------------------------------
     # The gate itself
     # -----------------------------------------------------------------------------------------
-    def test_a_simulated_gateway_is_a_delivery_target(self):
+    def test_a_playback_gateway_is_a_delivery_target(self):
+        gid = self._gateway(simulated=True, shadow=True)
+        self.assertIsNotNone(self._authorize(gid), "the gate returned no row for a shadow gateway")
+        self.assertTrue(self._deliverable(gid), "an is_shadow gateway must be a delivery target")
+
+    def test_a_simulated_gateway_is_not_a_delivery_target(self):
+        """
+        A Node-RED simulator is never a playback target (playback_target_must_be_shadow() refuses
+        it), so its password has no business in the worker's file. Its credential is issued as any
+        host gateway's is, and typed into Node-RED.
+        """
         gid = self._gateway(simulated=True)
         self.assertIsNotNone(self._authorize(gid), "the gate returned no row for a simulated host")
-        self.assertTrue(self._deliverable(gid), "a simulated gateway must be a delivery target")
+        self.assertFalse(self._deliverable(gid), "a simulated, non-shadow gateway must not be a target")
+
+    def test_an_archived_playback_gateway_is_not_a_delivery_target(self):
+        # Its broker account is disabled on archive. The gate refuses to issue for it anyway; the
+        # predicate is asked on its own by playback_delivery_targets(), which prunes the file.
+        gid = self._gateway(simulated=True, shadow=True, archived=True)
+        self.assertFalse(self._deliverable(gid), "an archived shadow gateway must not be a target")
 
     def test_a_real_gateway_is_not(self):
         """
@@ -141,35 +167,32 @@ class PlaybackCredentialDelivery(unittest.TestCase):
         self.assertEqual(count, 1)
         self.assertEqual(result, "TABLE(sparkplug_id text, gateway_name text)")
 
-    def test_is_simulated_is_not_null_which_is_what_makes_the_coalesce_dead_code(self):
+    def test_is_shadow_is_not_null_and_a_null_archived_flag_does_not_deliver(self):
         """
-        WRITTEN THE OTHER WAY ROUND ON PURPOSE, having first been written wrong. This started as a
-        test that a NULL `is_simulated` yields false -- and the insert failed, because the column is
-        NOT NULL. So 0078's `coalesce` is unreachable today, and the useful assertion is the
-        constraint that makes it unreachable.
-
-        If a later migration relaxes it, this fails and names the reason: the coalesce stops being
-        defence in depth and becomes the thing deciding what gets delivered, which is a decision
-        somebody should make deliberately rather than inherit.
+        `is_shadow` is NOT NULL, so the answer turns on it. `is_archived` is nullable, and a NULL
+        there leaves `is_shadow AND NOT is_archived` NULL, which the coalesce turns into "do not
+        deliver": the safe direction, and the one the playback dialog's `is_archived = false`
+        filter takes too.
         """
         self.cur.execute(
             "SELECT attnotnull FROM pg_attribute "
-            " WHERE attrelid = 'public.gateways'::regclass AND attname = 'is_simulated'"
+            " WHERE attrelid = 'public.gateways'::regclass AND attname = 'is_shadow'"
         )
-        self.assertTrue(
-            self.cur.fetchone()[0],
-            "gateways.is_simulated has become nullable; 0078's coalesce now decides deliveries",
-        )
+        self.assertTrue(self.cur.fetchone()[0], "gateways.is_shadow has become nullable")
+
+        gid = self._gateway(simulated=True, shadow=True)
+        self.cur.execute("UPDATE public.gateways SET is_archived = NULL WHERE id = %s", (gid,))
+        self.assertIs(self._deliverable(gid), False)
 
     def test_the_flag_is_a_boolean_for_both_kinds_of_gateway(self):
         # NO ROLLBACK BETWEEN THE TWO. `set_config('request.jwt.claims', ..., true)` is
         # transaction-local, so rolling back mid-test would drop the caller's identity and the
         # second call would fail on the role check instead of answering the question.
-        simulated = self._deliverable(self._gateway(simulated=True))
+        shadow = self._deliverable(self._gateway(simulated=True, shadow=True))
         real = self._deliverable(self._gateway(simulated=False))
-        self.assertIsInstance(simulated, bool)
+        self.assertIsInstance(shadow, bool)
         self.assertIsInstance(real, bool)
-        self.assertNotEqual(simulated, real)
+        self.assertNotEqual(shadow, real)
 
     # -----------------------------------------------------------------------------------------
     # The refusals 0078 inherits and must not have dropped
@@ -198,28 +221,69 @@ class PlaybackCredentialDelivery(unittest.TestCase):
     # -----------------------------------------------------------------------------------------
     def test_delivery_and_the_job_gate_agree(self):
         """
-        Delivery is scoped to `is_simulated` because that is what `start_playback_job()` gates on.
-        If one moved without the other, the worker would hold credentials for gateways it may not
-        target -- and nothing would fail. It would simply hold more than it needs.
-
-        0078 carries a boot-time self-check of the same property; this is the runtime half.
+        Delivery is scoped to `is_shadow` because that is what `playback_target_must_be_shadow()`,
+        the trigger on `playback_jobs`, admits a target by. If one moved without the other, the
+        worker would hold credentials for gateways it may not target -- and nothing would fail. It
+        would simply hold more than it needs, which is what 0183 corrected.
         """
+        for fn in ("playback_target_must_be_shadow", "gateway_is_playback_delivery_target"):
+            self.assertIn("is_shadow", self._source(fn), f"{fn}() no longer reads is_shadow")
+        self.assertNotIn(
+            "is_simulated", self._source("gateway_is_playback_delivery_target"),
+            "the delivery predicate reads is_simulated again, which delivers every simulator",
+        )
+
+    def _source(self, fn):
         self.cur.execute(
             "SELECT prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
-            " WHERE n.nspname = 'public' AND p.proname = 'start_playback_job'"
+            " WHERE n.nspname = 'public' AND p.proname = %s", (fn,)
         )
         row = self.cur.fetchone()
-        self.assertIsNotNone(row, "start_playback_job() is missing")
-        self.assertIn(
-            "is_simulated", row[0],
-            "start_playback_job() no longer gates on is_simulated, but 0078 delivers on it",
+        self.assertIsNotNone(row, f"{fn}() is missing")
+        return row[0]
+
+    # -----------------------------------------------------------------------------------------
+    # The list the credential service prunes the delivered file by
+    # -----------------------------------------------------------------------------------------
+    def test_the_target_list_holds_playback_gateways_and_nothing_else(self):
+        shadow = self._sparkplug_id(self._gateway(simulated=True, shadow=True))
+        simulated = self._sparkplug_id(self._gateway(simulated=True))
+        real = self._sparkplug_id(self._gateway(simulated=False))
+        archived = self._sparkplug_id(self._gateway(simulated=True, shadow=True, archived=True))
+
+        targets = self._targets()
+        self.assertIn(shadow, targets)
+        for other in (simulated, real, archived):
+            self.assertNotIn(other, targets)
+
+    def test_the_target_list_agrees_with_the_predicate_row_by_row(self):
+        self._gateway(simulated=True, shadow=True)
+        self._gateway(simulated=True)
+        self.cur.execute(
+            "SELECT sparkplug_id FROM public.gateways "
+            " WHERE public.gateway_is_playback_delivery_target(id) ORDER BY sparkplug_id"
         )
+        expected = [r[0] for r in self.cur.fetchall()]
+        self.assertGreater(len(expected), 0)
+        self.assertEqual(self._targets(), expected)
+
+    def test_the_target_list_refuses_a_caller_without_the_role(self):
+        self.cur.execute("DELETE FROM public.user_roles WHERE user_id = %s", (ADMIN,))
+        with self.assertRaises(psycopg2.Error):
+            self._targets()
+        self.conn.rollback()
+
+    def test_anon_cannot_list_the_targets(self):
+        self.cur.execute(
+            "SELECT has_function_privilege('anon', 'public.playback_delivery_targets()', 'EXECUTE')"
+        )
+        self.assertFalse(self.cur.fetchone()[0])
 
     def test_the_delivery_predicate_is_its_own_function_returning_a_boolean(self):
         """
-        Declared once, by 0078 alone, and NOT a column on the authorisation gate. A function 0001
-        also declares cannot have its return type changed by a later file -- see the test above and
-        0078's header for the boot that proved it.
+        One overload, and NOT a column on the authorisation gate. 0183 redeclares it with 0001's
+        signature and return type: a later file cannot change a return type 0001 declares -- see the
+        test above, and archived migration 0078's header for the boot that proved it.
         """
         self.cur.execute(
             "SELECT count(*), max(pg_get_function_result(p.oid)) "

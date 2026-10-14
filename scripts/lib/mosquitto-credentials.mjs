@@ -46,6 +46,21 @@ export function mergeDelivery(existing, sparkplugId, password, onWarn = () => {}
   return held;
 }
 
+// Keep only the delivered passwords whose gateway is a playback target now (`targets`, the
+// database's list), plus the one just delivered. Returns the kept map and the ids dropped. No list
+// keeps everything: a failed read must not empty the store.
+export function pruneDelivery(held, targets, delivered) {
+  if (!Array.isArray(targets)) return { held, dropped: [] };
+  const keep = new Set([...targets.filter(isGatewayId), delivered]);
+  const kept = {};
+  const dropped = [];
+  for (const [id, password] of Object.entries(held)) {
+    if (keep.has(id)) kept[id] = password;
+    else dropped.push(id);
+  }
+  return { held: kept, dropped };
+}
+
 // Trailing newline, so the file is a well-formed text file.
 export function serialiseDelivery(held) {
   return `${JSON.stringify(held, null, 2)}\n`;

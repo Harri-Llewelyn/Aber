@@ -172,6 +172,47 @@ describe('GatewayCredentialModal', () => {
     })
   })
 
+  /**
+   * Decided by the gateway, not by what the server delivered. A server from before 0183 delivered
+   * every Simulated gateway's password too; the dialog then hid the Node-RED steps and said there
+   * was nothing to do, while re-issuing had just disconnected the running simulator.
+   */
+  describe('a Simulated gateway', () => {
+    const SIMULATED = { ...GATEWAY, gateway_name: 'Line Simulator', is_simulated: true, is_shadow: false }
+    const mint = async (credential) => {
+      api.mintGatewayCredential.mockResolvedValue({ ...CREDENTIAL, ...credential })
+      render(<GatewayCredentialModal gateway={SIMULATED} onClose={vi.fn()} showToast={vi.fn()} />)
+      fireEvent.change(screen.getByLabelText(`Type ${SIMULATED.gateway_name} to confirm`), {
+        target: { value: SIMULATED.gateway_name }
+      })
+      fireEvent.click(screen.getByText(/Issue Credential/i))
+      await waitFor(() => expect(api.mintGatewayCredential).toHaveBeenCalled())
+    }
+
+    it.each([
+      ['not delivered', { playback_delivered: null }],
+      ['delivered by an older server', { playback_delivered: true }],
+      ['a failed delivery', { playback_delivered: false }]
+    ])('shows the Node-RED steps and the copy callout when %s', async (_, credential) => {
+      await mint({ ...credential, credential_kept: true })
+      expect(await screen.findByText(/Use it in Node-RED/i)).toBeInTheDocument()
+      expect(screen.getByText(/Copy this into Node-RED now/i)).toBeInTheDocument()
+      expect(screen.queryByText(/Delivered to the playback worker/)).toBeNull()
+      expect(screen.queryByText(/Nothing further to do/)).toBeNull()
+      expect(screen.queryByText(/For secrets\.mqttPlaybackCredentials/)).toBeNull()
+    })
+  })
+
+  it('gives the Playback gateway the Helm value when its password was not delivered', async () => {
+    api.mintGatewayCredential.mockResolvedValue({ ...CREDENTIAL, playback_delivered: null })
+    render(<GatewayCredentialModal gateway={{ ...GATEWAY, is_shadow: true }}
+      onClose={vi.fn()} showToast={vi.fn()} />)
+    await confirmAndMint()
+    expect(await screen.findByText(/For secrets\.mqttPlaybackCredentials/)).toBeInTheDocument()
+    expect(screen.queryByText(/Use it in Node-RED/i)).toBeNull()
+    expect(screen.queryByText(/Automatic delivery to the playback worker failed/)).toBeNull()
+  })
+
   it('adds the worker setting to the fallback when delivery failed and the worker is not deployed', async () => {
     globalThis.__ABER_CONFIG__ = { VITE_PLAYBACK_ENABLED: 'false' }
     try {

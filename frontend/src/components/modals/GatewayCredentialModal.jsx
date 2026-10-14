@@ -66,13 +66,14 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
     if (!ok) showToast?.('Could not reach the clipboard — select the value and copy it.', 'error')
   }, [showToast])
 
-  // Two destinations. A host-run gateway's pair is typed on its broker node's Security tab in the
-  // Node-RED editor, which stores it encrypted and keeps it across restarts. The playback gateway's
-  // goes in `secrets.mqttPlaybackCredentials`, one JSON object keyed by sparkplug_id.
+  // Two destinations, decided by the gateway before anything the server said. A host-run gateway's
+  // pair is typed on its broker node's Security tab in the Node-RED editor, which stores it
+  // encrypted and keeps it across restarts. The Playback gateway's is delivered to the playback
+  // worker, or goes in `secrets.mqttPlaybackCredentials`, one JSON object keyed by sparkplug_id.
   const isPlayback = !!gateway.is_shadow
 
-  // What the server did: true (written where the worker reads it), false (delivery failed) or null
-  // (not a playback target; absent reads as null).
+  // What the server did for a Playback gateway: true (written where the worker reads it), false
+  // (delivery failed) or null (not delivered; absent reads as null).
   const wasDelivered = credential?.playback_delivered === true
   const deliveryFailed = credential?.playback_delivered === false
   const workerDeployed = playbackWorkerDeployed()
@@ -223,10 +224,13 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
             </div>
           </div>
 
-          {/* Delivered means there is nothing to do: the credential service wrote the password where
-              the worker reads it. False is the one that needs a person. With playback.enabled off
-              the password is stored all the same, for a worker that does not exist yet. */}
-          {wasDelivered && !workerDeployed ? (
+          {/* Any gateway but the Playback gateway: Node-RED, whatever the server delivered. For the
+              Playback gateway, delivered means there is nothing to do: the credential service wrote
+              the password where the worker reads it. False is the one that needs a person. With
+              playback.enabled off the password is stored all the same, for a worker not yet there. */}
+          {!isPlayback ? (
+            <NodeRedCredentialSteps />
+          ) : wasDelivered && !workerDeployed ? (
             <div className="form-group">
               <strong className="gateway-delivered">
                 <IconCheck size={13} /> Saved for the playback worker.
@@ -253,7 +257,7 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
                 again.
               </div>
             </div>
-          ) : isPlayback ? (
+          ) : (
             <div className="form-group">
               <label className="form-label">For secrets.mqttPlaybackCredentials</label>
               <pre className="mono gateway-code">{secretBlock}</pre>
@@ -281,8 +285,6 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
                 </button>
               </div>
             </div>
-          ) : (
-            <NodeRedCredentialSteps />
           )}
         </>
       )}
