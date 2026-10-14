@@ -237,6 +237,24 @@ shown, and replacing it asks first: `set_archive_credential()` overwrites it wit
 nothing can show either value again. A first key goes straight in. Its `useCredential()` hook
 writes the key when the dialog saves, before archiving is switched on, and names a 403 as a refusal.
 
+### Why a reload waits for the auth server
+
+A session can end on the server while the browser still holds its tokens: a Sign Out in another
+browser, a password change, a wiped `auth.sessions`. PostgREST checks only the JWT's signature, so
+reads on such a token still succeed. `App.jsx`'s `restoreSession` therefore asks the auth server
+with `getUser()` before anything renders. The spinner stays up for that round trip, and the
+`INITIAL_SESSION` and `SIGNED_IN` events supabase-js raises for the stored session do not end it.
+
+- **An ended session reaches the page as a 400.** auth-js turns GoTrue's 403 `session_not_found`
+  into an `AuthSessionMissingError` with status 400, and deletes the stored session before it
+  returns. `isSessionRejected()` names that error. `restoreSession` also keeps only the session
+  `getSession()` still returns after the check, so a later auth-js that names the error differently
+  cannot bring back a session supabase-js has dropped. A page holding one sends every request with
+  the publishable key alone, and PostgREST refuses them all.
+- **An unreachable auth server is not a rejection.** A fetch failure or a 5xx comes back as
+  `AuthRetryableFetchError`, supabase-js keeps the session, and the dashboard opens on it. The
+  connection strip then says whether the page is updating.
+
 ---
 
 ## Realtime

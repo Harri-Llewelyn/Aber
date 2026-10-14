@@ -1,3 +1,4 @@
+import { isAuthSessionMissingError } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabaseClient';
 
 /**
@@ -28,10 +29,12 @@ export function isInvalidSessionError(error) {
 /**
  * True only when the auth server actively rejected the session. A network failure is not a
  * rejection: supabase-js reports an unreachable server as a fetch error with no HTTP status, so an
- * explicit 401/403 or an unmistakable message is required.
+ * explicit 401/403 or an unmistakable message is required. GoTrue's 403 session_not_found reaches
+ * here as AuthSessionMissingError, which carries status 400.
  */
 export function isSessionRejected(error) {
   if (!error) return false;
+  if (isAuthSessionMissingError(error)) return true;
   if (error.status === 401 || error.status === 403) return true;
   if (error.name === 'AuthRetryableFetchError') return false;
   return isInvalidSessionError(error);
