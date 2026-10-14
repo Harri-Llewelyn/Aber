@@ -2806,8 +2806,8 @@ coldArchive:
 
 | Field | From `values.yaml` | From the Cold Storage page |
 | :--- | :--- | :--- |
-| Endpoint, region, bucket, access key ID | Seeded while its row is empty | Yes, and the page wins after |
-| Path style | Seeded on the first boot | Yes, and the page wins after |
+| Endpoint, region, bucket, access key ID | Seeded while its row is empty | Yes; a later chart value never overwrites it |
+| Path style | Seeded on the first boot | Yes; a later chart value never overwrites it |
 | Site key | Yes, frozen at the first boot that sets it | No: shown for reference |
 | Secret access key | **No** | **Yes, and only there** |
 
