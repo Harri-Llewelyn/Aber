@@ -110,7 +110,9 @@ a gateway that returns to its own group clears the warning with its next message
 - **Not read back on the hot path.** The column is not among the gateway columns the resolution
   cache selects. On an upgrade the new daemon runs before db-init has added the column, and a select
   naming it would fail every gateway lookup until then. A write that fails, there or anywhere, is
-  logged at most once per node every five minutes and retried by the next message.
+  logged at most once per node every five minutes and retried by the next message. It is read once
+  per rebirth a person asks for, to address the request
+  ([Rebirth Requests](#rebirth-requests-ncmd)); a failed read falls back to `sparkplug_group`.
 - **Not recorded:** a message with an empty group, a group over 255 characters (the gate's cap,
   `MAX_OBSERVED_GROUP_LENGTH`), an archived or unregistered gateway's traffic, which is refused
   first, and an NDEATH from an earlier session ([below](#a-death-from-an-earlier-session)).
@@ -506,13 +508,20 @@ would meet that limit, and the container would be OOM-killed taking ingestion fo
 with it. That is the argument for the smaller number, ahead of the
 storage one.
 
+**A capture records its edge node under any Sparkplug group**, as ingestion accepts it
+([Resolution precedence](#resolution-precedence)): `observe()` matches the node's `sparkplug_id`, and
+a device capture also its device id, never the group. A gateway whose node publishes under a group
+other than its row's ingests normally, so its captures must not come back empty.
+
 **A capture opens by asking its edge node to rebirth**, because birth certificates cannot be
 queried: `asset_config` holds birth *parameters* and `devices.last_birth_metrics` holds metric
 *names*, and neither reconstructs a Sparkplug payload. The birth then arrives on the wire and is
-recorded as ordinary traffic. `request_node_rebirth()` takes a `force` flag for this and capture is
-its only caller — the throttle exists to stop a flood driven by traffic, and a capture is one person
-pressing one button under a single-flight lock. The throttle is still stamped, so a forced request
-does not leave the node open to being asked again by the next message that notices a gap.
+recorded as ordinary traffic. The request goes through `request_operator_rebirth()`, as the
+dashboard's Request Rebirth does. It is addressed to the group the node publishes under
+([Rebirth Requests](#rebirth-requests-ncmd)), and it passes `force` to `request_node_rebirth()` —
+the throttle exists to stop a flood driven by traffic, and a capture is one person pressing one
+button under a single-flight lock. The throttle is still stamped, so a forced request does not leave
+the node open to being asked again by the next message that notices a gap.
 
 **`birth_captured` means the node's birth, not a device's.** An `NBIRTH` carries the alias table,
 which is what makes a capture replayable; announcing a *device* takes a `DBIRTH`, and only
@@ -1123,7 +1132,15 @@ On an unresolvable alias the daemon publishes `Node Control/Rebirth` to
 `spBv1.0/<group>/NCMD/<edge_node>`. It asks the same way on a sequence gap, and on DDATA from a
 device held OFFLINE that has not been born since (see
 [A device that publishes again](#a-device-that-publishes-again)). An operator's request from the
-dashboard and a broker capture ask too, past the rate limit below.
+dashboard and a broker capture ask too, past the rate limit below, through
+`request_operator_rebirth()`.
+
+- **The group is the one the node publishes under.** An edge node subscribes to NCMD under its own
+  group only (Sparkplug 3.0.0 `tck-id-message-flow-edge-node-ncmd-subscribe`,
+  `tck-id-topics-ncmd-topic`), and ingestion accepts a node under any group. The three requests
+  above take the group from the message's topic. A person's request starts from a row that carries
+  the gateway's configured group, so `publishing_group()` reads `gateways.observed_sparkplug_group`
+  first and uses the configured group only when that is NULL or cannot be read.
 
 - **Rate limited per edge node** (`REBIRTH_REQUEST_INTERVAL_SECONDS`, default 300s). This is the
   load-bearing half: a gateway that answers a rebirth by restarting, or one that never answers at

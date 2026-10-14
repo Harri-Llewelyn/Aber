@@ -69,6 +69,8 @@ class _JobState:
     def __init__(self, job):
         self.job = job
         self.id = job["id"]
+        # The gateway's configured group, from the job. Only the rebirth request uses it, and only
+        # when ingestion has not recorded the group the node publishes under.
         self.group = job["sparkplug_group"]
         self.edge_node = job["edge_node_id"]
         self.device = job.get("device_sparkplug_id")
@@ -99,8 +101,11 @@ class _JobState:
         that replays as `unresolved_alias` and drops every metric, from a file that looks complete.
         ingestion.py documents that failure at `_alias_map`: it "ingests nothing at all from an
         alias-optimised gateway, and reports no error while doing it".
+
+        THE GROUP IS NOT COMPARED. Ingestion accepts an edge node under any group, by its
+        sparkplug_id alone (unique site-wide), so a capture records the same traffic.
         """
-        if len(parts) < 4 or parts[1] != self.group or parts[3] != self.edge_node:
+        if len(parts) < 4 or parts[3] != self.edge_node:
             return False
         if self.device is None:
             return True
@@ -273,8 +278,8 @@ def _begin(job_row):
             logger.warning("Capture %s: rebirth request failed: %s", state.id, err)
 
     logger.info(
-        "Capture %s started: %s on %s/%s, caps %ds / %d messages / %d bytes%s",
-        state.id, state.device or "the whole edge node", state.group, state.edge_node,
+        "Capture %s started: %sedge node %s, caps %ds / %d messages / %d bytes%s",
+        state.id, "device %s on " % state.device if state.device else "", state.edge_node,
         state.max_seconds, state.max_messages, state.max_bytes,
         "" if state.rebirth_requested else " (rebirth rate-limited; may open without a birth)",
     )
@@ -294,10 +299,9 @@ def _finish(state, reason):
         # An empty capture is almost always a credential, ACL or identity problem rather than a
         # quiet fleet, and storing the file anyway would defer that discovery to playback.
         _fail(state, (
-            "recorded no messages from %s/%s%s. Either nothing published during the window, or the "
-            "subject's ids do not match what is on the wire."
-            % (state.group, state.edge_node,
-               " for device " + state.device if state.device else "")
+            "recorded no messages from edge node %s%s, in any Sparkplug group. Either nothing "
+            "published during the window, or the subject's ids do not match what is on the wire."
+            % (state.edge_node, " for device " + state.device if state.device else "")
         ))
         return
 
@@ -312,8 +316,8 @@ def _finish(state, reason):
             "broker": "%s:%d" % (capture.MQTT_HOST, capture.MQTT_PORT),
             # The topic this WOULD have been recorded with by the CLI, so a downloaded file reads
             # the same whichever path produced it.
-            "topic": "spBv1.0/%s/+/%s%s" % (
-                state.group, state.edge_node, "/" + state.device if state.device else "/#"),
+            "topic": "spBv1.0/+/+/%s%s" % (
+                state.edge_node, "/" + state.device if state.device else "/#"),
         },
         "capture_epoch_ms": capture_epoch_ms,
         "duration_ms": messages[-1]["offset_ms"],
@@ -515,7 +519,8 @@ def start(supabase, rebirth=None):
     """
     Run the capture worker. Returns True if startup reconciliation ran.
 
-    `rebirth(group, edge_node) -> bool` requests a birth certificate.
+    `rebirth(group, edge_node) -> bool` requests a birth certificate. `group` is the job's configured
+    group; the callable addresses the request to the group the node publishes under.
 
     PASSED IN RATHER THAN IMPORTED. ingestion.py imports this module, so reaching back for
     `request_node_rebirth` would be a cycle -- and the callable keeps this module testable without

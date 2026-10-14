@@ -5171,7 +5171,13 @@ components:
         subject_kind: { type: string, enum: [gateway, device] }
         gateway_id: { type: string, format: uuid, nullable: true }
         device_id: { type: string, format: uuid, nullable: true }
-        sparkplug_group: { type: string, example: Aber }
+        sparkplug_group:
+          type: string
+          description: >-
+            The gateway's configured group when the job was queued. Topics match on edge_node_id in
+            any group, as ingestion accepts them; the rebirth request goes to the group the node
+            publishes under (gateways.observed_sparkplug_group), or to this one while that is null.
+          example: Aber
         edge_node_id:
           type: string
           description: 'The gateway the daemon matches topics against — for a device capture too.'
@@ -5264,7 +5270,12 @@ components:
           type: string
           description: 'The gateway`s sparkplug_id — the NCMD is addressed to it.'
           example: gwy120000000000400080000
-        sparkplug_group: { type: string, example: Aber }
+        sparkplug_group:
+          type: string
+          description: >-
+            The gateway's configured group when the request was made. The NCMD goes to the group the
+            node publishes under (gateways.observed_sparkplug_group), or to this one while that is null.
+          example: Aber
         status: { type: string, enum: [PENDING, SENT, FAILED] }
         throttled:
           type: boolean
