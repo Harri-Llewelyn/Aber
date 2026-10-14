@@ -19,6 +19,7 @@ import {
   assertSafePassword,
   generatePassword,
   mergeDelivery,
+  pruneDelivery,
   serialiseDelivery,
 } from './lib/mosquitto-credentials.mjs';
 import { assertOk, isRefusal, issueWithControl, summariseInventory } from './lib/mosquitto-dynsec.mjs';
@@ -134,8 +135,9 @@ function namespace() {
 
 // Hands a fresh password to the playback worker by patching the Secret its pod mounts (archived migration
 // 0078); the Role behind it is get and patch on one Secret by name. Decides nothing about
-// eligibility: `deliver` arrives already answered by the database. Merged, not overwritten.
-async function deliverToPlayback(sparkplugId, password) {
+// eligibility: `deliver` and `targets` arrive already answered by the database. Merged, then
+// pruned to the gateways that are still targets (0183).
+async function deliverToPlayback(sparkplugId, password, targets) {
   const ns = namespace();
   const path = `/api/v1/namespaces/${ns}/secrets/${SECRET_NAME}`;
 
@@ -149,7 +151,9 @@ async function deliverToPlayback(sparkplugId, password) {
     log(`Secret ${ns}/${SECRET_NAME} not found; creating its first playback delivery.`);
   }
 
-  const held = mergeDelivery(existing, sparkplugId, password, log);
+  const merged = mergeDelivery(existing, sparkplugId, password, log);
+  const { held, dropped } = pruneDelivery(merged, targets, sparkplugId);
+  if (dropped.length) log(`dropped the delivered credential of ${dropped.join(', ')}: no longer a playback target`);
   await k8sRequest('PATCH', path, {
     data: {
       [PLAYBACK_SECRET_KEY]:
@@ -160,7 +164,7 @@ async function deliverToPlayback(sparkplugId, password) {
   return { delivered: true, held: Object.keys(held).length, via: 'secret' };
 }
 
-async function issue(sparkplugId, password, { deliver = false } = {}) {
+async function issue(sparkplugId, password, { deliver = false, targets = null } = {}) {
   assertGatewayId(sparkplugId);
   assertSafePassword(password);
 
@@ -180,7 +184,7 @@ async function issue(sparkplugId, password, { deliver = false } = {}) {
   let delivery = null;
   if (deliver) {
     try {
-      delivery = await deliverToPlayback(sparkplugId, password);
+      delivery = await deliverToPlayback(sparkplugId, password, targets);
     } catch (err) {
       log(`WARNING: could not deliver the playback credential: ${err.message}`);
       delivery = { delivered: false, error: err.message };
@@ -259,7 +263,7 @@ function readBody(req, limit = 8192) {
     let data = '';
     req.on('data', (chunk) => {
       data += chunk;
-      // Bounded: this endpoint takes two short strings.
+      // Bounded: this endpoint takes two short strings and a short list of gateway ids.
       if (data.length > limit) {
         reject(new CredentialError('request body too large', 'body_too_large'));
         req.destroy();
@@ -345,8 +349,10 @@ const server = createServer(async (req, res) => {
     const password = parsed.password || generatePassword();
     // Strictly === true, so an absent key, a null or a truthy string cannot turn delivery on.
     const deliver = parsed.deliver_to_playback === true;
+    // Every current target, from the database; absent prunes nothing.
+    const targets = Array.isArray(parsed.playback_targets) ? parsed.playback_targets : null;
 
-    const result = await issue(sparkplugId, password, { deliver });
+    const result = await issue(sparkplugId, password, { deliver, targets });
     log(`issued ${result.replaced ? '(re-issued)' : '(new)'} credential for ${sparkplugId}`);
 
     // Returned once. The plugin stores a hash; this response is the only copy.

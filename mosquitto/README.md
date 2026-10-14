@@ -275,13 +275,14 @@ use when the caller supplies none, one fewer copy in transit; the plugin stores 
 response is the only copy, returned once. The playback delivery (archived migration 0078) is the
 one case where it goes somewhere else: the worker runs in another pod, so the service patches the
 Secret that pod mounts, with a Role of `get` and `patch` on that one Secret by name. The service
-decides nothing about eligibility, since `deliver` is decided by the database from `is_simulated`
+decides nothing about eligibility, since `deliver` is decided by the database from `is_shadow`
 and arrives already answered, and it accepts only a strict `true`, so an absent key, a null or a
 truthy string cannot turn delivery on. Delivery happens after the broker, never before, and a
 delivery failure is logged rather than failing the issue, because the account exists and the
 browser is about to show the password. The store is merged, not overwritten, because a stack can
 have several playback targets issued one at a time and a single-entry store would silently revoke
-delivery for every other target; a malformed store is replaced rather than fatal, because throwing
+delivery for every other target; it is then pruned to the targets the database lists now
+(`playback_targets`, 0183), and a request without that list prunes nothing; a malformed store is replaced rather than fatal, because throwing
 would strand a credential nobody can use to preserve a file nobody can parse; and values are
 coerced to strings, because a Python worker hands them to paho as a password and a number
 surviving a JSON round trip would fail at CONNECT rather than where the cause is visible. The

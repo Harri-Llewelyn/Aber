@@ -22,6 +22,7 @@ import {
   hashArgvForUsername,
   hashScript,
   mergeDelivery,
+  pruneDelivery,
   serialiseDelivery,
   PLAYBACK_CREDENTIAL_FILE,
 } from './mosquitto-credentials.mjs';
@@ -249,5 +250,53 @@ describe('mergeDelivery', () => {
     // playback_worker.py defaults to this same string, and the two cannot import from each other --
     // check-docs-drift.mjs is what holds them together. This pins the value it checks against.
     assert.equal(PLAYBACK_CREDENTIAL_FILE, '/var/lib/aber/playback/credentials.json');
+  });
+});
+
+/**
+ * The store is rebuilt on each delivery from the database's list of current targets, so a password
+ * delivered for a gateway that is no longer one (a simulator, under the old predicate; an archived
+ * Playback gateway) does not stay in the file the worker mounts.
+ */
+describe('pruneDelivery', () => {
+  const GW_SHADOW = 'gwy160000000000400080000';
+  const held = { [GW_A]: ALPHA_PW, [GW_B]: BETA_PW, [GW_SHADOW]: NEW_PW };
+
+  test('keeps only the gateways that are targets now', () => {
+    const { held: kept, dropped } = pruneDelivery(held, [GW_SHADOW], GW_SHADOW);
+    assert.deepEqual(kept, { [GW_SHADOW]: NEW_PW });
+    assert.deepEqual(dropped.sort(), [GW_A, GW_B].sort());
+  });
+
+  test('keeps every target, not only the one just delivered', () => {
+    const { held: kept, dropped } = pruneDelivery(held, [GW_SHADOW, GW_B], GW_SHADOW);
+    assert.deepEqual(kept, { [GW_B]: BETA_PW, [GW_SHADOW]: NEW_PW });
+    assert.deepEqual(dropped, [GW_A]);
+  });
+
+  test('keeps the gateway just delivered even if the list missed it', () => {
+    // The list and the predicate are two reads; a gateway archived between them is dropped next time.
+    const { held: kept } = pruneDelivery(held, [], GW_SHADOW);
+    assert.deepEqual(kept, { [GW_SHADOW]: NEW_PW });
+  });
+
+  test('prunes nothing without a list, so a failed read cannot empty the store', () => {
+    for (const absent of [null, undefined, 'gwy160000000000400080000', {}]) {
+      const { held: kept, dropped } = pruneDelivery(held, absent, GW_SHADOW);
+      assert.deepEqual(kept, held);
+      assert.deepEqual(dropped, []);
+    }
+  });
+
+  test('an entry in the list that is not a gateway id keeps nothing', () => {
+    const { held: kept } = pruneDelivery({ ...held, 'not-a-gateway': OLD_PW }, ['not-a-gateway'], GW_SHADOW);
+    assert.deepEqual(kept, { [GW_SHADOW]: NEW_PW });
+  });
+
+  test('composes with mergeDelivery the way the service calls it', () => {
+    const stale = serialiseDelivery({ [GW_A]: ALPHA_PW, [GW_SHADOW]: OLD_PW });
+    const { held: kept, dropped } = pruneDelivery(mergeDelivery(stale, GW_SHADOW, NEW_PW), [GW_SHADOW], GW_SHADOW);
+    assert.deepEqual(JSON.parse(serialiseDelivery(kept)), { [GW_SHADOW]: NEW_PW });
+    assert.deepEqual(dropped, [GW_A]);
   });
 });

@@ -1025,9 +1025,18 @@ a publisher nothing to observe after it.
 
 `gateway_is_playback_delivery_target()` answers whether the password may be delivered, and the
 credential service writes it where the playback worker reads when it is true. **The predicate is
-`is_simulated` — the same one `start_playback_job()` gates on** — so the set of passwords the worker
-can be handed is exactly the set of gateways it may publish as, and `0078` carries a self-check that
-fails if the job gate stops using it.
+`is_shadow` on an unarchived gateway (`0183`)**, what `playback_target_must_be_shadow()` admits a
+playback by, so the set of passwords the worker can be handed is the set of gateways it may publish
+as. `0078` answered `is_simulated`, and once `0060`'s trigger confined playback to the shadow
+gateway, that delivered every Node-RED simulator's password to a worker that could use none of them.
+
+**Each delivery also prunes what is held.** `playback_delivery_targets()` lists the gateways the
+predicate is true for. `gateway-credential` passes that list with the delivery, and the credential
+service keeps a delivered password only for a gateway on it, plus the one it is delivering. So a
+password delivered under the old predicate, or for a gateway archived since, is gone after the next
+delivery. With no list (its read failed) nothing is pruned, because a failed read must not empty the
+file. An archived gateway's password stays until then; its broker account is disabled on archive,
+so the broker refuses it meanwhile.
 
 **It is its own function rather than a third column on the authorisation gate, and that is not a
 style choice.** It was written as a column first. That worked on the boot which applied it and

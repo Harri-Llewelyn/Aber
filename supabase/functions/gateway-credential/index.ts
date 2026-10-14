@@ -142,10 +142,10 @@ Deno.serve(async (req) => {
 
   // 1b. May the password be delivered to the playback worker? A second call rather than a column on
   // the gate above, because the gate is redeclared on every boot with CREATE OR REPLACE, which
-  // cannot change a return type. Still the database's answer, `is_simulated`, the same predicate
-  // start_playback_job() gates on, so there is one definition of "is this a playback target". False
-  // on error, never true: a failure must not fail the issue and must not deliver on a guess, so the
-  // password is shown once and placed by hand.
+  // cannot change a return type. The database's answer, `is_shadow`, the target a playback may
+  // have, so there is one definition of "is this a playback target". False on error, never true: a
+  // failure must not fail the issue and must not deliver on a guess, so the password is shown once
+  // and placed by hand.
   let deliverToPlayback = false;
   const { data: isPlaybackTarget, error: deliveryError } = await supabase
     .rpc("gateway_is_playback_delivery_target", { p_gateway_id: gatewayId });
@@ -154,6 +154,19 @@ Deno.serve(async (req) => {
     console.error(`gateway-credential: delivery predicate unavailable: ${deliveryError.message}`);
   } else {
     deliverToPlayback = isPlaybackTarget === true;
+  }
+
+  // 1c. With a delivery, every gateway that is a target now, so the credential service drops a
+  // delivered password whose gateway is not. Omitted on error: the service then prunes nothing,
+  // and the delivery itself goes ahead.
+  let playbackTargets: string[] | undefined;
+  if (deliverToPlayback) {
+    const { data: targets, error: targetsError } = await supabase.rpc("playback_delivery_targets");
+    if (targetsError) {
+      console.error(`gateway-credential: delivery targets unavailable: ${targetsError.message}`);
+    } else {
+      playbackTargets = ((targets ?? []) as { sparkplug_id: string }[]).map((t) => t.sparkplug_id);
+    }
   }
 
   // 2. The mint. No password is supplied: the credential service generates it at the point of use,
@@ -174,6 +187,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         sparkplug_id: identity.sparkplug_id,
         deliver_to_playback: deliverToPlayback,
+        playback_targets: playbackTargets,
       }),
     });
 

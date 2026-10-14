@@ -390,7 +390,8 @@ platform kept no copy at all: the broker stores only a hash.
 
 **Accepted because** the copy is limited to the passwords a person handles anyway. Remote gateways'
 credentials never reach a browser, and the Playback gateway's is delivered to its worker, so neither
-keeps one. Showing a password is Administrator only, each showing is a `CREDENTIAL_SHOWN` row in the
+keeps one. Only a Playback gateway's password is delivered to the playback worker (`0183`): a Host
+or Simulated gateway's never reaches it. Showing a password is Administrator only, each showing is a `CREDENTIAL_SHOWN` row in the
 Audit Trail, and the copy is deleted when the gateway is archived or deleted. An Administrator could
 already issue a new password for any gateway, which gives the same access.
 
