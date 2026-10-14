@@ -1,6 +1,10 @@
 {{- if .Values.playback.enabled }}
 {{- $component := "playback" -}}
 {{- $secretName := include "aber.secretName" . -}}
+{{- $helmCredentials := "" -}}
+{{- if not .Values.secrets.existingSecret -}}
+{{- $helmCredentials = .Values.secrets.mqttPlaybackCredentials | default "" -}}
+{{- end -}}
 {{/*
 =================================================================================================
 The broker playback worker: a stored capture -> MQTT, published as a simulated gateway.
@@ -49,6 +53,10 @@ spec:
     metadata:
       labels:
         {{- include "aber.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+      annotations:
+        # Roll the worker when its Helm-value credentials change: env from a Secret is read at
+        # start. Under existingSecret the chart renders no value, so this stays constant.
+        checksum/playback-credentials: {{ $helmCredentials | sha256sum }}
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
