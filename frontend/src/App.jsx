@@ -161,13 +161,13 @@ function AuthScreen({ onLoginSuccess, notice }) {
         : 'Sign in with your platform account'}
     >
       {notice && !authError && (
-        <div role="status" style={{ background: 'rgba(255,179,0,0.15)', border: '1px solid var(--warning)', color: 'var(--warning-text)', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '18px' }}>
+        <div role="status" style={{ background: 'var(--warning-tint)', border: '1px solid var(--warning)', color: 'var(--warning-text)', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '18px' }}>
           {notice}
         </div>
       )}
 
       {authError && (
-        <div role="alert" style={{ background: 'rgba(255,77,109,0.15)', border: '1px solid var(--danger)', color: 'var(--danger-text)', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '18px' }}>
+        <div role="alert" style={{ background: 'var(--danger-tint)', border: '1px solid var(--danger)', color: 'var(--danger-text)', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '18px' }}>
           {authError}
         </div>
       )}

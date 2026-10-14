@@ -74,8 +74,8 @@ describe('badges', () => {
 })
 
 describe('rows and utilities', () => {
-  it('tints an archived row', () => {
-    expect(inline('tr.row-archived')).toMatch(/rgba\(255, 179, 0, 0\.06\)/)
+  it("tints an archived row with the theme's warning colour", () => {
+    expect(inline('tr.row-archived')).toMatch(/color-mix\(in srgb, var\(--warning\) 6%, transparent\)/)
   })
 
   it('right-aligns the actions column, header and cell, and spaces its buttons once', () => {

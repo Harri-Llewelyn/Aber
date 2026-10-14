@@ -56,6 +56,12 @@
   --success:      #00e896;
   --warning:      #ffb300;
   --danger:       #ff4d6d;
+  /* The signal colours at 15%: the fill under a badge, a toast and a sign-in notice. --accent-dim is
+     the accent's. A var() in a token resolves on the element that declares it, so the light block
+     restates these: wherever data-theme is set, the mix takes that theme's colour. */
+  --success-tint: color-mix(in srgb, var(--success) 15%, transparent);
+  --warning-tint: color-mix(in srgb, var(--warning) 15%, transparent);
+  --danger-tint:  color-mix(in srgb, var(--danger) 15%, transparent);
   --text-primary: #e8eaf0;
   /* Three distinguishable secondary tiers, every one clearing WCAG AA against --bg-card. */
   --text-muted:   #858ea3;  /* 5.14:1 on --bg-card */
@@ -85,6 +91,8 @@
   --cluster:      #a855f7;
   --cluster-bg:   rgba(168, 85, 247, 0.18);
   --cluster-text: #d8b4fe;
+  /* The offline and archived device chip's fill: a white lift on the dark card. */
+  --chip-offline-bg: rgba(255, 255, 255, 0.05);
   /* The monospace face, written once. Structural, so the light theme does not restate it. */
   --font-mono:    'JetBrains Mono', monospace;
   /* The interface face, written once. Structural, like --font-mono. */
@@ -109,6 +117,11 @@
   --radius-xs:    6px;
   --radius-pill:  999px;
   --shadow:       0 4px 24px rgba(0, 0, 0, 0.5);
+  /* The same in both themes, so the light block does not restate them: a popover's drop shadow, an
+     area plan pin's, and the scrim behind a modal. */
+  --shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.35);
+  --shadow-pin:     0 2px 8px rgba(0, 0, 0, 0.25);
+  --scrim:          rgba(0, 0, 0, 0.6);
   --transition:   all 0.2s ease;
   /* The z-index ladder. A layer sits above the ones listed before it; a new layer takes a rung,
      not a number picked to win.
@@ -141,30 +154,37 @@
   --success:      #059669;
   --warning:      #d97706;
   --danger:       #e11d48;
+  --success-tint: color-mix(in srgb, var(--success) 15%, transparent);
+  --warning-tint: color-mix(in srgb, var(--warning) 15%, transparent);
+  --danger-tint:  color-mix(in srgb, var(--danger) 15%, transparent);
   --text-primary: #0f172a;
   --text-muted:   #475569;  /* 7.58:1 on --bg-card */
   /* Clears AA on both a white card (5.25:1) and --bg-base (4.80:1), and stays dimmer than
      --text-muted. */
   --text-dim:     #5f6d82;
   /* The light-theme --warning and --success are below AA for text. These are the readable
-     equivalents, one step darker on the same hue; worst case is the 0.15 tinted badge fill: 4.59:1
-     and 4.99:1. */
-  --warning-text: #b45309;
-  --success-text: #047857;
+     equivalents on the same hue: amber-700 and emerald-700, each darkened to the first half-step of
+     lightness that clears AA on every tint it labels. Worst cases: the archived badge in an
+     archived row, 4.55:1, and a success badge in a hovered row, 4.52:1. */
+  --warning-text: #a84d08;
+  --success-text: #047655;
   /* --accent measures 3.51:1 on the 0.12 --accent-dim fill a badge paints on a white card. Sky-700,
      the filled-button fill, clears it at 5.09:1, and 4.90:1 on a hovered row. */
   --accent-text:  #0369a1;
   /* Amber-600 is 3.18:1 under white and 5.35:1 under slate-900, so the ink stays dark here too
      -- unlike --accent-contrast, which flips between the themes. */
   --warning-contrast: #0f172a;
-  /* --danger (#e11d48) measures 4.72:1 on a white card -- a pass -- but drops to 3.94:1 once the
-     0.15 rose tint lightens the surface under it. Rose-700 clears that at 5.21:1. */
+  /* --danger (#e11d48) measures 4.72:1 on a white card -- a pass -- but drops to 3.71:1 on
+     --danger-tint. Rose-700 clears that at 4.96:1. */
   --danger-text:  #be123c;
   /* The dark theme's #d8b4fe is a pale lavender: on a white card under a light violet tint it is
      effectively invisible. Violet-700 on a 0.12 tint of violet-600 measures 7.4:1. */
   --cluster:      #7e22ce;
   --cluster-bg:   rgba(147, 51, 234, 0.12);
   --cluster-text: #6b21a8;
+  /* The dark theme's white lift, unchanged: on a white card it paints nothing, so the chip is an
+     outline. */
+  --chip-offline-bg: rgba(255, 255, 255, 0.05);
   --shadow:       0 4px 20px rgba(0, 0, 0, 0.06);
 }
 
@@ -1582,7 +1602,7 @@ tbody tr:hover { background: var(--bg-glass); }
 .stack > * + * { margin-top: var(--stack); }
 
 /* A table row whose entity is archived: the amber tint. The generic row hover paints over it. */
-tr.row-archived { background: rgba(255, 179, 0, 0.06); }
+tr.row-archived { background: color-mix(in srgb, var(--warning) 6%, transparent); }
 
 /* Buttons in a table cell, held to the right-hand edge of the row. The header cell over them takes
    the same class so the column title lines up. */
@@ -1727,8 +1747,8 @@ td.row-actions, th.row-actions {
 /* The table-cell size: 11px, so a row does not mix two badge sizes. */
 .badge-sm { font-size: 11px; }
 
-.badge-online  { background: rgba(0, 232, 150, 0.15); color: var(--success-text); }
-.badge-warning { background: rgba(255, 179, 0, 0.15);  color: var(--warning-text); }
+.badge-online  { background: var(--success-tint); color: var(--success-text); }
+.badge-warning { background: var(--warning-tint); color: var(--warning-text); }
 .badge-neutral { background: var(--bg-glass); color: var(--text-muted); border: 1px solid var(--border); }
 
 /* Variants named for what they say. `ok`, `critical` and `unknown` are the tones the credential,
@@ -1737,9 +1757,9 @@ td.row-actions, th.row-actions {
    --accent-text likewise. Unknown is neutral with a dashed border: the page could not read the
    state, which is not the same as a neutral one. */
 .badge-success,
-.badge-ok       { background: rgba(0, 232, 150, 0.15); color: var(--success-text); }
+.badge-ok       { background: var(--success-tint); color: var(--success-text); }
 .badge-danger,
-.badge-critical { background: rgba(255, 77, 109, 0.15); color: var(--danger-text); }
+.badge-critical { background: var(--danger-tint); color: var(--danger-text); }
 .badge-info     { background: var(--accent-dim); color: var(--accent-text); }
 .badge-unknown  { background: var(--bg-glass); color: var(--text-muted); border: 1px dashed var(--border); }
 
@@ -1748,15 +1768,15 @@ td.row-actions, th.row-actions {
    solid is waiting on a person (go install it), dashed is waiting on a machine that already has
    everything it needs. */
 .badge-pending {
-  background: rgba(0, 212, 255, 0.15);
+  background: var(--accent-dim);
   color: var(--accent-text);
-  border: 1px solid rgba(0, 212, 255, 0.45);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .badge-provisioned {
-  background: rgba(0, 212, 255, 0.07);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
   color: var(--accent-text);
-  border: 1px dashed rgba(0, 212, 255, 0.45);
+  border: 1px dashed color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 /* Out of commission: the warning badge with a border, and an icon in front. See ArchivedBadge. */
@@ -1836,11 +1856,11 @@ td.row-actions, th.row-actions {
 /* --danger-text, not --danger: this is text on a rose-tinted fill, on which --danger measures under
    AA in both themes. */
 .btn-danger {
-  background: rgba(255, 77, 109, 0.12);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
   color: var(--danger-text);
-  border: 1px solid rgba(255, 77, 109, 0.25);
+  border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
 }
-.btn-danger:hover { background: rgba(255, 77, 109, 0.2); box-shadow: 0 0 12px rgba(255, 77, 109, 0.2); }
+.btn-danger:hover { background: color-mix(in srgb, var(--danger) 20%, transparent); box-shadow: 0 0 12px color-mix(in srgb, var(--danger) 20%, transparent); }
 
 /* An action that is risky but not destructive: amber fill, --warning-contrast ink. Pair it with an
    icon or a word, since colour alone is not a signal. */
@@ -1865,9 +1885,9 @@ td.row-actions, th.row-actions {
 
 .btn-danger.btn-danger-reveal:hover,
 .btn-danger.btn-danger-reveal:focus-visible {
-  background: rgba(255, 77, 109, 0.2);
+  background: color-mix(in srgb, var(--danger) 20%, transparent);
   color: var(--danger-text);
-  border-color: rgba(255, 77, 109, 0.35);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
 }
 
 .btn-sm { padding: 6px 12px; font-size: 13px; }
@@ -1936,7 +1956,7 @@ td.row-actions, th.row-actions {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--scrim);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -2343,20 +2363,20 @@ td.row-actions, th.row-actions {
 .toast-dismiss:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
 
 .toast-success {
-  background-image: linear-gradient(rgba(0, 232, 150, 0.15), rgba(0, 232, 150, 0.15));
+  background-image: linear-gradient(var(--success-tint), var(--success-tint));
   border: 1px solid var(--success);
   color: var(--success-text);
 }
 
 /* --accent-text, the accent's label ink on its own tint (the pending badge's pairing). */
 .toast-info {
-  background-image: linear-gradient(rgba(0, 212, 255, 0.15), rgba(0, 212, 255, 0.15));
+  background-image: linear-gradient(var(--accent-dim), var(--accent-dim));
   border: 1px solid var(--accent);
   color: var(--accent-text);
 }
 
 .toast-warning {
-  background-image: linear-gradient(rgba(255, 179, 0, 0.15), rgba(255, 179, 0, 0.15));
+  background-image: linear-gradient(var(--warning-tint), var(--warning-tint));
   border: 1px solid var(--warning);
   color: var(--warning-text);
 }
@@ -2364,7 +2384,7 @@ td.row-actions, th.row-actions {
 /* --danger-text, not --danger: the bare signal colour is a border/icon tone and measures below
    AA once the 0.15 rose fill lightens the surface beneath it. */
 .toast-error {
-  background-image: linear-gradient(rgba(255, 77, 109, 0.15), rgba(255, 77, 109, 0.15));
+  background-image: linear-gradient(var(--danger-tint), var(--danger-tint));
   border: 1px solid var(--danger);
   color: var(--danger-text);
 }
@@ -2522,27 +2542,27 @@ td.row-actions, th.row-actions {
 
 .site-lane-site {
   border-color: var(--accent);
-  background: rgba(0, 212, 255, 0.05);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
 }
 
 .site-lane-site:hover,
-.site-lane-site.is-open { box-shadow: 0 0 14px rgba(0, 212, 255, 0.2); }
+.site-lane-site.is-open { box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 20%, transparent); }
 
 .site-lane-simulated {
   border-color: var(--text-dim);
-  background: rgba(133, 142, 163, 0.07);
+  background: color-mix(in srgb, var(--text-muted) 7%, transparent);
 }
 
 .site-lane-simulated:hover,
-.site-lane-simulated.is-open { box-shadow: 0 0 14px rgba(133, 142, 163, 0.18); }
+.site-lane-simulated.is-open { box-shadow: 0 0 14px color-mix(in srgb, var(--text-muted) 18%, transparent); }
 
 .site-lane-queue {
   border-color: var(--warning);
-  background: rgba(255, 179, 0, 0.06);
+  background: color-mix(in srgb, var(--warning) 6%, transparent);
 }
 
 .site-lane-queue:hover,
-.site-lane-queue.is-open { box-shadow: 0 0 14px rgba(255, 179, 0, 0.2); }
+.site-lane-queue.is-open { box-shadow: 0 0 14px color-mix(in srgb, var(--warning) 20%, transparent); }
 
 /* A lane wears its hue only while it holds something: an empty lane keeps its outline and drops
    the fill. The 4px cap stays, in grey, so empty lanes are as tall as full ones. Compounded, so it
@@ -2599,7 +2619,7 @@ td.row-actions, th.row-actions {
 .area-card.area-card-alerting,
 .area-card.area-card-alerting:hover {
   border-color: var(--danger);
-  box-shadow: 0 0 14px rgba(255, 77, 109, 0.25);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--danger) 25%, transparent);
 }
 
 /* An archived area: still drawn, with its plan and its pins, and muted the way an archived cell's
@@ -2807,7 +2827,7 @@ span.area-plan-pin { cursor: inherit; }
   border: 3px solid var(--pin-colour);
   background: var(--bg-card);
   color: var(--pin-colour);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-pin);
 }
 
 .area-plan-pin-small .area-plan-pin-disc {
@@ -2819,7 +2839,7 @@ span.area-plan-pin { cursor: inherit; }
 
 .area-plan-pin-small { gap: 2px; }
 
-.area-plan-pin-selected .area-plan-pin-disc { box-shadow: 0 0 0 3px var(--accent), 0 2px 8px rgba(0, 0, 0, 0.25); }
+.area-plan-pin-selected .area-plan-pin-disc { box-shadow: 0 0 0 3px var(--accent), var(--shadow-pin); }
 
 .area-plan-pin:focus-visible .area-plan-pin-disc { outline: 2px solid var(--accent); outline-offset: 2px; }
 
@@ -2999,7 +3019,7 @@ span.area-plan-pin { cursor: inherit; }
 }
 /* The same border and fill as `.chip-danger`, quoted rather than shared: a swatch that drifts from
    the chip it describes is a legend that lies. */
-.legend-chip-danger { border-color: var(--danger); background: rgba(255, 77, 109, 0.15); }
+.legend-chip-danger { border-color: var(--danger); background: var(--danger-tint); }
 
 /* A chip that navigates, used in the context drawers for Serving Gateway, Cell and Schema. A
    <button> rather than an <a>, because these are in-app tab switches with filter state, not URLs.
@@ -3030,12 +3050,12 @@ span.area-plan-pin { cursor: inherit; }
   padding: 10px 12px;
   margin-bottom: 14px;
   border: 1px solid var(--warning);
-  background: rgba(255, 179, 0, 0.12);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
 }
 
 .context-alert-critical {
   border-color: var(--danger);
-  background: rgba(255, 77, 109, 0.13);
+  background: color-mix(in srgb, var(--danger) 13%, transparent);
 }
 
 .context-alert-head {
@@ -3134,13 +3154,13 @@ span.area-plan-pin { cursor: inherit; }
 
 .alert-pill-critical {
   border-color: var(--danger);
-  background: rgba(255, 77, 109, 0.16);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
   color: var(--danger);
 }
 
 .alert-pill-warning {
   border-color: var(--warning);
-  background: rgba(255, 179, 0, 0.16);
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
   color: var(--warning-text);
 }
 
@@ -3185,7 +3205,7 @@ span.area-plan-pin { cursor: inherit; }
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-popover);
 }
 
 .alert-pill-panel-head {
@@ -3330,19 +3350,19 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
 }
 
 .notif-badge-info {
-  background-image: linear-gradient(rgba(0, 212, 255, 0.15), rgba(0, 212, 255, 0.15));
+  background-image: linear-gradient(var(--accent-dim), var(--accent-dim));
   border-color: var(--accent);
   color: var(--accent-text);
 }
 
 .notif-badge-warning {
-  background-image: linear-gradient(rgba(255, 179, 0, 0.15), rgba(255, 179, 0, 0.15));
+  background-image: linear-gradient(var(--warning-tint), var(--warning-tint));
   border-color: var(--warning);
   color: var(--warning-text);
 }
 
 .notif-badge-error {
-  background-image: linear-gradient(rgba(255, 77, 109, 0.15), rgba(255, 77, 109, 0.15));
+  background-image: linear-gradient(var(--danger-tint), var(--danger-tint));
   border-color: var(--danger);
   color: var(--danger-text);
 }
@@ -3360,7 +3380,7 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-popover);
 }
 
 /* Focused programmatically as it opens, so a screen reader announces it; the ring would only
@@ -3555,7 +3575,7 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
 .icon-picker-option.is-selected {
   border-color: var(--accent);
   color: var(--text-primary);
-  background: rgba(0, 212, 255, 0.08);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
@@ -3602,11 +3622,11 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
    accent is what distinguishes a gateway chip from a device chip at a glance. */
 .chip .mono { font-size: inherit; }
 
-.chip-gw { border-color: rgba(0, 232, 150, 0.3); }
-.chip-success { border-color: var(--success); background: rgba(0, 232, 150, 0.12); color: var(--text-primary); }
-.chip-warning { border-color: var(--warning); background: rgba(255, 179, 0, 0.12); color: var(--text-primary); }
-.chip-danger  { border-color: var(--danger);  background: rgba(255, 77, 109, 0.15); color: var(--danger); font-weight: 600; }
-.chip-offline { border-color: rgba(123, 132, 152, 0.4); background: rgba(255, 255, 255, 0.05); color: var(--text-muted); font-weight: 500; }
+.chip-gw { border-color: color-mix(in srgb, var(--success) 30%, transparent); }
+.chip-success { border-color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); color: var(--text-primary); }
+.chip-warning { border-color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, transparent); color: var(--text-primary); }
+.chip-danger  { border-color: var(--danger);  background: var(--danger-tint); color: var(--danger); font-weight: 600; }
+.chip-offline { border-color: color-mix(in srgb, var(--text-dim) 40%, transparent); background: var(--chip-offline-bg); color: var(--text-muted); font-weight: 500; }
 
 /* Context panel: the right-hand drawer, and the flex row that lets it push rather than cover.
    `min-width: 0` on the main column is what lets it give up width: a flex item defaults to
@@ -4478,10 +4498,10 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 /* The classification badge in the drawer's subtitle. Same tinted-fill convention as `.badge-*`
    above, and the same reason for the `-text` tokens: the bare signal colours are tuned for
    borders and fills, not for text. */
-.trail-badge-creation    { background: rgba(0, 232, 150, 0.15); color: var(--success-text); }
+.trail-badge-creation    { background: var(--success-tint);     color: var(--success-text); }
 .trail-badge-operational { background: var(--accent-dim);       color: var(--accent-text); }
-.trail-badge-governance  { background: rgba(255, 179, 0, 0.15); color: var(--warning-text); }
-.trail-badge-critical    { background: rgba(255, 77, 109, 0.15); color: var(--danger-text); }
+.trail-badge-governance  { background: var(--warning-tint);     color: var(--warning-text); }
+.trail-badge-critical    { background: var(--danger-tint);      color: var(--danger-text); }
 
 /* Stepping through one asset's history: full width of the subtitle row, stacked, because the
    position line and the two buttons are three things at three sizes. */
