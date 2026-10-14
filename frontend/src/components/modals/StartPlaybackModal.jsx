@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
+import { playbackWorkerDeployed } from '../../config'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
@@ -106,6 +107,9 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
 
   const unmapped = (capturedDevices || []).filter(d => !deviceMap[d])
 
+  // playback.enabled off: no worker exists to run a job, so none is queued.
+  const deployed = playbackWorkerDeployed()
+
   /**
    * Mint the replay lanes and fill the map from what came back. The target list is refreshed
    * afterwards, because `target.devices` is what the dropdowns render and was read before these
@@ -123,7 +127,8 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
   })
   // The worker check is not part of `ready` when the status is unknown: a dialog that refuses
   // because it could not read a courtesy row would be worse than the failure it prevents.
-  const ready = !!target
+  const ready = deployed
+    && !!target
     && target.gateway_has_broker_credential
     && (worker === undefined || !workerLive || workerHoldsCurrent(target))
     && unmapped.length === 0
@@ -160,13 +165,14 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
             disabled={!ready}
             // Stated rather than left to a greyed-out button, which explains nothing about why.
             title={ready ? undefined : (
-              !target ? 'Choose the Playback gateway'
-                : !target.gateway_has_broker_credential ? 'The Playback gateway holds no broker credential'
-                  : (workerLive && !workerHolds(target))
-                    ? 'The playback worker was not given this gateway’s password'
-                    : (workerLive && !workerHoldsCurrent(target))
-                      ? 'This credential was re-issued after the worker last picked one up — wait about a minute'
-                      : `${plural(unmapped.length, 'device')} still to map`
+              !deployed ? 'The playback worker is not deployed on this site (playback.enabled)'
+                : !target ? 'Choose the Playback gateway'
+                  : !target.gateway_has_broker_credential ? 'The Playback gateway holds no broker credential'
+                    : (workerLive && !workerHolds(target))
+                      ? 'The playback worker was not given this gateway’s password'
+                      : (workerLive && !workerHoldsCurrent(target))
+                        ? 'This credential was re-issued after the worker last picked one up — wait about a minute'
+                        : `${plural(unmapped.length, 'device')} still to map`
             )}
             onClick={submit}
           >
@@ -175,6 +181,18 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
         </>
       }
     >
+      {/* First, because nothing below matters until it is fixed. */}
+      {!deployed && (
+        <div className="callout callout-danger">
+          <IconShieldAlert size={14} className="callout-icon" />
+          <div>
+            <strong>Turn on the playback worker first.</strong> Set{' '}
+            <code>playback.enabled: true</code> in this site’s Helm values, then upgrade the
+            release. The worker is not deployed here, so a playback would never start.
+          </div>
+        </div>
+      )}
+
       {/* Warned only when it is true: a missing birth costs metrics only when the recording uses
           aliases, which `uses_aliases` records at capture time. */}
       {capture.manifest?.birth_captured === false && capture.manifest?.uses_aliases && (
@@ -304,7 +322,7 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
 
       {/* "Holds nothing" and "is not running" are different problems; the heartbeat tells them
           apart. */}
-      {worker !== undefined && !workerLive && (
+      {deployed && worker !== undefined && !workerLive && (
         <div className="callout callout-warning">
           <IconShieldAlert size={14} className="callout-icon" />
           <div>

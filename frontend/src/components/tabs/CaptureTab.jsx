@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api'
+import { playbackWorkerDeployed } from '../../config'
 import { REALTIME_ENABLED } from '../../constants'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { usePendingAction } from '../../hooks/usePendingAction'
@@ -751,7 +752,9 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               ? DENIED_TITLE
               : activePlayback
                 ? 'A playback is already running'
-                : 'Play this capture back onto the Playback gateway',
+                : playbackWorkerDeployed()
+                  ? 'Play this capture back onto the Playback gateway'
+                  : 'The playback worker is not deployed on this site. The dialog says how to turn it on.',
             onClick: () => setPlayFor(capture)
           },
           capture && {
@@ -994,7 +997,9 @@ function PlaybackStrip({ job, onStop, stopPending, canManage }) {
         )}
         <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>
           {pending
-            ? 'Waiting for the playback worker to pick it up. If this does not start within a few seconds, the worker is not running.'
+            ? (playbackWorkerDeployed()
+                ? 'Waiting for the playback worker to pick it up. If this does not start within a few seconds, the worker is not running.'
+                : 'Stop this, or set playback.enabled: true in the Helm values and upgrade. The playback worker is not deployed on this site, so it will not start.')
             : `${job.messages_sent}${total ? ` of ${total}` : ''} message${job.messages_sent === 1 ? '' : 's'} played back · ${job.elapsed_seconds}s`}
         </div>
       </div>

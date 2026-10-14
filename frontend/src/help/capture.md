@@ -23,7 +23,9 @@ A capture holds only the window it ran for. It does not reach back before it was
 
 A capture with no birth certificate can still be played back. A metric sent by its full name plays back normally. But the devices are not announced, so they stay OFFLINE until they send a birth of their own. A metric sent by alias cannot be resolved without a birth certificate, so it is dropped. That is why **NO BIRTH** shows in warning colour on a capture that uses aliases.
 
-Playback needs a broker credential of its own, for the Playback gateway. When that credential is issued, Aber delivers it to the playback worker within about a minute. It is not created by whoever presses the button. It is also not the credential of the gateway whose traffic is played back. So a playback cannot be mistaken for the machine it imitates, on the wire or in the historian.
+Playback needs the playback worker, which every install runs. If the playback dialog says the worker is not deployed, set `playback.enabled: true` in the site's Helm values and upgrade the release. Until then a playback cannot start.
+
+Playback also needs a broker credential of its own, for the Playback gateway. When that credential is issued, Aber delivers it to the playback worker within about a minute. It is not created by whoever presses the button. It is also not the credential of the gateway whose traffic is played back. So a playback cannot be mistaken for the machine it imitates, on the wire or in the historian.
 
 If a playback completes but loses readings whose timestamps were too old for the historian, it says so above the list.
 

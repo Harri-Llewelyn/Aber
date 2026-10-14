@@ -60,6 +60,8 @@ window.__ABER_CONFIG__ = window.__ABER_CONFIG__ || {
   VITE_HISTORIAN_PHYSICAL_BACKUP: %q,
   // true while supabaseDb.physicalBackup is on: the Backups page shows the platform database's own backup.
   VITE_PLATFORM_PHYSICAL_BACKUP: %q,
+  // playback.enabled. false: the playback worker is not deployed, and the Capture page says so.
+  VITE_PLAYBACK_ENABLED: %q,
 };
 `
   (include "aber.supabaseUrl" .)
@@ -74,7 +76,8 @@ window.__ABER_CONFIG__ = window.__ABER_CONFIG__ || {
   .Chart.AppVersion
   (.Values.backup.retentionDays | toString)
   (include "aber.physicalBackupOn" .)
-  (include "aber.platformBackupOn" .) -}}
+  (include "aber.platformBackupOn" .)
+  (.Values.playback.enabled | toString) -}}
 {{- /*
 The Content-Security-Policy, as one nginx add_header line mounted over the image's empty include.
 It names what config.js hands the bundle: the API (Realtime over its WebSocket scheme) and the

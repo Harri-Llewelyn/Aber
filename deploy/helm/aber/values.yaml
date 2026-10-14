@@ -89,8 +89,9 @@ secrets:
   releaseCheckKey: ""
 
   # The broker passwords the playback worker holds, keyed by gateway sparkplug_id:
-  #   mqttPlaybackCredentials: '{"gwy130000000000400080000":"..."}'
+  #   mqttPlaybackCredentials: '{"gwy160000000000400080000":"..."}'
   # Empty is valid: the worker refuses each job naming the gateway it lacks a credential for.
+  # The fallback for when automatic delivery fails. A change restarts the worker on upgrade.
   mqttPlaybackCredentials: ""
 
   # Superuser password for Supabase Postgres, and the password set on the scoped roles by the
@@ -959,9 +960,10 @@ mosquitto:
 # capture.py's plan_playback(), which is in that image), so the two cannot disagree about the
 # capture format.
 playback:
-  # Off by default: a diagnostic tool, and a cluster with no simulated gateways has nothing for
-  # it to publish as.
-  enabled: false
+  # On by default: every install seeds the Playback gateway for it to publish as, and without the
+  # worker the Capture page's Play back queues a job nothing ever runs. False removes the
+  # Deployment, and the page then says the worker is not deployed and names this key.
+  enabled: true
   # How often an idle worker looks for a queued job.
   pollIntervalSeconds: 3
   resources:

@@ -50,4 +50,6 @@ window.__ABER_CONFIG__ = window.__ABER_CONFIG__ || {
   VITE_HISTORIAN_PHYSICAL_BACKUP: '',
   // 'true' while supabaseDb.physicalBackup is on. Blank: the Backups page shows no platform database row.
   VITE_PLATFORM_PHYSICAL_BACKUP: '',
+  // playback.enabled. Blank: the Capture page treats the playback worker as deployed.
+  VITE_PLAYBACK_ENABLED: '',
 };

@@ -48,6 +48,9 @@ export const RUNTIME_SETTING_NAMES = [
   // 'true' while supabaseDb.physicalBackup is on: the Backups page shows the platform database's
   // own backup beside the historian's.
   'VITE_PLATFORM_PHYSICAL_BACKUP',
+  // playback.enabled. 'false' means the playback worker is not deployed, so the Capture page says
+  // so instead of queueing a playback nothing runs. Absent reads as deployed.
+  'VITE_PLAYBACK_ENABLED',
 ];
 
 /**
@@ -69,6 +72,7 @@ const BUILD_TIME_SETTINGS = {
   VITE_BACKUP_RETENTION_DAYS: import.meta.env.VITE_BACKUP_RETENTION_DAYS,
   VITE_HISTORIAN_PHYSICAL_BACKUP: import.meta.env.VITE_HISTORIAN_PHYSICAL_BACKUP,
   VITE_PLATFORM_PHYSICAL_BACKUP: import.meta.env.VITE_PLATFORM_PHYSICAL_BACKUP,
+  VITE_PLAYBACK_ENABLED: import.meta.env.VITE_PLAYBACK_ENABLED,
 };
 
 /**
@@ -109,6 +113,12 @@ export const readFlag = (name, fallback = false) => {
   const value = readSetting(name);
   return value === undefined ? fallback : value.toLowerCase() === 'true';
 };
+
+/**
+ * Whether the chart deployed the playback worker (playback.enabled). Absent reads as deployed: an
+ * older config.js and the Vite dev server name no such key. Read per call, so a test can set it.
+ */
+export const playbackWorkerDeployed = () => readFlag('VITE_PLAYBACK_ENABLED', true);
 
 /**
  * The Supabase origin and publishable key. These throw when unresolvable rather than defaulting:

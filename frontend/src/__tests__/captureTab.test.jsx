@@ -1,6 +1,6 @@
 import React from 'react'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { CaptureTab } from '../components/tabs/CaptureTab'
 import { captureManifest, capturePath } from '../api'
 import { tabIsVisible, TABS, groupedNav } from '../navigation'
@@ -981,6 +981,56 @@ describe('playing a capture back', () => {
     })
     await open()
     expect(await screen.findByText(/has not reported recently/)).toBeInTheDocument()
+  })
+
+  /**
+   * playback.enabled off: no worker exists, so the dialog names the setting rather than calling the
+   * worker late, and queues nothing.
+   */
+  describe('when the chart did not deploy the worker', () => {
+    beforeEach(() => { globalThis.__ABER_CONFIG__ = { VITE_PLAYBACK_ENABLED: 'false' } })
+    afterEach(() => { delete globalThis.__ABER_CONFIG__ })
+
+    it('says the worker is not deployed, names the setting, and will not start', async () => {
+      api.playbackWorkerStatus.mockResolvedValue(null)
+      await open()
+      expect(await screen.findByText(/Turn on the playback worker first/)).toBeInTheDocument()
+      expect(screen.getByText('playback.enabled: true')).toBeInTheDocument()
+      expect(screen.queryByText(/has not reported recently/)).toBeNull()
+
+      fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
+      fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
+        { target: { value: 'dev310000000000400080000' } })
+      const start = screen.getByRole('button', { name: 'Play back' })
+      expect(start).toBeDisabled()
+      expect(start.getAttribute('title')).toMatch(/not deployed.*playback\.enabled/)
+    })
+
+    it('tells a queued playback it will not start, and how to fix that', async () => {
+      api.activePlaybackJob.mockResolvedValue({
+        id: 'pb-1', status: 'PENDING', target_edge_node_id: 'gwy130000000000400080000',
+        gateways: { name: 'Playback Target' }, speed: 1,
+        messages_sent: 0, messages_total: 0, elapsed_seconds: 0
+      })
+      renderTab()
+      expect(await screen.findByText(/playback\.enabled: true in the Helm values/)).toBeInTheDocument()
+      expect(screen.queryByText(/Waiting for the playback worker/)).toBeNull()
+    })
+  })
+
+  /** An older config.js, or the Vite dev server, has no such key: the worker is assumed deployed. */
+  it('treats an absent setting as a deployed worker', async () => {
+    globalThis.__ABER_CONFIG__ = {}
+    try {
+      await open()
+      fireEvent.change(screen.getByLabelText('Playback gateway'), { target: { value: 'gw-sim' } })
+      fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
+        { target: { value: 'dev310000000000400080000' } })
+      expect(screen.queryByText(/Turn on the playback worker first/)).toBeNull()
+      expect(screen.getByRole('button', { name: 'Play back' })).not.toBeDisabled()
+    } finally {
+      delete globalThis.__ABER_CONFIG__
+    }
   })
 
   /**

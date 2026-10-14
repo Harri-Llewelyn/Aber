@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api'
+import { playbackWorkerDeployed } from '../../config'
 import { ActionButton } from '../common/ActionButton'
 import { copyText } from '../common/CopyableId'
 import { Modal } from '../common/Modal'
@@ -74,6 +75,7 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
   // (not a playback target; absent reads as null).
   const wasDelivered = credential?.playback_delivered === true
   const deliveryFailed = credential?.playback_delivered === false
+  const workerDeployed = playbackWorkerDeployed()
   const secretBlock = credential && isPlayback
     ? `{"${credential.mqtt_username}":"${credential.password}"}`
     : ''
@@ -222,8 +224,21 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
           </div>
 
           {/* Delivered means there is nothing to do: the credential service wrote the password where
-              the worker reads it. False is the one that needs a person. */}
-          {wasDelivered ? (
+              the worker reads it. False is the one that needs a person. With playback.enabled off
+              the password is stored all the same, for a worker that does not exist yet. */}
+          {wasDelivered && !workerDeployed ? (
+            <div className="form-group">
+              <strong className="gateway-delivered">
+                <IconCheck size={13} /> Saved for the playback worker.
+              </strong>
+              <div className="form-hint">
+                To use it, set <span className="mono">playback.enabled: true</span> in this
+                site’s Helm values and upgrade the release. The playback worker is not deployed
+                here yet. It reads this password when it starts. Copy the password above only if
+                you want it for something else; it is not shown again.
+              </div>
+            </div>
+          ) : wasDelivered ? (
             <div className="form-group">
               <strong className="gateway-delivered">
                 <IconCheck size={13} /> Delivered to the playback worker.
@@ -252,9 +267,14 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
                   )}
                   Set <span className="mono">secrets.mqttPlaybackCredentials</span> to this object
                   and upgrade the release. Already have other targets in there? Add this key to
-                  the existing object rather than replacing it. The playback worker picks the
-                  change up when its Secret refreshes, or at once after{' '}
-                  <span className="mono">kubectl rollout restart deploy/playback</span>.
+                  the existing object rather than replacing it. The upgrade restarts the playback
+                  worker, which then holds the password.
+                  {!workerDeployed && (
+                    <>
+                      {' '}The worker is not deployed on this site, so set{' '}
+                      <span className="mono">playback.enabled: true</span> in the same upgrade.
+                    </>
+                  )}
                 </span>
                 <button className="btn btn-ghost" onClick={() => copy('secret', secretBlock)}>
                   {copied === 'secret' ? <IconCheck size={13} /> : <IconCopy size={13} />} Copy block

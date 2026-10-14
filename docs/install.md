@@ -438,6 +438,9 @@ dashboard shows the new password once. Give it to the person yourself.
 - **A new install is empty.** It has no cells, devices, schemas or metrics, one gateway (the
   Playback gateway, which replays recorded data), and an empty Node-RED editor. The
   [tutorial](../tutorial/README.md) builds your first machine.
+- **The playback worker runs from the start.** It publishes a recording when someone plays one
+  back on the Capture page, and is idle otherwise. To leave it out, set `playback.enabled` to
+  `false` in `site.yaml` and install again. The Capture page then says the worker is not deployed.
 - **Node-RED's editor is empty because nothing has been built yet, not because something failed to
   load.** It has no broker connection, so nothing connects and nothing is sent. `node-red-init`
   writes a marker into `/data` when it sets up the blank flow, which is how the two cases are told
