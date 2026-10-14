@@ -93,7 +93,8 @@ It prints one plugin per line, its id first and then the types it also answers t
 
 **Measured, 2026-10-14.** Plain Docker, `grafana/grafana:13.2.3`, this directory's `grafana.ini`
 and provisioning mounted as the chart mounts them, all four datasources healthy against Postgres,
-Prometheus and Loki containers, no memory limit, sampled one to three minutes after start:
+Prometheus and Loki containers, no memory limit, the page cache dropped between the runs, sampled
+one to three minutes after start:
 
 | | Before: all thirteen loaded | After: ten disabled |
 | :--- | ---: | ---: |
