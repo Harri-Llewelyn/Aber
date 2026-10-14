@@ -1,12 +1,16 @@
 import React from 'react'
-import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, renderHook, screen, waitFor, fireEvent, act } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import App from '../App'
 import { documentTitle, APP_TITLE } from '../hooks/useDocumentTitle'
+import { useAlertFavicon, FAVICON, ALERT_FAVICON } from '../hooks/useAlertFavicon'
+import fs from 'node:fs'
+import path from 'node:path'
 
 /**
- * The browser tab's title names the current page and leads with the alert pill's count. The count
- * must follow the pill, and must not outlive the session that could read it.
+ * The browser tab's title names the current page and leads with the alert pill's count, and its
+ * icon carries a red dot while that count is above zero. Both must follow the pill, and must not
+ * outlive the session that could read it.
  */
 
 const mockSession = {
@@ -112,5 +116,94 @@ describe('the tab title in the app', () => {
     await waitFor(() => expect(document.title).toBe('Aber | Sign in'))
     fireEvent.click(screen.getByRole('button', { name: /forgot your password/i }))
     expect(document.title).toBe('Aber | Reset password')
+  })
+})
+
+describe('the tab icon', () => {
+  let authCallback
+  let link
+
+  // index.html's own icon link, which the hook swaps rather than adding one.
+  beforeEach(() => {
+    link = document.createElement('link')
+    link.setAttribute('rel', 'icon')
+    link.setAttribute('type', 'image/svg+xml')
+    link.setAttribute('href', FAVICON)
+    document.head.appendChild(link)
+  })
+
+  afterEach(() => link.remove())
+
+  it('follows the count: plain at none, the red dot while any fire, plain again at none', () => {
+    const { rerender, unmount } = renderHook(({ count }) => useAlertFavicon(count), { initialProps: { count: 0 } })
+    expect(link.getAttribute('href')).toBe(FAVICON)
+    rerender({ count: 3 })
+    expect(link.getAttribute('href')).toBe(ALERT_FAVICON)
+    rerender({ count: 1 })
+    expect(link.getAttribute('href')).toBe(ALERT_FAVICON)
+    rerender({ count: 0 })
+    expect(link.getAttribute('href')).toBe(FAVICON)
+    rerender({ count: 2 })
+    unmount()
+    expect(link.getAttribute('href')).toBe(FAVICON)
+  })
+
+  it('both icons are files the dashboard serves, the alert one with the danger red', () => {
+    const publicDir = path.resolve(__dirname, '../../public')
+    expect(fs.existsSync(path.join(publicDir, FAVICON))).toBe(true)
+    const alertIcon = fs.readFileSync(path.join(publicDir, ALERT_FAVICON), 'utf8')
+    // The light theme's --danger: 3.6:1 or more on light tab strips, and the white ring around it
+    // carries it on dark ones.
+    const lightTheme = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
+      .match(/\[data-theme="light"\]\s*\{([^}]*)\}/)[1]
+    const danger = lightTheme.match(/--danger:\s*(#[0-9a-f]{6})\b/i)[1]
+    expect(alertIcon).toContain(`fill="${danger}"`)
+    expect(fs.readFileSync(path.resolve(publicDir, '../index.html'), 'utf8'))
+      .toContain(`<link rel="icon" type="image/svg+xml" href="${FAVICON}" />`)
+  })
+
+  describe('in the app', () => {
+    beforeEach(() => {
+      vi.clearAllMocks()
+      alertRows = []
+      window.history.pushState({}, '', '/')
+      supabase.auth.getSession.mockResolvedValue({ data: { session: mockSession } })
+      supabase.auth.getUser.mockResolvedValue({ data: { user: mockSession.user }, error: null })
+      supabase.auth.signOut.mockResolvedValue({ error: null })
+      supabase.auth.onAuthStateChange.mockImplementation((cb) => {
+        authCallback = cb
+        return { data: { subscription: { unsubscribe: vi.fn() } } }
+      })
+      supabase.from.mockImplementation((table) => {
+        const rows = table === 'platform_alerts_active' ? alertRows : []
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          order: vi.fn().mockImplementation(() => Promise.resolve({ data: rows, error: null }))
+        }
+      })
+    })
+
+    it('stays plain while nothing is firing', async () => {
+      render(<App />)
+      await waitFor(() => expect(document.title).toBe('Aber | Site Map'))
+      expect(link.getAttribute('href')).toBe(FAVICON)
+    })
+
+    it('carries the dot from the same list as the title and the pill', async () => {
+      alertRows = firing
+      render(<App />)
+      await waitFor(() => expect(document.title).toBe('(2) Aber | Site Map'))
+      expect(link.getAttribute('href')).toBe(ALERT_FAVICON)
+    })
+
+    it('goes back to the plain icon on sign-out', async () => {
+      alertRows = firing
+      render(<App />)
+      await waitFor(() => expect(link.getAttribute('href')).toBe(ALERT_FAVICON))
+      act(() => authCallback('SIGNED_OUT', null))
+      await waitFor(() => expect(document.title).toBe('Aber | Sign in'))
+      expect(link.getAttribute('href')).toBe(FAVICON)
+    })
   })
 })

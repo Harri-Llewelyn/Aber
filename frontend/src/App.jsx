@@ -20,6 +20,7 @@ import { useClickOutside } from './hooks/useClickOutside'
 import { useEscapeKey } from './hooks/useEscapeKey'
 import { useSidebarMode } from './hooks/useSidebarMode'
 import { useDocumentTitle } from './hooks/useDocumentTitle'
+import { useAlertFavicon } from './hooks/useAlertFavicon'
 import { Sidebar } from './components/common/Sidebar'
 import { GlobalSearch } from './components/common/GlobalSearch'
 import { AberMark } from './components/common/AberMark'
@@ -534,8 +535,10 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   // under the bar and the tab title.
   const connection = useConnectionStatus()
 
-  // The page's rail label, and the pill's count, so the tab and the bar never disagree.
+  // The page's rail label, and the pill's count, so the tab and the bar never disagree. The icon's
+  // red dot follows the same count, for a pinned tab that shows no title.
   useDocumentTitle(TABS.find(t => t.id === tab)?.label, firingAlerts.length, connection.status !== CONNECTION_OK)
+  useAlertFavicon(firingAlerts.length)
 
   // What the rail flags, with a number, to a viewer who can act on it: quarantine, offline gateways,
   // unfiled cells and waiting proposals. Owned here for the same reason the alerts are.
