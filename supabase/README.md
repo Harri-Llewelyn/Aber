@@ -5256,9 +5256,13 @@ self-check asserts that absence directly.
 | `fallback_source` | The env var or constant that applies when the row was never changed |
 | `updated_by` | Stamped by trigger from `auth.uid()`; **not writable by the caller** |
 
-**Nothing secret goes in this table — that is a rule, not a convention.** Every row is readable by
-every authenticated user, deliberately: a setting shapes what a page renders, so an
-Administrator-only `SELECT` would break that page for everyone else in a way that reads as a bug.
+**Nothing secret goes in this table — that is a rule, not a convention.** Every authenticated user
+can read every row except those flagged `sensitive`, which only an `Administrator` can read
+(`USING (NOT sensitive OR has_role(ARRAY['Administrator']))`). Readable is the default, and
+deliberately: a setting shapes what a page renders, so an Administrator-only `SELECT` would break
+that page for everyone else in a way that reads as a bug. Two destinations are flagged: the cold
+archive's five `archive.*` fields and the off-site backup's `backup_offsite.*` rows. A flagged row
+is still not a secret: an Administrator's dashboard shows it.
 
 **Secrets live in Supabase Vault, and who issued a secret decides how it gets there.**
 
