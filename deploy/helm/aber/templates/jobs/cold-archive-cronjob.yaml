@@ -51,6 +51,12 @@ spec:
             runAsGroup: 10001
             seccompProfile:
               type: RuntimeDefault
+          # What the run reaches first, in order: the gateway for its settings and destination, then
+          # the historian. Under a NetworkPolicy a new pod's first connections are refused for
+          # about a second, and a refused settings read is taken as archive.enabled off.
+          initContainers:
+            {{- include "aber.waitFor" (dict "ctx" . "name" "wait-for-gateway" "image" (include "aber.curlImage" $) "command" (printf "curl -sf -o /dev/null -H \"apikey: $SUPABASE_PUBLISHABLE_KEY\" %s/rest/v1/" (include "aber.supabase.internalUrl" .)) "describe" "supabase-envoy (the archive settings and destination are read through it)" "env" (include "aber.secretEnv" (dict "name" "SUPABASE_PUBLISHABLE_KEY" "secretName" $secretName "key" "SUPABASE_PUBLISHABLE_KEY"))) | nindent 12 }}
+            {{- include "aber.waitForPostgres" (dict "ctx" . "name" "wait-for-timescaledb" "host" (include "aber.timescale.host" .) "port" (include "aber.timescale.port" .) "user" "ingest_writer" "db" .Values.timescaledb.database "passwordKey" "INGEST_WRITER_PASSWORD") | nindent 12 }}
           containers:
             - name: cold-archive
               image: {{ include "aber.image" (dict "image" .Values.ingestion.image "ctx" $) | quote }}

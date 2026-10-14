@@ -8,6 +8,9 @@
        volume mount naming a PVC that does not exist, which would leave the CronJob permanently
        unschedulable. */ -}}
 {{- $includeStorage := eq (include "aber.backupMountsStorage" .) "true" -}}
+{{- /* The databases a run dumps, read by its waits and its dumps alike. */ -}}
+{{- $dumpsPlatform := .Values.supabaseDb.enabled -}}
+{{- $dumpsHistorian := and .Values.timescaledb.enabled (not (include "aber.physicalBackupOn" .)) -}}
 {{/*
 =================================================================================================
 Scheduled logical backups -- AND THE ONLY RECOVERY PATH THIS STACK HAS.
@@ -136,6 +139,17 @@ spec:
             fsGroupChangePolicy: OnRootMismatch
             seccompProfile:
               type: RuntimeDefault
+          {{- if or $dumpsPlatform $dumpsHistorian }}
+          # Each database this run dumps, as the role that dumps it. Under a NetworkPolicy a new
+          # pod's first connections are refused for about a second.
+          initContainers:
+            {{- if $dumpsPlatform }}
+            {{- include "aber.waitForPostgres" (dict "ctx" . "name" "wait-for-supabase-db" "host" (include "aber.supabaseDb.host" .) "port" (include "aber.supabaseDb.port" .) "user" "supabase_admin" "db" "postgres" "passwordKey" "POSTGRES_PASSWORD") | nindent 12 }}
+            {{- end }}
+            {{- if $dumpsHistorian }}
+            {{- include "aber.waitForPostgres" (dict "ctx" . "name" "wait-for-timescaledb" "host" (include "aber.timescale.host" .) "port" (include "aber.timescale.port" .) "user" .Values.timescaledb.username "db" .Values.timescaledb.database "passwordKey" "DB_PASSWORD") | nindent 12 }}
+            {{- end }}
+          {{- end }}
           containers:
             - name: backup
               # The supabase/postgres image, for its pg_dump. THE DUMPING CLIENT MUST BE AT LEAST THE
@@ -189,9 +203,9 @@ spec:
                     `pg_restore --clean` dies on the first of them with `must be owner of event
                     trigger pgrst_drop_watch`. Both roles authenticate with postgresPassword.
                   */}}
-                  {{ if .Values.supabaseDb.enabled }}dump supabase-db {{ include "aber.supabaseDb.host" . }} {{ include "aber.supabaseDb.port" . }} supabase_admin postgres "$SUPABASE_PGPASSWORD"{{ end }}
+                  {{ if $dumpsPlatform }}dump supabase-db {{ include "aber.supabaseDb.host" . }} {{ include "aber.supabaseDb.port" . }} supabase_admin postgres "$SUPABASE_PGPASSWORD"{{ end }}
                   {{- /* The historian is backed up by pgBackRest instead while timescaledb.physicalBackup is on. */}}
-                  {{ if and .Values.timescaledb.enabled (not (include "aber.physicalBackupOn" .)) }}dump timescaledb {{ include "aber.timescale.host" . }} {{ include "aber.timescale.port" . }} {{ .Values.timescaledb.username }} {{ .Values.timescaledb.database }} "$TS_PGPASSWORD"{{ end }}
+                  {{ if $dumpsHistorian }}dump timescaledb {{ include "aber.timescale.host" . }} {{ include "aber.timescale.port" . }} {{ .Values.timescaledb.username }} {{ .Values.timescaledb.database }} "$TS_PGPASSWORD"{{ end }}
                   {{- if $includeStorage }}
 
                   echo '--- archive the storage objects (every bucket)'

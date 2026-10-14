@@ -1385,6 +1385,11 @@ does not exempt kubelet probes from ingress policy. Add an ingress allow from th
   gateway. pg_net has no retries and no dead-letter queue (DLQ), so blocking this flow drops every
   notification silently.
 
+**A new pod's first connections are refused for about a second**, until the policy controller
+admits the pod. So each Job and CronJob in the chart starts with an init container that retries
+until the services it connects to answer. The `claim-templates` hook retries its own calls instead.
+Give a Job you add the same wait: check 80 of `scripts/check-docs-drift.mjs` fails one without it.
+
 **`networkPolicy.apiServerCidr` admits the pods that call the Kubernetes API**, on
 `networkPolicy.apiServerPorts`: Alloy, the broker pod's credential sidecar, the backup service
 when `backup.ca` names a Secret, the e2e Job, and the forge pod. Each holds a ServiceAccount token in
