@@ -1457,13 +1457,13 @@ the gateway against a stack that looks fine. The chart never generates them, and
 skipped under `existingSecret`, when the values are not the chart's to see (§3.2). Beyond the set,
 each conditional requirement is stated with the failure it prevents: the BI reader password when
 Grafana is enabled (its datasource initContainer refuses to start without one); the two
-machine-principal keys unconditionally, because `helm install` reports success while the ingestion
-daemon halts itself rather than run fail-open and the only symptom is `0 of 1 updated replicas are
-available`; the credential service's token at 32 characters, because the service exits 2 on less
-rather than running open and, as a sidecar in the broker's pod, takes the pod's readiness with it
-while the rollout error names `i3x-service`; the plugin's admin password, without which the
-broker's initContainer exits 1; and the playback key when playback is on, whose absence is a
-CrashLoopBackOff naming an environment variable rather than the values key that fills it.
+machine-principal keys unconditionally, the playback key even while playback is off, because
+`helm install` reports success while the ingestion daemon halts itself rather than run fail-open
+and the only symptom is `0 of 1 updated replicas are available`; the credential service's token at
+32 characters, because the service exits 2 on less rather than running open and, as a sidecar in
+the broker's pod, takes the pod's readiness with it while the rollout error names `i3x-service`;
+the plugin's admin password, without which the broker's initContainer exits 1; and the release
+check's key when the release check is on, without which every run fails at the gate.
 
 **The demo secret is refused on anything not plainly local.** `values-dev.yaml` legitimately
 carries the published Supabase demo credentials and CI installs with it, so the value alone cannot

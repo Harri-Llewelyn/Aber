@@ -353,15 +353,17 @@ this is a Helm error rather than a CrashLoopBackOff.
 {{- $missing = append $missing "secrets.ingestWriterPassword (INGEST_WRITER_PASSWORD, required while ingestion.dbUser is ingest_writer -- the role does not exist without it, and the only other historian credential is the superuser)" -}}
 {{- end -}}
 {{/*
-  The two machine-principal keys: without them helm install reports success while the ingestion
-  daemon halts itself rather than run fail-open, and the only symptom is 0 of 1 updated replicas
-  are available. Unconditional; neither workload has an enabled flag.
+  The two machine-principal keys, both required on every install. Without the ingestion key helm
+  install reports success while the daemon halts itself rather than run fail-open, and the only
+  symptom is 0 of 1 updated replicas are available. The playback key is required even while
+  playback.enabled is off; the worker refuses to start without it. mqttPlaybackCredentials is not
+  required: no broker credential is correct for a stack that has issued no playback targets yet.
   */}}
 {{- if not .Values.secrets.ingestionKey -}}
 {{- $missing = append $missing "secrets.ingestionKey (SUPABASE_INGESTION_KEY, required -- the ingestion daemon halts rather than start its MQTT loop without it, so the stack installs and then never becomes ready)" -}}
 {{- end -}}
 {{- if not .Values.secrets.playbackKey -}}
-{{- $missing = append $missing "secrets.playbackKey (SUPABASE_PLAYBACK_KEY, required -- Service_Playback is the identity broker playback publishes under, and it is deliberately not service_role)" -}}
+{{- $missing = append $missing "secrets.playbackKey (SUPABASE_PLAYBACK_KEY, required even with playback off -- a JWT signed by jwtSecret for subject b0000000-0000-4000-8000-000000000003, Service_Playback, the identity broker playback publishes under and deliberately not service_role)" -}}
 {{- end -}}
 {{- if not .Values.secrets.fdwReaderPassword -}}
 {{- $missing = append $missing "secrets.fdwReaderPassword (FDW_READER_PASSWORD, required -- Supabase's postgres_fdw mapping authenticates as fdw_reader, and the only alternative is the historian superuser)" -}}
@@ -380,14 +382,6 @@ above. The credential service authenticates as it; nothing else does.
 */}}
 {{- if and .Values.mosquitto.enabled (not .Values.secrets.mqttDynsecAdminPassword) -}}
 {{- $missing = append $missing "secrets.mqttDynsecAdminPassword (MQTT_DYNSEC_ADMIN_PASSWORD, required -- the account the credential service administers the broker's Dynamic Security plugin as)" -}}
-{{- end -}}
-{{/*
-Conditional, because playback is off by default: the worker refuses to start without the key and
-the CrashLoopBackOff names an env var. mqttPlaybackCredentials is not required beside it: no broker
-credential is correct for a stack that has issued no playback targets yet.
-*/}}
-{{- if and .Values.playback.enabled (not .Values.secrets.playbackKey) -}}
-{{- $missing = append $missing "secrets.playbackKey (SUPABASE_PLAYBACK_KEY, required when playback.enabled -- a JWT signed by jwtSecret for subject b0000000-0000-4000-8000-000000000003, Service_Playback)" -}}
 {{- end -}}
 {{/*
 Conditional, because the release check is off by default: without the key every run fails at the
