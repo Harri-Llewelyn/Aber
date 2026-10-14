@@ -141,7 +141,49 @@ describe('GatewayCredentialModal', () => {
     expect(written[0]).not.toContain('<NAME>')
     expect(screen.queryAllByText(/aberCredentialsEnv/)).toHaveLength(0)
     expect(screen.queryAllByText(/Node-RED/)).toHaveLength(0)
-    expect(screen.getByText(/rollout restart deploy\/playback/)).toBeInTheDocument()
+    // The chart's checksum on the value rolls the worker, so the upgrade is the whole step.
+    expect(screen.getByText(/The upgrade restarts the playback worker/)).toBeInTheDocument()
+    expect(document.body.textContent).not.toMatch(/kubectl/)
+  })
+
+  describe('a delivered Playback gateway credential', () => {
+    const PLAYBACK = { ...GATEWAY, is_shadow: true }
+    const mintDelivered = async () => {
+      api.mintGatewayCredential.mockResolvedValue({ ...CREDENTIAL, playback_delivered: true })
+      render(<GatewayCredentialModal gateway={PLAYBACK} onClose={vi.fn()} showToast={vi.fn()} />)
+      await confirmAndMint()
+    }
+    afterEach(() => { delete globalThis.__ABER_CONFIG__ })
+
+    it('says it was delivered and that nothing more is needed', async () => {
+      await mintDelivered()
+      expect(await screen.findByText(/Delivered to the playback worker/)).toBeInTheDocument()
+      expect(screen.getByText(/Nothing further to do/)).toBeInTheDocument()
+    })
+
+    /** playback.enabled off: the Secret holds the password, and no worker reads it. */
+    it('does not claim delivery when the worker is not deployed, and names the setting', async () => {
+      globalThis.__ABER_CONFIG__ = { VITE_PLAYBACK_ENABLED: 'false' }
+      await mintDelivered()
+      expect(await screen.findByText(/Saved for the playback worker/)).toBeInTheDocument()
+      expect(screen.getByText('playback.enabled: true')).toBeInTheDocument()
+      expect(screen.queryByText(/Delivered to the playback worker/)).toBeNull()
+      expect(screen.queryByText(/Nothing further to do/)).toBeNull()
+    })
+  })
+
+  it('adds the worker setting to the fallback when delivery failed and the worker is not deployed', async () => {
+    globalThis.__ABER_CONFIG__ = { VITE_PLAYBACK_ENABLED: 'false' }
+    try {
+      api.mintGatewayCredential.mockResolvedValue({ ...CREDENTIAL, playback_delivered: false })
+      render(<GatewayCredentialModal gateway={{ ...GATEWAY, is_shadow: true }}
+        onClose={vi.fn()} showToast={vi.fn()} />)
+      await confirmAndMint()
+      expect(await screen.findByText(/Automatic delivery to the playback worker failed/)).toBeInTheDocument()
+      expect(screen.getByText('playback.enabled: true')).toBeInTheDocument()
+    } finally {
+      delete globalThis.__ABER_CONFIG__
+    }
   })
 
   /**

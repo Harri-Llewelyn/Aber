@@ -1098,14 +1098,14 @@ kubectl -n aber get pvc          # delete deliberately, never as cleanup habit
 | `supabase-storage`, `supabase-functions` | deployed |
 | `supabase-meta`, `supabase-studio`, `swagger-ui` | deployed |
 | `db-roles-init`, `db-init`, `storage-policies`, `storage-init`, `timescaledb-maintenance` hooks | deployed |
-| `mosquitto` + `mosquitto-external`, `ingestion` | deployed |
+| `mosquitto` + `mosquitto-external`, `ingestion`, `playback` | deployed |
 | `node-red`, `frontend` | deployed |
 | `i3x-service` | deployed |
 | `gitea` + `gitea-external` | deployed |
 | `prometheus`, `loki`, `alloy`, the `cold-archive` CronJob | deployed |
 | `grafana`, `Ingress` (9 subdomain routes) | deployed |
 | `helm test` (the FDW link, the API, the broker, ingestion, the dashboard), k3d CI | deployed |
-| In-cluster E2E Jobs, `playback`, the backup service, historian physical backup, database TLS | **available, off by default** |
+| In-cluster E2E Jobs, the backup service, historian physical backup, database TLS | **available, off by default** |
 | NetworkPolicies, PDBs, HPAs, backup CronJob | **available, off by default** |
 | MQTTS on 8883, internal CA, ServiceMonitors | **available, off by default** |
 

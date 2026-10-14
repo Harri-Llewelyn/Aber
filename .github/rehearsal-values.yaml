@@ -63,6 +63,8 @@ ingestion:
   # writer racing the backup would be a moving target for a job that asserts a count did not move.
   enabled: false
 playback:
+  # On by default, so off here explicitly: it runs on the ingestion image, which the rehearsal does
+  # not build, and it holds no state. The site rehearsals run it.
   enabled: false
 coldArchive:
   # A CronJob on the ingestion image, which the rehearsal does not build.
