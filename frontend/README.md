@@ -254,6 +254,10 @@ with `getUser()` before anything renders. The spinner stays up for that round tr
 - **An unreachable auth server is not a rejection.** A fetch failure or a 5xx comes back as
   `AuthRetryableFetchError`, supabase-js keeps the session, and the dashboard opens on it. The
   connection strip then says whether the page is updating.
+- **The wait is bounded.** A connection that never answers would hold the spinner until the browser
+  gives up, so after `AUTH_CHECK_TIMEOUT_MS` (10 seconds) the page opens as it would for an
+  unreachable server. It uses the session supabase-js last announced. A refusal that arrives later
+  still signs the page out, with the same notice.
 
 ---
 

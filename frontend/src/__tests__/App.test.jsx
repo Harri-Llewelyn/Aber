@@ -197,4 +197,55 @@ describe('App Component', () => {
       expect(window.location.pathname).toBe('/devices')
     })
   })
+
+  describe('when the auth server does not answer', () => {
+    // Only the timer restoreSession races getUser() against is faked; the page's own intervals and
+    // React's scheduling keep running.
+    beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }) })
+    afterEach(() => { vi.useRealTimers() })
+
+    const advance = (ms) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
+
+    it('opens on the stored session after ten seconds, with no notice', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      supabase.auth.getSession.mockResolvedValue({ data: { session: mockSession } })
+      supabase.auth.getUser.mockImplementation(() => new Promise(() => {}))
+
+      render(<App />)
+      await advance(9900)
+      expect(screen.getByText(/Connecting to Supabase Auth/)).toBeInTheDocument()
+
+      await advance(100)
+      expect(screen.getByText('Aber')).toBeInTheDocument()
+      expect(screen.queryByText(/session is no longer valid/i)).not.toBeInTheDocument()
+      expect(supabase.auth.signOut).not.toHaveBeenCalled()
+      expect(warn).toHaveBeenCalledWith(
+        '[auth] the auth server did not answer within 10 s; opening on the stored session'
+      )
+    })
+
+    it('still honours a refusal that arrives after the dashboard opened, with the notice', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {})
+      supabase.auth.getSession.mockResolvedValue({ data: { session: mockSession } })
+      let answer
+      supabase.auth.getUser.mockImplementation(() => new Promise(resolve => { answer = resolve }))
+
+      render(<App />)
+      await advance(10000)
+      expect(screen.getByText('Aber')).toBeInTheDocument()
+
+      // At 12 s auth-js gets GoTrue's session_not_found: it drops the session, then returns.
+      await advance(2000)
+      await act(async () => {
+        supabase.auth.getSession.mockResolvedValue({ data: { session: null } })
+        authCallback('SIGNED_OUT', null)
+        answer({ data: { user: null }, error: new AuthSessionMissingError() })
+      })
+      await advance(0)
+
+      expect(screen.getByText('Sign in to Aber')).toBeInTheDocument()
+      expect(screen.getByText(/session is no longer valid on the server/i)).toBeInTheDocument()
+      expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
+    })
+  })
 })
