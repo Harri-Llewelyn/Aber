@@ -109,8 +109,17 @@ one to three minutes after start:
 | `memory.current` | 817-1010 MiB | 610-642 MiB |
 
 Plugin loading at start took 1.5 s before and 0.4 s after. On the k3d dev stack, chart 1.4, the
-pod's `memory.current` was 976 MiB of its 1 GiB limit, and its 13 plugin processes held about
-434 MiB RSS. **[After, on k3d: to be measured; the coordinator adds the figure here.]**
+pod's `memory.current` was 976 MiB of its 1 GiB limit after running for a day, and its 13 plugin
+processes held about 434 MiB RSS. Measured again on k3d with the page cache dropped and Grafana
+restarted, three minutes after start:
+
+| On k3d | Before | After |
+| :--- | ---: | ---: |
+| Plugin processes | 13 | 3 |
+| Their RSS | 451 MiB | 126 MiB |
+| Anonymous memory | 272 MiB | 214 MiB |
+| Working set | 305 MiB | 234 MiB |
+| *Container Near Memory Limit*'s ratio | 65.9% | 21.6% |
 
 ## Conventions every rule follows
 
