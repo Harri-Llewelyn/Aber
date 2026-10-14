@@ -58,6 +58,22 @@ const CUSTOM_TYPE = '__custom__'
 // name), because Machinery and Robotics both define names like `Manufacturer`.
 const OPCUA_KEY_SEP = '::'
 
+// The catalog's Standard filter: '' is All standards, and this sentinel is Local extension, because
+// a local extension's own value, STANDARDS.CUSTOM, is '' too.
+const LOCAL_STANDARD_FILTER = '__local__'
+
+// The standards the Standard filter offers, in the Add Metric form's order. Local extension follows.
+const FILTER_STANDARDS = STANDARD_OPTIONS.filter(o => o.value !== STANDARDS.CUSTOM)
+
+/** The Standard filter option a metric falls under. */
+const standardFilterValue = (m) => m.standard || LOCAL_STANDARD_FILTER
+
+/**
+ * No semantic id, as the AAS export counts it: NULL and '' alike. The dashboard stores a blank id
+ * as NULL, but a row written in SQL can hold ''.
+ */
+const isUnmapped = (m) => !m.semantic_id
+
 // Extracted because three paths need it: the initial state, a successful add, and closing
 // the dialog. Duplicating the shape was how a field would get missed from one of the resets.
 const BLANK_METRIC = {
@@ -139,12 +155,20 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // Filters the catalog by metric name. With groups collapsed by default it is how one metric is
   // found without opening each group.
   const [catalogSearch, setCatalogSearch] = useState('')
+  // The catalog's other filters: a standard (or LOCAL_STANDARD_FILTER), and metrics with no id.
+  const [standardFilter, setStandardFilter] = useState('')
+  const [unmappedOnly, setUnmappedOnly] = useState(false)
+  const catalogFilterCount = [catalogSearch, standardFilter, unmappedOnly].filter(Boolean).length
+  const clearCatalogFilters = () => {
+    setCatalogSearch(''); setStandardFilter(''); setUnmappedOnly(false)
+  }
 
   /**
-   * A group is open when the operator opened it. While a search narrows the catalog it is open
-   * unless explicitly closed: a search that left the groups shut would show headers and no matches.
+   * A group is open when the operator opened it. While the search or a filter narrows the catalog it
+   * is open unless explicitly closed: a filter that left the groups shut would show headers and no
+   * matches.
    */
-  const isGroupOpen = (label) => (catalogSearch ? expandedGroups[label] !== false : expandedGroups[label] === true)
+  const isGroupOpen = (label) => (catalogFilterCount > 0 ? expandedGroups[label] !== false : expandedGroups[label] === true)
   const toggleGroup = (label) =>
     setExpandedGroups(prev => ({ ...prev, [label]: !isGroupOpen(label) }))
 
@@ -452,14 +476,23 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const matchesCatalogSearch = (m) =>
     !catalogSearch || (m.name || '').toLowerCase().includes(catalogSearch.trim().toLowerCase())
 
+  const matchesCatalogFilters = (m) =>
+    matchesCatalogSearch(m) &&
+    (!standardFilter || standardFilterValue(m) === standardFilter) &&
+    (!unmappedOnly || isUnmapped(m))
+
   const currentCatalog = catalog.filter(m => !m.deprecated)
-  const activeCatalog = currentCatalog.filter(matchesCatalogSearch)
-  // Its own tab, unfiltered: the search box belongs to the catalog tab.
+  const activeCatalog = currentCatalog.filter(matchesCatalogFilters)
+  // The filters' counts are over the whole active catalog, not what the search and the other filter
+  // leave, so they do not change while the operator types.
+  const standardCount = (value) => currentCatalog.filter(m => standardFilterValue(m) === value).length
+  const unmappedCount = currentCatalog.filter(isUnmapped).length
+  // Its own tab, unfiltered: the search and the filters belong to the catalog tab.
   const deprecatedCatalog = catalog.filter(m => m.deprecated)
   const selected = catalog.find(m => m.metric_uuid === selectedId) || null
   // Grouped by the name's first `/`-separated segment; ungrouped metrics fall into a trailing bucket.
   const catalogGroups = groupCatalog(activeCatalog)
-  // Writes every group explicitly, `false` included, so Collapse all also closes what a search opened.
+  // Writes every group explicitly, `false` included, so Collapse all also closes what a filter opened.
   const setAllGroups = (open) => setExpandedGroups(prev => ({
     ...prev,
     ...Object.fromEntries(groupCatalog(currentCatalog).map(g => [g.label, open]))
@@ -724,8 +757,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
 
           {view === 'catalog' && (
             <>
-              {/* The groups start collapsed, so typing is how a known metric is reached; it opens
-                  the groups that matched (isGroupOpen). */}
+              {/* The groups start collapsed, so the search and the filters are how metrics are
+                  reached; they open the groups that matched (isGroupOpen). */}
               <div className="filter-bar">
                 <SearchInput
                   value={catalogSearch}
@@ -733,6 +766,28 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                   placeholder="Search metrics…"
                   ariaLabel="Search the metric catalog"
                 />
+                <select
+                  className="form-control control-md"
+                  value={standardFilter}
+                  onChange={e => setStandardFilter(e.target.value)}
+                  aria-label="Filter the catalog by standard"
+                  title="Filter by the Standard column: the vocabulary a metric was named from, or Local extension for a metric this site defined itself"
+                >
+                  <option value="">All standards ({currentCatalog.length})</option>
+                  {FILTER_STANDARDS.map(o => (
+                    <option key={o.value} value={o.value}>{o.label} ({standardCount(o.value)})</option>
+                  ))}
+                  <option value={LOCAL_STANDARD_FILTER}>{LOCAL_EXTENSION_LABEL} ({standardCount(LOCAL_STANDARD_FILTER)})</option>
+                </select>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${unmappedOnly ? 'btn-primary' : 'btn-ghost'}`}
+                  onClick={() => setUnmappedOnly(v => !v)}
+                  aria-pressed={unmappedOnly}
+                  title="Show only metrics with no semantic id. An AAS export writes them without one, so they cannot fill a Digital Nameplate field. Select one and use Edit to map it."
+                >
+                  Unmapped ({unmappedCount})
+                </button>
                 <ExpandAllToggle
                   anyOpen={catalogGroups.some(g => isGroupOpen(g.label))}
                   onExpandAll={() => setAllGroups(true)}
@@ -741,7 +796,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                   disabled={catalogGroups.length === 0}
                 />
                 <div className="filter-bar-actions">
-                  <ClearFilters count={catalogSearch ? 1 : 0} onClear={() => setCatalogSearch('')} />
+                  <ClearFilters count={catalogFilterCount} onClear={clearCatalogFilters} />
                   <ActionButton
                     className="btn btn-primary btn-sm"
                     permitted={canManageSchema}
@@ -757,11 +812,13 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
               {!loaded ? <LoadingState label="catalog" /> : catalogGroups.length === 0 ? (
                 <EmptyState
                   icon={<IconBookOpen size={36} />}
-                  filtered={Boolean(catalogSearch)}
+                  filtered={catalogFilterCount > 0}
                   message={deprecatedCatalog.length > 0
                     ? 'Every metric in the catalog is deprecated.'
                     : 'No metrics in the catalog yet.'}
-                  filteredMessage={<>No metric matches <strong>{catalogSearch}</strong>.</>}
+                  filteredMessage={catalogFilterCount === 1 && catalogSearch
+                    ? <>No metric matches <strong>{catalogSearch}</strong>.</>
+                    : 'No metric matches these filters.'}
                 />
               ) : (
                 <div className="table-wrap">
