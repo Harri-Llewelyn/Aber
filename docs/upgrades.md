@@ -37,6 +37,25 @@ It applies from 1.0.0 onwards. An install older than that is reinstalled rather 
   [*the images run as non-root users*](#from-130-the-images-run-as-non-root-users).
 - **Upgrading with `helm upgrade` rather than the installer?** Raise the node's inotify limits: see
   [*the node needs room for every container's log*](#from-130-the-node-needs-room-for-every-containers-log).
+- **Upgrading from 1.3.x or earlier?** Plan to rotate the historian's three role passwords after the
+  upgrade: see [*no Job prints a secret*](#from-140-no-job-prints-a-secret-rotate-the-historians-passwords).
+- **A pinned `gatewayCredential` or `backupService` image tag, a hand edit to their scripts'
+  ConfigMaps, or Aber's images built on site?** Check them first: see
+  [*three scripts ship in their images*](#from-140-three-scripts-ship-in-their-images-not-in-the-chart).
+- **The forge integration kept off by an empty `giteaMachinePassword`, `aber_platform` made a forge
+  administrator, or the chart applied by a GitOps tool?** Check them first: see
+  [*the forge's machine account is a bot*](#from-140-the-forges-machine-account-is-a-bot-with-a-scoped-token).
+- **NetworkPolicies of your own beyond the chart's?** Admit the edge functions' new path to the forge:
+  see [*the edge functions reach the forge only through the gateway*](#from-140-the-edge-functions-reach-the-forge-only-through-the-gateway).
+- **Browsers that reach the API at an address of your own, such as a reverse proxy's?** Set
+  `publicUrls.supabase` to it first: see
+  [*the dashboard enforces a Content-Security-Policy*](#from-140-the-dashboard-enforces-a-content-security-policy).
+- **An image of your own in place of one the chart names, or Storage on NFS?** Check them first: see
+  [*every container but the forge's has a read-only root filesystem*](#from-140-every-container-but-the-forges-has-a-read-only-root-filesystem)
+  and [*the gateway, Storage, postgres-meta and Studio run as non-root users*](#from-140-the-gateway-storage-postgres-meta-and-studio-run-as-non-root-users).
+- **Might you roll back to 1.3.x?** Read the rollback steps for
+  [*the broker*](#from-140-the-broker-runs-mosquitto-21-and-refuses-a-message-over-16-mib) and
+  [*the forge's account*](#from-140-the-forges-machine-account-is-a-bot-with-a-scoped-token) first.
 - **Pinned `supabaseDb.image.tag` to run another server build?** Set `supabaseDb.serverImage`
   first: see [*the platform database runs Aber's own image*](#from-120-the-platform-database-runs-abers-own-image).
 - **An admission webhook that injects sidecars?** Check each tolerates the runtime's default seccomp
@@ -576,6 +595,328 @@ into the rollups (#788). A replay more than a day late that arrives in the minut
 runs is stored, but missing from the rollups until refreshed by hand
 ([`remote-gateways.md`](remote-gateways.md), *Late data after an outage*).
 
+### From 1.4.0, no Job prints a secret: rotate the historian's passwords
+
+Up to 1.3.x, two Jobs printed secrets into their logs on every install and upgrade (#887). The
+historian's maintenance Job printed `secrets.biReaderPassword`, `secrets.ingestWriterPassword` and
+`secrets.fdwReaderPassword`. db-init printed the first again, and seven more secrets. The log
+collector ships every pod's log to Loki, which keeps it for 30 days. So anyone with Grafana's Explore
+on Loki, or `kubectl logs` on those pods, could read them. 1.4.0 prints none of them. The values
+already in Loki stay there until they age out.
+
+**After the upgrade, rotate the three historian passwords.** Do it on 1.4.0, not before: a 1.3.x
+hook would print the new values too.
+
+1. Make three new values, as `npm run setup` does (`openssl rand -hex 24` each).
+2. Put them where the site keeps its secrets: `secrets.biReaderPassword`,
+   `secrets.ingestWriterPassword` and `secrets.fdwReaderPassword` in the values file, or
+   `BI_READER_PASSWORD`, `INGEST_WRITER_PASSWORD` and `FDW_READER_PASSWORD` in the external Secret
+   (`secrets.existingSecret`).
+3. Run `helm upgrade` as usual, at a quiet moment. Its hooks give the roles the new passwords. Until
+   db-init has run, a dashboard query that reads telemetry through the link between the databases
+   fails to sign in.
+4. Restart the two workloads that read a password only when they start:
+
+   ```bash
+   kubectl -n aber rollout restart deployment/ingestion   # ingest_writer
+   kubectl -n aber rollout restart deployment/grafana     # both datasources' reader password
+   ```
+
+   Until ingestion restarts, any reconnect uses the old password and is refused, and telemetry stops
+   reaching the historian.
+5. Give every BI tool that signs in as `powerbi_reader`, such as Power BI, the new `biReaderPassword`.
+
+**Rotating the other seven is recommended**, the same way: a new value, `helm upgrade`, then a
+restart of what reads it.
+
+| Value | Restart after `helm upgrade` |
+| :--- | :--- |
+| `secrets.grafanaOAuthClientSecret` | `deployment/grafana` |
+| `secrets.studioOAuthClientSecret`, `secrets.giteaOAuthClientSecret` | `deployment/supabase-envoy` |
+| `secrets.noderedOAuthClientSecret`, `secrets.noderedWebhookJwtSecret` | `deployment/node-red` |
+| `secrets.gatewayRevokeSecret`, `secrets.forgeSweepSecret` | `deployment/supabase-functions` |
+
+### From 1.4.0, the broker runs Mosquitto 2.1 and refuses a message over 16 MiB
+
+The broker moves from Mosquitto 2.0.22 to 2.1.2 (#830). Every gateway account now holds one role,
+`gateway`, whose rules confine each gateway to the edge node its username names. The broker restarts
+once on the upgrade, and its boot removes the per-gateway roles 1.3.x generated. Gateways reconnect
+with the same username and password.
+
+- **A message over 16 MiB is refused.** The broker disconnects the client that sent it, and logs
+  `disconnected: oversize packet`. A gateway that resends the message on every connect, as it
+  resends a birth, never births. Up to 1.3.x the broker accepted 256 MiB, more than its own 256 Mi
+  memory limit. If a gateway sends larger messages, such as the birth of a very large device, set
+  `mosquitto.maxPacketSize` to the size it needs. Raise `mosquitto.resources.limits.memory` to
+  several times that too, because the broker holds each message whole. To find such a gateway after
+  upgrading:
+
+  ```bash
+  kubectl -n aber logs deploy/mosquitto -c mosquitto | grep 'oversize packet'
+  ```
+
+- **A rollback to 1.3.x needs the copy of the broker's document that 1.4.0 keeps.** The first time an
+  account changes after the upgrade (issued, re-issued, revoked or re-enabled), 2.1 rewrites every
+  stored password in a form 2.0.22 cannot read. Rolled back without the copy, the broker refuses
+  every gateway. The first 1.4.0 boot keeps the document as
+  `/mosquitto/data/dynamic-security.json.pre-2.1`, before anything rewrites it. To roll back, run
+  `helm rollback`, then put the copy back before anyone issues or revokes an account:
+
+  ```bash
+  kubectl -n aber exec deploy/mosquitto -c mosquitto -- \
+    cp /mosquitto/data/dynamic-security.json.pre-2.1 /mosquitto/data/dynamic-security.json
+  kubectl -n aber rollout restart deploy/mosquitto
+  ```
+
+  Then issue again every gateway issued or re-issued after the upgrade: the copy predates it. A
+  rollback with no account changed on 1.4.0 needs none of this.
+
+### From 1.4.0, the forge's machine account is a bot with a scoped token
+
+The platform's forge account, `aber_platform`, becomes a Gitea bot (#669). The upgrade converts it
+in place, and its stored password stops working at once. Its repositories, teams and history are
+unchanged. The forge then mints a token with four scopes into the `aber-forge-token` Secret, which
+the edge functions read ([`forge/README.md`](../forge/README.md#the-machine-accounts-token)).
+
+Most sites have nothing to do. Check three things first:
+
+- **The forge integration kept off by leaving `secrets.giteaMachinePassword` empty.** 1.4.0 creates
+  the account and its token anyway, so enrolment starts creating a repository for each gateway. Set
+  `gitea.machineUser: ""` before upgrading: that is now the switch.
+- **`aber_platform` made a Gitea site administrator by hand.** A bot cannot be one, so the forge's
+  init container stops and the forge does not start. Take the administrator flag away first, in the
+  forge's *Site Administration*.
+- **The chart applied with `helm template` or a GitOps tool.** Every apply writes the token Secret
+  empty, because the render cannot see the cluster, and the edge functions then skip the forge.
+  Leave `aber-forge-token` out of what the tool manages, or restart the forge after each apply
+  (`kubectl -n aber rollout restart deploy/gitea`).
+
+For a minute or two after the upgrade, the edge functions can start before the forge has minted the
+token. An appliance that enrols then gets no repository: enrol it again. The forge sweep answers 503
+and runs again within fifteen minutes. This ends without a restart. If it does not,
+`kubectl -n aber logs deploy/gitea -c gitea-token` says why.
+
+`secrets.giteaMachinePassword` is deprecated, and nothing reads it. Remove it from the values file,
+and `GITEA_MACHINE_PASSWORD` from an external Secret. 2.0 removes the key (#848).
+
+**Rolling back to 1.3.x is not supported:** 1.3.x signs in with the password, which a bot refuses.
+If you roll back anyway, make the account a person again and give it back its password:
+
+```bash
+kubectl -n aber exec deploy/gitea -c gitea -- su-exec git gitea admin user change-type \
+  --username aber_platform --user-type User
+kubectl -n aber exec deploy/gitea -c gitea -- su-exec git gitea admin user change-password \
+  --username aber_platform --password '<secrets.giteaMachinePassword>' --must-change-password=false
+```
+
+### From 1.4.0, the edge functions reach the forge only through the gateway
+
+The edge functions now call the forge's API on a fourth gateway listener, `supabase-envoy` port
+8003, instead of `gitea` port 3000 (#844). That listener serves the API alone, and removes the header
+Gitea signs people in by. Port 3000 admits the gateway and nothing else. The chart's own
+NetworkPolicies already allow the new path.
+
+A site with NetworkPolicies of its own beyond the chart's (`networkPolicy.extraEgress`, or policies
+managed outside the chart) must admit `supabase-functions` to `supabase-envoy` on 8003. Otherwise
+enrolment creates no repositories, and the forge sweep fails.
+
+### From 1.4.0, three scripts ship in their images, not in the chart
+
+The broker's boot reconcile, the credential service and the backup service now run from scripts in
+the `gateway-credential` and `backup-service` images, under `/opt/aber/` (#882). The chart no longer
+renders the `aber-mosquitto-scripts` and `aber-backup-service-scripts` ConfigMaps, so the release
+stays within the size Helm can store. Most sites have nothing to do. Check three things first:
+
+- **A pinned `gatewayCredential.image.tag` or `backupService.image.tag`.** An image from before 1.4.0
+  has no scripts. With an older credential image, the broker's `assemble-config` fails with
+  `Cannot find module '/opt/aber/mosquitto-dynsec-init.mjs'`, and no gateway can connect. With an
+  older backup image, the backup service crash-loops and no backup runs. Remove the pin, or set it to
+  1.4.0 or later.
+- **A hand edit to either ConfigMap.** The upgrade deletes both, and the edit goes with them. To keep
+  a local change, build your own image from `gateway-credential/Dockerfile` or
+  `backup-service/Dockerfile`, and set that image's `repository` and `tag`.
+- **Aber's images built on site** (an arm64 or air-gapped site, following
+  [*Images you must build*](../deploy/k8s/README.md#images-you-must-build)). Build these two from the
+  repository root, as that section now does:
+
+  ```bash
+  docker build -f gateway-credential/Dockerfile -t $NS/gateway-credential:$V .
+  docker build -f backup-service/Dockerfile     -t $NS/backup-service:$V .
+  ```
+
+  The old commands fail with `"/scripts/...": not found`.
+
+A `helm rollback` to 1.3.x brings back the two ConfigMaps and the 1.3.x images together.
+
+### From 1.4.0, the dashboard enforces a Content-Security-Policy
+
+Browsers now refuse anything a dashboard page loads or connects to that the dashboard's policy does
+not name (#679). The chart builds the policy from the addresses it already gives the dashboard: the
+API (`publicUrls.supabase`), and the Studio and forge doors (`publicUrls.studio`,
+`publicUrls.gitea`). A standard install has nothing to set
+([`deploy/k8s/README.md`](../deploy/k8s/README.md#what-a-browser-may-load-the-content-security-policy)).
+
+**If part of a page stays empty after the upgrade**, such as a table, live updates, an area plan or a
+3D model, open the browser's console (F12). A refusal there names the Content Security Policy.
+Signing out that leaves Studio signed in is the same fault. Switch the policy to report-only. The
+dashboard then loads everything again, and the console lists each refusal:
+
+```bash
+helm upgrade ... --set frontend.contentSecurityPolicy.mode=report-only
+```
+
+The usual cause is a browser reaching the API at an address the chart does not know, such as a
+reverse proxy with its own hostname. Set `publicUrls.supabase` to that address, then set the mode
+back to `enforce`.
+
+A pinned `frontend.image.tag` may show the 3D viewer unstyled: the policy admits the viewer's
+stylesheet by a hash, which belongs to this release's image. Use the release's image, or report-only
+while you move to it. Grafana and the Node-RED editor now send report-only policies, which refuse
+nothing.
+
+### From 1.4.0, the gateway, Storage, postgres-meta and Studio run as non-root users
+
+Their images name no user, so 1.3.x started these four pods as root. 1.4.0 runs each as the user its
+image carries, with `runAsNonRoot: true` (#812; [`deploy/k8s/README.md`](../deploy/k8s/README.md#users)):
+`supabase-envoy` as 101, and `supabase-storage`, `supabase-meta` and `supabase-studio` as 1000. A
+security policy that pins uids must now allow 101 for Envoy too.
+
+**With `backup.includeStorage` on (and `backup.enabled`), Storage is unchanged.** The backup service
+mounts the storage volume, and while it does the kubelet cannot make the volume writable for another
+user. So Storage keeps 1.3.x's pod context and runs as root. There is nothing to do.
+
+**Without it, Storage runs as 1000, and keeps using the objects 1.3.x stored as root.** At each start
+the kubelet makes them writable by group 1000 (`fsGroupChangePolicy: Always`), at about a second per
+20,000 objects. Check two things:
+
+- **A volume type that ignores `fsGroup`:** NFS, or a `hostPath` volume that k3s's `local-path` made
+  before April 2024 (k3s 1.29.4). Uploads and deletes beside the old objects then fail with
+  `EACCES`. Before the upgrade, give the volume's files to uid 1000 once, as root
+  (`chown -R 1000:1000` on the volume's directory on the node). After it, this should print nothing:
+
+  ```bash
+  kubectl -n aber exec deploy/supabase-storage -- \
+    find /var/lib/storage -type d ! -user 1000 ! -perm -g+w | head
+  ```
+
+- **Turning `backup.includeStorage` off, now or later.** The old backup-service pod can still hold the
+  volume when the new storage pod starts, and the kubelet then skips its walk. Storage logs `EACCES`,
+  and the `find` above prints directories. Once the backup service has rolled, restart Storage:
+
+  ```bash
+  kubectl -n aber rollout status deploy/backup-service
+  kubectl -n aber rollout restart deploy/supabase-storage
+  ```
+
+`helm upgrade --reuse-values` keeps 1.3.x's `supabaseStorage.podSecurityContext`, so Storage stays
+root under it. Pass your values files instead, as [*The command*](#the-command) says.
+
+### From 1.4.0, every container but the forge's has a read-only root filesystem
+
+Every container the chart runs, except the forge's `gitea` and `gitea-init`, now sets
+`readOnlyRootFilesystem: true` (#419, phase three of three). Each writes only its volumes and the
+`emptyDir` volumes [`deploy/k8s/README.md`](../deploy/k8s/README.md#security-contexts) lists. No
+values key changes, and no data moves. A process that writes anywhere else fails with `Read-only file
+system`, often at its first request. Check four things:
+
+- **An image of your own in place of one the chart names.** It must write only where the stock
+  image does, and so must a different tag of GoTrue, PostgREST, postgres-meta, storage-api,
+  Realtime, Envoy or Studio. A replaced edge runtime (`supabaseFunctions.image`) must ship its module
+  cache at `/home/deno/deno-dir`, with `/bin/sh` and `cp`. A replaced dashboard keeps nginx's pid in
+  `/tmp`, its temporary files in `/var/cache/nginx` and its rendered config in `/etc/nginx/conf.d`.
+  A replaced database server may write `/var/run/postgresql` and nothing outside its volume.
+- **A Node-RED flow that writes files.** A file or exec node that writes outside `/data` and `/tmp`
+  now fails with `EROFS: read-only file system`. A relative path writes under `/usr/src/node-red`,
+  which is read-only. Give such a node an absolute path under `/data` (kept) or `/tmp` (lost at a
+  restart).
+- **`ingestion.healthFile` outside `/tmp`.** Keep it under `/tmp`. Anywhere else the heartbeat write
+  fails, and the pod restarts every few minutes.
+- **A file written through `kubectl exec`.** A command that streams, such as `pg_dump` or `psql -c`,
+  works as before. One that writes a file outside a volume fails: use `/tmp` where the container has
+  one. A cold archive query's `--csv` goes to `/tmp` in the ingestion pod, and `kubectl cp` copies it
+  out ([`supabase/README.md`](../supabase/README.md#cold-telemetry-archival-archived-migration-0068)).
+
+The new `emptyDir` volumes use the node's disk, and count towards each pod's ephemeral storage. Each
+one for a small, known writer has a size limit, and crossing it evicts the pod. The edge runtime and
+Swagger UI start with a new init container, which copies files their image ships into a writable
+volume.
+
+### From 1.4.0, the cold archive's secret key comes only from the Cold Storage page
+
+`secrets.archiveS3SecretAccessKey` is deprecated, and nothing reads it (#862). Setting it has not
+configured the cold archive since 1.0.0: an archive that exports today already has its key from the
+page. The upgrade changes nothing that runs.
+
+If you set the value and archiving is on:
+
+1. Open **Cold Storage** as an Administrator.
+2. If the destination button reads **Complete the destination** and names the secret access key,
+   choose it and enter the key there.
+
+Then delete `archiveS3SecretAccessKey` from the values file, and `ARCHIVE_S3_SECRET_ACCESS_KEY` from
+an external Secret. The release's own Secret may keep its old copy of the key; nothing reads it. 2.0
+removes the key from the chart (#902).
+
+A stored key now reads *Stored in the vault* on the Cold Storage page, and in the Backups page's
+off-site destination. **Replace Key** asks before it overwrites one (#353).
+
+### From 1.4.0, a site can turn on a check for a newer release
+
+`releaseCheck.enabled: true` adds a daily CronJob that asks `api.github.com` for the latest release
+(#434). The account menu then says when a newer Aber exists. It is off by default, and nothing leaves
+the site until a site turns it on.
+
+The CronJob calls with a key of its own, `secrets.releaseCheckKey`, for the machine identity
+`Service_ReleaseCheck`. The chart refuses to render the check without it. `npm run setup` makes one
+for a new site. A site set up before 1.4.0 makes it from its own signing secret, on a machine whose
+kube context reaches the release:
+
+```bash
+npm run keys:rotate -- --apply
+```
+
+That re-signs the ingestion and playback keys as any rotation does, and signs the new key. It stores
+the three in the release Secret and in `deploy/helm/aber/values-local.yaml` (or the file
+`--values=<file>` names), then restarts ingestion and playback. The old keys keep working until they
+expire. Then set `releaseCheck.enabled: true` and run `helm upgrade` with the same values file. With
+`secrets.existingSecret`, run `npm run keys:rotate` without `--apply`, and add the
+`SUPABASE_RELEASE_CHECK_KEY` it prints to your secret store.
+
+Under `networkPolicy.enabled`, list GitHub's addresses (the "api" ranges at
+`https://api.github.com/meta`) in `releaseCheck.githubEgress`, or a proxy in `releaseCheck.proxy`.
+Without them every check fails, and the menu shows nothing.
+
+### From 1.4.0, the CronJobs wait for the services they connect to
+
+Each run of the cold archive, the release check and the nightly backup CronJob now starts with
+`wait-for-*` init containers, as the hook Jobs already did (#896). Under NetworkPolicies a new pod's
+first connections are refused for about a second, so the cold archive could fail a night's run with
+`Connection refused`. There is nothing to set.
+
+- The pods show `Init:0/2` (or `Init:0/1`) for a second or two before they run.
+  `kubectl -n aber logs job/<name> -c wait-for-gateway` (or `-c wait-for-timescaledb`,
+  `-c wait-for-supabase-db`) shows what each waited for.
+- A run whose service is down now waits up to `initJobs.waitTimeout` (600 s), then fails, naming
+  the service. Before, the cold archive read an unreachable gateway as archiving turned off, and
+  exited successfully having exported nothing.
+
+### The upgrade to 1.4.0 rolls every workload once
+
+Every workload rolls once, for the read-only root filesystems. Beyond that:
+
+- **The broker** restarts on Mosquitto 2.1.2, and gateways reconnect.
+- **The forge** converts its account and starts its audit log, kept for 365 days
+  (`gitea.audit.retentionDays`). Nothing before the upgrade is in it. A forge restored from a backup
+  before the upgrade is mended by this restart:
+  `kubectl -n aber logs deploy/gitea -c gitea-init | grep 'belonged to another user'` shows it.
+- **i3X** restarts, so its open subscriptions are lost, and clients create new ones. The chart refuses
+  an `i3xService.maxQueuedMiB` at or above `i3xService.resources.limits.memory`. A site that set that
+  limit to 128Mi or less lowers `maxQueuedMiB` below it first.
+- **Alloy's memory limit** rises from 768Mi to 1Gi on every site; its request is unchanged, so the
+  node's minimum size is too. `helm upgrade --reuse-values` keeps 768Mi.
+- **Node-RED** rewrites its generated `settings.js` once, keeping the previous file as
+  `settings.js.bak`.
+
 ---
 
 ## Backups
@@ -627,6 +968,7 @@ is fresh.
 | :--- | :--- |
 | Every migration applied cleanly | `kubectl -n aber logs job/aber-db-init` — it exits non-zero on any failure |
 | The databases' link, the API, the broker, ingestion and the dashboard answer | `helm test aber -n aber` — every test Pod Succeeded; none of them writes anything |
+| The broker kept its 1.3.x document for a rollback (upgrading to 1.4.0) | `kubectl -n aber exec deploy/mosquitto -c mosquitto -- ls -l /mosquitto/data/` — `dynamic-security.json.pre-2.1` is there |
 | The historian's extension matches its image | `kubectl -n aber logs job/aber-timescaledb-maintenance` — the first step names the version, and fails the step if it drifted |
 | Policy jobs are getting workers | `kubectl -n aber logs statefulset/timescaledb \| grep -c 'failed to start a background worker'` — expect `0` |
 | Gateways still reporting | Dashboard → Gateways: `Last Heartbeat` under 90s |
