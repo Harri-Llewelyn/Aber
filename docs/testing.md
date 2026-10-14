@@ -328,6 +328,12 @@ python supabase/migrations/test_audit_trail_paging.py
 # let it publish as that machine. Also pins is_simulated NOT NULL, which is what makes 0078's coalesce
 # dead code rather than the thing deciding deliveries.
 python supabase/migrations/test_playback_credential_delivery.py
+# The capture and playback helpers answer only a caller who could read the job (0184). An Operator
+# gets false from is_active_capture_object() and is_active_playback_capture() and no rows from
+# playback_stale_credentials(); the reader roles, the two machine principals and service_role get
+# what they did, and start_playback_job() still refuses a stale target. The broker-captures storage
+# policies run verbatim on a stand-in table, so their outcome is checked for every caller here.
+python supabase/migrations/test_capture_playback_gates.py
 # The monthly partitioning of audit_trail (0079). THE INTERESTING TESTS ARE THE BORING ONES:
 # converting a populated table to partitioned means rebuilding by hand every object PostgreSQL
 # does not carry across -- the primary key, the FK, three indexes, two triggers, RLS and its two

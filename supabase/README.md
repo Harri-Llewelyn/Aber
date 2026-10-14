@@ -933,6 +933,30 @@ the principal has no role, no permission and no other gate, and `service_role` i
 gate's callers. A stack set up before 0181 mints the key with `npm run keys:rotate`, which signs it
 with that stack's own JWT secret (`docs/upgrades.md`).
 
+### The capture and playback helpers check the caller (0184)
+
+`is_active_capture_object()`, `is_active_playback_capture()` and `playback_stale_credentials()` are
+`SECURITY DEFINER` and executable by `authenticated`, and until `0184` none of them looked at who
+was asking. An Operator, who can read no row of `capture_jobs`, `playback_jobs` or
+`playback_worker_status`, could call all three. A capture is stored at `<subject>/capture.json`,
+and every signed-in account can read every gateway's and device's `sparkplug_id`. So the first two
+told the Operator which machine was being recorded or replayed right now. The third told it when
+each playback credential was issued.
+
+Each now answers only a caller who could read the job row. That is the matching machine principal
+(the ingestion daemon for a recording, the playback worker for a replay), a role the tables' RLS
+admits (Administrator, Shopfloor_Manager, Auditor), or a role RLS does not apply to (`service_role`
+and the owner, found from the `role` setting PostgREST and storage-api make). Anyone else gets
+`false`, or no rows from `playback_stale_credentials()`, which is what RLS would show them.
+
+**The grants stay, because the storage policies need them.** The `broker-captures` policies call
+the two predicates as the caller, and the daemon and the worker reach storage as `authenticated`.
+Every such call is ANDed with `is_ingestion_caller()` or `is_playback_caller()`, so the answers that
+changed are ones no policy could act on. `test_capture_playback_gates.py` runs the four policies
+from `storage-policies.sql` verbatim on a stand-in table and checks what each role and principal
+reaches. The Start Playback dialog opens only for Administrator and Shopfloor_Manager, and
+`start_playback_job()` asks for the stale credentials as that caller, so both still get the answer.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by

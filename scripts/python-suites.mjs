@@ -767,6 +767,14 @@ export const SUITES = {
       'the only one the broker will accept, and getting this wrong shows up as CONNACK rc=5 with ' +
       'nothing naming the cause.',
   },
+  'supabase/migrations/test_capture_playback_gates.py': {
+    lanes: ['db'],
+    why:
+      "0184 -- the capture and playback helpers answer only a caller who could read the job. An " +
+      'Operator learns nothing; the readers, the two machine principals and service_role get ' +
+      'what they did; and the broker-captures storage policies, run verbatim on a stand-in ' +
+      'table, still admit exactly what storage-policies.sql says for every role and principal.',
+  },
   'supabase/migrations/test_role_permission_split.py': {
     lanes: ['db'],
     why:
