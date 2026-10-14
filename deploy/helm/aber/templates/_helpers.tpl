@@ -353,15 +353,17 @@ this is a Helm error rather than a CrashLoopBackOff.
 {{- $missing = append $missing "secrets.ingestWriterPassword (INGEST_WRITER_PASSWORD, required while ingestion.dbUser is ingest_writer -- the role does not exist without it, and the only other historian credential is the superuser)" -}}
 {{- end -}}
 {{/*
-  The two machine-principal keys: without them helm install reports success while the ingestion
-  daemon halts itself rather than run fail-open, and the only symptom is 0 of 1 updated replicas
-  are available. Unconditional; neither workload has an enabled flag.
+  The two machine-principal keys, both required on every install. Without the ingestion key helm
+  install reports success while the daemon halts itself rather than run fail-open, and the only
+  symptom is 0 of 1 updated replicas are available. The playback key is required even while
+  playback.enabled is off; the worker refuses to start without it. mqttPlaybackCredentials is not
+  required: no broker credential is correct for a stack that has issued no playback targets yet.
   */}}
 {{- if not .Values.secrets.ingestionKey -}}
 {{- $missing = append $missing "secrets.ingestionKey (SUPABASE_INGESTION_KEY, required -- the ingestion daemon halts rather than start its MQTT loop without it, so the stack installs and then never becomes ready)" -}}
 {{- end -}}
 {{- if not .Values.secrets.playbackKey -}}
-{{- $missing = append $missing "secrets.playbackKey (SUPABASE_PLAYBACK_KEY, required -- Service_Playback is the identity broker playback publishes under, and it is deliberately not service_role)" -}}
+{{- $missing = append $missing "secrets.playbackKey (SUPABASE_PLAYBACK_KEY, required even with playback off -- a JWT signed by jwtSecret for subject b0000000-0000-4000-8000-000000000003, Service_Playback, the identity broker playback publishes under and deliberately not service_role)" -}}
 {{- end -}}
 {{- if not .Values.secrets.fdwReaderPassword -}}
 {{- $missing = append $missing "secrets.fdwReaderPassword (FDW_READER_PASSWORD, required -- Supabase's postgres_fdw mapping authenticates as fdw_reader, and the only alternative is the historian superuser)" -}}
@@ -380,14 +382,6 @@ above. The credential service authenticates as it; nothing else does.
 */}}
 {{- if and .Values.mosquitto.enabled (not .Values.secrets.mqttDynsecAdminPassword) -}}
 {{- $missing = append $missing "secrets.mqttDynsecAdminPassword (MQTT_DYNSEC_ADMIN_PASSWORD, required -- the account the credential service administers the broker's Dynamic Security plugin as)" -}}
-{{- end -}}
-{{/*
-Conditional, because playback is off by default: the worker refuses to start without the key and
-the CrashLoopBackOff names an env var. mqttPlaybackCredentials is not required beside it: no broker
-credential is correct for a stack that has issued no playback targets yet.
-*/}}
-{{- if and .Values.playback.enabled (not .Values.secrets.playbackKey) -}}
-{{- $missing = append $missing "secrets.playbackKey (SUPABASE_PLAYBACK_KEY, required when playback.enabled -- a JWT signed by jwtSecret for subject b0000000-0000-4000-8000-000000000003, Service_Playback)" -}}
 {{- end -}}
 {{/*
 Conditional, because the release check is off by default: without the key every run fails at the
@@ -652,10 +646,11 @@ an empty ingestion or i3X password stops its init container. Skipped under exist
 Publishing Studio requires the credentials that make it a door rather than a hole. With the secrets
 unset the gateway substitutes credentials that cannot authenticate and no client is registered, so
 the route publishes a hostname whose every request ends at a login nobody can complete, which
-reads as a broken proxy rather than two empty values.
+reads as a broken proxy rather than two empty values. Skipped under existingSecret, which then
+holds both keys out of the chart's sight.
 */}}
 {{- define "aber.validateStudioRoute" -}}
-{{- if and .Values.ingress.enabled (eq (index .Values.ingress.routes "studio") true) -}}
+{{- if and .Values.ingress.enabled (eq (index .Values.ingress.routes "studio") true) (not .Values.secrets.existingSecret) -}}
 {{- if or (not .Values.secrets.studioOAuthClientSecret) (not .Values.secrets.studioProxyHmacSecret) -}}
 {{- fail "\n\naber: ingress.routes.studio is true but Studio's door has no credentials.\n\nThe route publishes the gateway's studio listener, which runs an OAuth flow against this stack's own\nGoTrue and admits `Administrator` only. Without both values below the flow has no registered client\nand no cookie key, so every request to studio.<publicBaseDomain> ends at a login that cannot\ncomplete -- which looks like a broken proxy rather than like an unset value.\n\nSet both:\n  secrets.studioOAuthClientSecret   (also hashed into auth.oauth_clients by migration 0081)\n  secrets.studioProxyHmacSecret     (signs the session cookie; nothing else reads it)\n\nOr leave ingress.routes.studio at its default of false and reach the console with a port-forward.\n" -}}
 {{- end -}}

@@ -136,6 +136,12 @@ if these are missing the PVC must be destroyed, not the pod restarted):
      machine account is a bot that holds a token the forge mints itself (forge/README.md). Remove
      the key from your values; it goes away in 2.0.
 {{- end }}
+{{- if .Values.secrets.archiveS3SecretAccessKey }}
+
+  ⚠  secrets.archiveS3SecretAccessKey is DEPRECATED and nothing reads it. The cold archive's
+     secret access key is set only on the Cold Storage page, by an Administrator. If that page
+     says the key is missing, enter it there. Remove the key from your values; it goes away in 2.0.
+{{- end }}
 {{- if .Values.ingestion.allowHistorianSuperuser }}
 
   ⚠  ingestion.allowHistorianSuperuser is on. If ingestion.dbUser is a superuser, the ingestion

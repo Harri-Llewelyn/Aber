@@ -4473,7 +4473,7 @@ function edgeFunctionNames() {
     mqttMonitorUser: 'a username, with a default',
     mqttValidatorUser: 'a username, with a default',
     mqttPlaybackCredentials: 'empty is valid: the worker refuses a job for a gateway it holds no credential for',
-    archiveS3SecretAccessKey: 'only for a cold archive in S3, which setup does not configure',
+    archiveS3SecretAccessKey: 'deprecated and read by nothing: the cold archive key is set on the Cold Storage page',
     smtpPassword: 'only for supabaseAuth.smtp, which setup does not configure',
     giteaMachinePassword: 'deprecated and read by nothing: the machine account is a bot with a token the forge mints',
   };
@@ -4502,6 +4502,97 @@ function edgeFunctionNames() {
     if (!missing.length && !stale.length) {
       pass(`npm run setup writes ${declared.length - Object.keys(OPTIONAL).length} of values.yaml's ${declared.length} secrets; the other ${Object.keys(OPTIONAL).length} may stay empty`);
     }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 78. The existingSecret contract in values-prod.yaml.example names every key templates/secret.yaml
+// renders, and no other. A site that keeps its credentials in an external store builds its Secret
+// from that list: a key missing from it is a pod that cannot start or a feature that fails closed.
+// List lines are `#` and three spaces; text in parentheses is a key's condition and is not counted.
+// -------------------------------------------------------------------------------------------------
+{
+  const EXAMPLE = 'deploy/helm/aber/values-prod.yaml.example';
+  const TEMPLATE = 'deploy/helm/aber/templates/secret.yaml';
+  const example = read(EXAMPLE);
+  const start = example.indexOf('THE SECRET MUST CARRY THESE KEYS');
+  const end = example.indexOf('# STILL A SET.', start);
+  const lines = start < 0 || end < 0 ? [] : example.slice(start, end).split('\n').filter((l) => /^\s*# {3}/.test(l));
+  const listed = [...lines.map((l) => l.replace(/^\s*#/, '')).join('\n').replace(/\([^)]*\)/g, '')
+    .matchAll(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g)].map((m) => m[0]);
+  const rendered = [...read(TEMPLATE).matchAll(/^ {2}([A-Z][A-Z0-9_]*):/gm)].map((m) => m[1]);
+
+  if (!listed.length || !rendered.length) {
+    fail(`check 78 found no "THE SECRET MUST CARRY THESE KEYS" list in ${EXAMPLE} or no keys in ${TEMPLATE}, so it compares nothing`);
+  } else {
+    const missing = rendered.filter((k) => !listed.includes(k));
+    const stale = [...new Set(listed)].filter((k) => !rendered.includes(k));
+    const twice = [...new Set(listed.filter((k, i) => listed.indexOf(k) !== i))];
+    for (const k of missing) {
+      fail(`${TEMPLATE} renders ${k}, and ${EXAMPLE}'s existingSecret list does not name it. Add it there, ` +
+        'with "(read only when ...)" if a setting gates it: a Secret built from the list lacks it otherwise.');
+    }
+    for (const k of stale) fail(`${EXAMPLE}'s existingSecret list names ${k}, which ${TEMPLATE} does not render: remove it`);
+    for (const k of twice) fail(`${EXAMPLE}'s existingSecret list names ${k} more than once`);
+    if (!missing.length && !stale.length && !twice.length) {
+      pass(`${EXAMPLE}'s existingSecret list names the ${rendered.length} keys ${TEMPLATE} renders, and no other`);
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 79. The rotation note names every key of the chart's Secret that a post-upgrade hook copies into
+// a database. db-init and timescaledb-maintenance hand them to psql as variables, so a rotated key
+// reaches the database only when `helm upgrade` re-runs the hook. Both places that list them are
+// held to the hooks' `-v name="$VAR"` arguments, both ways.
+// -------------------------------------------------------------------------------------------------
+{
+  const HOOKS = ['deploy/helm/aber/templates/jobs/db-init.yaml', 'deploy/helm/aber/templates/jobs/timescaledb-maintenance.yaml'];
+  const copied = new Set();
+  for (const hook of HOOKS) {
+    const text = read(hook);
+    // Each env var the hook fills from the chart's Secret, in either form the templates use.
+    const fromSecret = new Map([
+      ...[...text.matchAll(/include "aber\.(?:optional)?[sS]ecretEnv" \(dict "name" "([A-Z0-9_]+)" "secretName" \$secretName "key" "([A-Z0-9_]+)"\)/g)],
+      ...[...text.matchAll(/- name: ([A-Z0-9_]+)\s+valueFrom:\s+secretKeyRef:\s+name: \{\{ \$secretName \}\}\s+key: ([A-Z0-9_]+)/g)],
+    ].map((m) => [m[1], m[2]]));
+    for (const m of text.matchAll(/-v [a-z0-9_]+="\$\{?([A-Z0-9_]+)/g)) {
+      if (fromSecret.has(m[1])) copied.add(fromSecret.get(m[1]));
+    }
+  }
+  const KEY = /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g;
+  const example = read('deploy/helm/aber/values-prod.yaml.example');
+  const runbook = read('deploy/k8s/README.md');
+  const between = (text, from, to) => {
+    const start = text.indexOf(from);
+    const end = start < 0 ? -1 : text.indexOf(to, start + from.length);
+    return end < 0 ? '' : text.slice(start, end);
+  };
+  const lists = [
+    ['deploy/helm/aber/values-prod.yaml.example\'s "ROTATION IS NOT AUTOMATIC" note', between(example, 'ROTATION IS NOT AUTOMATIC', 'Consider Reloader')],
+    ['deploy/k8s/README.md\'s *Secrets in production*', between(runbook, '### Secrets in production', '\n### ')],
+  ];
+
+  if (!copied.size || lists.some(([, text]) => !text)) {
+    fail('check 79 found no Secret key a hook passes to psql, or lost the rotation note or *Secrets in production*, so it compares nothing');
+  } else {
+    let bad = 0;
+    for (const [where, text] of lists) {
+      const named = new Set([...text.matchAll(KEY)].map((m) => m[0]));
+      for (const k of copied) {
+        if (!named.has(k)) {
+          bad++;
+          fail(`a post-upgrade hook copies ${k} into a database, and ${where} does not name it: rotating it needs a helm upgrade, so name it there`);
+        }
+      }
+      for (const k of named) {
+        if (!copied.has(k)) {
+          bad++;
+          fail(`${where} names ${k}, which neither db-init nor timescaledb-maintenance passes to psql: remove it, or say why elsewhere`);
+        }
+      }
+    }
+    if (!bad) pass(`the rotation note and the runbook name the ${copied.size} Secret keys db-init and timescaledb-maintenance copy into a database`);
   }
 }
 
