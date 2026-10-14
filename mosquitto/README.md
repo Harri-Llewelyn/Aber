@@ -282,8 +282,9 @@ delivery failure is logged rather than failing the issue, because the account ex
 browser is about to show the password. The store is merged, not overwritten, because a stack can
 have several playback targets issued one at a time and a single-entry store would silently revoke
 delivery for every other target; it is then pruned to the targets the database lists now
-(`playback_targets`, 0183), and a request without that list prunes nothing; a malformed store is replaced rather than fatal, because throwing
-would strand a credential nobody can use to preserve a file nobody can parse; and values are
+(`playback_targets`, 0183), and a request without that list prunes nothing; a malformed store is
+replaced rather than fatal, because throwing would strand a credential nobody can use to preserve a
+file nobody can parse; and values are
 coerced to strings, because a Python worker hands them to paho as a password and a number
 surviving a JSON round trip would fail at CONNECT rather than where the cause is visible. The
 delivery path is declared once and imported by both ends, since a writer/reader mismatch is silent

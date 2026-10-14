@@ -687,9 +687,9 @@ audit row; only delivery is automated.
 **Which credentials may be delivered is decided by the database.**
 `gateway_is_playback_delivery_target()` returns `is_shadow` on an unarchived gateway (`0183`) —
 the flag `playback_target_must_be_shadow()` admits a playback target by — and the edge function
-passes it to the credential service as `deliver_to_playback`. Not computed in the edge function, and not in the service: the service holds
-a `sparkplug_id` and no database access by design, and two definitions of *"is this a playback
-target"* would eventually disagree. The disagreement is a real machine's broker password in a file
+passes it to the credential service as `deliver_to_playback`. Not computed in the edge function,
+and not in the service: the service holds a `sparkplug_id` and no database access by design, and
+two definitions of *"is this a playback target"* would eventually disagree. The disagreement is a real machine's broker password in a file
 the replay worker reads. It is a **separate function** rather than a column on the authorisation
 gate for a migration-replay reason that cost this stack an outage — see
 [`supabase/README.md`](../supabase/README.md) under `0078`.
