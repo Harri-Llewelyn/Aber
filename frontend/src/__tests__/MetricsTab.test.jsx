@@ -747,6 +747,209 @@ describe('Metric Catalog — search', () => {
   })
 })
 
+/**
+ * Eight active metrics across the standards, with and without a semantic id, and two deprecated ones
+ * the filters must neither count nor list. A NULL and a '' semantic id are both unmapped, as the AAS
+ * export counts them; a NULL and a '' standard are both a local extension, as the column shows them.
+ */
+const FILTER_CATALOG = [
+  { metric_uuid: 'f1', name: 'Axes/DISPLACEMENT', metric_group: 'Axes', datatype: 10, category: 'SAMPLE', standard: 'MTConnect', semantic_id: 'https://aber.local/semantics/mtconnect/v2.0/DataItemType/DISPLACEMENT', semantic_id_type: 'IRI', deprecated: false },
+  { metric_uuid: 'f2', name: 'Controller/EXECUTION', metric_group: 'Controller', datatype: 12, category: 'EVENT', standard: 'MTConnect', semantic_id: null, deprecated: false },
+  { metric_uuid: 'f3', name: 'Controller/FIRMWARE', metric_group: 'Controller', datatype: 12, category: 'EVENT', standard: 'MTConnect', semantic_id: '', deprecated: false },
+  { metric_uuid: 'f4', name: 'OEE/AVAILABILITY', metric_group: 'OEE', datatype: 10, category: 'SAMPLE', standard: 'ISO 22400', semantic_id: 'https://aber.local/semantics/iso22400/AVAILABILITY', semantic_id_type: 'IRI', deprecated: false },
+  { metric_uuid: 'f5', name: 'OEE/MTBF', metric_group: 'OEE', datatype: 10, category: 'SAMPLE', standard: 'ISO 22400', semantic_id: null, deprecated: false },
+  { metric_uuid: 'f6', name: 'Machine/SpeedOverride', metric_group: 'Machine', datatype: 10, category: 'SAMPLE', standard: 'OPC UA', semantic_id: 'nsu=http://opcfoundation.org/UA/Robotics/;i=16662', semantic_id_type: 'ExpandedNodeId', deprecated: false },
+  { metric_uuid: 'f7', name: 'safety_interlock', metric_group: null, datatype: 11, category: null, standard: null, semantic_id: null, deprecated: false },
+  // A local extension may carry an id the site typed: Local extension lists it, Unmapped does not.
+  { metric_uuid: 'f8', name: 'Hydraulic/PRESSURE', metric_group: 'Hydraulic', datatype: 10, category: null, standard: '', semantic_id: 'urn:example:site:hydraulic-pressure', semantic_id_type: 'IRI', deprecated: false },
+  { metric_uuid: 'f9', name: 'temperature', metric_group: null, datatype: 10, standard: null, semantic_id: null, deprecated: true },
+  { metric_uuid: 'f10', name: 'Controller/OLD_EXECUTION', metric_group: 'Controller', datatype: 12, category: 'EVENT', standard: 'MTConnect', semantic_id: null, deprecated: true }
+]
+
+describe('Metric Catalog — Standard and Unmapped filters', () => {
+  const standardFilter = () => screen.getByRole('combobox', { name: 'Filter the catalog by standard' })
+  const unmappedButton = () => screen.getByRole('button', { name: /^Unmapped \(\d+\)$/ })
+  const search = () => screen.getByLabelText('Search the metric catalog')
+  const optionTexts = () => [...standardFilter().querySelectorAll('option')].map(o => o.textContent)
+  /** Chooses the option whose label starts with `label`, so the test does not know its value. */
+  const chooseStandard = (label) => {
+    const option = [...standardFilter().querySelectorAll('option')].find(o => o.textContent.startsWith(`${label} (`))
+    fireEvent.change(standardFilter(), { target: { value: option.value } })
+  }
+  /** The metric names the catalog table shows, in order; none while it renders no table. */
+  const listed = () => {
+    const table = catalogTable()
+    return table ? [...table.querySelectorAll('tbody tr:not(.table-group-row) td:first-child .mono')].map(el => el.textContent) : []
+  }
+  const ALL_OPTIONS = [
+    'All standards (8)', 'MTConnect (3)', 'ISO 22400 (2)', 'OPC UA (1)', 'ASHRAE 223P (0)', 'Local extension (2)'
+  ]
+
+  const setup = async () => {
+    api.get.mockImplementation((path) =>
+      Promise.resolve(path.startsWith('/api/v1/metric-catalog')
+        ? FILTER_CATALOG
+        : (routes[Object.keys(routes).find(r => path.startsWith(r))] || [])))
+    renderTab()
+    await waitFor(() => expect(within(catalogTable()).getAllByTitle(/^Expand /).length).toBeGreaterThan(0))
+  }
+
+  it('sits in the toolbar beside the search, before Expand all', async () => {
+    await setup()
+
+    const bar = search().closest('.filter-bar')
+    const controls = [...bar.children]
+    const at = (el) => controls.indexOf(el.closest('.filter-bar > *'))
+    expect(at(standardFilter())).toBe(at(search()) + 1)
+    expect(at(unmappedButton())).toBe(at(search()) + 2)
+    expect(at(screen.getByRole('button', { name: 'Expand all' }))).toBe(at(search()) + 3)
+    expect(standardFilter()).toHaveClass('form-control')
+  })
+
+  it('offers All standards, each standard the form offers, and Local extension, each with its active count', async () => {
+    await setup()
+
+    expect(optionTexts()).toEqual(ALL_OPTIONS)
+    expect(standardFilter().value).toBe('')
+    // The deprecated MTConnect metric is in no count; its tab is not filtered.
+    expect(unmappedButton().textContent).toBe('Unmapped (4)')
+    expect(unmappedButton().getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('narrows to one standard and opens the groups it matched', async () => {
+    await setup()
+    expect(listed()).toEqual([])
+
+    chooseStandard('ISO 22400')
+
+    expect(listed()).toEqual(['OEE/AVAILABILITY', 'OEE/MTBF'])
+    expect(within(catalogTable()).queryByText('Axes')).toBeNull()
+  })
+
+  it('lists a NULL and a blank standard alike under Local extension', async () => {
+    await setup()
+
+    chooseStandard('Local extension')
+
+    expect(listed()).toEqual(['Hydraulic/PRESSURE', 'safety_interlock'])
+  })
+
+  it('narrows to the metrics with no semantic id, NULL and blank alike, and opens their groups', async () => {
+    await setup()
+
+    fireEvent.click(unmappedButton())
+
+    expect(unmappedButton().getAttribute('aria-pressed')).toBe('true')
+    expect(unmappedButton()).toHaveClass('btn-primary')
+    expect(listed()).toEqual(['Controller/EXECUTION', 'Controller/FIRMWARE', 'OEE/MTBF', 'safety_interlock'])
+  })
+
+  it('combines the two filters: a metric must match both', async () => {
+    await setup()
+
+    chooseStandard('ISO 22400')
+    fireEvent.click(unmappedButton())
+    expect(listed()).toEqual(['OEE/MTBF'])
+
+    chooseStandard('Local extension')
+    expect(listed()).toEqual(['safety_interlock'])
+  })
+
+  it('combines with the search', async () => {
+    await setup()
+
+    fireEvent.click(unmappedButton())
+    fireEvent.change(search(), { target: { value: 'controller' } })
+    expect(listed()).toEqual(['Controller/EXECUTION', 'Controller/FIRMWARE'])
+
+    chooseStandard('MTConnect')
+    fireEvent.change(search(), { target: { value: 'FIRM' } })
+    expect(listed()).toEqual(['Controller/FIRMWARE'])
+  })
+
+  it('keeps every count while the search and the other filter narrow the list', async () => {
+    await setup()
+
+    fireEvent.change(search(), { target: { value: 'OEE' } })
+    fireEvent.click(unmappedButton())
+    expect(optionTexts()).toEqual(ALL_OPTIONS)
+
+    chooseStandard('OPC UA')
+    expect(unmappedButton().textContent).toBe('Unmapped (4)')
+  })
+
+  it('says so when nothing matches, in the page’s empty state', async () => {
+    await setup()
+
+    chooseStandard('ASHRAE 223P')
+
+    expect(catalogTable()).toBeNull()
+    expect(document.querySelector('.empty-state').textContent).toBe('No metric matches these filters.')
+  })
+
+  it('names the search alone in the empty state, as before', async () => {
+    await setup()
+
+    fireEvent.change(search(), { target: { value: 'no-such-metric' } })
+    expect(document.querySelector('.empty-state').textContent).toBe('No metric matches no-such-metric.')
+  })
+
+  it('leaves the Deprecated Metrics tab unfiltered', async () => {
+    await setup()
+
+    chooseStandard('ISO 22400')
+    fireEvent.click(unmappedButton())
+    const deprecated = cardTable('Deprecated Metrics')
+
+    expect(within(deprecated).getByText('temperature')).toBeTruthy()
+    expect(within(deprecated).getByText('Controller/OLD_EXECUTION')).toBeTruthy()
+    expect(screen.queryByRole('combobox', { name: 'Filter the catalog by standard' })).toBeNull()
+  })
+
+  it('lets Collapse all close the groups the filters opened, and keeps the filters', async () => {
+    await setup()
+
+    fireEvent.click(unmappedButton())
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse all' }))
+
+    expect(listed()).toEqual([])
+    expect(unmappedButton().getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(within(catalogTable()).getByTitle('Expand OEE (1 metric)'))
+    expect(listed()).toEqual(['OEE/MTBF'])
+  })
+
+  it('counts the search and both filters in Clear filters, and resets all three', async () => {
+    await setup()
+
+    fireEvent.change(search(), { target: { value: 'o' } })
+    chooseStandard('MTConnect')
+    fireEvent.click(unmappedButton())
+    expect(listed()).toEqual(['Controller/EXECUTION', 'Controller/FIRMWARE'])
+
+    fireEvent.click(screen.getByRole('button', { name: /Clear filters \(3\)/ }))
+    expect(search().value).toBe('')
+    expect(standardFilter().value).toBe('')
+    expect(unmappedButton().getAttribute('aria-pressed')).toBe('false')
+    // Back to the collapsed catalog, with every group listed.
+    expect(listed()).toEqual([])
+    expect(within(catalogTable()).getAllByTitle(/^Expand /)).toHaveLength(6)
+    expect(screen.queryByRole('button', { name: /Clear filters/ })).toBeNull()
+  })
+
+  it('opens a filtered row’s drawer, whose Edit offers the suggested id and the vocabulary search', async () => {
+    await setup()
+
+    fireEvent.click(unmappedButton())
+    selectMetric(catalogTable(), 'Controller/FIRMWARE')
+    fireEvent.click(drawerButton('Edit'))
+    const modal = within(document.querySelector('.modal'))
+
+    expect(modal.getByRole('textbox', { name: /Semantic ID/ }).value).toBe('')
+    expect(modal.getByRole('button', { name: 'Use suggested' })).toBeTruthy()
+    expect(modal.getByRole('button', { name: 'Search vocabularies' })).toBeTruthy()
+  })
+})
+
 describe('Metric Catalog — Expand all / Collapse all', () => {
   const allButton = () => screen.getByRole('button', { name: /^(Expand|Collapse) all$/ })
   const groupToggles = () => [...catalogTable().querySelectorAll('.table-group-button')]
