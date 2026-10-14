@@ -2066,9 +2066,11 @@ def h_objects_value(req: "Handler") -> None:
 
 
 # RFC 3339 `date-time` in full: date, time, optional fraction and a REQUIRED offset, matched whole.
-# PostgREST is only ever sent the parsed instant (`_pg_time`), never the caller's text.
+# PostgREST is only ever sent the parsed instant (`_pg_time`), never the caller's text. The clock's
+# ranges are the pattern's, not `fromisoformat`'s: Python 3.14 reads hour 24 as the next midnight.
 RFC3339 = re.compile(
-    r"(\d{4}-\d{2}-\d{2})[Tt](\d{2}:\d{2}:\d{2})(?:\.(\d+))?([Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)",
+    r"(\d{4}-\d{2}-\d{2})[Tt]((?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d)(?:\.(\d+))?"
+    r"([Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)",
     re.ASCII,
 )
 
@@ -2085,7 +2087,7 @@ def _rfc3339(text) -> Optional[datetime]:
         micros = (fraction or "")[:6].ljust(6, "0")
         return datetime.fromisoformat(f"{date}T{clock}.{micros}{offset}").astimezone(timezone.utc)
     except (ValueError, OverflowError):
-        # Month 13, hour 24, second 60, or an offset that moves year 1 or 9999 out of range.
+        # Month 13, February 30, or an offset that moves year 1 or 9999 out of range.
         return None
 
 
