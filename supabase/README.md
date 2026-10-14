@@ -1203,6 +1203,16 @@ showed nothing: the Playback gateway's heartbeat is NULL until a playback writes
 fired about six minutes after every replay. Check 71 in `scripts/check-docs-drift.mjs` holds the
 last declaration of the function to the line.
 
+**`0185` leaves the replay lanes out of `expected_publishers` too.** That arm gates *Ingestion
+Consuming Nothing*, which is critical. It counts a device that has published, or whose gateway has
+reported. A replay does both for its lanes: the replayed NBIRTH writes the Playback gateway's
+`last_heartbeat`, and each replayed DBIRTH writes a lane's `first_dbirth_at`. So after one replay
+the lanes counted. On a stack whose only devices were lanes, which is a workshop or demonstration
+stack, the rule fired ten minutes after the replay and stayed firing until the lanes were deleted.
+The arm now joins each device to its gateway and leaves out the devices of a shadow gateway, the
+same `NOT g.is_shadow` the `gateway_stale` arm carries. Check 71 holds both arms to it. A site where
+a replay left the alert firing sees it clear at the next evaluation after the upgrade.
+
 **`is_shadow`, and not one of the other three flags.** `is_simulated` is carried by every simulator
 gateway, and those do heartbeat — their silence is a real fault. `deployment` answers where the connector runs, not
 whether anything publishes as it. `is_archived` would mean
