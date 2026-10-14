@@ -1141,7 +1141,6 @@ dashboard and a broker capture ask too, past the rate limit below, through
   above take the group from the message's topic. A person's request starts from a row that carries
   the gateway's configured group, so `publishing_group()` reads `gateways.observed_sparkplug_group`
   first and uses the configured group only when that is NULL or cannot be read.
-
 - **Rate limited per edge node** (`REBIRTH_REQUEST_INTERVAL_SECONDS`, default 300s). This is the
   load-bearing half: a gateway that answers a rebirth by restarting, or one that never answers at
   all, would otherwise be asked once per message and held in a reboot loop by the mechanism meant
