@@ -100,15 +100,9 @@ secrets:
   # The SMTP relay's password, for supabaseAuth.smtp. Empty is valid: the relay is optional.
   smtpPassword: ""
 
-  # The secret half of coldArchive.s3.accessKeyId. A FOREIGN CREDENTIAL, like the SMTP password
-  # above: the stack cannot mint, rotate or revoke a key at another provider, so it is given to
-  # the chart rather than issued by the database. A seed, like the rest of coldArchive.s3: db-init
-  # writes it only while the destination has none. Empty is valid -- an Administrator then sets
-  # the destination on the Cold Storage page, and until then nothing is exported.
-  #
-  # Scope it to PutObject and GetObject on site=<siteKey>/* with NO DeleteObject: the exporter
-  # writes and never deletes, and a credential that cannot delete makes that an invariant the
-  # gateway is unable to break. supabase/README.md carries the policy.
+  # DEPRECATED since 1.4.0 and read by nothing; removed in 2.0. The cold archive's secret access
+  # key is set only on the Cold Storage page, by an Administrator, and nothing seeds it from here.
+  # Accepted so an upgrade with it set renders.
   archiveS3SecretAccessKey: ""
 
   # TimescaleDB (the historian): a separate database with its own credentials.

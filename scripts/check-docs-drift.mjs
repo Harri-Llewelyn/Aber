@@ -4473,7 +4473,7 @@ function edgeFunctionNames() {
     mqttMonitorUser: 'a username, with a default',
     mqttValidatorUser: 'a username, with a default',
     mqttPlaybackCredentials: 'empty is valid: the worker refuses a job for a gateway it holds no credential for',
-    archiveS3SecretAccessKey: 'only for a cold archive in S3, which setup does not configure',
+    archiveS3SecretAccessKey: 'deprecated and read by nothing: the cold archive key is set on the Cold Storage page',
     smtpPassword: 'only for supabaseAuth.smtp, which setup does not configure',
     giteaMachinePassword: 'deprecated and read by nothing: the machine account is a bot with a token the forge mints',
   };

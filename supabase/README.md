@@ -2752,14 +2752,12 @@ the daemon may *ask* for a drop the manifest has already cleared while holding n
 remove a row of its own choosing.
 
 **Its settings arrive with their reader**, which is `0031`'s rule: `archive.enabled` (off by
-default), `archive.tier_after_days` and `archive.site_key`, all read by
-`ingestion/cold_archive.py`. **No credential key will ever be added** — every authenticated user
-can read `system_settings`, so no credential key is declared there and the endpoint and bucket are
-chart values rather than settings. The S3 secret itself lives in the Vault: `0134` seeds it once
-from `secrets.archiveS3SecretAccessKey` and never again, because an Administrator may have set it
-since through `set_archive_credential()` from the Cold Storage page, and `cold_archive.py` reads it
-back through `cold_archive_destination()`. The secrets rule under *Runtime configuration* admits
-that writer, and since `0178` it shares one helper with the off-site backup key's. `archive.bucket` was a setting and is retired with the local bucket it named (`0132`).
+default), `archive.tier_after_days`, `archive.site_key` and the five destination fields below, all
+read by `ingestion/cold_archive.py`. **No credential is ever a setting.** The S3 secret lives in
+the Vault, and only the Cold Storage page writes it, through `set_archive_credential()`. Nothing
+seeds it from the chart. `cold_archive.py` reads it back through `cold_archive_destination()`. The
+secrets rule under *Runtime configuration* admits that one writer, and since `0178` it shares one
+helper with the off-site backup key's.
 
 #### The destination is somewhere else, and only somewhere else (archived migration 0132)
 
@@ -2790,10 +2788,10 @@ answer to a question `0132` got wrong — it put the whole destination in
 `values.yaml` because *one* of its fields is a secret, when an endpoint, a region, a bucket and a
 path style are not credentials and an access key *id* is an identifier (issue #351).
 
-**The chart values are a seed, not the source.** A new install can still be configured from
-`values.yaml`, and `0134` writes each field into its settings row *only while that row is empty* —
-so a chart value configures a fresh stack and never overwrites what an Administrator later set from
-the page:
+**The chart values are a seed, not the source, and the secret key is not among them.** A new
+install can still name its destination in `values.yaml`. db-init hands each field to `0002`, which
+writes it into its settings row *only while that row is empty*. So a chart value configures a fresh
+stack and never overwrites what an Administrator later set from the page:
 
 ```yaml
 coldArchive:
@@ -2804,9 +2802,18 @@ coldArchive:
     bucket: "plant-history"
     accessKeyId: "AKIA..."
     pathStyle: false                       # true for MinIO and most self-hosted gateways
-secrets:
-  archiveS3SecretAccessKey: "..."          # seeded into the vault on the first boot only
 ```
+
+| Field | From `values.yaml` | From the Cold Storage page |
+| :--- | :--- | :--- |
+| Endpoint, region, bucket, access key ID | Seeded while its row is empty | Yes, and the page wins after |
+| Path style | Seeded on the first boot | Yes, and the page wins after |
+| Site key | Yes, frozen at the first boot that sets it | No: shown for reference |
+| Secret access key | **No** | **Yes, and only there** |
+
+**The secret access key comes only from the page.** `secrets.archiveS3SecretAccessKey` is
+deprecated and read by nothing; the rendered notes say so when it is set. Until an Administrator
+enters the key, the exporter names it as missing and exports nothing.
 
 The **site key** is the exception and stays install-time: it is the IAM prefix every object is
 already addressed under, so it is frozen read-only by `0132` and changing it is a procedure rather
@@ -2897,8 +2904,8 @@ To change it deliberately, in this order, with the CronJob suspended:
 
 #### The credential is a foreign one, and it cannot delete
 
-We cannot mint, rotate or revoke a key at another provider, so it sits with the SMTP relay password
-rather than with the principals this stack issues. Scope it to `PutObject` and `GetObject` on this
+We cannot mint, rotate or revoke a key at another provider, so an Administrator enters it on the
+Cold Storage page rather than the stack issuing it. Scope it to `PutObject` and `GetObject` on this
 site's prefix, with **no `DeleteObject`**:
 
 ```json
