@@ -2221,16 +2221,26 @@ the External Secrets Operator (ESO) if there is a vault, and SOPS-encrypted valu
 `ExternalSecret` example.
 
 **Rotation is not automatic even with ESO.** Most values are read into a pod's environment when it
-starts. Two need more:
+starts. Two groups need more:
 
 ```bash
 # The gateway's API keys are substituted by an initContainer:
 kubectl -n aber rollout restart deployment/supabase-envoy
-# The OAuth client secrets are HASHED INTO auth.oauth_clients by db-init:
-helm upgrade ...   # re-runs the post-upgrade hook
+# The keys the db-init and timescaledb-maintenance hooks copy into the databases:
+helm upgrade ...   # re-runs the post-upgrade hooks
 ```
 
-Both halves of an OAuth secret must move together, or the handshake fails with `invalid_credentials`.
+The hooks copy these keys:
+
+- **Hashed into `auth.oauth_clients`:** `GRAFANA_OAUTH_CLIENT_SECRET`, `NODERED_OAUTH_CLIENT_SECRET`,
+  `STUDIO_OAUTH_CLIENT_SECRET` and `GITEA_OAUTH_CLIENT_SECRET`. Both halves of an OAuth secret must
+  move together, or the handshake fails with `invalid_credentials`.
+- **Stored in the vault:** `SUPABASE_PUBLISHABLE_KEY`, `GATEWAY_REVOKE_SECRET`, `FORGE_SWEEP_SECRET`
+  and `NODERED_WEBHOOK_JWT_SECRET`.
+- **Set on database roles and on the platform database's link to the historian:** `DB_PASSWORD`,
+  `FDW_READER_PASSWORD`, `BI_READER_PASSWORD` and `INGEST_WRITER_PASSWORD`. `DB_PASSWORD` is also
+  the historian superuser's own password, set when its volume was created, so change it in the
+  historian first.
 
 ### Storage durability
 

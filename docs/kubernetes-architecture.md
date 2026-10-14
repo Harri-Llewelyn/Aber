@@ -1333,9 +1333,13 @@ key contract, an ESO `ExternalSecret` example, and the SOPS alternative.
 
 **Rotation is not automatic even with ESO**, and that is the part worth writing down. Most values are
 read into a pod's environment at start, so a refreshed Secret reaches nothing until a restart. Two
-need more: the gateway's API keys are substituted by an initContainer (needs a rollout restart), and the two
-OAuth client secrets are *hashed into `auth.oauth_clients`* by db-init (needs a `helm upgrade`, and
-both halves must move together or the handshake fails with `invalid_credentials`).
+groups need more: the gateway's API keys are substituted by an initContainer (needs a rollout
+restart), and every key the db-init and timescaledb-maintenance hooks copy into a database needs a
+`helm upgrade` to re-run them. Those are the four OAuth client secrets *hashed into
+`auth.oauth_clients`* (both halves must move together or the handshake fails with
+`invalid_credentials`), the four secrets stored in the vault, and the four passwords set on
+database roles and on the platform database's link to the historian. `values-prod.yaml.example` and the runbook's *Secrets in production* name them, and
+check 79 holds both lists to the hooks' psql variables.
 
 ### 10.5 TLS, MQTTS and self-monitoring
 
