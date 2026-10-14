@@ -905,6 +905,9 @@ function edgeFunctionNames() {
     'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline records the first alone',
     'public.reject_archived_schema_assignment': '0168 declares it as the baseline does, in its final form, so neither names devices.schema_id (0175)',
     'public.platform_health_rows': '0182 puts back the shadow-gateway exclusion archived migration 0061 gave the gateway_stale arm and 0074 dropped; the baseline carries the form without it (check 71)',
+    'public.is_active_capture_object': '0184 answers false unless the caller could read the capture job: the ingestion daemon, a role capture_jobs\' RLS admits, or one RLS does not apply to; the baseline answered any signed-in account',
+    'public.is_active_playback_capture': '0184 answers false unless the caller could read the playback job: the playback worker, a role playback_jobs\' RLS admits, or one RLS does not apply to; the baseline answered any signed-in account',
+    'public.playback_stale_credentials': '0184 returns no rows to a caller playback_jobs\' RLS refuses; the baseline told any signed-in account when playback credentials were issued',
     // Empty just after a squash: the baseline is generated from a dump of the finished database,
     // so every function appears in it exactly once, in its final form. Entries return as soon as
     // a migration added after the fold redeclares something the baseline holds, and each one
