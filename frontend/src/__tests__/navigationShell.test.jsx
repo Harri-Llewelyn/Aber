@@ -540,12 +540,12 @@ describe('the retired KPI ribbon', () => {
  */
 describe('Site Map lane hues', () => {
   // Each lane is one button with its own hue: blue for Site-Wide, grey for Simulated, amber for
-  // Unassigned. The hue is a border colour plus a tint; themeContrast.test.js measures --text-muted
-  // over these exact tints, so they are quoted here to keep that measurement honest.
+  // Unassigned. The hue is a border colour plus a tint of a theme colour, so it follows the theme;
+  // themeContrast.test.js measures --text-muted over each tint.
   const HUES = [
-    ['site-lane-site', 'var(--accent)', 'rgba(0, 212, 255, 0.05)'],
-    ['site-lane-simulated', 'var(--text-dim)', 'rgba(133, 142, 163, 0.07)'],
-    ['site-lane-queue', 'var(--warning)', 'rgba(255, 179, 0, 0.06)']
+    ['site-lane-site', 'var(--accent)', 'color-mix(in srgb, var(--accent) 5%, transparent)'],
+    ['site-lane-simulated', 'var(--text-dim)', 'color-mix(in srgb, var(--text-muted) 7%, transparent)'],
+    ['site-lane-queue', 'var(--warning)', 'color-mix(in srgb, var(--warning) 6%, transparent)']
   ]
 
   it.each(HUES)('.%s sets its border colour and tint', (variant, border, tint) => {

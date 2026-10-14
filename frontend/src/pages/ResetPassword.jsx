@@ -49,7 +49,7 @@ export function ResetPasswordScreen({ email, onDone }) {
   return (
     <AuthShell theme={theme} onToggleTheme={toggleTheme} title="Choose a new password" subtitle={email ? `for ${email}` : undefined}>
       {error && (
-        <div role="alert" style={{ background: 'rgba(255,77,109,0.15)', border: '1px solid var(--danger)', color: 'var(--danger-text)', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '18px' }}>
+        <div role="alert" style={{ background: 'var(--danger-tint)', border: '1px solid var(--danger)', color: 'var(--danger-text)', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '18px' }}>
           {error}
         </div>
       )}

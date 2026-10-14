@@ -1,33 +1,27 @@
 import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
+import { tokenBlocks, themeTokens, resolveColour, over, declaration } from '../test/themeColours'
 
 /**
  * WCAG contrast guard for the theme tokens. A token that looks right in the theme it was authored
  * in and is unreadable in the other is invisible to a rendering test, because each renders
  * something. This computes the real ratios from App.css and holds every text token to WCAG AA in
- * both themes.
+ * both themes. Each tint is read from the rule that paints it and resolved in the theme being
+ * measured, so the light theme's text is measured on the light theme's fill.
  */
 
 const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
 
-const tokenBlock = (marker) => {
-  const i = APP_CSS.indexOf(marker)
-  if (i < 0) throw new Error(`theme block not found: ${marker}`)
-  const body = APP_CSS.slice(APP_CSS.indexOf('{', i) + 1, APP_CSS.indexOf('}', i))
-  return Object.fromEntries(
-    [...body.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/gi)].map(m => [m[1], m[2].trim().split(/\s/)[0]])
-  )
-}
+/** Each theme's tokens as its root element resolves them, and each block's own declarations. */
+const THEMES = themeTokens(APP_CSS)
+const BLOCKS = tokenBlocks(APP_CSS)
 
-const THEMES = {
-  dark: tokenBlock(':root, [data-theme="dark"]'),
-  light: tokenBlock('[data-theme="light"]'),
-}
-
-const rgb = (hex) => {
-  const h = hex.replace('#', '').trim()
-  return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16))
+/** An opaque colour as [r, g, b]: a hex, or any value the theme resolves to an opaque colour. */
+const rgb = (value, tokens = {}) => {
+  const [r, g, b, a] = resolveColour(value, tokens)
+  if (a !== 1) throw new Error(`${value} is translucent; composite it with over() first`)
+  return [r, g, b]
 }
 const channel = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4) }
 const luminance = ([r, g, b]) => 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
@@ -35,8 +29,6 @@ const contrast = (fg, bg) => {
   const [hi, lo] = [luminance(fg), luminance(bg)].sort((a, b) => b - a)
   return (hi + 0.05) / (lo + 0.05)
 }
-/** Composite a translucent overlay onto an opaque background. */
-const tint = (overlay, alpha, base) => overlay.map((c, i) => Math.round(c * alpha + base[i] * (1 - alpha)))
 
 const AA_TEXT = 4.5      // body text
 const AA_LARGE = 3.0     // >=18px text, and graphical objects such as icons
@@ -73,8 +65,21 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
   const card = rgb(t['--bg-card'])
   const base = rgb(t['--bg-base'])
   const surface = rgb(t['--bg-surface'])
-  // The lightest amber tint (0.07) over the card: a margin case for text on any amber-tinted surface.
-  const alertCard = tint([255, 179, 0], 0.07, card)
+
+  /** A colour value resolved in this theme and composited onto an opaque ground. */
+  const on = (value, ground) => over(resolveColour(value, t), ground)
+  /** What a rule in App.css paints, found by its exact selector. */
+  const paint = (selector, prop = 'background') => {
+    const value = declaration(APP_CSS, selector, prop)
+    if (!value) throw new Error(`no ${prop} for ${selector} in App.css`)
+    return value
+  }
+  const mix = (token, pct) => `color-mix(in srgb, var(${token}) ${pct}%, transparent)`
+
+  // .callout-warning's tint, the lightest amber surface that carries text.
+  const alertCard = on(paint('.callout-warning'), card)
+  // An archived row's amber: the ground of the archived badge in it.
+  const archivedRow = on(paint('tr.row-archived'), card)
 
   /**
    * --bg-glass composited onto whatever it sits on. It is the hover ground for CopyableId,
@@ -82,14 +87,10 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
    * theme (white at 0.04 in dark, black at 0.02 in light), so a colour safe on a resting card is
    * not automatically safe once pointed at.
    */
-  const glass = (base) => themeName === 'dark'
-    ? tint([255, 255, 255], 0.04, base)
-    : tint([0, 0, 0], 0.02, base)
+  const glass = (ground) => on('var(--bg-glass)', ground)
 
   /** --accent-dim composited onto a ground: the fill .badge-info and .trail-badge-operational paint. */
-  const accentDim = (base) => themeName === 'dark'
-    ? tint([0, 212, 255], 0.15, base)
-    : tint([2, 132, 199], 0.12, base)
+  const accentDim = (ground) => on('var(--accent-dim)', ground)
 
   const cases = [
     // [label, foreground token, background, threshold]
@@ -103,34 +104,43 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['--text-dim on base',           '--text-dim',     base,      AA_TEXT],
     // An amber tint costs contrast, so sub-text on it is --text-muted, which still clears AA.
     ['--text-muted on alert card',   '--text-muted',   alertCard, AA_TEXT],
+    ['--text-muted on an archived row', '--text-muted', archivedRow, AA_TEXT],
     // Warning used as text must clear AA; --warning itself is only safe for borders and icons.
-    // Warning text sits on an amber-tinted fill (.badge-warning at 0.15, the banners at 0.08 and
-    // 0.12), which costs contrast, so each level is checked.
-    ['--warning-text on card',        '--warning-text', card,                              AA_TEXT],
-    ['--warning-text on alert card',  '--warning-text', alertCard,                         AA_TEXT],
-    ['--warning-text on 0.08 tint',   '--warning-text', tint([255,179,0], 0.08, card),     AA_TEXT],
-    ['--warning-text on 0.12 tint',   '--warning-text', tint([255,179,0], 0.12, card),     AA_TEXT],
-    ['--warning-text on 0.15 tint',   '--warning-text', tint([255,179,0], 0.15, card),     AA_TEXT],
-    // Same split for success: .badge-online and .toast-success sit on rgba(0,232,150,0.15).
-    ['--success-text on card',        '--success-text', card,                              AA_TEXT],
-    ['--success-text on 0.12 tint',   '--success-text', tint([0,232,150], 0.12, card),     AA_TEXT],
-    ['--success-text on 0.15 tint',   '--success-text', tint([0,232,150], 0.15, card),     AA_TEXT],
-    ['--success-text on base',        '--success-text', base,                              AA_TEXT],
-    // And again for danger: the error toast paints rgba(255,77,109,0.15) underneath its text, and
-    // on that fill --danger measured 3.94:1 in light. --danger-text is the readable equivalent.
-    ['--danger-text on card',         '--danger-text',  card,                              AA_TEXT],
-    ['--danger-text on base',         '--danger-text',  base,                              AA_TEXT],
-    ['--danger-text on 0.15 tint',    '--danger-text',  tint([255,77,109], 0.15, card),    AA_TEXT],
+    // Warning text sits on an amber-tinted fill, which costs contrast, so each fill is checked.
+    ['--warning-text on card',          '--warning-text', card,                                         AA_TEXT],
+    ['--warning-text on alert card',    '--warning-text', alertCard,                                    AA_TEXT],
+    ['--warning-text on a page banner', '--warning-text', on(paint('.callout-warning.callout-page'), base), AA_TEXT],
+    ['--warning-text on a context alert', '--warning-text', on(paint('.context-alert'), surface),       AA_TEXT],
+    ['--warning-text on --warning-tint', '--warning-text', on(paint('.badge-warning'), card),            AA_TEXT],
+    ['warning badge on hover',          '--warning-text', on(paint('.badge-warning'), glass(card)),     AA_TEXT],
+    ['archived badge in an archived row', '--warning-text', on(paint('.badge-warning'), archivedRow),   AA_TEXT],
+    ['warning alert pill',              '--warning-text', on(paint('.alert-pill-warning'), surface),    AA_TEXT],
+    // Same split for success: .badge-online and .toast-success sit on --success-tint.
+    ['--success-text on card',          '--success-text', card,                                         AA_TEXT],
+    ['--success-text on 0.12 tint',     '--success-text', on(mix('--success', 12), card),               AA_TEXT],
+    ['--success-text on --success-tint', '--success-text', on(paint('.badge-online'), card),            AA_TEXT],
+    ['success badge on hover',          '--success-text', on(paint('.badge-online'), glass(card)),      AA_TEXT],
+    ['--success-text on base',          '--success-text', base,                                         AA_TEXT],
+    // And again for danger: --danger is below AA on its own tint in the light theme, so the text on
+    // a rose fill is --danger-text.
+    ['--danger-text on card',           '--danger-text',  card,                                         AA_TEXT],
+    ['--danger-text on base',           '--danger-text',  base,                                         AA_TEXT],
+    ['--danger-text on --danger-tint',  '--danger-text',  on(paint('.badge-critical'), card),           AA_TEXT],
+    ['danger badge on hover',           '--danger-text',  on(paint('.badge-critical'), glass(card)),    AA_TEXT],
     // --warning/--success remain the border/icon colours, where 3:1 is the bar.
     ['--warning icon on card',        '--warning',      card,                              AA_LARGE],
     ['--success icon on card',        '--success',      card,                              AA_LARGE],
     ['--danger as text on card',      '--danger',       card,                              AA_TEXT],
     ['--danger border on card',       '--danger',       card,                              AA_LARGE],
     ['--accent on card',              '--accent',       card,                              AA_LARGE],
-    // The two derived lanes tint their own ground; --text-muted is the text on it, because
+    // The Site Map lanes tint their own ground; --text-muted is the text on it, because
     // --text-dim measures exactly 4.50:1 on a bare card, so any tint pushes it under AA.
-    ['--text-muted on site-wide lane', '--text-muted',  tint([0,212,255], 0.05, card),     AA_TEXT],
-    ['--text-muted on unassigned lane','--text-muted',  tint([255,179,0], 0.06, card),     AA_TEXT],
+    ['--text-muted on site-wide lane', '--text-muted',  on(paint('.site-lane-site'), card),      AA_TEXT],
+    ['--text-muted on simulated lane', '--text-muted',  on(paint('.site-lane-simulated'), card), AA_TEXT],
+    ['--text-muted on unassigned lane','--text-muted',  on(paint('.site-lane-queue'), card),     AA_TEXT],
+    // A device chip's name is --text-primary on the chip's tint.
+    ['online device chip',             '--text-primary', on(paint('.chip-success'), card),       AA_TEXT],
+    ['quarantined device chip',        '--text-primary', on(paint('.chip-warning'), card),       AA_TEXT],
 
     // .context-panel sits on --bg-surface, not --bg-card, so none of the card figures describe it.
     // Its field labels are the smallest text in the drawer.
@@ -152,27 +162,28 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['danger-reveal label at rest',    '--text-muted',  glass(card),                       AA_TEXT],
     // --danger-text, not --danger: the label sits ON the rose fill the button paints, and
     // --danger measured 4.09:1 dark / 3.69:1 light on the 0.2 hover level.
-    ['danger-reveal label on hover',   '--danger-text', tint([255,77,109], 0.2, card),     AA_TEXT],
-    ['btn-danger label at rest',       '--danger-text', tint([255,77,109], 0.12, card),    AA_TEXT],
+    ['danger-reveal label on hover',   '--danger-text', on(paint('.btn-danger.btn-danger-reveal:hover'), card), AA_TEXT],
+    ['btn-danger label at rest',       '--danger-text', on(paint('.btn-danger'), card),    AA_TEXT],
+    ['btn-danger label on hover',      '--danger-text', on(paint('.btn-danger:hover'), card), AA_TEXT],
     // The rail's flagged item paints --warning-text on the sidebar's ground, which is the card's.
     ['--warning-text on rail item',    '--warning-text', card,                             AA_TEXT],
     // Brand badges. The label is --text-primary ON the brand tint precisely because the brand
     // colours themselves are not legible as text -- see the negative guard below.
-    ['sharepoint badge label',         '--text-primary', tint([0,120,212], 0.15, surface),  AA_TEXT],
-    ['drive badge label',              '--text-primary', tint([15,157,88], 0.15, surface),  AA_TEXT],
+    ['sharepoint badge label',         '--text-primary', on(mix('--brand-sharepoint', 15), surface), AA_TEXT],
+    ['drive badge label',              '--text-primary', on(mix('--brand-drive', 15), surface),      AA_TEXT],
     // Badges labelled in the accent on an accent tint, at 12px. --accent measured 3.51:1 on
-    // --accent-dim in light, so the label is --accent-text; pending and provisioned tint cyan.
+    // --accent-dim in light, so the label is --accent-text.
     ['info badge label',               '--accent-text',  accentDim(card),                   AA_TEXT],
     ['info badge label on hover',      '--accent-text',  accentDim(glass(card)),            AA_TEXT],
     ['operational badge in the drawer','--accent-text',  accentDim(surface),                AA_TEXT],
-    ['pending badge label',            '--accent-text',  tint([0,212,255], 0.15, card),     AA_TEXT],
-    ['pending badge label on hover',   '--accent-text',  tint([0,212,255], 0.15, glass(card)), AA_TEXT],
-    ['provisioned badge label',        '--accent-text',  tint([0,212,255], 0.07, card),     AA_TEXT],
-    // The toast types and the bell's badge tones, each ink on its own 0.15 tint over --bg-card.
-    ['info toast label',               '--accent-text',  tint([0,212,255], 0.15, card),     AA_TEXT],
-    ['warning toast label',            '--warning-text', tint([255,179,0], 0.15, card),     AA_TEXT],
-    ['success toast label',            '--success-text', tint([0,232,150], 0.15, card),     AA_TEXT],
-    ['error toast label',              '--danger-text',  tint([255,77,109], 0.15, card),    AA_TEXT],
+    ['pending badge label',            '--accent-text',  on(paint('.badge-pending'), card),        AA_TEXT],
+    ['pending badge label on hover',   '--accent-text',  on(paint('.badge-pending'), glass(card)), AA_TEXT],
+    ['provisioned badge label',        '--accent-text',  on(paint('.badge-provisioned'), card),    AA_TEXT],
+    // The toast types and the bell's badge tones, each ink on its own tint over --bg-card.
+    ['info toast label',               '--accent-text',  on(paint('.toast-info', 'background-image'), card),    AA_TEXT],
+    ['warning toast label',            '--warning-text', on(paint('.toast-warning', 'background-image'), card), AA_TEXT],
+    ['success toast label',            '--success-text', on(paint('.toast-success', 'background-image'), card), AA_TEXT],
+    ['error toast label',              '--danger-text',  on(paint('.toast-error', 'background-image'), card),   AA_TEXT],
     // The notification list: the timestamp is the dimmest text in it.
     ['notification time',              '--text-dim',     card,                              AA_TEXT],
   ]
@@ -180,11 +191,47 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
   it.each(cases)('%s clears its threshold', (label, token, bg, threshold) => {
     const value = t[token]
     expect(value, `${token} is not defined in the ${themeName} theme`).toBeTruthy()
-    const ratio = contrast(rgb(value), bg)
+    const ratio = contrast(rgb(value, t), bg)
     expect(
       Number(ratio.toFixed(2)),
       `${label} in ${themeName}: ${value} measured ${ratio.toFixed(2)}:1, needs ${threshold}:1`
     ).toBeGreaterThanOrEqual(threshold)
+  })
+})
+
+/**
+ * The parser above stands in for the browser, so it is held to what CSS Color 5 says color-mix()
+ * computes: srgb channels interpolated premultiplied by alpha, which makes a mix with
+ * `transparent` the colour itself at that alpha.
+ */
+describe('color-mix resolution', () => {
+  it('mixes a colour with transparent into that colour at the percentage as alpha', () => {
+    expect(resolveColour('color-mix(in srgb, rgb(255, 179, 0) 15%, transparent)', {}))
+      .toEqual(resolveColour('rgba(255, 179, 0, 0.15)', {}))
+  })
+
+  it('resolves var() in the theme it is read in', () => {
+    const value = 'color-mix(in srgb, var(--warning) 15%, transparent)'
+    expect(resolveColour(value, THEMES.dark)).toEqual([255, 179, 0, 0.15])
+    expect(resolveColour(value, THEMES.light)).toEqual([...rgb(THEMES.light['--warning']), 0.15])
+  })
+
+  it('completes a missing percentage and scales alpha by a sum under 100', () => {
+    expect(resolveColour('color-mix(in srgb, #ffffff, #000000)', {})).toEqual([127.5, 127.5, 127.5, 1])
+    expect(resolveColour('color-mix(in srgb, #ffffff 25%, #000000)', {})).toEqual([63.75, 63.75, 63.75, 1])
+    expect(resolveColour('color-mix(in srgb, #ffffff 20%, #000000 20%)', {})).toEqual([127.5, 127.5, 127.5, 0.4])
+  })
+})
+
+/**
+ * The tint tokens are declared in both blocks, so a theme set below the root re-resolves them
+ * against its own colours, and each mixes the signal colour it is named for.
+ */
+describe('tint tokens', () => {
+  it.each(['--success', '--warning', '--danger'])('%s-tint mixes its signal at 15%% in both blocks', (signal) => {
+    for (const block of Object.values(BLOCKS)) {
+      expect(block[`${signal}-tint`]).toBe(`color-mix(in srgb, var(${signal}) 15%, transparent)`)
+    }
   })
 })
 
@@ -311,7 +358,7 @@ describe('colours resolve through theme tokens', () => {
   it('keeps the brand marks identical across both themes', () => {
     for (const token of ['--brand-sharepoint', '--brand-drive']) {
       expect(THEMES.dark[token], `${token} must be defined`).toBeTruthy()
-      expect(THEMES.light[token] ?? THEMES.dark[token]).toBe(THEMES.dark[token])
+      expect(BLOCKS.light[token] ?? BLOCKS.dark[token]).toBe(BLOCKS.dark[token])
     }
   })
 
@@ -461,8 +508,8 @@ describe('theme token hygiene', () => {
   it('defines the same token names in both themes', () => {
     // A token present in one theme and missing in the other resolves to nothing at runtime,
     // which is how the sign-in card ended up white-on-white.
-    const darkOnly = Object.keys(THEMES.dark).filter(k => !(k in THEMES.light))
-    const lightOnly = Object.keys(THEMES.light).filter(k => !(k in THEMES.dark))
+    const darkOnly = Object.keys(BLOCKS.dark).filter(k => !(k in BLOCKS.light))
+    const lightOnly = Object.keys(BLOCKS.light).filter(k => !(k in BLOCKS.dark))
     // The dark block is the base :root, so it legitimately defines structural tokens the
     // light override does not need to restate. Only colour tokens must exist in both.
     const colourish = (k) => /(text|bg|border|accent|success|warning|danger)/.test(k)
