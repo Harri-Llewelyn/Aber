@@ -15,7 +15,7 @@
     ]
   },
   "grafana/grafana": {
-    "reason": "13.2.3 is the newest Grafana release (2026-09-29). Every finding is inside a bundled datasource plugin's own binary: gRPC-Go, whose server answers only Grafana over the plugin's local go-plugin connection, and the Tempo library in the Tempo plugin, which this stack does not provision.",
+    "reason": "13.2.3 is the newest Grafana release (2026-09-29). Every finding is inside a bundled datasource plugin's own binary: gRPC-Go, whose server answers only Grafana over the plugin's local go-plugin connection, and the Tempo library in the Tempo plugin, which grafana.ini disables, so Grafana never starts it.",
     "expires": "2026-12-01",
     "accept": [
       "CVE-2026-21728 github.com/grafana/tempo",

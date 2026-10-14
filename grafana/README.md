@@ -1,7 +1,8 @@
 # Grafana provisioning
 
 **In short:** Aber's dashboards, data sources and alert rules in Grafana, as Grafana loads them when
-it starts. Read this to change a dashboard or an alert rule, or to understand an alert that fired.
+it starts, and the bundled plugins it runs. Read this to change a dashboard or an alert rule, to
+understand an alert that fired, or to move Grafana to a new image.
 
 Everything Grafana loads at start lives here and is mirrored into the chart by
 `scripts/sync-helm-chart-files.mjs`: the platform dashboards under
@@ -28,6 +29,97 @@ both. A checksum on the pod template rolls Grafana.
 say, which is why several groups below are `noDataState: OK` throughout: their exporters can be
 switched off, and a rule that alerts forever about a measurement the operator declined would be
 switched off with them.
+
+## Bundled plugins
+
+**Grafana runs only the datasource plugins Aber provisions.** The image bundles thirteen backend
+datasource plugins under `/usr/share/grafana/data/plugins-bundled`. Grafana starts each one it
+loads as a process of its own, from a binary of about 30 MiB. Aber provisions three types:
+Prometheus, Loki and PostgreSQL (the TimescaleDB and Supabase datasources). `disable_plugins` in
+[`grafana.ini`](grafana.ini) names the other ten. Grafana then loads none of them, starts no process
+for them and drops them from its preinstall list. The datasources compiled into Grafana itself
+(Azure Monitor, CloudWatch, Graphite and TestData) run inside the server process and start nothing,
+so they are not listed here.
+
+**A datasource of a disabled type stops working, and nothing is logged at start.** A site's own
+datasource of that type, added in the UI, keeps its row: it stays listed with a generic icon, and
+its health check and every query answer 404 `Plugin not registered`. A site keeps such a plugin with
+the chart value `grafana.enablePlugins`, e.g. `[mysql]`, and the datasource answers again unchanged.
+The chart then sets `GF_PLUGINS_DISABLE_PLUGINS` to `disable_plugins` less those ids, read from
+`grafana.ini` so the list is written once, and an id it does not name fails the render. With
+`[mysql]` Grafana runs four plugin processes and MySQL registers again (measured). Grafana ignores
+an empty variable, so keeping all ten renders a lone comma.
+
+The bundled backend datasource plugins of `grafana/grafana:13.2.3`, as the image's `plugin.json`
+files declare them:
+
+| Plugin id | Also answers to type | In Aber |
+| :--- | :--- | :--- |
+| `elasticsearch` | | Disabled |
+| `grafana-postgresql-datasource` | `postgres` | Provisioned |
+| `grafana-pyroscope-datasource` | `phlare` | Disabled |
+| `influxdb` | | Disabled |
+| `jaeger` | | Disabled |
+| `loki` | | Provisioned |
+| `mssql` | | Disabled |
+| `mysql` | | Disabled |
+| `opentsdb` | | Disabled |
+| `prometheus` | | Provisioned |
+| `stackdriver` | | Disabled |
+| `tempo` | | Disabled |
+| `zipkin` | | Disabled |
+
+`check-docs-drift.mjs` holds this table, `disable_plugins` and the provisioning together. Every
+plugin listed is provisioned or disabled, and no type a datasource, dashboard or alert rule uses is
+disabled. The chart overrides the line only as above, and `grafana.enablePlugins` is empty by
+default. A plugin Aber starts provisioning comes out of `disable_plugins` and is marked Provisioned
+here.
+
+**A new Grafana image means reading the list again.** The check fails while the chart pins a tag
+other than the one above, so a Renovate pull request that moves `grafana.image.tag` fails until
+the list is refreshed. Read it from the new image (Docker and Node on the PATH):
+
+```sh
+TAG=13.2.3   # set to the tag deploy/helm/aber/values.yaml pins
+docker run --rm --entrypoint sh "grafana/grafana:$TAG" -c \
+  'echo "["; s=; for f in /usr/share/grafana/data/plugins-bundled/*/plugin.json; do echo "$s"; cat "$f"; s=,; done; echo "]"' |
+  node -e 'for (const p of JSON.parse(require("fs").readFileSync(0, "utf8")))
+    if (p.type === "datasource" && p.backend) console.log(p.id, ...(p.aliasIDs ?? []))'
+```
+
+It prints one plugin per line, its id first and then the types it also answers to. Then:
+
+1. Change the tag above the table to the new one.
+2. Make the table's rows the printed list. A new plugin is Disabled unless Aber provisions its
+   type.
+3. Make `disable_plugins` in `grafana.ini` name every Disabled row, and only those.
+4. Run `node scripts/sync-helm-chart-files.mjs` and `node scripts/check-docs-drift.mjs`.
+
+**Measured, 2026-10-14.** Plain Docker, `grafana/grafana:13.2.3`, this directory's `grafana.ini`
+and provisioning mounted as the chart mounts them, all four datasources healthy against Postgres,
+Prometheus and Loki containers, no memory limit, the page cache dropped between the runs, sampled
+one to three minutes after start:
+
+| | Before: all thirteen loaded | After: ten disabled |
+| :--- | ---: | ---: |
+| Plugin processes | 13 | 3 |
+| Their RSS | 367-452 MiB | 115-123 MiB |
+| Anonymous memory | 249-258 MiB | 172-193 MiB |
+| Working set (`memory.current` less inactive file cache) | 659-666 MiB | 290-317 MiB |
+| `memory.current` | 817-1010 MiB | 610-642 MiB |
+
+Plugin loading at start took 1.5 s before and 0.4 s after. On the k3d dev stack, chart 1.4, the
+pod's `memory.current` was 976 MiB of its 1 GiB limit after running for a day, and its 13 plugin
+processes held about 434 MiB RSS. Measured again on k3d with the page cache dropped and Grafana
+restarted, three minutes after start:
+
+| On k3d | Before | After |
+| :--- | ---: | ---: |
+| Plugin processes | 13 | 3 |
+| Their RSS | 451 MiB | 126 MiB |
+| Anonymous memory | 272 MiB | 214 MiB |
+| Working set | 305 MiB | 234 MiB |
+| *Container Near Memory Limit*'s ratio | 65.9% | 21.6% |
 
 ## Conventions every rule follows
 
