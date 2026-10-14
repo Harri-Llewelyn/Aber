@@ -566,6 +566,11 @@ jobs:
           expect_failure "Secure-cookie login on a plain-http public host" "where its login cannot complete" \
             -f "$DEV" --set global.publicBaseDomain=127.0.0.1.nip.io
 
+          # The studio route with no door credentials publishes a login nobody can complete. Skipped
+          # under existingSecret, which the existingSecret keys step below renders.
+          expect_failure "studio route with no door credentials" "Studio's door has no credentials" \
+            -f "$DEV" --set secrets.studioOAuthClientSecret=
+
           # An Ingress with empty `host:` fields is ACCEPTED by the API server and then matches every
           # request that reaches the controller.
           expect_failure "ingress enabled with no resolvable host" "no route resolved a hostname" \
@@ -726,6 +731,8 @@ jobs:
       # values-prod.yaml.example's key list to templates/secret.yaml; this holds secret.yaml to the
       # keys the pods read from an external Secret, both ways, with the optional workloads on. A key
       # read and not rendered is missing from the list; a key rendered and read by nothing is dead.
+      # values-dev.yaml publishes the studio route; its two values are blanked because an external
+      # Secret holds them, and the render must not ask for them.
       - name: Verify The Keys Read From existingSecret Are The Keys The Chart's Secret Renders
         run: |
           set -euo pipefail
@@ -734,6 +741,8 @@ jobs:
             > /tmp/own-secret.yaml
           helm template aber deploy/helm/aber -f "$DEV" --set global.publicBaseDomain=localhost \
             --set secrets.existingSecret=ci-render-check \
+            --set ingress.routes.studio=true \
+            --set secrets.studioOAuthClientSecret= --set secrets.studioProxyHmacSecret= \
             --set playback.enabled=true --set releaseCheck.enabled=true --set e2e.enabled=true \
             --set loadTest.enabled=true --set backup.enabled=true --set backupService.enabled=true \
             > /tmp/existing-secret.yaml

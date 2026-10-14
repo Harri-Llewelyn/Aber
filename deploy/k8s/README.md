@@ -682,6 +682,10 @@ Both secrets are required, and if either is missing the **render fails naming th
 check, the route would be published with no registered client for its sign-in. It would then look
 like a broken proxy rather than two empty values.
 
+With `secrets.existingSecret`, put the two keys in that Secret instead (`STUDIO_OAUTH_CLIENT_SECRET`
+and `STUDIO_PROXY_HMAC_SECRET`) and leave out the two `--set secrets.studio...` lines. The chart
+cannot see that Secret, so it does not check them.
+
 - Rotating `studioOAuthClientSecret` needs `db-init` to re-run, because the seed (`0002`) stores its
   hash.
 - Rotating `studioProxyHmacSecret` signs everyone out, and grants nobody anything.

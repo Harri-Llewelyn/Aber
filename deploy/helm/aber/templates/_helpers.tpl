@@ -652,10 +652,11 @@ an empty ingestion or i3X password stops its init container. Skipped under exist
 Publishing Studio requires the credentials that make it a door rather than a hole. With the secrets
 unset the gateway substitutes credentials that cannot authenticate and no client is registered, so
 the route publishes a hostname whose every request ends at a login nobody can complete, which
-reads as a broken proxy rather than two empty values.
+reads as a broken proxy rather than two empty values. Skipped under existingSecret, which then
+holds both keys out of the chart's sight.
 */}}
 {{- define "aber.validateStudioRoute" -}}
-{{- if and .Values.ingress.enabled (eq (index .Values.ingress.routes "studio") true) -}}
+{{- if and .Values.ingress.enabled (eq (index .Values.ingress.routes "studio") true) (not .Values.secrets.existingSecret) -}}
 {{- if or (not .Values.secrets.studioOAuthClientSecret) (not .Values.secrets.studioProxyHmacSecret) -}}
 {{- fail "\n\naber: ingress.routes.studio is true but Studio's door has no credentials.\n\nThe route publishes the gateway's studio listener, which runs an OAuth flow against this stack's own\nGoTrue and admits `Administrator` only. Without both values below the flow has no registered client\nand no cookie key, so every request to studio.<publicBaseDomain> ends at a login that cannot\ncomplete -- which looks like a broken proxy rather than like an unset value.\n\nSet both:\n  secrets.studioOAuthClientSecret   (also hashed into auth.oauth_clients by migration 0081)\n  secrets.studioProxyHmacSecret     (signs the session cookie; nothing else reads it)\n\nOr leave ingress.routes.studio at its default of false and reach the console with a port-forward.\n" -}}
 {{- end -}}
