@@ -749,6 +749,10 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   )
 }
 
+// How long a reload waits for the auth server before opening on the stored session. Without a bound,
+// a connection that never answers holds the spinner until the browser abandons the request.
+const AUTH_CHECK_TIMEOUT_MS = 10000
+
 export default function App() {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -759,38 +763,78 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false
+    // Only restoreSession ends the first load. supabase-js announces the stored session
+    // (INITIAL_SESSION, SIGNED_IN) before the auth server has checked it, and a page rendered on it
+    // would read on a token that may be dead.
+    let restoring = true
+    // The session supabase-js last announced while restoring, for a check that runs out of time.
+    let announced
 
-    // Restore and validate the stored session. getSession() only reads localStorage and PostgREST
-    // only checks the JWT signature, so a revoked session would still read data; getUser() asks the
-    // auth server.
+    const endRejectedSession = async (error) => {
+      console.warn('[auth] stored session rejected by the auth server:', error.message)
+      setAuthNotice(await clearInvalidSession())
+      setSession(null)
+    }
+
+    // Restore and validate the stored session, resolving to the session the page may use.
+    // getSession() only reads localStorage and PostgREST only checks the JWT signature, so a revoked
+    // session would still read data; getUser() asks the auth server.
     const restoreSession = async () => {
       const { data: { session: stored } } = await supabase.auth.getSession()
+      if (!stored) return null
 
-      if (!stored) {
-        if (!cancelled) { setSession(null); setLoading(false) }
-        return
+      // getUser() deletes a session the server refused, whatever auth-js calls the error, so the
+      // page keeps only what supabase-js still holds and never puts `stored` back.
+      const check = supabase.auth.getUser().then(async ({ error }) => {
+        const { data: { session: current } } = await supabase.auth.getSession()
+        return { error, current, rejected: !!error && (isSessionRejected(error) || !current) }
+      })
+      let timer
+      const answer = await Promise.race([
+        check,
+        new Promise(resolve => { timer = setTimeout(resolve, AUTH_CHECK_TIMEOUT_MS, null) }),
+      ]).finally(() => clearTimeout(timer))
+      if (cancelled) return null
+
+      if (!answer) {
+        // Treated as an unreachable server. A refusal that arrives later still ends the session.
+        console.warn(`[auth] the auth server did not answer within ${AUTH_CHECK_TIMEOUT_MS / 1000} s; opening on the stored session`)
+        check.then(late => { if (late.rejected && !cancelled) endRejectedSession(late.error) }, () => {})
+        return announced === undefined ? stored : announced
       }
-
-      const { error } = await supabase.auth.getUser()
-      if (cancelled) return
-
-      if (isSessionRejected(error)) {
-        console.warn('[auth] stored session rejected by the auth server:', error.message)
-        setAuthNotice(await clearInvalidSession())
-        setSession(null)
-      } else {
-        // No error, or the auth server was simply unreachable -- keep the stored
-        // session rather than signing someone out over a network blip.
-        if (error) console.warn('[auth] could not validate the stored session:', error.message)
-        setSession(stored)
+      if (answer.rejected) {
+        await endRejectedSession(answer.error)
+        return null
       }
-      setLoading(false)
+      // No error, or the auth server was unreachable (a network error or a 5xx, through which
+      // supabase-js keeps the session): stay signed in rather than sign someone out over a blip.
+      if (answer.error) console.warn('[auth] could not validate the stored session:', answer.error.message)
+      return answer.current
     }
 
     restoreSession()
+      .catch(err => {
+        console.warn('[auth] could not restore the stored session:', err?.message)
+        return null
+      })
+      .then(restored => {
+        if (cancelled) return
+        restoring = false
+        setSession(restored)
+        setLoading(false)
+      })
 
     // Listen for Supabase Auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setRecovering(true)
+        setSession(session)
+        setLoading(false)
+        return
+      }
+      // Until restoreSession has decided, an event only notes the session supabase-js now holds.
+      if (restoring) { announced = session; return }
+      if (event === 'INITIAL_SESSION') return
       // Handle SIGNED_OUT events - clear session and show auth screen
       if (event === 'SIGNED_OUT') {
         setSession(null)
@@ -802,13 +846,7 @@ export default function App() {
         setSession(session)
         return
       }
-      if (event === 'PASSWORD_RECOVERY') {
-        setRecovering(true)
-        setSession(session)
-        setLoading(false)
-        return
-      }
-      // For other events (INITIAL_SESSION, USER_MODIFIED), update session normally
+      // For other events (SIGNED_IN, USER_UPDATED), update session normally
       setSession(session)
       setLoading(false)
     })

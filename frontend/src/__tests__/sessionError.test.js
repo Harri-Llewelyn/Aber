@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { AuthRetryableFetchError, AuthSessionMissingError } from '@supabase/supabase-js';
 
 const signOut = vi.fn().mockResolvedValue({ error: null });
 vi.mock('../lib/supabaseClient', () => ({ supabase: { auth: { signOut } } }));
@@ -32,10 +33,19 @@ describe('distinguishing a rejection from an unreachable server', () => {
     expect(isSessionRejected({ status: 401, message: 'Unauthorized' })).toBe(true);
   });
 
+  it('treats the error auth-js makes of a 403 session_not_found as a rejection, despite its 400', () => {
+    // GoTrue's answer once the auth.sessions row has gone: auth-js returns this in its place.
+    const error = new AuthSessionMissingError();
+    expect(error.status).toBe(400);
+    expect(isSessionRejected(error)).toBe(true);
+  });
+
   it('does NOT sign the user out when the auth server is simply unreachable', () => {
     // A dropped connection must not be mistaken for a revoked session -- signing
     // someone out over a network blip is worse than the stale session this guards.
     expect(isSessionRejected({ name: 'AuthRetryableFetchError', message: 'Failed to fetch' })).toBe(false);
+    expect(isSessionRejected(new AuthRetryableFetchError('Failed to fetch', 0))).toBe(false);
+    expect(isSessionRejected(new AuthRetryableFetchError('no healthy upstream', 503))).toBe(false);
     expect(isSessionRejected({ message: 'NetworkError when attempting to fetch resource' })).toBe(false);
     expect(isSessionRejected(null)).toBe(false);
   });
