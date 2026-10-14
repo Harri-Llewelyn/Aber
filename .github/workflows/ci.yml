@@ -722,6 +722,57 @@ jobs:
           echo "  ok: values-prod.yaml.example renders $COUNT objects with its TLS, ingress and"
           echo "      metrics posture intact, and defers the Secret to the external one"
 
+      # The existingSecret contract from the reading side. check-docs-drift 78 holds
+      # values-prod.yaml.example's key list to templates/secret.yaml; this holds secret.yaml to the
+      # keys the pods read from an external Secret, both ways, with the optional workloads on. A key
+      # read and not rendered is missing from the list; a key rendered and read by nothing is dead.
+      - name: Verify The Keys Read From existingSecret Are The Keys The Chart's Secret Renders
+        run: |
+          set -euo pipefail
+          DEV=deploy/helm/aber/values-dev.yaml
+          helm template aber deploy/helm/aber -f "$DEV" --set global.publicBaseDomain=localhost \
+            > /tmp/own-secret.yaml
+          helm template aber deploy/helm/aber -f "$DEV" --set global.publicBaseDomain=localhost \
+            --set secrets.existingSecret=ci-render-check \
+            --set playback.enabled=true --set releaseCheck.enabled=true --set e2e.enabled=true \
+            --set loadTest.enabled=true --set backup.enabled=true --set backupService.enabled=true \
+            > /tmp/existing-secret.yaml
+          python3 - <<'PY'
+          import sys, yaml
+          own = [d for d in yaml.safe_load_all(open('/tmp/own-secret.yaml', encoding='utf-8'))
+                 if d and d['kind'] == 'Secret' and d['metadata']['name'] == 'aber-secrets']
+          rendered = set(own[0]['stringData']) if own else set()
+          read = {}
+          def walk(node, who):
+              if isinstance(node, dict):
+                  ref = node.get('secretKeyRef')
+                  if isinstance(ref, dict) and ref.get('name') == 'ci-render-check':
+                      read.setdefault(ref['key'], set()).add(who)
+                  for v in node.values():
+                      walk(v, who)
+              elif isinstance(node, list):
+                  for v in node:
+                      walk(v, who)
+          for d in yaml.safe_load_all(open('/tmp/existing-secret.yaml', encoding='utf-8')):
+              if d:
+                  walk(d, f"{d['kind']}/{d['metadata']['name']}")
+          errors = []
+          if not rendered or not read:
+              errors.append(f"compared nothing: {len(rendered)} key(s) in aber-secrets, {len(read)} read from ci-render-check")
+          for key in sorted(set(read) - rendered):
+              errors.append(f"{', '.join(sorted(read[key]))} read(s) {key} from existingSecret, and templates/secret.yaml "
+                            "does not render it: render it there, and check-docs-drift 78 then asks for it in "
+                            "values-prod.yaml.example's list")
+          for key in sorted(rendered - set(read)):
+              errors.append(f"templates/secret.yaml renders {key}, and no workload reads it from existingSecret: "
+                            "remove it, or turn on here the setting that reads it")
+          for e in errors:
+              print(f"::error::{e}")
+          if errors:
+              sys.exit(1)
+          print(f"  ok: the {len(read)} keys read from existingSecret are the {len(rendered)} templates/secret.yaml renders")
+          PY
+
       # templates/networkpolicy.yaml declares the flow graph once as edges and generates both
       # directions; this asserts the rendered output holds that property. An asymmetric policy drops
       # packets at the destination and logs nothing.
