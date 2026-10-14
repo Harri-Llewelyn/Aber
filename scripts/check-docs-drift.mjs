@@ -4577,8 +4577,8 @@ function edgeFunctionNames() {
       continue;
     }
     // The value itself, or a variable the template assigns from it.
-    const covers = (expr) => expr.includes(ref) || (/^\$\w+$/.test(expr) &&
-      [...src.matchAll(new RegExp(`\\${expr}\\s*:?=\\s*([^}]+)`, 'g'))].some((m) => m[1].includes(ref)));
+    const covers = (expr) => expr.includes(ref) ||
+      [...src.matchAll(/(\$\w+)\s*:?=\s*([^}]+)/g)].some((m) => m[1] === expr && m[2].includes(ref));
     const sums = [...pod.matchAll(/^\s+checksum\/[\w.-]+: \{\{ (.+?) \| sha256sum \}\}$/gm)];
     if (!sums.some((m) => covers(m[1].trim()))) {
       offences.push(`${T}${file}'s pod template has no checksum annotation over ${value}, so changing it and upgrading leaves the pod on the old value`);
