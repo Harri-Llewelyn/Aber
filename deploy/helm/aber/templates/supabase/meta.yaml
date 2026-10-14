@@ -101,6 +101,7 @@ spec:
             failureThreshold: 24
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:

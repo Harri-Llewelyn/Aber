@@ -1535,6 +1535,35 @@ One step of #419 follows: each root filesystem becomes read-only, one workload a
 `emptyDir` for what the process writes. Until then `scripts/lint/config-allowlist.json` lists each
 writable root against #419.
 
+**Read-only root filesystems.** The Supabase services, Swagger UI and the database and storage init
+Jobs set `readOnlyRootFilesystem: true`, so a process cannot change its own image. Each writes only
+where a volume is mounted:
+
+- `gotrue`, `postgrest`, `postgres-meta`, `envoy` and `realtime`, with `wait-for-realtime-schema`,
+  write nothing. Nor do the `storage-init` and `storage-policies` Jobs.
+- Every `wait-for-*` init container that `aber.waitFor` or `aber.waitForPostgres` renders, in
+  every pod, writes nothing. Each runs `curl`, `nc`, `wget` or `psql` until a service answers.
+- `realtime` writes no Erlang crash dump: its start script names `/tmp`, which is read-only.
+  Kubernetes discarded a dump there at the container's restart anyway.
+- `storage` (supabase-storage) writes only the objects' volume, `/var/lib/storage`.
+- `studio` writes saved snippets to `/app/snippets`, and Next.js its cache to `.next/cache`.
+- `render-config` (supabase-envoy) writes the gateway's configuration to `/config`, which `envoy`
+  reads.
+- `edge-runtime` (supabase-functions) writes a scratch directory per worker in `/tmp`, and its
+  analysis caches to `DENO_DIR` (`/home/deno/deno-dir`). The image ships the functions'
+  dependencies in `DENO_DIR`, so the `seed-deno-dir` init container copies them into the
+  `emptyDir` first.
+- `swagger-ui` rewrites files its image ships when it starts: `swagger-initializer.js` and a `.gz`
+  beside each page, script and stylesheet in the document root, and two snippets in
+  `/etc/nginx/templates`. The `seed-web-root` init container copies both directories into
+  `emptyDir`s first. nginx also writes `/etc/nginx/conf.d`, `/var/cache/nginx` and its pid file in
+  `/run`.
+- `db-init` and `db-roles-init` write small files to `/tmp`.
+
+What happens if a process writes anywhere else: it fails with `Read-only file system`, often at its
+first request rather than at start. What to do: mount an `emptyDir` at that directory in that
+container, and add it to this list.
+
 ### Users
 
 Every image this repository builds, except `supabase-db` (below), ends with a non-root `USER`. It is

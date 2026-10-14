@@ -42,13 +42,31 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      # The image's user, which owns DENO_DIR.
+      # The image's user, which owns DENO_DIR's copy below.
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
         runAsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        # DENO_DIR is an emptyDir, so the runtime can write its analysis caches beside the module
+        # cache. The module cache (npm/, remote/) ships in the image at that path and is the only
+        # source of the functions' dependencies, so this copies it in first.
+        - name: seed-deno-dir
+          image: {{ include "aber.image" (dict "image" .Values.supabaseFunctions.image "ctx" $) | quote }}
+          imagePullPolicy: {{ .Values.supabaseFunctions.image.pullPolicy }}
+          command: ["/bin/sh", "-e", "-c", "cp -R /home/deno/deno-dir/. /seed/"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.supabaseFunctions.resources | nindent 12 }}
+          volumeMounts:
+            - name: deno-dir
+              mountPath: /seed
       containers:
         - name: edge-runtime
           # BUILT FROM supabase/functions/Dockerfile, not pulled. The functions and the Remote
@@ -235,13 +253,18 @@ spec:
             failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
             {{- toYaml .Values.supabaseFunctions.resources | nindent 12 }}
-          {{- if or .Values.ingress.tls.enabled $forgeToken }}
           volumeMounts:
-          {{- end }}
+            # The image's DENO_DIR, seeded above. The runtime writes its analysis caches here.
+            - name: deno-dir
+              mountPath: /home/deno/deno-dir
+            # Each worker's scratch directory; the runtime refuses to boot without one.
+            - name: tmp
+              mountPath: /tmp
           {{- if $forgeToken }}
             {{- /* Optional, so the pod starts before the forge has written the token; the file is
                    then empty and the forge functions skip the forge, saying so, until it arrives. */}}
@@ -261,9 +284,14 @@ spec:
               mountPath: /home/deno/ca
               readOnly: true
           {{- end }}
-      {{- if or .Values.ingress.tls.enabled $forgeToken }}
       volumes:
-      {{- end }}
+        # Holds the image's module cache, copied in at start, so the limit must exceed it.
+        - name: deno-dir
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
       {{- if $forgeToken }}
         - name: forge-token
           secret:
