@@ -1641,6 +1641,11 @@ daemon does with it:
 - **A replay says nothing about now.** A message whose every metric is historical does not set its
   device ONLINE, its rows are not republished on the UNS (whose retained topics are current
   values), and a historical node message sets no gateway status, health or clock offset.
+  A node message from a shadow gateway, the Playback gateway, records no health, outage report or
+  clock offset whether or not its metrics are historical, and its `Gateway_Status` is ignored: a
+  replay republishes a recorded appliance's, so they are not the Playback gateway's. Its heartbeat
+  is written as for any gateway, with the status the message type implies (ONLINE, or OFFLINE for an
+  NDEATH).
 - **A replay out of order is not a gap.** The appliance stamps its seq as it publishes, so its
   replay is in sequence and checked like any message. A historical message from another edge node
   whose seq is not the next one, a replay under the seq it was first given, is counted in
@@ -1653,7 +1658,8 @@ daemon does with it:
   neither counted nor refused. The `Outage/` prefix is reserved on node-level messages. The daemon counts each report once per (edge
   node, start), from a registered gateway only, into the `aber_ingestion_gateway_outage_*` series,
   and logs it. Node metrics are never stored as telemetry. The *Gateway Outage Lost Readings* alert
-  fires for an hour after a report with any reading dropped. Any edge node may send the same report.
+  fires for an hour after a report with any reading dropped. Any edge node may send the same report;
+  a shadow gateway's is not counted, because it is a recording's.
 - **A replay reaches the rollups however late it is.** The continuous aggregates' own refresh
   reaches back 25 hours (`timescaledb/aggregates.sql`). For an older reading the writer records its
   hour, and a historian job refreshes it in `telemetry_1m`, `_5m` and `_1h` within five minutes

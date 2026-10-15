@@ -134,7 +134,9 @@ python ingestion/test_playback_session.py
 # (which is what exercises the delivery path), waits out the kubelet's Secret refresh, replays a
 # fixture, and asserts the rows arrived. THE SENTINEL METRIC IS LOAD BEARING: a name unique to the
 # run can only have come from the replay, which is what makes "it landed under the replay lane and
-# under nothing else" checkable against a live historian.
+# under nothing else" checkable against a live historian. The fixture also holds the recorded
+# appliance's node heartbeat, with health and an outage report: the Playback gateway must record a
+# heartbeat and none of it.
 python ingestion/test_playback_replay.py
 # A CAPTURE RECORDED FROM THE BROKER REACHES STORAGE AND REPLAYS. The suite above replays a file it
 # uploaded; this one records one the way the Capture page does. A fixture Host gateway, its broker
@@ -454,6 +456,11 @@ python supabase/migrations/test_shadow_lane_is_not_assignable.py
 # replay. Its replay lanes are never counted in expected_publishers, and a real device that has
 # published, or sits behind a gateway that has reported, still is (0185).
 python supabase/migrations/test_a_shadow_gateway_is_never_stale.py
+# A shadow gateway holds no health (0186): the chain leaves the Playback gateway no reading, the
+# migration clears what a replay left and nothing else and changes nothing on a second boot, a
+# heartbeat with no health records none and no FLOW_DEPLOYED row, and the daemon's role reads the
+# is_shadow column it tests.
+python supabase/migrations/test_a_shadow_gateway_holds_no_health.py
 python supabase/migrations/test_metric_catalog_seed.py
 # A constraint, policy or trigger is re-created only when it differs from its migration (0001,
 # section 3c). Every one the chain states is changed live, and its own call or guard must put it

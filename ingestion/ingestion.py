@@ -602,8 +602,9 @@ _DEVICE_COLUMNS = (
 
 # `status` lets process_node_message() tell a transition from a repeated heartbeat in the log.
 # `is_archived` is fetched rather than filtered so an archived gateway is distinguishable from
-# an unregistered one; resolve_gateway() refuses it.
-_GATEWAY_COLUMNS = "id,name,sparkplug_id,sparkplug_group,status,is_archived"
+# an unregistered one; resolve_gateway() refuses it. `is_shadow` marks the Playback gateway, whose
+# node messages are recordings; a row cached without the key reads as an ordinary gateway.
+_GATEWAY_COLUMNS = "id,name,sparkplug_id,sparkplug_group,status,is_archived,is_shadow"
 
 # The value of devices.conformance_policy that lets a violation DROP a metric rather than only
 # record it (0050). Anything else -- including the 'audit' default and a row fetched before this
@@ -2410,7 +2411,7 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
 
     NBIRTH/NDATA mark the edge node ONLINE; NDEATH marks it and every device behind it OFFLINE. A
     `Gateway_Status` metric overrides the gateway's derived status, subject to
-    accept_reported_status(). Gateways are never auto-created.
+    accept_reported_status(), except for a shadow gateway's. Gateways are never auto-created.
 
     An NDEATH whose bdSeq names an earlier session than the open one changes nothing: see
     stale_death().
@@ -2491,6 +2492,15 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
             )
         return
 
+    # A shadow gateway publishes only recordings of other machines, so its clock, outage report,
+    # health and reported status are theirs whether or not the metrics are marked historical. The
+    # first three are left out as a replay's are, and the status is the message type's. The
+    # heartbeat below still counts.
+    shadow = bool(gateway.get("is_shadow"))
+    own_readings = not replay and not shadow
+    if shadow:
+        status = "OFFLINE" if msg_type == "NDEATH" else "ONLINE"
+
     # Not skippable: `public.gateway_status` derives staleness from `last_heartbeat` at read time,
     # so suppressing this write would make a live gateway read STALE. The audit trigger subtracts
     # the columns a heartbeat writes (audit_telemetry_columns(), 0100) before comparing, so a
@@ -2502,7 +2512,7 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
     # NDEATH excluded here, beside the msg_type the rest of this function branches on; see
     # record_gateway_clock_offset(). After the registration check, before health because this does
     # not depend on the appliance reporting anything.
-    if msg_type != "NDEATH" and not replay:
+    if msg_type != "NDEATH" and own_readings:
         record_gateway_clock_offset(edge_node_id, payload, heartbeat_dt)
         # After the registration check, so a forged edge node id cannot add a series.
         report = extract_outage_report(group_id, edge_node_id, payload)
@@ -2512,7 +2522,7 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
     # After the registration check: an unregistered node is dropped either way, and validating its
     # metrics first would log rejections for nothing. `health_reported_at` is stamped by the gate,
     # only when the health object is non-empty, so NULL means "does not report health".
-    health = {} if replay else extract_gateway_health(group_id, edge_node_id, payload)
+    health = extract_gateway_health(group_id, edge_node_id, payload) if own_readings else {}
     if health:
         # The scrapeable half, for the readings that need a trend rather than a current value.
         record_gateway_health_gauges(edge_node_id, health, heartbeat_dt)
