@@ -124,14 +124,25 @@ describe('the page', () => {
     fireEvent.click(screen.getByRole('tab', { name: new RegExp(`^${category}`) }))
   }
 
-  it('renders each setting with its label, and its description behind a tip', async () => {
+  it("prints each setting's description on the page, with no ? to click", async () => {
     await show()
     expect(screen.getByText('Refresh interval (seconds)')).toBeInTheDocument()
-    // The description is read on demand from the "?" beside the label rather than printed under
-    // every row: the page is a list of controls, not a manual.
-    const tip = screen.getByRole('button', { name: 'About Refresh interval (seconds)' })
-    fireEvent.mouseEnter(tip)
-    expect(screen.getByRole('tooltip')).toHaveTextContent(/How often the Audit Trail/)
+    // The description is a cell of the row, read without hovering or clicking anything.
+    const description = screen.getByText('How often the Audit Trail re-reads the audit log.')
+    expect(description.closest('tr')).toBe(document.querySelector('[data-setting="ui.audit_trail_poll_seconds"]'))
+    expect(screen.queryByRole('tooltip')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'About Refresh interval (seconds)' })).toBeNull()
+    // The one ? left is the one beside the tabs.
+    expect(screen.getAllByRole('button', { name: /^About / }).map(b => b.getAttribute('aria-label')))
+      .toEqual(['About Audit Trail settings'])
+  })
+
+  it('does not tell the reader that a ? beside a setting says what it controls', async () => {
+    await show()
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'About Audit Trail settings' }))
+    const tip = screen.getByRole('tooltip')
+    expect(tip).toHaveTextContent(/without a restart/)
+    expect(tip).not.toHaveTextContent(/beside a setting/)
   })
 
   it('names what applies when a setting has never been changed', async () => {
@@ -139,6 +150,20 @@ describe('the page', () => {
        appears to do nothing, so the page names it. */
     await show()
     expect(screen.getByText('DEFAULT_POLL_SECONDS (60) in AuditTrailTab.jsx')).toBeInTheDocument()
+  })
+
+  it('says it once: one muted line, "Falls back to" followed by the stored text', async () => {
+    /* The stored text follows "Falls back to", so it must not say "fallback" itself. */
+    api.get.mockResolvedValue([{
+      ...SETTINGS[1], key: 'proposals.retention_days', label: 'Closed proposals kept for (days)',
+      fallback_source: 'ninety days, in prune_closed_proposals()'
+    }])
+    await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
+    const line = screen.getByText('ninety days, in prune_closed_proposals()').closest('.setting-fallback')
+    expect(line).toHaveTextContent(/^Falls back to ninety days, in prune_closed_proposals\(\)$/)
+    expect(line.textContent.match(/fall/gi)).toHaveLength(1)
+    // Under the description, in the same cell.
+    expect(line.previousElementSibling).toHaveTextContent(/How long a resolved alert/)
   })
 
   it('copies the key, and leaves a fallback that is prose as plain text', async () => {
@@ -159,8 +184,10 @@ describe('the page', () => {
     // A permanently enabled Save invites the click that does nothing and then reports success.
     await show()
     expect(screen.queryByRole('button', { name: /^Save$/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Discard/ })).toBeNull()
     // Nothing is reserved for the buttons while there is nothing to save.
     expect(document.querySelector('.setting-actions')).toBeNull()
+    expect(document.querySelector('.setting-cell-actions')).toBeEmptyDOMElement()
 
     fireEvent.change(screen.getByLabelText('Refresh interval (seconds)'), { target: { value: '45' } })
 
@@ -168,8 +195,15 @@ describe('the page', () => {
        the tick but the effect race show() settles: an edit made before SettingRow's effect
        re-seeded the draft was overwritten by it. */
     const save = await screen.findByRole('button', { name: /^Save$/ })
-    // Beside the field, in the same control row, rather than on a line of its own beneath the row.
-    expect(save.closest('.setting-control')).toContainElement(screen.getByLabelText('Refresh interval (seconds)'))
+    expect(screen.getByRole('button', { name: /Discard/ })).toBeInTheDocument()
+    // In the Actions cell of the field's own row.
+    expect(save.closest('td')).toHaveClass('setting-cell-actions')
+    expect(save.closest('tr')).toContainElement(screen.getByLabelText('Refresh interval (seconds)'))
+  })
+
+  it('leaves Actions empty for a setting that can be changed', async () => {
+    await show()
+    expect(screen.queryByText('Fixed at install')).toBeNull()
   })
 
   it('sends the coerced value, not the string from the input', async () => {
@@ -221,7 +255,9 @@ describe('the page', () => {
   it('shows the permitted range rather than hiding it in the input attributes', async () => {
     /* `min`/`max` give a browser its spinner limits and a reader nothing. */
     await showCategory('Retention')
-    expect(screen.getByText('Between 1 and 3650')).toBeInTheDocument()
+    const range = screen.getByText('1 to 3650')
+    expect(range.closest('td')).toHaveClass('setting-cell-value')
+    expect(screen.getByLabelText('Alert history kept for (days)')).toHaveAccessibleDescription('1 to 3650')
   })
 
   it('refuses an out-of-range value before sending it', async () => {
@@ -266,6 +302,8 @@ describe('the page', () => {
       })
       expect(screen.getByRole('tab', { name: /^Retention/ })).toHaveAttribute('aria-selected', 'true')
       const row = document.querySelector('[data-setting="alerts.retention_days"]')
+      // The table row carries the highlight, so the tint reaches every cell.
+      expect(row.tagName).toBe('TR')
       expect(row).toHaveClass('setting-row-found')
       expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' })
       expect(scrollIntoView.mock.contexts[0]).toBe(row)
@@ -279,6 +317,63 @@ describe('the page', () => {
     api.get.mockResolvedValue([])
     render(<SettingsTab showToast={vi.fn()} />)
     await waitFor(() => expect(screen.getByText(/arrive by migration/i)).toBeInTheDocument())
+  })
+})
+
+describe('the table', () => {
+  const setting = (key, category, label) => ({
+    id: key, key, value: 1, value_type: 'number', category, label,
+    description: `What ${label} does.`, fallback_source: null, updated_at: '2026-08-22T10:00:00Z', updated_by: null
+  })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    api.get.mockResolvedValue([
+      setting('a.one', 'Alpha', 'First'),
+      setting('b.one', 'Bravo', 'Second'), setting('b.two', 'Bravo', 'Third'), setting('b.three', 'Bravo', 'Fourth')
+    ])
+  })
+
+  const headers = () => screen.getAllByRole('columnheader').map(th => th.textContent)
+
+  it('puts the same header row on a tab with one setting as on a tab with three', async () => {
+    await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
+    expect(screen.getAllByRole('row')).toHaveLength(2) // header + the one setting
+    expect(headers()).toEqual(['Setting', 'Description', 'Value', 'Actions'])
+    for (const th of screen.getAllByRole('columnheader')) expect(th).toHaveAttribute('scope', 'col')
+
+    fireEvent.click(screen.getByRole('tab', { name: /^Bravo/ }))
+    expect(screen.getAllByRole('row')).toHaveLength(4) // header + three
+    expect(headers()).toEqual(['Setting', 'Description', 'Value', 'Actions'])
+  })
+
+  it("is a real table in the card's scroller, so the header stays in view", async () => {
+    await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
+    const table = screen.getByRole('table')
+    expect(table.closest('.table-wrap').parentElement).toHaveClass('card-fill')
+    expect(table.querySelector('thead')).not.toBeNull()
+  })
+
+  it("holds each setting's four parts in the cell the header over it names", async () => {
+    await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
+    const [name, description, value, actions] = document.querySelector('[data-setting="a.one"]').children
+    expect(name).toHaveTextContent('First')
+    expect(name).toContainElement(screen.getByRole('button', { name: 'Copy setting key a.one' }))
+    expect(description).toHaveTextContent('What First does.')
+    expect(value).toContainElement(screen.getByLabelText('First'))
+    expect(actions).toBeEmptyDOMElement()
+  })
+
+  it("shows a number's one-sided range as words", async () => {
+    api.get.mockResolvedValue([
+      { ...setting('a.min', 'Alpha', 'Floor only'), min_value: 3 },
+      { ...setting('a.max', 'Alpha', 'Ceiling only'), max_value: 90 },
+      { ...setting('a.zero', 'Alpha', 'Zero floor'), min_value: 0, max_value: 0.5 }
+    ])
+    await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
+    expect(screen.getByText('3 or more')).toBeInTheDocument()
+    expect(screen.getByText('90 or less')).toBeInTheDocument()
+    expect(screen.getByText('0 to 0.5')).toBeInTheDocument()
   })
 })
 
@@ -331,8 +426,15 @@ describe('a setting that is fixed at install', () => {
     /* "falls back to" means "what applies if you never change this", which is wrong here: the
        chart value IS the value, and it is the only place it can be changed. */
     await show()
-    expect(screen.getByText(/set by/i)).toBeInTheDocument()
+    expect(screen.getByText(/^Set by/)).toBeInTheDocument()
     expect(screen.queryByText(/falls back to/i)).not.toBeInTheDocument()
+  })
+
+  it('says "Fixed at install" in the Actions cell, beside the greyed field', async () => {
+    await show()
+    const fixed = screen.getByText('Fixed at install')
+    expect(fixed.closest('td')).toHaveClass('setting-cell-actions')
+    expect(fixed.closest('tr')).toContainElement(screen.getByLabelText('Sparkplug group'))
   })
 
   it('copies the values.yaml path it is set by, not the words around it', async () => {
@@ -408,7 +510,7 @@ describe('the page frame', () => {
     // The card scrolls, not the page.
     expect(document.querySelector('.page-layout.page-fill')).not.toBeNull()
     expect(card).toHaveClass('card-fill')
-    expect(card.querySelector(':scope > .card-fill-scroll')).toContainElement(screen.getByLabelText('Refresh interval (seconds)'))
+    expect(card.querySelector(':scope > .table-wrap')).toContainElement(screen.getByLabelText('Refresh interval (seconds)'))
     expect(document.querySelectorAll('.card')).toHaveLength(1)
   })
 
@@ -418,7 +520,7 @@ describe('the page frame', () => {
     expect(help).toContainElement(screen.getByRole('button', { name: 'About Audit Trail settings' }))
     // A category has no filters or actions, so nothing sits between the bar and its rows.
     expect(document.querySelector('.filter-bar')).toBeNull()
-    expect(document.querySelector('.card > .tab-strip').nextElementSibling).toHaveClass('card-fill-scroll')
+    expect(document.querySelector('.card > .tab-strip').nextElementSibling).toHaveClass('table-wrap')
     expect(document.querySelector('.section-count')).toBeNull()
     for (const tab of screen.getAllByRole('tab')) expect(tab).not.toHaveAttribute('title')
 

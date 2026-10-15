@@ -122,46 +122,54 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
 
   const reset = () => { setDraft(stored); setError(null) }
   const copy = fallbackCopy(setting.fallback_source)
-  // A number or an on/off choice takes the short field; text takes the longer one.
-  const short = setting.value_type === 'number' || setting.value_type === 'boolean'
+
+  // The permitted range, stated rather than left to a spinner's limits: `min`/`max` on the input
+  // give a browser its limits and a reader nothing.
+  const hasMin = setting.value_type === 'number' && setting.min_value != null
+  const hasMax = setting.value_type === 'number' && setting.max_value != null
+  const range = hasMin && hasMax ? `${setting.min_value} to ${setting.max_value}`
+    : hasMin ? `${setting.min_value} or more`
+      : hasMax ? `${setting.max_value} or less` : null
+  const rangeId = `setting-${setting.key}-range`
 
   return (
-    <div ref={rowRef} className={`setting-row${highlighted ? ' setting-row-found' : ''}`} data-setting={setting.key}>
-      <div className="setting-meta">
-        <div className="setting-label-row">
-          <label className="setting-label" htmlFor={`setting-${setting.key}`}>{setting.label}</label>
-          {setting.description && <HelpTip label={`About ${setting.label}`} text={setting.description} />}
-        </div>
-        <div className="setting-provenance">
+    <tr ref={rowRef} className={`setting-row${highlighted ? ' setting-row-found' : ''}`} data-setting={setting.key}>
+      <td className="setting-cell setting-cell-name">
+        <label className="setting-label" htmlFor={`setting-${setting.key}`}>{setting.label}</label>
+        <div className="setting-key">
           <CopyableId
             value={setting.key}
             label="setting key"
             title="The key the code reads. It cannot be changed. Click to copy it."
             onNotify={showToast}
           />
-          {/* Named, because an absent row is not an absent value: what applies when this has never
-              been changed is the env var or constant below, and the first thing to check when a
-              setting appears to do nothing. A read-only row's source is not a fallback -- it is
-              where the value came from and the only place it can be changed. */}
-          {setting.fallback_source && (
-            <span
-              className="setting-fallback"
-              title={setting.read_only
-                ? 'Where this value is set. Changing it here is not possible'
-                : 'What applies if this setting is never changed'}
-            >
-              {setting.read_only ? 'set by ' : 'falls back to '}
-              {copy ? (
-                <>{copy.lead}<CopyableId value={copy.value} label={copy.label} onNotify={showToast} /></>
-              ) : (
-                <span>{setting.fallback_source}</span>
-              )}
-            </span>
-          )}
         </div>
-      </div>
+      </td>
 
-      <div className="setting-control">
+      <td className="setting-cell setting-cell-description">
+        {setting.description && <p className="setting-description">{setting.description}</p>}
+        {/* Named, because an absent row is not an absent value: what applies when this has never
+            been changed is the env var or constant below, and the first thing to check when a
+            setting appears to do nothing. A read-only row's source is not a fallback -- it is
+            where the value came from and the only place it can be changed. */}
+        {setting.fallback_source && (
+          <p
+            className="setting-fallback"
+            title={setting.read_only
+              ? 'Where this value is set. Changing it here is not possible'
+              : 'What applies if this setting is never changed'}
+          >
+            {setting.read_only ? 'Set by ' : 'Falls back to '}
+            {copy ? (
+              <>{copy.lead}<CopyableId value={copy.value} label={copy.label} onNotify={showToast} /></>
+            ) : (
+              <span>{setting.fallback_source}</span>
+            )}
+          </p>
+        )}
+      </td>
+
+      <td className="setting-cell setting-cell-value">
         {/* A read-only setting is rendered as such rather than left editable: the database refuses
             the write either way, so an operator is not offered a control that cannot work. Two
             settings are fixed: the Sparkplug group, which re-addresses every gateway if changed,
@@ -169,7 +177,7 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
         {setting.read_only ? (
           <input
             id={`setting-${setting.key}`}
-            className={`form-control${short ? ' setting-input-short' : ''}`}
+            className="form-control"
             type="text"
             value={stored}
             readOnly
@@ -178,7 +186,7 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
         ) : setting.value_type === 'boolean' ? (
           <select
             id={`setting-${setting.key}`}
-            className="form-control setting-input-short"
+            className="form-control"
             value={draft === 'true' ? 'true' : 'false'}
             onChange={e => setDraft(e.target.value)}
           >
@@ -196,32 +204,27 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
         ) : (
           <input
             id={`setting-${setting.key}`}
-            className={`form-control${short ? ' setting-input-short' : ''}`}
+            className="form-control"
             type={setting.value_type === 'number' ? 'number' : 'text'}
             value={draft}
             onChange={e => setDraft(e.target.value)}
-            {...(setting.value_type === 'number' && setting.min_value != null
-              ? { min: setting.min_value } : {})}
-            {...(setting.value_type === 'number' && setting.max_value != null
-              ? { max: setting.max_value } : {})}
+            aria-describedby={range ? rangeId : undefined}
+            {...(hasMin ? { min: setting.min_value } : {})}
+            {...(hasMax ? { max: setting.max_value } : {})}
           />
         )}
 
-        {/* The range is shown, not only enforced: `min`/`max` on the input give a browser its
-            spinner limits and nothing a reader can see. */}
-        {setting.value_type === 'number' && (setting.min_value != null || setting.max_value != null) && (
-          <div className="setting-bounds">
-            {setting.min_value != null && setting.max_value != null
-              ? `Between ${setting.min_value} and ${setting.max_value}`
-              : setting.min_value != null
-                ? `${setting.min_value} or more`
-                : `${setting.max_value} or less`}
-          </div>
-        )}
+        {range && <div id={rangeId} className="setting-bounds">{range}</div>}
 
-        {/* SHOWN ONLY WHEN THERE IS A CHANGE TO SAVE, beside the field, reserving nothing. A
-            permanently enabled Save invites the click that does nothing, then a toast saying it worked. */}
-        {dirty && (
+        {error && <div className="setting-error">{error}</div>}
+      </td>
+
+      <td className="setting-cell setting-cell-actions">
+        {setting.read_only ? (
+          <span className="setting-fixed">Fixed at install</span>
+        ) : dirty && (
+          /* SHOWN ONLY WHEN THERE IS A CHANGE TO SAVE. A permanently enabled Save invites the
+             click that does nothing, then a toast saying it worked. */
           <div className="setting-actions">
             <button className="btn btn-primary btn-sm" onClick={save} disabled={saving}>
               {saving ? 'Saving…' : 'Save'}
@@ -231,10 +234,8 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
             </button>
           </div>
         )}
-
-        {error && <div className="setting-error">{error}</div>}
-      </div>
-    </div>
+      </td>
+    </tr>
   )
 }
 
@@ -317,16 +318,28 @@ export function SettingsTab({ showToast, initialSetting = '', onClearSetting }) 
               help={(
                 <HelpTip
                   label={`About ${activeCategory} settings`}
-                  text="A change takes effect without a restart. Edit a value and Save, or Discard to go back. The ? beside a setting says what it controls, and the line beneath it names the default it overrides."
+                  text="A change takes effect without a restart. Edit a value and Save, or Discard to go back. The grey line under a description names the default it overrides."
                 />
               )}
             />
 
             {activeGroup && (
-              <div className="card-fill-scroll settings-group" key={activeGroup.category}>
-                {activeGroup.settings.map(s => (
-                  <SettingRow key={s.key} setting={s} onSaved={() => load(false)} showToast={showToast} highlighted={s.key === foundKey} />
-                ))}
+              <div className="table-wrap settings-wrap" key={activeGroup.category}>
+                <table className="settings-table">
+                  <thead>
+                    <tr>
+                      <th scope="col" className="setting-col-name">Setting</th>
+                      <th scope="col">Description</th>
+                      <th scope="col" className="setting-col-value">Value</th>
+                      <th scope="col" className="setting-col-actions">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeGroup.settings.map(s => (
+                      <SettingRow key={s.key} setting={s} onSaved={() => load(false)} showToast={showToast} highlighted={s.key === foundKey} />
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </>)}
