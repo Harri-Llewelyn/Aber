@@ -23,7 +23,9 @@ import { CardHeading } from '../common/CardHeading'
 import { Badge } from '../common/Badge'
 import { TabStrip } from '../common/TabStrip'
 import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { useSortableRows } from '../../hooks/useTableSort'
 import { SearchInput } from '../common/SearchInput'
+import { SortHeader } from '../common/SortHeader'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
@@ -194,7 +196,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
       sparkplugId: subject.sparkplug_id,
       // The gateway a device row sits under; null for a gateway row.
       context: subjectKind === 'device'
-        ? (gatewayName.get(subject.gateway_id) || 'Unbound')
+        ? (gatewayName.get(subject.gateway_id) || UNBOUND)
         : null,
       gatewayId: subjectKind === 'device' ? subject.gateway_id : subject.id,
       // The type of the gateway, for a device row as much as a gateway one: a device's readings are
@@ -208,7 +210,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     }))
   }, [subjectKind, gateways, devices, captureBySubject, gatewayName, gatewayById])
 
-  const rows = useMemo(() => {
+  const matchingRows = useMemo(() => {
     const needle = search.trim().toLowerCase()
     return allRows.filter(row => {
       if (storedFilter === 'with' && !row.capture) return false
@@ -219,6 +221,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         || (row.sparkplugId || '').toLowerCase().includes(needle)
     })
   }, [allRows, storedFilter, gatewayFilter, search])
+  const [rows, sort] = useSortableRows(matchingRows, subjectKind === 'device' ? DEVICE_SORT : GATEWAY_SORT)
 
   // The gateway filter is only offered on the Devices tab, so it only counts there -- otherwise
   // switching tabs with one set would show "Clear filters (1)" for a control that is not on screen.
@@ -532,25 +535,25 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             <table>
               <thead>
                 <tr>
-                  <th title={subjectKind === 'gateway'
+                  <SortHeader sort={sort} column="name" title={subjectKind === 'gateway'
                     ? 'The edge gateway a capture would record every message from'
                     : 'A single device, recorded with its gateway’s birth certificate'}>
                     {subjectKind === 'gateway' ? 'Gateway' : 'Device'}
-                  </th>
+                  </SortHeader>
                   {subjectKind === 'device' && (
-                    <th title="The edge node this device publishes through, and the one a capture of it also records the birth certificate from">
+                    <SortHeader sort={sort} column="gateway" title="The edge node this device publishes through, and the one a capture of it also records the birth certificate from">
                       Gateway
-                    </th>
+                    </SortHeader>
                   )}
-                  <th title="The wire identity. A capture is filed under this, and playback rewrites it onto the target's own assets">
+                  <SortHeader sort={sort} column="sparkplug_id" title="The wire identity. A capture is filed under this, and playback rewrites it onto the target's own assets">
                     Sparkplug ID
-                  </th>
-                  <th title="The kind of gateway this subject publishes through: Remote (an appliance on the plant network), Host (inside this stack) or Simulated (readings generated)">
+                  </SortHeader>
+                  <SortHeader sort={sort} column="type" title="The kind of gateway this subject publishes through: Remote (an appliance on the plant network), Host (inside this stack) or Simulated (readings generated)">
                     Type
-                  </th>
-                  <th title="The one capture stored for this subject. Recording again replaces it">
+                  </SortHeader>
+                  <SortHeader sort={sort} column="stored" title="The one capture stored for this subject. Recording again replaces it">
                     Stored capture
-                  </th>
+                  </SortHeader>
                 </tr>
               </thead>
               <tbody>
@@ -1170,6 +1173,21 @@ function RecentDiscards({ jobs }) {
     </>
   )
 }
+
+/** What a device row's Gateway column says when the device is bound to no gateway. */
+const UNBOUND = 'Unbound'
+
+/**
+ * The subject table's sortable columns. Stored capture sorts by when the capture was recorded, and
+ * a subject with none goes last, as does a device bound to no gateway.
+ */
+const GATEWAY_SORT = {
+  name: { type: 'text', value: row => row.name },
+  sparkplug_id: { type: 'text', value: row => row.sparkplugId },
+  type: { type: 'text', value: row => gatewayTypeLabel(row.type) },
+  stored: { type: 'time', value: row => row.capture?.recorded_at }
+}
+const DEVICE_SORT = { ...GATEWAY_SORT, gateway: { type: 'text', value: row => (row.context === UNBOUND ? null : row.context) } }
 
 function SubjectRow({ row, selected, onSelect }) {
   const capture = row.capture

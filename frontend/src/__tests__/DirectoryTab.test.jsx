@@ -463,9 +463,10 @@ describe('DirectoryTab refresh', () => {
     expect(screen.queryByTitle(/Show only one kind of service/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Refresh Directory/i })).not.toBeInTheDocument()
     // The page is a read-only directory with no controls of its own beyond its tabs. The endpoint
-    // cells are still buttons, one per row a browser cannot open, so this counts what is neither.
+    // cells are still buttons, one per row a browser cannot open, and the column headers sort the
+    // table, so this counts what is none of these.
     const buttons = screen.getAllByRole('button')
-      .filter(b => !b.classList.contains('copyable-id') && !b.classList.contains('help-tip'))
+      .filter(b => !['copyable-id', 'help-tip', 'sort-header'].some(c => b.classList.contains(c)))
     expect(buttons).toHaveLength(0)
   })
 

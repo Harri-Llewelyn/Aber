@@ -9,6 +9,9 @@ import { LoadingState } from '../common/LoadingState'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { useUrlTab } from '../../hooks/useUrlState'
+import { useSortableRows } from '../../hooks/useTableSort'
+import { rankIn } from '../../utils/tableSort'
+import { SortHeader } from '../common/SortHeader'
 import CopyableId from '../common/CopyableId'
 import { formatDateTime } from '../../utils/format'
 
@@ -388,10 +391,25 @@ function VersionCell({ service }) {
 }
 
 /**
+ * The service table's sortable columns, each on what its cell shows. Reach runs from the widest
+ * to the narrowest, and Liveness puts a DOWN service first; "not recorded" and "not observed" go
+ * last.
+ */
+const SERVICE_SORT = {
+  name: { type: 'text', value: s => s.service_name },
+  type: { type: 'text', value: s => serviceTypeLabel(s.service_type) },
+  version: { type: 'text', value: s => (s.upstream_version || imageVersion(s.image))?.replace(/^[vV](?=\d)/, '') },
+  endpoint: { type: 'text', value: s => s.endpoint_url },
+  reach: { type: 'rank', value: s => rankIn(['NETWORK', 'HOST', 'INTERNAL'], s.exposure) },
+  liveness: { type: 'rank', value: s => rankIn(['DOWN', 'ACTIVE'], s.status) }
+}
+
+/**
  * One group's table. `.table-directory` pins the column widths so the columns hold still when the
  * tab changes.
  */
 function ServiceTable({ rows, onNotify }) {
+  const [sorted, sort] = useSortableRows(rows, SERVICE_SORT)
   // Read once per render rather than per row. `window` is guarded because this module is imported
   // by tests that render without a location.
   const viewerOnHost = viewerIsOnDeploymentHost(
@@ -403,16 +421,16 @@ function ServiceTable({ rows, onNotify }) {
       <table className="table-directory">
         <thead>
           <tr>
-            <th title="Service name">Service Name</th>
-            <th title="Architecture category">Service Type</th>
-            <th title="The version this release deploys for the service; hover it for the full image reference. The badge counts the fixable HIGH and CRITICAL vulnerabilities the release found in that image, dated">Version</th>
-            <th title="Endpoints this browser can reach open in a new tab; everything else copies to the clipboard">Endpoint URL</th>
-            <th title="Where the service can be reached from, as a property of how it is published. Recorded from the chart by db-init on every install and upgrade">Reach</th>
-            <th title="Observed liveness. Written every minute from Prometheus's up series; services nothing scrapes read as not observed">Liveness</th>
+            <SortHeader sort={sort} column="name" title="Service name">Service Name</SortHeader>
+            <SortHeader sort={sort} column="type" title="Architecture category">Service Type</SortHeader>
+            <SortHeader sort={sort} column="version" title="The version this release deploys for the service; hover it for the full image reference. The badge counts the fixable HIGH and CRITICAL vulnerabilities the release found in that image, dated">Version</SortHeader>
+            <SortHeader sort={sort} column="endpoint" title="Endpoints this browser can reach open in a new tab; everything else copies to the clipboard">Endpoint URL</SortHeader>
+            <SortHeader sort={sort} column="reach" title="Where the service can be reached from, as a property of how it is published. Recorded from the chart by db-init on every install and upgrade">Reach</SortHeader>
+            <SortHeader sort={sort} column="liveness" title="Observed liveness. Written every minute from Prometheus's up series; services nothing scrapes read as not observed">Liveness</SortHeader>
           </tr>
         </thead>
         <tbody>
-          {rows.map(s => (
+          {sorted.map(s => (
             <tr key={s.service_uuid}>
               <td><strong>{s.service_name}</strong></td>
               <td title={`Registered as ${s.service_type}`}>{serviceTypeLabel(s.service_type)}</td>

@@ -114,6 +114,9 @@ export function severityRank(tone) {
   return rank < 0 ? CLASS_RANK.indexOf('badge-neutral') : rank
 }
 
+/** An archived row's rank in a status column: out of service, so after every live state. */
+export const ARCHIVED_RANK = CLASS_RANK.length
+
 /** A value's place in `order`, for a `rank` column with a fixed order; a value not listed is empty. */
 export function rankIn(order, value) {
   const at = order.indexOf(value)

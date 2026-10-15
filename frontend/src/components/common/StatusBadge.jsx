@@ -15,32 +15,30 @@ const PLAYBACK_STATES = {
 }
 
 /**
- * The gateway status chip, drawn through Badge. `warning` is the default for anything
- * unrecognised: `gateways.status` is free text (an NBIRTH payload can override it), so the set is
- * open.
+ * The Badge tone of a gateway status. `warning` is the default for anything unrecognised:
+ * `gateways.status` is free text (an NBIRTH payload can override it), so the set is open.
  */
-export function StatusBadge({ status }) {
+export function gatewayStatusTone(status) {
   const playback = PLAYBACK_STATES[status]
-  if (playback) return <Badge tone={playback.tone} dot title={playback.title}>{GATEWAY_STATUS_LABELS[status]}</Badge>
-
-  const isOnline = status === 'ONLINE' || status === 'ACTIVE'
-  const isOffline = status === 'OFFLINE'
-
+  if (playback) return playback.tone
+  if (status === 'ONLINE' || status === 'ACTIVE') return 'success'
   // The enrolment states get their own informational tones: amber means look at this and grey
   // means offline, and a gateway waiting for its bundle is neither. Two tones, not one: solid
   // (pending) for "waiting on a person", dashed (provisioned) for "waiting on a machine". The label
   // says what is being waited for.
-  const isPending = status === 'PENDING_ENROLLMENT' || status === 'AWAITING_BIRTH'
+  if (status === 'PENDING_ENROLLMENT') return 'pending'
+  if (status === 'AWAITING_BIRTH') return 'provisioned'
+  if (status === 'OFFLINE') return 'neutral'
+  return 'warning'
+}
 
-  const tone = isOnline
-    ? 'success'
-    : status === 'PENDING_ENROLLMENT'
-      ? 'pending'
-      : status === 'AWAITING_BIRTH'
-        ? 'provisioned'
-        : isOffline
-          ? 'neutral'
-          : 'warning'
+/** The gateway status chip, drawn through Badge. */
+export function StatusBadge({ status }) {
+  const playback = PLAYBACK_STATES[status]
+  if (playback) return <Badge tone={playback.tone} dot title={playback.title}>{GATEWAY_STATUS_LABELS[status]}</Badge>
+
+  const isPending = status === 'PENDING_ENROLLMENT' || status === 'AWAITING_BIRTH'
+  const tone = gatewayStatusTone(status)
 
   const label = GATEWAY_STATUS_LABELS[status] || status
 

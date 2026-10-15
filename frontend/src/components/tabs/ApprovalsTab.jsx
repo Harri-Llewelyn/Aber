@@ -9,8 +9,11 @@ import { HelpTip } from '../common/HelpTip'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { useSortableRows } from '../../hooks/useTableSort'
+import { severityRank } from '../../utils/tableSort'
 import { Badge } from '../common/Badge'
 import { SearchInput } from '../common/SearchInput'
+import { SortHeader } from '../common/SortHeader'
 import { ClearFilters } from '../common/ClearFilters'
 import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
@@ -278,11 +281,28 @@ function RejectDialog({ onCancel, onConfirm, busy }) {
    (utils/proposeFromForm.js). This page is a queue: what is waiting, what was decided, and the
    drawer that decides one. Editing your own open proposal hands over to the entity's page. */
 
+/** The Field(s) changed column: the fields a proposal would change, by label. */
+function changedFields(p) {
+  if (p.entity_type === 'schemas') return 'Publish this draft'
+  const diff = diffRows(p)
+  return diff.length === 0 ? 'Nothing' : diff.map(d => keyLabel(d.key)).join(', ')
+}
+
+/** The columns both queues sort by. Status ranks by its colour, so a rejection comes first. */
+const PROPOSAL_SORT = {
+  subject: { type: 'text', value: p => p.target_label },
+  change: { type: 'text', value: p => KIND_BY_ID.get(p.entity_type)?.label || p.entity_type },
+  fields: { type: 'text', value: changedFields },
+  status: { type: 'rank', value: p => severityRank(STATUS_TONE[p.status] || 'neutral') },
+  when: { type: 'time', value: p => p.decided_at || p.proposed_at }
+}
+
 /**
  * One list of proposals, as a table. The row carries what you triage on; the drawer carries the
  * diff and every action. `loading` shows the first load in place of the rows.
  */
 function ProposalTable({ rows, selectedId, onSelect, loading, filtered, emptyMessage, filteredMessage }) {
+  const [sorted, sort] = useSortableRows(rows, PROPOSAL_SORT)
   if (loading) return <LoadingState label="proposals" />
   if (rows.length === 0) {
     return (
@@ -301,22 +321,17 @@ function ProposalTable({ rows, selectedId, onSelect, loading, filtered, emptyMes
           {/* The drawer names the proposer. Status and time are two columns because they are two
               facts. */}
           <tr>
-            <th title="The device, area, cell or gateway this proposal is about">Subject</th>
-            <th title="Which kind of change this is">Change</th>
-            <th title="The fields this proposal would change">Field(s) changed</th>
-            <th title="Its current state">Status</th>
-            <th title="When it was decided, or when it was filed while it is still open">When</th>
+            <SortHeader sort={sort} column="subject" title="The device, area, cell or gateway this proposal is about">Subject</SortHeader>
+            <SortHeader sort={sort} column="change" title="Which kind of change this is">Change</SortHeader>
+            <SortHeader sort={sort} column="fields" title="The fields this proposal would change">Field(s) changed</SortHeader>
+            <SortHeader sort={sort} column="status" title="Its current state">Status</SortHeader>
+            <SortHeader sort={sort} column="when" title="When it was decided, or when it was filed while it is still open">When</SortHeader>
           </tr>
         </thead>
         <tbody>
-          {rows.map(p => {
+          {sorted.map(p => {
             const kind = KIND_BY_ID.get(p.entity_type)
-            const diff = diffRows(p)
-            const summary = p.entity_type === 'schemas'
-              ? 'Publish this draft'
-              : diff.length === 0
-                ? 'Nothing'
-                : diff.map(d => keyLabel(d.key)).join(', ')
+            const summary = changedFields(p)
             return (
               <tr
                 key={p.id}

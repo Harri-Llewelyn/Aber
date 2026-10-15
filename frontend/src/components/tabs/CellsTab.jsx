@@ -37,6 +37,7 @@ import {
 import { CardHeading } from '../common/CardHeading'
 import { Badge, ArchivedBadge } from '../common/Badge'
 import { SearchInput } from '../common/SearchInput'
+import { SortHeader } from '../common/SortHeader'
 import { ClearFilters } from '../common/ClearFilters'
 import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
@@ -46,6 +47,7 @@ import { deviceLifecycleStatus, deviceStatusTitle, deviceDotColor } from '../../
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { useUrlState } from '../../hooks/useUrlState'
+import { useSortableRows } from '../../hooks/useTableSort'
 
 export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectArea, onViewTrail, onShowOnSiteMap, hasPermission, activeAlerts = [] }) {
   /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js. */
@@ -215,7 +217,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
   // Either no gateways at all, or gateways serving nothing: usually a provisioning mistake.
   const cellIsEmpty = (c) => liveGateways(c).length === 0 || liveDevices(c).length === 0
 
-  const filteredCells = cells.filter(c => {
+  const matchingCells = cells.filter(c => {
     if (filterMode === 'active'   && c.is_archived) return false
     if (filterMode === 'archived' && !c.is_archived) return false
     if (attentionOnly && !cellNeedsAttention(c)) return false
@@ -226,6 +228,19 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
     }
     return true
   })
+
+  // An unfiled cell has no area to sort by, so it goes last either way.
+  const sortColumns = useMemo(() => {
+    const areaNames = new Map(areas.map(a => [a.area_id, a.area_name]))
+    return {
+      name: { type: 'text', value: c => c.cell_name },
+      area: { type: 'text', value: c => (c.area_id ? areaNames.get(c.area_id) || c.area_id : null) },
+      uuid: { type: 'text', value: c => c.cell_id },
+      gateways: { type: 'number', value: c => (c.gateways || []).length },
+      devices: { type: 'number', value: c => (devicesByCell.get(c.cell_id) || []).length }
+    }
+  }, [areas, devicesByCell])
+  const [filteredCells, sort] = useSortableRows(matchingCells, sortColumns)
 
   const attentionCount = cells.filter(c => !c.is_archived && cellNeedsAttention(c)).length
   const emptyCount = cells.filter(c => !c.is_archived && cellIsEmpty(c)).length
@@ -348,11 +363,11 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
                   {/* The cell's own glyph, chosen in the New Cell form. Its header is a
                       screen-reader label, because a 32px column cannot carry a word. */}
                   <th className="cell-icon-col"><span className="sr-only">Icon</span></th>
-                  <th title="Human-readable cell name">Cell Name</th>
-                  <th title="The ISA-95 area this cell is in, and whether it has a place on that area's plan">Area</th>
-                  <th title="The cell's unique UUID">Cell UUID</th>
-                  <th title="Edge gateways assigned to this cell">Assigned Gateways</th>
-                  <th title="Devices in this cell — its gateways' devices, plus any device filed here explicitly">Devices</th>
+                  <SortHeader sort={sort} column="name" title="Human-readable cell name">Cell Name</SortHeader>
+                  <SortHeader sort={sort} column="area" title="The ISA-95 area this cell is in, and whether it has a place on that area's plan">Area</SortHeader>
+                  <SortHeader sort={sort} column="uuid" title="The cell's unique UUID">Cell UUID</SortHeader>
+                  <SortHeader sort={sort} column="gateways" title="Edge gateways assigned to this cell">Assigned Gateways</SortHeader>
+                  <SortHeader sort={sort} column="devices" title="Devices in this cell — its gateways' devices, plus any device filed here explicitly">Devices</SortHeader>
                 </tr>
               </thead>
               <tbody>

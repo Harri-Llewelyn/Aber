@@ -30,11 +30,15 @@ function useSortOver(columns, value, setValue) {
  * A page table's sort, held in the address (`?sort=name`, `?sort=-last_heartbeat`), so a sorted
  * view can be linked to and survives a reload. A page shows one table per tab, so every page uses
  * the key `sort`, and a tab change drops it as it does the other filters.
+ *
+ * `active` is false while the table's tab is not the one shown, for a page that keeps every tab's
+ * table in one component: the hidden table then neither reads the sort nor tidies away one meant
+ * for the table that is shown.
  */
-export function useTableSort(columns, { key = 'sort' } = {}) {
-  const allowed = useCallback((value) => parseSort(value, columns) !== null, [columns])
-  const [value, setValue] = useUrlState(key, '', { allowed })
-  return useSortOver(columns, value, setValue)
+export function useTableSort(columns, { key = 'sort', active = true } = {}) {
+  const valid = useCallback((value) => parseSort(value, columns) !== null, [columns])
+  const [value, setValue] = useUrlState(key, '', { allowed: active ? valid : null })
+  return useSortOver(columns, active ? value : '', setValue)
 }
 
 /** A sort held by the component, for a table in a modal, which has no address of its own. */

@@ -25,9 +25,10 @@ import { flowDriftState, flowDriftLabel, isFlowDrift, flowEditedOnAppliance, FLO
 import { LocationPicker, locationIncomplete } from '../common/LocationPicker'
 import CopyableId from '../common/CopyableId'
 import { TagList } from '../common/TagList'
-import { StatusBadge } from '../common/StatusBadge'
+import { StatusBadge, gatewayStatusTone } from '../common/StatusBadge'
 import { Badge, ArchivedBadge } from '../common/Badge'
 import { SearchInput } from '../common/SearchInput'
+import { SortHeader } from '../common/SortHeader'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
@@ -61,6 +62,8 @@ import {
 import { CardHeading } from '../common/CardHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { useUrlState } from '../../hooks/useUrlState'
+import { useSortableRows } from '../../hooks/useTableSort'
+import { severityRank } from '../../utils/tableSort'
 
 export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevice, hasPermission, userRole, activeAlerts = [] }) {
   /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js (issue #34). */
@@ -270,7 +273,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
     assets.filter(a => a.is_quarantined && a.active_gateway_id).map(a => a.active_gateway_id)
   )
 
-  const filteredGateways = gateways.filter(g => {
+  const matchingGateways = gateways.filter(g => {
     if (filterMode === 'active'   && g.is_archived) return false
     if (filterMode === 'archived' && !g.is_archived) return false
     if (searchQuery) {
@@ -286,6 +289,29 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
     if (quarantineOnly && !gatewaysWithQuarantine.has(g.gateway_id)) return false
     return true
   })
+
+  // Each column sorts on what its cell shows. An archived gateway shows no status and no devices,
+  // and a location that does not apply shows none, so those go last.
+  const sortColumns = React.useMemo(() => {
+    const areaNames = new Map(areas.map(a => [a.area_id, a.area_name]))
+    const cellNames = new Map(cells.map(c => [c.cell_id, c.cell_name]))
+    const location = (g) => {
+      if (!gatewayAcceptsCell(g)) return null
+      if (g.location_scope === SCOPE_SITE_WIDE) return 'Site-Wide'
+      if (g.location_scope === SCOPE_AREA_WIDE) return 'Area-Wide'
+      return g.cell_id ? cellNames.get(g.cell_id) || g.cell_id : null
+    }
+    return {
+      name: { type: 'text', value: g => g.gateway_name },
+      uuid: { type: 'text', value: g => g.gateway_id },
+      type: { type: 'text', value: g => gatewayTypeLabel(gatewayType(g)) },
+      location: { type: 'text', value: location },
+      status: { type: 'rank', value: g => (g.is_archived ? null : severityRank(gatewayStatusTone(gatewayDisplayStatus(g)))) },
+      last_heartbeat: { type: 'time', value: g => g.last_heartbeat },
+      devices: { type: 'number', value: g => (g.is_archived ? null : (g.devices || []).length) }
+    }
+  }, [areas, cells])
+  const [filteredGateways, sort] = useSortableRows(matchingGateways, sortColumns)
 
   const activeFilterCount =
     [searchQuery, liveStatusFilter, kindFilter].filter(Boolean).length +
@@ -449,13 +475,13 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
              <table>
                <thead>
                  <tr>
-                   <th title="Human-readable gateway name">Gateway Name</th>
-                   {!compact && <th title="The gateway's database identifier -- the id to quote in a query, a ticket or an API call. Its Sparkplug edge node id is derived from this, so nothing is lost by showing it here.">Gateway UUID</th>}
-                   <th title="Where this gateway's connector runs, and whether its readings are real: Remote (an appliance on the plant network), Host (inside this stack), Simulated (host-run, readings generated), Playback (republishes recorded captures)">Type</th>
-                   <th title="Where this gateway serves: a cell, a whole area, or the whole site">Location</th>
-                   <th title="What the gateway last reported, shown as Stale once its heartbeat is over 90 seconds old">Gateway Status</th>
-                   <th title="Age of the last Sparkplug B node heartbeat (NBIRTH/NDATA/NDEATH)">Last Heartbeat</th>
-                   {!compact && <th title="Devices assigned to this gateway">Connected Devices</th>}
+                   <SortHeader sort={sort} column="name" title="Human-readable gateway name">Gateway Name</SortHeader>
+                   {!compact && <SortHeader sort={sort} column="uuid" title="The gateway's database identifier -- the id to quote in a query, a ticket or an API call. Its Sparkplug edge node id is derived from this, so nothing is lost by showing it here.">Gateway UUID</SortHeader>}
+                   <SortHeader sort={sort} column="type" title="Where this gateway's connector runs, and whether its readings are real: Remote (an appliance on the plant network), Host (inside this stack), Simulated (host-run, readings generated), Playback (republishes recorded captures)">Type</SortHeader>
+                   <SortHeader sort={sort} column="location" title="Where this gateway serves: a cell, a whole area, or the whole site">Location</SortHeader>
+                   <SortHeader sort={sort} column="status" title="What the gateway last reported, shown as Stale once its heartbeat is over 90 seconds old">Gateway Status</SortHeader>
+                   <SortHeader sort={sort} column="last_heartbeat" title="Age of the last Sparkplug B node heartbeat (NBIRTH/NDATA/NDEATH)">Last Heartbeat</SortHeader>
+                   {!compact && <SortHeader sort={sort} column="devices" title="Devices assigned to this gateway">Connected Devices</SortHeader>}
                  </tr>
                </thead>
                <tbody>
