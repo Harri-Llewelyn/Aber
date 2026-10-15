@@ -10,7 +10,7 @@ a Shopfloor_Manager, so before 0187 one could mark a Host gateway is_shadow, and
 `start_playback_job()` then accepted a map of a real device onto itself: a replay wrote recorded
 readings into that device's history, and the Audit Trail showed a gateways UPDATE.
 
-Four things are held here, for an Administrator and a Shopfloor_Manager alike:
+Five things are held here, for an Administrator and a Shopfloor_Manager alike:
 
   * the flag cannot be set (an UPDATE, an INSERT, an upsert) or cleared through the API, and
     service_role is held too;
@@ -20,7 +20,10 @@ Four things are held here, for an Administrator and a Shopfloor_Manager alike:
     its flags on every boot. 0002 replays BEFORE the migration that adds the trigger, so from the
     second boot on the trigger is in place when it runs: the seed's own statement is executed here;
   * `start_playback_job()` accepts a map only onto the lane of the device the key names, and
-    `ensure_shadow_devices()` still produces exactly such a map.
+    `ensure_shadow_devices()` still produces exactly such a map;
+  * what makes a device a lane, `devices.shadow_of`, is as closed as the flag: it cannot be set,
+    changed or cleared through the API, a lane cannot be moved to another gateway, and
+    `ensure_shadow_devices()` (which runs as the owner) still mints, reuses and archives lanes.
 
 Every test rolls back. Writes to `gateways` and `devices` fire the audit-trail trigger.
 """
@@ -412,6 +415,256 @@ class ThePlaybackJobMapsOnlyOntoLanes(Base):
                     self.assertIsNotNone(self.cur.fetchone()[0])
                 finally:
                     self.cur.execute("ROLLBACK TO SAVEPOINT prepare;")
+
+
+class ALaneIsMadeByEnsureShadowDevicesAlone(Base):
+    """
+    `devices.shadow_of` is what makes a device a lane, and the lane check above trusts it. Before
+    this guard a manager could move a real device onto the Playback gateway and set it in the same
+    UPDATE; measured, it returned UPDATE 1.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.real_gw, _ = self._gateway()
+        self.other_gw, _ = self._gateway()
+        self.dev_a, self.wire_a = self._device(self.real_gw, name="Test_Lane_Press_A")
+        self.dev_b, self.wire_b = self._device(self.real_gw, name="Test_Lane_Press_B")
+        self.target, _ = self._gateway(simulated=True, shadow=True)
+        self.lane, self.lane_wire = self._device(self.target, shadow_of=self.dev_a,
+                                                 name="Test_Lane_Press_A (replay)")
+
+    def _act(self, role, sql, args=(), then=None, then_args=()):
+        """`sql` as `role`, then `then` as the owner, then back out: (rowcount, what `then` read)."""
+        self.cur.execute("SAVEPOINT act;")
+        try:
+            self._as(role)
+            self.cur.execute(sql, args)
+            rowcount = self.cur.rowcount
+            self.cur.execute("RESET ROLE;")
+            rows = None
+            if then:
+                self.cur.execute(then, then_args)
+                rows = self.cur.fetchall()
+            return rowcount, rows
+        finally:
+            self.cur.execute("ROLLBACK TO SAVEPOINT act;")
+
+    def _lane_of(self, device_id):
+        self.cur.execute("SELECT shadow_of, gateway_id FROM public.devices WHERE id = %s;",
+                         (device_id,))
+        return self.cur.fetchone()
+
+    # -- refused ---------------------------------------------------------------------------
+
+    def test_a_real_device_cannot_be_moved_onto_the_playback_gateway_as_a_lane(self):
+        """THE MEASURED CASE. It returned UPDATE 1 before this guard."""
+        for role in ROLES:
+            with self.subTest(role=role):
+                with self.assertRaisesRegex(pg_errors.CheckViolation,
+                                            "Test_Lane_Press_B cannot be made a replay lane"):
+                    self._call(role, "UPDATE public.devices SET gateway_id = %s, shadow_of = %s "
+                                     "WHERE id = %s;", (PLAYBACK_GATEWAY, self.dev_a, self.dev_b))
+                self.assertEqual(self._lane_of(self.dev_b), (None, self.real_gw))
+
+    def test_shadow_of_alone_is_refused_on_a_device_that_stays_where_it_is(self):
+        for role in ROLES:
+            with self.subTest(role=role):
+                with self.assertRaisesRegex(pg_errors.CheckViolation, "cannot be made a replay lane"):
+                    self._call(role, "UPDATE public.devices SET shadow_of = %s WHERE id = %s;",
+                               (self.dev_a, self.dev_b))
+
+    def test_a_device_cannot_be_created_as_a_lane(self):
+        for role in ROLES:
+            with self.subTest(role=role):
+                with self.assertRaisesRegex(pg_errors.CheckViolation,
+                                            "cannot be created as a replay lane"):
+                    self._call(role, "INSERT INTO public.devices (name, gateway_id, shadow_of) "
+                                     "VALUES (%s, %s, %s);",
+                               (f"Test_Lane_New_{uuid.uuid4().hex[:8]}", self.target, self.dev_a))
+
+    def test_an_upsert_cannot_set_it_either(self):
+        for role in ROLES:
+            with self.subTest(role=role):
+                with self.assertRaises(pg_errors.CheckViolation):
+                    self._call(role, "INSERT INTO public.devices (id, name, gateway_id) "
+                                     "VALUES (%s, 'Test_Lane_Upsert', %s) "
+                                     "ON CONFLICT (id) DO UPDATE SET shadow_of = %s;",
+                               (self.dev_b, self.real_gw, self.dev_a))
+
+    def test_a_lane_cannot_be_pointed_at_another_device(self):
+        for role in ROLES:
+            with self.subTest(role=role):
+                with self.assertRaisesRegex(pg_errors.CheckViolation,
+                                            "cannot be made the lane of another device"):
+                    self._call(role, "UPDATE public.devices SET shadow_of = %s WHERE id = %s;",
+                               (self.dev_b, self.lane))
+                self.assertEqual(self._lane_of(self.lane)[0], self.dev_a)
+
+    def test_a_lane_cannot_stop_being_one(self):
+        for role in ROLES:
+            with self.subTest(role=role):
+                with self.assertRaisesRegex(pg_errors.CheckViolation, "cannot stop being a replay lane"):
+                    self._call(role, "UPDATE public.devices SET shadow_of = NULL WHERE id = %s;",
+                               (self.lane,))
+                self.assertEqual(self._lane_of(self.lane)[0], self.dev_a)
+
+    def test_a_lane_cannot_be_moved_to_another_gateway_or_unassigned(self):
+        for role in ROLES:
+            for destination in (self.other_gw, None):
+                with self.subTest(role=role, destination=destination):
+                    with self.assertRaisesRegex(pg_errors.CheckViolation,
+                                                "cannot be moved to another gateway"):
+                        self._call(role, "UPDATE public.devices SET gateway_id = %s WHERE id = %s;",
+                                   (destination, self.lane))
+                    self.assertEqual(self._lane_of(self.lane)[1], self.target)
+
+    def test_service_role_is_held_too(self):
+        with self.assertRaises(pg_errors.CheckViolation):
+            self._call("service_role", "UPDATE public.devices SET gateway_id = %s, shadow_of = %s "
+                                       "WHERE id = %s;", (PLAYBACK_GATEWAY, self.dev_a, self.dev_b))
+        with self.assertRaises(pg_errors.CheckViolation):
+            self._call("service_role", "UPDATE public.devices SET shadow_of = NULL WHERE id = %s;",
+                       (self.lane,))
+
+    def test_the_old_gate_still_refuses_a_device_arriving_without_provenance(self):
+        """0083's half is unchanged: the two read as one rule, and neither leaves the other's case."""
+        for role in ROLES:
+            with self.subTest(role=role):
+                with self.assertRaisesRegex(pg_errors.CheckViolation, "playback gateway"):
+                    self._call(role, "UPDATE public.devices SET gateway_id = %s WHERE id = %s;",
+                               (self.target, self.dev_b))
+
+    def test_the_refusal_says_what_to_do(self):
+        with self.assertRaises(pg_errors.CheckViolation) as ctx:
+            self._call("Shopfloor_Manager", "UPDATE public.devices SET shadow_of = %s "
+                                            "WHERE id = %s;", (self.dev_a, self.dev_b))
+        self.assertIn("Prepare replay lanes", str(ctx.exception))
+
+    # -- still allowed ---------------------------------------------------------------------
+
+    def test_an_ordinary_edit_of_a_lane_still_works(self):
+        for role in ROLES:
+            with self.subTest(role=role):
+                self.assertEqual(
+                    self._call(role, "UPDATE public.devices SET name = %s, description = %s "
+                                     "WHERE id = %s;", ("Test_Lane_Renamed", "edited", self.lane)), 1)
+
+    def test_a_whole_row_patch_that_changes_neither_column_passes(self):
+        """The Edit Details form sends gateway_id with every save, and PostgREST sends the row."""
+        for role in ROLES:
+            with self.subTest(role=role):
+                self.assertEqual(
+                    self._call(role, "UPDATE public.devices SET name = %s, gateway_id = %s, "
+                                     "shadow_of = %s WHERE id = %s;",
+                               ("Test_Lane_Same", self.target, self.dev_a, self.lane)), 1)
+                self.assertEqual(
+                    self._call(role, "UPDATE public.devices SET name = %s, gateway_id = %s, "
+                                     "shadow_of = NULL WHERE id = %s;",
+                               ("Test_Lane_Same", self.real_gw, self.dev_b)), 1)
+
+    def test_an_ordinary_device_still_moves_between_ordinary_gateways(self):
+        for role in ROLES:
+            with self.subTest(role=role):
+                self.assertEqual(
+                    self._call(role, "UPDATE public.devices SET gateway_id = %s WHERE id = %s;",
+                               (self.other_gw, self.dev_b)), 1)
+                self.assertEqual(
+                    self._call(role, "UPDATE public.devices SET gateway_id = NULL WHERE id = %s;",
+                               (self.dev_b,)), 1)
+                self.assertEqual(
+                    self._call(role, "INSERT INTO public.devices (name, gateway_id) VALUES (%s, %s);",
+                               (f"Test_Lane_Plain_{uuid.uuid4().hex[:8]}", self.real_gw)), 1)
+
+    def test_a_row_with_no_provenance_can_still_leave_the_playback_gateway(self):
+        """0083's recovery path: a row with no shadow_of is not a lane, and can be moved off."""
+        orphan, _ = self._device(self.target, shadow_of=self.dev_b, name="Test_Lane_Orphan")
+        self.cur.execute("UPDATE public.devices SET shadow_of = NULL WHERE id = %s;", (orphan,))
+        for role in ROLES:
+            with self.subTest(role=role):
+                self.assertEqual(
+                    self._call(role, "UPDATE public.devices SET gateway_id = %s WHERE id = %s;",
+                               (self.real_gw, orphan)), 1)
+
+    def test_archiving_a_lane_works(self):
+        for role in ROLES:
+            with self.subTest(role=role):
+                count, rows = self._act(
+                    role, "UPDATE public.devices SET is_archived = true, archived_at = now() "
+                          "WHERE id = %s;", (self.lane,),
+                    "SELECT is_archived, shadow_of, gateway_id FROM public.devices WHERE id = %s;",
+                    (self.lane,))
+                self.assertEqual((count, rows[0][0]), (1, True))
+                self.assertEqual(rows[0][1:], (self.dev_a, self.target))
+
+    def test_archiving_and_deleting_the_original_carry_its_lane_with_it(self):
+        for role in ROLES:
+            with self.subTest(role=role):
+                count, rows = self._act(
+                    role, "UPDATE public.devices SET is_archived = true, archived_at = now() "
+                          "WHERE id = %s;", (self.dev_a,),
+                    "SELECT is_archived FROM public.devices WHERE id = %s;", (self.lane,))
+                self.assertEqual((count, rows), (1, [(True,)]))
+                count, rows = self._act(
+                    role, "DELETE FROM public.devices WHERE id = %s;", (self.dev_a,),
+                    "SELECT count(*) FROM public.devices WHERE id = %s;", (self.lane,))
+                self.assertEqual((count, rows), (1, [(0,)]))
+
+    def test_the_foreign_key_still_clears_shadow_of_when_an_original_is_deleted(self):
+        """
+        devices_shadow_of_fkey is ON DELETE SET NULL, and the action runs as the table's owner, so
+        the guard lets it through. The BEFORE DELETE trigger that removes lanes first is off here
+        so the action itself is what runs.
+        """
+        self.cur.execute("ALTER TABLE public.devices DISABLE TRIGGER trg_devices_shadow_follows_delete;")
+        for role in ROLES:
+            with self.subTest(role=role):
+                count, rows = self._act(
+                    role, "DELETE FROM public.devices WHERE id = %s;", (self.dev_a,),
+                    "SELECT shadow_of FROM public.devices WHERE id = %s;", (self.lane,))
+                self.assertEqual((count, rows), (1, [(None,)]))
+
+    def test_deleting_the_playback_gateway_still_unassigns_its_lanes(self):
+        """devices_gateway_id_fkey is ON DELETE SET NULL; the action is the owner's, so it passes."""
+        for role in ROLES:
+            with self.subTest(role=role):
+                count, rows = self._act(
+                    role, "DELETE FROM public.gateways WHERE id = %s;", (self.target,),
+                    "SELECT gateway_id, shadow_of FROM public.devices WHERE id = %s;", (self.lane,))
+                self.assertEqual((count, rows), (1, [(None, self.dev_a)]))
+
+    def test_ensure_shadow_devices_mints_and_reuses_lanes(self):
+        capture = self._capture(self.other_gw, [self.wire_a, self.wire_b])
+        for role in ROLES:
+            with self.subTest(role=role):
+                self.cur.execute("SAVEPOINT mint;")
+                try:
+                    self._as(role)
+                    self.cur.execute("SELECT public.ensure_shadow_devices(%s);", (capture,))
+                    first = self.cur.fetchone()[0]
+                    self.cur.execute("SELECT public.ensure_shadow_devices(%s);", (capture,))
+                    second = self.cur.fetchone()[0]
+                    self.cur.execute("RESET ROLE;")
+                    self.assertEqual(first, second)
+                    self.assertEqual(set(first), {self.wire_a, self.wire_b})
+                    self.cur.execute(
+                        "SELECT count(*) FROM public.devices WHERE shadow_of = %s "
+                        "AND sparkplug_id = %s;", (self.dev_b, first[self.wire_b]))
+                    self.assertEqual(self.cur.fetchone()[0], 1)
+                finally:
+                    self.cur.execute("ROLLBACK TO SAVEPOINT mint;")
+
+    def test_the_trigger_is_stated_once_through_replay_trigger(self):
+        self.cur.execute("SELECT public.live_trigger_statement('public.devices', "
+                         "'trg_devices_replay_lane_stays_as_minted');")
+        self.assertRegex(
+            self.cur.fetchone()[0],
+            r"^CREATE TRIGGER trg_devices_replay_lane_stays_as_minted BEFORE INSERT OR UPDATE OF "
+            r"gateway_id, shadow_of ON public\.devices FOR EACH ROW EXECUTE FUNCTION "
+            r"public\.refuse_hand_making_a_replay_lane\(\);$")
+        self.cur.execute("SELECT has_function_privilege(%s, "
+                         "'public.refuse_hand_making_a_replay_lane()', 'EXECUTE');", ("authenticated",))
+        self.assertFalse(self.cur.fetchone()[0])
 
 
 class TheRefusalsNoLongerPointAtAnotherGateway(Base):

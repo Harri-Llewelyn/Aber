@@ -988,21 +988,34 @@ wrote recorded readings into the device's history, and the Audit Trail showed a 
   requires each target to be an active device of the gateway, to have `shadow_of` set, and to have
   it set to the device the key names. A real device, the lane of another device and a key that names
   no device are each refused, and the message names the device.
+- **A lane is made by `ensure_shadow_devices()` alone.** `devices.shadow_of` is what makes a device
+  a lane, and it was as open as the flag: a Shopfloor_Manager could move a real device onto the
+  Playback gateway and set `shadow_of` in the same UPDATE (measured: `UPDATE 1`), and the lane check
+  above would then accept it. `trg_devices_replay_lane_stays_as_minted` refuses, for the same roles
+  and with the same owner exemption, an INSERT with `shadow_of`, an UPDATE that sets, changes or
+  clears it, and an UPDATE that moves a lane to another gateway or unassigns it. An edit that
+  mentions those columns without changing them passes. It is the companion of
+  `trg_devices_replay_lane_is_minted` (`0083`), which holds every role, the owner included, and
+  refuses a device arriving on a shadow gateway without `shadow_of`. Read together: a device is on
+  the Playback gateway only as a lane, and a lane exists only because `ensure_shadow_devices()` made
+  it. The refusal names the Prepare replay lanes button, which is how a person gets one.
+- **Every other writer is the owner's, so none is in the way.** `ensure_shadow_devices()` is
+  `SECURITY DEFINER`. The foreign keys that clear `shadow_of` when an original is deleted and
+  `gateway_id` when a gateway is deleted run as the table's owner. Archiving, restoring and
+  deleting a lane write neither column, and an original takes its lanes with it
+  (`shadow_follows_its_original()`). A row with no `shadow_of` that sits on the Playback gateway,
+  the state `0083` calls recoverable, can still be moved off. The Edit Details form shows a lane's
+  Serving Gateway and does not let it change.
 - **There is one Playback gateway, and no function mints another.** `ensure_shadow_devices()` still
   finds the oldest unarchived `is_shadow` gateway, which is the seeded one. Its not-found message and
   the archive refusal no longer tell an operator to mark another gateway, because the API refuses it.
-  Check 90 of `scripts/check-docs-drift.mjs` fails if any other migration writes the flag.
+  Check 90 of `scripts/check-docs-drift.mjs` fails if any other migration writes the flag, if any
+  function but `ensure_shadow_devices()` writes `shadow_of`, or if `api.js` sends either.
 
 **Nothing is reset.** A site that already has a second `is_shadow` gateway keeps it, and so keeps
 its lanes and the ability to archive it. Find one with
 `SELECT id, name FROM gateways WHERE is_shadow AND id <> '16000000-0000-4000-8000-000000000001'`.
 It cannot be unmarked through the API either; clearing the flag is a database owner's act.
-
-**What this does not close.** `devices.shadow_of` is not guarded. A person who may write devices can
-set it on a real device and move that device onto the Playback gateway, which
-`trg_devices_replay_lane_is_minted` admits because the device then carries provenance. That moves a
-real device off its own gateway, which is a visible change and not a quiet extra publisher, but the
-column is still what defines a lane.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
@@ -5157,6 +5170,13 @@ lane must still see its own gateway in the list, or its form would fall back to 
 saving would move it off the lane. But the pickers are a courtesy. `devices` is writable through
 PostgREST by any Administrator or Shopfloor_Manager, so they are three doors of an unbounded number,
 and the trigger is the one that holds for the fourth.
+
+**`0187` closes the other half.** The arrival gate trusts `shadow_of`, and `shadow_of` was writable by
+the same two roles: a real device moved onto the Playback gateway with `shadow_of` set in the same
+UPDATE passed it. `trg_devices_replay_lane_stays_as_minted` now refuses, for the roles the API runs
+as, setting, changing or clearing `shadow_of` and moving a lane off its gateway. This gate still
+holds every role, the owner included. The two are one rule, in *Only the seed makes a playback
+gateway (0187)*. The Edit Details form shows a lane's Serving Gateway but does not let it change.
 
 ---
 

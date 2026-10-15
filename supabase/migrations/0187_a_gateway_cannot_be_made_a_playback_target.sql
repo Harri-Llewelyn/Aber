@@ -18,6 +18,13 @@
 --     runs; its statements run as the owner and pass.
 --   * start_playback_job() requires every mapped target to be a replay lane of the device its key
 --     names. A key is the recorded device's sparkplug_id and a value the id it is published as.
+--   * What makes a device a replay lane is devices.shadow_of, which was as unguarded as the flag: a
+--     manager could move a real device onto the Playback gateway and set shadow_of in the same
+--     UPDATE. trg_devices_replay_lane_stays_as_minted refuses, from the same roles, an INSERT with
+--     shadow_of, any UPDATE that changes it, and any move of a lane to another gateway.
+--     ensure_shadow_devices() runs as the owner and still mints. Together with 0083's gate, which
+--     refuses a device arriving on a shadow gateway without shadow_of, a lane exists only because
+--     that function made it.
 --   * One Playback gateway, then. ensure_shadow_devices() still takes the oldest unarchived
 --     is_shadow gateway, which is the seeded one; its message and comment, and the archive
 --     refusal's, no longer send an operator to mark another gateway. Only their text changes.
@@ -384,7 +391,64 @@ ALTER FUNCTION public.start_playback_job(p_capture_id uuid, p_target_gateway_id 
 COMMENT ON FUNCTION public.start_playback_job(p_capture_id uuid, p_target_gateway_id uuid, p_device_map jsonb, p_speed numeric) IS 'Queue a capture for publication onto a simulated gateway. The only way a playback_jobs row is created. Refuses a target that is not is_simulated, one holding no broker credential, a device map naming a device that is not an active replay lane of the gateway and of the device its key names, and a second concurrent playback onto the same edge node. See 0056''s header for the three tiers this is the first of.';
 
 -- -------------------------------------------------------------------------------------------------
--- Self-check: the trigger is in place, and the three redeclared bodies say what this file changed.
+-- A replay lane is made by ensure_shadow_devices() alone
+-- -------------------------------------------------------------------------------------------------
+-- 0083's gate refuses a device ARRIVING on a shadow gateway without shadow_of, for every role. It
+-- admits one that carries shadow_of, because ensure_shadow_devices() sets both in one INSERT. This
+-- is the other half: nothing else may set shadow_of, change it or clear it, and a lane stays where
+-- it was minted. Its gate is the same one 0187 puts on gateways.is_shadow: the roles the API runs as
+-- are held, the owner is not, because the owner runs ensure_shadow_devices() and the foreign-key
+-- actions that clear shadow_of when an original is deleted.
+CREATE OR REPLACE FUNCTION public.refuse_hand_making_a_replay_lane() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_what text;
+BEGIN
+    IF current_user IN ('postgres', 'supabase_admin') THEN
+        RETURN NEW;
+    END IF;
+
+    -- A PATCH sends the whole row, so an edit that mentions a column without changing it passes.
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.shadow_of IS NULL THEN
+            RETURN NEW;
+        END IF;
+        v_what := 'cannot be created as a replay lane';
+    ELSIF NEW.shadow_of IS DISTINCT FROM OLD.shadow_of THEN
+        v_what := CASE WHEN OLD.shadow_of IS NULL THEN 'cannot be made a replay lane'
+                       WHEN NEW.shadow_of IS NULL THEN 'cannot stop being a replay lane'
+                       ELSE 'cannot be made the lane of another device' END;
+    ELSIF OLD.shadow_of IS NOT NULL AND NEW.gateway_id IS DISTINCT FROM OLD.gateway_id THEN
+        v_what := 'is a replay lane and cannot be moved to another gateway';
+    ELSE
+        RETURN NEW;
+    END IF;
+
+    RAISE EXCEPTION
+      'device % %. A replay lane stands in for one real machine, and only the playback dialog makes '
+      'one: its Prepare replay lanes button, on the Capture page, creates the lane for each device '
+      'in a capture and reuses it for every later playback. Nothing else can make a device a lane, '
+      'change which machine it stands in for, or move it.',
+      NEW.name, v_what
+        USING ERRCODE = 'check_violation';
+END;
+$$;
+
+ALTER FUNCTION public.refuse_hand_making_a_replay_lane() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.refuse_hand_making_a_replay_lane() FROM PUBLIC, anon, authenticated;
+
+COMMENT ON FUNCTION public.refuse_hand_making_a_replay_lane() IS 'For every role the API runs as: refuses a device INSERTed with shadow_of, an UPDATE that sets, changes or clears it, and an UPDATE that moves a lane to another gateway. The database owner is exempt, which is how ensure_shadow_devices() mints a lane and how devices_shadow_of_fkey clears shadow_of when an original is deleted. The companion of refuse_hand_assigning_a_replay_lane(), which holds every role including the owner and refuses a device arriving on a shadow gateway without shadow_of (0187).';
+
+COMMENT ON FUNCTION public.refuse_hand_assigning_a_replay_lane() IS 'Refuses a device ARRIVING on a shadow gateway without shadow_of -- an INSERT, or an UPDATE that changes gateway_id -- for every role, the owner included. Deliberately silent about a device already there whose shadow_of has become NULL: devices_shadow_of_fkey is ON DELETE SET NULL, so that is the legal state of a lane whose original was deleted, and checking it would make that deletion fail. Its companion refuse_hand_making_a_replay_lane() holds the API roles to the other half: nothing but ensure_shadow_devices() sets shadow_of (0083, 0187).';
+
+SELECT public.replay_trigger('public.devices', 'trg_devices_replay_lane_stays_as_minted', $ddl$
+CREATE TRIGGER trg_devices_replay_lane_stays_as_minted BEFORE INSERT OR UPDATE OF gateway_id, shadow_of ON public.devices FOR EACH ROW EXECUTE FUNCTION public.refuse_hand_making_a_replay_lane();
+$ddl$);
+
+-- -------------------------------------------------------------------------------------------------
+-- Self-check: the triggers are in place, and the three redeclared bodies say what this file changed.
 -- -------------------------------------------------------------------------------------------------
 DO $$
 DECLARE
@@ -392,6 +456,9 @@ DECLARE
 BEGIN
   IF public.live_trigger_statement('public.gateways', 'trg_gateways_playback_flag_is_seeded') IS NULL THEN
     RAISE EXCEPTION '0187: gateways has no trg_gateways_playback_flag_is_seeded';
+  END IF;
+  IF public.live_trigger_statement('public.devices', 'trg_devices_replay_lane_stays_as_minted') IS NULL THEN
+    RAISE EXCEPTION '0187: devices has no trg_devices_replay_lane_stays_as_minted';
   END IF;
 
   SELECT prosrc INTO v_src FROM pg_proc WHERE oid = 'public.start_playback_job(uuid, uuid, jsonb, numeric)'::regprocedure;
