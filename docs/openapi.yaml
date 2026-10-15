@@ -2064,6 +2064,55 @@ paths:
         '400': { description: 'The value did not match `value_type`, or an immutable column was addressed.' }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
+  /rest/v1/user_settings:
+    get:
+      tags: [Registry]
+      summary: Read your own display preferences
+      description: |
+        One row per person (`0188`): the theme and sidebar layout the dashboard's Profile page
+        and account menu set, so they follow the account rather than the browser. RLS returns the
+        caller's own row and nobody else's, an `Administrator` included; an empty array means
+        this person has chosen nothing yet, and the defaults apply. `anon` and `service_role` hold
+        nothing on the table.
+      parameters:
+        - { name: user_id, in: query, schema: { type: string }, description: 'e.g. `eq.<your auth.uid()>`' }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Your row, or an empty array.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/UserSettings' } }
+        '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
+    post:
+      tags: [Registry]
+      summary: Create or change your own display preferences
+      description: |
+        An upsert on `user_id` (`Prefer: resolution=merge-duplicates`, `on_conflict=user_id`): the
+        columns sent are set and the others are left as they are, or take their defaults on a new
+        row. The dashboard seeds a person's first row with `resolution=ignore-duplicates`, so a row
+        another tab created is never overwritten. `user_id` must be the caller's own; any other is
+        refused (403). There is no `DELETE`: the row goes when the account is deleted.
+        `updated_at` is stamped by the database. Not recorded in the Audit Trail.
+      parameters:
+        - { name: on_conflict, in: query, schema: { type: string, example: user_id } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: string, format: uuid, description: "The caller's own id." }
+                theme: { type: string, enum: [dark, light] }
+                sidebar_mode: { type: string, enum: [hover, expanded, collapsed] }
+      responses:
+        '201': { description: 'Created or changed.' }
+        '400': { description: 'A value outside the CHECK (`23514`).' }
+        '401': { description: 'Not authenticated.' }
+        '403': { description: "`user_id` is not the caller's own (`42501`)." }
+
   /rest/v1/platform_alerts_active:
     get:
       tags: [Registry]
@@ -5069,6 +5118,21 @@ components:
         name: { type: string, example: TemperatureSensor, description: 'The concept''s key in its vocabulary: the IDTA idShort, or the vocabulary row''s name.' }
         definition: { type: string, example: 'A `Sensor` that `observes` a `QuantifiableObservableProperty` that represents a measure of temperature.' }
         standard: { type: string, enum: [IDTA, ASHRAE 223P, OPC UA, ISO 22400] }
+
+    UserSettings:
+      type: object
+      description: |
+        One person's display preferences (`0188`). Each is a typed column with a CHECK and a
+        default; a new preference is a column added by the migration beside the code that reads it.
+      properties:
+        user_id: { type: string, format: uuid, description: "The person's `auth.users` id." }
+        theme: { type: string, enum: [dark, light], default: dark }
+        sidebar_mode:
+          type: string
+          enum: [hover, expanded, collapsed]
+          default: hover
+          description: 'How the sidebar shows the page names: on hover, always, or never (icons only).'
+        updated_at: { type: string, format: date-time, readOnly: true }
 
     SystemSetting:
       type: object

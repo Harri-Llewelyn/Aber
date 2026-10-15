@@ -35,7 +35,7 @@ describe('what the index holds', () => {
     const operator = TABS.filter(t => tabIsVisible(t, () => false, 'Operator'))
     const found = buildTargets(operator).map(t => t.tabId)
 
-    expect(found).not.toContain('settings')
+    expect(found).not.toContain('backups')
     expect(found).not.toContain('access-control')
     expect(found).toContain('site-map')
   })
@@ -49,14 +49,32 @@ describe('what the index holds', () => {
     expect(targets().map(t => t.label)).toContain('Broker credentials')
   })
 
-  /* THE GATE IS THE TAB, NOT RLS. `system_settings` is SELECT-able by every authenticated session
-     -- the policy that names Administrator is the UPDATE one -- so a setting must be withheld here
-     or the box would send an Operator to a page that will not render for them. */
-  it('offers a setting only to a session that can open the Settings page', () => {
+  /* Every role reads the settings, so every role is offered them: RLS has already withheld the rows
+     marked `sensitive`, and the Settings page opens read-only for anyone but an Administrator. */
+  it('offers a setting to every session, since every role can open the Settings page', () => {
     const rows = [{ key: 'site.name', label: 'Site name', category: 'Site' }]
     const operator = buildTargets(TABS.filter(t => tabIsVisible(t, () => false, 'Operator')), rows)
-    expect(operator.map(t => t.label)).not.toContain('Site name')
+    expect(operator.find(t => t.label === 'Site name')).toMatchObject({ kind: 'setting', tabId: 'settings' })
     expect(buildTargets(adminTabs(), rows).map(t => t.label)).toContain('Site name')
+  })
+
+  /* A setting a page's own dialog edits goes to that page, so it is offered only where that page is
+     in the rail: the box must not send an Operator to Cold Storage, which will not render for them. */
+  it('withholds a setting whose page this session cannot open', () => {
+    const rows = [{ key: 'archive.enabled', label: 'Archive old telemetry', category: 'Cold Storage' }]
+    const operator = buildTargets(TABS.filter(t => tabIsVisible(t, () => false, 'Operator')), rows)
+    expect(operator.map(t => t.label)).not.toContain('Archive old telemetry')
+    const auditor = buildTargets(TABS.filter(t => tabIsVisible(t, () => true, 'Auditor')), rows)
+    expect(auditor.find(t => t.label === 'Archive old telemetry')).toMatchObject({ kind: 'card', tabId: 'cold-storage' })
+  })
+
+  it("offers Profile's two tabs to every session", () => {
+    const operator = buildTargets(TABS.filter(t => tabIsVisible(t, () => false, 'Operator')))
+    expect(operator.find(t => t.label === 'Profile')).toMatchObject({ kind: 'page', tabId: 'profile' })
+    expect(operator.find(t => t.label === 'Appearance')).toMatchObject({ kind: 'card', tabId: 'profile', section: 'appearance' })
+    expect(operator.find(t => t.label === 'Account')).toMatchObject({ kind: 'card', tabId: 'profile', section: 'account' })
+    expect(matchTargets('dark mode', operator).map(t => t.label)).toContain('Appearance')
+    expect(matchTargets('change password', operator).map(t => t.label)).toContain('Account')
   })
 
   it('sends a setting the Cold Storage dialog edits to that page, not to Settings', () => {

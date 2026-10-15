@@ -159,7 +159,8 @@ export const ENTITY_TABLE_BY_KIND = Object.fromEntries(
  */
 export const VALID_TABS = [
   'site-map', 'approvals', 'areas', 'cells', 'gateways', 'devices', 'audit-trail', 'schemas', 'metrics', 'vocabulary', 'directory',
-  'capture', 'archives', 'cold-storage', 'access-control', 'backups', 'settings'
+  'capture', 'archives', 'cold-storage', 'access-control', 'backups', 'settings',
+  'profile'
 ];
 
 // Realtime rollout flag and the polling intervals paired with it. REALTIME_ENABLED gates every

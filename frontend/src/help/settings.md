@@ -1,6 +1,10 @@
 ## What this page is for
 
-This page holds the settings an Administrator owns. They cover how long things are kept, thresholds, and switches for what Aber does on its own. Each setting is a stored value with a name, and every change is recorded in the Audit Trail as a row.
+This page holds the settings for the whole site. They apply to everyone on this site. They cover how long things are kept, thresholds, and switches for what Aber does on its own. Each setting is a stored value with a name, and every change is recorded in the Audit Trail as a row.
+
+Everyone can read this page. Only an Administrator can change a setting. For any other role the fields are greyed out, and Actions says **Only an Administrator can change this**.
+
+Your own choices, such as your theme and sidebar layout, are not here. They are on your **Profile** page. Open it from the account menu: select your avatar at the foot of the sidebar, then select **Profile**.
 
 ## What the controls do
 
@@ -8,7 +12,7 @@ This page holds the settings an Administrator owns. They cover how long things a
 - **Each tab is a table** with four columns. **Setting** holds the name, with its key beneath it. Click the key to copy it. **Description** says what the setting controls. **Value** holds the field. **Actions** holds Save and Discard.
 - **Read the description before you change a value.** Several settings sound alike and act very differently.
 - **The grey line under a description** says what applies if the setting has never been changed (**Falls back to**). Where that is a `values.yaml` path or a single identifier, it copies too.
-- **Save** and **Discard** appear in Actions only once you change the value. The database refuses a save if the value is out of bounds or your role may not change it, and the message says which.
+- **Save** and **Discard** appear in Actions only once an Administrator changes the value. The database refuses a save if the value is out of bounds or your role may not change it, and the message says which.
 - **Each setting carries its own bounds.** A retention window has a floor and a ceiling, and the field refuses a value outside them. The range is written beneath the field, for example **7 to 3650**. That way a typo is refused today, rather than causing a silent outage weeks later.
 - **Enabled / Disabled** switches turn scheduled jobs on and off. A change takes effect the next time the job runs, and does not undo anything already done.
 - **Cold Storage** here holds the archive threshold and the read-only site key. The archive destination, and the switch that turns archiving on, are set in one dialog on the Cold Storage page, so they are not listed here.

@@ -9,7 +9,8 @@ import { RouteLink } from './RouteLink'
 /**
  * The primary navigation: a 52px rail of icons with a labelled panel.
  *
- * Three behaviours, chosen from the control at the foot of the rail and persisted per browser:
+ * Three behaviours, chosen from the control at the foot of the rail and saved with the person's
+ * other preferences (useUserSettings.js):
  *
  *   hover      the panel paints OVER the page while the pointer is on the rail, and reflows nothing.
  *   expanded   the rail is 232px wide and the page makes room for it.
@@ -21,8 +22,11 @@ import { RouteLink } from './RouteLink'
  *
  * Each page is a link to `hrefFor(id)`, so Ctrl-click, middle-click and "Copy link address" work. A
  * plain click navigates in place, through `onNavigate(id)` when it is given.
+ *
+ * `account` is the account control App.jsx renders (its `UserMenu`), placed at the foot above the
+ * behaviour control.
  */
-export function Sidebar({ tabs, currentTab, onNavigate, hrefFor = id => `/${id}`, mode = 'hover', onChangeMode, signals = {} }) {
+export function Sidebar({ tabs, currentTab, onNavigate, hrefFor = id => `/${id}`, mode = 'hover', onChangeMode, signals = {}, account = null }) {
   const [hovered, setHovered] = useState(false)
   const [focused, setFocused] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -71,40 +75,48 @@ export function Sidebar({ tabs, currentTab, onNavigate, hrefFor = id => `/${id}`
           </div>
         ))}
 
-        {onChangeMode && (
-          <div className="sidebar-foot" ref={menuRef}>
-            <button
-              type="button"
-              className="sidebar-mode-button"
-              onClick={() => setMenuOpen(v => !v)}
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              aria-label={`Sidebar behaviour: ${current.label}`}
-              title={`Sidebar behaviour: ${current.label}`}
-            >
-              <span className="sidebar-item-icon"><IconPanelLeft size={16} /></span>
-              <span className="sidebar-item-label">{current.label}</span>
-            </button>
+        {/* Pinned to the bottom of the rail while the page list scrolls behind it (App.css). The
+            account control comes first, then the rail's own behaviour. */}
+        {(account || onChangeMode) && (
+          <div className="sidebar-foot">
+            {account}
 
-            {menuOpen && (
-              <div className="sidebar-mode-menu" role="menu" aria-label="Sidebar behaviour">
-                {SIDEBAR_MODES.map(m => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={m.id === mode}
-                    className={`sidebar-mode-option${m.id === mode ? ' active' : ''}`}
-                    onClick={() => { onChangeMode(m.id); setMenuOpen(false) }}
-                    title={m.description}
-                  >
-                    <span className="sidebar-mode-option-tick">{m.id === mode && <IconCheck size={12} />}</span>
-                    <span>
-                      <span className="sidebar-mode-option-label">{m.label}</span>
-                      <span className="sidebar-mode-option-desc">{m.description}</span>
-                    </span>
-                  </button>
-                ))}
+            {onChangeMode && (
+              <div className="sidebar-mode" ref={menuRef}>
+                <button
+                  type="button"
+                  className="sidebar-mode-button"
+                  onClick={() => setMenuOpen(v => !v)}
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen}
+                  aria-label={`Sidebar behaviour: ${current.label}`}
+                  title={`Sidebar behaviour: ${current.label}`}
+                >
+                  <span className="sidebar-item-icon"><IconPanelLeft size={16} /></span>
+                  <span className="sidebar-item-label">{current.label}</span>
+                </button>
+
+                {menuOpen && (
+                  <div className="sidebar-mode-menu" role="menu" aria-label="Sidebar behaviour">
+                    {SIDEBAR_MODES.map(m => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={m.id === mode}
+                        className={`sidebar-mode-option${m.id === mode ? ' active' : ''}`}
+                        onClick={() => { onChangeMode(m.id); setMenuOpen(false) }}
+                        title={m.description}
+                      >
+                        <span className="sidebar-mode-option-tick">{m.id === mode && <IconCheck size={12} />}</span>
+                        <span>
+                          <span className="sidebar-mode-option-label">{m.label}</span>
+                          <span className="sidebar-mode-option-desc">{m.description}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

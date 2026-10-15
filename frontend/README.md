@@ -228,11 +228,11 @@ tooltip, computed in `utils/people.js`, so the page and the database state the s
 by `PasswordShownOnce` and lives in its dialog's state until it closes, as a minted token does in
 `ServiceTokenModal`.
 
-**Change Password**, in the account menu (`App.jsx`'s `UserMenu`), opens `ChangePasswordModal`.
-`utils/passwords.js` checks the current password with a password grant it sends with `fetch`, not
-`supabase.auth.signInWithPassword()`, which would store the session it opens in place of the
-dashboard's. Then `supabase.auth.updateUser()` sets the new one. The item is disabled for a session
-with no email address, a machine identity, which has no password.
+**Change Password**, the Password row's action on Profile's Account tab, opens `ChangePasswordModal`.
+`utils/passwords.js` sends the current password with the new one in one
+`supabase.auth.updateUser()`, and GoTrue checks the current one before it sets anything
+(`docs/security-model.md`, *People*). The button is disabled for a session with no email address,
+a machine identity, which has no password.
 
 ### Why the cold-archive destination is one dialog
 
@@ -267,6 +267,36 @@ with `getUser()` before anything renders. The spinner stays up for that round tr
   gives up, so after `AUTH_CHECK_TIMEOUT_MS` (10 seconds) the page opens as it would for an
   unreachable server. It uses the session supabase-js last announced. A refusal that arrives later
   still signs the page out, with the same notice.
+
+### Profile, and the preferences that follow the person
+
+Two pages, two scopes, and each says which in its heading's note. **Profile**
+(`components/tabs/ProfileTab.jsx`, page id `profile`, tabs `account` and `appearance`) is the signed-in
+person's own: "Applies to you, on any browser". **Settings** is the site's: "Applies to everyone on
+this site". Profile's tabs reuse the Settings table (Setting, Description, Value, Actions), header
+row and all, so the two read alike.
+
+- **Profile is not in the page list.** Its `TABS` entry has no group, so `groupedNav()` leaves it
+  out of the rail; the router, the help drawer, the tab title and the search still know it. The way
+  in is the account menu, App.jsx's `UserMenu`, which `Sidebar` draws at the rail's pinned foot
+  above the behaviour control: Profile first, then the quick Theme toggle, Report Bug and Sign Out.
+- **Settings is every role's.** Every signed-in account may read a setting, so the page is in every
+  rail and the search offers its rows to everyone. `SettingsTab`'s `readOnly`, which `App.jsx`
+  passes for anyone but an Administrator, disables each field and puts "Only an Administrator can
+  change this" in Actions. RLS already withholds the rows marked `sensitive`; a row another page's
+  dialog edits is offered by the search only while that page is in the rail.
+- **Theme and sidebar layout are the person's `user_settings` row** (`supabase/README.md`,
+  `0188`), read and written by `hooks/useUserSettings.js`. `useTheme` and `useSidebarMode` keep the
+  browser's copy in localStorage (`aber_theme`, `aber_sidebar_mode`), so the page paints at once and
+  the sign-in screen shows the theme last used here; once the row loads it wins. A person with no
+  row is seeded from that copy (`utils/userSettings.js`, ON CONFLICT DO NOTHING, then a second
+  read). Each change goes to the copy at once and to the row behind it, and the menu's toggle, the
+  rail's control and Appearance all write through the one hook. A choice made before the row
+  arrives is not undone by it.
+- **Without the row the page works as it did before.** A failed read or write leaves `source` at
+  `browser`: Appearance says the choices are this browser's, and a change holds here only.
+- **There is no display name.** The account is named by its email address everywhere, the menu and
+  Profile included.
 
 ---
 

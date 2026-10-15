@@ -10,7 +10,8 @@ import { Sidebar } from '../components/common/Sidebar'
 import { RouteLink } from '../components/common/RouteLink'
 import { TABS, tabIsVisible } from '../navigation'
 
-const adminTabs = () => TABS.filter(t => tabIsVisible(t, () => true, 'Administrator'))
+// The rail's pages: Profile has no group, so it is reached from the account menu, not the rail.
+const adminTabs = () => TABS.filter(t => t.group && tabIsVisible(t, () => true, 'Administrator'))
 
 /** Fires a click and reports whether the page prevented the browser's own navigation. */
 const click = (element, init = {}) => {

@@ -119,6 +119,15 @@ describe('the scrollbar gutter', () => {
     expect(rule('.content')).toMatch(/scrollbar-gutter:\s*stable/)
   })
 
+  it('is styled by ::-webkit-scrollbar in Chrome: the standard properties are Firefox-only', () => {
+    // Chrome ignores ::-webkit-scrollbar on an element that sets scrollbar-width or scrollbar-color,
+    // and draws its own light bar, white against the dark theme.
+    const firefoxOnly = APP_CSS.match(/@supports not selector\(::-webkit-scrollbar\) \{[\s\S]*?\n\}/)
+    expect(firefoxOnly).not.toBeNull()
+    const elsewhere = APP_CSS.replace(firefoxOnly[0], '').replace(/\/\*[\s\S]*?\*\//g, '')
+    expect(elsewhere).not.toMatch(/scrollbar-(width|color)\s*:/)
+  })
+
   it('is only worth reserving because the scrollbar is narrow', () => {
     // A 6px track is a rounding error to give up permanently. If somebody widens the scrollbar to
     // a platform default of ~15px, `stable` stops being a free trade and wants re-deciding.

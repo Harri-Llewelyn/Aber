@@ -606,9 +606,9 @@ describe('the nav entry', () => {
 
   /** A single-role `role:` string must keep working -- every other gated tab still uses one. */
   it('still honours a single role given as a string', () => {
-    const settings = TABS.find(t => t.id === 'settings')
-    expect(tabIsVisible(settings, () => true, 'Administrator')).toBe(true)
-    expect(tabIsVisible(settings, () => true, 'Auditor')).toBe(false)
+    const backups = TABS.find(t => t.id === 'backups')
+    expect(tabIsVisible(backups, () => true, 'Administrator')).toBe(true)
+    expect(tabIsVisible(backups, () => true, 'Auditor')).toBe(false)
   })
 
   /** Under History rather than Assets: a capture is a recording of what a device already said. */

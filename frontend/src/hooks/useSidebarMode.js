@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 export const SIDEBAR_MODES = [
   { id: 'hover',     label: 'Expand on hover', description: 'Icons only; labels appear while the pointer is over the rail.' },
@@ -20,7 +20,10 @@ const readStored = () => {
   }
 }
 
-/** The rail's behaviour preference, persisted per browser the way the theme is. */
+/**
+ * The rail's behaviour. localStorage keeps this browser's copy, the theme's arrangement: signed in,
+ * the person's `user_settings` row is the source and this copy its cache (useUserSettings.js).
+ */
 export function useSidebarMode() {
   const [mode, setModeState] = useState(readStored)
 
@@ -28,6 +31,6 @@ export function useSidebarMode() {
     try { localStorage.setItem(SIDEBAR_MODE_KEY, mode) } catch { /* storage unavailable */ }
   }, [mode])
 
-  const setMode = (next) => { if (isMode(next)) setModeState(next) }
+  const setMode = useCallback((next) => { if (isMode(next)) setModeState(next) }, [])
   return { mode, setMode }
 }

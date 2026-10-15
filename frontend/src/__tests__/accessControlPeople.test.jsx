@@ -254,9 +254,10 @@ describe('setting a new password', () => {
     renderPeople()
     expect(within(await row('operator@site.test')).getByRole('button', { name: 'Set New Password' })).toBeEnabled()
     expect(within(await row('invited@site.test')).getByRole('button', { name: 'Set New Password' })).toBeEnabled()
-    const mine = within(await row('me@site.test')).getByRole('button', { name: 'Set New Password' })
-    expect(mine).toBeDisabled()
-    expect(mine).toHaveAttribute('title', expect.stringMatching(/Change Password in your account menu/))
+    // Your own row links to Profile, where your own password is changed, instead of a dead button.
+    const mine = within(await row('me@site.test'))
+    expect(mine.queryByRole('button', { name: 'Set New Password' })).toBeNull()
+    expect(mine.getByRole('link', { name: /Open Profile/ })).toHaveAttribute('href', '/profile')
     await showRemoved()
     const removed = within(await row('removed@site.test')).getByRole('button', { name: 'Set New Password' })
     expect(removed).toBeDisabled()

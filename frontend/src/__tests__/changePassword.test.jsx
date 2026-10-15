@@ -1,5 +1,5 @@
 /**
- * Change Password, for the signed-in person: the account-menu item, the dialog's rules, and the one
+ * Change Password, for the signed-in person: the Profile page's row, the dialog's rules, and the one
  * request that changes it. The current password travels with the new one in supabase-js's
  * updateUser(), so GoTrue checks both together; the dialog sends no password grant of its own, and
  * GoTrue's refusal codes come back as the dialog's sentences.
@@ -151,7 +151,7 @@ describe('the Change Password dialog', () => {
   })
 })
 
-describe('the account menu', () => {
+describe('the Profile page', () => {
   function signIn(user) {
     const session = { access_token: 'token', user }
     supabase.auth.getSession.mockResolvedValue({ data: { session } })
@@ -159,29 +159,37 @@ describe('the account menu', () => {
     supabase.auth.onAuthStateChange.mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } })
   }
 
-  async function openMenu() {
+  /** Profile, from the account menu at the foot of the rail, on its Account tab. */
+  async function openProfile() {
     render(<App />)
     fireEvent.click(await screen.findByRole('button', { name: /account menu/i }))
-    return screen.getByRole('menu')
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: /^profile$/i }))
+    const row = (await screen.findByText('Password')).closest('tr')
+    return within(row).getByRole('button', { name: /change password/i })
   }
 
-  it('opens Change Password for a person', async () => {
+  it('is not in the account menu any more', async () => {
     window.history.pushState({}, '', '/')
     signIn({ id: 'user-operator', email: EMAIL, app_metadata: { role: 'Operator' } })
-    const menu = await openMenu()
-    const item = within(menu).getByRole('menuitem', { name: /change password/i })
-    expect(item).toBeEnabled()
-    fireEvent.click(item)
-    expect(screen.queryByRole('menu')).toBeNull()
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: /account menu/i }))
+    expect(within(screen.getByRole('menu')).queryByRole('menuitem', { name: /change password/i })).toBeNull()
+  })
+
+  it('opens Change Password for a person, from the Password row', async () => {
+    window.history.pushState({}, '', '/')
+    signIn({ id: 'user-operator', email: EMAIL, app_metadata: { role: 'Operator' } })
+    const button = await openProfile()
+    expect(button).toBeEnabled()
+    fireEvent.click(button)
     expect(await screen.findByRole('dialog')).toHaveTextContent('Change your password')
   })
 
   it('is disabled for a machine identity, which has no password, saying why', async () => {
     window.history.pushState({}, '', '/')
     signIn({ id: 'machine-1', email: null, app_metadata: {} })
-    const menu = await openMenu()
-    const item = within(menu).getByRole('menuitem', { name: /change password/i })
-    expect(item).toBeDisabled()
-    expect(item).toHaveAttribute('title', expect.stringMatching(/no password/))
+    const button = await openProfile()
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('title', expect.stringMatching(/no password/))
   })
 })

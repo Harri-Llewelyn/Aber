@@ -10,12 +10,20 @@ import { CARDS, PAGE_KEYWORDS } from '../searchIndex'
 
 describe('the groups', () => {
 
-  it('files every page in a group that exists', () => {
+  it('files every page in a group that exists, except Profile', () => {
     const known = new Set(NAV_GROUPS.map(g => g.id))
-    for (const tab of TABS) {
+    for (const tab of TABS.filter(t => t.id !== 'profile')) {
       expect(tab.group, `${tab.id} declares no group`).toBeTruthy()
       expect(known, `${tab.id} is in an undeclared group "${tab.group}"`).toContain(tab.group)
     }
+  })
+
+  /** Profile is reached from the account menu at the rail's foot, so the page list never draws it. */
+  it('leaves Profile out of the rail, ungated', () => {
+    const profile = TABS.find(t => t.id === 'profile')
+    expect(profile.group).toBeUndefined()
+    expect(tabIsVisible(profile, () => false, 'Operator')).toBe(true)
+    expect(groupedNav(TABS).flatMap(g => g.tabs.map(t => t.id))).not.toContain('profile')
   })
 
   it('uses every group it declares', () => {
@@ -83,10 +91,11 @@ describe('groupedNav', () => {
     expect(ids).toEqual(NAV_GROUPS.map(g => g.id))
   })
 
-  it('shows an Administrator every page exactly once', () => {
+  it('shows an Administrator every rail page exactly once', () => {
+    const rail = TABS.filter(t => t.group)
     const flat = groupedNav(admin()).flatMap(g => g.tabs.map(t => t.id))
-    expect(flat).toHaveLength(TABS.length)
-    expect(new Set(flat).size).toBe(TABS.length)
+    expect(flat).toHaveLength(rail.length)
+    expect(new Set(flat).size).toBe(rail.length)
   })
 
   /**
@@ -104,13 +113,13 @@ describe('groupedNav', () => {
   })
 
   /**
-   * The other half of the same move: a group with one visible page still renders. Directory tells
-   * anyone where Grafana and Node-RED are, so filing it with the two Administrator pages must not
-   * gate it by association.
+   * The other half of the same move: a group with some visible pages still renders. Directory tells
+   * anyone where Grafana and Node-RED are, and Settings is readable by every role, so filing them
+   * with Access Control must not gate them by association.
    */
-  it('keeps a group alive for its one ungated page', () => {
+  it('keeps a group alive for its ungated pages', () => {
     const admin = groupedNav(operator()).find(g => g.id === 'admin')
-    expect(admin?.tabs.map(t => t.id)).toEqual(['directory'])
+    expect(admin?.tabs.map(t => t.id)).toEqual(['directory', 'settings'])
   })
 
   it('returns nothing at all rather than a row of empty headings', () => {

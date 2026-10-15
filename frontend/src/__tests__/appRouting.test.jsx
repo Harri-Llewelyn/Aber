@@ -40,13 +40,13 @@ describe('the nav and the router agree', () => {
   })
 
   it('hides a role-gated tab from the wrong role and shows it to the right one', () => {
-    const settings = TABS.find(t => t.id === 'settings')
+    const accessControl = TABS.find(t => t.id === 'access-control')
     const never = () => false
-    expect(tabIsVisible(settings, never, 'Administrator')).toBe(true)
-    expect(tabIsVisible(settings, never, 'Operator')).toBe(false)
+    expect(tabIsVisible(accessControl, never, 'Administrator')).toBe(true)
+    expect(tabIsVisible(accessControl, never, 'Operator')).toBe(false)
     // Null while the permission fetch is in flight. The nav hiding it briefly is harmless; what
     // must NOT happen is App redirecting on this, which is why that effect waits for loadingPerms.
-    expect(tabIsVisible(settings, never, null)).toBe(false)
+    expect(tabIsVisible(accessControl, never, null)).toBe(false)
   })
 
   it('leaves an ungated tab visible to everyone', () => {
@@ -67,13 +67,16 @@ describe('the nav and the router agree', () => {
     expect(tabIsVisible(archives, () => false, 'Operator')).toBe(false)
   })
 
-  it('gates the Settings tab on the Administrator role rather than a permission', () => {
-    /* The settings UPDATE policy is `has_role(ARRAY['Administrator'])`, so gating the UI on a
-       permission uuid would put two predicates on the same question. */
+  it('shows the Settings tab to every role, since every role may read a setting', () => {
+    /* The SELECT policy admits every signed-in account to the rows not marked `sensitive`; the
+       UPDATE policy is the Administrator gate, and the page is read-only for anyone else. */
     const settings = TABS.find(t => t.id === 'settings')
     expect(settings).toBeTruthy()
-    expect(settings.role).toBe('Administrator')
+    expect(settings.role).toBeUndefined()
     expect(settings.permission).toBeUndefined()
+    for (const role of ['Administrator', 'Shopfloor_Manager', 'Operator', 'Auditor']) {
+      expect(tabIsVisible(settings, () => false, role), role).toBe(true)
+    }
   })
 })
 

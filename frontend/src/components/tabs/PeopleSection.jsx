@@ -6,12 +6,14 @@ import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { IconArchive, IconPlus, IconShieldAlert, IconUser } from '../common/Icons'
 import { LoadingState } from '../common/LoadingState'
+import { RouteLink } from '../common/RouteLink'
 import { SearchInput } from '../common/SearchInput'
 import { useUrlState } from '../../hooks/useUrlState'
 import { AddPersonModal } from '../modals/AddPersonModal'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { NewPasswordModal } from '../modals/NewPasswordModal'
 import { formatDateTime } from '../../utils/format'
+import { tabUrl } from '../../routes'
 import {
   NO_ROLE,
   PERSON_ROLES,
@@ -254,15 +256,23 @@ export function PeopleSection({ showToast, currentUserId }) {
                     </td>
                     <td className="cell-meta">{p.last_sign_in_at ? formatDateTime(p.last_sign_in_at) : 'Never'}</td>
                     <td className="row-actions">
-                      <ActionButton
-                        className="btn btn-ghost btn-sm"
-                        permitted={!passwordBlocked}
-                        deniedTitle={passwordBlocked}
-                        onClick={() => setConfirming({ act: 'password', person: p })}
-                        title="Make them a new password, shown to you once. Their current one stops working."
-                      >
-                        Set New Password
-                      </ActionButton>
+                      {/* Your own password is changed on Profile, so your row links there instead. */}
+                      {isSelf ? (
+                        <RouteLink to={tabUrl('profile')} className="btn btn-ghost btn-sm"
+                          title="Your own password, theme and sidebar layout are on your Profile page">
+                          <IconUser size={13} /> Open Profile
+                        </RouteLink>
+                      ) : (
+                        <ActionButton
+                          className="btn btn-ghost btn-sm"
+                          permitted={!passwordBlocked}
+                          deniedTitle={passwordBlocked}
+                          onClick={() => setConfirming({ act: 'password', person: p })}
+                          title="Make them a new password, shown to you once. Their current one stops working."
+                        >
+                          Set New Password
+                        </ActionButton>
+                      )}
                       {removed && (
                         <ActionButton
                           className="btn btn-ghost btn-sm"

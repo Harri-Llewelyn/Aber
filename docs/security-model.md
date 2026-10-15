@@ -172,7 +172,7 @@ people's accounts in GoTrue, and it is narrow by construction.
   writes `PASSWORD_SET` (email and method, no password). If that record fails, the answer is a 500
   that withholds the password: it was changed, nobody has seen it, and setting it again records it.
   So no password anyone holds was set without a row in the trail.
-- **A person's own password.** Change Password, in the account menu, sends the current password
+- **A person's own password.** Change Password, on the Profile page, sends the current password
   with the new one in a single `PUT /auth/v1/user`, and GoTrue checks the current one before it
   sets anything. The chart always sets `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD`,
   so a request without it is refused (400 `current_password_required`, or
@@ -187,6 +187,14 @@ people's accounts in GoTrue, and it is narrow by construction.
   `user_updated_password` in its own audit log (`auth.audit_log_entries`).
 - **Machine identities are never people.** `list_people()` leaves them out, every function refuses
   them, and `refuse_role_for_machine_principal()` still refuses a role at the table.
+- **A person's own preferences are theirs alone.** `user_settings` (`0188`) holds each person's
+  theme and sidebar layout. RLS admits the row's own person and nobody else, an Administrator
+  included; `anon` and `service_role` hold nothing on it, and deleting the account deletes the row.
+  It is not audited: a display choice is not platform state.
+- **Every role reads the site's settings.** The Settings page is shown to every signed-in account,
+  read-only for anyone but an Administrator, because `system_settings_select_authenticated` already
+  admits them; the rows marked `sensitive` stay Administrator-only. Changing a setting is
+  `system_settings_update_admin`'s, which names Administrator alone.
 
 What a removal does not reach at once is an [accepted risk](#a-removed-person-keeps-what-a-session-already-holds),
 and so is what a new password does not reach ([below it](#a-new-password-does-not-end-a-session-at-once)).

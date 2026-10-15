@@ -548,7 +548,7 @@ try {
     // The dashboard's own Sign Out, which also fetches the Studio and forge doors' sign-out. It ends
     // every session of the walk's account, and nobody else's.
     current = '(sign-out)'
-    await evaluate("document.querySelector('.user-avatar').click()")
+    await evaluate("document.querySelector('.user-menu-button').click()")
     await until("!!document.querySelector('.user-popover-action-danger')", 5000)
     await evaluate("document.querySelector('.user-popover-action-danger').click()")
     if (!await until(SIGN_IN_FORM, 15000)) problems.push('(sign-out): the sign-in form did not come back')

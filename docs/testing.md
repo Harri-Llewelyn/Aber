@@ -365,6 +365,11 @@ python supabase/migrations/test_directory_images.py
 # gate refuses a version, link or `newer` the account menu could not show, and only
 # Service_ReleaseCheck may call it; its key reaches nothing else.
 python supabase/migrations/test_release_check.py
+# A person's own preferences (0188). Each person reads, creates and changes their own
+# user_settings row and nobody else's, an Administrator included; anon and service_role hold
+# nothing; the CHECKs refuse an unknown theme or sidebar mode; the first sign-in's seed never
+# overwrites a row; and deleting the account deletes the row, with nothing in the Audit Trail.
+python supabase/migrations/test_user_settings.py
 # The Backup Stale rule's clock (0144). No row while no backup job exists; the first job recorded
 # until one succeeds, then the start of the last success, which a later failure does not move; and
 # anon and authenticated cannot read a view that runs past backup_jobs' Administrator-only RLS.
