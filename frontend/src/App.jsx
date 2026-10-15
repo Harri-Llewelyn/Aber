@@ -18,7 +18,7 @@ import { ResetPasswordScreen } from './pages/ResetPassword'
 import { describeResetError } from './utils/authErrors'
 import { useClickOutside } from './hooks/useClickOutside'
 import { useEscapeKey } from './hooks/useEscapeKey'
-import { useSidebarMode } from './hooks/useSidebarMode'
+import { useUserSettings } from './hooks/useUserSettings'
 import { useDocumentTitle } from './hooks/useDocumentTitle'
 import { useAlertFavicon } from './hooks/useAlertFavicon'
 import { Sidebar } from './components/common/Sidebar'
@@ -47,7 +47,6 @@ import {
   IconRefreshCw,
   IconAlertCircle,
   IconDownload,
-  IconLock,
   IconLogOut
 } from './components/common/Icons'
 
@@ -88,6 +87,7 @@ const SettingsTab      = lazy(() => import('./components/tabs/SettingsTab').then
 const AccessControlTab = lazy(() => import('./components/tabs/AccessControlTab').then(m => ({ default: m.AccessControlTab })))
 const BackupsTab       = lazy(() => import('./components/tabs/BackupsTab').then(m => ({ default: m.BackupsTab })))
 const ApprovalsTab     = lazy(() => import('./components/tabs/ApprovalsTab').then(m => ({ default: m.ApprovalsTab })))
+const ProfileTab       = lazy(() => import('./components/tabs/ProfileTab').then(m => ({ default: m.ProfileTab })))
 
 function AuthScreen({ onLoginSuccess, notice }) {
   // Its own theme handle: this renders instead of Dashboard, never beside it.
@@ -269,12 +269,12 @@ function AuthScreen({ onLoginSuccess, notice }) {
 }
 
 /**
- * The account control: a round icon button whose head states the address, role and version, and
- * whose rows hold the session-level preferences and escape hatches (theme, Change Password, Report
- * Bug, Sign Out). Click, not hover: a hover menu holding Sign Out puts an irreversible action one
- * stray movement away. `passwordBlocked` is why Change Password is disabled, or null.
+ * The account control at the foot of the rail: the avatar, with the address beside it whenever the
+ * rail shows labels. Its menu's head states the address, role and version; its rows are Profile, the
+ * quick theme toggle, Report Bug and Sign Out. Click, not hover: a hover menu holding Sign Out puts
+ * an irreversible action one stray movement away. The menu opens beside the rail (App.css).
  */
-function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReportBug, onChangePassword, passwordBlocked = null }) {
+function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReportBug, onOpenProfile, profileOpen = false }) {
   const [open, setOpen] = useState(false)
   const wrapRef = useClickOutside(() => setOpen(false), open)
   useEscapeKey(() => setOpen(false), open)
@@ -303,16 +303,19 @@ function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReport
 
   return (
     <div className="user-menu" ref={wrapRef}>
-      {/* No visible text, so the accessible name comes from `title`, which leads with the address
-          and the role. */}
+      {/* The address is a rail label, transparent while the rail is collapsed, so the accessible
+          name is stated rather than read from it: it leads with the address and the role. */}
       <button
-        className={`user-avatar${open ? ' user-avatar-open' : ''}`}
+        type="button"
+        className={`user-menu-button${open ? ' user-menu-button-open' : ''}${profileOpen ? ' active' : ''}`}
         onClick={() => setOpen(v => !v)}
         aria-expanded={open}
         aria-haspopup="menu"
+        aria-label={`Signed in as ${persona} (${userRole}) — open account menu`}
         title={`Signed in as ${persona} (${userRole}) — open account menu`}
       >
-        <IconUser size={14} />
+        <span className="user-avatar" aria-hidden="true"><IconUser size={14} /></span>
+        <span className="sidebar-item-label user-menu-email">{persona}</span>
       </button>
 
       {open && (
@@ -356,7 +359,18 @@ function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReport
             )}
           </div>
 
-          {/* The label states the current theme; the icon shows the destination. */}
+          {/* First: the whole of the person's own page, two clicks from anywhere. */}
+          <button
+            className="user-popover-action"
+            role="menuitem"
+            onClick={() => { setOpen(false); onOpenProfile() }}
+            title="Your account, password, theme and sidebar layout"
+          >
+            <IconUser size={14} /> <span>Profile</span>
+          </button>
+
+          {/* The label states the current theme; the icon shows the destination. The same setting
+              as Profile > Appearance. */}
           <button
             className="user-popover-action"
             role="menuitem"
@@ -370,16 +384,6 @@ function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReport
 
           {/* The menu stays open on the theme toggle, whose result is visible behind it, and closes
               on the others. */}
-          <button
-            className="user-popover-action"
-            role="menuitem"
-            disabled={!!passwordBlocked}
-            onClick={() => { setOpen(false); onChangePassword() }}
-            title={passwordBlocked || 'Change the password you sign in with'}
-          >
-            <IconLock size={14} /> <span>Change Password</span>
-          </button>
-
           <button
             className="user-popover-action"
             role="menuitem"
@@ -495,9 +499,10 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
     if (proposal.entity_type.startsWith('gateway')) return showGateway(proposal.entity_id)
     return showDevice(proposal.entity_id)
   }
-  const { theme, toggleTheme } = useTheme()
+  // One source for both: the person's user_settings row, cached in this browser. The account menu's
+  // toggle, the rail's foot control and the Profile page all write through it.
+  const { theme, setTheme, toggleTheme, sidebarMode, setSidebarMode, source: settingsSource } = useUserSettings(session?.user?.id)
   const { toasts, showToast, expireToast, dismissToast, history, markAllRead, clearHistory } = useToast()
-  const { mode: sidebarMode, setMode: setSidebarMode } = useSidebarMode()
 
   const { userRole, hasPermission, loadingPerms } = usePermissions(session)
 
@@ -561,6 +566,20 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
     ? null
     : 'Machine identities have no password to change. They use tokens instead.'
 
+  // Drawn at the foot of the rail. `handleNavClick`, so Profile opens on its first tab.
+  const accountMenu = (
+    <UserMenu
+      persona={persona}
+      userRole={userRole}
+      onSignOut={onSignOut}
+      theme={theme}
+      onToggleTheme={toggleTheme}
+      onReportBug={() => setShowBugReport(true)}
+      onOpenProfile={() => handleNavClick('profile')}
+      profileOpen={tab === 'profile'}
+    />
+  )
+
   // Computed once and used twice: the rail draws it and the search palette indexes it. Filtering
   // in both places would let the search offer a page the rail does not.
   const navTabs = TABS.filter(t => tabIsVisible(t, hasPermission, userRole))
@@ -609,8 +628,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
         />
 
         {/* The right-hand side holds the two controls whose values move, the alert pill and the
-            notification bell, plus the doors to everything else. Standing preferences live in the
-            account menu. */}
+            notification bell, plus the two signposts. The account menu is at the rail's foot. */}
         <div className="topbar-right">
           {/* A device alert goes to Devices and a gateway alert to Gateways, chosen by the alert's
               declared scope rather than its id prefix, through the same helpers every other surface
@@ -627,8 +645,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
               is a reason to act, and this list holds resolved and routine messages too. */}
           <NotificationHistory entries={history} onMarkRead={markAllRead} onClear={clearHistory} />
 
-          {/* A discovery aid rather than a preference, so it stays in the bar, ahead of the avatar,
-              which must stay the last thing in it. */}
+          {/* A discovery aid rather than a preference, so it stays in the bar. */}
           <button
             className="topbar-icon-button"
             onClick={() => setShowShortcuts(true)}
@@ -638,9 +655,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
             <IconKeyboard size={15} />
           </button>
 
-          {/* The help control sits between the shortcuts key and the account button.
-              `aria-expanded` because it toggles a drawer that stays open, unlike the shortcuts
-              dialog. */}
+          {/* The help control is the bar's last. `aria-expanded` because it toggles a drawer that
+              stays open, unlike the shortcuts dialog. */}
           <button
             className={`topbar-icon-button${showHelp ? ' topbar-icon-button-active' : ''}`}
             onClick={() => setShowHelp((v) => !v)}
@@ -650,17 +666,6 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
           >
             <IconHelp size={15} />
           </button>
-
-          <UserMenu
-            persona={persona}
-            userRole={userRole}
-            onSignOut={onSignOut}
-            theme={theme}
-            onToggleTheme={toggleTheme}
-            onReportBug={() => setShowBugReport(true)}
-            onChangePassword={() => setShowChangePassword(true)}
-            passwordBlocked={passwordBlocked}
-          />
         </div>
 
         {/* Rendered only while busy, so there is no inert element to mistake for a stalled bar.
@@ -683,7 +688,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
           expanded mode the row reflows. See Sidebar.jsx. */}
       <div className="app-body">
         {/* Devices' signal is the quarantine queue, so while it shows, the item opens that tab. */}
-        <Sidebar tabs={navTabs} currentTab={tab} onNavigate={id => (id === 'devices' && navSignals.devices ? showSection('devices', 'quarantine') : handleNavClick(id))} mode={sidebarMode} onChangeMode={setSidebarMode} signals={navSignals} />
+        <Sidebar tabs={navTabs} currentTab={tab} onNavigate={id => (id === 'devices' && navSignals.devices ? showSection('devices', 'quarantine') : handleNavClick(id))} mode={sidebarMode} onChangeMode={setSidebarMode} signals={navSignals} account={accountMenu} />
 
         {/* A page's drawer closes help through this on a narrow screen (ContextPanel.jsx). The help
             drawer itself sits outside it. */}
@@ -734,7 +739,24 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
                 the nav never offered. Still a courtesy -- RLS is what refuses the write. */}
             {tab === 'access-control' && userRole === 'Administrator' && <AccessControlTab showToast={showToast} initialSection={selectedSection} onClearSection={() => setSelectedSection('')} userRole={userRole} currentUserId={session?.user?.id} />}
             {tab === 'backups' && userRole === 'Administrator' && <BackupsTab showToast={showToast} />}
-            {tab === 'settings' && userRole === 'Administrator' && <SettingsTab showToast={showToast} initialSetting={selectedSettingKey} onClearSetting={() => setSelectedSettingKey('')} />}
+            {tab === 'settings' && !loadingPerms && <SettingsTab showToast={showToast} initialSetting={selectedSettingKey} onClearSetting={() => setSelectedSettingKey('')} readOnly={userRole !== 'Administrator'} />}
+            {/* Every person's own page. Appearance writes through useUserSettings, as the account
+                menu's toggle and the rail's foot control do. */}
+            {tab === 'profile' && (
+              <ProfileTab
+                email={session?.user?.email}
+                userRole={loadingPerms ? undefined : userRole}
+                passwordBlocked={passwordBlocked}
+                onChangePassword={() => setShowChangePassword(true)}
+                theme={theme}
+                onChangeTheme={setTheme}
+                sidebarMode={sidebarMode}
+                onChangeSidebarMode={setSidebarMode}
+                settingsSource={settingsSource}
+                initialSection={selectedSection}
+                onClearSection={() => setSelectedSection('')}
+              />
+            )}
           </Suspense>
         </main>
         </HelpDrawerContext.Provider>

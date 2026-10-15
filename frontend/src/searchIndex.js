@@ -44,7 +44,9 @@ export const PAGE_KEYWORDS = {
   'cold-storage':   ['parquet', 'tiered', 'object storage', 'minio', 'telemetry archive', 's3'],
   'access-control': ['users', 'roles', 'permissions', 'principals', 'credentials', 'rbac', 'identities'],
   'backups':        ['backup', 'dump', 'pg_dump', 'restore', 'snapshot', 'retention', 'disaster recovery'],
-  'settings':       ['configuration', 'config', 'retention', 'preferences', 'tuning']
+  'settings':       ['configuration', 'config', 'retention', 'tuning', 'site settings'],
+  // The person's own page: what somebody types looking for their own choices.
+  'profile':        ['account', 'my account', 'preferences', 'me', 'my settings', 'user']
 }
 
 /**
@@ -87,7 +89,10 @@ export const CARDS = [
   { id: 'machine-identities',   label: 'Machine identities',   tab: 'access-control', section: 'identities', keywords: ['machine accounts', 'non-human', 'service accounts', 'principals', 'tokens', 'withdraw', 'cannot sign in'] },
   { id: 'broker-accounts',      label: 'Broker accounts',      tab: 'access-control', section: 'accounts', keywords: ['mqtt users', 'platform accounts', 'orphaned accounts', 'no gateway'] },
   { id: 'broker-roles',         label: 'Broker roles',         tab: 'access-control', section: 'roles', keywords: ['dynamic security', 'mosquitto roles', 'topic access'] },
-  { id: 'backup-list',          label: 'Backups',              tab: 'backups',        keywords: ['take a backup', 'stored backups', 'pinned', 'release'] }
+  { id: 'backup-list',          label: 'Backups',              tab: 'backups',        keywords: ['take a backup', 'stored backups', 'pinned', 'release'] },
+
+  { id: 'profile-account',      label: 'Account',              tab: 'profile',        section: 'account', keywords: ['email', 'role', 'password', 'change password', 'my role'] },
+  { id: 'profile-appearance',   label: 'Appearance',           tab: 'profile',        section: 'appearance', keywords: ['theme', 'dark mode', 'light mode', 'dark', 'light', 'sidebar layout', 'collapse sidebar', 'expand sidebar'] }
 ]
 
 /**
@@ -97,9 +102,9 @@ export const CARDS = [
  *
  * `settings` are rows, not a listed constant -- a migration adds one and nothing here would know --
  * but they are a closed set of a dozen short labels, so they are matched here alongside the pages
- * rather than probed per keystroke like the estate. The caller passes them only when the Settings
- * page is this session's to open: `system_settings` is readable by every authenticated session
- * while the page is an Administrator's, so RLS is not the gate here that it is for an asset.
+ * rather than probed per keystroke like the estate. RLS decides which rows arrive (a `sensitive`
+ * one reaches Administrators only), and a row is offered only while the page that shows it is in
+ * the rail: Settings for most, the page whose dialog edits it for the rest.
  */
 export function buildTargets(visibleTabs, settings = []) {
   const pages = visibleTabs.map(t => ({
@@ -129,8 +134,10 @@ export function buildTargets(visibleTabs, settings = []) {
   /* The key is a keyword rather than the label, so `site.name` finds the row somebody read in a
      log or a migration as surely as "Site name" does. The category is what the row says beneath
      its label, because it is the tab the page will open on. */
+  // A row a page's own dialog edits is offered only while that page is in the rail.
+  const offered = (s) => s && s.key && (!EDITED_ON.has(s.key) || reachable.has(EDITED_ON.get(s.key).tabId))
   const settingRows = reachable.has('settings')
-    ? settings.filter(s => s && s.key).map(s => (EDITED_ON.has(s.key)
+    ? settings.filter(offered).map(s => (EDITED_ON.has(s.key)
       // Edited in a page's destination dialog, not on Settings, so it opens that page.
       ? { kind: 'card', key: `setting:${s.key}`, label: s.label || s.key, ...EDITED_ON.get(s.key),
           keywords: [s.key, s.category].filter(Boolean) }

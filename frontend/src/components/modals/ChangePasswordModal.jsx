@@ -6,7 +6,7 @@ import { IconLock } from '../common/Icons'
 import { MIN_PASSWORD_LENGTH, changeOwnPassword, newPasswordProblem } from '../../utils/passwords'
 
 /**
- * Change Password, from the account menu: the signed-in person's current password, then the new
+ * Change Password, from the Profile page: the signed-in person's current password, then the new
  * one twice. GoTrue checks the current one in the same request that sets the new one
  * (utils/passwords.js). No audit row is written here: GoTrue's own audit log records the change.
  */

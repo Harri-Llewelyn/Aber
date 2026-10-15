@@ -10,7 +10,8 @@ import { TABS, tabIsVisible } from '../navigation'
 
 const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8').replace(/\r\n/g, '\n')
 
-const adminTabs = () => TABS.filter(t => tabIsVisible(t, () => true, 'Administrator'))
+// The rail's pages. Profile has no group: the account menu at the rail's foot is its way in.
+const adminTabs = () => TABS.filter(t => t.group && tabIsVisible(t, () => true, 'Administrator'))
 const rail = () => document.querySelector('.sidebar')
 const isExpanded = () => rail().classList.contains('sidebar-expanded')
 
@@ -122,10 +123,12 @@ describe('the stylesheet', () => {
     expect(panel).toMatch(/box-shadow:\s*none/)
   })
 
-  it('gives the account avatar the same ground as the other bar controls', () => {
+  it('gives the account control the same ground as the behaviour control beside it', () => {
     const avatar = APP_CSS.match(/\n\.user-avatar \{([\s\S]*?)\n\}/)[1]
-    const iconButton = APP_CSS.match(/\n\.topbar-icon-button \{([\s\S]*?)\n\}/)[1]
+    const account = APP_CSS.match(/\n\.user-menu-button \{([\s\S]*?)\n\}/)[1]
+    const behaviour = APP_CSS.match(/\n\.sidebar-mode-button \{([\s\S]*?)\n\}/)[1]
     expect(avatar).toMatch(/background:\s*none/)
-    expect(iconButton).toMatch(/background:\s*none/)
+    expect(account).toMatch(/background:\s*none/)
+    expect(behaviour).toMatch(/background:\s*none/)
   })
 })

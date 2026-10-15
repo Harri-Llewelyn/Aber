@@ -16,8 +16,9 @@ const EDITED_ELSEWHERE = new Set([...COLD_STORAGE_DIALOG_KEYS, ...BACKUP_OFFSITE
 /**
  * The runtime configuration plane as a page. It cannot add or delete a setting: the key set is
  * closed in the database, where RLS grants UPDATE and nothing else, and a row exists because some
- * code reads it. The role gate on the tab is a courtesy; RLS refuses the write, which is why
- * `api.patchSetting` treats zero rows affected as an error.
+ * code reads it. Every role reads it, as RLS allows; rows marked `sensitive` reach Administrators
+ * only. `readOnly`, for anyone but an Administrator, is a courtesy: RLS refuses the write, which is
+ * why `api.patchSetting` treats zero rows affected as an error.
  */
 
 /**
@@ -77,7 +78,7 @@ export function fallbackCopy(text) {
   return null
 }
 
-function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
+function SettingRow({ setting, onSaved, showToast, highlighted = false, readOnly = false }) {
   const [draft, setDraft] = useState(() => displayValue(setting.value, setting.value_type))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -189,6 +190,7 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
             className="form-control"
             value={draft === 'true' ? 'true' : 'false'}
             onChange={e => setDraft(e.target.value)}
+            disabled={readOnly}
           >
             <option value="true">Enabled</option>
             <option value="false">Disabled</option>
@@ -200,6 +202,7 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
             rows={4}
             value={draft}
             onChange={e => setDraft(e.target.value)}
+            disabled={readOnly}
           />
         ) : (
           <input
@@ -208,6 +211,7 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
             type={setting.value_type === 'number' ? 'number' : 'text'}
             value={draft}
             onChange={e => setDraft(e.target.value)}
+            disabled={readOnly}
             aria-describedby={range ? rangeId : undefined}
             {...(hasMin ? { min: setting.min_value } : {})}
             {...(hasMax ? { max: setting.max_value } : {})}
@@ -222,6 +226,8 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
       <td className="setting-cell setting-cell-actions">
         {setting.read_only ? (
           <span className="setting-fixed">Fixed at install</span>
+        ) : readOnly ? (
+          <span className="setting-fixed">Only an Administrator can change this</span>
         ) : dirty && (
           /* SHOWN ONLY WHEN THERE IS A CHANGE TO SAVE. A permanently enabled Save invites the
              click that does nothing, then a toast saying it worked. */
@@ -239,7 +245,7 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
   )
 }
 
-export function SettingsTab({ showToast, initialSetting = '', onClearSetting }) {
+export function SettingsTab({ showToast, initialSetting = '', onClearSetting, readOnly = false }) {
   const [settings, setSettings] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
@@ -289,6 +295,7 @@ export function SettingsTab({ showToast, initialSetting = '', onClearSetting }) 
             icon={<IconSettings size={15} />}
             title="Settings"
             description="Values that take effect without a restart and override the environment defaults they name; the list is fixed, not added to by hand."
+            note="Applies to everyone on this site."
           />
 
           {loadError && (
@@ -318,7 +325,9 @@ export function SettingsTab({ showToast, initialSetting = '', onClearSetting }) 
               help={(
                 <HelpTip
                   label={`About ${activeCategory} settings`}
-                  text="A change takes effect without a restart. Edit a value and Save, or Discard to go back. The grey line under a description names the default it overrides."
+                  text={readOnly
+                    ? 'Only an Administrator can change these. A change takes effect without a restart. The grey line under a description names the default it overrides.'
+                    : 'A change takes effect without a restart. Edit a value and Save, or Discard to go back. The grey line under a description names the default it overrides.'}
                 />
               )}
             />
@@ -336,7 +345,7 @@ export function SettingsTab({ showToast, initialSetting = '', onClearSetting }) 
                   </thead>
                   <tbody>
                     {activeGroup.settings.map(s => (
-                      <SettingRow key={s.key} setting={s} onSaved={() => load(false)} showToast={showToast} highlighted={s.key === foundKey} />
+                      <SettingRow key={s.key} setting={s} onSaved={() => load(false)} showToast={showToast} highlighted={s.key === foundKey} readOnly={readOnly} />
                     ))}
                   </tbody>
                 </table>

@@ -6,7 +6,8 @@ import { Sidebar } from '../components/common/Sidebar'
 import { ShortcutsModal, shortcutGroups } from '../components/modals/ShortcutsModal'
 import { TABS, tabIsVisible } from '../navigation'
 
-const adminTabs = () => TABS.filter(t => tabIsVisible(t, () => true, 'Administrator'))
+// The rail's pages. Profile has no group: the account menu at the rail's foot is its way in.
+const adminTabs = () => TABS.filter(t => t.group && tabIsVisible(t, () => true, 'Administrator'))
 
 const rail = () => document.querySelector('.sidebar')
 const isExpanded = () => rail().classList.contains('sidebar-expanded')

@@ -1323,6 +1323,7 @@ Every table has `ENABLE ROW LEVEL SECURITY`. The pattern is uniform and fail-clo
 | `user_roles` | own row, or `Administrator` / `Shopfloor_Manager` | none — `set_person_role()` and the People functions (`0166`) |
 | `access_removals` | nobody — `list_people()` reads it for an `Administrator` | none — `remove_person_access()` and `restore_person_access()` (`0166`) |
 | `principal_permissions` | own row, or `Administrator` | none — `create_machine_principal()` is the only write path |
+| `user_settings` | own row only, `Administrator` included (`0188`) | own row: `INSERT`, `UPDATE`; no `DELETE` — the row goes with the account |
 | `machine_principals` | `Administrator`, `Auditor` | none — `create_machine_principal()` writes it with the identity (`0125`); `describe_machine_principal()` (`0126`) is the only path after |
 | `webhook_endpoints` | `Administrator` | **no write policy** |
 
@@ -1646,7 +1647,7 @@ has two other ways in.
   withholds the password, so a password nobody has seen is the only unrecorded one there can be.
   GoTrue deletes the person's sessions when an administrator sets their password; an access token
   already issued lasts until it expires.
-- **Change Password**, in the account menu, is a person changing their own. The dashboard sends the
+- **Change Password**, on the Profile page, is a person changing their own. The dashboard sends the
   current password with the new one in a single `PUT /auth/v1/user`, and GoTrue checks it
   (`GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_CURRENT_PASSWORD`, always on), so an access token alone
   cannot change a password. A recovery link's session and an invited account with no password yet
@@ -5367,6 +5368,45 @@ subject.
 **Adding one** means a migration calling `public.seed_setting(...)` beside the consumer that reads
 it. Seeds on first boot and refreshes only the metadata afterwards, so an operator's value survives
 every replay — `value` is the one column an operator owns.
+
+**Every role reads the Settings page.** The dashboard shows it to every signed-in account, because
+the `SELECT` policy already admits them, and it is read-only for anyone but an `Administrator`, who
+alone passes the `UPDATE` policy. The rows marked `sensitive` never reach the others.
+
+### A person's own preferences (`user_settings`, 0188)
+
+`system_settings` is the site's; `user_settings` is one person's. It holds one row per account: the
+display choices on the dashboard's **Profile** page, so that they follow the person rather than the
+browser. On a shared control-room PC, the next person to sign in gets their own theme, not the last
+person's.
+
+| Column | Notes |
+| :--- | :--- |
+| `user_id` | Primary key, `REFERENCES auth.users(id) ON DELETE CASCADE`: deleting the account deletes the row |
+| `theme` | `dark` (the default) or `light`, by CHECK |
+| `sidebar_mode` | `hover` (the default), `expanded` or `collapsed`, by CHECK |
+| `updated_at` | Stamped by `user_settings_stamp()` on every write; the caller cannot supply it |
+
+- **Typed columns, not key/value rows.** The database refuses a value the dashboard does not know,
+  and a person who has chosen nothing reads the defaults. A new preference is a column added by
+  the migration beside the code that reads it, the rule `system_settings` keys follow.
+- **A person reads and writes their own row only** (`user_id = auth.uid()`, the pattern
+  `change_proposals` uses). An `Administrator` reads nobody else's: nothing in it is anyone else's
+  business. `authenticated` holds `SELECT`, `INSERT` and `UPDATE`, and no `DELETE`. `anon` and
+  `service_role` hold nothing.
+- **Not audited.** A display choice is not platform state, so the table has no audit trigger.
+- **The browser keeps a copy** in localStorage (`aber_theme`, `aber_sidebar_mode`), so the page
+  paints in the right theme before the row arrives, and the sign-in screen, which has no account
+  yet, shows the theme last used on that PC. Once the row loads it wins, and the copy follows it.
+- **A first row keeps the browser's choice.** A person with no row gets one seeded from the
+  browser's copy at their next sign-in, by `INSERT ... ON CONFLICT DO NOTHING` and a second read,
+  so a row another tab created meanwhile is kept. Each later change is an upsert of that one column.
+- **Without the row, the dashboard works as it did before.** If the row cannot be read or written
+  (offline, or a database without `0188`), the page uses the browser's copy, Profile says so, and a
+  change holds in that browser only.
+
+The dashboard side is `frontend/src/hooks/useUserSettings.js`. `test_user_settings.py` holds the
+policies, the CHECKs, the seed and the cascade.
 
 ---
 

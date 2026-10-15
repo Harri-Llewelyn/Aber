@@ -248,7 +248,7 @@ describe('setting a new password', () => {
     expect(within(await row('invited@site.test')).getByRole('button', { name: 'Set New Password' })).toBeEnabled()
     const mine = within(await row('me@site.test')).getByRole('button', { name: 'Set New Password' })
     expect(mine).toBeDisabled()
-    expect(mine).toHaveAttribute('title', expect.stringMatching(/Change Password in your account menu/))
+    expect(mine).toHaveAttribute('title', expect.stringMatching(/Change Password on your Profile page/))
     const removed = within(await row('removed@site.test')).getByRole('button', { name: 'Set New Password' })
     expect(removed).toBeDisabled()
     expect(removed).toHaveAttribute('title', expect.stringMatching(/Restore it first/))

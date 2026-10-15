@@ -140,31 +140,28 @@ describe('Merged navigation shell', () => {
   })
 
   /**
-   * Five controls on the right, and the count is the assertion: the alert pill and the
-   * notification bell, whose values change; the shortcuts key and the help control, which are
-   * signposts rather than preferences; and the account door, behind which the standing preferences
-   * live. An exact count rather than an upper bound, because the failure this guards against is
-   * accretion.
+   * Four controls on the right, and the count is the assertion: the alert pill and the
+   * notification bell, whose values change; and the shortcuts key and the help control, which are
+   * signposts rather than preferences. The account door is at the rail's foot. An exact count
+   * rather than an upper bound, because the failure this guards against is accretion.
    */
-  it('keeps the bar to the two changing controls, the two signposts and the account door', async () => {
+  it('keeps the bar to the two changing controls and the two signposts', async () => {
     await renderShell()
 
     const right = topbar().querySelector('.topbar-right')
     expect(right).toBeTruthy()
     const controls = [...right.querySelectorAll('button')]
-    expect(controls).toHaveLength(5)
+    expect(controls).toHaveLength(4)
 
-    // The two whose VALUES move, the two signposts, and the door to everything else. The bell sits
-    // directly after the pill.
+    // The two whose VALUES move, then the two signposts. The bell sits directly after the pill.
     expect(right.querySelector('.alert-pill')).toBeTruthy()
     expect(controls[1]).toBe(within(right).getByRole('button', { name: /^notifications/i }))
     expect(within(right).getByRole('button', { name: /keyboard shortcuts/i })).toBeTruthy()
-    expect(within(right).getByRole('button', { name: /help for this page/i })).toBeTruthy()
-    expect(right.querySelector('.user-avatar')).toBeTruthy()
+    expect(controls[controls.length - 1]).toBe(within(right).getByRole('button', { name: /help for this page/i }))
 
-    // The avatar stays LAST. It is the fixed corner people aim at, and inserting anything after it
-    // moves the target that every other control in this bar is positioned relative to.
-    expect(controls[controls.length - 1]).toBe(right.querySelector('.user-avatar'))
+    // The account control left the bar for the rail's foot.
+    expect(topbar().querySelector('.user-menu')).toBeNull()
+    expect(sidebar().querySelector('.sidebar-foot .user-menu')).toBeTruthy()
 
     // The Live/Polling chip is gone. It reported a build flag, not the socket's health.
     expect(document.querySelector('.topbar-status')).toBeNull()
@@ -238,28 +235,57 @@ describe('Merged navigation shell', () => {
   })
 
   /**
-   * The account menu: a 28px circle with the theme toggle and Report Bug alongside Sign Out. These
-   * pin reachability and the two facts the button no longer displays.
+   * The account menu, at the foot of the rail: a 28px avatar with the address beside it, whose menu
+   * holds Profile, the theme toggle and Report Bug alongside Sign Out. These pin reachability and
+   * the facts the button names.
    */
   describe('Account menu', () => {
     const trigger = () => screen.getByRole('button', { name: /account menu/i })
 
-    it('carries the address and the role on the button, now that neither is printed on it', async () => {
+    it('names the address and the role on the button, and prints the address as a rail label', async () => {
       await renderShell()
 
-      // The title is load-bearing: the button has no visible text, so this string is also its
-      // accessible name.
-      const title = trigger().getAttribute('title')
-      expect(title).toContain('admin@aber.local')
+      // The rail label is transparent while the rail is collapsed, so the name is stated outright.
+      expect(trigger().getAttribute('aria-label')).toContain('admin@aber.local')
+      expect(trigger().getAttribute('title')).toContain('admin@aber.local')
       // usePermissions resolves the role from the database before falling back to the built-in map,
       // so it arrives a tick after the bar does.
       await waitFor(() => expect(trigger().getAttribute('title')).toContain('Administrator'))
 
-      // Nothing is printed on the button itself.
-      expect(trigger()).toHaveTextContent('')
+      // The address is the label: clipped with the others in the collapsed rail, read when it opens.
+      expect(trigger().querySelector('.sidebar-item-label')).toHaveTextContent('admin@aber.local')
       // Closed by default: the popover holds Sign Out, which must not be reachable by accident.
       expect(trigger()).toHaveAttribute('aria-expanded', 'false')
       expect(screen.queryByRole('menu')).toBeNull()
+    })
+
+    it('sits at the foot of the rail above the behaviour control, outside the page list', async () => {
+      await renderShell()
+
+      const foot = sidebar().querySelector('.sidebar-foot')
+      const controls = [...foot.querySelectorAll(':scope > .user-menu, :scope > .sidebar-mode')]
+      expect(controls.map(c => c.className)).toEqual(['user-menu', 'sidebar-mode'])
+      expect(foot.contains(trigger())).toBe(true)
+      // Not a page entry: Profile is reached through the menu, and the page list stays the pages.
+      expect(trigger()).not.toHaveClass('sidebar-item')
+      expect(within(sidebar()).queryByRole('button', { name: /^Profile$/ })).toBeNull()
+    })
+
+    it('leads with Profile, which opens the Profile page', async () => {
+      await renderShell()
+
+      fireEvent.click(trigger())
+      const items = within(screen.getByRole('menu')).getAllByRole('menuitem')
+      expect(items.map(i => i.textContent.trim())).toEqual([
+        'Profile', expect.stringMatching(/^Theme:/), 'Report Bug', 'Sign Out'
+      ])
+
+      fireEvent.click(items[0])
+      expect(screen.queryByRole('menu')).toBeNull()
+      await waitFor(() => expect(window.location.pathname).toBe('/profile'))
+      expect(await screen.findByRole('heading', { name: /^Profile/ })).toBeInTheDocument()
+      // The avatar marks the page as the current one, the job `active` does for a rail item.
+      expect(trigger()).toHaveClass('active')
     })
 
     it('reveals the full address, the role and a working Sign Out when opened', async () => {
@@ -291,11 +317,15 @@ describe('Merged navigation shell', () => {
       expect(item()).toHaveTextContent(/Theme:\s*Light/)
     })
 
-    it('closes on the two items whose result is NOT visible behind it', async () => {
+    it('closes on the items whose result is NOT visible behind it', async () => {
       await renderShell()
 
       fireEvent.click(trigger())
       fireEvent.click(screen.getByRole('menuitem', { name: /report bug/i }))
+      expect(screen.queryByRole('menu')).toBeNull()
+
+      fireEvent.click(trigger())
+      fireEvent.click(screen.getByRole('menuitem', { name: /^profile$/i }))
       expect(screen.queryByRole('menu')).toBeNull()
     })
 
@@ -340,6 +370,24 @@ describe('Merged navigation shell', () => {
     expect(expandedRule).toMatch(/width:\s*232px/)
     // And it paints above the page. Below the bar, so the account popover still wins.
     expect(railRule).toMatch(/z-index:\s*90/)
+  })
+
+  /**
+   * The foot is pinned: on a short screen the page list scrolls behind it, so the account and Sign
+   * Out are never scrolled away. Its menu opens beside the rail, where the panel cannot clip it.
+   */
+  it('pins the foot to the bottom of the rail, and opens the account menu beside it', () => {
+    const foot = APP_CSS.match(/\n\.sidebar-foot \{([\s\S]*?)\n\}/)[1]
+    expect(foot).toMatch(/position:\s*sticky/)
+    expect(foot).toMatch(/bottom:\s*0/)
+    expect(foot).toMatch(/background:\s*var\(--bg-surface\)/)
+    // The panel scrolls; the foot is its last child, so it needs no bottom padding of the panel's.
+    expect(APP_CSS.match(/\n\.sidebar-panel \{([\s\S]*?)\n\}/)[1]).toMatch(/overflow-y:\s*auto/)
+
+    const popover = APP_CSS.match(/\n\.user-popover \{([\s\S]*?)\n\}/)[1]
+    expect(popover).toMatch(/position:\s*fixed/)
+    expect(popover).toMatch(/left:\s*60px/)
+    expect(APP_CSS).toMatch(/\.sidebar-expanded \.user-popover \{ left: 240px; \}/)
   })
 
   /**

@@ -21,7 +21,7 @@ People has a row of controls under the tabs, with **Refresh** and **Add Person**
 - **Restore Access** lets them sign in again, with the role they had.
 - **Set New Password** asks you to confirm. Then Aber makes a new password for the person and shows it once, as Add Person does. Their old password stops working straight away.
 - Use it when someone has lost their password, with or without a mail relay. A person whose access is removed needs **Restore Access** first.
-- **You cannot change your own role, remove your own access or set your own password here.** Ask another Administrator. Your own row is marked **YOU**, and its controls are greyed out. Hover over one to see why. To change your own password, use **Change Password** in your account menu, the round button at the top right.
+- **You cannot change your own role, remove your own access or set your own password here.** Ask another Administrator. Your own row is marked **YOU**, and its controls are greyed out. Hover over one to see why. To change your own password, use **Change Password** on your **Profile** page. Open it from your avatar at the foot of the sidebar.
 - **One Administrator who can sign in always remains.** The last one cannot be given another role, or have their access removed. Make someone else an Administrator first.
 - Adding a person, changing a role, removing access, restoring it and setting a new password are each recorded in the Audit Trail. The record names the person and who made the change. It never holds a password.
 - A person changing their own password with **Change Password** is not in the Audit Trail. The sign-in service keeps its own record of it.
@@ -78,4 +78,4 @@ A machine identity lives on one of two sides, and nothing holds both. A database
 
 **It does not show who is connected.** It reads the broker's accounts and roles live, but not its sessions. So an account that is Active is one that may connect, not one that has. When the broker cannot be read, the Broker column says **Not read**, and the two broker tabs say so. Only the database half of the page is left.
 
-**It does not change your own password.** Use **Change Password** in your account menu. It asks for your current password, then the new one twice. The new one needs at least 12 characters. Someone who has forgotten theirs can use **Forgot your password?** on the sign-in page, if the site has a mail relay. Otherwise an Administrator gives them a new one here, with **Set New Password**.
+**It does not change your own password.** Use **Change Password** on your **Profile** page. It asks for your current password, then the new one twice. The new one needs at least 12 characters. Someone who has forgotten theirs can use **Forgot your password?** on the sign-in page, if the site has a mail relay. Otherwise an Administrator gives them a new one here, with **Set New Password**.

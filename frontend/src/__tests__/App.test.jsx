@@ -76,8 +76,7 @@ describe('App Component', () => {
     })
 
     expect(screen.getByText('The shopfloor data platform')).toBeInTheDocument()
-    // The account control is an icon button with no text, so its `title` is both the hover text and
-    // its accessible name; the address is asserted on the attribute.
+    // The account control at the rail's foot names the address in its hover text.
     expect(screen.getByRole('button', { name: /account menu/i })).toHaveAttribute(
       'title', expect.stringContaining('admin@aber.local')
     )

@@ -17,7 +17,8 @@ import {
   IconLock,
   IconSettings,
   IconInbox,
-  IconTag
+  IconTag,
+  IconUser
 } from './components/common/Icons'
 
 /*
@@ -99,15 +100,18 @@ export const TABS = [
      group runs a retention timer over something and offers a way back from it. */
   { id: 'archives',       label: 'Archived Entities', group: 'retention', icon: <IconArchive size={16} />, permission: PERMISSION_UUIDS.ARCHIVE_MANAGE },
 
-  // Where everything lives, who may touch it, and how it is tuned. Directory is ungated while the
-  // other two are Administrator-only, so for anyone else this group is Directory alone.
+  // Where everything lives, who may touch it, and how it is tuned. Directory and Settings are
+  // ungated and Access Control is Administrator-only, so for anyone else this group is the two.
   { id: 'directory',      label: 'Directory',      group: 'admin',   icon: <IconBookOpen size={16} /> },
-  // Gated on the role, because the database gates on the role; a SETTINGS_MANAGE permission for
-  // the UI would be a second predicate that can disagree. Access Control is narrower than the API
-  // behind it: seeing who holds what is an access-control question, and a Shopfloor_Manager who
-  // needs to issue a credential still can, from Gateways.
+  // Access Control is narrower than the API behind it: seeing who holds what is an access-control
+  // question, and a Shopfloor_Manager who needs to issue a credential still can, from Gateways.
   { id: 'access-control', label: 'Access Control', group: 'admin',   icon: <IconLock size={16} />, role: 'Administrator' },
-  { id: 'settings',       label: 'Settings',       group: 'admin',   icon: <IconSettings size={16} />, role: 'Administrator' }
+  // Ungated, because every signed-in account may read a setting (rows marked `sensitive` reach
+  // Administrators only); changing one is the database's Administrator gate, and the page is
+  // read-only for any other role.
+  { id: 'settings',       label: 'Settings',       group: 'admin',   icon: <IconSettings size={16} /> },
+  // No group, so the rail does not draw it: the account menu at the rail's foot is its way in.
+  { id: 'profile',        label: 'Profile',        icon: <IconUser size={16} /> }
 ]
 
 /**
@@ -127,7 +131,7 @@ export function tabIsVisible(tabDef, hasPermission, userRole) {
 
 /**
  * The visible pages, bucketed into the groups above, with empty groups dropped: a separator with
- * nothing under it reads as a page that failed to load.
+ * nothing under it reads as a page that failed to load. A page with no group is left out.
  */
 export function groupedNav(visibleTabs) {
   return NAV_GROUPS
