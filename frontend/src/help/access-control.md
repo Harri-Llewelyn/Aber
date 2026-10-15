@@ -31,7 +31,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Restore Access** lets them sign in again, with the role they had.
 - **Set New Password** asks you to confirm. Then Aber makes a new password for the person and shows it once, as Add Person does. Their old password stops working straight away.
 - Use it when someone has lost their password, with or without a mail relay. A person whose access is removed needs **Restore Access** first.
-- **You cannot change your own role, remove your own access or set your own password here.** Ask another Administrator. Your own row is marked **YOU**, and its controls are greyed out. Hover over one to see why. To change your own password, use **Change Password** on your **Profile** page. Open it from your avatar at the foot of the sidebar.
+- **You cannot change your own role, remove your own access or set your own password here.** Ask another Administrator. Your own row is marked **YOU**. Its role and removal controls are greyed out: hover over one to see why. In place of **Set New Password**, your row has **Open Profile**. Your **Profile** page is where you change your own password, with **Change Password**.
 - **One Administrator who can sign in always remains.** The last one cannot be given another role, or have their access removed. Make someone else an Administrator first.
 - Adding a person, changing a role, removing access, restoring it and setting a new password are each recorded in the Audit Trail. The record names the person and who made the change. It never holds a password.
 - A person changing their own password with **Change Password** is not in the Audit Trail. The sign-in service keeps its own record of it.
