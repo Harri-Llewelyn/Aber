@@ -7541,7 +7541,7 @@ SELECT public.seed_setting(
     'An open proposal nobody acts on closes on this timer, freeing the slot it holds under both '
     'caps. Expiry is not rejection: it records that nobody decided, carries no reason and names '
     'no approver, and the same change may be proposed again immediately.',
-    'the seven-day fallback in expire_open_proposals()'
+    'seven days, in expire_open_proposals()'
 );
 
 SELECT public.seed_setting(
@@ -7553,7 +7553,7 @@ SELECT public.seed_setting(
     'How long an applied, rejected, withdrawn or expired proposal is kept before the nightly '
     'prune removes it. What an approval CHANGED lives in audit_trail under its own retention; '
     'this governs only the queue entry and the rationale attached to it.',
-    'the ninety-day fallback in prune_closed_proposals()'
+    'ninety days, in prune_closed_proposals()'
 );
 
 -- ---------------------------------------------------------------------------------------------

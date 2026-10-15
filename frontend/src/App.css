@@ -4790,96 +4790,137 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 
 /* ===== Settings ============================================================================= */
 
-/* The card's scroller: the selected category's rows. */
-.settings-group { padding: 0; }
+/* One table per category. Setting, Value and Actions have fixed widths, so the fields line up down
+   the page and across tabs; Description takes the rest. The scroller is the container the rows
+   stack against: its width is what the table gets, whatever the sidebar and drawers take. */
+.settings-wrap { container: settings / inline-size; }
 
-/* A fixed label column with the control straight after it. Below the two bases together (about
-   616px) the control wraps under the label rather than squeezing the input. */
-.setting-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px var(--inset);
-  align-items: flex-start;
-  padding: 12px var(--inset);
-  border-bottom: 1px solid var(--border);
+.settings-table { table-layout: fixed; }
+
+.setting-col-name { width: 280px; }
+.setting-col-value { width: 232px; }
+.setting-col-actions { width: 200px; }
+
+.setting-cell {
+  vertical-align: top;
+  font-size: 13px;
 }
-.setting-row:last-child { border-bottom: none; }
 
 /* The row the search bar was asked for. A page of thirty settings opens on the right category but
-   still needs to say which of them was meant. */
-.setting-row-found {
-  background: var(--accent-dim);
-  box-shadow: inset 3px 0 0 var(--accent);
-}
-
-.setting-meta { flex: 0 0 420px; max-width: 100%; min-width: 0; }
-
-/* The label and its "?" on one line. The tip is outside the <label> so the label names the
-   input alone; a button nested in a label is labelled by it too. */
-.setting-label-row {
-  display: flex;
-  align-items: center;
-  margin-bottom: 3px;
-}
+   still needs to say which of them was meant. The border sits on the first cell, since a `<tr>`
+   does not draw a box-shadow in every browser. */
+tr.setting-row-found > td { background: var(--accent-dim); }
+tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 .setting-label {
   display: block;
+  margin-bottom: 4px;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
-.setting-provenance {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-  font-size: 12px;
+.setting-key { font-size: 12px; }
+
+.setting-description {
+  margin: 0;
+  line-height: 1.5;
 }
 
 /* What applies when the setting has never been changed: plain, readable text, since it answers
    "this setting appears to do nothing". Only a values.yaml path or a bare identifier is a chip. */
-.setting-fallback { color: var(--text-muted); line-height: 1.45; }
-
-/* The field, the range, then Save and Discard on one line; the field keeps its width. */
-.setting-control {
-  flex: 1 1 180px;
-  min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
+.setting-fallback {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
 }
+.setting-fallback:first-child { margin-top: 0; }
 
-.setting-control > .form-control { flex: 0 1 280px; min-width: 0; }
-.setting-control > .setting-input-short { flex-basis: 160px; }
-
-.setting-control > .setting-json {
-  flex: 1 1 100%;
-  max-width: 560px;
+.setting-json {
   font-family: var(--font-mono);
   font-size: 11px;
   resize: vertical;
 }
 
-/* Rendered only while there is an unsaved change, so the row reserves nothing for it. */
-.setting-actions {
-  display: flex;
-  gap: 6px;
-}
-
 /* The permitted range, stated rather than left to a spinner's limits. */
 .setting-bounds {
+  margin-top: 4px;
   font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;
 }
 
 .setting-error {
-  flex-basis: 100%;
+  margin-top: 6px;
   font-size: 11px;
   color: var(--danger-text);
   line-height: 1.45;
+}
+
+/* Level with the field beside them. Rendered only while there is an unsaved change, or for a
+   setting fixed at install, so a quiet row reserves nothing. */
+.setting-actions,
+.setting-fixed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+}
+
+.setting-fixed {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Below 1000px the three fixed columns (712px) leave the description under 290px, so each row
+   stacks: name and key, then value and actions, then the description. The value comes before the
+   description so a long paragraph does not push the field out of view. The header row stays for
+   assistive technology only. */
+@container settings (max-width: 1000px) {
+  .settings-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+
+  .settings-table,
+  .settings-table tbody { display: block; }
+
+  .settings-table tr.setting-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px 0;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .settings-table tr.setting-row:last-child { border-bottom: none; }
+
+  .settings-table td.setting-cell {
+    padding: 0 var(--inset);
+    border-bottom: none;
+  }
+
+  .setting-cell-name { flex: 1 1 100%; }
+  .setting-cell-value { flex: 0 1 280px; min-width: 0; }
+  .setting-cell-actions { flex: 0 0 auto; }
+  .setting-cell-actions:empty { display: none; }
+  .setting-cell-description { order: 1; flex: 1 1 100%; }
+
+  /* The whole stacked row is the found row, not its first cell. */
+  .settings-table tr.setting-row-found {
+    background: var(--accent-dim);
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  .settings-table tr.setting-row-found > td,
+  .settings-table tr.setting-row-found > td:first-child {
+    background: none;
+    box-shadow: none;
+  }
 }
 
 
