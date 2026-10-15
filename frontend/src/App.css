@@ -507,8 +507,9 @@ html, body, #root {
   z-index: 200;
 }
 
-/* Beside the labelled panel whenever it shows: expanded mode, hover and keyboard focus alike. */
-.sidebar-expanded .user-popover { left: 240px; }
+/* Beside the panel in expanded mode, as the behaviour menu is. Not on a hover-opened panel: the
+   pointer crossing to the menu would leave the rail, close it and move the menu under itself. */
+.sidebar-mode-expanded .user-popover { left: 240px; }
 
 .user-popover-head {
   padding: 10px 12px;

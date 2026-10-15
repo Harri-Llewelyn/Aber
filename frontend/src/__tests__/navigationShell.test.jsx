@@ -387,7 +387,8 @@ describe('Merged navigation shell', () => {
     const popover = APP_CSS.match(/\n\.user-popover \{([\s\S]*?)\n\}/)[1]
     expect(popover).toMatch(/position:\s*fixed/)
     expect(popover).toMatch(/left:\s*60px/)
-    expect(APP_CSS).toMatch(/\.sidebar-expanded \.user-popover \{ left: 240px; \}/)
+    // Beside the panel in expanded mode only: a hover-opened panel closes as the pointer crosses.
+    expect(APP_CSS).toMatch(/\.sidebar-mode-expanded \.user-popover \{ left: 240px; \}/)
   })
 
   /**
