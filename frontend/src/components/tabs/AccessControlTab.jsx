@@ -10,7 +10,7 @@ import { ServicePrincipalCreateModal } from '../modals/ServicePrincipalCreateMod
 import { ServicePrincipalDescribeModal } from '../modals/ServicePrincipalDescribeModal'
 import { PeopleSection } from './PeopleSection'
 import {
-  IconBot, IconDownload, IconLock, IconPencil, IconPlus, IconRadio, IconRefreshCw, IconShieldAlert,
+  IconArchive, IconBot, IconDownload, IconLock, IconPencil, IconPlus, IconRadio, IconShieldAlert,
   IconShieldCheck,
 } from '../common/Icons'
 import { Badge, ArchivedBadge } from '../common/Badge'
@@ -19,6 +19,7 @@ import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { HelpTip } from '../common/HelpTip'
 import { LoadingState } from '../common/LoadingState'
+import { SearchInput } from '../common/SearchInput'
 import { TabStrip } from '../common/TabStrip'
 import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
@@ -143,10 +144,16 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
   // stack whose credential service is down should still show what the platform recorded.
   const [inventory, setInventory] = useState(null)
   const [inventoryError, setInventoryError] = useState(null)
-  // One of the credential filter's values: a credential state, every active gateway, or the archive.
-  const [credentialFilter, setCredentialFilter] = useUrlState('state', 'active', {
-    allowed: ['active', ...Object.values(CREDENTIAL_STATES), 'archived']
+  // The search of the tab on show (Broker credentials, Machine identities); a tab change drops it.
+  const [search, setSearch] = useUrlState('search')
+  // Archived gateways are left off Broker credentials until this is on, as removed people and
+  // withdrawn identities are on their tabs.
+  const [showArchived, setShowArchived] = useUrlState('archived', false)
+  // A credential state, or the archive while archived gateways are shown; '' is any state.
+  const [credentialFilter, setCredentialFilter] = useUrlState('state', '', {
+    allowed: [...Object.values(CREDENTIAL_STATES), ...(showArchived ? ['archived'] : [])]
   })
+  const [showWithdrawn, setShowWithdrawn] = useUrlState('withdrawn', false)
   const [bundleForGw, setBundleForGw] = useState(null)
   const [credentialForGw, setCredentialForGw] = useState(null)
   const [principals, setPrincipals] = useState([])
@@ -246,11 +253,34 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
     return counts
   }, [rows])
 
+  const query = search.trim().toLowerCase()
   const visible = useMemo(() => rows.filter(r => {
-    if (credentialFilter === 'archived') return r.is_archived
-    if (r.is_archived) return false
-    return credentialFilter === 'active' || credentialState(r, r.issued_at) === credentialFilter
-  }), [rows, credentialFilter])
+    if (r.is_archived) {
+      if (!showArchived || (credentialFilter && credentialFilter !== 'archived')) return false
+    } else if (credentialFilter === 'archived') {
+      return false
+    } else if (credentialFilter && credentialState(r, r.issued_at) !== credentialFilter) {
+      return false
+    }
+    // The two columns a gateway is known by: its name and the username it connects as.
+    return !query || [r.name, r.sparkplug_id].some(v => String(v || '').toLowerCase().includes(query))
+  }), [rows, credentialFilter, showArchived, query])
+
+  // The toggle shows only while a gateway is archived, so an address that turns it on with none
+  // archived is tidied once the list is in.
+  useEffect(() => {
+    if (!loading && !loadError && showArchived && filterCounts.archived === 0) setShowArchived(false)
+  }, [loading, loadError, showArchived, filterCounts.archived, setShowArchived])
+
+  // Withdrawn identities are left off until Show withdrawn is on. Searched by the name the page shows.
+  const withdrawnCount = useMemo(
+    () => principals.filter(p => revokedPrincipals.has(p.principal_id)).length,
+    [principals, revokedPrincipals]
+  )
+  const visiblePrincipals = useMemo(() => principals.filter(p =>
+    (showWithdrawn || !revokedPrincipals.has(p.principal_id)) &&
+    (!query || describePrincipal(p.principal_id, p).name.toLowerCase().includes(query))
+  ), [principals, revokedPrincipals, showWithdrawn, query])
 
   const clientsByUsername = useMemo(
     () => new Map((inventory?.clients || []).map(c => [c.username, c])),
@@ -311,8 +341,11 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
     </Badge>
   )
 
-  // The credential filter is the only control on the page that can be off its default.
-  const filterCount = credentialFilter !== 'active' ? 1 : 0
+  // What each tab's Clear filters counts and resets.
+  const filterCount = (credentialFilter ? 1 : 0) + (query ? 1 : 0) + (showArchived ? 1 : 0)
+  const clearCredentialFilters = () => { setCredentialFilter(''); setSearch(''); setShowArchived(false) }
+  const identityFilterCount = (query ? 1 : 0) + (showWithdrawn ? 1 : 0)
+  const clearIdentityFilters = () => { setSearch(''); setShowWithdrawn(false) }
 
   return (
     <div className="page-layout page-fill">
@@ -338,6 +371,12 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
 
           {section === 'credentials' && (<>
           <div className="filter-bar">
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              placeholder="Search gateway or MQTT username…"
+              ariaLabel="Search credentials by gateway name or MQTT username"
+            />
             <select
               className="form-control control-lg"
               value={credentialFilter}
@@ -345,19 +384,28 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
               aria-label="Filter gateways by credential state"
               title="Filter by the Credential column. An archived gateway's credential was rotated to a password nobody holds; it can be issued a new one only after being restored."
             >
-              <option value="active">Active ({filterCounts.active})</option>
+              <option value="">Any state ({filterCounts.active + (showArchived ? filterCounts.archived : 0)})</option>
               <option value={CREDENTIAL_STATES.ISSUED}>Issued ({filterCounts[CREDENTIAL_STATES.ISSUED]})</option>
               <option value={CREDENTIAL_STATES.AWAITING_ENROLMENT}>Setup outstanding ({filterCounts[CREDENTIAL_STATES.AWAITING_ENROLMENT]})</option>
               <option value={CREDENTIAL_STATES.REVOKED}>Revoked ({filterCounts[CREDENTIAL_STATES.REVOKED]})</option>
               <option value={CREDENTIAL_STATES.UNRECORDED}>No platform record ({filterCounts[CREDENTIAL_STATES.UNRECORDED]})</option>
-              <option value="archived">Archived ({filterCounts.archived})</option>
+              {showArchived && <option value="archived">Archived ({filterCounts.archived})</option>}
             </select>
+            {/* Offered only while a gateway is archived; the count is what it would list. */}
+            {filterCounts.archived > 0 && (
+              <button
+                type="button"
+                className={`btn btn-sm ${showArchived ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => setShowArchived(v => !v)}
+                aria-pressed={showArchived}
+                title="Archived gateways are left off the list. Their credential was rotated to a password nobody holds, and is issued again only after the gateway is restored."
+              >
+                <IconArchive size={13} /> Show archived ({filterCounts.archived})
+              </button>
+            )}
             {/* Clear sits in the actions group: two auto margins in one bar would split the row. */}
             <div className="filter-bar-actions">
-              <ClearFilters count={filterCount} onClear={() => setCredentialFilter('active')} />
-              <button className="btn btn-ghost btn-sm" onClick={() => load()} title="Re-read credentials">
-                <IconRefreshCw size={14} /> Refresh
-              </button>
+              <ClearFilters count={filterCount} onClear={clearCredentialFilters} />
             </div>
           </div>
 
@@ -397,7 +445,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                 No gateways registered. Create one on the Gateways page —{' '}
                 <code>tutorial/README.md</code> walks through it.
               </>}
-              filteredMessage="No gateway matches this filter."
+              filteredMessage="No gateway matches these filters."
             />
           ) : (
             <div className="table-wrap">
@@ -513,7 +561,26 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
               nothing else, so it goes with the button. */}
           {!principalError && (
             <div className="filter-bar">
+              <SearchInput
+                value={search}
+                onChange={setSearch}
+                placeholder="Search by name…"
+                ariaLabel="Search machine identities by name"
+              />
+              {/* Offered only while an identity is withdrawn; the count is what it would list. */}
+              {withdrawnCount > 0 && (
+                <button
+                  type="button"
+                  className={`btn btn-sm ${showWithdrawn ? 'btn-primary' : 'btn-ghost'}`}
+                  onClick={() => setShowWithdrawn(v => !v)}
+                  aria-pressed={showWithdrawn}
+                  title="Withdrawn identities are left off the list. The API refuses every token that names one, and Reinstate lets it back."
+                >
+                  <IconArchive size={13} /> Show withdrawn ({withdrawnCount})
+                </button>
+              )}
               <div className="filter-bar-actions">
+                <ClearFilters count={identityFilterCount} onClear={clearIdentityFilters} />
                 <button
                   className="btn btn-primary btn-sm"
                   onClick={() => setCreating(true)}
@@ -534,10 +601,12 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
             </div>
           )}
           {!principalError && (principalsLoading ? <LoadingState label="machine identities" /> :
-            principals.length === 0 ? (
+            visiblePrincipals.length === 0 ? (
               <EmptyState
                 icon={<IconBot size={36} />}
+                filtered={principals.length > 0}
                 message="No machine identities are registered. Every account on this stack belongs to a person."
+                filteredMessage="No machine identity matches these filters."
               />
             ) : (
             <div className="table-wrap">
@@ -559,7 +628,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                   </tr>
                 </thead>
                 <tbody>
-                  {principals.map(p => {
+                  {visiblePrincipals.map(p => {
                     // The row carries `name` and `purpose` for an identity created from the page;
                     // the registry answers for the three a migration pinned.
                     const meta = describePrincipal(p.principal_id, p)
