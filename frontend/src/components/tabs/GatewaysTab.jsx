@@ -293,7 +293,6 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   // Each column sorts on what its cell shows. An archived gateway shows no status and no devices,
   // and a location that does not apply shows none, so those go last.
   const sortColumns = React.useMemo(() => {
-    const areaNames = new Map(areas.map(a => [a.area_id, a.area_name]))
     const cellNames = new Map(cells.map(c => [c.cell_id, c.cell_name]))
     const location = (g) => {
       if (!gatewayAcceptsCell(g)) return null
@@ -310,7 +309,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
       last_heartbeat: { type: 'time', value: g => g.last_heartbeat },
       devices: { type: 'number', value: g => (g.is_archived ? null : (g.devices || []).length) }
     }
-  }, [areas, cells])
+  }, [cells])
   const [filteredGateways, sort] = useSortableRows(matchingGateways, sortColumns)
 
   const activeFilterCount =

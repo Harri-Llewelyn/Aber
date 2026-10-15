@@ -4,6 +4,9 @@ import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
 import { Modal } from '../common/Modal'
 import { IconShieldAlert } from '../common/Icons'
+import { SortHeader } from '../common/SortHeader'
+import { useLocalSortableRows } from '../../hooks/useTableSort'
+import { severityRank } from '../../utils/tableSort'
 import { NO_VALUE, formatDate } from '../../utils/format'
 
 /**
@@ -51,10 +54,25 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
 
   // Newest first, the reverse of tokenStatus(), which sorts by earliest expiry. A person looking
   // for the token they just issued wants it at the top.
-  const rows = useMemo(
+  const newestFirst = useMemo(
     () => [...(status?.rows || [])].sort((a, b) => b.expiresAtMs - a.expiresAtMs),
     [status]
   )
+
+  // Expired is checked before revoked: the signature check refuses an expired token everywhere,
+  // including the services a revocation never reaches.
+  const tokenState = useCallback((t) => {
+    if (t.expiresAtMs <= now) return { label: 'EXPIRED', tone: 'neutral' }
+    if (t.revoked || justRevoked.has(t.jti)) return { label: 'REVOKED', tone: 'danger' }
+    return { label: 'ACTIVE', tone: 'success' }
+  }, [now, justRevoked])
+  const sortColumns = useMemo(() => ({
+    jti: { type: 'text', value: t => t.jti },
+    issued: { type: 'time', value: t => t.issued_at },
+    expires: { type: 'time', value: t => t.expiresAtMs },
+    state: { type: 'rank', value: t => severityRank(tokenState(t).tone) }
+  }), [tokenState])
+  const [rows, sort] = useLocalSortableRows(newestFirst, sortColumns)
 
   return (
     <Modal
@@ -86,10 +104,10 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
           <table>
             <thead>
               <tr>
-                <th>Token ID (jti)</th>
-                <th>Issued</th>
-                <th>Expires</th>
-                <th>State</th>
+                <SortHeader sort={sort} column="jti">Token ID (jti)</SortHeader>
+                <SortHeader sort={sort} column="issued">Issued</SortHeader>
+                <SortHeader sort={sort} column="expires">Expires</SortHeader>
+                <SortHeader sort={sort} column="state">State</SortHeader>
                 <th className="row-actions">Actions</th>
               </tr>
             </thead>
@@ -97,6 +115,7 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
               {rows.map(t => {
                 const revoked = t.revoked || justRevoked.has(t.jti)
                 const expired = t.expiresAtMs <= now
+                const state = tokenState(t)
                 const error = errors.get(t.jti)
                 return (
                   <tr key={t.jti || `${t.issued_at}-${t.expiresAtMs}`}>
@@ -104,12 +123,7 @@ export function ServiceTokenInventoryModal({ principalName, status, onClose, onC
                     <td className="cell-meta">{t.issued_at ? formatDate(t.issued_at) : NO_VALUE}</td>
                     <td className="cell-meta">{formatDate(t.expiresAtMs)}</td>
                     <td>
-                      {/* Expired is checked before revoked: the signature check refuses an
-                          expired token everywhere, including the services a revocation never
-                          reaches. */}
-                      <Badge size="sm" tone={expired ? 'neutral' : revoked ? 'danger' : 'success'}>
-                        {expired ? 'EXPIRED' : revoked ? 'REVOKED' : 'ACTIVE'}
-                      </Badge>
+                      <Badge size="sm" tone={state.tone}>{state.label}</Badge>
                       {error && <div className="form-hint hint-danger">{error}</div>}
                     </td>
                     <td className="row-actions">

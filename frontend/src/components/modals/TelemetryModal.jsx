@@ -5,6 +5,8 @@ import { formatTelemetryValue, telemetryValueClass } from '../../utils/telemetry
 import { IconActivity, IconDownload, IconLock } from '../common/Icons'
 import { Modal } from '../common/Modal'
 import { Badge } from '../common/Badge'
+import { SortHeader } from '../common/SortHeader'
+import { useLocalSortableRows } from '../../hooks/useTableSort'
 import { formatDateTime } from '../../utils/format'
 
 /**
@@ -27,11 +29,21 @@ function sortMetrics(a, b) {
   return a.name.localeCompare(b.name)
 }
 
+/**
+ * The sortable columns. Latest Value is not one: each row is a different metric in its own unit,
+ * so the values have no order between them. A metric that has never reported goes last.
+ */
+const METRIC_SORT = {
+  metric: { type: 'text', value: m => m.name },
+  last_updated: { type: 'time', value: m => m.row?.time }
+}
+
 export function TelemetryModal({ device, hasPermission, onExport, onClose }) {
   const [metrics, setMetrics]   = useState([])
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState(null)
   const [selected, setSelected] = useState(() => new Set())
+  const [sortedMetrics, sort] = useLocalSortableRows(metrics, METRIC_SORT)
 
   const canRead = hasPermission?.(PERMISSION_UUIDS.TELEMETRY_READ) ?? false
   const deviceId = device?.asset_id || device?.id
@@ -126,13 +138,13 @@ export function TelemetryModal({ device, hasPermission, onExport, onClose }) {
                     title="Select every metric"
                   />
                 </th>
-                <th title="Metric name as published on the wire">Metric</th>
-                <th title="When this metric last reported">Last Updated</th>
+                <SortHeader sort={sort} column="metric" title="Metric name as published on the wire">Metric</SortHeader>
+                <SortHeader sort={sort} column="last_updated" title="When this metric last reported">Last Updated</SortHeader>
                 <th title="Most recent value">Latest Value</th>
               </tr>
             </thead>
             <tbody>
-              {metrics.map(m => (
+              {sortedMetrics.map(m => (
                 <tr key={m.name}>
                   <td>
                     <input

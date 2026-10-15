@@ -9,6 +9,28 @@ import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { formatDateTime } from '../../utils/format'
 import { isNeverSeen } from '../../utils/deviceProvisioning'
+import { SortHeader } from '../common/SortHeader'
+import { useLocalSortableRows } from '../../hooks/useTableSort'
+import { severityRank } from '../../utils/tableSort'
+
+const STATUS_TONE = { present: 'success', missing: 'warning', extra: 'neutral' }
+const datatypeName = (row) => (row ? SPARKPLUG_TYPES[row.datatype] || row.datatype : null)
+
+/**
+ * The sortable columns. The value is not one: each row is a different metric in its own unit. A
+ * metric the device has not reported goes last. Status runs Missing, Unmodelled, Present.
+ */
+const CONFIG_SORT = {
+  metric: { type: 'text', value: row => row.metric_name },
+  datatype: { type: 'text', value: datatypeName },
+  last_updated: { type: 'time', value: row => row.updated_at }
+}
+const COMPARISON_SORT = {
+  metric: { type: 'text', value: row => row.metric_name },
+  status: { type: 'rank', value: row => severityRank(STATUS_TONE[row.status]) },
+  datatype: { type: 'text', value: row => datatypeName(row.reported) },
+  last_updated: { type: 'time', value: row => row.reported?.updated_at }
+}
 
 // Read-only: everything it displays comes from asset_config and the device's own row.
 export function AssetConfigModal({ asset, schemas, onClose }) {
@@ -60,14 +82,17 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
     ]
   }
 
+  const [comparisonSorted, comparisonSort] = useLocalSortableRows(comparisonRows, COMPARISON_SORT)
+  const [configSorted, configSort] = useLocalSortableRows(config, CONFIG_SORT)
+
   const statusBadge = (status) => {
     if (status === 'present') {
-      return <Badge tone="success" size="sm" icon={<IconCheck size={10} />} title="Required by the schema and reported by the device">Present</Badge>
+      return <Badge tone={STATUS_TONE.present} size="sm" icon={<IconCheck size={10} />} title="Required by the schema and reported by the device">Present</Badge>
     }
     if (status === 'missing') {
-      return <Badge tone="warning" size="sm" icon={<IconAlertTriangle size={10} />} title="Required by the schema but not reported yet">Missing</Badge>
+      return <Badge tone={STATUS_TONE.missing} size="sm" icon={<IconAlertTriangle size={10} />} title="Required by the schema but not reported yet">Missing</Badge>
     }
-    return <Badge size="sm" title="Declared by the device but not part of its assigned schema">Unmodelled</Badge>
+    return <Badge tone={STATUS_TONE.extra} size="sm" title="Declared by the device but not part of its assigned schema">Unmodelled</Badge>
   }
 
   return (
@@ -119,10 +144,16 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
                 <col style={{ width: '18%' }} />
               </colgroup>
               <thead>
-                <tr><th title="Metric parameter key">Metric Parameter</th><th title="Conformance to the assigned schema">Status</th><th title="Reported value">Reported Value</th><th title="Sparkplug B datatype">Datatype</th><th title="Last updated timestamp">Last Updated</th></tr>
+                <tr>
+                  <SortHeader sort={comparisonSort} column="metric" title="Metric parameter key">Metric Parameter</SortHeader>
+                  <SortHeader sort={comparisonSort} column="status" title="Conformance to the assigned schema">Status</SortHeader>
+                  <th title="Reported value">Reported Value</th>
+                  <SortHeader sort={comparisonSort} column="datatype" title="Sparkplug B datatype">Datatype</SortHeader>
+                  <SortHeader sort={comparisonSort} column="last_updated" title="Last updated timestamp">Last Updated</SortHeader>
+                </tr>
               </thead>
               <tbody>
-                {comparisonRows.map(row => (
+                {comparisonSorted.map(row => (
                   <tr key={row.metric_name}>
                     {/* Wraps at the path separators rather than truncating, and carries the full
                         name in `title` for a squeezed column. */}
@@ -152,10 +183,15 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
               <col style={{ width: '19%' }} />
             </colgroup>
             <thead>
-              <tr><th title="Metric parameter key">Metric Parameter</th><th title="Reported value">Value</th><th title="Sparkplug B datatype">Datatype</th><th title="Last updated timestamp">Last Updated</th></tr>
+              <tr>
+                <SortHeader sort={configSort} column="metric" title="Metric parameter key">Metric Parameter</SortHeader>
+                <th title="Reported value">Value</th>
+                <SortHeader sort={configSort} column="datatype" title="Sparkplug B datatype">Datatype</SortHeader>
+                <SortHeader sort={configSort} column="last_updated" title="Last updated timestamp">Last Updated</SortHeader>
+              </tr>
             </thead>
             <tbody>
-              {config.map(row => (
+              {configSorted.map(row => (
                 <tr key={row.metric_name}>
                   <td className="config-metric-name"><strong title={row.metric_name}>{row.metric_name}</strong></td>
                   <td className="telemetry-value" title={String(fmtVal(row))}>{fmtVal(row)}</td>

@@ -9,6 +9,9 @@ import { LoadingState } from '../common/LoadingState'
 import { RouteLink } from '../common/RouteLink'
 import { SearchInput } from '../common/SearchInput'
 import { useUrlState } from '../../hooks/useUrlState'
+import { useSortableRows } from '../../hooks/useTableSort'
+import { rankIn, severityRank } from '../../utils/tableSort'
+import { SortHeader } from '../common/SortHeader'
 import { AddPersonModal } from '../modals/AddPersonModal'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { NewPasswordModal } from '../modals/NewPasswordModal'
@@ -25,6 +28,17 @@ import {
   removalBlocked,
   roleChangeBlocked,
 } from '../../utils/people'
+
+/**
+ * The People table's sortable columns. Role runs in the order roles are listed everywhere,
+ * Administrator first, and someone holding none goes last, as does someone who never signed in.
+ */
+const PEOPLE_SORT = {
+  person: { type: 'text', value: p => p.email || p.user_id },
+  role: { type: 'rank', value: p => rankIn(PERSON_ROLES.map(r => r.name), p.role) },
+  status: { type: 'rank', value: p => severityRank(personStatus(p).tone) },
+  last_sign_in: { type: 'time', value: p => p.last_sign_in_at }
+}
 
 /**
  * Access Control's People tab: every person who can sign in, with their role, for an
@@ -70,11 +84,12 @@ export function PeopleSection({ showToast, currentUserId }) {
   // What the role and status options count: everyone the removed toggle lets in.
   const listed = useMemo(() => people.filter(p => showRemoved || !accessRemoved(p)), [people, showRemoved])
   const query = search.trim().toLowerCase()
-  const shown = useMemo(() => listed.filter(p => {
+  const matching = useMemo(() => listed.filter(p => {
     if (roleFilter && (p.role || NO_ROLE) !== roleFilter) return false
     if (statusFilter && personStatus(p).key !== statusFilter) return false
     return !query || String(p.email || p.user_id).toLowerCase().includes(query)
   }), [listed, roleFilter, statusFilter, query])
+  const [shown, sort] = useSortableRows(matching, PEOPLE_SORT)
   const roleCount = (name) => listed.filter(p => (p.role || NO_ROLE) === name).length
   const statusCount = (key) => listed.filter(p => personStatus(p).key === key).length
   const filterCount = [search, roleFilter, statusFilter].filter(Boolean).length + (showRemoved ? 1 : 0)
@@ -212,10 +227,10 @@ export function PeopleSection({ showToast, currentUserId }) {
           <table>
             <thead>
               <tr>
-                <th>Person</th>
-                <th>Role</th>
-                <th>Status</th>
-                <th>Last signed in</th>
+                <SortHeader sort={sort} column="person">Person</SortHeader>
+                <SortHeader sort={sort} column="role">Role</SortHeader>
+                <SortHeader sort={sort} column="status">Status</SortHeader>
+                <SortHeader sort={sort} column="last_sign_in">Last signed in</SortHeader>
                 <th className="row-actions">Actions</th>
               </tr>
             </thead>
