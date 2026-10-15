@@ -4,8 +4,8 @@ import { IconKeyboard } from '../common/Icons'
 
 /**
  * What the keyboard does, in one place. Every row is a shortcut that exists; the application binds
- * the palette, its two movement keys and its opener, the Audit Trail drawer's two stepping keys,
- * plus Escape through one hook. The browser's own keys are included because Tab is the only way to
+ * the palette, its two movement keys and its opener, `/` for the page's own search box, the Audit
+ * Trail drawer's two stepping keys, plus Escape through one hook. The browser's own keys are included because Tab is the only way to
  * reach the navigation rail without a mouse, and it makes the rail expand. Plain strings, never
  * matched against: the bindings live with the components that own them.
  *
@@ -25,7 +25,9 @@ export function shortcutGroups({ mac = false } = {}) {
         { keys: [mod, 'K'], description: 'Focus the search box from anywhere' },
         { keys: ['↑', '↓'], join: 'or', description: 'Move through the results' },
         { keys: ['Enter'], description: 'Open the highlighted result' },
-        { keys: ['Esc'], description: 'Clear the box and dismiss the results' }
+        { keys: ['Esc'], description: 'Clear the box and dismiss the results' },
+        // Bound in App beside `?`; reaches the SearchInput in the open page's toolbar.
+        { keys: ['/'], description: "Focus this page's search box" }
       ]
     },
     {

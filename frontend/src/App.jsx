@@ -25,6 +25,7 @@ import { Sidebar } from './components/common/Sidebar'
 import { GlobalSearch } from './components/common/GlobalSearch'
 import { AberMark } from './components/common/AberMark'
 import { ConnectionStrip } from './components/common/ConnectionStrip'
+import { focusPageSearch } from './components/common/SearchInput'
 
 /* There is no sign-up form. Registration is disabled server-side by GOTRUE_DISABLE_SIGNUP, so
    accounts arrive by invitation, admin provisioning or an upstream identity provider; a client-side
@@ -511,14 +512,21 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
     if (current && !tabIsVisible(current, hasPermission, userRole)) setTab('site-map')
   }, [tab, loadingPerms, userRole, hasPermission, setTab])
 
-  /* `?` opens the shortcuts list. It is a printable character, so the handler stands down for any
-     editable target, including contenteditable, and for any keystroke carrying a modifier. */
+  /* `?` opens the shortcuts list and `/` focuses the open page's search box. Both are printable
+     characters, read from `e.key` so a layout that types them with Shift still works, so the
+     handler stands down for any editable target, including contenteditable, and for any keystroke
+     carrying a modifier. `/` also stands down while a dialog is open, and on a page with no box. */
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key !== '?' || e.ctrlKey || e.metaKey || e.altKey) return
+      if ((e.key !== '?' && e.key !== '/') || e.ctrlKey || e.metaKey || e.altKey) return
       const el = e.target
       const tag = el?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return
+      if (e.key === '/') {
+        // Kept from the field it has just focused, which would otherwise type it.
+        if (focusPageSearch()) e.preventDefault()
+        return
+      }
       e.preventDefault()
       setShowShortcuts(true)
     }

@@ -1178,6 +1178,24 @@ html, body, #root {
 }
 .search-input-clear:hover { color: var(--text-primary); background: var(--bg-glass); }
 .search-input-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The `/` key hint, the same key cap as the top bar's .global-search-kbd. Drawn only where `/`
+   reaches the box, a page's toolbar in `main` (focusPageSearch), and gone while the box has focus;
+   SearchInput leaves it out while there is text, when the clear button takes the slot. */
+.search-input-kbd {
+  display: none;
+  position: absolute;
+  right: 8px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+main .filter-bar .search-input-kbd { display: inline-block; }
+main .filter-bar .search-input-field:focus ~ .search-input-kbd { display: none; }
 
 /* The foot of a list that loads in steps (ListFoot): a rule above, the button or the end line
    inside. It sits after the scroller, not in it. */

@@ -478,6 +478,14 @@ draws no toolbar.
 `CardHeading` takes no buttons: it has no `actions` prop, and `cardHeading.test.jsx` fails on a
 page that passes one. So a page's main button is in the same place whether or not it has tabs.
 
+`/` focuses the open page's search box (`focusPageSearch` in `common/SearchInput.jsx`, bound in
+`App.jsx` beside `?`). It finds the first shown `SearchInput` in a `.filter-bar` inside `main`, so a
+search box added to a toolbar is reached with no wiring of its own. The top bar's search is outside
+`main`, and Ctrl K owns it. `/` does nothing in a text field, a select or a contenteditable, with
+Ctrl, Cmd or Alt held, while any `role="dialog"` (a modal or a popover) is open, or on a page with no
+box. The box shows a `/` hint while it is empty and unfocused, and App.css draws it only where `/`
+reaches.
+
 ---
 
 ## Words and rules
