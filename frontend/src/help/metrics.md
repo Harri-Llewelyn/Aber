@@ -1,10 +1,10 @@
 ## What this page is for
 
-This page is the catalog of metrics that every schema is built from. A metric is a name, a datatype and a meaning, and a schema is a selection of metrics. Most metrics are not invented here. They are taken from a published standard on the Vocabulary page. That page passes the entry straight to the Add Metric dialog, so you do not have to type the values.
+This page is the catalog of metrics that every schema is built from. A metric is a name, a datatype and a meaning, and a schema is a selection of metrics. Most metrics are not invented here. They are taken from a published standard on the Vocabulary page. That page passes the entry straight to the Add Metric dialog, so you do not have to type the values. The **Uncatalogued** tab shows the metrics your devices publish that the catalog does not describe yet.
 
 ## What the controls do
 
-- **Metric Catalog** and **Deprecated Metrics** are the two tabs of the page's one card. The open tab's table scrolls inside the card, and its header and group headings stay in view. The two tabs' columns line up.
+- **Metric Catalog**, **Deprecated Metrics** and **Uncatalogued** are the three tabs of the page's one card. The open tab's table scrolls inside the card, and its header and group headings stay in view. The first two tabs' columns line up.
 - **Add Metric**, at the right-hand end of the Metric Catalog tab's toolbar, opens a dialog that builds a name from its parts. You see the full name before you commit to it. Its parts are **Group** (the component the metric belongs to), **Instance** (optional), **Type** (from the selected standard's vocabulary) and **Sub Type** (optional, for MTConnect only).
 - **Standard** decides which vocabulary the Type picker draws from. It is stored on the metric as its source. Changing it clears everything the previous vocabulary decided, because a leftover type would make a wrong claim to other systems.
 - **Semantic ID** and **Reference Type** link a metric to a term somebody else also uses, so it is no longer local to Aber. The field suggests the id the metric's standard gives it, marked **suggested**. An MTConnect metric gets its data item type's id, which every metric of that type shares. An ISO 22400 or OPC UA entry brings its own id. An ASHRAE 223P concept brings none.
@@ -27,12 +27,22 @@ This page is the catalog of metrics that every schema is built from. A metric is
 - Edit's confirmation says how many schemas model the metric, because every AAS shell exported from them carries the new id. The edit is recorded in the Audit Trail.
 - **Deprecate**, in the drawer of a catalog metric, takes it out of the schema builder. It can name the metric that replaces it. The confirmation says how many schemas model it.
 - **Restore**, in the drawer of a metric on the Deprecated Metrics tab, is the way back. It offers the metric to schema authors again, and clears the replacement it named. It asks first, as Deprecate does. Both are recorded in the Audit Trail, under Metric catalog, with who made them.
+- **Uncatalogued** lists the metric names your devices declare that no catalog row has. A device declares its metrics in its birth certificate when it connects. The tab's label shows how many names there are, so **Uncatalogued (0)** means the catalog covers every device.
+- Each row shows the name, how many devices declare it, and which ones. Select a device to open it on the Devices page. A device still waiting for approval is marked **quarantined**. A long list shows three devices: select **more** to see the rest.
+- **Datatype** is how the devices' birth certificates encode the value. It shows "—" when no birth certificate gave the metric a value. **Last Declared** is the last time one of these devices changed the set of metrics it declares.
+- **Catalogue** opens Add Metric with the name filled in and the standard set to Custom. It fills in the datatype too, when the devices agree on one the form offers. Otherwise, choose it yourself. Like Add Metric, it needs the Administrator role, and it is not shown without it.
+- Keep the name exactly as the devices declare it. If you change it, a warning says that the devices do not publish the new name.
+- **Catalogue** is greyed out for a name the catalog cannot hold, such as one with a space. Its tooltip says which characters to remove. Rename the metric on the device instead.
+- **Search**, on the Uncatalogued tab, finds a metric by its name. It does not search device names.
+- The list leaves out archived devices and replay lanes. It also leaves out Sparkplug's control metrics, such as `Device Control/Rebirth`, because they are commands rather than readings. A deprecated metric counts as catalogued.
 
 ## What the states mean
 
 **A metric name cannot be changed.** The name is what the device publishes, so it reaches MQTT, TimescaleDB and Grafana. Renaming it would strand every reading already stored under the old name. That is why you see the full name before the metric is created, and why you withdraw a metric by deprecating it. The datatype is fixed for the same reason. The semantic id is not sent on the wire. It is a claim about what the metric means, so it can be corrected.
 
 **Deprecated is not deleted.** A deprecated metric keeps its readings, and stays on the schemas that already model it. It is held back from the builder, so no new schema picks it up. The Deprecated Metrics tab lists deprecated metrics, each with the metric that replaced it. The tab is always there, and says so when nothing is deprecated.
+
+**Uncatalogued is not unrecorded.** The readings of an uncatalogued metric are stored. But the metric has no description, unit or semantic id. No schema can model it, and an AAS export carries it without a semantic id. Catalogue it under the same name to fix all three. A name must match exactly, capital letters included: `temperature` and `Temperature` are two metrics.
 
 **A group is part of the name.** `Axes/X/POSITION` belongs to the group `Axes` because of the text before the first slash, not because of a separate column. A name with no slash is listed under Ungrouped. A group typed with different capital letters from an existing one takes the existing spelling, so you do not get two groups.
 

@@ -19,6 +19,8 @@ how each was confirmed, and for the one that was wrong.
 Every addition follows the existing **"vocabulary, not catalog"** stance of `mtconnect_vocabulary`,
 `iso22400_vocabulary` and `opcua_vocabulary`: reference data describing what a standard *defines*,
 kept separate from `metric_catalog`, which records what a device actually publishes.
+A name a device declares that the catalog does not record yet is listed on the Metrics page's
+Uncatalogued tab (`uncatalogued_metrics`, 0189).
 
 **A fresh install seeds the vocabularies and leaves the catalog empty.** Every standard semantic id
 is there when an operator registers a metric on the Metrics page, and nothing is registered until

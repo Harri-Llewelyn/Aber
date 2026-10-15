@@ -172,8 +172,8 @@ class WhatIsListed(UncataloguedFixtures):
         self.assertFalse(self.listed(self.name("Gone")))
 
     def test_a_device_property_is_listed(self):
-        """`Properties/*` is a device's own data and a valid catalog name: catalogued with a
-        nameplate semantic id, it answers that Digital Nameplate field."""
+        """`Properties/*` is a device's own data under a valid catalog name: catalogued with an OPC
+        40001 Machinery identification id, it fills that Digital Nameplate field."""
         gw = self.gateway()
         prop = f"Properties/{self.group}"
         self.device(gw, [prop])
