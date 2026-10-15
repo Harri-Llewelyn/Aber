@@ -28,6 +28,7 @@ Needs the stack up AND `playback.enabled`, which `values-dev.yaml` sets. Without
 job sits PENDING and setUpClass says so rather than timing out against the broker.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -249,9 +250,19 @@ def historian():
     )
 
 
+def recorded_flow_hash(metric):
+    """The flow hash the recorded appliance reports, derived from the run's sentinel so a
+    FLOW_DEPLOYED row naming it can only have come from this replay."""
+    return hashlib.sha256(metric.encode()).hexdigest()
+
+
 def build_capture(recorded_gateway, recorded_device, metric, epoch_ms):
     """
-    A three-message capture: the device's birth, then two readings.
+    A four-message capture: the device's birth, one node heartbeat carrying the recorded
+    appliance's health and an outage report, then two readings.
+
+    THE HEARTBEAT IS THE RECORDED APPLIANCE'S, not the Playback gateway's: the replay republishes
+    it as the Playback gateway, and the daemon must record none of it for that gateway.
 
     THE BIRTH IS NOT OPTIONAL. `process_dbirth()` is what sets a device ONLINE and records its
     declared metrics; a capture of DDATA alone replays into the historian but leaves the lane
@@ -273,10 +284,27 @@ def build_capture(recorded_gateway, recorded_device, metric, epoch_ms):
                         "double_value": value, "timestamp": stamp})
         return {"timestamp": stamp, "metrics": metrics}
 
+    node_stamp = epoch_ms + 100
+    appliance = [
+        {"name": "Uptime_s", "datatype": 10, "double_value": 4210.0},
+        {"name": "Cert_Expires_At", "datatype": 10,
+         "double_value": float(epoch_ms + 20 * 24 * 3600 * 1000)},
+        {"name": "Flow_Hash", "datatype": 12, "string_value": recorded_flow_hash(metric)},
+        {"name": "Agent_Version", "datatype": 12, "string_value": "0.0.0-replay-fixture"},
+        {"name": "Outage/Started_At", "datatype": 10, "double_value": float(epoch_ms - 600_000)},
+        {"name": "Outage/Ended_At", "datatype": 10, "double_value": float(epoch_ms - 1000)},
+        {"name": "Outage/Readings_Buffered", "datatype": 10, "double_value": 100.0},
+        {"name": "Outage/Readings_Dropped", "datatype": 10, "double_value": 7.0},
+        {"name": "Outage/Buffering", "datatype": 11, "boolean_value": True},
+    ]
     messages = [
         {"offset_ms": 0, "encoding": "json",
          "topic": f"spBv1.0/Aber/DBIRTH/{recorded_gateway}/{recorded_device}",
          "payload": payload(0, 1.0, True)},
+        {"offset_ms": 100, "encoding": "json",
+         "topic": f"spBv1.0/Aber/NDATA/{recorded_gateway}",
+         "payload": {"timestamp": node_stamp,
+                     "metrics": [dict(m, timestamp=node_stamp) for m in appliance]}},
         {"offset_ms": 200, "encoding": "json",
          "topic": f"spBv1.0/Aber/DDATA/{recorded_gateway}/{recorded_device}",
          "payload": payload(200, 2.0, False)},
@@ -582,8 +610,7 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
     def _await_gateway_offline(cls):
         """
         The Playback gateway's row once the daemon has written the job's NDEATH: OFFLINE, with a
-        heartbeat other than the one it had before the job. The fixture holds no node message, so
-        nothing else in the replay writes this row.
+        heartbeat other than the one it had before the job.
         """
         before = cls.playback_gateway.get("last_heartbeat")
         deadline = time.monotonic() + GATEWAY_OFFLINE_TIMEOUT
@@ -686,6 +713,32 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
             ("OFFLINE", "OFFLINE"),
             f"the Playback gateway reads {self.gateway_after} after the job, not OFFLINE",
         )
+
+    def test_the_recorded_appliance_s_health_is_not_the_playback_gateway_s(self):
+        """
+        The fixture's node heartbeat carries uptime, a CA date, an agent version, a flow hash and an
+        outage report. The daemon records a heartbeat for the Playback gateway and none of them:
+        the figures are another machine's, and a replayed flow hash that differed wrote a
+        FLOW_DEPLOYED row for a deployment that never happened.
+        """
+        status, rows = self.session.rest(
+            "/gateways?select=health_reported_at,uptime_seconds,load_1m,mem_available_bytes,"
+            "disk_free_bytes,cert_expires_at,flow_hash,agent_version"
+            f"&id=eq.{self.playback_gateway['id']}&limit=1")
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            {k: v for k, v in rows[0].items() if v is not None}, {},
+            "the Playback gateway holds health the recorded appliance reported",
+        )
+        # The empty answer below means something only if this session can read gateway audit rows
+        # at all: the fixture gateway's own INSERT row is one it wrote a moment ago.
+        status, visible = self.session.rest(f"/audit_trail?select=id&entity_id=eq.{SOURCE_GATEWAY_ID}&limit=1")
+        self.assertEqual((status, bool(visible)), (200, True), "the audit trail is not readable here")
+        status, deployed = self.session.rest(
+            f"/audit_trail?select=id&entity_id=eq.{self.playback_gateway['id']}"
+            f"&action=eq.FLOW_DEPLOYED&new_data-%3E%3Eflow_hash=eq.{recorded_flow_hash(self.metric)}")
+        self.assertEqual(status, 200)
+        self.assertEqual(deployed, [], "the replay recorded a flow deployment for the Playback gateway")
 
     def test_the_replayed_frames_reached_the_historian(self):
         """
