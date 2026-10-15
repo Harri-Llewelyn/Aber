@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { gatewaySparkplugId } from '../utils/sparkplugId'
 import { api } from '../api'
+import { gatewayUrl } from '../routes'
 
 /**
  * Arriving on Gateways by Sparkplug id, the drawer's uptime, and what the credential dialog is
@@ -41,9 +42,11 @@ const routeGet = (rows) => (path) => {
   return Promise.resolve([])
 }
 
-const show = async (rows, initialSearchFilter = '') => {
+/** Renders the page at the address an alert row or a chip links to, `/gateways?search=<id>`. */
+const show = async (rows, arrivingId = '') => {
   api.get.mockImplementation(routeGet(rows))
-  render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter={initialSearchFilter} onClearFilter={vi.fn()} />)
+  if (arrivingId) window.history.replaceState(null, '', gatewayUrl(arrivingId))
+  render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} />)
   await waitFor(() => expect(screen.getAllByText(rows[0].gateway_name).length).toBeGreaterThan(0))
 }
 

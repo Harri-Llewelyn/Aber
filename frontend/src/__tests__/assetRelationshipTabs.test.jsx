@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
+import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { CellsTab } from '../components/tabs/CellsTab'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
@@ -247,7 +247,7 @@ describe('The Site Map hands a cell over to the Cells page', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'North Shop' }))
     // The pin on the card: the area panel now lists the cell as a chip too.
     fireEvent.click(within(document.querySelector('.area-card')).getByRole('button', { name: 'Assembly Line 1' }))
-    return screen.findByRole('button', { name: /Open on Cells page/ })
+    return screen.findByRole('link', { name: /Open on Cells page/ })
   }
 
   it('passes the clicked cell id to onSelectCell', async () => {
@@ -292,14 +292,20 @@ describe('CellsTab consumes a handed-over cell filter', () => {
     expect(screen.getByText(/Clear filters \(1\)/)).toBeInTheDocument()
   })
 
-  it('falls back to the lifted initialSearchFilter prop when no query param was pushed', async () => {
+  it('follows the address on Back, as a reload would', async () => {
+    window.history.replaceState({}, '', '/cells?search=cell-1')
     api.get.mockImplementation(bothCells)
+    render(<CellsTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
+    await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
-    render(<CellsTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true}
-                     initialSearchFilter="cell-2" onClearFilter={vi.fn()} />)
-
-    await waitFor(() => expect(screen.getByText('Weld Bay 2')).toBeInTheDocument())
-    expect(screen.queryByText('Assembly Line 1')).not.toBeInTheDocument()
+    // Back to an entry that named the other cell: the page reads the address it lands on.
+    act(() => {
+      window.history.replaceState({}, '', '/cells?search=cell-2')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    const table = () => within(document.querySelector('tbody'))
+    await waitFor(() => expect(table().getByText('Weld Bay 2')).toBeInTheDocument())
+    expect(table().queryByText('Assembly Line 1')).not.toBeInTheDocument()
   })
 
   it('matches on cell name too, so the search box keeps working by hand', async () => {
@@ -316,19 +322,19 @@ describe('CellsTab consumes a handed-over cell filter', () => {
 
   // Without this, a reload or a Back re-applies a filter the user just cleared -- the query
   // string outlives the component state.
-  it('strips ?search= from the URL and releases the lifted filter when cleared', async () => {
+  it('strips ?search= from the URL when cleared', async () => {
     window.history.replaceState({}, '', '/cells?search=cell-1')
     api.get.mockImplementation(bothCells)
-    const onClearFilter = vi.fn()
 
-    render(<CellsTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true}
-                     initialSearchFilter="cell-1" onClearFilter={onClearFilter} />)
+    render(<CellsTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
 
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
     fireEvent.click(screen.getByText(/Clear filters/))
 
-    expect(window.location.search).toBe('')
-    expect(onClearFilter).toHaveBeenCalled()
+    // The filter leaves the address; the open drawer is not a filter, and stays.
+    const params = new URLSearchParams(window.location.search)
+    expect(params.has('search')).toBe(false)
+    expect(params.get('cell')).toBe('cell-1')
     await waitFor(() => expect(screen.getByText('Weld Bay 2')).toBeInTheDocument())
   })
 })

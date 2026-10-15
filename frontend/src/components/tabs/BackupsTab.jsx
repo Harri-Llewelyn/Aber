@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { api } from '../../api'
 import { usePolling } from '../../hooks/usePolling'
+import { useUrlState } from '../../hooks/useUrlState'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { ConfirmModal } from '../modals/ConfirmModal'
@@ -94,7 +95,7 @@ export function BackupsTab({ showToast }) {
   const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState(null)
   const [activeJob, setActiveJob] = useState(null)
-  const [filter, setFilter] = useState('all')
+  const [filter, setFilter] = useUrlState('status', 'all', { allowed: Object.keys(FILTERS) })
   const [limit, setLimit] = useState(PAGE_SIZE)
   const [loading, setLoading] = useState(true)
   const [paging, setPaging] = useState(false)
@@ -104,7 +105,8 @@ export function BackupsTab({ showToast }) {
   const [floorIds, setFloorIds] = useState(() => new Set())
   const [offsite, setOffsite] = useState(null)
   const [editingDestination, setEditingDestination] = useState(false)
-  const [selectedId, setSelectedId] = useState(null)
+  // A run's id, or a database's PHYSICAL key, in the address as `?run=`.
+  const [selectedId, setSelectedId] = useUrlState('run')
   // Each database's own backup by PHYSICAL key: undefined while its physical backup is off or not
   // yet read, null when it cannot be read.
   const [physical, setPhysical] = useState({})

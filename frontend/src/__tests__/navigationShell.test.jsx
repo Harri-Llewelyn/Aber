@@ -84,7 +84,7 @@ describe('Merged navigation shell', () => {
     expect(topbar().querySelector('nav')).toBeNull()
 
     for (const label of ALWAYS_VISIBLE) {
-      expect(within(nav).getByRole('button', { name: new RegExp(label, 'i') })).toBeTruthy()
+      expect(within(nav).getByRole('link', { name: new RegExp(label, 'i') })).toBeTruthy()
     }
   })
 
@@ -180,7 +180,7 @@ describe('Merged navigation shell', () => {
     expect(brand.getAttribute('aria-label')).toMatch(/site map/i)
 
     // Leave the Site Map, then click the mark to come back.
-    fireEvent.click(screen.getByRole('button', { name: /^Devices$/ }))
+    fireEvent.click(screen.getByRole('link', { name: /^Devices$/ }))
     await waitFor(() => expect(window.location.pathname).toBe('/devices'))
 
     fireEvent.click(brand)

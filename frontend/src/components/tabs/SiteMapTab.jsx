@@ -1,4 +1,6 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react'
+import { RouteLink } from '../common/RouteLink'
+import { areaUrl, cellUrl, deviceUrl, gatewayUrl, tabUrl } from '../../routes'
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { api } from '../../api'
 import { REALTIME_ENABLED, STALENESS_TICK_MS, refreshInterval } from '../../constants'
@@ -6,6 +8,7 @@ import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
+import { useUrlState, queryOf } from '../../hooks/useUrlState'
 import { gatewayLiveStatus, formatHeartbeat } from '../../utils/gatewayStatus'
 import { gatewayFleetCounts } from '../../utils/fleetCounts'
 import { useSetting } from '../../hooks/useSettings'
@@ -62,7 +65,8 @@ const PIN_ICON = { 1: 20, 2: 16, 3: 12 }
  * area, then every live area as its own plan with every one of its cells pinned on it; archived
  * areas are drawn only on request. Read only: assets are filed on their own pages, and cells are
  * placed on the plan from the Cells page. One context panel serves the lanes, the areas and the
- * pins: whichever was clicked last. `?area=<id>` opens on that area.
+ * pins: whichever was clicked last. The open panel is in the address (`?area=`, `?cell=` or
+ * `?lane=`), and `?area=<id>` from another page opens on that area and scrolls to it.
  */
 export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSelectArea, showToast, onNavigateTab, activeAlerts = [] }) {
   const [cells, setCells]     = useState([])
@@ -100,7 +104,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
   const sparkplugGroup = useSetting('sparkplug.group_id', '')
 
   // Archived areas, and the cells filed in them, are left off the map until asked for.
-  const [showArchived, setShowArchived] = useState(false)
+  const [showArchived, setShowArchived] = useUrlState('archived', false)
   const archivedAreas = areas.filter(a => a.is_archived)
   const visibleAreas = showArchived ? areas : areas.filter(a => !a.is_archived)
   const hiddenAreaIds = new Set(showArchived ? [] : archivedAreas.map(a => a.area_id))
@@ -110,18 +114,19 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
    * because this page polls, and an object would go stale. Choosing one clears the others: there
    * is one panel.
    */
-  const [openLane, setOpenLane] = useState(null)
-  const [selectedCellId, setSelectedCellId] = useState(null)
-  const [selectedAreaId, setSelectedAreaId] = useState(null)
-  // Resolved against what is drawn, so hiding an area closes its panel or its cell's.
+  const [openLane, setOpenLane] = useUrlState('lane', '', { allowed: [SOURCE_SITE_WIDE, SOURCE_SIMULATED, SOURCE_UNASSIGNED] })
+  const [selectedCellId, setSelectedCellId] = useUrlState('cell')
+  const [selectedAreaId, setSelectedAreaId] = useUrlState('area')
+  // Resolved against what is drawn, so hiding an area closes its panel or its cell's. Not before
+  // the first read, which would close a panel the address opened.
   const selectedCell = cells.find(c => c.cell_id === selectedCellId && !hiddenAreaIds.has(c.area_id)) || null
   const selectedArea = visibleAreas.find(a => a.area_id === selectedAreaId) || null
   useEffect(() => {
-    if (selectedCellId && !selectedCell) setSelectedCellId(null)
-  }, [selectedCellId, selectedCell])
+    if (!loading && selectedCellId && !selectedCell) setSelectedCellId(null)
+  }, [loading, selectedCellId, selectedCell, setSelectedCellId])
   useEffect(() => {
-    if (selectedAreaId && !selectedArea) setSelectedAreaId(null)
-  }, [selectedAreaId, selectedArea])
+    if (!loading && selectedAreaId && !selectedArea) setSelectedAreaId(null)
+  }, [loading, selectedAreaId, selectedArea, setSelectedAreaId])
   const toggleCell = (cellId) => {
     setOpenLane(null); setSelectedAreaId(null)
     setSelectedCellId(id => id === cellId ? null : cellId)
@@ -145,7 +150,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
 
   // Arriving from a plan on the Areas or Cells page names one area: open its panel, draw it even
   // when archived, and bring its card into view once it is drawn.
-  const [arrivalAreaId] = useState(() => new URLSearchParams(window.location.search).get('area') || '')
+  const [arrivalAreaId] = useState(() => queryOf().get('area') || '')
   const [scrollToAreaId, setScrollToAreaId] = useState(null)
   useArrivalSelection(arrivalAreaId, areas, (a, id) => a.area_id === id, (a) => {
     if (a.is_archived) setShowArchived(true)
@@ -204,11 +209,12 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     const status = deviceLifecycleStatus(a)
     const alert = alertForDevice(alerts, a)
     return (
-      <span
+      <RouteLink
         key={a.asset_id}
         className={`chip ${deviceChipClass(a, alert)}`}
-        onClick={() => onSelectDevice?.(a.asset_id)}
-        style={{ cursor: 'pointer', userSelect: 'none' }}
+        to={deviceUrl(a.asset_id)}
+        onNavigate={() => onSelectDevice?.(a.asset_id)}
+        style={{ userSelect: 'none' }}
         title={`${a.asset_name} [${a.asset_id}] — ${alert ? `ALERT: ${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''}` : deviceStatusTitle(status)} — Click to view on Devices page`}
       >
         <IconCpu size={11} />
@@ -232,19 +238,20 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
               : <><IconAlertTriangle size={10} /> WARNING</>}
           </span>
         )}
-      </span>
+      </RouteLink>
     )
   }
 
   const gatewayChip = (g) => {
     const gwStatus = gatewayLiveStatus(g)
     return (
-      <span
+      <RouteLink
         key={g.gateway_id}
         className="chip chip-gw"
         title={`Gateway ${g.gateway_name} [${g.gateway_id}] ${g.deployment === 'host' ? '(Host-run gateway)' : ''} (${gwStatus}, heartbeat ${formatHeartbeat(g.last_heartbeat)}) — ${g.device_count} device(s) — Click to view on Gateways page`}
-        onClick={() => onSelectGateway?.(g.gateway_id)}
-        style={{ cursor: 'pointer', borderColor: g.deployment === 'host' ? 'var(--accent)' : undefined }}
+        to={gatewayUrl(g.gateway_id)}
+        onNavigate={() => onSelectGateway?.(g.gateway_id)}
+        style={{ borderColor: g.deployment === 'host' ? 'var(--accent)' : undefined }}
       >
         {/* Three outcomes, not two: a red dot on a gateway nobody has installed yet is a fault
             report on an unfinished task. */}
@@ -255,7 +262,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
                 : 'badge-danger'}`} />
         <span className="chip-name mono">{g.gateway_name}</span>
         {g.deployment === 'host' && <span className="chip-flag" style={{ color: 'var(--accent-text)' }} title="Runs on this host"><IconZap size={9} /></span>}
-      </span>
+      </RouteLink>
     )
   }
 
@@ -281,10 +288,10 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
 
   /** A gateway in the cell and area panels: a chip that opens it on the Gateways page. */
   const panelGatewayChip = (g, areaWide = false) => (
-    <button key={g.gateway_id} className="chip chip-link chip-gw" onClick={() => onSelectGateway?.(g.gateway_id)} title={`Open ${g.gateway_name} on the Gateways page${areaWide ? ' — it serves the whole area' : ''}`}>
+    <RouteLink key={g.gateway_id} className="chip chip-link chip-gw" to={gatewayUrl(g.gateway_id)} onNavigate={() => onSelectGateway?.(g.gateway_id)} title={`Open ${g.gateway_name} on the Gateways page${areaWide ? ' — it serves the whole area' : ''}`}>
       <IconRadio size={11} /><span className="chip-name">{g.gateway_name}</span>
       {areaWide && <span className="chip-flag" style={{ color: 'var(--text-muted)' }}>AREA-WIDE</span>}
-    </button>
+    </RouteLink>
   )
 
   /** A device in the cell and area panels: its state's dot, and a flag while an alert fires on it. */
@@ -292,7 +299,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
     const status = deviceLifecycleStatus(d)
     const alert = alertForDevice(alerts, d)
     return (
-      <button key={d.asset_id} className="chip chip-link" onClick={() => onSelectDevice?.(d.asset_id)} title={`Open ${d.asset_name} on the Devices page — ${alert ? `ALERT: ${alert.alert_name}` : deviceStatusTitle(status)}${areaWide ? ' — it serves the whole area' : ''}`}>
+      <RouteLink key={d.asset_id} className="chip chip-link" to={deviceUrl(d.asset_id)} onNavigate={() => onSelectDevice?.(d.asset_id)} title={`Open ${d.asset_name} on the Devices page — ${alert ? `ALERT: ${alert.alert_name}` : deviceStatusTitle(status)}${areaWide ? ' — it serves the whole area' : ''}`}>
         <span className="badge-dot" style={{ background: deviceDotColor(d, alert) }} />
         <IconCpu size={11} />
         <span className="chip-name">{d.asset_name}</span>
@@ -300,7 +307,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           <span className="chip-flag" style={{ color: 'var(--danger-text)' }}>{alert.severity === 'critical' ? 'ALARM' : 'WARNING'}</span>
         )}
         {areaWide && <span className="chip-flag" style={{ color: 'var(--text-muted)' }}>AREA-WIDE</span>}
-      </button>
+      </RouteLink>
     )
   }
 
@@ -518,8 +525,8 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
       // Each action is offered only while the lane holds something to act on. Both are marked
       // primary; the panel draws the first one offered as the primary.
       actions: onNavigateTab ? [
-        laneAssets.length > 0 && { label: 'Open Devices page', icon: <IconCpu size={13} />, primary: true, onClick: () => onNavigateTab('devices'), title: `File these ${laneAssets.length} device(s) on the Devices page` },
-        laneGateways.length > 0 && { label: 'Open Gateways page', icon: <IconRadio size={13} />, primary: true, onClick: () => onNavigateTab('gateways'), title: `File these ${laneGateways.length} gateway(s) on the Gateways page` }
+        laneAssets.length > 0 && { label: 'Open Devices page', icon: <IconCpu size={13} />, primary: true, to: tabUrl('devices'), onClick: () => onNavigateTab('devices'), title: `File these ${laneAssets.length} device(s) on the Devices page` },
+        laneGateways.length > 0 && { label: 'Open Gateways page', icon: <IconRadio size={13} />, primary: true, to: tabUrl('gateways'), onClick: () => onNavigateTab('gateways'), title: `File these ${laneGateways.length} gateway(s) on the Gateways page` }
       ].filter(Boolean) : []
     }
   })() : null
@@ -576,6 +583,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
       actions: [
         {
           label: 'Open on Areas page', icon: <IconLayoutDashboard size={13} />, primary: true,
+          to: onSelectArea ? areaUrl(selectedArea.area_id) : tabUrl('areas'),
           onClick: () => onSelectArea ? onSelectArea(selectedArea.area_id) : onNavigateTab?.('areas'),
           title: 'Edit this area, or upload its plan, on the Areas page'
         }
@@ -644,6 +652,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
       {
         // The primary when the cell has no dashboard: the panel takes the first one marked.
         label: 'Open on Cells page', icon: <IconLayoutDashboard size={13} />, primary: true,
+        to: onSelectCell ? cellUrl(selectedCell.cell_id) : tabUrl('cells'),
         onClick: () => onSelectCell ? onSelectCell(selectedCell.cell_id) : onNavigateTab?.('cells'),
         title: 'Edit this cell, or place it on its area plan, on the Cells page'
       }

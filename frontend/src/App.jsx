@@ -2,6 +2,11 @@ import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 
 import { supabase } from './lib/supabaseClient'
 import { usePermissions } from './hooks/usePermissions'
 import { useAppRouting } from './hooks/useAppRouting'
+import { navigate } from './hooks/useUrlState'
+import {
+  deviceUrl, gatewayUrl, cellUrl, areaUrl, schemaUrl, devicesForSchemaUrl, siteMapAreaUrl, trailUrl,
+  approvalsForUrl, proposalSubjectUrl, settingUrl, unmappedMetricsUrl, tabUrl,
+} from './routes'
 import { useTheme } from './hooks/useTheme'
 import { useToast, clearStoredHistory } from './hooks/useToast'
 import { useApiActivity } from './hooks/useApiActivity'
@@ -405,96 +410,54 @@ function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReport
 }
 
 function Dashboard({ session, onSignOut, onSignInAgain }) {
-  /* One-shot, cleared by ApprovalsTab's onClearFocus. Held in state rather than a query parameter
-     because it is an intent, not a location, and must not replay on reload. */
-  const [proposalFocus, setProposalFocus] = useState(null)
-  const [selectedDeviceFilter, setSelectedDeviceFilter] = useState('')
-  const [selectedGatewayFilter, setSelectedGatewayFilter] = useState('')
-  // Set when a schema's device count is clicked on the Schemas page; consumed by DevicesTab.
-  const [selectedSchemaFilter, setSelectedSchemaFilter] = useState('')
-  // Separate from the device filter above: set by a device drawer's Schema chip and consumed by
-  // SchemasTab, which opens that schema's drawer.
-  const [selectedSchemaId, setSelectedSchemaId] = useState('')
-  // Set when a cell is opened from another page; consumed by CellsTab.
-  const [selectedCellFilter, setSelectedCellFilter] = useState('')
-  // Set by a cell drawer's Area chip; consumed by AreasTab, which opens that area's drawer.
-  const [selectedAreaFilter, setSelectedAreaFilter] = useState('')
-  // Set by the search bar; consumed by SettingsTab, which opens that setting's category on it.
-  const [selectedSettingKey, setSelectedSettingKey] = useState('')
-  // Set by a search-bar card that is one tab of its page; consumed by AccessControlTab.
-  const [selectedSection, setSelectedSection] = useState('')
-  // Set by an "Audit Trail" action on an asset row; consumed by AuditTrailTab as { id, type }.
-  const [selectedTrailEntity, setSelectedTrailEntity] = useState(null)
   // Set by clicking an entry on the Vocabulary page; consumed by MetricsTab, which resolves it
-  // against the vocabularies it already holds and opens its Add Metric dialog.
+  // against the vocabularies it already holds and opens its Add Metric dialog. State, not the
+  // address: it is an act to perform once, not a view to come back to.
   const [pendingVocabularyEntry, setPendingVocabularyEntry] = useState(null)
-  // Set by the export warning about unmapped metrics; applied once by MetricsTab, which clears it.
-  const [selectedMetricFilter, setSelectedMetricFilter] = useState('')
   const [showBugReport, setShowBugReport] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [showChangePassword, setShowChangePassword] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
   const closeHelp = useCallback(() => setShowHelp(false), [])
 
-  const { tab, setTab, handleNavClick } = useAppRouting(
-    setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter, setSelectedCellFilter,
-    setSelectedTrailEntity, setPendingVocabularyEntry, setSelectedAreaFilter
-  )
+  const { tab, setTab, handleNavClick } = useAppRouting()
 
   /**
-   * Drill into one asset's audit trace on the page that owns it, rather than in a dialog. `purged`
-   * is a tombstone's handover: the entity is gone from the live tables, so the page shows deleted
-   * entities rather than hiding every row of it.
+   * The cross-page drill-downs, defined once. Each goes to an address (routes.js), and the page at
+   * the other end reads its filters and drawer from it, so the destination is linkable and survives
+   * a reload. A page that renders the drill-down as a link uses the same address for its href.
+   *
+   * `purged` is a tombstone's hand-over: the entity is gone from the live tables, so the Audit
+   * Trail shows deleted entities rather than hiding every row of it.
    */
-  const viewTrailFor = (id, type, purged = false) => {
-    setSelectedTrailEntity({ id, type, purged })
-    setTab('audit-trail', { entity: id })
-  }
-
-  /**
-   * The cross-page hand-overs, defined once. Each sets state and pushes a query parameter: the
-   * state reaches a tab that is already mounted, and the query string survives a reload and makes
-   * the destination linkable. The target pages read both, URL first.
-   */
-  const showDevice  = (id) => { setSelectedDeviceFilter(id);  setTab('devices',  { search: id }) }
-  const showGateway = (id) => { setSelectedGatewayFilter(id); setTab('gateways', { search: id }) }
-  const showCell    = (id) => { setSelectedCellFilter(id);    setTab('cells',    { search: id }) }
-  const showArea    = (id) => { setSelectedAreaFilter(id);    setTab('areas',    { search: id }) }
-  /** The Site Map on one area: a plan preview on the Areas or Cells page. The map reads `area`. */
-  const showOnSiteMap = (id) => setTab('site-map', { area: id })
+  const viewTrailFor = (id, type, purged = false) => navigate(trailUrl(id, type, purged))
+  const showDevice  = (id) => navigate(deviceUrl(id))
+  const showGateway = (id) => navigate(gatewayUrl(id))
+  const showCell    = (id) => navigate(cellUrl(id))
+  const showArea    = (id) => navigate(areaUrl(id))
+  /** The Site Map on one area: a plan preview on the Areas or Cells page. */
+  const showOnSiteMap = (id) => navigate(siteMapAreaUrl(id))
   /** Open ONE schema's drawer on the Schemas page -- a device drawer's Schema chip. */
-  const showSchema  = (uuid) => { setSelectedSchemaId(uuid);  setTab('schemas',  { search: uuid }) }
+  const showSchema  = (uuid) => navigate(schemaUrl(uuid))
   /* A setting is reached by its key, not a UUID: the key is what the page, the code and every
      migration call it, and it is what a link to one should carry. */
-  const showSetting = (key) => { setSelectedSettingKey(key); setTab('settings', { search: key }) }
+  const showSetting = (key) => navigate(settingUrl(key))
   /** The Metrics catalog with Unmapped on, from the export's warning toast, which it dismisses. */
-  const showUnmappedMetrics = (toastId) => { setSelectedMetricFilter('unmapped'); setTab('metrics'); dismissToast(toastId) }
-  const showSection = (tabId, section) => { handleNavClick(tabId); setSelectedSection(section) }
+  const showUnmappedMetrics = (toastId) => { navigate(unmappedMetricsUrl()); dismissToast(toastId) }
+  /** One tab of a page: a search-bar card, or the rail's quarantine signal. */
+  const showSection = (tabId, section) => navigate(tabUrl(tabId, section))
   /** The opposite direction: every device provisioned with a schema. Note the `schema` key. */
-  const showDevicesForSchema = (uuid) => {
-    setSelectedSchemaFilter(uuid)
-    setTab('devices', { schema: uuid })
-  }
+  const showDevicesForSchema = (uuid) => navigate(devicesForSchemaUrl(uuid))
 
   /** What is already waiting on this asset, with the queue filtered to it. */
-  const showApprovalsFor = (device) => {
-    setProposalFocus({ subject: device.asset_id })
-    setTab('approvals')
-  }
+  const showApprovalsFor = (device) => navigate(approvalsForUrl(device.asset_id))
 
   /**
    * Opens the asset a proposal is about on the page that owns its form; that page's Propose a
    * Change dialog seeds itself from the proposal it finds. There is no separate edit-proposal
    * dialog.
    */
-  const openProposalSubject = (proposal) => {
-    // Before the `cell` test, not after: `startsWith` is a prefix match and "areas" shares none of
-    // these, but the device fallthrough at the end would take it if it were not named here.
-    if (proposal.entity_type.startsWith('area')) return showArea(proposal.entity_id)
-    if (proposal.entity_type.startsWith('cell')) return showCell(proposal.entity_id)
-    if (proposal.entity_type.startsWith('gateway')) return showGateway(proposal.entity_id)
-    return showDevice(proposal.entity_id)
-  }
+  const openProposalSubject = (proposal) => navigate(proposalSubjectUrl(proposal))
   const { theme, toggleTheme } = useTheme()
   const { toasts, showToast, expireToast, dismissToast, history, markAllRead, clearHistory } = useToast()
   const { mode: sidebarMode, setMode: setSidebarMode } = useSidebarMode()
@@ -508,7 +471,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   useEffect(() => {
     if (loadingPerms) return
     const current = TABS.find(t => t.id === tab)
-    if (current && !tabIsVisible(current, hasPermission, userRole)) setTab('site-map')
+    // Replaced rather than pushed, so Back does not return to the page that sent it here.
+    if (current && !tabIsVisible(current, hasPermission, userRole)) setTab('site-map', {}, { replace: true })
   }, [tab, loadingPerms, userRole, hasPermission, setTab])
 
   /* `?` opens the shortcuts list. It is a printable character, so the handler stands down for any
@@ -566,14 +530,17 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   const navTabs = TABS.filter(t => tabIsVisible(t, hasPermission, userRole))
   // The export warning leads to Metrics only for a reader who has that page in the rail.
   const unmappedMetricsLink = navTabs.some(t => t.id === 'metrics') ? showUnmappedMetrics : undefined
+  // Where each rail entry goes: the bare page, except Devices, which opens the Quarantine tab while
+  // the rail flags a waiting device.
+  const railHref = (id) => (id === 'devices' && navSignals.devices ? tabUrl('devices', 'quarantine') : tabUrl(id))
 
   return (
     <div className="app-shell">
       {/* The bar carries the brand, the search box and the session controls; navigation is in the
           rail. */}
       <header className="topbar">
-        {/* A button because it navigates home. `handleNavClick`, not `setTab`, so the cross-page
-            filters a drill-down handed over are cleared. */}
+        {/* A button because it navigates home, to the bare path, so no filter a drill-down set
+            comes along. */}
         <button
           className="topbar-brand"
           onClick={() => handleNavClick('site-map')}
@@ -589,9 +556,9 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
           </div>
         </button>
 
-        {/* Takes the same `navTabs` the rail does and the same hand-over helpers every other
-            surface navigates with, so a pasted device id lands where clicking that device lands,
-            query parameter and all. */}
+        {/* Takes the same `navTabs` the rail does and the same drill-down helpers every other
+            surface navigates with, so a pasted device id lands at the address clicking that device
+            does. */}
         <GlobalSearch
           tabs={navTabs}
           currentTab={tab}
@@ -683,7 +650,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
           expanded mode the row reflows. See Sidebar.jsx. */}
       <div className="app-body">
         {/* Devices' signal is the quarantine queue, so while it shows, the item opens that tab. */}
-        <Sidebar tabs={navTabs} currentTab={tab} onNavigate={id => (id === 'devices' && navSignals.devices ? showSection('devices', 'quarantine') : handleNavClick(id))} mode={sidebarMode} onChangeMode={setSidebarMode} signals={navSignals} />
+        <Sidebar tabs={navTabs} currentTab={tab} hrefFor={railHref} mode={sidebarMode} onChangeMode={setSidebarMode} signals={navSignals} />
 
         {/* A page's drawer closes help through this on a narrow screen (ContextPanel.jsx). The help
             drawer itself sits outside it. */}
@@ -691,30 +658,26 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
         <main className="content">
           <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
             {tab === 'site-map'       && <SiteMapTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} showToast={showToast} onNavigateTab={t => setTab(t)} />}
-            {tab === 'areas'          && <AreasTab showToast={showToast} onViewTrail={a => viewTrailFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} initialSearchFilter={selectedAreaFilter} onClearFilter={() => setSelectedAreaFilter('')} />}
-            {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewTrail={c => viewTrailFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
-            {tab === 'gateways'       && <GatewaysTab userRole={userRole} activeAlerts={firingAlerts} showToast={showToast} onViewTrail={g => viewTrailFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
-            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewTrail={a => viewTrailFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} initialSection={selectedSection} onClearSection={() => setSelectedSection('')} activeAlerts={firingAlerts} onShowUnmappedMetrics={unmappedMetricsLink} />}
+            {tab === 'areas'          && <AreasTab showToast={showToast} onViewTrail={a => viewTrailFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} />}
+            {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewTrail={c => viewTrailFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} />}
+            {tab === 'gateways'       && <GatewaysTab userRole={userRole} activeAlerts={firingAlerts} showToast={showToast} onViewTrail={g => viewTrailFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} />}
+            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewTrail={a => viewTrailFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} activeAlerts={firingAlerts} onShowUnmappedMetrics={unmappedMetricsLink} />}
             {/* Re-checked here: `tab` arrives from the URL as well as the nav, so hiding the item
                 is not the same as closing the page. */}
             {tab === 'audit-trail' && hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ) && (
               <AuditTrailTab
                 userRole={userRole}
-                initialEntity={selectedTrailEntity}
-                onClearEntity={() => setSelectedTrailEntity(null)}
                 showToast={showToast}
               />
             )}
-            {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={showDevicesForSchema} onSelectDevice={showDevice} initialSchemaId={selectedSchemaId} />}
-            {tab === 'metrics'        && <MetricsTab showToast={showToast} hasPermission={hasPermission} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} initialFilter={selectedMetricFilter} onClearFilter={() => setSelectedMetricFilter('')} />}
+            {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={showDevicesForSchema} onSelectDevice={showDevice} />}
+            {tab === 'metrics'        && <MetricsTab showToast={showToast} hasPermission={hasPermission} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} />}
             {tab === 'vocabulary'     && <VocabularyTab hasPermission={hasPermission} onUseEntry={entry => { setPendingVocabularyEntry(entry); setTab('metrics') }} />}
-            {tab === 'directory'      && <DirectoryTab showToast={showToast} initialSection={selectedSection} onClearSection={() => setSelectedSection('')} />}
+            {tab === 'directory'      && <DirectoryTab showToast={showToast} />}
             {/* `currentUserId` lets the page say "you" and offer Edit and Withdraw on the
                 proposer's own rows. The transition guard and RLS re-derive the proposer from
                 auth.uid(). */}
             {tab === 'approvals'      && <ApprovalsTab showToast={showToast} userRole={userRole} currentUserId={session?.user?.id}
-              initialSubject={proposalFocus?.subject || ''}
-              onClearFocus={() => setProposalFocus(null)}
               onOpenSubject={openProposalSubject}
               /* The proposal's subject, not the proposal: the page names its kind and whether it
                  was deleted, as the Archived Entities page does. */
@@ -732,9 +695,9 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
               <ColdStorageTab showToast={showToast} userRole={userRole} />}
             {/* The role is re-checked here, not only in the nav: routing can put `tab` on a value
                 the nav never offered. Still a courtesy -- RLS is what refuses the write. */}
-            {tab === 'access-control' && userRole === 'Administrator' && <AccessControlTab showToast={showToast} initialSection={selectedSection} onClearSection={() => setSelectedSection('')} userRole={userRole} currentUserId={session?.user?.id} />}
+            {tab === 'access-control' && userRole === 'Administrator' && <AccessControlTab showToast={showToast} userRole={userRole} currentUserId={session?.user?.id} />}
             {tab === 'backups' && userRole === 'Administrator' && <BackupsTab showToast={showToast} />}
-            {tab === 'settings' && userRole === 'Administrator' && <SettingsTab showToast={showToast} initialSetting={selectedSettingKey} onClearSetting={() => setSelectedSettingKey('')} />}
+            {tab === 'settings' && userRole === 'Administrator' && <SettingsTab showToast={showToast} />}
           </Suspense>
         </main>
         </HelpDrawerContext.Provider>

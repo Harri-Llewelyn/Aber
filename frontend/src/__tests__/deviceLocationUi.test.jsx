@@ -293,6 +293,8 @@ describe('the edit form', () => {
     openEdit()
     expect(screen.getByRole('radio', { name: /Area-Wide/i })).toBeDisabled()
     cleanup()
+    // The open drawer is in the address, which outlives the unmount.
+    window.history.replaceState(null, '', '/')
 
     await show([device()], { areas: [{ area_id: 'area-1', area_name: 'Area 1', cells: [], cell_count: 0 }] })
     openEdit()
@@ -429,8 +431,8 @@ describe('the Location row in the context panel', () => {
   it('is one row: the area and the cell, marked as from the gateway when inherited', async () => {
     const value = await location()
     expect(value.textContent).toBe('North Shop›Assembly(from gateway)')
-    expect(within(value).getByRole('button', { name: /North Shop/ })).toHaveAttribute('title', 'Open this area on the Areas page')
-    expect(within(value).getByRole('button', { name: /Assembly/ })).toHaveAttribute('title', 'Open this cell on the Cells page')
+    expect(within(value).getByRole('link', { name: /North Shop/ })).toHaveAttribute('title', 'Open this area on the Areas page')
+    expect(within(value).getByRole('link', { name: /Assembly/ })).toHaveAttribute('title', 'Open this cell on the Cells page')
     const labels = [...document.querySelectorAll('.context-panel .context-field-label')].map(l => l.textContent)
     expect(labels).not.toContain('Area (resolved)')
     expect(labels).not.toContain('Location Source')
@@ -452,6 +454,7 @@ describe('the Location row in the context panel', () => {
     let value = await location({ location_scope: 'area_wide', area_id: 'area-1', effective_cell_id: null, location_source: 'area_wide' })
     expect(value.textContent).toBe('North Shop›Area-Wide')
     cleanup()
+    window.history.replaceState(null, '', '/')
     value = await location({ location_scope: 'site_wide', effective_cell_id: null, location_source: 'site_wide' })
     expect(value.textContent).toBe('Site-Wide')
   })

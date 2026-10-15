@@ -124,11 +124,18 @@ describe('DirectoryTab service groups', () => {
     expect(document.querySelector('.card > .tab-strip + .table-wrap')).toBeTruthy()
   })
 
-  it('opens the group a search-bar card names, then drops the request', async () => {
-    const onClearSection = vi.fn()
-    render(<DirectoryTab showToast={vi.fn()} initialSection="ingestion" onClearSection={onClearSection} />)
+  it('opens the group the address names, as a search-bar card links to it', async () => {
+    window.history.replaceState(null, '', '/directory/ingestion')
+    render(<DirectoryTab showToast={vi.fn()} />)
     await waitFor(() => expect(tab(INGEST)).toHaveAttribute('aria-selected', 'true'))
-    expect(onClearSection).toHaveBeenCalled()
+  })
+
+  it('puts a chosen group in the path, the first group being the bare page', async () => {
+    await renderTab()
+    openTab(INGEST)
+    expect(window.location.pathname).toBe('/directory/ingestion')
+    openTab(APPS)
+    expect(window.location.pathname).toBe('/directory')
   })
 
   // The point of the change: a service is found by what it IS, not by where the alphabet put it.

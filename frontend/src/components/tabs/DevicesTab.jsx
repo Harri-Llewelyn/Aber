@@ -1,5 +1,7 @@
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import { RouteLink } from '../common/RouteLink'
+import { approvalsForUrl, areaUrl, cellUrl, gatewayUrl, schemaUrl, trailUrl } from '../../routes'
 import { supabase } from '../../lib/supabaseClient'
 import { api } from '../../api'
 import { trackRequest } from '../../lib/apiActivity'
@@ -78,6 +80,7 @@ import {
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
+import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
 
 // Sentinel values for the cell filter's two derived lanes. Prefixed so they can never collide
 // with a cell UUID, and kept out of `cells` because neither lane is a row in that table.
@@ -99,7 +102,7 @@ const VIEW_HELP = {
   },
 }
 
-export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewTrail, onViewApprovals, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter, initialSection, onClearSection, activeAlerts = [], onShowUnmappedMetrics }) {
+export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewTrail, onViewApprovals, hasPermission, activeAlerts = [], onShowUnmappedMetrics }) {
   /**
    * Which devices have an alert firing on them, via utils/deviceAlerts.js so the Site Map, Cells and
    * Gateways resolve alerts the same way.
@@ -125,8 +128,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [nameplateFor, setNameplateFor] = useState(null)
   const [openProposals, setOpenProposals] = useState([])
   // An ID, not the device object -- this page polls, so a captured object would freeze while the
-  // row beside it kept updating. Resolved against `assets` every render.
-  const [selectedId, setSelectedId] = useState(null)
+  // row beside it kept updating. Resolved against `assets` every render. In the address as
+  // `?device=`, so a link can open one device.
+  const [selectedId, setSelectedId] = useUrlState('device', '', { allowed: loading ? null : assets.map(a => a.asset_id) })
   // The device whose telemetry inspector is open, or null. A modal, because the inspector is a
   // four-column table and the drawer is too narrow for one.
   const [telemetryFor, setTelemetryFor] = useState(null)
@@ -145,18 +149,10 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_ids: [], cell_id: '', area_id: '', location_scope: SCOPE_CELL })
   const [areas, setAreas]       = useState([])
   const [form, setForm]         = useState(blank)
-  const [filterMode, setFilterMode] = useState('active')
-  // The card's tab: 'registered' or 'quarantine'. `initialSection` is a one-shot hand-over from App
-  // (the rail's quarantine signal, the search), consumed and cleared so a second one still lands.
-  const [view, setView] = useState(initialSection === 'quarantine' ? 'quarantine' : 'registered')
-  useEffect(() => {
-    if (!initialSection) return
-    if (initialSection === 'quarantine') {
-      setView('quarantine')
-      setSelectedId(null)
-    }
-    onClearSection?.()
-  }, [initialSection, onClearSection])
+  const [filterMode, setFilterMode] = useUrlState('lifecycle', 'active', { allowed: ['all', 'active', 'archived'] })
+  // The card's tab, in the path: `/devices` or `/devices/quarantine`. A tab change drops the
+  // query, so the Registered filters and the drawer, which belong to that tab, go with it.
+  const [view, setView] = useUrlTab('devices', Object.keys(VIEW_HELP), 'registered')
   // The device whose export dialog is open, or null.
   const [exportFor, setExportFor] = useState(null)
 
@@ -199,61 +195,21 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
    */
   const editFormFor = (device) => ({ ...device, schema_ids: schemaIdsForDevice(device) })
 
-  const getInitialSearch = () => {
-    const params = new URLSearchParams(window.location.search)
-    return params.get('search') || initialSearchFilter || ''
-  }
-
-  const getInitialSchema = () => {
-    const params = new URLSearchParams(window.location.search)
-    return params.get('schema') || initialSchemaFilter || ''
-  }
-
-  const [searchQuery, setSearchQuery] = useState(getInitialSearch)
-  // Set when arriving from a schema's device count on the Schemas page, or from ?schema=<uuid>.
-  const [schemaFilter, setSchemaFilter] = useState(getInitialSchema)
-  const [statusFilter, setStatusFilter] = useState('')
-  const [tagFilter, setTagFilter] = useState('')
-  const [gatewayFilter, setGatewayFilter] = useState('')
-  const [cellFilter, setCellFilter] = useState('')
-  const [attentionOnly, setAttentionOnly] = useState(false)
+  // Every filter is a query parameter, so a filtered list can be linked to and survives a reload.
+  // A drill-down from another page arrives as `?search=<id>` or `?schema=<uuid>`.
+  const [searchQuery, setSearchQuery] = useUrlState('search')
+  const [schemaFilter, setSchemaFilter] = useUrlState('schema', '', { allowed: loading ? null : schemas.map(s => s.schema_uuid) })
+  const [statusFilter, setStatusFilter] = useUrlState('status', '', { allowed: ['online', 'offline', 'unborn', 'overdue', 'unmodelled'] })
+  const [tagFilter, setTagFilter] = useUrlState('type')
+  const [gatewayFilter, setGatewayFilter] = useUrlState('gateway', '', { allowed: loading ? null : gateways.map(g => g.gateway_id) })
+  const [cellFilter, setCellFilter] = useUrlState('cell', '', {
+    allowed: loading ? null : [CELL_FILTER_UNASSIGNED, CELL_FILTER_SITE_WIDE, ...cells.map(c => c.cell_id)]
+  })
+  const [attentionOnly, setAttentionOnly] = useUrlState('attention', false)
   // Shadow devices. Off by default; not a `filterMode`, which is the archived axis.
-  const [showShadows, setShowShadows] = useState(false)
+  const [showShadows, setShowShadows] = useUrlState('replay', false)
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const urlSearch = params.get('search')
-    if (urlSearch) {
-      setSearchQuery(urlSearch)
-    } else if (initialSearchFilter) {
-      setSearchQuery(initialSearchFilter)
-    }
-  }, [initialSearchFilter])
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const urlSchema = params.get('schema')
-    if (urlSchema) {
-      setSchemaFilter(urlSchema)
-    } else if (initialSchemaFilter) {
-      setSchemaFilter(initialSchemaFilter)
-    }
-  }, [initialSchemaFilter])
-
-  // Drops the query string along with the filter, so a reload does not resurrect it.
-  const clearUrlQuery = () => {
-    if (window.location.search) {
-      window.history.replaceState({}, '', window.location.pathname)
-    }
-  }
-
-  const handleSchemaFilterChange = (val) => {
-    setSchemaFilter(val)
-    if (!val) {
-      clearUrlQuery()
-      if (onClearSchemaFilter) onClearSchemaFilter()
-    }
-  }
+  const handleSchemaFilterChange = (val) => setSchemaFilter(val)
 
   const resetFilters = () => {
     setSearchQuery('')
@@ -265,9 +221,6 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     setAttentionOnly(false)
     setFilterMode('active')
     setShowShadows(false)
-    clearUrlQuery()
-    if (onClearFilter) onClearFilter()
-    if (onClearSchemaFilter) onClearSchemaFilter()
   }
 
   // The Filters popover's own Clear: only the filters inside it, the schema hand-over included.
@@ -649,8 +602,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     assets,
     (a, term) => a.asset_id === term || effectiveSparkplugId(a) === term,
     (a) => {
-      if (a.is_quarantined) { chooseView('quarantine'); return }
-      setView('registered')
+      // Replaced, not pushed: Back from here should leave the page, not land on the arrival again.
+      if (a.is_quarantined) { setView('quarantine', { replace: true }); return }
+      if (view !== 'registered') setView('registered', { replace: true })
       setSelectedId(a.asset_id)
     }
   )
@@ -1436,9 +1390,10 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             label: 'Serving Gateway',
             full: true,
             value: selectedDevice.active_gateway_id ? (
-              <button
+              <RouteLink
                 className="chip chip-link"
-                onClick={() => onSelectGateway?.(selectedDevice.active_gateway_id)}
+                to={gatewayUrl(selectedDevice.active_gateway_id)}
+                onNavigate={() => onSelectGateway?.(selectedDevice.active_gateway_id)}
                 title="Open this gateway on the Gateways page"
               >
                 <IconRadio size={11} />
@@ -1446,7 +1401,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
                   {gateways.find(g => g.gateway_id === selectedDevice.active_gateway_id)?.gateway_name
                     || selectedDevice.gateway_name || selectedDevice.active_gateway_id}
                 </span>
-              </button>
+              </RouteLink>
             ) : null,
             title: "The edge node carrying this device's data. Reassign it in Edit Details."
           },
@@ -1464,28 +1419,30 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               const area = areaById.get(selectedLocation.effective_area_id)
               const cell = cellById.get(selectedLocation.effective_cell_id)
               const place = cell ? (
-                <button
+                <RouteLink
                   className="chip chip-link"
-                  onClick={() => onSelectCell?.(cell.cell_id)}
+                  to={cellUrl(cell.cell_id)}
+                  onNavigate={() => onSelectCell?.(cell.cell_id)}
                   title="Open this cell on the Cells page"
                 >
                   <IconLayoutDashboard size={11} />
                   <span className="chip-name">{cell.cell_name}</span>
-                </button>
+                </RouteLink>
               ) : NON_CELL_SOURCES.has(source) ? <span>{locationSourceLabel(source)}</span> : null
               if (!place) return null
               return (
                 <div className="device-location">
                   {area && (
                     <>
-                      <button
+                      <RouteLink
                         className="chip chip-link"
-                        onClick={() => onSelectArea?.(area.area_id)}
+                        to={areaUrl(area.area_id)}
+                        onNavigate={() => onSelectArea?.(area.area_id)}
                         title="Open this area on the Areas page"
                       >
                         <AreaIcon area={area} size={11} />
                         <span className="chip-name">{area.area_name}</span>
-                      </button>
+                      </RouteLink>
                       <span aria-hidden="true">›</span>
                     </>
                   )}
@@ -1516,15 +1473,16 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               return (
                 <div className="context-device-list">
                   {attached.map(schema => (
-                    <button
+                    <RouteLink
                       key={schema.schema_uuid}
                       className="chip chip-link"
-                      onClick={() => onSelectSchema?.(schema.schema_uuid)}
+                      to={schemaUrl(schema.schema_uuid)}
+                      onNavigate={() => onSelectSchema?.(schema.schema_uuid)}
                       title={`Open ${schema.schema_name} on the Schemas page`}
                     >
                       <IconClipboardList size={11} />
                       <span className="chip-name">{schema.schema_name}</span>
-                    </button>
+                    </RouteLink>
                   ))}
                 </div>
               )
@@ -1586,6 +1544,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               ? '1 change awaiting decision'
               : `${openForSelected.length} changes awaiting decision`,
             icon: <IconInbox size={13} />,
+            to: approvalsForUrl(selectedDevice.asset_id),
             onClick: () => onViewApprovals?.(selectedDevice),
             title: 'Open the approvals queue, filtered to this device'
           },
@@ -1632,6 +1591,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
              `audit_trail:read`. `.filter(Boolean)` drops it. */
           canReadTrail && {
             label: 'View Audit Trail', icon: <IconHistory size={13} />,
+            to: trailUrl(selectedDevice.asset_id, 'DEVICE'),
             onClick: () => onViewTrail?.(selectedDevice),
             title: 'Open the Audit Trail filtered to this device'
           },
