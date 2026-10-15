@@ -1851,6 +1851,8 @@ describe('Metric Catalog table — standard and semantic id columns', () => {
 
     const localRow = screen.getByText('safety_interlock').closest('tr')
     expect(within(localRow).getAllByText('Local extension').length).toBeGreaterThan(0)
+    // The Standard column is the one place a local extension is marked: nothing follows its name.
+    expect(localRow.querySelector('td:first-child').textContent).toBe('safety_interlock')
   })
 
   it('renders an unmapped metric as a dash rather than an empty cell', async () => {

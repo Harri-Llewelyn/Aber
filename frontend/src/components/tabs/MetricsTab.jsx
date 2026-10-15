@@ -653,13 +653,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   /** The cells both tabs share, so a metric reads the same in each. */
   const metricCells = (m) => (
     <>
-      <td>
-        <span className="mono">{m.name}</span>
-        {/* MTConnect permits local extensions, so this marks provenance, not a problem. */}
-        {!m.standard && m.category && (
-          <span className="cell-meta badge-follow" title="Local extension — not drawn from a standard vocabulary">local</span>
-        )}
-      </td>
+      <td><span className="mono">{m.name}</span></td>
       {/* Plain text in the row's one meta style: a pill would wrap a long standard name onto two lines. */}
       <td className="cell-meta" title={m.standard ? `Named from the ${m.standard} vocabulary` : undefined}>
         {m.standard || LOCAL_EXTENSION_LABEL}
