@@ -378,7 +378,7 @@ describe('the destination button', () => {
     withDestination([{ key: 'archive.enabled', value: false }])
     await show([], 'Administrator')
     const button = await findInToolbar('Set up cold storage')
-    expect(button).toHaveClass('btn-ghost')
+    expect(button).toHaveClass('btn-primary')
     expect(button.getAttribute('title')).toMatch(/dropped and cannot be recovered/)
   })
 
@@ -399,7 +399,7 @@ describe('the destination button', () => {
     api.archiveCredentialIsSet.mockResolvedValue(true)
     await show([], 'Administrator')
     const button = await findInToolbar('Change destination')
-    expect(button).toHaveClass('btn-ghost')
+    expect(button).toHaveClass('btn-primary')
     await waitFor(() => expect(button.getAttribute('title'))
       .toMatch('https://s3.eu-west-2.amazonaws.com/plant-history/site=broughton-7f3a9c21/'))
   })

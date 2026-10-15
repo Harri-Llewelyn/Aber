@@ -484,7 +484,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               <ClearFilters count={activeFilterCount} onClear={clearFilters} />
               {/* Stored first, then played: the worker reads its capture out of Storage. */}
               <ActionButton
-                className="btn btn-ghost btn-sm"
+                className="btn btn-primary btn-sm"
                 permitted={canManage}
                 deniedTitle={DENIED_TITLE}
                 onClick={() => playFileRef.current?.click()}

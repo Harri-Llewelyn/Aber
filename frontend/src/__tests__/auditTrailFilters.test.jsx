@@ -1076,6 +1076,10 @@ describe('Audit Trail — removed tag filter', () => {
     fireEvent.change(screen.getByPlaceholderText('Search a name or any ID…'), { target: { value: 'Press' } })
     const clear = await screen.findByRole('button', { name: /Clear filters/ })
     expect(clear.nextElementSibling).toBe(exportButton)
+    // An action is filled; Clear filters beside it is a filter control, and stays outlined (#971).
+    expect(exportButton).toHaveClass('btn-primary')
+    expect(exportButton).not.toHaveClass('btn-ghost')
+    expect(clear).toHaveClass('btn-ghost')
   })
 
   it('no longer offers the auto-refresh control, having replaced it with a poll (issue #42)', async () => {

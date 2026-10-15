@@ -994,7 +994,7 @@ function offsiteBase(destination) {
  * The off-site destination as a toolbar button, left of Take a backup. Unset or incomplete is a
  * warning rather than an error: the backups are good, and they share a disk with the data they
  * protect. The warning is the button's description as well as its tooltip, so a screen reader
- * hears it. Set, it is a neutral button whose tooltip names where copies go.
+ * hears it. Set, it is filled, as a toolbar's actions are, and its tooltip names where copies go.
  */
 function DestinationButton({ destination, onEdit }) {
   const descriptionId = useId()
@@ -1002,7 +1002,7 @@ function DestinationButton({ destination, onEdit }) {
   const base = offsiteBase(destination)
   if (base) {
     return (
-      <button className="btn btn-ghost btn-sm" onClick={onEdit} title={`Every backup is copied, encrypted, to ${base}`}>
+      <button className="btn btn-primary btn-sm" onClick={onEdit} title={`Every backup is copied, encrypted, to ${base}`}>
         Change destination
       </button>
     )

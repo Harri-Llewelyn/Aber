@@ -400,7 +400,8 @@ describe('the off-site copy', () => {
     ])
     renderTab()
     const change = await screen.findByRole('button', { name: 'Change destination' })
-    expect(change).toHaveClass('btn-ghost')
+    // Filled, as a toolbar's actions are: it sits beside Take a backup, also filled (#971).
+    expect(change).toHaveClass('btn-primary')
     expect(change).not.toHaveAttribute('aria-describedby')
     expect(change).toHaveAttribute('title', `Every backup is copied, encrypted, to ${BASE}`)
     expect(screen.getByTestId('run-j-1')).toHaveTextContent('Copied')
