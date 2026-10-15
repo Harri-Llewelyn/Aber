@@ -93,6 +93,9 @@
   --cluster-text: #d8b4fe;
   /* The offline and archived device chip's fill: a white lift on the dark card. */
   --chip-offline-bg: rgba(255, 255, 255, 0.05);
+  /* Its label: --text-muted's grey, a step lighter because the lift costs it AA (4.49:1 on the lift,
+     4.67:1 here). */
+  --chip-offline-text: #8891a5;
   /* The monospace face, written once. Structural, so the light theme does not restate it. */
   --font-mono:    'JetBrains Mono', monospace;
   /* The interface face, written once. Structural, like --font-mono. */
@@ -185,6 +188,7 @@
   /* The dark theme's white lift, unchanged: on a white card it paints nothing, so the chip is an
      outline. */
   --chip-offline-bg: rgba(255, 255, 255, 0.05);
+  --chip-offline-text: #475569;
   --shadow:       0 4px 20px rgba(0, 0, 0, 0.06);
 }
 
@@ -3067,7 +3071,8 @@ span.area-plan-pin { cursor: inherit; }
   color: var(--warning-text);
 }
 
-.context-alert-critical .context-alert-head { color: var(--danger); }
+/* --danger-text, not --danger: the head's label sits on the rose tint. */
+.context-alert-critical .context-alert-head { color: var(--danger-text); }
 
 .context-alert-name { flex: 1; min-width: 0; }
 
@@ -3152,10 +3157,11 @@ span.area-plan-pin { cursor: inherit; }
   animation: alert-pill-pulse 2.4s ease-in-out infinite;
 }
 
+/* --danger-text, not --danger: the label sits on its own rose tint. */
 .alert-pill-critical {
   border-color: var(--danger);
   background: color-mix(in srgb, var(--danger) 16%, transparent);
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .alert-pill-warning {
@@ -3625,8 +3631,10 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
 .chip-gw { border-color: color-mix(in srgb, var(--success) 30%, transparent); }
 .chip-success { border-color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); color: var(--text-primary); }
 .chip-warning { border-color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, transparent); color: var(--text-primary); }
-.chip-danger  { border-color: var(--danger);  background: var(--danger-tint); color: var(--danger); font-weight: 600; }
-.chip-offline { border-color: color-mix(in srgb, var(--text-dim) 40%, transparent); background: var(--chip-offline-bg); color: var(--text-muted); font-weight: 500; }
+/* --danger-text and --chip-offline-text, not --danger and --text-muted: both measure under AA on the
+   fill their chip paints. */
+.chip-danger  { border-color: var(--danger);  background: var(--danger-tint); color: var(--danger-text); font-weight: 600; }
+.chip-offline { border-color: color-mix(in srgb, var(--text-dim) 40%, transparent); background: var(--chip-offline-bg); color: var(--chip-offline-text); font-weight: 500; }
 
 /* Context panel: the right-hand drawer, and the flex row that lets it push rather than cover.
    `min-width: 0` on the main column is what lets it give up width: a flex item defaults to

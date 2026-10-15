@@ -197,6 +197,36 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
       `${label} in ${themeName}: ${value} measured ${ratio.toFixed(2)}:1, needs ${threshold}:1`
     ).toBeGreaterThanOrEqual(threshold)
   })
+
+  /**
+   * Four labels measured as App.css writes them: the colour from the rule that sets it, on the fill
+   * from the rule that paints it, over the ground the element sits on. A label moved back to
+   * --danger or --text-muted fails here, because the cases above name the token and these do not.
+   */
+  const labels = [
+    // [what, label selector, fill selector, ground]
+    ['danger device chip',           '.chip-danger',          '.chip-danger',          card],
+    ['offline device chip',          '.chip-offline',         '.chip-offline',         card],
+    ['critical alert pill',          '.alert-pill-critical',  '.alert-pill-critical',  surface],
+    ['critical alert in the drawer', '.context-alert-critical .context-alert-head', '.context-alert-critical', surface],
+  ]
+
+  it.each(labels)('%s label clears AA on its own fill', (what, labelSelector, fillSelector, ground) => {
+    const colour = paint(labelSelector, 'color')
+    const ratio = contrast(rgb(colour, t), on(paint(fillSelector), ground))
+    expect(
+      Number(ratio.toFixed(2)),
+      `${what} in ${themeName}: ${labelSelector} writes color: ${colour}, which measured ${ratio.toFixed(2)}:1 on its fill, needs ${AA_TEXT}:1`
+    ).toBeGreaterThanOrEqual(AA_TEXT)
+  })
+
+  // The offline chip is the quiet one: its label gains contrast to clear AA, not to compete with
+  // the name on an online chip.
+  it('keeps the offline chip quieter than an online one', () => {
+    const offline = contrast(rgb(paint('.chip-offline', 'color'), t), on(paint('.chip-offline'), card))
+    const online = contrast(rgb(paint('.chip-success', 'color'), t), on(paint('.chip-success'), card))
+    expect(offline, `${themeName}: offline ${offline.toFixed(2)}:1, online ${online.toFixed(2)}:1`).toBeLessThan(online)
+  })
 })
 
 /**
