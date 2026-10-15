@@ -1412,8 +1412,11 @@ describe('playing a file', () => {
       ?.querySelector(':scope > button:last-child')
     expect(document.querySelector('.card-heading button')).toBeNull()
     expect(inToolbar()).toHaveTextContent('Play a file…')
+    // Filled, as a toolbar's action is on every page, on both tabs (#971).
+    expect(inToolbar()).toHaveClass('btn-primary')
     fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
     expect(inToolbar()).toHaveTextContent('Play a file…')
+    expect(inToolbar()).toHaveClass('btn-primary')
     const button = screen.getByRole('button', { name: /Play a file…/ })
     fireEvent.click(button)
     click.mockRestore()
@@ -1431,6 +1434,7 @@ describe('playing a file', () => {
     await screen.findByText('Line 1 Gateway')
     const button = screen.getByRole('button', { name: /Play a file…/ })
     expect(button).toBeDisabled()
+    expect(button).toHaveClass('btn-primary', 'btn-disabled')
     expect(button).toHaveAttribute('title', 'Requires Administrator or Shopfloor Manager')
 
     dropOnCard(editedFile())

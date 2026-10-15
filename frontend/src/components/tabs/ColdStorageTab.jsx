@@ -315,18 +315,18 @@ export function ColdStorageTab({ showToast, userRole }) {
 }
 
 /**
- * The toolbar's way into the destination dialog, in three states: off (neutral, and its tooltip
- * says what is lost meanwhile), on but incomplete (a warning naming what is missing, also given to
- * a screen reader), and on and complete (neutral, naming where objects go). Administrator only,
- * rendered by the caller on that condition: for anybody else the sensitive reads come back empty
- * and a configured stack would read as unconfigured.
+ * The toolbar's way into the destination dialog, in three states: off (filled, as a toolbar's
+ * actions are, and its tooltip says what is lost meanwhile), on but incomplete (amber, naming what
+ * is missing, also given to a screen reader), and on and complete (filled, naming where objects
+ * go). Administrator only, rendered by the caller on that condition: for anybody else the
+ * sensitive reads come back empty and a configured stack would read as unconfigured.
  */
 function DestinationButton({ enabled, missing, destination, onOpen }) {
   const describedBy = useId()
   if (!enabled) {
     return (
       <button
-        className="btn btn-ghost btn-sm"
+        className="btn btn-primary btn-sm"
         onClick={onOpen}
         title="Archiving is off: raw telemetry past the retention window is dropped and cannot be recovered."
       >
@@ -346,7 +346,7 @@ function DestinationButton({ enabled, missing, destination, onOpen }) {
     )
   }
   return (
-    <button className="btn btn-ghost btn-sm" onClick={onOpen} title={`Objects are written to ${destination}`}>
+    <button className="btn btn-primary btn-sm" onClick={onOpen} title={`Objects are written to ${destination}`}>
       Change destination
     </button>
   )

@@ -1524,7 +1524,7 @@ export function AuditTrailTab({ userRole, showToast }) {
             {/* Export writes the events the page is holding, not everything that matches, and the
                 tooltip says so. */}
             <button
-              className="btn btn-ghost btn-sm"
+              className="btn btn-primary btn-sm"
               onClick={() => downloadCSV(exportRows(), 'audit-trail-export.csv')}
               title={hasMoreToLoad
                 ? `Download the ${events.length} events loaded here as CSV. ${totalMatching} match `
