@@ -305,8 +305,8 @@ def _finish(state, reason):
         ))
         return
 
-    first = messages[0]["payload"].get("timestamp")
-    capture_epoch_ms = int(first) if first is not None else int(time.time() * 1000)
+    # The first message's own clock, or when it was received: the offsets count from that receipt.
+    capture_epoch_ms = capture.first_message_epoch_ms(messages[0]["payload"], state.first_ms)
     edge_nodes, devices = capture.capture_identities(messages)
 
     document = {

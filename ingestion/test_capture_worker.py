@@ -31,6 +31,7 @@ import os
 import sys
 import types
 import unittest
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -423,6 +424,140 @@ class DrainIsExclusive(unittest.TestCase):
         drained = j.drain()
         self.assertEqual(len(drained), 1)
         self.assertEqual(j.messages, [])
+
+
+def unstamped_wire():
+    """A protobuf payload from a publisher that sends no clock: neither the message nor its metric."""
+    p = sparkplug_b_pb2.Payload()
+    m = p.metrics.add()
+    m.name = "Temperature"
+    m.datatype = 10
+    m.double_value = 21.5
+    return p.SerializeToString()
+
+
+class TheCaptureEpoch(unittest.TestCase):
+    """
+    A capture is rebased from its epoch, and the offsets count from the first message's RECEIPT.
+    A first message with no payload clock must take that receipt as its epoch: taking the time the
+    recording ended files every stamped reading early by the length of the recording.
+    """
+
+    RECEIVED_S = 1_800_000_000.0
+    FINISHED_S = RECEIVED_S + 2 * 3600
+
+    def _finished(self, raw):
+        j = job()
+        topic = "spBv1.0/%s/NDATA/%s" % (GROUP, GWY)
+        with patch.object(capture_worker.time, "time", return_value=self.RECEIVED_S):
+            j.append(topic, raw, "NDATA")
+        uploads = []
+        storage = MagicMock()
+        storage.from_.return_value.upload.side_effect = lambda **kw: uploads.append(kw)
+        with patch.object(capture_worker, "_storage", storage), \
+                patch.object(capture_worker, "_supabase", MagicMock()), \
+                patch.object(capture_worker.time, "time", return_value=self.FINISHED_S):
+            capture_worker._finish(j, "duration reached")
+        self.assertEqual(len(uploads), 1, "the capture was not stored")
+        return json.loads(uploads[0]["file"])
+
+    def test_a_first_message_with_no_clock_is_rebased_from_its_receipt(self):
+        document = self._finished(unstamped_wire())
+        self.assertEqual(document["capture_epoch_ms"], int(self.RECEIVED_S * 1000))
+
+    def test_a_first_message_with_a_zero_clock_is_rebased_from_its_receipt(self):
+        document = self._finished(wire(timestamp=0))
+        self.assertEqual(document["capture_epoch_ms"], int(self.RECEIVED_S * 1000))
+
+    def test_a_first_message_with_a_clock_is_rebased_from_it(self):
+        document = self._finished(wire(timestamp=1700000000000))
+        self.assertEqual(document["capture_epoch_ms"], 1700000000000)
+
+    def test_a_reading_stamped_later_lands_where_it_was_taken(self):
+        # The first message carries no clock; a later one carries its device's. Rebased from the
+        # receipt, a reading stamped 30 s after the first message plays 30 s after the start.
+        document = self._finished(unstamped_wire())
+        epoch = document["capture_epoch_ms"]
+        later = {"timestamp": epoch + 30_000, "metrics": [
+            {"name": "Temperature", "timestamp": epoch + 30_000, "double_value": 22.0}]}
+        moved = capture.rebase_payload(later, epoch, 1_900_000_000_000)
+        self.assertEqual(moved["metrics"][0]["timestamp"], 1_900_000_030_000)
+
+
+class TheWindowIsTheDaemons(unittest.TestCase):
+    """
+    capture.py restates the daemon's timestamp window and must not import the daemon, so this suite
+    (which can) holds the two together: the three bounds, and the verdict on what each puts on the
+    wire.
+    """
+
+    def test_the_bounds_are_the_daemons(self):
+        for name in ("TELEMETRY_MAX_AGE_SECONDS", "TELEMETRY_MAX_FUTURE_SECONDS",
+                     "TELEMETRY_MAX_HISTORICAL_AGE_SECONDS"):
+            self.assertEqual(getattr(capture, name), getattr(ingestion, name), name)
+
+    def test_a_stamp_is_judged_as_the_daemon_judges_it(self):
+        now = datetime(2026, 10, 15, 12, 0, 0, tzinfo=timezone.utc)
+        now_ms = int(now.timestamp() * 1000)
+        bounds = (ingestion.TELEMETRY_MAX_AGE_SECONDS, ingestion.TELEMETRY_MAX_HISTORICAL_AGE_SECONDS,
+                  -ingestion.TELEMETRY_MAX_FUTURE_SECONDS)
+        offsets = sorted({-bound + step for bound in bounds for step in (-1, 0, 1)} | {0, 8 * 86400})
+        for historical in (False, True):
+            for ahead in offsets:
+                stamp = now + timedelta(seconds=ahead)
+                expected = ingestion.timestamp_refusal(stamp, historical, now) is None
+                got = capture.timestamp_is_sane(int(stamp.timestamp() * 1000), now_ms, historical)
+                self.assertEqual(got, expected, "historical=%s, %+ds from now" % (historical, ahead))
+
+    @staticmethod
+    def _daemon_drops(plan, now_ms):
+        """The metrics the daemon's window drops from what the plan puts on the wire."""
+        dropped = 0
+        for delay_ms, _topic, raw, _ in plan:
+            arrives = datetime.fromtimestamp((now_ms + delay_ms) / 1000.0, timezone.utc)
+            payload, _encoding = capture.decode_wire_payload(raw)
+            payload_ts = payload.timestamp if payload.timestamp > 0 else int(arrives.timestamp() * 1000)
+            payload_dt = datetime.fromtimestamp(payload_ts / 1000.0, timezone.utc)
+            for metric in payload.metrics:
+                if metric.HasField("timestamp") and metric.timestamp > 0:
+                    stamped = datetime.fromtimestamp(metric.timestamp / 1000.0, timezone.utc)
+                else:
+                    stamped = payload_dt
+                if ingestion.timestamp_refusal(stamped, ingestion.is_historical(metric), arrives):
+                    dropped += 1
+        return dropped
+
+    def test_a_plan_is_judged_as_the_daemon_will_judge_it_at_every_speed(self):
+        epoch, now_ms, hour = 1_700_000_000_000, 1_800_000_000_000, 3600 * 1000
+        gateway, device, mapped = "gwy" + "1" * 21, "dev" + "2" * 21, "dev" + "3" * 21
+        stamps = (
+            (0, False), (-20 * 60 * 1000, False), (4_000, False), (-30 * hour, False),
+            (-30 * hour, True), (-8 * 24 * hour, True), (6 * 60 * 1000, True), (-6 * 24 * hour, True),
+        )
+        messages = []
+        for offset in (0, 60_000, 3_600_000):
+            for stamp, historical in stamps:
+                metric = {"name": "Systems/T", "timestamp": epoch + offset + stamp, "double_value": 1.0}
+                if historical:
+                    metric["is_historical"] = True
+                messages.append({
+                    "offset_ms": offset, "topic": "spBv1.0/Aber/DDATA/%s/%s" % (gateway, device),
+                    "payload": {"timestamp": epoch + offset, "metrics": [metric]},
+                })
+        document = {
+            "aber_capture_version": capture.CAPTURE_VERSION, "capture_epoch_ms": epoch,
+            "messages": sorted(messages, key=lambda m: m["offset_ms"]),
+        }
+        for speed in (0.01, 0.1, 1.0, 10.0):
+            for encoding in (capture.ENCODING_PROTOBUF, capture.ENCODING_JSON):
+                for entry in document["messages"]:
+                    entry["encoding"] = encoding
+                plan = capture.plan_playback(document, gateway, {device: mapped}, now_ms, speed=speed)
+                expected = self._daemon_drops(plan, now_ms)
+                self.assertEqual(capture.window_outcome(plan, now_ms)[2], expected,
+                                 "speed %s, %s" % (speed, encoding))
+                if speed == 1.0:
+                    self.assertGreater(expected, 0, "the fixture drops nothing, so proves little")
 
 
 if __name__ == "__main__":

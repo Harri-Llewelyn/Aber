@@ -359,8 +359,9 @@ passed through.
 
 ### Rebasing, and why it is also the speed control
 
-`_timestamp_is_sane()` rejects any metric more than 24 hours behind now, because such a row *"lands
-outside the retention policy, or inside an already-compressed chunk that rejects the write"*. A
+`timestamp_refusal()` rejects any metric more than 24 hours behind now (7 days when it is flagged
+`is_historical`), because such a row *"lands outside the retention policy, or inside an
+already-compressed chunk that rejects the write"*. A
 capture published at its original timestamps is therefore worthless the day after it was recorded —
 and could not be written even if it were fresh, since `telemetry`'s primary key is
 `(time, asset_id, metric_name)` and a verbatim second run collides row for row.
@@ -373,12 +374,27 @@ only when the metric has none, so rebasing the payload alone would leave every m
 capture's clock for the sanity window to drop — a playback that connects, publishes, reports
 success and writes nothing.
 
-**`--speed` cannot push a message outside that window**, which is worth stating because the
-intuition says otherwise. Playing an hour of capture at 0.1x takes ten hours, but the rebasing
-divides by the same speed, so the timestamp moves to exactly ten hours from now too. The scheduler
-and the rebasing share a divisor. What *does* fail is a timestamp already far from the capture
-epoch — a stale reading, a device clock skewed against the recorder's, or a hand edit — and
-`play` reports those before publishing rather than leaving them to be discovered as a gap.
+**A slow `--speed` can push a reading outside that window.** Playing an hour of capture at 0.1x
+takes ten hours, and the rebasing divides by the same speed, so a stamp at its own message's
+receipt time stays level with it at any speed. Any other gap between a stamp and its message is
+divided by the speed too. A metric stamped 20 minutes before its birth message is 20 minutes behind
+at 1x, 200 minutes at 0.1x and 33 hours at 0.01x, which is past 24 hours. A device clock 4 seconds
+fast is 400 seconds ahead at 0.01x, which is past 5 minutes. The scheduler and the rebasing share a
+divisor, and the plan carries both, so `play` and the worker judge each reading at the chosen speed
+and report the ones the daemon will discard — too old, or too far in the future — before
+publishing. Their message says when a slow speed is part of the cause, and that retrying at 1x may
+help.
+
+**A reading flagged `is_historical` is judged by the historical bound**, as the daemon judges it.
+`capture.py` restates the three bounds (`TELEMETRY_MAX_AGE_SECONDS`, `TELEMETRY_MAX_FUTURE_SECONDS`
+and `TELEMETRY_MAX_HISTORICAL_AGE_SECONDS`, which it reads from the same environment variable, and
+the chart passes the same value to the playback worker), and `test_capture_worker.py` holds them to
+the daemon's. A capture of a gateway replaying its buffer after an outage therefore plays.
+
+**The capture's epoch is the first message's own clock**, or the time that message was received
+when its payload carries none. It is never the time the recording ended: the offsets count from the
+first receipt, and a later fallback would file every stamped reading early by the length of the
+recording.
 
 ### The file is JSON; the wire is whatever was recorded
 
@@ -1705,7 +1721,7 @@ published default is a silent security downgrade, and the failure mode is silenc
 | `DB_PASSWORD` | **required** | Unless `TIMESCALEDB_URL` is set |
 | `SUPABASE_URL` | `http://127.0.0.1:54321` | |
 | `SUPABASE_PUBLISHABLE_KEY` / `SUPABASE_INGESTION_KEY` | **required** | The gateway's `apikey` and the `Service_Ingestor` bearer (`secrets.ingestionKey`). Without either the daemon exits rather than running fail-open; it never holds the service-role key |
-| `TELEMETRY_MAX_HISTORICAL_AGE_SECONDS` | `604800` (7 days) | How old an `is_historical` reading may be. `ingestion.historicalMaxAgeSeconds` — see [Loss model](#loss-model) |
+| `TELEMETRY_MAX_HISTORICAL_AGE_SECONDS` | `604800` (7 days) | How old an `is_historical` reading may be. `ingestion.historicalMaxAgeSeconds` — see [Loss model](#loss-model). The playback worker reads it too, to judge a replay as the daemon will |
 | `TIMESCALEDB_ROLLUPS_ENABLED` | `true` | Whether a late replay's hours are recorded for the rollups. The chart sets it from `timescaledb.rollups.enabled`; `false` records nothing — see [The historian writer](#the-historian-writer) |
 | `DEVICE_OFFLINE_TIMEOUT_SECONDS` | `300` | Silence after which a device is marked OFFLINE. `0` disables the watchdog |
 | `DEVICE_WATCHDOG_INTERVAL_SECONDS` | `30` | Sweep interval |

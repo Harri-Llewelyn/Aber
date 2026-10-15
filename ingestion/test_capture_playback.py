@@ -402,11 +402,10 @@ class SanityWindowTests(unittest.TestCase):
     """
     The check that catches a playback which would report success and write nothing.
 
-    THE FIRST VERSION OF THIS SUITE ASSERTED THE OPPOSITE OF THE TRUTH and the tests caught it,
-    so the corrected property is pinned here rather than merely fixed: no choice of --speed can
-    put a message outside the window, because rebase_payload() and the scheduler divide by the
-    same number. What survives rebasing is a timestamp's distance from the capture epoch, so that
-    distance is the only thing that can be out of range.
+    WHAT IS JUDGED IS THE GAP BETWEEN A STAMP AND THE TIME ITS MESSAGE ARRIVES, and the speed
+    divides that gap. rebase_payload() and the scheduler share a divisor, so a stamp at its
+    message's own receipt time stays in window at any speed. Any other gap is stretched by a slow
+    speed: a metric stamped 20 minutes before its birth is 33 hours behind at 0.01x.
     """
 
     def test_a_normal_playback_has_nothing_out_of_window(self):
@@ -416,11 +415,11 @@ class SanityWindowTests(unittest.TestCase):
         )
         self.assertEqual(capture.unsane_timestamps(plan, NOW), [])
 
-    def test_no_speed_can_push_a_message_out_of_window(self):
-        # THE PROPERTY, NOT AN EXAMPLE. An hour of capture from a ten-hour crawl to a 600x
-        # sprint: the send delay and the timestamp move together, so the offset at send is
-        # always zero. A future change that rebased against wall time instead of the shared
-        # divisor would break this at both extremes.
+    def test_a_reading_stamped_at_its_receipt_stays_in_window_at_any_speed(self):
+        # THE PROPERTY, NOT AN EXAMPLE, FOR A GAP OF ZERO. An hour of capture from a ten-hour
+        # crawl to a 600x sprint: the send delay and the timestamp move together, so the offset
+        # at send is always zero. A future change that rebased against wall time instead of the
+        # shared divisor would break this at both extremes.
         long_capture = capture_file([message(0, "DDATA"), message(3_600_000, "DDATA")])
         for speed in (0.1, 0.5, 1.0, 60.0, 600.0):
             plan = capture.plan_playback(long_capture, GW, DEFAULT_MAP, NOW, speed=speed)
@@ -428,6 +427,36 @@ class SanityWindowTests(unittest.TestCase):
                 capture.unsane_timestamps(plan, NOW), [],
                 "speed %r put a message outside the window" % speed,
             )
+
+    def _gap_capture(self, stamp_offset_ms, **metric):
+        """One DBIRTH at the capture epoch whose only metric is stamped `stamp_offset_ms` from it."""
+        return capture_file([message(0, "DBIRTH", metrics=[
+            dict({"name": "Systems/TEMPERATURE", "timestamp": EPOCH + stamp_offset_ms,
+                  "double_value": 20.0}, **metric),
+        ])])
+
+    def _dropped_at(self, document, speed):
+        plan = capture.plan_playback(document, GW, DEFAULT_MAP, NOW, speed=speed)
+        return capture.window_outcome(plan, NOW)[2]
+
+    def test_a_slow_speed_stretches_how_old_a_reading_is_before_its_birth(self):
+        # A metric stamped 20 minutes before its birth message. The gap is divided by the
+        # speed, so it is 20 minutes at 1x, 200 minutes at 0.1x and 33 hours at 0.01x, which is
+        # past the 24-hour bound. A faster speed shrinks it.
+        document = self._gap_capture(-20 * 60 * 1000)
+        self.assertEqual(
+            [self._dropped_at(document, speed) for speed in (10.0, 1.0, 0.1, 0.01)],
+            [0, 0, 0, 1],
+        )
+
+    def test_a_slow_speed_stretches_how_far_ahead_a_fast_device_clock_is(self):
+        # A device clock 4 seconds fast: 4 s at 1x, 40 s at 0.1x and 400 s at 0.01x, past the
+        # 5-minute bound.
+        document = self._gap_capture(4_000)
+        self.assertEqual(
+            [self._dropped_at(document, speed) for speed in (10.0, 1.0, 0.1, 0.01)],
+            [0, 0, 0, 1],
+        )
 
     def test_a_reading_older_than_the_window_is_caught(self):
         # The case that IS real: a metric stamped 25 hours before the capture epoch stays 25
@@ -507,13 +536,62 @@ class SanityWindowTests(unittest.TestCase):
         lossy, kept, dropped = capture.window_outcome(plan, NOW)
         self.assertEqual((len(lossy), kept, dropped), (1, 1, 1))
 
-    def test_the_window_matches_the_daemons(self):
-        # Restated rather than imported, so it is pinned against drift from ingestion.py.
+    # -----------------------------------------------------------------------------------------
+    # A READING FLAGGED is_historical HAS THE DAEMON'S LONGER BOUND, and the future bound is the
+    # same for both. A gateway replaying its buffer after an outage is the case: refusing it here
+    # would fail a playback the daemon writes in full.
+    # -----------------------------------------------------------------------------------------
+    HOUR_MS = 3600 * 1000
+
+    def _window(self, document):
+        plan = capture.plan_playback(document, GW, DEFAULT_MAP, NOW)
+        return capture.window_outcome(plan, NOW)
+
+    def test_a_historical_reading_thirty_hours_old_is_kept(self):
+        lossy, kept, dropped = self._window(
+            self._gap_capture(-30 * self.HOUR_MS, is_historical=True))
+        self.assertEqual((lossy, kept, dropped), ([], 1, 0))
+
+    def test_a_live_reading_thirty_hours_old_is_dropped(self):
+        lossy, kept, dropped = self._window(self._gap_capture(-30 * self.HOUR_MS))
+        self.assertEqual((len(lossy), kept, dropped), (1, 0, 1))
+
+    def test_a_historical_reading_eight_days_old_is_dropped(self):
+        lossy, kept, dropped = self._window(
+            self._gap_capture(-8 * 24 * self.HOUR_MS, is_historical=True))
+        self.assertEqual((len(lossy), kept, dropped), (1, 0, 1))
+
+    def test_a_reading_six_minutes_ahead_is_dropped_historical_or_not(self):
+        for flags in ({}, {"is_historical": True}):
+            lossy, kept, dropped = self._window(self._gap_capture(6 * 60 * 1000, **flags))
+            self.assertEqual((len(lossy), kept, dropped), (1, 0, 1), flags)
+
+    def test_only_a_true_flag_is_historical(self):
+        # The daemon sets the flag from a JSON `true` alone, so a hand edit that writes the word
+        # or a number is a live reading to it, and is judged as one.
+        for flag in ("true", 1):
+            lossy, kept, dropped = self._window(
+                self._gap_capture(-30 * self.HOUR_MS, is_historical=flag))
+            self.assertEqual((len(lossy), kept, dropped), (1, 0, 1), flag)
+
+    def test_a_historical_metric_without_a_timestamp_takes_the_payloads_and_its_bound(self):
+        replayed = capture_file([message(0, "DDATA", timestamp=EPOCH - 30 * self.HOUR_MS, metrics=[
+            {"name": "Systems/TEMPERATURE", "double_value": 20.0, "is_historical": True},
+        ])])
+        self.assertEqual(self._window(replayed)[1:], (1, 0))
+
+    def test_the_window_matches_the_daemons_values(self):
+        # Restated rather than imported; test_capture_worker.py holds these to ingestion.py's
+        # own, which it can import.
         self.assertEqual(capture.TELEMETRY_MAX_AGE_SECONDS, 24 * 60 * 60)
         self.assertEqual(capture.TELEMETRY_MAX_FUTURE_SECONDS, 5 * 60)
+        self.assertEqual(capture.TELEMETRY_MAX_HISTORICAL_AGE_SECONDS, 7 * 24 * 60 * 60)
         self.assertTrue(capture.timestamp_is_sane(NOW, NOW))
         self.assertFalse(capture.timestamp_is_sane(NOW - 25 * 3600 * 1000, NOW))
+        self.assertTrue(capture.timestamp_is_sane(NOW - 25 * 3600 * 1000, NOW, historical=True))
+        self.assertFalse(capture.timestamp_is_sane(NOW - 8 * 24 * 3600 * 1000, NOW, historical=True))
         self.assertFalse(capture.timestamp_is_sane(NOW + 6 * 60 * 1000, NOW))
+        self.assertFalse(capture.timestamp_is_sane(NOW + 6 * 60 * 1000, NOW, historical=True))
 
 
 class TopicAndMapTests(unittest.TestCase):
@@ -640,11 +718,11 @@ class WorkerOutOfWindowTests(unittest.TestCase):
         def download(self, _path):
             return self._body
 
-    def _run(self, document):
+    def _run(self, document, speed=1.0):
         worker = self._worker()
         return worker._run_job(
             supabase=None, storage=self._Storage(document),
-            credentials={GW: "a-password"}, job=self._job(),
+            credentials={GW: "a-password"}, job=dict(self._job(), speed=speed),
         )
 
     @staticmethod
@@ -673,8 +751,65 @@ class WorkerOutOfWindowTests(unittest.TestCase):
         # reporting a count they would then have to go and find the cause of.
         _, _, error = self._run(self._stale(1_000, count=2))
         self.assertIn("spBv1.0/", error, "the refusal does not name a topic")
-        self.assertIn("--speed cannot cause it", error,
-                      "the refusal does not rule out the explanation an operator reaches for first")
+
+    def test_the_refusal_says_too_old_or_too_far_in_the_future(self):
+        _, _, error = self._run(self._stale(1_000))
+        self.assertIn("too old or too far in the future", error)
+
+    def test_a_slow_speed_is_named_as_a_cause_and_1x_as_the_retry(self):
+        # Every metric is stamped 20 minutes before its birth: in window at 1x, 33 hours behind
+        # at 0.01x. The refusal says the speed did it and what to try, and does not say the
+        # opposite.
+        document = capture_file([message(0, "DBIRTH", metrics=[
+            {"name": "Systems/TEMPERATURE", "timestamp": EPOCH - 20 * 60 * 1000,
+             "double_value": 20.0},
+        ])])
+        _, _, error = self._run(document, speed=0.01)
+        self.assertIn("write nothing to the historian", error)
+        self.assertIn("A slow --speed stretches that gap", error)
+        self.assertIn("retrying at 1x may help", error)
+        self.assertNotIn("cannot cause", error)
+
+        _, out_of_window, error = self._run(document, speed=1.0)
+        self.assertEqual(out_of_window, 0)
+        self.assertNotIn("write nothing to the historian", error or "")
+
+    def test_a_replayed_buffer_the_daemon_would_write_is_not_refused(self):
+        # A gateway replaying its store-and-forward buffer after an outage: every reading
+        # flagged is_historical and 30 hours old. The daemon writes it in full, so the refusal
+        # must not fail it as a total no-op.
+        replayed = capture_file([
+            message(offset, "DDATA", metrics=[
+                {"name": "Systems/TEMPERATURE", "timestamp": EPOCH - 30 * 3600 * 1000 + offset,
+                 "double_value": 20.0, "is_historical": True},
+            ])
+            for offset in (0, 1_000)
+        ])
+        sent, out_of_window, error = self._run(replayed)
+        self.assertEqual((sent, out_of_window), (0, 0))
+        self.assertNotIn("write nothing to the historian", error or "")
+
+    def test_the_command_line_refusal_reads_the_same(self):
+        import argparse
+        import tempfile
+        document = capture_file([message(0, "DBIRTH", metrics=[
+            {"name": "Systems/TEMPERATURE", "timestamp": EPOCH - 20 * 60 * 1000,
+             "double_value": 20.0},
+        ])])
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "fixture.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(document, fh)
+            args = argparse.Namespace(
+                capture=path, map=["%s=%s" % (CAPTURED_DEV, DEV_A)], as_gateway=GW, speed=0.01,
+                group=None, allow_unsane=False, dry_run=True, head=5, verbose=False,
+            )
+            with self.assertRaises(capture.CaptureError) as caught:
+                capture.cmd_play(args)
+        text = str(caught.exception)
+        self.assertIn("too old or too far in the future", text)
+        self.assertIn("retrying at 1x may help", text)
+        self.assertNotIn("cannot cause", text)
 
     def test_a_partly_stale_capture_is_not_refused(self):
         # THE OTHER HALF OF THE DECISION, and the reason this is not simply the CLI's refusal moved

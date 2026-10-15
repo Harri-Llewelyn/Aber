@@ -17,13 +17,14 @@ silence: a refused publish is dropped with no PUBACK at QoS 0 under MQTT 3.1.1 a
 publisher learns nothing from the broker by construction, and the run reports success and moves
 nothing.
 
-TIMESTAMPS ARE REBASED, AND BOTH PLACES THAT CARRY ONE MUST MOVE. `_timestamp_is_sane()` rejects a
-metric more than 24 hours behind now, and `telemetry`'s primary key is `(time, asset_id,
-metric_name)`, so a verbatim run is both out of window and a row-for-row collision. Every timestamp
-moves by one offset, preserving the intervals; dividing that offset by a speed factor is the same
-operation, which is why there is one mechanism and not two. `payload.timestamp` is the message
-clock, but process_ddata() reads `metric.timestamp` per metric and falls back to the payload's only
-when the metric has none -- rebase the payload alone and the sanity window drops the lot.
+TIMESTAMPS ARE REBASED, AND BOTH PLACES THAT CARRY ONE MUST MOVE. The daemon refuses a metric more
+than 24 hours behind now (7 days when it is flagged `is_historical`), and `telemetry`'s primary key
+is `(time, asset_id, metric_name)`, so a verbatim run is both out of window and a row-for-row
+collision. Every timestamp moves by one offset, preserving the intervals; dividing that offset by a
+speed factor is the same operation, which is why there is one mechanism and not two.
+`payload.timestamp` is the message clock, but process_ddata() reads `metric.timestamp` per metric
+and falls back to the payload's only when the metric has none -- rebase the payload alone and the
+sanity window drops the lot.
 
 THE FILE IS ALWAYS JSON; THE WIRE IS WHATEVER WAS RECORDED. Editing a captured value by hand is half
 the point, so the file holds the readable form whatever arrived, in the shape
@@ -76,10 +77,14 @@ RECORD_PASSWORD = (os.getenv("MQTT_CAPTURE_PASSWORD") or os.getenv("MQTT_INGESTI
 PLAY_USER = os.getenv("MQTT_PLAYBACK_USER", "")
 PLAY_PASSWORD = os.getenv("MQTT_PLAYBACK_PASSWORD", "")
 
-# Mirrors ingestion.py. Named here rather than imported because importing the daemon pulls in its
-# database and Supabase clients, and this tool must run against a capture file with neither.
+# Mirrors ingestion.py, including the environment variable and the default of the historical bound.
+# Named here rather than imported because importing the daemon pulls in its database and Supabase
+# clients, and this tool must run against a capture file with neither. A unit test holds the three
+# to the daemon's.
 TELEMETRY_MAX_AGE_SECONDS = 24 * 60 * 60
 TELEMETRY_MAX_FUTURE_SECONDS = 5 * 60
+TELEMETRY_MAX_HISTORICAL_AGE_SECONDS = int(
+    os.getenv("TELEMETRY_MAX_HISTORICAL_AGE_SECONDS", str(7 * 24 * 60 * 60)))
 
 # `sparkplug_id` is a GENERATED column: the prefix plus the first 21 hex characters of the row's
 # UUID. Anything else is not an id this stack issued, and pinning the shape here is what turns a
@@ -468,10 +473,58 @@ def rebase_payload(payload_dict, capture_epoch_ms, play_epoch_ms, speed=1.0):
     return out
 
 
-def timestamp_is_sane(ts_ms, now_ms):
-    """ingestion.py's window, restated so a capture can be checked before it is published."""
+def timestamp_is_sane(ts_ms, now_ms, historical=False):
+    """
+    ingestion.py's timestamp_refusal(), restated so a capture can be checked before it is published.
+    A reading flagged `is_historical` may be older; the future bound is the same for both.
+    """
     delta = (ts_ms - now_ms) / 1000.0
-    return -TELEMETRY_MAX_AGE_SECONDS <= delta <= TELEMETRY_MAX_FUTURE_SECONDS
+    oldest = TELEMETRY_MAX_HISTORICAL_AGE_SECONDS if historical else TELEMETRY_MAX_AGE_SECONDS
+    return -oldest <= delta <= TELEMETRY_MAX_FUTURE_SECONDS
+
+
+def _span(seconds):
+    """A bound in the unit a person would state it in: 24 hours, 7 days, 5 minutes."""
+    if seconds >= 2 * 86400 and seconds % 86400 == 0:
+        return "%d days" % (seconds // 86400)
+    if seconds >= 3600 and seconds % 3600 == 0:
+        return "%d hours" % (seconds // 3600)
+    if seconds >= 60 and seconds % 60 == 0:
+        return "%d minutes" % (seconds // 60)
+    return "%d seconds" % seconds
+
+
+def window_explanation(speed):
+    """
+    What puts a reading outside the daemon's window and what to try, for the playback worker's
+    refusal and the CLI's. A slow speed is a cause and is named as one: the gap between a stamp and
+    the time its message arrives is divided by the speed.
+    """
+    text = (
+        "The daemon keeps a live reading up to %s old, a reading flagged is_historical up to %s "
+        "old, and neither more than %s ahead. "
+        "Rebasing keeps the gap between a reading's stamp and the time its message is received. "
+        "So a reading that was already old when it was recorded, a device clock skewed against "
+        "the recorder's, or a hand edit stays outside the window. "
+        "A slow --speed stretches that gap, because the gap is divided by the speed. A reading "
+        "that fits at 1x can be too old or too far in the future at 0.01x."
+        % (_span(TELEMETRY_MAX_AGE_SECONDS), _span(TELEMETRY_MAX_HISTORICAL_AGE_SECONDS),
+           _span(TELEMETRY_MAX_FUTURE_SECONDS))
+    )
+    if speed < 1:
+        text += " This playback runs at %gx, so retrying at 1x may help." % speed
+    return text
+
+
+def first_message_epoch_ms(first_payload, first_received_ms):
+    """
+    The time a capture is rebased from: the first message's own clock, or when that message was
+    RECEIVED if its payload carries none. A zero is no clock, as the daemon reads it. The receipt
+    time and not the time the recording ended: the offsets count from the first receipt, so a later
+    fallback would file every stamped reading early by the length of the recording.
+    """
+    stamp = first_payload.get("timestamp")
+    return int(stamp) if stamp else int(first_received_ms)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -607,17 +660,18 @@ def window_outcome(plan, now_ms):
     an out-of-window metric is a counter and not an error -- so without this a playback reports
     success and writes nothing.
 
-    SPEED IS NOT WHAT PUTS A MESSAGE OUT OF WINDOW, and the arithmetic is worth writing down
-    because the intuition says otherwise. Playing an hour of capture at 0.1x takes ten hours, so
-    the last message is sent ten hours from now -- but rebase_payload() divides by that same
-    speed, so its timestamp moves to exactly ten hours from now too. The scheduler and the
-    rebasing share a divisor, which makes every message in-window at the instant it is sent no
-    matter what speed is chosen. Measuring at `now_ms + delay_ms` rather than at plan time is
-    what keeps that true, and this function was first written with a comment claiming the
-    opposite.
+    A metric flagged `is_historical` is judged by the historical bound, as the daemon does, and
+    the flag is read as the daemon reads it: only a true one counts.
 
-    What DOES fail is a timestamp already far from the capture epoch, because rebasing preserves
-    that distance faithfully:
+    THE SPEED IS ALREADY IN THE PLAN, so this judges what the daemon will see at the chosen speed.
+    A stamp is rebased to `play_epoch + (stamp - epoch) / speed` and its message is sent at
+    `now + offset / speed`, so the gap between the two is `(stamp - receipt) / speed`. Measuring at
+    `now_ms + delay_ms` rather than at plan time is what makes that true. A stamp at its message's
+    own receipt time has no gap, and stays in window at any speed. Any other gap is stretched by a
+    slow speed: a metric stamped 20 minutes before its birth message is 20 minutes behind at 1x
+    and 33 hours behind at 0.01x.
+
+    What fails is therefore a gap that the speed makes too wide, or one that was already wide:
 
       * a metric carrying a genuinely old reading, which the daemon would have rejected live too;
       * a device whose clock is skewed against the recorder's, which only becomes visible once
@@ -637,7 +691,7 @@ def window_outcome(plan, now_ms):
             ts = metric.get("timestamp")
             if ts is None or ts <= 0:
                 ts = payload_ts
-            if timestamp_is_sane(ts, at_send_ms):
+            if timestamp_is_sane(ts, at_send_ms, metric.get("is_historical") is True):
                 kept += 1
             else:
                 dropped += 1
@@ -768,16 +822,16 @@ def cmd_record(args):
     # THE CAPTURE EPOCH IS THE FIRST MESSAGE'S OWN CLOCK, not the recorder's. Rebasing measures
     # every timestamp's distance from this, so taking it from the wall clock at connect time
     # would fold the recorder's idle wait into every offset -- and would make the rebasing depend
-    # on how long the recorder sat waiting for the fleet to say something.
-    first = messages[0]["payload"].get("timestamp")
-    capture_epoch_ms = int(first) if first is not None else int(time.time() * 1000)
+    # on how long the recorder sat waiting for the fleet to say something. A first message with no
+    # clock falls back to when it arrived.
+    epoch_ms = first_message_epoch_ms(messages[0]["payload"], started_ms)
 
     edge_nodes, devices = capture_identities(messages)
     capture = {
         "aber_capture_version": CAPTURE_VERSION,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
         "recorded_from": {"broker": "%s:%d" % (MQTT_HOST, MQTT_PORT), "topic": args.topic},
-        "capture_epoch_ms": capture_epoch_ms,
+        "capture_epoch_ms": epoch_ms,
         "duration_ms": messages[-1]["offset_ms"],
         "identities": {"edge_nodes": edge_nodes, "devices": devices},
         "messages": messages,
@@ -836,14 +890,12 @@ def cmd_play(args):
     if bad:
         topic, ts, at = bad[0]
         detail = (
-            "%d of %d messages carry a timestamp the daemon will reject at the moment they are "
-            "sent (first: %s, stamped %s, sent at %s). Rebasing preserves how far a timestamp "
-            "sits from the capture's own epoch, so this is a reading that was already old when it "
-            "was recorded, a device clock skewed against the recorder's, or a hand edit. Note "
-            "that --speed cannot cause this: the scheduler and the rebasing divide by it alike."
+            "%d of %d messages carry a timestamp the daemon will reject as too old or too far in "
+            "the future at the moment they are sent (first: %s, stamped %s, sent at %s). %s"
             % (len(bad), len(plan), topic,
                datetime.fromtimestamp(ts / 1000.0, timezone.utc).isoformat(),
-               datetime.fromtimestamp(at / 1000.0, timezone.utc).isoformat())
+               datetime.fromtimestamp(at / 1000.0, timezone.utc).isoformat(),
+               window_explanation(args.speed))
         )
         if not args.allow_unsane:
             raise CaptureError(

@@ -428,22 +428,19 @@ def _run_job(supabase, storage, credentials, job):
         topic, ts, at = lossy[0]
         return 0, out_of_window, (
             "every one of the %d reading(s) in this capture carries a timestamp the ingestion "
-            "daemon will discard as outside its sanity window, so this playback would publish the "
-            "whole capture and write nothing to the historian (first: %s, stamped %s, would be "
-            "sent at %s). "
-            "Rebasing preserves how far a timestamp sits from the capture's own epoch, so this is a "
-            "reading that was already old when it was recorded, a device clock skewed against the "
-            "recorder's, or a hand edit. --speed cannot cause it: the scheduler and the rebasing "
-            "divide by it alike." % (
+            "daemon will discard as too old or too far in the future, so this playback would "
+            "publish the whole capture and write nothing to the historian (first: %s, stamped %s, "
+            "would be sent at %s). %s" % (
                 metrics_dropped, topic,
                 datetime.fromtimestamp(ts / 1000.0, timezone.utc).isoformat(),
                 datetime.fromtimestamp(at / 1000.0, timezone.utc).isoformat(),
+                capture.window_explanation(speed),
             )
         )
     if lossy:
         logger.warning(
-            "Playback %s: %d of %d message(s) carry timestamps the daemon will drop as outside its "
-            "sanity window. They will be published and silently discarded on ingest.",
+            "Playback %s: %d of %d message(s) carry timestamps the daemon will drop as too old or "
+            "too far in the future. They will be published and silently discarded on ingest.",
             job_id, out_of_window, len(plan),
         )
 
