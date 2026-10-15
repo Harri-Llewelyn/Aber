@@ -99,7 +99,7 @@ const VIEW_HELP = {
   },
 }
 
-export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewTrail, onViewApprovals, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter, initialSection, onClearSection, activeAlerts = [] }) {
+export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewTrail, onViewApprovals, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter, initialSection, onClearSection, activeAlerts = [], onShowUnmappedMetrics }) {
   /**
    * Which devices have an alert firing on them, via utils/deviceAlerts.js so the Site Map, Cells and
    * Gateways resolve alerts the same way.
@@ -1389,6 +1389,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               : null}
           onClose={() => setExportFor(null)}
           showToast={showToast}
+          onShowUnmappedMetrics={onShowUnmappedMetrics}
         />
       )}
       </div>

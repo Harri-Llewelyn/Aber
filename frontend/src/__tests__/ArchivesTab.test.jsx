@@ -554,6 +554,26 @@ describe('ArchivesTab exports a device before it goes', () => {
     expect(downloadBlob).toHaveBeenCalled()
   })
 
+  it('leads the unmapped-metrics warning of an AAS export to the Metrics page, when the page is given a way there', async () => {
+    api.post.mockResolvedValue({
+      blob: new Blob(['PK']), format: 'aasx', stats: { submodels: 1, telemetry_metrics: 2, unmapped_semantic_ids: 3 }
+    })
+    const onShowUnmappedMetrics = vi.fn()
+    const { showToast } = await showLifecycle({ archives: [ARCHIVED_DEVICE] }, { onShowUnmappedMetrics })
+
+    fireEvent.click(screen.getByRole('button', { name: /Export Bundle/i }))
+    const dialog = within(await screen.findByRole('dialog'))
+    fireEvent.click(dialog.getByRole('radio', { name: /AASX package/ }))
+    fireEvent.click(dialog.getByRole('button', { name: /^Export$/ }))
+
+    await waitFor(() => expect(showToast).toHaveBeenCalled())
+    const [message, type, options] = showToast.mock.calls[0]
+    expect(message).toMatch(/3 metrics carried no semantic id\. Open them on the Metrics page/)
+    expect(type).toBe('warning')
+    options.onOpen(9)
+    expect(onShowUnmappedMetrics).toHaveBeenCalledWith(9)
+  })
+
   it('notes the latest export beside the row, so a second one is a choice rather than a habit', async () => {
     await showLifecycle({ archives: [ARCHIVED_DEVICE], exports: [EXPORT_ROW] })
     expect(screen.getByText(/Exported/)).toBeInTheDocument()
