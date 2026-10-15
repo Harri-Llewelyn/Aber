@@ -9,6 +9,7 @@ import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { useUrlState } from '../../hooks/useUrlState'
+import { useSortableRows } from '../../hooks/useTableSort'
 import {
   SCOPE_AREA_WIDE, SOURCE_AREA_WIDE, groupCellsByArea, groupDevicesByCell
 } from '../../utils/cellResolution'
@@ -21,6 +22,7 @@ import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { CardHeading } from '../common/CardHeading'
 import { Badge, ArchivedBadge } from '../common/Badge'
 import { SearchInput } from '../common/SearchInput'
+import { SortHeader } from '../common/SortHeader'
 import { ClearFilters } from '../common/ClearFilters'
 import { LoadingState } from '../common/LoadingState'
 import { EmptyState } from '../common/EmptyState'
@@ -214,13 +216,28 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   const areaWideDevices = (areaId) => assets.filter(a => a.location_source === SOURCE_AREA_WIDE && a.effective_area_id === areaId)
   const areaWideGateways = (areaId) => gateways.filter(g => g.location_scope === SCOPE_AREA_WIDE && g.area_id === areaId)
 
-  const filteredAreas = areas.filter(a => {
+  const matchingAreas = areas.filter(a => {
     if (filterMode === 'active'   && a.is_archived) return false
     if (filterMode === 'archived' && !a.is_archived) return false
     if (!searchQuery) return true
     const q = searchQuery.toLowerCase()
     return String(a.area_id).toLowerCase().includes(q) || a.area_name.toLowerCase().includes(q)
   })
+
+  // The counts the Cells and Devices columns show: active cells, and the devices resolving to them.
+  const sortColumns = useMemo(() => {
+    const activeCells = (a) => (cellsByArea.get(a.area_id) || []).filter(c => !c.is_archived)
+    return {
+      name: { type: 'text', value: a => a.area_name },
+      plan: { type: 'rank', value: a => (a.plan_path ? 0 : 1) },
+      cells: { type: 'number', value: a => activeCells(a).length },
+      devices: {
+        type: 'number',
+        value: a => activeCells(a).reduce((n, c) => n + (devicesByCell.get(c.cell_id) || []).length, 0)
+      }
+    }
+  }, [cellsByArea, devicesByCell])
+  const [filteredAreas, sort] = useSortableRows(matchingAreas, sortColumns)
 
   // An arrival by id opens the area whatever its state, so a link to an archived one still lands.
   useArrivalSelection(searchQuery, areas, (a, term) => a.area_id === term, (a) => {
@@ -330,10 +347,10 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               <thead>
                 <tr>
                   <th className="cell-icon-col"><span className="sr-only">Icon</span></th>
-                  <th title="The area's name — also the <area> segment of its uns/ topics">Area</th>
-                  <th title="Whether the area carries an area plan for the Site Map to draw">Plan</th>
-                  <th title="Cells filed in this area">Cells</th>
-                  <th title="Devices resolving to a cell in this area, plus its Area-Wide assets">Devices</th>
+                  <SortHeader sort={sort} column="name" title="The area's name — also the <area> segment of its uns/ topics">Area</SortHeader>
+                  <SortHeader sort={sort} column="plan" title="Whether the area carries an area plan for the Site Map to draw">Plan</SortHeader>
+                  <SortHeader sort={sort} column="cells" title="Cells filed in this area">Cells</SortHeader>
+                  <SortHeader sort={sort} column="devices" title="Devices resolving to a cell in this area, plus its Area-Wide assets">Devices</SortHeader>
                 </tr>
               </thead>
               <tbody>

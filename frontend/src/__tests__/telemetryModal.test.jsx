@@ -127,6 +127,59 @@ describe('device telemetry modal', () => {
   })
 })
 
+describe('device telemetry modal: sorting by a column (#801)', () => {
+  const reading = (metric_name, msAgo) => ({
+    time: new Date(NOW - msAgo).toISOString(), asset_id: 'dev1', metric_name, val_double: 1, val_string: null, val_bool: null
+  })
+  const sortable = device({ last_birth_metrics: ['Spindle/Axis 10', 'Spindle/Axis 9', 'Coolant/LEVEL', 'Never/REPORTED'] })
+
+  const open = async () => {
+    api.get.mockResolvedValue([
+      reading('Spindle/Axis 10', 60_000),
+      reading('Spindle/Axis 9', 600_000),
+      reading('Coolant/LEVEL', 5_000),
+    ])
+    render(<TelemetryModal device={sortable} hasPermission={() => true} onClose={vi.fn()} />)
+    await screen.findByText('Never/REPORTED')
+  }
+  /** The metric name on each row, in the order shown; the first cell is the checkbox. */
+  const metrics = () => screen.getAllByRole('row').slice(1).map(r => r.cells[1].textContent)
+  const sortBy = (label) => fireEvent.click(screen.getByRole('button', { name: label }))
+
+  it('sorts metric names in natural order, so Axis 9 comes before Axis 10', async () => {
+    await open()
+    // By default, reported first and then the one that never has.
+    expect(metrics()).toEqual(['Coolant/LEVEL', 'Spindle/Axis 10', 'Spindle/Axis 9', 'Never/REPORTED'])
+
+    sortBy('Metric')
+    expect(metrics()).toEqual(['Coolant/LEVEL', 'Never/REPORTED', 'Spindle/Axis 9', 'Spindle/Axis 10'])
+    expect(screen.getByRole('columnheader', { name: 'Metric' })).toHaveAttribute('aria-sort', 'ascending')
+    sortBy('Metric')
+    expect(metrics()).toEqual(['Spindle/Axis 10', 'Spindle/Axis 9', 'Never/REPORTED', 'Coolant/LEVEL'])
+    expect(screen.getByRole('columnheader', { name: 'Metric' })).toHaveAttribute('aria-sort', 'descending')
+  })
+
+  it('sorts by when each metric last reported, with one that never has last either way', async () => {
+    await open()
+
+    sortBy('Last Updated')
+    expect(metrics()).toEqual(['Spindle/Axis 9', 'Spindle/Axis 10', 'Coolant/LEVEL', 'Never/REPORTED'])
+    sortBy('Last Updated')
+    expect(metrics()).toEqual(['Coolant/LEVEL', 'Spindle/Axis 10', 'Spindle/Axis 9', 'Never/REPORTED'])
+  })
+
+  /** Each row's value is a different metric in its own unit, so they have no order between them. */
+  it('does not offer Latest Value as a sort, and leaves the page address alone', async () => {
+    window.history.replaceState(null, '', '/devices?sort=-name')
+    await open()
+
+    expect(screen.getByRole('columnheader', { name: 'Latest Value' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Latest Value' })).toBeNull()
+    sortBy('Metric')
+    expect(window.location.pathname + window.location.search).toBe('/devices?sort=-name')
+  })
+})
+
 describe('metric selection and export hand-off', () => {
   it('offers Export CSV only once something is ticked', async () => {
     await showDrawer()

@@ -13,6 +13,8 @@ import { gatewayRepositoryUrl } from '../common/GatewayRepositoryPanel'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { useUrlTab } from '../../hooks/useUrlState'
+import { useSortableRows } from '../../hooks/useTableSort'
+import { SortHeader } from '../common/SortHeader'
 import { IconArchive, IconRefreshCw, IconTrash, IconDownload, IconHistory, IconExternalLink, IconAlertTriangle } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 import { Badge } from '../common/Badge'
@@ -43,6 +45,25 @@ const STAGE_HELP = {
   },
 }
 
+/** The Archived table's sortable columns. An entity with no auto-purge timer goes last. */
+const ARCHIVED_SORT = {
+  name: { type: 'text', value: a => a.name },
+  type: { type: 'text', value: a => a.entity_type },
+  entity_id: { type: 'text', value: a => a.entity_id },
+  archived_at: { type: 'time', value: a => a.archived_at },
+  auto_purge: { type: 'time', value: a => a.auto_delete_at }
+}
+
+/** The Retired table's sortable columns, each on what its cell shows. */
+const RETIRED_SORT = {
+  name: { type: 'text', value: r => r.name },
+  type: { type: 'text', value: r => r.entity_type },
+  entity_id: { type: 'text', value: r => r.entity_id },
+  retired_at: { type: 'time', value: r => r.retired_at },
+  by: { type: 'text', value: r => r.retired_by_email || r.retired_by || 'retention timer' },
+  historian_id: { type: 'text', value: r => r.sparkplug_id }
+}
+
 /**
  * One card, two tabs, two stages of one lifecycle. Archived is what archiving leaves: the row still
  * in its table, restorable, its retention timer running. Retired is what deleting leaves: the row
@@ -60,6 +81,8 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, onShowUnmap
   const [loading, setLoading]   = useState(true)
   // The tab, in the path: `/archives` or `/archives/retired`.
   const [stage, setStage]       = useUrlTab('archives', Object.keys(STAGE_HELP), 'archived')
+  const [archivedRows, archivedSort] = useSortableRows(archives, ARCHIVED_SORT, { active: stage === 'archived' })
+  const [retiredRows, retiredSort] = useSortableRows(retired, RETIRED_SORT, { active: stage === 'retired' })
   const [confirmPurge, setConfirmPurge] = useState(null)
   const [confirmRestore, setConfirmRestore] = useState(null)
   // The archived device whose export dialog is open, or null.
@@ -190,9 +213,18 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, onShowUnmap
          ) : (
            <div className="table-wrap">
              <table>
-               <thead><tr><th title="Entity Name">Name</th><th title="Entity classification">Type</th><th title="Entity ID">Entity ID</th><th title="When it was archived">Archived At</th><th title="When the auto-purge timer deletes the archived record for good">Auto-Purge</th><th className="row-actions">Actions</th></tr></thead>
+               <thead>
+                 <tr>
+                   <SortHeader sort={archivedSort} column="name" title="Entity Name">Name</SortHeader>
+                   <SortHeader sort={archivedSort} column="type" title="Entity classification">Type</SortHeader>
+                   <SortHeader sort={archivedSort} column="entity_id" title="Entity ID">Entity ID</SortHeader>
+                   <SortHeader sort={archivedSort} column="archived_at" title="When it was archived">Archived At</SortHeader>
+                   <SortHeader sort={archivedSort} column="auto_purge" title="When the auto-purge timer deletes the archived record for good">Auto-Purge</SortHeader>
+                   <th className="row-actions">Actions</th>
+                 </tr>
+               </thead>
                <tbody>
-                 {archives.map(a => {
+                 {archivedRows.map(a => {
                    const latestExport = a.entity_type === 'device' ? latestExportOf(a.entity_id) : null
                    return (
                    <tr key={`${a.entity_type}-${a.entity_id}`}>
@@ -262,9 +294,19 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, onShowUnmap
          ) : (
            <div className="table-wrap">
              <table>
-               <thead><tr><th title="The name the entity had">Name</th><th title="Entity classification">Type</th><th title="Entity ID, as it was">Entity ID</th><th title="When the row was deleted">Retired At</th><th title="Who deleted it, or the retention job">By</th><th title="The historian keys this entity's readings by this id">Historian ID</th><th className="row-actions" title="What survives the row">What Survives</th></tr></thead>
+               <thead>
+                 <tr>
+                   <SortHeader sort={retiredSort} column="name" title="The name the entity had">Name</SortHeader>
+                   <SortHeader sort={retiredSort} column="type" title="Entity classification">Type</SortHeader>
+                   <SortHeader sort={retiredSort} column="entity_id" title="Entity ID, as it was">Entity ID</SortHeader>
+                   <SortHeader sort={retiredSort} column="retired_at" title="When the row was deleted">Retired At</SortHeader>
+                   <SortHeader sort={retiredSort} column="by" title="Who deleted it, or the retention job">By</SortHeader>
+                   <SortHeader sort={retiredSort} column="historian_id" title="The historian keys this entity's readings by this id">Historian ID</SortHeader>
+                   <th className="row-actions" title="What survives the row">What Survives</th>
+                 </tr>
+               </thead>
                <tbody>
-                 {retired.map(r => (
+                 {retiredRows.map(r => (
                    <tr key={`${r.entity_type}-${r.entity_id}`}>
                      <td><strong>{r.name || '—'}</strong></td>
                      <td><Badge size="sm">{String(r.entity_type).toUpperCase()}</Badge></td>

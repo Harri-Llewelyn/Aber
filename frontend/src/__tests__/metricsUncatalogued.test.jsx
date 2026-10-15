@@ -311,3 +311,63 @@ describe('Uncatalogued tab: Catalogue', () => {
     expect(screen.queryByText(/Its devices declare it/)).toBeNull()
   })
 })
+
+describe('Uncatalogued tab: sorting by a column (#801)', () => {
+  /** The names down the table, in order. */
+  const listed = () =>
+    [...document.querySelectorAll('.card tbody tr')].map(r => r.querySelector('td .mono').textContent)
+  const sortBy = (name) => fireEvent.click(screen.getByRole('button', { name }))
+  const header = (name) => screen.getByRole('columnheader', { name })
+  const sortInAddress = () => new URLSearchParams(window.location.search).get('sort')
+
+  it('sorts Devices by the count, and reverses it on a second click', async () => {
+    renderTab()
+    await openTab()
+    expect(listed()).toEqual(['Hydraulic/PRESSURE', 'Motor Speed', 'Spindle/2/LOAD', 'vibration'])
+
+    sortBy('Devices')
+    // Motor Speed and vibration are one device each, and keep the order they came in.
+    expect(listed()).toEqual(['Motor Speed', 'vibration', 'Hydraulic/PRESSURE', 'Spindle/2/LOAD'])
+    expect(header('Devices')).toHaveAttribute('aria-sort', 'ascending')
+    expect(window.location.pathname).toBe('/metrics/uncatalogued')
+    expect(sortInAddress()).toBe('devices')
+
+    sortBy('Devices')
+    expect(listed()).toEqual(['Spindle/2/LOAD', 'Hydraulic/PRESSURE', 'Motor Speed', 'vibration'])
+    expect(header('Devices')).toHaveAttribute('aria-sort', 'descending')
+    expect(sortInAddress()).toBe('-devices')
+  })
+
+  it('sorts Datatype by the names the row shows, with a name no birth gave one last either way', async () => {
+    renderTab()
+    await openTab()
+
+    // "Int32, Double" after "Double": by the codes, "3, 10" would come before "10".
+    sortBy('Datatype')
+    expect(listed()).toEqual(['Hydraulic/PRESSURE', 'Motor Speed', 'Spindle/2/LOAD', 'vibration'])
+    expect(header('Datatype')).toHaveAttribute('aria-sort', 'ascending')
+
+    sortBy('Datatype')
+    expect(listed()).toEqual(['Spindle/2/LOAD', 'Hydraulic/PRESSURE', 'Motor Speed', 'vibration'])
+    expect(sortInAddress()).toBe('-datatype')
+  })
+
+  it('leaves Declared By a plain header, since a list of devices has no order of its own', async () => {
+    renderTab()
+    await openTab()
+
+    expect(header('Declared By')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Declared By' })).toBeNull()
+  })
+
+  it('opens sorted by Last Declared when the address names it, which the hidden catalog table leaves in place', async () => {
+    // Last Declared is not a column of the catalog, whose table is not on show.
+    window.history.replaceState(null, '', '/metrics/uncatalogued?sort=-last_declared')
+    renderTab()
+
+    await waitFor(() => expect(document.querySelectorAll('.card tbody tr')).toHaveLength(4))
+    expect(listed()).toEqual(['Spindle/2/LOAD', 'Hydraulic/PRESSURE', 'Motor Speed', 'vibration'])
+    expect(header('Last Declared')).toHaveAttribute('aria-sort', 'descending')
+    expect(window.location.pathname + window.location.search).toBe('/metrics/uncatalogued?sort=-last_declared')
+  })
+})

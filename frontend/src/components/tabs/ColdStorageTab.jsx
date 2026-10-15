@@ -6,6 +6,9 @@ import { CardHeading } from '../common/CardHeading'
 import { Stat } from '../common/Stat'
 import { Badge } from '../common/Badge'
 import { LoadingState } from '../common/LoadingState'
+import { SortHeader } from '../common/SortHeader'
+import { useSortableRows } from '../../hooks/useTableSort'
+import { rankIn } from '../../utils/tableSort'
 import { formatBytes, formatDate } from '../../utils/format'
 import { ColdStorageDestinationModal } from '../modals/ColdStorageDestinationModal'
 import {
@@ -24,6 +27,20 @@ import {
 } from '../../utils/coldStorage'
 
 /**
+ * The object table's sortable columns. State ranks a failed export first, the one row that needs a
+ * person, then the rest in the order of the export sequence.
+ */
+const STATE_ORDER = [COLD_STATES.FAILED, COLD_STATES.CLAIMED, COLD_STATES.EXPORTED, COLD_STATES.VERIFIED, COLD_STATES.ARCHIVED]
+const OBJECT_SORT = {
+  chunk: { type: 'text', value: r => r.chunk_name },
+  range: { type: 'time', value: r => r.range_start },
+  rows: { type: 'number', value: r => r.row_count },
+  size: { type: 'number', value: r => r.object_bytes },
+  state: { type: 'rank', value: r => rankIn(STATE_ORDER, r.state) },
+  object: { type: 'text', value: r => r.object_key }
+}
+
+/**
  * Cold Storage: telemetry tiered out of the hypertable as Parquet objects. Not Archived Entities,
  * which sits two places below it in the rail, past Backups, and has a Restore button and a purge
  * timer; there is no restore here. An Administrator sets the destination and the on/off switch
@@ -36,6 +53,7 @@ const COLD_STORAGE_ROLES = ['Administrator', 'Shopfloor_Manager', 'Auditor']
 
 export function ColdStorageTab({ showToast, userRole }) {
   const [rows, setRows] = useState([])
+  const [sortedRows, sort] = useSortableRows(rows, OBJECT_SORT)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -230,16 +248,16 @@ export function ColdStorageTab({ showToast, userRole }) {
                   <table>
                     <thead>
                       <tr>
-                        <th title="The TimescaleDB chunk this object holds">Chunk</th>
-                        <th title="The span of time the chunk covers">Range</th>
-                        <th title="Rows counted before export and re-checked against the written object">Rows</th>
-                        <th title="Size of the Parquet object on storage">Size</th>
-                        <th title="Where this chunk is in the export sequence">State</th>
-                        <th title="The object key, under year=YYYY/month=MM/">Object</th>
+                        <SortHeader sort={sort} column="chunk" title="The TimescaleDB chunk this object holds">Chunk</SortHeader>
+                        <SortHeader sort={sort} column="range" title="The span of time the chunk covers">Range</SortHeader>
+                        <SortHeader sort={sort} column="rows" title="Rows counted before export and re-checked against the written object">Rows</SortHeader>
+                        <SortHeader sort={sort} column="size" title="Size of the Parquet object on storage">Size</SortHeader>
+                        <SortHeader sort={sort} column="state" title="Where this chunk is in the export sequence">State</SortHeader>
+                        <SortHeader sort={sort} column="object" title="The object key, under year=YYYY/month=MM/">Object</SortHeader>
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map(r => (
+                      {sortedRows.map(r => (
                         <tr key={r.chunk_name}>
                           <td className="mono">{r.chunk_name}</td>
                           <td className="cell-meta">

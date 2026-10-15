@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
 import { deviceUrl, devicesForSchemaUrl } from '../../routes'
 import { api } from '../../api'
@@ -12,12 +12,13 @@ import { ConfirmModal } from '../modals/ConfirmModal'
 import { downloadJSON } from '../../utils/downloadJSON'
 import {
   schemaVersionLabel, schemaStatus, statusBadgeClass, statusLabel, isSchemaEditable,
-  canForkSchema, nextVersion, isCurrentSchema, SCHEMA_STATUS
+  canForkSchema, nextVersion, isCurrentSchema, schemaVersion, SCHEMA_STATUS
 } from '../../utils/schemaVersion'
 import CopyableId from '../common/CopyableId'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { ActionButton } from '../common/ActionButton'
 import { SearchInput } from '../common/SearchInput'
+import { SortHeader } from '../common/SortHeader'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
@@ -27,6 +28,7 @@ import {
 import { CardHeading } from '../common/CardHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { useUrlState } from '../../hooks/useUrlState'
+import { useSortableRows } from '../../hooks/useTableSort'
 import { plural } from '../../utils/format'
 import { schemaIdsForDevice } from '../../utils/deviceTags'
 
@@ -216,7 +218,23 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
       .some(field => String(field || '').toLowerCase().includes(schemaSearchTerm))
 
   const inStatusView = schemas.filter(matchesStatusFilter)
-  const visibleSchemas = inStatusView.filter(matchesSchemaSearch)
+  const matchingSchemas = inStatusView.filter(matchesSchemaSearch)
+
+  // Version sorts by its number. The device count is what the Devices column shows.
+  const sortColumns = useMemo(() => {
+    const deviceCounts = new Map()
+    for (const d of devices) {
+      for (const id of new Set(schemaIdsForDevice(d))) deviceCounts.set(id, (deviceCounts.get(id) || 0) + 1)
+    }
+    return {
+      name: { type: 'text', value: s => s.schema_name },
+      version: { type: 'number', value: s => schemaVersion(s) },
+      change: { type: 'text', value: s => s.change_description },
+      uuid: { type: 'text', value: s => s.schema_uuid },
+      devices: { type: 'number', value: s => deviceCounts.get(s.schema_uuid) || 0 }
+    }
+  }, [devices])
+  const [visibleSchemas, sort] = useSortableRows(matchingSchemas, sortColumns)
   // Drives the Clear button and its count. `current` is the resting state, not a filter.
   const schemaFilterCount = (statusFilter !== 'current' ? 1 : 0) + (schemaSearchTerm ? 1 : 0)
   const clearSchemaFilters = () => { setStatusFilter('current'); setSchemaSearch('') }
@@ -314,7 +332,15 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
         ) : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th title="Schema descriptive name">Schema Name</th><th title="Lineage position and lifecycle state. Only a draft is editable.">Version</th><th title="Why this version exists, recorded when it was created">Change Description</th><th title="Schema unique UUID">Schema UUID</th><th title="Devices provisioned with this schema">Devices</th></tr></thead>
+              <thead>
+                <tr>
+                  <SortHeader sort={sort} column="name" title="Schema descriptive name">Schema Name</SortHeader>
+                  <SortHeader sort={sort} column="version" title="Lineage position and lifecycle state. Only a draft is editable.">Version</SortHeader>
+                  <SortHeader sort={sort} column="change" title="Why this version exists, recorded when it was created">Change Description</SortHeader>
+                  <SortHeader sort={sort} column="uuid" title="Schema unique UUID">Schema UUID</SortHeader>
+                  <SortHeader sort={sort} column="devices" title="Devices provisioned with this schema">Devices</SortHeader>
+                </tr>
+              </thead>
               <tbody>
                 {visibleSchemas.map(sch => {
                   const count = deviceCountFor(sch.schema_uuid)

@@ -15,6 +15,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - People whose access is removed are hidden. Select **Show removed** to list them. The button shows how many there are, and appears only while there are some. While it is on, the status filter also offers **Access removed**.
 - A **Sign-in still open** row is never hidden. Its removal did not finish, so it still needs **Remove Access**.
 - **Clear filters** resets the search, both filters and Show removed. When nothing matches, the list says so.
+- **A column's heading sorts the table** by that column, on every tab. Click it again to reverse the order, and a third time to go back to the usual order. A status sorts the most serious first, and an empty cell always sorts last. The page's address keeps the order, so a link or a reload shows the table the same way. The token list that **Tokens** opens sorts the same way, until it closes.
 
 ## Adding and removing people
 

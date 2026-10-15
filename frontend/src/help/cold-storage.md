@@ -19,6 +19,7 @@ The line under the page's description says how long the historian keeps raw tele
 - **Range** is the window of time an object covers, and **Chunk** is the historian chunk it came from.
 - **Rows** and **Size** are what an object holds. Use them to judge whether a range is worth retrieving before you retrieve it.
 - **State** says how far a range has got on its way to cold storage. Each state is explained below.
+- **A column's heading sorts the table** by that column. Click it again to reverse the order, and a third time to go back to the usual order. A status sorts the most serious first, and an empty cell always sorts last. The page's address keeps the order, so a link or a reload shows the table the same way.
 - **Unexported since** is the date from which data has **not** reached the endpoint. No object is yet known to hold the telemetry after that date. Up to a week behind is normal, because a chunk is not exported until its whole span has passed the archive threshold (set on the Settings page). The tooltip gives the exact figure.
 - Once **Unexported since** is two weeks past the threshold, it turns amber with a warning icon, and the Archive Backlog alert fires. That usually means the endpoint cannot be reached.
 

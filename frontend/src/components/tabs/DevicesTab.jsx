@@ -21,6 +21,7 @@ import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { Modal } from '../common/Modal'
 import { SearchInput } from '../common/SearchInput'
+import { SortHeader } from '../common/SortHeader'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { TagList } from '../common/TagList'
 import { Model3DUploader } from '../common/Model3DUploader'
@@ -81,6 +82,8 @@ import {
 import { HelpTip } from '../common/HelpTip'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { useSortableRows } from '../../hooks/useTableSort'
+import { severityRank } from '../../utils/tableSort'
 
 // Sentinel values for the cell filter's two derived lanes. Prefixed so they can never collide
 // with a cell UUID, and kept out of `cells` because neither lane is a row in that table.
@@ -100,6 +103,14 @@ const VIEW_HELP = {
     label: 'About the Quarantine queue',
     text: 'A birth arrived that matches no registered device on its gateway, so its readings are held, not recorded. Approve & Onboard admits it, or accept a suggested match. Reject discards it.',
   },
+}
+
+/** The Quarantine table's sortable columns. A birth with no gateway name shows "—" and goes last. */
+const QUARANTINE_SORT = {
+  name: { type: 'text', value: q => q.asset_name },
+  published_id: { type: 'text', value: q => q.reported_identity },
+  gateway: { type: 'text', value: q => q.gateway_name },
+  discovered_at: { type: 'time', value: q => q.discovered_at },
 }
 
 export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewTrail, onViewApprovals, hasPermission, activeAlerts = [], onShowUnmappedMetrics }) {
@@ -506,7 +517,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   // Memoised: the predicate resolves schemas, tags, gateway and cell for every device, and this
   // component re-renders on any of thirty pieces of state. The dependency list is the contract:
   // miss a value the predicate reads and that filter stops responding.
-  const filteredAssets = useMemo(() => assets.filter(a => {
+  const matchingAssets = useMemo(() => assets.filter(a => {
     // Quarantined devices belong to the Quarantine queue card and nowhere else. The two lists come
     // from different sources, so this is the only place the separation is enforced.
     if (a.is_quarantined) return false
@@ -556,6 +567,36 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     gatewayFilter, cellFilter, gatewayById, attentionOnly, showShadows, statusFilter, searchQuery,
     unmodelledFor, cellById,
   ])
+
+  // Each column sorts on what its cell shows. Status takes the more severe of the lifecycle badge
+  // and a firing alert. An archived device has no lifecycle state (archived is its own axis,
+  // utils/deviceStatus.js), so it goes last either way, as does a device with no modelled group or
+  // no cell resolved.
+  const rosterSortColumns = useMemo(() => ({
+    name: { type: 'text', value: a => a.asset_name },
+    uuid: { type: 'text', value: a => a.asset_id },
+    status: {
+      type: 'rank',
+      value: a => {
+        if (a.is_archived) return null
+        const alert = alertFor(a)
+        const lifecycle = severityRank(deviceStatusBadge(a).tone)
+        return alert ? Math.min(lifecycle, severityRank(alert.severity === 'critical' ? 'danger' : 'warning')) : lifecycle
+      }
+    },
+    type: {
+      type: 'text',
+      value: a => deviceTagList(a, schemasForDevice(a, schemas), latestBySparkplugId.get(effectiveSparkplugId(a)) || null, catalog).join(', ')
+    },
+    cell: {
+      type: 'text',
+      value: a => (NON_CELL_SOURCES.has(a.location_source)
+        ? locationSourceLabel(a.location_source)
+        : cellById.get(a.effective_cell_id)?.cell_name || null)
+    }
+  }), [alertFor, schemas, latestBySparkplugId, catalog, cellById])
+  const [filteredAssets, rosterSort] = useSortableRows(matchingAssets, rosterSortColumns, { active: view === 'registered' })
+  const [quarantineRows, quarantineSort] = useSortableRows(quarantine, QUARANTINE_SORT, { active: view === 'quarantine' })
 
   // Counts only what the Needs attention filter can reveal; quarantined devices are counted by the
   // Quarantine queue instead. `needsAttention` is rebuilt every render, so its inputs are the
@@ -660,9 +701,18 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
         ) : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th title="Reported device name">Reported Name</th><th title="Sparkplug B id the device published under">Published ID</th><th title="Source gateway">Gateway</th><th title="When the platform first heard from it">Discovered At</th><th title="Sparkplug B birth payload">Payload</th><th className="row-actions">Actions</th></tr></thead>
+              <thead>
+                <tr>
+                  <SortHeader sort={quarantineSort} column="name" title="Reported device name">Reported Name</SortHeader>
+                  <SortHeader sort={quarantineSort} column="published_id" title="Sparkplug B id the device published under">Published ID</SortHeader>
+                  <SortHeader sort={quarantineSort} column="gateway" title="Source gateway">Gateway</SortHeader>
+                  <SortHeader sort={quarantineSort} column="discovered_at" title="When the platform first heard from it">Discovered At</SortHeader>
+                  <th title="Sparkplug B birth payload">Payload</th>
+                  <th className="row-actions">Actions</th>
+                </tr>
+              </thead>
               <tbody>
-                {quarantine.map(q => {
+                {quarantineRows.map(q => {
                   const [suggestion] = suggestMatches(q, assets, schemas)
                   return (
                   <tr key={q.quarantine_id}>
@@ -841,7 +891,15 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
          ) : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th title="Human-readable device name">Name</th><th title="The device's database identifier -- the id to quote in a query, a ticket or an API call. Its Sparkplug id is derived from this, so nothing is lost by showing it here.">Device UUID</th><th title="Device status">Status</th><th style={{ width: 'auto' }} title="Device classification">Type</th><th title="The cell the device resolves to">Cell</th></tr></thead>
+              <thead>
+                <tr>
+                  <SortHeader sort={rosterSort} column="name" title="Human-readable device name">Name</SortHeader>
+                  <SortHeader sort={rosterSort} column="uuid" title="The device's database identifier -- the id to quote in a query, a ticket or an API call. Its Sparkplug id is derived from this, so nothing is lost by showing it here.">Device UUID</SortHeader>
+                  <SortHeader sort={rosterSort} column="status" title="Device status">Status</SortHeader>
+                  <SortHeader sort={rosterSort} column="type" style={{ width: 'auto' }} title="Device classification">Type</SortHeader>
+                  <SortHeader sort={rosterSort} column="cell" title="The cell the device resolves to">Cell</SortHeader>
+                </tr>
+              </thead>
               <tbody>
                 {filteredAssets.map(a => {
                   return (

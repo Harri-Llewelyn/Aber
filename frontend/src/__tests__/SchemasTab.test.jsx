@@ -131,6 +131,73 @@ describe('the registry rows', () => {
   })
 })
 
+/**
+ * Sorting the registry (#801): Version by its number, and Devices by the devices attached, each
+ * counted once however many times it lists the schema.
+ */
+describe('the registry sorts by a column (#801)', () => {
+  const schema = (n, name, version) => ({
+    schema_uuid: `${n}${n}${n}${n}0000-0000-4000-8000-00000000000${n}`, schema_name: name,
+    version, status: 'active', parent_schema_id: null, schema_definition: { properties: {} }
+  })
+  // In this order from the API. Robot_Schema predates versioning, so it has no number and reads v1.
+  const LATHE = schema(1, 'Lathe_Schema', 9)
+  const PRESS = schema(2, 'Press_Schema', 10)
+  const ROBOT = schema(3, 'Robot_Schema', null)
+  const OVEN = schema(4, 'Oven_Schema', 2)
+  const device = (id, ...schemas) => ({ asset_id: id, asset_name: id, submodel_schema_ids: schemas.map(s => s.schema_uuid) })
+  // Lathe 3, Press 2 (d1 lists it twice), Robot 1, Oven none.
+  const DEVICES = [
+    device('d1', PRESS, PRESS), device('d2', PRESS), device('d3', LATHE), device('d4', LATHE), device('d5', LATHE, ROBOT)
+  ]
+
+  const renderSorted = async (url = '/schemas') => {
+    window.history.replaceState(null, '', url)
+    api.get.mockImplementation((path) => Promise.resolve({
+      '/api/v1/schemas': [LATHE, PRESS, ROBOT, OVEN],
+      '/api/v1/metric-catalog': CATALOG,
+      '/api/v1/devices': DEVICES
+    }[path] || []))
+    renderTab()
+    await waitFor(() => expect(screen.getByText('Lathe_Schema')).toBeTruthy())
+  }
+  const names = () => [...document.querySelectorAll('.table-wrap tbody tr')].map(r => r.querySelector('strong').textContent)
+  const address = () => window.location.pathname + window.location.search
+
+  it('sorts Version by its number, so v10 follows v9, and reverses on a second click', async () => {
+    await renderSorted()
+    const header = screen.getByRole('columnheader', { name: 'Version' })
+    expect(within(screen.getByText('Robot_Schema').closest('tr')).getByText('v1 · Active')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Version' }))
+    expect(names()).toEqual(['Robot_Schema', 'Oven_Schema', 'Lathe_Schema', 'Press_Schema'])
+    expect(header).toHaveAttribute('aria-sort', 'ascending')
+    expect(address()).toBe('/schemas?sort=version')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Version' }))
+    expect(names()).toEqual(['Press_Schema', 'Lathe_Schema', 'Oven_Schema', 'Robot_Schema'])
+    expect(header).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/schemas?sort=-version')
+  })
+
+  it('sorts Devices by the count the link shows, with the dash at zero sorting as none', async () => {
+    await renderSorted()
+    expect(screen.getByRole('link', { name: '2 devices' }).closest('tr')).toBe(screen.getByText('Press_Schema').closest('tr'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Devices' }))
+    expect(names()).toEqual(['Oven_Schema', 'Robot_Schema', 'Press_Schema', 'Lathe_Schema'])
+    fireEvent.click(screen.getByRole('button', { name: 'Devices' }))
+    expect(names()).toEqual(['Lathe_Schema', 'Press_Schema', 'Robot_Schema', 'Oven_Schema'])
+  })
+
+  it('opens sorted when the address already holds a sort', async () => {
+    await renderSorted('/schemas?sort=-devices')
+    expect(names()).toEqual(['Lathe_Schema', 'Press_Schema', 'Robot_Schema', 'Oven_Schema'])
+    expect(screen.getByRole('columnheader', { name: 'Devices' })).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/schemas?sort=-devices')
+  })
+})
+
 /** A picker's group heading counts what is ticked in it, not how big the group is. */
 describe('the builder group headings', () => {
   const PICKER = [

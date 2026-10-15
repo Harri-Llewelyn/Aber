@@ -17,6 +17,7 @@ A machine identity can propose too, if an Administrator gave it that permission.
 - **Add to this proposal** takes you to the entity's page with your open proposal loaded into its dialog. You can then add to it rather than filing a second one.
 - Each tab has its own **kind** filter, a search box and **Clear filters**. The kind filter's options say how many proposals each kind holds. The search matches the subject, the proposer, the reason or rationale, or an id.
 - The columns are **Subject**, **Change** (the kind of change), **Field(s) changed**, **Status** and **When**. Hover a time for the full date. The drawer adds who proposed it, when it was proposed and decided, the reason, the rationale, the proposal's UUID and the Audit Trail row.
+- **A column's heading sorts the table** by that column, on both tabs. Click it again to reverse the order, and a third time to go back to the usual order. A status sorts the most serious first, and an empty cell always sorts last. The page's address keeps the order, so a link or a reload shows the table the same way.
 - The database decides which fields a proposal may name, and checks again at approval. The dialog disables a field no proposal may name, and says why.
 
 ## What the states mean

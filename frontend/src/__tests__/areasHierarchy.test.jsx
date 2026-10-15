@@ -928,3 +928,83 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     expect(screen.queryByRole('button', { name: /Clear filters/ })).toBeNull()
   })
 })
+
+/* Each column sorts on what its cell shows: Cells and Devices count the cells still in service, as
+   the row lists them, and the Area-Wide badge beside the device count is not part of it. */
+describe('AreasTab: sorting by a column (#801)', () => {
+  const area = (id, name, plan = null) => ({
+    area_id: id, area_name: name, description: null, icon: 'Factory', cells: [], cell_count: 0,
+    plan_path: plan, plan_aspect: plan ? 1.5 : null
+  })
+  const cell = (id, areaId, archived = false) => ({
+    cell_id: id, cell_name: id, area_id: areaId, plan_x: null, plan_y: null, is_archived: archived, gateways: [], gateway_count: 0
+  })
+  const inCell = (id, cellId, areaId) => ({
+    ...device, asset_id: id, asset_name: id, effective_cell_id: cellId, gateway_cell_id: cellId, effective_area_id: areaId
+  })
+  const areaWide = (id, areaId) => ({ ...bms, asset_id: id, asset_name: id, area_id: areaId, effective_area_id: areaId })
+
+  // In this order from the API. Line 10 has two cells in service and three archived, holding four
+  // devices and three; Line 9 one cell with six; Boiler House three empty cells and five Area-Wide.
+  const AREAS = [area('area-10', 'Line 10'), area('area-9', 'Line 9', 'area-9/plan-1.svg'), area('area-bh', 'Boiler House')]
+  const CELLS = [
+    cell('Bay 10A', 'area-10'), cell('Bay 10B', 'area-10'),
+    cell('Old 10C', 'area-10', true), cell('Old 10D', 'area-10', true), cell('Old 10E', 'area-10', true),
+    cell('Bay 9A', 'area-9'),
+    cell('Boiler 1', 'area-bh'), cell('Boiler 2', 'area-bh'), cell('Boiler 3', 'area-bh')
+  ]
+  const DEVICES = [
+    ...[1, 2, 3, 4].map(n => inCell(`L10_${n}`, 'Bay 10A', 'area-10')),
+    ...[1, 2, 3].map(n => inCell(`L10_old_${n}`, 'Old 10C', 'area-10')),
+    ...[1, 2, 3, 4, 5, 6].map(n => inCell(`L9_${n}`, 'Bay 9A', 'area-9')),
+    ...[1, 2, 3, 4, 5].map(n => areaWide(`BH_${n}`, 'area-bh'))
+  ]
+
+  const renderSorted = async (url = '/areas') => {
+    window.history.replaceState(null, '', url)
+    api.get.mockImplementation(routeGet({ areas: AREAS, cells: CELLS, devices: DEVICES, gateways: [] }))
+    render(<AreasTab showToast={vi.fn()} hasPermission={() => true} onSelectCell={vi.fn()} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText('Boiler House')).toBeInTheDocument())
+  }
+  const names = () => [...document.querySelectorAll('.table-wrap tbody tr')].map(r => r.querySelector('strong').textContent)
+  const address = () => window.location.pathname + window.location.search
+
+  it('sorts the areas by name in natural order, and reverses on a second click', async () => {
+    await renderSorted()
+    expect(names()).toEqual(['Line 10', 'Line 9', 'Boiler House'])
+    const header = screen.getByRole('columnheader', { name: 'Area' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Area' }))
+    expect(names()).toEqual(['Boiler House', 'Line 9', 'Line 10'])
+    expect(header).toHaveAttribute('aria-sort', 'ascending')
+    expect(address()).toBe('/areas?sort=name')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Area' }))
+    expect(names()).toEqual(['Line 10', 'Line 9', 'Boiler House'])
+    expect(header).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/areas?sort=-name')
+  })
+
+  it('sorts Cells and Devices by the counts the row shows, and Plan with the plans first', async () => {
+    await renderSorted()
+    // 1, 2 and 3 cells in service; counting the archived three would put Line 10 last.
+    fireEvent.click(screen.getByRole('button', { name: 'Cells' }))
+    expect(names()).toEqual(['Line 9', 'Line 10', 'Boiler House'])
+
+    // 0, 4 and 6: neither the archived cell's devices nor Boiler House's Area-Wide five count.
+    fireEvent.click(screen.getByRole('button', { name: 'Devices' }))
+    expect(names()).toEqual(['Boiler House', 'Line 10', 'Line 9'])
+    expect(within(screen.getByText('Boiler House').closest('tr')).getByText('+5 Area-Wide')).toBeInTheDocument()
+
+    // The two with the default outline keep the order they came in.
+    fireEvent.click(screen.getByRole('button', { name: 'Plan' }))
+    expect(names()).toEqual(['Line 9', 'Line 10', 'Boiler House'])
+  })
+
+  it('opens sorted when the address already holds a sort', async () => {
+    await renderSorted('/areas?sort=-cells')
+    expect(names()).toEqual(['Boiler House', 'Line 10', 'Line 9'])
+    expect(screen.getByRole('columnheader', { name: 'Cells' })).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/areas?sort=-cells')
+  })
+})

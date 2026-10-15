@@ -22,6 +22,7 @@ This page does not make backups itself. **Take a backup** queues a request, and 
 - **Address the bucket by path** is for MinIO and most self-hosted stores. Leave it off for AWS, R2 and B2.
 - **Remove the destination** stops the copies and deletes the secret key. Copies already made stay in the bucket.
 - **The filter**, at the left of the toolbar, shows every run, or only the completed ones, or only the failed ones. A cancelled run is listed under all runs only.
+- **The columns cannot be sorted.** The list loads 30 runs at a time, newest first, and a sort would cover only the runs loaded. Use the filter to narrow it, or load older runs from the foot of the list.
 - The list shows the newest 30 runs that match the filter. The foot says how many are loaded, such as `30 of 57`, beside **Show 27 more**. That adds older runs, up to 30 at a time. At the end it says **All 57 shown.**
 - **A run** opens its panel when you select anywhere on its row, or press Enter or Space on it. The panel shows the whole of any failure, and when the run was queued, started and finished. For a backup, it shows where its files are, each file with its size, and its off-site copy. **Release** is there too, on a pinned backup.
 

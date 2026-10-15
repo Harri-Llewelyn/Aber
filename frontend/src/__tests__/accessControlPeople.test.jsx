@@ -187,6 +187,82 @@ describe('the People tab', () => {
   })
 })
 
+describe('People: sorting by a column (#801)', () => {
+  const MANAGER = 'a0000000-0000-4000-8000-000000000007'
+  // Listed in none of the orders a sort makes. Half holds no role and signed in before anyone;
+  // the invited person never has.
+  const SORTABLE = [
+    person(ME, 'me@site.test', 'Administrator', 'active'),
+    person(OPERATOR, 'operator@site.test', 'Operator', 'active', { last_sign_in_at: '2026-10-10T09:00:00Z' }),
+    person(INVITED, 'invited@site.test', 'Auditor', 'invited', { invited_at: '2026-10-06T09:00:00Z' }),
+    person(MANAGER, 'manager@site.test', 'Shopfloor_Manager', 'active', { last_sign_in_at: '2026-10-05T09:00:00Z' }),
+    person(HALF_REMOVED, 'half@site.test', null, 'removed', {
+      sign_in_blocked: false, role_on_restore: 'Operator', last_sign_in_at: '2026-09-20T09:00:00Z',
+    }),
+    person(REMOVED, 'removed@site.test', null, 'removed', { sign_in_blocked: true, role_on_restore: 'Auditor' }),
+  ]
+
+  const at = (url) => window.history.replaceState(null, '', url)
+  const address = () => window.location.pathname + window.location.search
+  /** The email on each row, in the order shown. */
+  const emails = () => screen.getAllByRole('row').slice(1).map(r => r.cells[0].firstElementChild.textContent)
+  const sortBy = (label) => fireEvent.click(screen.getByRole('button', { name: label }))
+
+  beforeEach(() => { api.listPeople.mockResolvedValue(SORTABLE) })
+
+  it('sorts roles in the order they are listed everywhere, with no role last', async () => {
+    at('/access-control')
+    renderPeople()
+    await screen.findByText('manager@site.test')
+
+    // Administrator, Shopfloor Manager, Operator, Auditor: not alphabetical.
+    sortBy('Role')
+    expect(emails()).toEqual(['me@site.test', 'manager@site.test', 'operator@site.test', 'invited@site.test', 'half@site.test'])
+    expect(screen.getByRole('columnheader', { name: 'Role' })).toHaveAttribute('aria-sort', 'ascending')
+    expect(address()).toBe('/access-control?sort=role')
+    sortBy('Role')
+    expect(emails()).toEqual(['invited@site.test', 'operator@site.test', 'manager@site.test', 'me@site.test', 'half@site.test'])
+    expect(screen.getByRole('columnheader', { name: 'Role' })).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/access-control?sort=-role')
+  })
+
+  it('sorts status by severity, a finished removal first and the active last', async () => {
+    renderPeople()
+    await showRemoved()
+    await screen.findByText('removed@site.test')
+
+    sortBy('Status')
+    expect(emails()).toEqual([
+      'removed@site.test', 'half@site.test', 'invited@site.test', 'me@site.test', 'operator@site.test', 'manager@site.test',
+    ])
+    sortBy('Status')
+    expect(emails()).toEqual([
+      'me@site.test', 'operator@site.test', 'manager@site.test', 'invited@site.test', 'half@site.test', 'removed@site.test',
+    ])
+  })
+
+  it('sorts by when each person last signed in, with Never last either way', async () => {
+    renderPeople()
+    await screen.findByText('manager@site.test')
+
+    sortBy('Last signed in')
+    expect(emails()).toEqual(['half@site.test', 'me@site.test', 'manager@site.test', 'operator@site.test', 'invited@site.test'])
+    sortBy('Last signed in')
+    expect(emails()).toEqual(['operator@site.test', 'manager@site.test', 'me@site.test', 'half@site.test', 'invited@site.test'])
+  })
+
+  /** People shares its page with four tables on hidden tabs, and none of them tidies its sort away. */
+  it('arrives sorted from the address, and keeps the sort there', async () => {
+    at('/access-control?sort=-last_sign_in')
+    renderPeople()
+
+    await waitFor(() => expect(emails())
+      .toEqual(['operator@site.test', 'manager@site.test', 'me@site.test', 'half@site.test', 'invited@site.test']))
+    expect(screen.getByRole('columnheader', { name: 'Last signed in' })).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/access-control?sort=-last_sign_in')
+  })
+})
+
 describe('adding a person', () => {
   async function submit(email, role) {
     fireEvent.click(await screen.findByRole('button', { name: /Add Person/ }))

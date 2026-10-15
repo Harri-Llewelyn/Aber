@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -179,5 +179,76 @@ describe('Configuration Parameters long metric names', () => {
     expect(rows.length).toBe(3)
     expect(within(table()).getAllByText('Present').length).toBe(2)
     expect(within(table()).getByText('Unmodelled')).toBeInTheDocument()
+  })
+})
+
+describe('Configuration Parameters: sorting by a column (#801)', () => {
+  // Datatypes whose names sort apart from their numbers: Int32 is 3, Double 10, Boolean 11.
+  const SORTABLE_CONFIG = [
+    { metric_name: 'Axes/X/DISPLACEMENT', val_double: 1.5, val_string: null, val_bool: null, datatype: 10, updated_at: '2026-08-10T10:00:00Z' },
+    { metric_name: 'Axes/Y/DISPLACEMENT', val_double: 7, val_string: null, val_bool: null, datatype: 3, updated_at: '2026-08-10T09:00:00Z' },
+    { metric_name: 'Controller/EMERGENCY_STOP', val_double: null, val_string: null, val_bool: false, datatype: 11, updated_at: '2026-08-10T11:00:00Z' },
+  ]
+  // Models both axes and a spindle speed the device has not reported; the emergency stop is unmodelled.
+  const MODEL = {
+    ...SCHEMA,
+    schema_definition: { properties: { 'Axes/X/DISPLACEMENT': {}, 'Axes/Y/DISPLACEMENT': {}, 'Spindle/SPEED': {} } }
+  }
+
+  /** The comparison view: Present, Present, Missing, Unmodelled by default. */
+  const compare = async () => {
+    const result = render(<AssetConfigModal asset={asset({ submodel_schema_ids: ['sch-1'] })} schemas={[MODEL]} onClose={vi.fn()} />)
+    await screen.findByText('Spindle/SPEED')
+    return result
+  }
+  const names = () => [...table().querySelectorAll('td.config-metric-name')].map(td => td.textContent)
+  const sortBy = (label) => fireEvent.click(screen.getByRole('button', { name: label }))
+
+  beforeEach(() => { api.get.mockResolvedValue(SORTABLE_CONFIG) })
+
+  it('sorts the comparison by status: Missing, then Unmodelled, then Present', async () => {
+    await compare()
+    expect(names()).toEqual(['Axes/X/DISPLACEMENT', 'Axes/Y/DISPLACEMENT', 'Spindle/SPEED', 'Controller/EMERGENCY_STOP'])
+
+    sortBy('Status')
+    expect(names()).toEqual(['Spindle/SPEED', 'Controller/EMERGENCY_STOP', 'Axes/X/DISPLACEMENT', 'Axes/Y/DISPLACEMENT'])
+    expect(screen.getByRole('columnheader', { name: 'Status' })).toHaveAttribute('aria-sort', 'ascending')
+    sortBy('Status')
+    expect(names()).toEqual(['Axes/X/DISPLACEMENT', 'Axes/Y/DISPLACEMENT', 'Controller/EMERGENCY_STOP', 'Spindle/SPEED'])
+    expect(screen.getByRole('columnheader', { name: 'Status' })).toHaveAttribute('aria-sort', 'descending')
+  })
+
+  it('sorts the comparison by the datatype’s name and by when it was reported, a missing metric last', async () => {
+    await compare()
+
+    // Boolean, Double, Int32: the names, not 11, 10, 3.
+    sortBy('Datatype')
+    expect(names()).toEqual(['Controller/EMERGENCY_STOP', 'Axes/X/DISPLACEMENT', 'Axes/Y/DISPLACEMENT', 'Spindle/SPEED'])
+    sortBy('Datatype')
+    expect(names()).toEqual(['Axes/Y/DISPLACEMENT', 'Axes/X/DISPLACEMENT', 'Controller/EMERGENCY_STOP', 'Spindle/SPEED'])
+
+    sortBy('Last Updated')
+    expect(names()).toEqual(['Axes/Y/DISPLACEMENT', 'Axes/X/DISPLACEMENT', 'Controller/EMERGENCY_STOP', 'Spindle/SPEED'])
+    sortBy('Last Updated')
+    expect(names()).toEqual(['Controller/EMERGENCY_STOP', 'Axes/X/DISPLACEMENT', 'Axes/Y/DISPLACEMENT', 'Spindle/SPEED'])
+  })
+
+  /** Each row's value is a different metric in its own unit, so the values have no order between them. */
+  it('offers no sort on the values in either table, and leaves the page address alone', async () => {
+    window.history.replaceState(null, '', '/devices?sort=-name')
+    const { unmount } = await compare()
+    expect(screen.getByRole('columnheader', { name: 'Reported Value' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reported Value' })).toBeNull()
+    sortBy('Status')
+    unmount()
+
+    // Without a schema: the four-column table sorts its datatype by name too.
+    render(<AssetConfigModal asset={asset()} schemas={[]} onClose={vi.fn()} />)
+    await screen.findByText('Controller/EMERGENCY_STOP')
+    expect(screen.getByRole('columnheader', { name: 'Value' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Value' })).toBeNull()
+    sortBy('Datatype')
+    expect(names()).toEqual(['Controller/EMERGENCY_STOP', 'Axes/X/DISPLACEMENT', 'Axes/Y/DISPLACEMENT'])
+    expect(window.location.pathname + window.location.search).toBe('/devices?sort=-name')
   })
 })

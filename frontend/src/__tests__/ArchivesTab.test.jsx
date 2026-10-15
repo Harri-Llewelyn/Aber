@@ -746,3 +746,88 @@ describe('ArchivesTab layout', () => {
     expect(screen.getByRole('button', { name: /Restore/i }).getAttribute('title')).not.toMatch(/Admin permissions/)
   })
 })
+
+/**
+ * Both stages sort by their columns (#801), the sort held in the address. The two tables live in
+ * one component, so the one on the hidden tab must leave alone a sort meant for the one shown.
+ */
+describe('ArchivesTab: sorting by a column (#801)', () => {
+  beforeEach(() => { vi.clearAllMocks() })
+
+  const at = (url) => window.history.replaceState(null, '', url)
+  const address = () => window.location.pathname + window.location.search
+  const names = () => [...document.querySelectorAll('tbody tr')].map(tr => tr.cells[0].textContent)
+  const sortBy = (label) => fireEvent.click(screen.getByRole('button', { name: label }))
+
+  const archived = (name, autoDeleteAt) => ({
+    ...ARCHIVED_CELL, entity_id: `cell-${name}`, name, auto_delete_at: autoDeleteAt
+  })
+  // The Retired tab's tombstones, as the fixtures above, by whoever deleted them.
+  const tombstone = (name, by, retiredAt = '2026-10-01T10:00:00Z') => ({
+    ...RETIRED_DEVICE, entity_id: `dev-${name}`, name, retired_at: retiredAt, exports: [], ...by
+  })
+
+  it('sorts the Archived table by its auto-purge date, with "Never auto-purged" last either way', async () => {
+    at('/archives')
+    await showLifecycle({ archives: [
+      archived('Press 10', '2026-12-01T00:00:00Z'),
+      archived('Press 9', null),
+      archived('Press 2', '2026-11-15T00:00:00Z'),
+      archived('Boiler', '2027-01-10T00:00:00Z')
+    ] })
+
+    sortBy('Auto-Purge')
+    expect(names()).toEqual(['Press 2', 'Press 10', 'Boiler', 'Press 9'])
+    expect(screen.getByRole('columnheader', { name: 'Auto-Purge' })).toHaveAttribute('aria-sort', 'ascending')
+    expect(address()).toBe('/archives?sort=auto_purge')
+
+    sortBy('Auto-Purge')
+    expect(names()).toEqual(['Boiler', 'Press 10', 'Press 2', 'Press 9'])
+    expect(screen.getByRole('columnheader', { name: 'Auto-Purge' })).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/archives?sort=-auto_purge')
+  })
+
+  it('sorts the Retired table by who retired it: the email, else the account uuid, else the retention timer', async () => {
+    at('/archives/retired')
+    await showLifecycle({ retired: [
+      tombstone('By Zoe', { retired_by: 'user-9', retired_by_email: 'zoe@example.test' }),
+      tombstone('By the timer', { retired_by: null, retired_by_email: null }),
+      tombstone('By a machine', { retired_by: 'b0000000-0000-4000-8000-000000000001', retired_by_email: null }),
+      tombstone('By the admin', { retired_by: 'user-1', retired_by_email: 'admin@example.test' })
+    ] })
+
+    sortBy('By')
+    // The timer is a value, not an empty cell, so it sorts as its words do rather than last.
+    expect(names()).toEqual(['By the admin', 'By a machine', 'By the timer', 'By Zoe'])
+    expect(address()).toBe('/archives/retired?sort=by')
+    sortBy('By')
+    expect(names()).toEqual(['By Zoe', 'By the timer', 'By a machine', 'By the admin'])
+  })
+
+  it('keeps a sort meant for the Retired tab on arrival, which the hidden Archived table leaves alone', async () => {
+    at('/archives/retired?sort=-retired_at')
+    api.get.mockImplementation(routed({
+      archives: [ARCHIVED_CELL],
+      retired: [
+        tombstone('Retired 1 Oct', {}, '2026-10-01T10:00:00Z'),
+        tombstone('Retired 3 Oct', {}, '2026-10-03T10:00:00Z'),
+        tombstone('Retired 2 Oct', {}, '2026-10-02T10:00:00Z')
+      ]
+    }))
+    render(<ArchivesTab showToast={vi.fn()} hasPermission={() => true} />)
+    await screen.findByText('Retired 1 Oct')
+    expect(names()).toEqual(['Retired 3 Oct', 'Retired 2 Oct', 'Retired 1 Oct'])
+    expect(screen.getByRole('columnheader', { name: 'Retired At' })).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/archives/retired?sort=-retired_at')
+  })
+
+  it('keeps a sort meant for the Archived tab on arrival, which the hidden Retired table leaves alone', async () => {
+    at('/archives?sort=-auto_purge')
+    await showLifecycle({
+      archives: [archived('Press 9', null), archived('Press 2', '2026-11-15T00:00:00Z'), archived('Boiler', '2027-01-10T00:00:00Z')],
+      retired: [RETIRED_DEVICE]
+    })
+    expect(names()).toEqual(['Boiler', 'Press 2', 'Press 9'])
+    expect(address()).toBe('/archives?sort=-auto_purge')
+  })
+})

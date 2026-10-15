@@ -34,6 +34,7 @@ import { Modal } from '../common/Modal'
 import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
 import { SearchInput } from '../common/SearchInput'
+import { SortHeader } from '../common/SortHeader'
 import { RouteLink } from '../common/RouteLink'
 import { deviceUrl } from '../../routes'
 import { ClearFilters } from '../common/ClearFilters'
@@ -49,6 +50,7 @@ import { TabStrip } from '../common/TabStrip'
 import { ExpandAllToggle } from '../common/ExpandAllToggle'
 import { HelpTip } from '../common/HelpTip'
 import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { useSortableRows, useTableSort } from '../../hooks/useTableSort'
 
 // Sentinel for the "not in the list yet" option in the group picker. Not a valid group name --
 // the CHECK constraint on metric_groups.name rejects anything containing the separator.
@@ -124,6 +126,25 @@ const VIEW_HELP = {
 // Device chips an Uncatalogued row shows before "more": a name a whole fleet declares would
 // otherwise fill the row with one chip per device.
 const UNCATALOGUED_DEVICES_SHOWN = 3
+
+/** The catalog's sortable columns, each on what its cell shows. A "—" cell goes last. */
+const CATALOG_SORT = {
+  name: { type: 'text', value: m => m.name },
+  standard: { type: 'text', value: m => m.standard || LOCAL_EXTENSION_LABEL },
+  category: { type: 'text', value: m => m.category },
+  units: { type: 'text', value: m => m.units },
+  datatype: { type: 'text', value: m => (m.datatype === null || m.datatype === undefined ? null : datatypeLabel(m.datatype)) },
+  semantic_id: { type: 'text', value: m => m.semantic_id },
+  description: { type: 'text', value: m => m.description }
+}
+
+/** The Uncatalogued table's sortable columns. Declared By is a list of devices; Devices counts it. */
+const UNCATALOGUED_SORT = {
+  name: { type: 'text', value: u => u.metric_name },
+  devices: { type: 'number', value: u => u.device_count },
+  datatype: { type: 'text', value: u => (u.datatypes || []).map(datatypeLabel).join(', ') },
+  last_declared: { type: 'time', value: u => u.last_declared_at }
+}
 
 /** Why Catalogue cannot prefill a datatype from what the births carried, or null when it can. */
 const catalogueDatatypeNote = (row) => {
@@ -579,6 +600,16 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // `superseded_by` is a uuid; the Deprecated Metrics tab and the restore modal show the name.
   const metricById = new Map(catalog.map(m => [m.metric_uuid, m]))
 
+  // The catalog sorts inside each group, and the groups keep their order. The Deprecated tab sorts
+  // by the same columns, plus the replacement's name.
+  const catalogSort = useTableSort(CATALOG_SORT, { active: view === 'catalog' })
+  const deprecatedSortColumns = useMemo(() => {
+    const names = new Map(catalog.map(m => [m.metric_uuid, m.name]))
+    return { ...CATALOG_SORT, superseded_by: { type: 'text', value: m => names.get(m.superseded_by) } }
+  }, [catalog])
+  const [deprecatedRows, deprecatedSort] = useSortableRows(deprecatedCatalog, deprecatedSortColumns, { active: view === 'deprecated' })
+  const [uncataloguedRows, uncataloguedSort] = useSortableRows(shownUncatalogued, UNCATALOGUED_SORT, { active: view === 'uncatalogued' })
+
   // The vocabulary the picker offers: the curated registry (MTConnect's component types) plus
   // anything already in use.
   const knownGroups = knownGroupNames(groups, catalog)
@@ -792,15 +823,15 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
     </colgroup>
   )
 
-  const catalogHeaders = (
+  const catalogHeaders = (sort) => (
     <>
-      <th>Name</th>
-      <th title="Which standard vocabulary this metric was named from">Standard</th>
-      <th title="MTConnect observation category">Category</th>
-      <th title="Unit of measure, where the metric has one">Units</th>
-      <th title="How the value is encoded on the wire">Datatype</th>
-      <th title="AAS (IEC 63278) semanticId — the resolvable identity of the concept this metric measures">Semantic ID</th>
-      <th>Description</th>
+      <SortHeader sort={sort} column="name">Name</SortHeader>
+      <SortHeader sort={sort} column="standard" title="Which standard vocabulary this metric was named from">Standard</SortHeader>
+      <SortHeader sort={sort} column="category" title="MTConnect observation category">Category</SortHeader>
+      <SortHeader sort={sort} column="units" title="Unit of measure, where the metric has one">Units</SortHeader>
+      <SortHeader sort={sort} column="datatype" title="How the value is encoded on the wire">Datatype</SortHeader>
+      <SortHeader sort={sort} column="semantic_id" title="AAS (IEC 63278) semanticId — the resolvable identity of the concept this metric measures">Semantic ID</SortHeader>
+      <SortHeader sort={sort} column="description">Description</SortHeader>
     </>
   )
 
@@ -903,7 +934,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                 <div className="table-wrap">
                   <table className="metric-table">
                     {metricColumns(false)}
-                    <thead><tr>{catalogHeaders}</tr></thead>
+                    <thead><tr>{catalogHeaders(catalogSort)}</tr></thead>
                     {catalogGroups.map(group => {
                       const open = isGroupOpen(group.label)
                       return (
@@ -932,7 +963,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                               </button>
                             </td>
                           </tr>
-                          {open && group.metrics.map(m => (
+                          {open && catalogSort.apply(group.metrics).map(m => (
                             <tr key={m.metric_uuid} {...rowProps(m)}>
                               {metricCells(m)}
                             </tr>
@@ -958,12 +989,12 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     {metricColumns(true)}
                     <thead>
                       <tr>
-                        {catalogHeaders}
-                        <th title="The metric named as this one's replacement when it was deprecated">Superseded By</th>
+                        {catalogHeaders(deprecatedSort)}
+                        <SortHeader sort={deprecatedSort} column="superseded_by" title="The metric named as this one's replacement when it was deprecated">Superseded By</SortHeader>
                       </tr>
                     </thead>
                     <tbody>
-                      {deprecatedCatalog.map(m => {
+                      {deprecatedRows.map(m => {
                         const replacement = m.superseded_by ? metricById.get(m.superseded_by) : null
                         return (
                           <tr key={m.metric_uuid} {...rowProps(m)}>
@@ -1022,16 +1053,16 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                     </colgroup>
                     <thead>
                       <tr>
-                        <th>Name</th>
-                        <th title="How many devices declare this name">Devices</th>
+                        <SortHeader sort={uncataloguedSort} column="name">Name</SortHeader>
+                        <SortHeader sort={uncataloguedSort} column="devices" title="How many devices declare this name">Devices</SortHeader>
                         <th title="The devices that declare it. Each opens on the Devices page.">Declared By</th>
-                        <th title="The datatype the devices' birth certificates gave it, where one gave it a value">Datatype</th>
-                        <th title="The latest birth certificate that changed what one of these devices declares. A rebirth that declares the same names does not move it.">Last Declared</th>
+                        <SortHeader sort={uncataloguedSort} column="datatype" title="The datatype the devices' birth certificates gave it, where one gave it a value">Datatype</SortHeader>
+                        <SortHeader sort={uncataloguedSort} column="last_declared" title="The latest birth certificate that changed what one of these devices declares. A rebirth that declares the same names does not move it.">Last Declared</SortHeader>
                         {canManageSchema && <th className="row-actions" aria-label="Actions" />}
                       </tr>
                     </thead>
                     <tbody>
-                      {shownUncatalogued.map(u => {
+                      {uncataloguedRows.map(u => {
                         const devices = u.devices || []
                         const showAll = allDevicesShown[u.metric_name] || devices.length <= UNCATALOGUED_DEVICES_SHOWN + 1
                         const hidden = devices.length - UNCATALOGUED_DEVICES_SHOWN

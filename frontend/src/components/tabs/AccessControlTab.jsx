@@ -22,6 +22,9 @@ import { LoadingState } from '../common/LoadingState'
 import { SearchInput } from '../common/SearchInput'
 import { TabStrip } from '../common/TabStrip'
 import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { useSortableRows } from '../../hooks/useTableSort'
+import { severityRank } from '../../utils/tableSort'
+import { SortHeader } from '../common/SortHeader'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { formatDateTime } from '../../utils/format'
 import {
@@ -60,6 +63,19 @@ const ACL_VERB = {
 
 /** Usernames shaped like a gateway id, which is what an orphaned account looks like. */
 const GATEWAY_USERNAME = /^gwy[0-9a-f]{21}$/
+
+/** What the Broker accounts table says an account is for, after any name it was declared with. */
+const accountPurpose = (c) => (c.noGateway
+  ? 'Shaped like a gateway’s account, but no gateway claims it and nothing declares it.'
+  : c.purpose || 'Holds no platform role; nothing in the repository declares it.')
+
+/** The Broker accounts table's sortable columns. Purpose sorts on the words the cell shows. */
+const ACCOUNT_SORT = {
+  username: { type: 'text', value: c => c.username },
+  roles: { type: 'text', value: c => (c.roles || []).join(', ') },
+  purpose: { type: 'text', value: c => [c.name, accountPurpose(c)].filter(Boolean).join('. ') },
+  broker: { type: 'rank', value: c => severityRank(brokerStateTone(brokerState(c, true))) }
+}
 
 /**
  * The declared broker roles in policy order, each annotated with the live rules the broker reports.
@@ -335,6 +351,45 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
     load()
   }, [load])
 
+  // Each tab's table sorts on what its cells show; a state sorts by its badge's colour. A dash
+  // (no tokens recorded, a role the broker did not report) goes last.
+  const credentialSortColumns = useMemo(() => ({
+    gateway: { type: 'text', value: g => g.name },
+    type: { type: 'text', value: g => gatewayTypeLabel(gatewayType(g)) },
+    username: { type: 'text', value: g => g.sparkplug_id },
+    credential: { type: 'rank', value: g => severityRank(credentialStateTone(credentialState(g, g.issued_at))) },
+    broker: { type: 'rank', value: g => severityRank(brokerStateTone(brokerState(clientsByUsername.get(g.sparkplug_id), !!inventory))) }
+  }), [clientsByUsername, inventory])
+  const identitySortColumns = useMemo(() => {
+    const outstanding = (p) => {
+      const status = tokenStatus(tokens.get(p.principal_id), Date.now(), revokedJtis)
+      return status.rows.length > 0 ? status.outstanding : null
+    }
+    return {
+      identity: { type: 'text', value: p => describePrincipal(p.principal_id, p).name },
+      principal_id: { type: 'text', value: p => p.principal_id },
+      holds: { type: 'text', value: p => (p.permissions || []).join(', ') },
+      reaches: { type: 'text', value: p => permissionReach(p.permissions) },
+      tokens: { type: 'number', value: outstanding }
+    }
+  }, [tokens, revokedJtis])
+  const roleSortColumns = useMemo(() => {
+    const allowed = (entry) => (rolesByName.get(entry.rolename)?.acls || []).filter(a => a.allow)
+    const writes = (entry) => (rolesByName.has(entry.rolename)
+      ? allowed(entry).some(a => a.acltype === 'publishClientSend')
+      : entry.writes)
+    return {
+      role: { type: 'text', value: e => e.rolename },
+      access: { type: 'rank', value: e => severityRank(writes(e) ? 'pending' : 'success') },
+      rules: { type: 'number', value: e => (rolesByName.has(e.rolename) ? allowed(e).length : null) },
+      purpose: { type: 'text', value: e => e.purpose }
+    }
+  }, [rolesByName])
+  const [credentialRows, credentialSort] = useSortableRows(visible, credentialSortColumns, { active: section === 'credentials' })
+  const [identityRows, identitySort] = useSortableRows(visiblePrincipals, identitySortColumns, { active: section === 'identities' })
+  const [accountRows, accountSort] = useSortableRows(brokerAccounts, ACCOUNT_SORT, { active: section === 'accounts' })
+  const [roleRows, roleSort] = useSortableRows(ROLE_ENTRIES, roleSortColumns, { active: section === 'roles' })
+
   const brokerBadge = (bs) => (
     <Badge size="sm" tone={brokerStateTone(bs)} title={brokerStateExplanation(bs)}>
       {brokerStateLabel(bs)}
@@ -452,16 +507,16 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
               <table>
                 <thead>
                   <tr>
-                    <th>Gateway</th>
-                    <th title="The kind of gateway: Remote (an appliance on the plant network), Host (inside this stack), Simulated (readings generated), Playback (republishes recorded captures)">Type</th>
-                    <th>MQTT username</th>
-                    <th title="What the platform issued and recorded, from the database">Credential</th>
-                    <th title="What the broker holds right now, read live from its Dynamic Security plugin">Broker</th>
+                    <SortHeader sort={credentialSort} column="gateway">Gateway</SortHeader>
+                    <SortHeader sort={credentialSort} column="type" title="The kind of gateway: Remote (an appliance on the plant network), Host (inside this stack), Simulated (readings generated), Playback (republishes recorded captures)">Type</SortHeader>
+                    <SortHeader sort={credentialSort} column="username">MQTT username</SortHeader>
+                    <SortHeader sort={credentialSort} column="credential" title="What the platform issued and recorded, from the database">Credential</SortHeader>
+                    <SortHeader sort={credentialSort} column="broker" title="What the broker holds right now, read live from its Dynamic Security plugin">Broker</SortHeader>
                     <th className="row-actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {visible.map(g => {
+                  {credentialRows.map(g => {
                     const state = credentialState(g, g.issued_at)
                     const action = credentialAction(g)
                     return (
@@ -613,22 +668,22 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
               <table>
                 <thead>
                   <tr>
-                    <th>Identity</th>
+                    <SortHeader sort={identitySort} column="identity">Identity</SortHeader>
                     {/* Its own column, as the Schemas page treats a UUID: it is the value a JWT's
                         `sub` claim has to equal. */}
-                    <th>Principal ID</th>
-                    <th>Holds</th>
-                    <th>Reaches</th>
+                    <SortHeader sort={identitySort} column="principal_id">Principal ID</SortHeader>
+                    <SortHeader sort={identitySort} column="holds">Holds</SortHeader>
+                    <SortHeader sort={identitySort} column="reaches">Reaches</SortHeader>
                     {/* What is outstanding, not when it was last minted (tokenStatus()): a re-mint
                         adds a live credential rather than replacing one. */}
-                    <th title="Long-lived tokens signed for this identity that have not yet expired">
+                    <SortHeader sort={identitySort} column="tokens" title="Long-lived tokens signed for this identity that have not yet expired">
                       Tokens
-                    </th>
+                    </SortHeader>
                     <th className="row-actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {visiblePrincipals.map(p => {
+                  {identityRows.map(p => {
                     // The row carries `name` and `purpose` for an identity created from the page;
                     // the registry answers for the three a migration pinned.
                     const meta = describePrincipal(p.principal_id, p)
@@ -809,14 +864,14 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
               <table>
                 <thead>
                   <tr>
-                    <th>MQTT username</th>
-                    <th>Roles</th>
-                    <th>Purpose</th>
-                    <th>Broker</th>
+                    <SortHeader sort={accountSort} column="username">MQTT username</SortHeader>
+                    <SortHeader sort={accountSort} column="roles">Roles</SortHeader>
+                    <SortHeader sort={accountSort} column="purpose">Purpose</SortHeader>
+                    <SortHeader sort={accountSort} column="broker">Broker</SortHeader>
                   </tr>
                 </thead>
                 <tbody>
-                  {brokerAccounts.map(c => (
+                  {accountRows.map(c => (
                     <tr key={c.username}>
                       <td>
                         <CopyableId
@@ -838,9 +893,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
                       <td className="mono cell-meta">{(c.roles || []).join(', ') || '—'}</td>
                       <td className="cell-meta" style={{ maxWidth: '46ch' }}>
                         {c.name && <strong>{c.name}. </strong>}
-                        {c.noGateway
-                          ? 'Shaped like a gateway’s account, but no gateway claims it and nothing declares it.'
-                          : c.purpose || 'Holds no platform role; nothing in the repository declares it.'}
+                        {accountPurpose(c)}
                       </td>
                       <td>{brokerBadge(brokerState(c, true))}</td>
                     </tr>
@@ -867,14 +920,14 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
             <table>
               <thead>
                 <tr>
-                  <th>Role</th>
-                  <th>Access</th>
-                  <th title="How many rules the broker reports for the role; open the role to read them">Rules</th>
-                  <th>Purpose</th>
+                  <SortHeader sort={roleSort} column="role">Role</SortHeader>
+                  <SortHeader sort={roleSort} column="access">Access</SortHeader>
+                  <SortHeader sort={roleSort} column="rules" title="How many rules the broker reports for the role; open the role to read them">Rules</SortHeader>
+                  <SortHeader sort={roleSort} column="purpose">Purpose</SortHeader>
                 </tr>
               </thead>
               <tbody>
-                {ROLE_ENTRIES.map(entry => {
+                {roleRows.map(entry => {
                   const live = rolesByName.get(entry.rolename)
                   const allowed = (live?.acls || []).filter(a => a.allow)
                   const writes = live ? allowed.some(a => a.acltype === 'publishClientSend') : entry.writes

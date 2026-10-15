@@ -295,3 +295,77 @@ describe('filters still narrow the table', () => {
     expect(document.querySelector('.card-fill > .table-wrap')).toBeTruthy()
   })
 })
+
+// Sorting (#801)
+
+describe('the cells table sorts by a column (#801)', () => {
+  // By id the welding hall comes first, by name second.
+  const AREAS = [
+    { area_id: 'area-1', area_name: 'Welding Hall' },
+    { area_id: 'area-2', area_name: 'Assembly Hall' }
+  ]
+  const RETIRED_AREA = 'b0000000-0000-4000-8000-000000000009'
+  const gatewaysIn = (cellId, n) => Array.from({ length: n }, (_, i) => ({
+    ...GATEWAY, gateway_id: `${cellId}-gw-${i}`, gateway_name: `${cellId}_Gateway_${i}`, cell_id: cellId
+  }))
+  const cell = (id, name, areaId, gateways) => ({
+    ...CELL, cell_id: id, cell_name: name, area_id: areaId, gateways: gatewaysIn(id, gateways), gateway_count: gateways
+  })
+  // Line 4's area is not in the list, so its row shows the id; Line 2 is unfiled.
+  const CELLS = [
+    cell('cell-1', 'Line 1', 'area-1', 2),
+    cell('cell-2', 'Line 2', null, 0),
+    cell('cell-3', 'Line 3', 'area-2', 1),
+    cell('cell-4', 'Line 4', RETIRED_AREA, 3)
+  ]
+  // 1, 3, 0 and 2 devices, each resolving to its cell through its gateway.
+  const DEVICES = [['cell-1', 1], ['cell-2', 3], ['cell-4', 2]].flatMap(([cellId, n]) =>
+    Array.from({ length: n }, (_, i) => device({ asset_id: `${cellId}-dev-${i}`, asset_name: `${cellId}_Device_${i}`, effective_cell_id: cellId })))
+
+  const renderSorted = async (url = '/cells') => {
+    window.history.replaceState(null, '', url)
+    api.get.mockImplementation((path) => {
+      if (path.startsWith('/api/v1/areas')) return Promise.resolve(AREAS)
+      return routeGet({ cells: CELLS, devices: DEVICES })(path)
+    })
+    render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} onViewTrail={vi.fn()} />)
+    await waitFor(() => expect(within(table()).getByText('Welding Hall')).toBeTruthy())
+  }
+  const names = () => [...table().querySelectorAll('tbody tr')].map(r => r.querySelector('strong').textContent)
+  const address = () => window.location.pathname + window.location.search
+
+  it('sorts Area by the area’s name, or its id where the name is unknown, with an unfiled cell last either way', async () => {
+    await renderSorted()
+    expect(within(rowFor('Line 4')).getByText(RETIRED_AREA)).toBeTruthy()
+    const header = screen.getByRole('columnheader', { name: 'Area' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Area' }))
+    expect(names()).toEqual(['Line 3', 'Line 4', 'Line 1', 'Line 2'])
+    expect(header).toHaveAttribute('aria-sort', 'ascending')
+    expect(address()).toBe('/cells?sort=area')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Area' }))
+    expect(names()).toEqual(['Line 1', 'Line 4', 'Line 3', 'Line 2'])
+    expect(header).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/cells?sort=-area')
+  })
+
+  it('sorts Assigned Gateways and Devices by how many each row holds', async () => {
+    await renderSorted()
+    fireEvent.click(screen.getByRole('button', { name: 'Assigned Gateways' }))
+    expect(names()).toEqual(['Line 2', 'Line 3', 'Line 1', 'Line 4'])
+
+    // The devices resolving to the cell, from the device list rather than the cell row.
+    fireEvent.click(screen.getByRole('button', { name: 'Devices' }))
+    expect(names()).toEqual(['Line 3', 'Line 1', 'Line 4', 'Line 2'])
+    fireEvent.click(screen.getByRole('button', { name: 'Devices' }))
+    expect(names()).toEqual(['Line 2', 'Line 4', 'Line 1', 'Line 3'])
+  })
+
+  it('opens sorted when the address already holds a sort', async () => {
+    await renderSorted('/cells?sort=-gateways')
+    expect(names()).toEqual(['Line 4', 'Line 1', 'Line 3', 'Line 2'])
+    expect(screen.getByRole('columnheader', { name: 'Assigned Gateways' })).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/cells?sort=-gateways')
+  })
+})
