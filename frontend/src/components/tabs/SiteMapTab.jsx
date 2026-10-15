@@ -217,7 +217,7 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
           <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>QUAR</span>
         )}
         {status === DEVICE_STATUS.OFFLINE && (
-          <span className="chip-flag" style={{ color: 'var(--text-muted)' }}>OFF</span>
+          <span className="chip-flag">OFF</span>
         )}
         {/* An alert carries a flag as well as a hue: never colour alone. The glyph and wording are
             DevicesTab's, so a device does not answer to two names on two pages. */}
