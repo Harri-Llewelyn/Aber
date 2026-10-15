@@ -3150,7 +3150,9 @@ function edgeFunctionNames() {
   const INDEX = 'frontend/index.html';
   const VITE = 'frontend/vite.config.js';
   const fallback = /location \/ \{[^}]*try_files \$uri \$uri\/ \/index\.html;/.test(read(NGINX));
-  const relative = [...read(INDEX).replace(/<!--[\s\S]*?-->/g, '').matchAll(/\s(?:src|href)="([^"]*)"/g)]
+  // Comments are blanked, as check 49 does, not removed: what is left cannot close up into a new one.
+  const uncommented = read(INDEX).replace(/<!--[\s\S]*?-->/g, (c) => c.replace(/[^\n]/g, ' '));
+  const relative = [...uncommented.matchAll(/\s(?:src|href)="([^"]*)"/g)]
     .map((m) => m[1])
     .filter((url) => !url.startsWith('/') && !/^[a-z]+:/i.test(url));
   const base = /^\s*base:\s*['"]([^'"]*)['"]/m.exec(read(VITE));
