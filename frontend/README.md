@@ -872,8 +872,9 @@ Three rules that were each learned from a real bug:
     amber first; a status with a fixed order of its own (Cold Storage's export sequence) uses
     `rankIn(order, value)`. A column sorts on the value its cell shows, so a count column counts
     what the cell counts.
-  - **An empty cell goes last** in either direction: a dash, Never, no gateway. Rows that compare
-    equal keep their default order.
+  - **An empty cell goes last** in either direction: Never, no gateway, a dash that stands for no
+    value. A count of zero is a number, even where the cell shows it as a dash, so it sorts as 0.
+    Rows that compare equal keep their default order.
   - **A column with no order between its rows is not sortable**: actions, an icon, a list of chips
     another column counts, or a value column whose rows are different metrics in different units.
   - **The sort is in the address**, `?sort=name` or `?sort=-name` for descending. A page shows one
@@ -886,7 +887,7 @@ Three rules that were each learned from a real bug:
   - **A table loaded a page at a time from the server keeps its order** and has no sortable headers:
     sorting in the browser would sort only the rows on screen. Backups is the one such table.
   - **The arrow hangs in the header cell's right padding**, so a sortable column is no wider than it
-    was and the header keeps its one line. `sortableTables.test.js` lists every file that draws a
+    was and the header keeps its one line. The focus ring goes round the label and the arrow. `sortableTables.test.js` lists every file that draws a
     table, with the reason each unsortable one keeps its order, so a new table cannot ship unsorted.
 - **Row actions live in the details drawer.** Keep one or two primary actions visible in the row; the rest go in the drawer, which can also say *why* an action is disabled.
 - **`common/TagList.jsx` collapses long tag lists**, with `priority` entries pinned ahead of the

@@ -1396,13 +1396,15 @@ th {
 }
 
 /* A sortable column's label (`common/SortHeader.jsx`): a button that looks like the header text, so
-   the header keeps its one line and fixed height. The arrow hangs in the cell's 16px right padding
-   rather than beside the label, so a sortable column is no wider than it was. */
+   the header keeps its one line and fixed height. The arrow hangs in the cell's 16px right padding:
+   the button's own right padding holds it, and the matching negative margin takes that space back,
+   so a sortable column is no wider than it was while the focus ring still goes round the arrow. */
 .sort-header {
   position: relative;
   display: inline-flex;
   align-items: center;
-  padding: 0;
+  padding: 0 14px 0 0;
+  margin-right: -14px;
   border: none;
   background: none;
   font: inherit;
@@ -1419,7 +1421,7 @@ th[aria-sort] > .sort-header { color: var(--text-primary); }
 
 .sort-arrow {
   position: absolute;
-  left: calc(100% + 2px);
+  right: 0;
   top: 50%;
   transform: translateY(-50%);
 }
