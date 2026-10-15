@@ -92,9 +92,9 @@ class ReplayLaneBase(unittest.TestCase):
         A gateway of our own rather than the seeded Playback one.
 
         THE SEEDED GATEWAY IS NOT USED ON PURPOSE. ensure_shadow_devices() finds the shadow gateway
-        by its FLAG and not by 0060's pinned id -- "an operator may legitimately want a second one"
-        -- so a suite that only ever tested the seeded row would pass against a gate hard-coded to
-        that one uuid, which is a gate that stops working the moment anybody adds a second.
+        by its FLAG and not by 0060's pinned id, and a stack upgraded from a release that allowed it
+        can have a second one. A suite that only ever tested the seeded row would pass against a
+        gate hard-coded to that one uuid.
         """
         gid = str(uuid.uuid4())
         cols = {
@@ -249,9 +249,9 @@ class TheGateIsNarrowEnough(ReplayLaneBase):
 class TheGateFindsTheGatewayByItsFlag(ReplayLaneBase):
     def test_a_second_shadow_gateway_is_also_closed(self):
         """
-        ensure_shadow_devices() looks the gateway up by `is_shadow` precisely so that a second one
-        works without it being edited. A gate pinned to 0060's seeded uuid would pass every other
-        test here and be open on that second gateway.
+        ensure_shadow_devices() looks the gateway up by `is_shadow`, and a stack upgraded from a
+        release that allowed a second one has one. A gate pinned to 0060's seeded uuid would pass
+        every other test here and be open on that second gateway.
         """
         second = self._gateway(deployment="host", is_simulated=True, is_shadow=True)
         with self.assertRaises(psycopg2.errors.CheckViolation) as ctx:

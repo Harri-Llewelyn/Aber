@@ -13,7 +13,7 @@ Use this page to record what the broker actually carried, and play it back later
 - **Play a file…**, at the top of the card, stores a capture file and goes straight on to playing it back. Dropping the file anywhere on the card does the same. If the file does not name its subject, **File it against** in the dialog names it.
 - **The strips above the list** show a recording or a playback that is queued or running, on either tab. They also show one that has just failed. **Stop** ends a running recording early and keeps what it has recorded, or stops a running playback. Nothing shows there when nothing is in progress.
 - **Play back…** is in the details panel of a subject with a stored capture. It publishes the capture as the **Playback gateway**, through the real broker and the real ingestion path. The capture's timestamps are shifted so it starts now.
-- The playback dialog asks for the gateway, a **Device mapping** and a **Speed**. The mapping moves each captured device onto one of the Playback gateway's own **replay lane** devices. Nothing you can create is a replay lane, and nothing real is turned into one. So replayed traffic is always visibly not live traffic.
+- The playback dialog asks for the gateway, a **Device mapping** and a **Speed**. The Playback gateway is the only one a capture can be played back onto, and no one can mark another gateway as one. The mapping moves each captured device onto its own **replay lane** on that gateway. Playback refuses a real device, and it refuses the lane of a different device. So replayed traffic is always visibly not live traffic.
 
 ## What the states mean
 

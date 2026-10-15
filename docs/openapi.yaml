@@ -1904,7 +1904,11 @@ paths:
         the platform issued, and every entry in `device_map` must name an active device *of that
         gateway* — an unmapped or foreign device id publishes under the target's edge node and is
         quarantined by `verify_gateway_binding()`, which reads as a fleet fault rather than a
-        mapping one.
+        mapping one. Each target must also be a replay lane, and the lane of the device its key
+        names (0187): a replay writes into the history of the device it publishes as, so a real
+        device, or another device's lane, is refused. The target gateway is the seeded Playback
+        gateway: `gateways.is_shadow` cannot be set or changed through the API (0187), so no other
+        gateway can be made one.
 
         **Stopping one is `request_playback_stop()`**, which sets `stop_requested`; the worker
         observes it on its next progress tick. Progress arrives over Realtime.
@@ -4636,7 +4640,8 @@ components:
             For a playback lane: the real machine whose recordings this device replays. NULL for
             every ordinary device. Set only by `ensure_shadow_devices()` (0060) — a lane is created
             as a side effect of preparing a playback and reused thereafter, one per (playback
-            gateway, original device). This is PROVENANCE and not a copy of a gateway flag: whether
+            gateway, original device). The API refuses to set, change or clear it, and to move a
+            lane to another gateway (0187). This is PROVENANCE and not a copy of a gateway flag: whether
             a device is synthetic still derives from `gateways.is_shadow` / `is_simulated`.
             A lane carries its original's schemas and deliberately NOT its nameplate — a serial
             number identifies one physical object, and a copy would make the AAS export emit two
@@ -5337,8 +5342,8 @@ components:
           type: object
           additionalProperties: { type: string }
           description: |
-            `{"<captured device id>": "<target device id>"}`. Every target must be an active device
-            of the target gateway.
+            `{"<captured device id>": "<target device id>"}`. Every target must be an active replay
+            lane of the target gateway, and the lane of the device its key names.
           example: { dev270000000000400080000: dev310000000000400080000 }
         speed: { type: number, description: 'Greater than 0 and at most 60. Zero is refused.' }
         status: { type: string, enum: [PENDING, RUNNING, COMPLETED, FAILED, CANCELLED] }

@@ -962,6 +962,61 @@ from `storage-policies.sql` verbatim on a stand-in table and checks what each ro
 reaches. The Start Playback dialog opens only for Administrator and Shopfloor_Manager, and
 `start_playback_job()` asks for the stale credentials as that caller, so both still get the answer.
 
+### Only the seed makes a playback gateway (0187)
+
+What makes a gateway a playback target is `gateways.is_shadow`. `playback_target_must_be_shadow()`
+admits a job by it, and `gateway_is_playback_delivery_target()` follows it, so it also decides which
+broker password the playback worker is handed. Until `0187` nothing guarded it: `gateways_update_privileged`
+admits a Shopfloor_Manager, and no trigger or column grant stopped the update. Marking a Host gateway
+`is_shadow` made its credential deliverable, and `start_playback_job()` then accepted a map of one of
+its real devices onto itself. A replay published as that edge node beside its real publisher and
+wrote recorded readings into the device's history, and the Audit Trail showed a gateways UPDATE.
+
+- **The flag is the seed's alone.** `trg_gateways_playback_flag_is_seeded` refuses a gateway INSERTed
+  with `is_shadow` and an UPDATE that changes it, for `authenticated` (people and machine principals),
+  `anon` and `service_role`. An UPDATE that mentions the column without changing it passes, because
+  PostgREST sends whole rows. The refusal is `check_violation`, as
+  `refuse_hand_assigning_a_replay_lane()`'s is.
+- **The owner is exempt, because the seed is the owner.** `0002` creates the Playback gateway and
+  reconciles its `deployment`, `is_simulated`, `is_shadow` and `cell_id` on every boot. It replays
+  before the migrations, so from the second boot on it meets the trigger. The test is
+  `current_user IN ('postgres', 'supabase_admin')`, as the audit trail's append-only guard has.
+  `test_only_the_seed_makes_a_playback_gateway.py` runs the seed's own statement out of the file
+  against a Playback gateway that lost its flags.
+- **A playback maps only onto the lane of the device a key names.** A key is the recorded device's
+  `sparkplug_id`, the key `ensure_shadow_devices()` returns its map under. `start_playback_job()` now
+  requires each target to be an active device of the gateway, to have `shadow_of` set, and to have
+  it set to the device the key names. A real device, the lane of another device and a key that names
+  no device are each refused, and the message names the device.
+- **A lane is made by `ensure_shadow_devices()` alone.** `devices.shadow_of` is what makes a device
+  a lane, and it was as open as the flag: a Shopfloor_Manager could move a real device onto the
+  Playback gateway and set `shadow_of` in the same UPDATE (measured: `UPDATE 1`), and the lane check
+  above would then accept it. `trg_devices_replay_lane_stays_as_minted` refuses, for the same roles
+  and with the same owner exemption, an INSERT with `shadow_of`, an UPDATE that sets, changes or
+  clears it, and an UPDATE that moves a lane to another gateway or unassigns it. An edit that
+  mentions those columns without changing them passes. It is the companion of
+  `trg_devices_replay_lane_is_minted` (`0083`), which holds every role, the owner included, and
+  refuses a device arriving on a shadow gateway without `shadow_of`. Read together: a device is on
+  the Playback gateway only as a lane, and a lane exists only because `ensure_shadow_devices()` made
+  it. The refusal names the Prepare replay lanes button, which is how a person gets one.
+- **Every other writer is the owner's, so none is in the way.** `ensure_shadow_devices()` is
+  `SECURITY DEFINER`. The foreign keys that clear `shadow_of` when an original is deleted and
+  `gateway_id` when a gateway is deleted run as the table's owner. Archiving, restoring and
+  deleting a lane write neither column, and an original takes its lanes with it
+  (`shadow_follows_its_original()`). A row with no `shadow_of` that sits on the Playback gateway,
+  the state `0083` calls recoverable, can still be moved off. The Edit Details form shows a lane's
+  Serving Gateway and does not let it change.
+- **There is one Playback gateway, and no function mints another.** `ensure_shadow_devices()` still
+  finds the oldest unarchived `is_shadow` gateway, which is the seeded one. Its not-found message and
+  the archive refusal no longer tell an operator to mark another gateway, because the API refuses it.
+  Check 90 of `scripts/check-docs-drift.mjs` fails if any other migration writes the flag, if any
+  function but `ensure_shadow_devices()` writes `shadow_of`, or if `api.js` sends either.
+
+**Nothing is reset.** A site that already has a second `is_shadow` gateway keeps it, and so keeps
+its lanes and the ability to archive it. Find one with
+`SELECT id, name FROM gateways WHERE is_shadow AND id <> '16000000-0000-4000-8000-000000000001'`.
+It cannot be unmarked through the API either; clearing the flag is a database owner's act.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
@@ -2762,11 +2817,12 @@ What it does not offer is the two acts that are wrong for it, for different reas
   publishes and holds no subscription at all, so the NCMD reaches nothing and `rebirth_requests`
   would record something that can never be answered.
 
-**The rule is "not the last one", not "never".** `ensure_shadow_devices()` finds the gateway by flag
-precisely so a stack can have more than one — two playbacks at once need two edge nodes — so
-`0067` refuses only the archive that would leave none, and its message names the way through: mark
-another gateway `is_shadow` first. Deletion is not guarded, because `0060` re-seeds the row on the
-next boot; archiving is the act that survives one.
+**The rule is "not the last one", not "never".** `0067` refuses only the archive that would leave
+no unarchived `is_shadow` gateway. Since `0187` the Playback gateway is the only one a stack makes
+and the API cannot mark another, so in practice it cannot be archived. A stack upgraded with an older
+second one can still archive either. The refusal no longer suggests marking another gateway. Deletion
+is not guarded, because `0060` re-seeds the row on the next boot; archiving is the act that survives
+one.
 
 **It is also not a capture subject.** Recording from a shadow gateway means capturing a capture, and
 its shadow devices exist to receive a replay rather than to report a machine, so both are filtered
@@ -5126,6 +5182,13 @@ lane must still see its own gateway in the list, or its form would fall back to 
 saving would move it off the lane. But the pickers are a courtesy. `devices` is writable through
 PostgREST by any Administrator or Shopfloor_Manager, so they are three doors of an unbounded number,
 and the trigger is the one that holds for the fourth.
+
+**`0187` closes the other half.** The arrival gate trusts `shadow_of`, and `shadow_of` was writable by
+the same two roles: a real device moved onto the Playback gateway with `shadow_of` set in the same
+UPDATE passed it. `trg_devices_replay_lane_stays_as_minted` now refuses, for the roles the API runs
+as, setting, changing or clearing `shadow_of` and moving a lane off its gateway. This gate still
+holds every role, the owner included. The two are one rule, in *Only the seed makes a playback
+gateway (0187)*. The Edit Details form shows a lane's Serving Gateway but does not let it change.
 
 ---
 

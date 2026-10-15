@@ -900,6 +900,8 @@ function edgeFunctionNames() {
    * definition. The check fails on the first unlisted redeclaration.
    */
   const INTENDED_REDECLARATIONS = {
+    'public.start_playback_job': '0187 refuses a device map that names anything but the replay lane of the device its key names, so a replay never publishes as a real device; the baseline checked only that the target belonged to the gateway',
+    'public.refuse_archiving_the_last_shadow_gateway': '0187 words the refusal for the one Playback gateway; the baseline told an operator to mark another gateway is_shadow, which the API now refuses (the logic is unchanged)',
     'public.gateway_is_playback_delivery_target': '0183 answers is_shadow on an unarchived gateway, the target a playback may have; the baseline answers is_simulated, which delivered every simulator\'s password to the playback worker',
     'public.audit_trail_page': '0168 probes device_submodels rows for deletion beside device_nameplate, both keyed by their device; the baseline drew a deleted device\'s schema rows as live',
     'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited',
@@ -917,7 +919,7 @@ function edgeFunctionNames() {
     'public.approve_proposal': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
     'public.approve_quarantined_device': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
     'public.discard_schema_draft': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
-    'public.ensure_shadow_devices': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
+    'public.ensure_shadow_devices': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500. 0187 words that message and the lookup comment for the one Playback gateway',
     'public.fork_schema': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
     'public.publish_schema_version': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
     'public.reject_proposal': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
@@ -3296,6 +3298,61 @@ function edgeFunctionNames() {
     );
   } else {
     pass(`the archive backlog tolerance is ${page} days on the Cold Storage page and in its alert rule`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 90. Only the seed makes a playback gateway, and only ensure_shadow_devices() makes a replay lane.
+// gateways.is_shadow decides which broker password the playback worker is given and which gateway a
+// replay may publish as, and devices.shadow_of decides which device a replay may publish as. So
+// only 0002 writes the flag, and the one function that writes shadow_of is ensure_shadow_devices().
+// Neither column is sent by the dashboard, and trg_gateways_playback_flag_is_seeded and
+// trg_devices_replay_lane_stays_as_minted are stated and refuse them to every role the API runs as.
+// A second way to mint either, such as a function for Administrators, is a decision to take in the
+// open: add it to this check with its reason, as check 65 does for the vault.
+// -------------------------------------------------------------------------------------------------
+{
+  const dir = 'supabase/migrations';
+  const files = readdirSync(join(REPO, dir)).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  const writers = files.filter((name) => {
+    const text = read(`${dir}/${name}`);
+    return /\bis_shadow\s*=\s*(true|false)\b/i.test(text)
+      || /INSERT INTO public\.gateways\s*\([^)]*\bis_shadow\b/i.test(text);
+  });
+  const stated = (table, trigger) => files.filter((name) => read(`${dir}/${name}`).includes(`replay_trigger('public.${table}', '${trigger}'`));
+  const flagGuard = stated('gateways', 'trg_gateways_playback_flag_is_seeded');
+  const laneGuard = stated('devices', 'trg_devices_replay_lane_stays_as_minted');
+  // Every statement that writes devices.shadow_of, with the function it sits in.
+  const LANE_WRITERS = ['public.ensure_shadow_devices'];
+  const strays = [];
+  for (const name of files) {
+    const text = read(`${dir}/${name}`);
+    for (const m of text.matchAll(/INSERT INTO public\.devices\s*\(([^)]*)\)|UPDATE public\.devices\b([^;]*);/gi)) {
+      const writes = m[1] !== undefined
+        ? /\bshadow_of\b/.test(m[1])
+        : /\bshadow_of\b/.test(m[2].split(/\bWHERE\b/i)[0]);
+      if (!writes) continue;
+      const inside = [...text.slice(0, m.index).matchAll(/CREATE OR REPLACE FUNCTION\s+([a-z_]+\.[a-z_]+)/gi)].pop();
+      const fn = inside ? inside[1].toLowerCase() : 'no function';
+      if (!LANE_WRITERS.includes(fn)) strays.push(`${name} (${fn})`);
+    }
+  }
+  const api = read('frontend/src/api.js');
+  const sends = /\bis_shadow\s*:/.test(api) ? 'is_shadow' : /\bshadow_of\s*:/.test(api) ? 'shadow_of' : null;
+  if (writers.join() !== '0002_seed_data.sql') {
+    fail(`the files that write gateways.is_shadow are ${writers.join(', ') || 'none'}, and must be 0002_seed_data.sql alone: `
+      + 'only the seed makes a playback gateway (0187), so a function that mints one belongs in this check with its reason');
+  } else if (strays.length) {
+    fail(`devices.shadow_of is written outside ensure_shadow_devices() by ${strays.join(', ')}: only that function makes a replay lane (0187), `
+      + 'so a function that writes it belongs in this check with its reason');
+  } else if (!flagGuard.length || !laneGuard.length) {
+    fail('no applied migration states ' + [!flagGuard.length && 'trg_gateways_playback_flag_is_seeded', !laneGuard.length && 'trg_devices_replay_lane_stays_as_minted'].filter(Boolean).join(' or ')
+      + ', so a Shopfloor Manager can mark a gateway a playback target or a device a replay lane');
+  } else if (sends) {
+    fail(`frontend/src/api.js builds a request body with ${sends}: the API refuses it (0187), so the dashboard must never send it`);
+  } else {
+    pass(`gateways.is_shadow is written by ${writers[0]} alone and devices.shadow_of by ${LANE_WRITERS[0]}() alone, `
+      + `both refused to the API (${flagGuard[0]}, ${laneGuard[0]}) and never sent by the dashboard`);
   }
 }
 

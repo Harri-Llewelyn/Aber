@@ -1108,7 +1108,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
             <div className="form-group">
               <label className="form-label">Serving Gateway</label>
               <Withheld field="active_gateway_id" />
-              <select className="form-control" disabled={proposeMode} value={form.active_gateway_id || ''} onChange={e => setForm(f => ({ ...f, active_gateway_id: e.target.value }))} title={proposeMode ? withheldFields.active_gateway_id : "Select the gateway serving this device"}>
+              <select className="form-control" disabled={proposeMode || !!editing?.shadow_of} value={form.active_gateway_id || ''} onChange={e => setForm(f => ({ ...f, active_gateway_id: e.target.value }))} title={proposeMode ? withheldFields.active_gateway_id : editing?.shadow_of ? 'A replay lane stays on the Playback gateway' : "Select the gateway serving this device"}>
                 <option value="">— Unassigned Gateway —</option>
                 {/* A replay lane is listed but disabled rather than filtered out, so a device that
                     is a lane still opens with its own gateway shown. The database refuses the write
@@ -1123,7 +1123,9 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               {/* Shown always: the question is why Playback cannot be picked, asked while something
                   else is selected. */}
               <div className="form-hint">
-                {noDeviceAssignmentReason({ is_shadow: true })}
+                {editing?.shadow_of
+                  ? 'This is a replay lane. It stays on the Playback gateway, and the database refuses a move.'
+                  : noDeviceAssignmentReason({ is_shadow: true })}
               </div>
             </div>
 

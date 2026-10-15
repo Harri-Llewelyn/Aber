@@ -154,6 +154,35 @@ describe("the device form's gateway picker", () => {
     expect(gatewaySelect().value).toBe(PLAYBACK)
   })
 
+  it('does not offer to move a replay lane, which the database refuses', async () => {
+    // `shadow_of` is what makes a device a lane, and a lane never leaves the Playback gateway
+    // through the API, so the picker is shown but not editable.
+    await show([device(), device({
+      asset_id: 'bbbbbbbb-0000-4000-8000-000000000002',
+      asset_name: 'CNC_01 (replay)',
+      active_gateway_id: PLAYBACK,
+      effective_cell_id: null,
+      gateway_cell_id: null,
+      location_source: 'shadow',
+      shadow_of: 'aaaaaaaa-0000-4000-8000-000000000001'
+    })])
+    // Lanes are hidden until asked for, in the Filters popover.
+    fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
+    fireEvent.click(await screen.findByText(/Show replay lanes/))
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.getByText('CNC_01 (replay)')).toBeTruthy())
+    openEdit('CNC_01 (replay)')
+    expect(gatewaySelect().value).toBe(PLAYBACK)
+    expect(gatewaySelect().disabled).toBe(true)
+    expect(screen.getByText(/This is a replay lane\. It stays on the Playback gateway/)).toBeTruthy()
+  })
+
+  it('leaves an ordinary device free to move between gateways', async () => {
+    await show([device()])
+    openEdit()
+    expect(gatewaySelect().disabled).toBe(false)
+  })
+
   it('says why the option is unavailable', async () => {
     await show([device()])
     openEdit()
