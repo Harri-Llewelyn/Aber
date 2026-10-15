@@ -56,7 +56,7 @@ const serve = (held) => (path) => {
   return Promise.resolve([])
 }
 
-const railItem = () => within(document.querySelector('.sidebar')).getByRole('button', { name: /^Devices/ })
+const railItem = () => within(document.querySelector('.sidebar')).getByRole('link', { name: /^Devices/ })
 const selectedTab = () => screen.getByRole('tab', { selected: true })
 
 const renderApp = async (held) => {
@@ -100,6 +100,6 @@ describe('the routes into the Quarantine tab', () => {
     fireEvent.change(search, { target: { value: 'quarantine' } })
     fireEvent.click(await screen.findByRole('option', { name: /^Quarantine/ }))
     await waitFor(() => expect(selectedTab()).toHaveAccessibleName('Quarantine'))
-    expect(window.location.pathname).toBe('/devices')
+    expect(window.location.pathname).toBe('/devices/quarantine')
   })
 })

@@ -1,4 +1,6 @@
 import React, { useState } from 'react'
+import { RouteLink } from './RouteLink'
+import { deviceUrl, gatewayUrl } from '../../routes'
 import { IconAlertTriangle, IconAlertCircle, IconShieldCheck, IconX, IconExternalLink } from './Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useClickOutside } from '../../hooks/useClickOutside'
@@ -113,6 +115,7 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
                 // column.
                 const kind = a.entity_type || 'device'
                 const onSelect = kind === 'gateway' ? onSelectGateway : kind === 'device' ? onSelectDevice : null
+                const to = kind === 'gateway' ? gatewayUrl(a.sparkplug_id) : deviceUrl(a.sparkplug_id)
                 const page = kind === 'gateway' ? 'Gateways' : 'Devices'
                 // A row is a button only when it can go somewhere: an alert whose sparkplug_id
                 // matched no row has nothing to navigate to.
@@ -139,15 +142,17 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
                 return (
                   <li key={a.fingerprint} className="alert-pill-item">
                     {navigable ? (
-                      <button
+                      <RouteLink
                         className="alert-pill-item-link"
-                        onClick={() => { setOpen(false); onSelect(a.sparkplug_id) }}
+                        to={to}
+                        onClick={() => setOpen(false)}
+                        onNavigate={() => onSelect(a.sparkplug_id)}
                         /* The sparkplug id, not a name: `platform_alerts` carries none, and the id
                            is what each page's search matches on. */
                         title={`Show ${a.sparkplug_id} on the ${page} page`}
                       >
                         {body}
-                      </button>
+                      </RouteLink>
                     ) : external ? (
                       <a
                         className="alert-pill-item-link"

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useUrlState } from '../../hooks/useUrlState'
 import { api } from '../../api'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { KNOWN_PRINCIPALS } from '../../utils/serviceIdentities'
@@ -82,12 +83,6 @@ const EMPTY_KINDS = new Set()
 const entityKind = (t) =>
   ENTITY_KIND[String(t || '').toLowerCase()] || String(t || '').toUpperCase()
 
-/**
- * The kind filter a hand-over from another page sets. A device's trail includes its nameplate and
- * schema rows, which carry the device's id as `entity_id`, so a DEVICE hand-over sets none: the id
- * in the search box then selects every row keyed by that device, and only those.
- */
-export const handoverKindFilter = (type) => (entityKind(type) === 'DEVICE' ? '' : (type || ''))
 
 /**
  * Columns excluded from every diff: timestamp churn that would otherwise open each diff with a line
@@ -843,11 +838,11 @@ function RawSnapshots({ event }) {
 }
 
 /**
- * `initialEntity` is a handover from another page: `{ id, type }`. Applied to the ordinary filters,
- * so every control still works and Clear filters clears it. The id goes into the name filter, which
- * matches ids as well as names.
+ * Every filter and the open event are query parameters. A hand-over from another page is an
+ * address with the entity's id in the search, which matches ids as well as names, and its kind
+ * (routes.js `trailUrl`), so every control still works and Clear filters clears it.
  */
-export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToast }) {
+export function AuditTrailTab({ userRole, showToast }) {
   // The kinds this role may ask for. The database policy decides what comes back; this decides
   // what is offered, so the two agree on which lanes exist for a Shopfloor_Manager.
   const entityTypes = useMemo(() => auditTrailEntityTypesFor(userRole), [userRole])
@@ -857,7 +852,7 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
   const [allEvents, setAllEvents]     = useState([])
   // Whether to include events whose entity is no longer in the database. Hidden by default, and
   // phrased as Show so the resting control is unlit, like the Gateways and Cells toggles.
-  const [showPurged, setShowPurged]   = useState(false)
+  const [showPurged, setShowPurged]   = useUrlState('deleted', false)
   // Set once the entity lookups have landed; until then every id looks absent. Stays false if they
   // fail: unable to tell purged from live means hide nothing.
   const [lookupsLoaded, setLookupsLoaded] = useState(false)
@@ -865,12 +860,12 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
   // deleted and hidden. Narrower than the constant whenever a tolerated lookup failed.
   const [loadedKinds, setLoadedKinds] = useState(EMPTY_KINDS)
   const [loading, setLoading]         = useState(true)
-  const [entityTypeFilter, setEntityTypeFilter] = useState(handoverKindFilter(initialEntity?.type))
-  const [nameFilter, setNameFilter]   = useState(initialEntity?.id || '')
-  const [actionFilter, setActionFilter] = useState('')
-  const [rangePreset, setRangePreset] = useState('all')
-  const [customStart, setCustomStart] = useState('')
-  const [customEnd, setCustomEnd]     = useState('')
+  const [entityTypeFilter, setEntityTypeFilter] = useUrlState('type', '', { allowed: entityTypes.map(e => e.kind) })
+  const [nameFilter, setNameFilter]   = useUrlState('search')
+  const [actionFilter, setActionFilter] = useUrlState('action', '', { allowed: Object.keys(AUDIT_TRAIL_ACTIONS) })
+  const [rangePreset, setRangePreset] = useUrlState('range', 'all', { allowed: [...TIME_PRESETS.map(p => p.value), 'custom'] })
+  const [customStart, setCustomStart] = useUrlState('since')
+  const [customEnd, setCustomEnd]     = useUrlState('until')
   const [devices, setDevices]         = useState([])
   const [gateways, setGateways]       = useState([])
   const [cells, setCells]             = useState([])
@@ -880,7 +875,8 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
   const [userAccounts, setUserAccounts] = useState([])
   // Principal id -> `machine_principals` row, for the same roles as the accounts above.
   const [machinePrincipals, setMachinePrincipals] = useState(() => new Map())
-  const [selectedEventId, setSelectedEventId] = useState(null)
+  // The event whose drawer is open, in the address as `?event=`.
+  const [selectedEventId, setSelectedEventId] = useUrlState('event')
 
   /* A runtime override, falling back to the constant above, which is what a stack whose Settings
      were never touched runs on. */
@@ -1124,17 +1120,6 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
       .catch(() => setLoadingMore(false))
   }, [nextCursor, loadingMore, buildUrl])
 
-  // A later handover -- clicking Audit Trail on a second device without leaving the page --
-  // replaces the filter rather than being ignored because state was already initialised.
-  useEffect(() => {
-    if (!initialEntity?.id) return
-    setEntityTypeFilter(handoverKindFilter(initialEntity.type))
-    setNameFilter(initialEntity.id)
-    // A handover from a tombstone names an entity the live tables no longer hold; the page would
-    // otherwise hide every row of it and read as empty.
-    if (initialEntity.purged) setShowPurged(true)
-  }, [initialEntity?.id, initialEntity?.type, initialEntity?.purged])
-
   const rangeIsFiltering =
     rangePreset === 'custom' ? !!(customStart || customEnd) : rangePreset !== 'all'
 
@@ -1166,9 +1151,6 @@ export function AuditTrailTab({ userRole, initialEntity, onClearEntity, showToas
   const resetFilters = () => {
     setEntityTypeFilter(''); setNameFilter(''); setActionFilter('')
     setRangePreset('all'); setCustomStart(''); setCustomEnd(''); setShowPurged(false)
-    // Also drop the handover, or the effect above would immediately re-apply it and Clear Filters
-    // would appear to do nothing.
-    onClearEntity?.()
   }
 
   useEffect(() => {

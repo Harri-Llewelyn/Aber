@@ -144,19 +144,39 @@ describe('Uncatalogued tab: the rows', () => {
   })
 
   it('links each device to its device, and marks one in quarantine', async () => {
-    const onSelectDevice = vi.fn()
-    renderTab({ onSelectDevice })
+    renderTab()
     await openTab()
 
     const row = within(rowOf('Hydraulic/PRESSURE'))
-    fireEvent.click(row.getByRole('button', { name: /Press_01/ }))
-    expect(onSelectDevice).toHaveBeenCalledWith('press-1')
+    const press = row.getByRole('link', { name: /Press_01/ })
+    expect(press.getAttribute('href')).toBe('/devices?search=press-1')
 
-    const quarantined = row.getByRole('button', { name: /Press_02/ })
+    const quarantined = row.getByRole('link', { name: /Press_02/ })
+    expect(quarantined.getAttribute('href')).toBe('/devices?search=press-2')
     expect(quarantined.textContent).toMatch(/quarantined/)
     expect(quarantined.title).toMatch(/in quarantine/)
-    fireEvent.click(quarantined)
-    expect(onSelectDevice).toHaveBeenLastCalledWith('press-2')
+
+    // A plain click navigates in place.
+    fireEvent.click(press, { button: 0 })
+    expect(window.location.pathname + window.location.search).toBe('/devices?search=press-1')
+  })
+
+  it('breaks a long name after its slashes, not inside a segment', async () => {
+    renderTab()
+    await openTab()
+
+    const name = within(rowOf('Spindle/2/LOAD')).getByText('Spindle/2/LOAD')
+    expect(name.querySelectorAll('wbr')).toHaveLength(2)
+  })
+
+  it('keeps its search in the address', async () => {
+    renderTab()
+    await openTab()
+
+    fireEvent.change(screen.getByPlaceholderText(/Search names/), { target: { value: 'spindle' } })
+    expect(new URLSearchParams(window.location.search).get('name')).toBe('spindle')
+    expect(rowOf('Spindle/2/LOAD')).toBeTruthy()
+    expect(within(document.querySelector('.card table')).queryByText('vibration')).toBeNull()
   })
 
   it('shows three devices of a long list and the rest on request', async () => {
@@ -164,9 +184,9 @@ describe('Uncatalogued tab: the rows', () => {
     await openTab()
 
     const row = () => within(rowOf('Spindle/2/LOAD'))
-    expect(row().getAllByRole('button', { name: /Lathe_/ })).toHaveLength(3)
+    expect(row().getAllByRole('link', { name: /Lathe_/ })).toHaveLength(3)
     fireEvent.click(row().getByRole('button', { name: '3 more' }))
-    expect(row().getAllByRole('button', { name: /Lathe_/ })).toHaveLength(6)
+    expect(row().getAllByRole('link', { name: /Lathe_/ })).toHaveLength(6)
     expect(row().queryByRole('button', { name: /more$/ })).toBeNull()
   })
 

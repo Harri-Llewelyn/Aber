@@ -619,7 +619,9 @@ describe('ArchivesTab shows what has been retired', () => {
 
   it('opens the audit trail with deleted entities shown, since the row is gone', async () => {
     const { onViewTrail } = await showRetired({ retired: [RETIRED_DEVICE] })
-    fireEvent.click(screen.getByRole('button', { name: /Audit Trail/i }))
+    const link = screen.getByRole('link', { name: /Audit Trail/i })
+    expect(link).toHaveAttribute('href', '/audit-trail?search=dev-1&deleted=1')
+    fireEvent.click(link)
     expect(onViewTrail).toHaveBeenCalledWith({ id: 'dev-1', type: 'DEVICE', purged: true })
   })
 
@@ -646,7 +648,7 @@ describe('ArchivesTab shows what has been retired', () => {
   it('offers nothing to download for a device that was never exported', async () => {
     await showRetired({ retired: [{ ...RETIRED_DEVICE, exports: [] }] })
     expect(screen.queryByRole('button', { name: /^Bundle/i })).toBeNull()
-    expect(screen.getByRole('button', { name: /Audit Trail/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Audit Trail/i })).toBeInTheDocument()
   })
 
   it('still shows the Archived tab when the tombstones cannot be read', async () => {

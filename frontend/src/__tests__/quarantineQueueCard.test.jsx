@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
 import { formatDateTime } from '../utils/format'
+import { deviceUrl, tabUrl } from '../routes'
 
 /**
  * The Devices page is one card with two tabs: Registered, the roster, which opens on Active and
@@ -179,17 +180,26 @@ describe('the Quarantine tab', () => {
     expect(button.title).not.toMatch(/Admin permissions/)
   })
 
-  it('opens on the Quarantine tab when App hands it over, and clears the hand-over', async () => {
-    const onClearSection = vi.fn()
-    await show([device()], [queued], () => true, { initialSection: 'quarantine', onClearSection })
+  it('opens on the Quarantine tab when the address names it, as the rail links to it', async () => {
+    window.history.replaceState(null, '', tabUrl('devices', 'quarantine'))
+    await show([device()], [queued], () => true)
 
     expect(tab(/^Quarantine/)).toHaveAttribute('aria-selected', 'true')
-    expect(onClearSection).toHaveBeenCalled()
+  })
+
+  it('puts a tab change in the path, so Back returns to the tab before', async () => {
+    window.history.replaceState(null, '', '/devices')
+    await show([device()], [queued], () => true)
+    fireEvent.click(tab(/^Quarantine/))
+    expect(window.location.pathname).toBe('/devices/quarantine')
+    fireEvent.click(tab(/^Registered/))
+    expect(window.location.pathname).toBe('/devices')
   })
 
   it('lands a quarantined device named by another page on the Quarantine tab, with no panel', async () => {
     const held = device({ asset_id: queued.asset_id, asset_name: 'Unknown_Robot', is_quarantined: true })
-    await show([device(), held], [queued], () => true, { initialSearchFilter: queued.asset_id })
+    window.history.replaceState(null, '', deviceUrl(queued.asset_id))
+    await show([device(), held], [queued], () => true)
 
     await waitFor(() => expect(tab(/^Quarantine/)).toHaveAttribute('aria-selected', 'true'))
     expect(panelOpen()).toBe(false)

@@ -49,9 +49,9 @@ describe('the three behaviours', () => {
 
   it('collapsed: keyboard focus still shows the labels, because Tab has no hover', () => {
     renderRail({ mode: 'collapsed' })
-    fireEvent.focus(screen.getByRole('button', { name: 'Devices' }))
+    fireEvent.focus(screen.getByRole('link', { name: 'Devices' }))
     expect(isExpanded()).toBe(true)
-    fireEvent.blur(screen.getByRole('button', { name: 'Devices' }))
+    fireEvent.blur(screen.getByRole('link', { name: 'Devices' }))
     expect(isExpanded()).toBe(false)
   })
 })

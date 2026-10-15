@@ -182,8 +182,8 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
     if (!result) return
     if (result.kind === 'entity') {
       const { kind, id } = result.entity
-      // Each of these sets the page's filter AND pushes a query parameter, so the destination is
-      // linkable and survives a reload. See the hand-over comment in App.jsx.
+      // Each of these goes to the page's address with the id in its search (routes.js), so the
+      // destination is linkable and survives a reload.
       if (kind === 'device') onSelectDevice?.(id)
       else if (kind === 'gateway') onSelectGateway?.(id)
       else if (kind === 'cell') onSelectCell?.(id)

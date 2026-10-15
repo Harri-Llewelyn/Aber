@@ -34,6 +34,8 @@ import { Modal } from '../common/Modal'
 import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
 import { SearchInput } from '../common/SearchInput'
+import { RouteLink } from '../common/RouteLink'
+import { deviceUrl } from '../../routes'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
@@ -46,6 +48,7 @@ import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { ExpandAllToggle } from '../common/ExpandAllToggle'
 import { HelpTip } from '../common/HelpTip'
+import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
 
 // Sentinel for the "not in the list yet" option in the group picker. Not a valid group name --
 // the CHECK constraint on metric_groups.name rejects anything containing the separator.
@@ -143,14 +146,11 @@ const catalogueDatatypeNote = (row) => {
  * identifiers for a standard's entry, resolved here because applyPrefill() is the only place that
  * knows how a vocabulary row becomes a metric.
  *
- * @param {string} [initialFilter] A catalog filter handed over from another page. 'unmapped' opens
- * the Metric Catalog tab with only the metrics that have no semantic id; any other value is
- * ignored. `onClearFilter` drops it once applied, so a later return to the page starts clean.
- *
- * @param {Function} [onSelectDevice] Opens one device on the Devices page, from the Uncatalogued
- * tab's device chips.
+ * The tab is the path (`/metrics/deprecated`), and the catalog's filters and the open drawer are
+ * query parameters: `/metrics?unmapped=1` is the catalog with only the metrics that have no
+ * semantic id, which the export warning links to.
  */
-export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, onConsumeVocabularyEntry, initialFilter = '', onClearFilter, onSelectDevice }) {
+export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, onConsumeVocabularyEntry }) {
   const [catalog, setCatalog]         = useState([])
   const [groups, setGroups]           = useState([])
   // Read for the usage count on a deprecation or a semantic id edit and nothing else -- how many
@@ -168,7 +168,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const [showAddMetric, setShowAddMetric] = useState(false)
   const [addError, setAddError]       = useState(null)
   const [adding, runAdd]              = usePendingAction()
-  const [selectedId, setSelectedId]   = useState(null)
+  const [selectedId, setSelectedId]   = useUrlState('metric', '', { allowed: loaded ? catalog.map(m => m.metric_uuid) : null })
   // The metric name is composed from its parts: component (group), optional instance, type,
   // optional subType. NEW_GROUP and CUSTOM_TYPE are the escapes for a local extension.
   const [newMetric, setNewMetric] = useState(BLANK_METRIC)
@@ -177,38 +177,28 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // The uncatalogued_metrics rows: null until the first read, and while a read has failed.
   const [uncatalogued, setUncatalogued] = useState(null)
   const [uncataloguedError, setUncataloguedError] = useState(null)
-  const [uncataloguedSearch, setUncataloguedSearch] = useState('')
+  const [uncataloguedSearch, setUncataloguedSearch] = useUrlState('name')
   // Rows showing every device chip, keyed by metric name.
   const [allDevicesShown, setAllDevicesShown] = useState({})
   // The Uncatalogued row Add Metric was opened from by Catalogue; null for any other opening.
   const [cataloguing, setCataloguing] = useState(null)
   const [editTarget, setEditTarget] = useState(null)
-  // Which tab of the card is shown: 'catalog', 'deprecated' or 'uncatalogued'.
-  const [view, setView] = useState('catalog')
+  // Which tab of the card is shown, one per VIEW_HELP entry; the default is the catalog.
+  const [view, setView] = useUrlTab('metrics', Object.keys(VIEW_HELP), 'catalog')
   // Expansion state for the catalog's group sections, keyed by label; absent means collapsed.
   const [expandedGroups, setExpandedGroups] = useState({})
   // Filters the catalog by metric name. With groups collapsed by default it is how one metric is
   // found without opening each group.
-  const [catalogSearch, setCatalogSearch] = useState('')
+  const [catalogSearch, setCatalogSearch] = useUrlState('search')
   // The catalog's other filters: a standard (or LOCAL_STANDARD_FILTER), and metrics with no id.
-  const [standardFilter, setStandardFilter] = useState('')
-  // Starts on when the page is opened by the unmapped hand-over, so the first paint is already
-  // filtered; the effect below also applies it to a page that is already open.
-  const [unmappedOnly, setUnmappedOnly] = useState(initialFilter === 'unmapped')
+  const [standardFilter, setStandardFilter] = useUrlState('standard', '', {
+    allowed: [...FILTER_STANDARDS.map(o => o.value), LOCAL_STANDARD_FILTER]
+  })
+  const [unmappedOnly, setUnmappedOnly] = useUrlState('unmapped', false)
   const catalogFilterCount = [catalogSearch, standardFilter, unmappedOnly].filter(Boolean).length
   const clearCatalogFilters = () => {
     setCatalogSearch(''); setStandardFilter(''); setUnmappedOnly(false)
   }
-
-  // Replaces whatever the catalog was filtered by with the filter handed over, then drops it.
-  useEffect(() => {
-    if (!initialFilter) return
-    if (initialFilter === 'unmapped') {
-      setView('catalog'); setSelectedId(null)
-      setCatalogSearch(''); setStandardFilter(''); setUnmappedOnly(true)
-    }
-    onClearFilter?.()
-  }, [initialFilter, onClearFilter])
 
   /**
    * A group is open when the operator opened it. While the search or a filter narrows the catalog it
@@ -1049,22 +1039,23 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                         const nameProblem = metricNameError(u.metric_name)
                         return (
                           <tr key={u.metric_name}>
-                            <td><span className="mono">{u.metric_name}</span></td>
+                            <td><span className="mono">{u.metric_name.split('/').map((part, i, all) => (
+                              <React.Fragment key={i}>{part}{i < all.length - 1 && <>/<wbr /></>}</React.Fragment>
+                            ))}</span></td>
                             <td className="cell-meta">{u.device_count}</td>
                             <td>
                               <div className="context-device-list">
                                 {(showAll ? devices : devices.slice(0, UNCATALOGUED_DEVICES_SHOWN)).map(d => (
-                                  <button
+                                  <RouteLink
                                     key={d.id}
-                                    type="button"
                                     className="chip chip-link"
-                                    onClick={() => onSelectDevice?.(d.id)}
+                                    to={deviceUrl(d.id)}
                                     title={`Open ${d.name} on the Devices page${d.quarantined ? '. It is in quarantine, awaiting approval.' : ''}`}
                                   >
                                     <IconCpu size={11} />
                                     <span className="chip-name">{d.name}</span>
                                     {d.quarantined && <span className="cell-meta">quarantined</span>}
-                                  </button>
+                                  </RouteLink>
                                 ))}
                                 {!showAll && (
                                   <button

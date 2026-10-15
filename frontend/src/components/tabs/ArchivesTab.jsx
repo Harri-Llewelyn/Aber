@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { RouteLink } from '../common/RouteLink'
+import { trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
@@ -10,6 +12,7 @@ import { DeviceExportModal } from '../modals/DeviceExportModal'
 import { gatewayRepositoryUrl } from '../common/GatewayRepositoryPanel'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
+import { useUrlTab } from '../../hooks/useUrlState'
 import { IconArchive, IconRefreshCw, IconTrash, IconDownload, IconHistory, IconExternalLink, IconAlertTriangle } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 import { Badge } from '../common/Badge'
@@ -55,7 +58,8 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, onShowUnmap
   const [retired, setRetired]   = useState([])
   const [exports, setExports]   = useState([])
   const [loading, setLoading]   = useState(true)
-  const [stage, setStage]       = useState('archived')
+  // The tab, in the path: `/archives` or `/archives/retired`.
+  const [stage, setStage]       = useUrlTab('archives', Object.keys(STAGE_HELP), 'archived')
   const [confirmPurge, setConfirmPurge] = useState(null)
   const [confirmRestore, setConfirmRestore] = useState(null)
   // The archived device whose export dialog is open, or null.
@@ -118,14 +122,15 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, onShowUnmap
     const items = []
     if (onViewTrail) {
       items.push(
-        <button
+        <RouteLink
           key="trail"
           className="btn btn-sm btn-ghost"
-          onClick={() => onViewTrail({ id: r.entity_id, type: TRAIL_TYPE[r.entity_type], purged: true })}
+          to={trailUrl(r.entity_id, TRAIL_TYPE[r.entity_type], true)}
+          onNavigate={() => onViewTrail({ id: r.entity_id, type: TRAIL_TYPE[r.entity_type], purged: true })}
           title="Open this entity's audit trace on the Audit Trail page, deleted entities shown"
         >
           <IconHistory size={12} /> Audit Trail
-        </button>
+        </RouteLink>
       )
     }
     if (r.entity_type === 'gateway' && r.old_data?.forge_repository_at && r.sparkplug_id) {

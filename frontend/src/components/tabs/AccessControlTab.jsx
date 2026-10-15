@@ -20,6 +20,7 @@ import { EmptyState } from '../common/EmptyState'
 import { HelpTip } from '../common/HelpTip'
 import { LoadingState } from '../common/LoadingState'
 import { TabStrip } from '../common/TabStrip'
+import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { formatDateTime } from '../../utils/format'
 import {
@@ -77,7 +78,7 @@ const ROLE_ENTRIES = [
 /** People comes first, and only for an Administrator; see AccessControlTab. */
 const PEOPLE_SECTION = { id: 'people', label: 'People', title: 'Everyone who can sign in, and their role' }
 
-/** The page's lists, one per tab, in tab order. A search-bar card opens one by its id. */
+/** The page's lists, one per tab, in tab order. The id is the tab's path segment. */
 const SECTIONS = [
   { id: 'credentials', label: 'Broker credentials', title: "Every gateway's broker credential, recorded and live" },
   { id: 'identities', label: 'Machine identities', title: "The stack's own processes, on the database side" },
@@ -123,15 +124,14 @@ const SECTION_HELP = {
  * identities on both planes. Administrator only, gated on the role as Settings is; the page is
  * narrower than the RPCs behind it, which also admit Shopfloor_Manager. The card scrolls.
  *
- * `initialSection` is a SECTIONS id handed over by the search bar; `onClearSection` drops it once
- * the tab is open.
+ * The tab is the path (`/access-control/credentials`), so a reload or Back returns to it.
  */
-export function AccessControlTab({ showToast, initialSection = '', onClearSection, userRole = null, currentUserId = null }) {
+export function AccessControlTab({ showToast, userRole = null, currentUserId = null }) {
   const showPeople = userRole === 'Administrator'
   const sections = useMemo(() => (showPeople ? [PEOPLE_SECTION, ...SECTIONS] : SECTIONS), [showPeople])
-  const [section, setSection] = useState(showPeople ? 'people' : 'credentials')
-  // The role whose rules the drawer shows, by name; null when closed.
-  const [openRole, setOpenRole] = useState(null)
+  const [section, setSection] = useUrlTab('access-control', sections.map(s => s.id), showPeople ? 'people' : 'credentials')
+  // The role whose rules the drawer shows, by name, in the address as `?broker-role=`.
+  const [openRole, setOpenRole] = useUrlState('broker-role', '', { allowed: ROLE_ENTRIES.map(e => e.rolename) })
   const [rows, setRows] = useState([])
   // One flag per read a card waits on, so a card that is still loading says so instead of reading
   // as empty.
@@ -144,7 +144,9 @@ export function AccessControlTab({ showToast, initialSection = '', onClearSectio
   const [inventory, setInventory] = useState(null)
   const [inventoryError, setInventoryError] = useState(null)
   // One of the credential filter's values: a credential state, every active gateway, or the archive.
-  const [credentialFilter, setCredentialFilter] = useState('active')
+  const [credentialFilter, setCredentialFilter] = useUrlState('state', 'active', {
+    allowed: ['active', ...Object.values(CREDENTIAL_STATES), 'archived']
+  })
   const [bundleForGw, setBundleForGw] = useState(null)
   const [credentialForGw, setCredentialForGw] = useState(null)
   const [principals, setPrincipals] = useState([])
@@ -227,19 +229,8 @@ export function AccessControlTab({ showToast, initialSection = '', onClearSectio
 
   useEffect(() => { load(true) }, [load])
 
-  // The drawer belongs to Broker roles, so leaving that tab closes it.
-  const selectSection = useCallback((id) => {
-    setSection(id)
-    if (id !== 'roles') setOpenRole(null)
-  }, [])
-
-  // Opens the tab a search-bar card named, then drops the request so a later visit starts on the
-  // default.
-  useEffect(() => {
-    if (!initialSection) return
-    if (sections.some(s => s.id === initialSection)) selectSection(initialSection)
-    onClearSection?.()
-  }, [initialSection, onClearSection, selectSection, sections])
+  // The drawer belongs to Broker roles; a tab change drops it from the address with the filters.
+  const selectSection = useCallback((id) => setSection(id), [setSection])
 
   // Counts per filter value, over the whole list, so the dropdown answers "is there any?" without
   // being selected. Archived rows count only under Archived: archiving rotated their credential to

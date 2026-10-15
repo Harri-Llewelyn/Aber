@@ -105,8 +105,9 @@ describe('the export warning about unmapped metrics', () => {
     await waitFor(() => expect(window.location.pathname).toBe('/metrics'))
     const unmapped = await screen.findByRole('button', { name: /^Unmapped \(\d+\)$/ })
     expect(unmapped).toHaveAttribute('aria-pressed', 'true')
-    expect(unmapped).toHaveTextContent('Unmapped (2)')
+    // The button renders before the catalog arrives, so its count is read once the rows are in.
     expect(await screen.findByText('Controller/EXECUTION')).toBeInTheDocument()
+    expect(unmapped).toHaveTextContent('Unmapped (2)')
     expect(screen.getByText('safety_interlock')).toBeInTheDocument()
     expect(screen.queryByText('Axes/DISPLACEMENT')).toBeNull()
     expect(screen.queryByRole('button', { name: /carried no semantic id/ })).toBeNull()

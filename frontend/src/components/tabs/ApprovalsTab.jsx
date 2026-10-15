@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, useRef } from 'react'
+import { proposalSubjectUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { POLL_INTERVAL_MS, ENTITY_KIND_BY_TABLE } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
@@ -7,6 +8,7 @@ import { IconPencil, IconCheck, IconX, IconArchive, IconHistory, IconInbox } fro
 import { HelpTip } from '../common/HelpTip'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
+import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
 import { Badge } from '../common/Badge'
 import { SearchInput } from '../common/SearchInput'
 import { ClearFilters } from '../common/ClearFilters'
@@ -416,9 +418,6 @@ const QUEUE_HELP = {
 
 export function ApprovalsTab({
   showToast, userRole, currentUserId, onViewTrail,
-  // Arrives from another page, one-shot: `initialSubject` points the working queue at one entity.
-  // Cleared through `onClearFocus` so returning later does not reapply it.
-  initialSubject = '', onClearFocus,
   // Hand back to the entity's page, where the form that edits a proposal lives.
   onOpenSubject
 }) {
@@ -431,15 +430,18 @@ export function ApprovalsTab({
 
   const [rejecting, setRejecting] = useState(null)
   const [busyId, setBusyId]       = useState(null)
-  const [selectedId, setSelectedId] = useState(null)
-  // The tab: 'open' (Awaiting a decision) or 'decided'.
-  const [queue, setQueue] = useState('open')
-  const [decidedKind, setDecidedKind] = useState('all')
-  const [decidedQuery, setDecidedQuery] = useState('')
-  const [openKind, setOpenKind] = useState('all')
-  // Set by the route effect below when the hand-over arrives, and freely editable afterwards --
-  // a filter somebody cannot clear is a trap, not a shortcut.
-  const [openQuery, setOpenQuery] = useState('')
+  // In the address as `?proposal=`.
+  const [selectedId, setSelectedId] = useUrlState('proposal', '', { allowed: loading ? null : proposals.map(p => p.id) })
+  // The tab, in the path: `/approvals` (Awaiting a decision) or `/approvals/decided`.
+  const [queue, setQueue] = useUrlTab('approvals', Object.keys(QUEUE_HELP), 'open')
+  // The queue on show filters by one kind and one search, in the address. A queue change drops
+  // them, so each queue opens unfiltered. A device drawer's hand-over arrives as `?search=<id>`.
+  const [kindFilter, setKindFilter] = useUrlState('kind', 'all', { allowed: ['all', ...KINDS.map(k => k.id)] })
+  const [queryFilter, setQueryFilter] = useUrlState('search')
+  const [decidedKind, setDecidedKind] = [kindFilter, setKindFilter]
+  const [decidedQuery, setDecidedQuery] = [queryFilter, setQueryFilter]
+  const [openKind, setOpenKind] = [kindFilter, setKindFilter]
+  const [openQuery, setOpenQuery] = [queryFilter, setQueryFilter]
 
   const loadAll = useCallback(async (signal) => {
     try {
@@ -462,19 +464,6 @@ export function ApprovalsTab({
   }, [])
 
   usePolling(loadAll, POLL_INTERVAL_MS)
-
-  /* An effect, not an initial state: every tab stays mounted across navigation, so
-     `useState(initialSubject)` would run once and ignore every later hand-over. */
-  React.useEffect(() => {
-    if (!initialSubject) return
-    setQueue('open')
-    setOpenQuery(initialSubject)
-    // Both queues are narrowed, so a decided proposal about the same device does not sit unfiltered
-    // below.
-    setDecidedQuery(initialSubject)
-    setSelectedId(null)
-    onClearFocus?.()
-  }, [initialSubject, onClearFocus])
 
   const refresh = useCallback(async () => {
     try { await loadAll() } catch { /* the poller reports a failing backend */ }
@@ -588,6 +577,7 @@ export function ApprovalsTab({
       // Filtered to the subject's own kind: `audit_trail_page()` compares `entity_type` exactly,
       // and the approval row is filed under that kind's table. A deleted subject's rows are hidden
       // by default, so the trail is asked to show them.
+      to: trailUrl(selected.entity_id, ENTITY_KIND_BY_TABLE[selected.entity_type] || '', Boolean(selected.target_missing)),
       onClick: () => onViewTrail({
         id: selected.entity_id,
         type: ENTITY_KIND_BY_TABLE[selected.entity_type] || '',
@@ -601,6 +591,7 @@ export function ApprovalsTab({
       ...(onOpenSubject ? [{
         label: 'Add to this proposal', primary: true, icon: <IconPencil size={13} />,
         title: 'Open this entity, where the same dialog that edits it will extend your request',
+        to: proposalSubjectUrl(selected),
         onClick: () => onOpenSubject(selected)
       }] : []),
       {

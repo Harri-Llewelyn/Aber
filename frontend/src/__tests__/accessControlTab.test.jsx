@@ -1,5 +1,5 @@
 import React from 'react'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import { AccessControlTab } from '../components/tabs/AccessControlTab'
@@ -330,23 +330,36 @@ describe('AccessControlTab', () => {
     expect(screen.getByRole('tab', { name: 'Broker accounts' }).getAttribute('aria-selected')).toBe('true')
   })
 
-  /** A search-bar card names one list; the page opens on its tab and hands the request back. */
-  it('opens the tab a search-bar card names, and drops the request', async () => {
+  /** The tab is the path: a search-bar card links to it, and a reload or Back returns to it. */
+  it('opens the tab the address names', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    const onClearSection = vi.fn()
-    render(<AccessControlTab showToast={vi.fn()} initialSection="roles" onClearSection={onClearSection} />)
+    window.history.replaceState(null, '', '/access-control/roles')
+    render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByRole('tab', { name: 'Broker roles' }).getAttribute('aria-selected')).toBe('true'))
-    expect(onClearSection).toHaveBeenCalled()
   })
 
-  it('ignores a section it does not have, and still drops the request', async () => {
+  it('opens the default tab for one it does not have, and tidies the address', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    const onClearSection = vi.fn()
-    render(<AccessControlTab showToast={vi.fn()} initialSection="services" onClearSection={onClearSection} />)
+    window.history.replaceState(null, '', '/access-control/services')
+    render(<AccessControlTab showToast={vi.fn()} />)
 
-    await waitFor(() => expect(onClearSection).toHaveBeenCalled())
     expect(screen.getByRole('tab', { name: 'Broker credentials' }).getAttribute('aria-selected')).toBe('true')
+    await waitFor(() => expect(window.location.pathname).toBe('/access-control'))
+  })
+
+  it('puts a chosen tab in the path, so Back returns to the one before', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    window.history.replaceState(null, '', '/access-control')
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Broker roles' }))
+    expect(window.location.pathname).toBe('/access-control/roles')
+    act(() => {
+      window.history.back()
+    })
+    await waitFor(() => expect(window.location.pathname).toBe('/access-control'))
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Broker credentials' }).getAttribute('aria-selected')).toBe('true'))
   })
 
   /** A declared fixture is named rather than marked as a stray; anything undeclared is the stray. */

@@ -79,7 +79,7 @@ describe('navSignalsFrom', () => {
 })
 
 describe('Sidebar shows a signal', () => {
-  const item = (label) => screen.getAllByRole('button').find(b => b.getAttribute('aria-label')?.startsWith(label))
+  const item = (label) => screen.getAllByRole('link').find(b => b.getAttribute('aria-label')?.startsWith(label))
 
   it('colours the flagged page and carries the reason on its title and label', () => {
     render(<Sidebar tabs={TABS} currentTab="site-map" onNavigate={vi.fn()}

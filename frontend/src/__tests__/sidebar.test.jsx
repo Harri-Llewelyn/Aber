@@ -43,8 +43,8 @@ describe('the rail expands and, crucially, collapses again', () => {
     const onNavigate = renderRail()
 
     fireEvent.mouseEnter(rail())
-    const devices = screen.getByRole('button', { name: 'Devices' })
-    // A real click focuses the button it lands on. fireEvent.click does not, so the focus that
+    const devices = screen.getByRole('link', { name: 'Devices' })
+    // A real click focuses the link it lands on. fireEvent.click does not, so the focus that
     // caused the bug is raised explicitly -- otherwise this test passes against the broken code.
     fireEvent.focus(devices)
     fireEvent.click(devices)
@@ -60,10 +60,10 @@ describe('the rail expands and, crucially, collapses again', () => {
    */
   it('still expands on a keyboard focus, which arrives with no pointer over it', () => {
     renderRail()
-    fireEvent.focus(screen.getByRole('button', { name: 'Devices' }))
+    fireEvent.focus(screen.getByRole('link', { name: 'Devices' }))
     expect(isExpanded()).toBe(true)
 
-    fireEvent.blur(screen.getByRole('button', { name: 'Devices' }))
+    fireEvent.blur(screen.getByRole('link', { name: 'Devices' }))
     expect(isExpanded()).toBe(false)
   })
 })
@@ -90,7 +90,7 @@ describe('the grouping', () => {
     renderRail()
     const nav = within(rail()).getByRole('navigation', { name: /primary/i })
     for (const tab of adminTabs()) {
-      expect(within(nav).getByRole('button', { name: tab.label })).toBeTruthy()
+      expect(within(nav).getByRole('link', { name: tab.label })).toBeTruthy()
     }
   })
 })
