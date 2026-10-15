@@ -618,6 +618,16 @@ export const SUITES = {
       "to confine an admin's write landed on top of a table-level UPDATE already held and did " +
       'nothing. The settings page would have worked perfectly while provenance was forgeable.',
   },
+  'supabase/migrations/test_user_settings.py': {
+    lanes: ['db'],
+    why:
+      "0188's per-person preferences, which the Profile page and the account menu write. A person " +
+      "reads, creates and changes their own row and nobody else's, an Administrator included, and " +
+      'cannot hand it to someone else; anon and service_role hold nothing; the CHECKs refuse a ' +
+      "value the dashboard does not know; the first sign-in's seed never overwrites a row another " +
+      "tab created, and a one-column save leaves the other column alone; and the row goes with the " +
+      'account, unaudited.',
+  },
   'supabase/migrations/test_area_plans.py': {
     lanes: ['db'],
     why:
