@@ -654,10 +654,10 @@ html, body, #root {
   /* Clips the labels while collapsed. They stay in the DOM at every width -- an accessible name
      that appears and disappears with a hover is not one. */
   overflow-x: hidden;
+  /* The page list scrolls behind the pinned foot on a short screen, with the 6px bar every scroller
+     here has. No scrollbar-width or scrollbar-color here: Chrome drops ::-webkit-scrollbar's styling
+     for an element that sets either, and draws its own light bar in both themes. */
   overflow-y: auto;
-  /* The page list scrolls behind the pinned foot on a short screen; a thin bar leaves the 52px
-     rail its icons. */
-  scrollbar-width: thin;
   transition: width 0.18s ease, box-shadow 0.18s ease;
 }
 
@@ -963,6 +963,10 @@ a.sidebar-item { text-decoration: none; }
     /* Its track is not --scrollbar wide (none at all with overlay scrollbars), so nothing is taken
        back out of the padding. */
     padding-right: var(--gutter);
+  }
+  .sidebar-panel {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
   }
 }
 
