@@ -706,7 +706,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
               />
             )}
             {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={showDevicesForSchema} onSelectDevice={showDevice} initialSchemaId={selectedSchemaId} />}
-            {tab === 'metrics'        && <MetricsTab showToast={showToast} hasPermission={hasPermission} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} initialFilter={selectedMetricFilter} onClearFilter={() => setSelectedMetricFilter('')} />}
+            {tab === 'metrics'        && <MetricsTab showToast={showToast} hasPermission={hasPermission} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} initialFilter={selectedMetricFilter} onClearFilter={() => setSelectedMetricFilter('')} onSelectDevice={showDevice} />}
             {tab === 'vocabulary'     && <VocabularyTab hasPermission={hasPermission} onUseEntry={entry => { setPendingVocabularyEntry(entry); setTab('metrics') }} />}
             {tab === 'directory'      && <DirectoryTab showToast={showToast} initialSection={selectedSection} onClearSection={() => setSelectedSection('')} />}
             {/* `currentUserId` lets the page say "you" and offer Edit and Withdraw on the

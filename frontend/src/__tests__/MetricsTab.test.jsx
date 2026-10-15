@@ -160,7 +160,7 @@ beforeEach(() => {
   })
 })
 
-describe('Metrics page: one card with two tabs', () => {
+describe('Metrics page: one card with three tabs', () => {
   it('names the page in the card heading, with the rail icon and a one-sentence description', async () => {
     renderTab()
     await waitFor(() => expect(catalogTable()).toBeTruthy())
@@ -175,13 +175,14 @@ describe('Metrics page: one card with two tabs', () => {
     expect(description.split(' ').length).toBeLessThanOrEqual(28)
   })
 
-  it('puts the tabs directly in the card, catalog first and selected, Deprecated always present', async () => {
+  it('puts the tabs directly in the card, catalog first and selected, Deprecated and Uncatalogued always present', async () => {
     renderTab()
     await waitFor(() => expect(catalogTable()).toBeTruthy())
 
     const tablist = screen.getByRole('tablist')
     expect(tablist.closest('.tab-strip').parentElement).toHaveClass('card')
-    expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['Metric Catalog', 'Deprecated Metrics'])
+    await waitFor(() => expect(screen.getAllByRole('tab').map(t => t.textContent))
+      .toEqual(['Metric Catalog', 'Deprecated Metrics', 'Uncatalogued (0)']))
     expect(screen.getByRole('tab', { name: 'Metric Catalog' }).getAttribute('aria-selected')).toBe('true')
   })
 
@@ -196,12 +197,15 @@ describe('Metrics page: one card with two tabs', () => {
     expect(deprecatedTableOf().parentElement.parentElement).toBe(fill)
   })
 
-  it('carries no count on the card, its tabs or the group headings', async () => {
+  it('carries no count on the card, the catalog’s two tabs or the group headings', async () => {
     renderTab()
     await waitFor(() => expect(catalogTable()).toBeTruthy())
 
     expect(document.querySelector('.card .section-count')).toBeNull()
-    for (const tab of screen.getAllByRole('tab')) expect(tab.textContent).not.toMatch(/\d/)
+    // Uncatalogued carries its count by design (metricsUncatalogued.test.jsx).
+    for (const name of ['Metric Catalog', 'Deprecated Metrics']) {
+      expect(screen.getByRole('tab', { name }).textContent).not.toMatch(/\d/)
+    }
   })
 
   it('puts the selected tab’s "?" in the tab bar, after the last tab', async () => {

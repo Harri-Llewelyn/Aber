@@ -2228,6 +2228,18 @@ const apiMethods = {
       }));
     }
 
+    if (path.startsWith('/api/v1/uncatalogued-metrics')) {
+      // The names devices declare that no catalog row has (0189), computed by the view under the
+      // caller's RLS. `devices` is [{ id, name, quarantined }], by name; `datatypes` the Sparkplug
+      // codes their births carried, [] when none did.
+      const { data, error } = await supabase
+        .from('uncatalogued_metrics')
+        .select('metric_name, device_count, devices, last_declared_at, datatypes')
+        .order('metric_name', { ascending: true });
+      if (error) throw error;
+      return data || [];
+    }
+
     if (path.startsWith('/api/v1/schemas')) {
       const { data, error } = await supabase.from('schemas').select('*').order('created_at', { ascending: false });
       if (error) throw error;
