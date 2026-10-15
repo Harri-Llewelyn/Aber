@@ -900,6 +900,8 @@ function edgeFunctionNames() {
    * definition. The check fails on the first unlisted redeclaration.
    */
   const INTENDED_REDECLARATIONS = {
+    'public.start_playback_job': '0187 refuses a device map that names anything but the replay lane of the device its key names, so a replay never publishes as a real device; the baseline checked only that the target belonged to the gateway',
+    'public.refuse_archiving_the_last_shadow_gateway': '0187 words the refusal for the one Playback gateway; the baseline told an operator to mark another gateway is_shadow, which the API now refuses (the logic is unchanged)',
     'public.gateway_is_playback_delivery_target': '0183 answers is_shadow on an unarchived gateway, the target a playback may have; the baseline answers is_simulated, which delivered every simulator\'s password to the playback worker',
     'public.audit_trail_page': '0168 probes device_submodels rows for deletion beside device_nameplate, both keyed by their device; the baseline drew a deleted device\'s schema rows as live',
     'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited',
@@ -917,7 +919,7 @@ function edgeFunctionNames() {
     'public.approve_proposal': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
     'public.approve_quarantined_device': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
     'public.discard_schema_draft': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
-    'public.ensure_shadow_devices': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
+    'public.ensure_shadow_devices': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500. 0187 words that message and the lookup comment for the one Playback gateway',
     'public.fork_schema': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
     'public.publish_schema_version': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
     'public.reject_proposal': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
@@ -3296,6 +3298,36 @@ function edgeFunctionNames() {
     );
   } else {
     pass(`the archive backlog tolerance is ${page} days on the Cold Storage page and in its alert rule`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 90. The seed alone makes a playback gateway. is_shadow decides which broker password the playback
+// worker is given and which gateway a replay may publish as, so only 0002 writes it: no other
+// applied migration sets it, the dashboard never sends it, and trg_gateways_playback_flag_is_seeded
+// is stated and refuses it to every role the API runs as. A second way to mint one, such as a
+// function for Administrators, is a decision to take in the open: add it to this check with its
+// reason, as check 65 does for the vault.
+// -------------------------------------------------------------------------------------------------
+{
+  const dir = 'supabase/migrations';
+  const files = readdirSync(join(REPO, dir)).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  const writers = files.filter((name) => {
+    const text = read(`${dir}/${name}`);
+    return /\bis_shadow\s*=\s*(true|false)\b/i.test(text)
+      || /INSERT INTO public\.gateways\s*\([^)]*\bis_shadow\b/i.test(text);
+  });
+  const guard = files.filter((name) => /replay_trigger\('public\.gateways', 'trg_gateways_playback_flag_is_seeded'/.test(read(`${dir}/${name}`)));
+  const sends = /\bis_shadow\s*:/.test(read('frontend/src/api.js'));
+  if (writers.join() !== '0002_seed_data.sql') {
+    fail(`the files that write gateways.is_shadow are ${writers.join(', ') || 'none'}, and must be 0002_seed_data.sql alone: `
+      + 'only the seed makes a playback gateway (0187), so a function that mints one belongs in this check with its reason');
+  } else if (!guard.length) {
+    fail('no applied migration states trg_gateways_playback_flag_is_seeded, so a Shopfloor Manager can mark any gateway a playback target');
+  } else if (sends) {
+    fail('frontend/src/api.js builds a gateway body with is_shadow: the API refuses it (0187), so the dashboard must never send it');
+  } else {
+    pass(`gateways.is_shadow is written by ${writers[0]} alone, refused to the API by ${guard[0]}, and never sent by the dashboard`);
   }
 }
 

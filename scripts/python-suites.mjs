@@ -816,6 +816,16 @@ export const SUITES = {
       'the database refuses it anyway, which is the half that holds for a PostgREST caller the ' +
       'dashboard never sees.',
   },
+  'supabase/migrations/test_only_the_seed_makes_a_playback_gateway.py': {
+    lanes: ['db'],
+    why:
+      '0187 -- is_shadow decides which gateway a replay may publish as and whose broker password ' +
+      'the worker is handed, and a Shopfloor_Manager could set it on a Host gateway and replay ' +
+      "into its real devices' history. Pins the refusal for both roles and service_role, that an " +
+      'ordinary edit and a whole-row PATCH still pass, that the seed’s own statement still ' +
+      'reconciles the Playback gateway on the second boot, and that start_playback_job() maps ' +
+      'only onto the lane of the device a key names.',
+  },
   'supabase/migrations/test_a_shadow_gateway_is_never_stale.py': {
     lanes: ['db'],
     why:

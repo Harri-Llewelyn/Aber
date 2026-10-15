@@ -449,6 +449,13 @@ python supabase/migrations/test_foreign_credentials.py
 # edited: a gate written against the STATE rather than the ACT would break both with an error about
 # playback. Since 0124 the lane is deleted with its original rather than orphaned by the FK.
 python supabase/migrations/test_shadow_lane_is_not_assignable.py
+# Only the seed makes a playback gateway, and a playback maps only onto replay lanes (0187). A
+# Shopfloor_Manager could mark a Host gateway is_shadow and replay recorded readings into its real
+# devices' history. The refusals are held for an Administrator, a Shopfloor_Manager and service_role.
+# THE TESTS THAT EARN THEIR PLACE ARE THE ONES THAT STILL PASS: the seed's own statement, read out of
+# 0002, reconciles the Playback gateway as the owner, which every upgrade after the first depends on,
+# and an ordinary edit, or a whole-row PATCH that mentions the flag, is not refused.
+python supabase/migrations/test_only_the_seed_makes_a_playback_gateway.py
 # A shadow gateway is never reported as gateway_stale, and an ordinary gateway that died still is
 # (0182). The exclusion was lost once in a redeclaration, and Gateway Stale then fired after every
 # replay. Its replay lanes are never counted in expected_publishers, and a real device that has
