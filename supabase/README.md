@@ -1238,6 +1238,16 @@ to exist.
 stale heartbeat. A panel is an inventory and an alert is a demand for action; answering both with
 one predicate would be fixing the second by reflex.
 
+**`0186` clears the health a replay left on a shadow gateway.** A replay republishes a recorded
+appliance's node messages as the Playback gateway, and the daemon used to record their uptime, load,
+memory, free disk, CA date, agent version and flow hash as the gateway's own. The *Gateway Fleet
+Health* dashboard showed another machine's figures as Playback's, *Gateway CA Expiring* fired for it,
+and a replayed flow hash that differed wrote a `FLOW_DEPLOYED` audit row for a deployment that never
+happened. The daemon now writes a shadow gateway's heartbeat and status and no health, and `0186` sets
+the eight health columns of every shadow gateway back to NULL once; a second boot changes nothing.
+`FLOW_DEPLOYED` rows already written stay, since `audit_trail` is append-only. The Playback row in
+`gateway_health` now shows a heartbeat and no readings.
+
 ### `0001` builds `gateway_status` by calling the function, not inline
 
 `pg_dump` records the view with an **explicit column list**, while `ensure_gateway_status_view()`

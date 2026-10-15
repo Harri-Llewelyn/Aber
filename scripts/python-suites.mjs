@@ -826,6 +826,15 @@ export const SUITES = {
       'counted in expected_publishers, which gates the critical Ingestion Consuming Nothing, and ' +
       'a real device still counted.',
   },
+  'supabase/migrations/test_a_shadow_gateway_holds_no_health.py': {
+    lanes: ['db'],
+    why:
+      "0186's clean-up of the health a replay left on the Playback gateway: another machine's disk, " +
+      'CA date and agent version on the Fleet Health dashboard, and Gateway CA Expiring firing for ' +
+      'it. The chain leaves a shadow gateway no reading, the migration clears the columns and ' +
+      'nothing else and changes nothing on a second boot, a heartbeat without health records none ' +
+      'and no FLOW_DEPLOYED row, and the role the daemon uses can read the is_shadow column it tests.',
+  },
 
   // -----------------------------------------------------------------------------------------
   // Two lanes: an offline layer that always runs, a live layer that needs the stack

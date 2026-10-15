@@ -249,6 +249,7 @@ class NodeMessageTestCase(unittest.TestCase):
         ingestion._gateway_outage_gauges.clear()
         ingestion._gateway_outage_counted.clear()
         ingestion._gateway_clock_gauges.clear()
+        ingestion._gateway_health_gauges.clear()
         self.gateway = {"id": "50000000-0000-4000-8000-000000000005", "name": "Line 5", "status": "ONLINE"}
         self.supabase = MagicMock()
         for target, value in (
@@ -280,6 +281,12 @@ class NodeMessageTestCase(unittest.TestCase):
     def flag(name, value):
         m = sparkplug_b_pb2.Payload.Metric()
         m.name, m.datatype, m.boolean_value = name, 11, value
+        return m
+
+    @staticmethod
+    def text(name, value):
+        m = sparkplug_b_pb2.Payload.Metric()
+        m.name, m.datatype, m.string_value = name, 12, value
         return m
 
     def report(self, started, ended, buffered=0, dropped=0, buffering=True):
@@ -366,6 +373,76 @@ class ReplayedNodeMessageTest(NodeMessageTestCase):
         self.assertEqual(ingestion.gateway_clock_gauge_snapshot(), {})
         call = self.supabase.rpc.call_args[0][1]
         self.assertEqual((call["p_status"], call["p_health"]), ("ONLINE", None))
+
+
+class ShadowGatewayNodeMessageTest(NodeMessageTestCase):
+    """
+    The Playback gateway republishes a recorded appliance's node messages, live-looking metrics and
+    all. Its heartbeat is real; the health, outage report and clock in them are the recording's.
+    """
+
+    def appliance_message(self):
+        end = now_ms() - 1000
+        return [
+            self.number("Uptime_s", 4210),
+            self.number("Cert_Expires_At", now_ms() + 20 * DAY_MS),
+            self.text("Flow_Hash", "a" * 64),
+            self.text("Agent_Version", "1.4.0"),
+            *self.report(end - 600_000, end, dropped=30),
+        ]
+
+    def fresh(self, **row):
+        """Another message to the same gateway, with nothing remembered from the last."""
+        registry.reset()
+        self.supabase.reset_mock()
+        for gauges in (ingestion._gateway_outage_gauges, ingestion._gateway_outage_counted,
+                       ingestion._gateway_clock_gauges, ingestion._gateway_health_gauges):
+            gauges.clear()
+        self.gateway.pop("is_shadow", None)
+        self.gateway.update(row)
+
+    def heartbeat(self):
+        calls = [c for c in self.supabase.rpc.call_args_list if c[0][0] == "ingest_record_gateway_health"]
+        self.assertEqual(len(calls), 1, "one heartbeat per node message")
+        return calls[0][0][1]
+
+    def test_a_shadow_gateway_records_no_health_outage_or_clock(self):
+        for msg_type in ("NBIRTH", "NDATA"):
+            with self.subTest(msg_type):
+                self.fresh(is_shadow=True)
+                self.node(self.appliance_message(), msg_type=msg_type)
+                self.assertIsNone(self.heartbeat()["p_health"])
+                self.assertEqual(ingestion.gateway_outage_gauge_snapshot(), {})
+                self.assertEqual(ingestion.gateway_clock_gauge_snapshot(), {})
+                self.assertEqual(ingestion.gateway_health_gauge_snapshot(), {})
+                self.assertNotIn("aber_ingestion_gateway_outages_total", " ".join(samples()))
+
+    def test_the_directory_reads_select_the_flag(self):
+        # The fixtures above set the key by hand; the daemon only sees it if it asks for it.
+        self.assertIn("is_shadow", ingestion._GATEWAY_COLUMNS.split(","))
+
+    def test_a_shadow_gateways_heartbeat_still_counts(self):
+        self.fresh(is_shadow=True)
+        self.node(self.appliance_message())
+        call = self.heartbeat()
+        self.assertEqual((call["p_gateway_id"], call["p_status"]), (self.gateway["id"], "ONLINE"))
+        self.assertIn("aber_ingestion_gateway_heartbeats_total 1.0", samples())
+
+    def test_an_ordinary_gateway_still_records_all_three(self):
+        # A row cached before the column was fetched has no key at all; it is an ordinary gateway.
+        for row in ({}, {"is_shadow": False}):
+            with self.subTest(row):
+                self.fresh(**row)
+                self.node(self.appliance_message())
+                health = self.heartbeat()["p_health"]
+                self.assertEqual(health["flow_hash"], "a" * 64)
+                self.assertEqual(health["agent_version"], "1.4.0")
+                self.assertIn("cert_expires_at", health)
+                self.assertIn("uptime_seconds", health)
+                self.assertEqual(ingestion.gateway_outage_gauge_snapshot()[NODE][
+                    "aber_ingestion_gateway_outage_last_readings_dropped"], 30)
+                self.assertIn(ingestion.GATEWAY_CLOCK_OFFSET_GAUGE, ingestion.gateway_clock_gauge_snapshot()[NODE])
+                self.assertIn("aber_ingestion_gateway_uptime_seconds", ingestion.gateway_health_gauge_snapshot()[NODE])
 
 
 if __name__ == "__main__":
