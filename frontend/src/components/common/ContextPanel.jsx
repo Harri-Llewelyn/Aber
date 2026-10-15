@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useRef } from 'react'
 import { IconX, IconAlertTriangle, IconAlertCircle, IconExternalLink } from './Icons'
 import CopyableId from './CopyableId'
 import { HelpTip } from './HelpTip'
+import { RouteLink } from './RouteLink'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { grafanaAlertUrl } from '../../constants'
 
@@ -36,8 +37,10 @@ export const HelpDrawerContext = createContext(null)
  * colours the value only; `help` puts a HelpTip beside the label, for a field whose name does
  * not say what it is for.
  *
- * @param {Array} actions [{ label, icon, onClick, href?, disabled?, title?, primary?, pending?,
- * pendingLabel? }]. `pending` puts that one action into the in-flight state. The first action marked
+ * @param {Array} actions [{ label, icon, onClick, to?, href?, disabled?, title?, primary?, pending?,
+ * pendingLabel? }]. `to` is an address in this app: the action is a link to it, and a plain click
+ * runs `onClick` (or goes to `to`) in place. `href` is another site's, opened in a new tab.
+ * `pending` puts that one action into the in-flight state. The first action marked
  * `primary` is drawn highlighted at the top of the list; a later one marked `primary` is drawn as
  * a plain action in its own position.
  *
@@ -187,7 +190,21 @@ export function ContextPanel({ open, type, title, icon, subtitle, fields = [], a
               <div className="context-panel-section-label">Actions</div>
               {orderedActions.map((a, i) => {
                 const cls = `btn btn-sm ${a.primary ? 'btn-primary' : 'btn-ghost'} context-action${a.danger ? ' context-action-danger' : ''}`
-                // An href action is a real link, so middle-click and copy link work.
+                // A `to` or `href` action is a real link, so middle-click and copy link work.
+                if (a.to && !a.disabled) {
+                  return (
+                    <RouteLink
+                      key={i}
+                      className={cls}
+                      to={a.to}
+                      onNavigate={a.onClick}
+                      title={a.title}
+                      tabIndex={open ? 0 : -1}
+                    >
+                      {a.icon} {a.label}
+                    </RouteLink>
+                  )
+                }
                 return a.href ? (
                   <a
                     key={i}

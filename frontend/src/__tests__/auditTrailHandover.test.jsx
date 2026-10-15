@@ -1,13 +1,16 @@
 import React from 'react';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AuditTrailTab } from '../components/tabs/AuditTrailTab';
 import { api } from '../api';
 import { ENTITY_KIND_BY_TABLE } from '../constants';
+import { trailUrl } from '../routes';
+import { navigate } from '../hooks/useUrlState';
 
 /**
- * The Devices page navigates here with the device it was on. These cover the handover itself: the
- * filters narrow to that device, and the page stays a normal page afterwards.
+ * The Devices page navigates here with the device it was on, as an address (routes.js trailUrl).
+ * These cover the handover itself: the filters narrow to that device, and the page stays a normal
+ * page afterwards.
  */
 vi.mock('../api', () => ({ api: { listUserAccounts: vi.fn(() => Promise.resolve([])), get: vi.fn() } }));
 
@@ -39,12 +42,18 @@ beforeEach(() => {
   });
 });
 
+/** Opens the page at the address another page's "View Audit Trail" links to. */
+const handOver = (id, type) => {
+  window.history.replaceState(null, '', trailUrl(id, type));
+  return render(<AuditTrailTab />);
+};
+
 const trailCalls = () =>
   api.get.mock.calls.map(([url]) => url).filter((url) => url.startsWith('/api/v1/audit-trail'));
 
 describe('AuditTrailTab handover', () => {
   it('narrows to the handed-over device', async () => {
-    render(<AuditTrailTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={vi.fn()} />);
+    handOver(DEVICE_ID, 'DEVICE');
 
     await waitFor(() => expect(trailCalls().length).toBeGreaterThan(0));
     // The id lands in the name filter because that filter matches on id as well as name, which is
@@ -60,7 +69,7 @@ describe('AuditTrailTab handover', () => {
 
   it('keeps the kind filter for a hand-over that nothing else is keyed by', async () => {
     const GATEWAY_ID = '22222222-3333-4444-5555-666666666666';
-    render(<AuditTrailTab initialEntity={{ id: GATEWAY_ID, type: 'GATEWAY' }} onClearEntity={vi.fn()} />);
+    handOver(GATEWAY_ID, 'GATEWAY');
     await waitFor(() =>
       expect(trailCalls().some((url) => url.includes(`search=${GATEWAY_ID}`))).toBe(true));
     expect(trailCalls().every((url) => url.includes('entity_type=GATEWAY'))).toBe(true);
@@ -95,7 +104,7 @@ describe('AuditTrailTab handover', () => {
       return Promise.resolve([]);
     });
 
-    render(<AuditTrailTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={vi.fn()} />);
+    handOver(DEVICE_ID, 'DEVICE');
 
     await screen.findByRole('button', { name: /UPDATE on Simulated_CNC_01/ });
     expect(document.querySelectorAll('.trail-lane:not(.trail-axis)').length).toBe(3);
@@ -109,28 +118,24 @@ describe('AuditTrailTab handover', () => {
   });
 
   it('lets Clear Filters actually clear the handover', async () => {
-    const onClearEntity = vi.fn();
-    render(<AuditTrailTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={onClearEntity} />);
+    handOver(DEVICE_ID, 'DEVICE');
     await waitFor(() =>
       expect(screen.getByPlaceholderText('Search a name or any ID…').value).toBe(DEVICE_ID));
 
     fireEvent.click(screen.getByRole('button', { name: /clear filters/i }));
 
-    // Without the callback the parent would still hold the entity and the effect would put the
-    // filter straight back, so the button would look broken.
-    expect(onClearEntity).toHaveBeenCalled();
+    // The hand-over is only the address, so clearing it leaves nothing to put the filter back.
+    expect(window.location.search).toBe('');
     expect(screen.getByPlaceholderText('Search a name or any ID…').value).toBe('');
   });
 
   it('re-narrows when a second device is handed over', async () => {
     const other = '99999999-8888-7777-6666-555555555555';
-    const { rerender } = render(
-      <AuditTrailTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={vi.fn()} />
-    );
+    handOver(DEVICE_ID, 'DEVICE');
     await waitFor(() =>
       expect(screen.getByPlaceholderText('Search a name or any ID…').value).toBe(DEVICE_ID));
 
-    rerender(<AuditTrailTab initialEntity={{ id: other, type: 'DEVICE' }} onClearEntity={vi.fn()} />);
+    act(() => navigate(trailUrl(other, 'DEVICE')));
 
     await waitFor(() =>
       expect(screen.getByPlaceholderText('Search a name or any ID…').value).toBe(other));
@@ -139,7 +144,7 @@ describe('AuditTrailTab handover', () => {
   // The fixture is the shape api.js emits, so the row it produces has to render completely.
   // Asserted so the fixture cannot drift back to raw column names.
   it('renders the handed-over event in full', async () => {
-    render(<AuditTrailTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={vi.fn()} />);
+    handOver(DEVICE_ID, 'DEVICE');
 
     // One lane, one marker. The description and the mutation id moved into the drawer -- they
     // describe one EVENT, and a lane is one ASSET.
@@ -158,7 +163,7 @@ describe('AuditTrailTab handover', () => {
   /* The reason the default range is All time: this fixture is dated 2026-08-10 and never refreshed,
      and an operator asking for one asset's history means all of it. */
   it('requests an unbounded window, so an old asset history is not silently empty', async () => {
-    render(<AuditTrailTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={vi.fn()} />);
+    handOver(DEVICE_ID, 'DEVICE');
 
     await waitFor(() => expect(trailCalls().length).toBeGreaterThan(0));
     expect(trailCalls().every((url) => !url.includes('since='))).toBe(true);

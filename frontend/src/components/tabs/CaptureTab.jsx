@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { RouteLink } from '../common/RouteLink'
+import { schemaUrl } from '../../routes'
 import { api } from '../../api'
 import { playbackWorkerDeployed } from '../../config'
 import { REALTIME_ENABLED } from '../../constants'
@@ -20,6 +22,7 @@ import { HelpTip } from '../common/HelpTip'
 import { CardHeading } from '../common/CardHeading'
 import { Badge } from '../common/Badge'
 import { TabStrip } from '../common/TabStrip'
+import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
 import { SearchInput } from '../common/SearchInput'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
@@ -42,7 +45,9 @@ const DENIED_TITLE = `Requires ${WRITE_ROLES.map(r => r.replace(/_/g, ' ')).join
  * first two.
  */
 export function CaptureTab({ showToast, userRole, onSelectSchema }) {
-  const [subjectKind, setSubjectKind] = useState('gateway')
+  // The tab, in the path: `/capture` (gateways) or `/capture/device`. The stored filter and the
+  // search sit above both tabs, so they stay in the address across a tab change.
+  const [subjectKind, setSubjectKind] = useUrlTab('capture', ['gateway', 'device'], 'gateway', { keep: ['stored', 'search'] })
   const [gateways, setGateways] = useState([])
   const [devices, setDevices] = useState([])
   const [captures, setCaptures] = useState([])
@@ -53,7 +58,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  const [selectedId, setSelectedId] = useState(null)
+  // The subject whose drawer is open, in the address as `?subject=`.
+  const [selectedId, setSelectedId] = useUrlState('subject')
   const [startFor, setStartFor] = useState(null)
   const [deleteFor, setDeleteFor] = useState(null)
   const [playFor, setPlayFor] = useState(null)
@@ -61,9 +67,9 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   const [dragging, setDragging] = useState(false)
   const [busyId, setBusyId] = useState(null)
 
-  const [storedFilter, setStoredFilter] = useState('all')
-  const [gatewayFilter, setGatewayFilter] = useState('')
-  const [search, setSearch] = useState('')
+  const [storedFilter, setStoredFilter] = useUrlState('stored', 'all', { allowed: ['all', 'with', 'without'] })
+  const [gatewayFilter, setGatewayFilter] = useUrlState('gateway', '', { allowed: loading ? null : gateways.map(g => g.id) })
+  const [search, setSearch] = useUrlState('search')
   const [draggingPlay, setDraggingPlay] = useState(false)
   // Set when a file comes in through "Play a file…" or a drop on the card: once it has been stored,
   // the playback dialog opens on the capture it produced rather than sending the operator back to
@@ -237,6 +243,10 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   // Resolved from the current rows rather than captured on click: this page refreshes on a timer
   // and over Realtime, so a held object would freeze.
   const selected = allRows.find(r => r.id === selectedId) || null
+  // A subject the address names and this tab does not list leaves the address once the rows are in.
+  useEffect(() => {
+    if (!loading && selectedId && !selected) setSelectedId('')
+  }, [loading, selectedId, selected, setSelectedId])
 
   // `schemasForDevice` resolves the device's attached schemas in one place, as the Devices page does.
   const selectedSchemas = useMemo(
@@ -605,17 +615,16 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                   ? (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                       {selectedSchemas.map(s => (
-                        <button
+                        <RouteLink
                           key={s.schema_uuid}
-                          type="button"
                           className="btn btn-ghost btn-sm"
-                          onClick={() => onSelectSchema?.(s.schema_uuid)}
+                          to={schemaUrl(s.schema_uuid)}
+                          onNavigate={onSelectSchema ? () => onSelectSchema(s.schema_uuid) : undefined}
                           title={`Open ${s.schema_name} on the Schemas page`}
-                          disabled={!onSelectSchema}
                         >
                           {s.schema_name}
                           {s.version ? <Badge size="sm" className="badge-follow">v{s.version}</Badge> : null}
-                        </button>
+                        </RouteLink>
                       ))}
                     </div>
                   )

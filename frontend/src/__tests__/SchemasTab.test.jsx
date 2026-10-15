@@ -84,10 +84,11 @@ describe('the registry rows', () => {
   it('words the Devices link "3 devices" and "1 device", with a plain dash at zero', async () => {
     await renderRegistry()
 
-    expect(devicesCell('Three_Devices').querySelector('button.count-link')).toHaveTextContent(/^3 devices$/)
-    expect(devicesCell('One_Device').querySelector('button.count-link')).toHaveTextContent(/^1 device$/)
+    expect(devicesCell('Three_Devices').querySelector('a.count-link')).toHaveTextContent(/^3 devices$/)
+    expect(devicesCell('Three_Devices').querySelector('a.count-link')).toHaveAttribute('href', `/devices?schema=${S1.schema_uuid}`)
+    expect(devicesCell('One_Device').querySelector('a.count-link')).toHaveTextContent(/^1 device$/)
     expect(devicesCell('No_Devices')).toHaveTextContent(/^—$/)
-    expect(devicesCell('No_Devices').querySelector('button')).toBeNull()
+    expect(devicesCell('No_Devices').querySelector('a, button')).toBeNull()
     // No pill markup anywhere in the column, and none on the card heading.
     expect(document.querySelector('tbody .section-count')).toBeNull()
     expect(document.querySelector('.card-heading .section-count')).toBeNull()
@@ -96,7 +97,7 @@ describe('the registry rows', () => {
   it('opens the Devices page filtered to the schema, without opening the drawer', async () => {
     await renderRegistry()
 
-    fireEvent.click(screen.getByRole('button', { name: '3 devices' }))
+    fireEvent.click(screen.getByRole('link', { name: '3 devices' }))
     expect(onSelectSchema).toHaveBeenCalledWith(S1.schema_uuid)
     expect(document.querySelector('.row-selected')).toBeNull()
   })
@@ -113,7 +114,7 @@ describe('the registry rows', () => {
     expect(row).not.toHaveClass('row-selected')
 
     // Enter on the link inside the row is the link's, not the row's.
-    fireEvent.keyDown(screen.getByRole('button', { name: '3 devices' }), { key: 'Enter' })
+    fireEvent.keyDown(screen.getByRole('link', { name: '3 devices' }), { key: 'Enter' })
     expect(row).not.toHaveClass('row-selected')
   })
 

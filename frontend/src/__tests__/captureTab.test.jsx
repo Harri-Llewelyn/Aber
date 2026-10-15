@@ -1514,15 +1514,16 @@ describe('the device schema on the panel', () => {
     selectRow((await screen.findByText('CNC Spindle')).closest('tr'))
   }
 
-  it('names the schema as a button that navigates', async () => {
+  it('names the schema as a link that navigates', async () => {
     const onSelectSchema = vi.fn()
     renderTab({ onSelectSchema })
     await screen.findByText('Line 1 Gateway')
     fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
     selectRow((await screen.findByText('CNC Spindle')).closest('tr'))
 
-    const button = screen.getByRole('button', { name: /CNC Mill/ })
-    fireEvent.click(button)
+    const link = screen.getByRole('link', { name: /CNC Mill/ })
+    expect(link).toHaveAttribute('href', '/schemas?search=sch-1')
+    fireEvent.click(link)
     expect(onSelectSchema).toHaveBeenCalledWith('sch-1')
   })
 

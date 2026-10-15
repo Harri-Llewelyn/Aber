@@ -5,6 +5,7 @@ import { CellsTab } from '../components/tabs/CellsTab'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
+import { devicesForSchemaUrl } from '../routes'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -129,7 +130,9 @@ describe('DevicesTab filters', () => {
 
   it('narrows to a single schema when handed one from the Schemas page', async () => {
     api.get.mockImplementation(routeGet())
-    renderDevices({ initialSchemaFilter: 'schema-robot' })
+    // The Schemas page's device count links here.
+    window.history.replaceState({}, '', devicesForSchemaUrl('schema-robot'))
+    renderDevices()
 
     await waitFor(() => expect(screen.getByText('Robot_03')).toBeTruthy())
     // CNC_01 carries schema-cnc and must be filtered out.
@@ -270,7 +273,8 @@ describe('DevicesTab filters', () => {
 
   it('clears every filter at once and reports how many were active', async () => {
     api.get.mockImplementation(routeGet())
-    renderDevices({ initialSchemaFilter: 'schema-robot' })
+    window.history.replaceState({}, '', devicesForSchemaUrl('schema-robot'))
+    renderDevices()
     await waitFor(() => expect(screen.getByText('Robot_03')).toBeTruthy())
 
     fireEvent.change(screen.getByTitle('Filter by operational state'), { target: { value: 'offline' } })

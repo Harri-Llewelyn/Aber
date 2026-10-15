@@ -7,6 +7,7 @@ import { EmptyState } from '../common/EmptyState'
 import { HelpTip } from '../common/HelpTip'
 import { LoadingState } from '../common/LoadingState'
 import { TabStrip } from '../common/TabStrip'
+import { useUrlState, useUrlTab, pathSlug } from '../../hooks/useUrlState'
 import { COLD_STORAGE_DIALOG_KEYS } from '../../utils/coldStorage'
 import { BACKUP_OFFSITE_SETTING_KEYS } from '../../utils/backupOffsite'
 
@@ -239,14 +240,10 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false }) {
   )
 }
 
-export function SettingsTab({ showToast, initialSetting = '', onClearSetting }) {
+export function SettingsTab({ showToast }) {
   const [settings, setSettings] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
-  /* The category on screen, held by name rather than index: the list is rebuilt on every read, and
-     an index would move the operator to a different category when one arrives or empties. Null
-     until the first read resolves, then the first category the API returned. */
-  const [category, setCategory] = useState(null)
 
   const load = useCallback((isInitial = false) => {
     if (isInitial) setLoading(true)
@@ -261,22 +258,20 @@ export function SettingsTab({ showToast, initialSetting = '', onClearSetting }) 
 
   const groups = useMemo(() => groupByCategory(settings), [settings])
 
-  /* A setting arrived from the search bar. Its category is chosen once, when the read that can
-     answer "which category?" lands -- not held, or the operator could never leave the category
-     they were sent to. `onClearSetting` drops the key so a later return to the page starts where
-     the page always starts. */
-  const [foundKey, setFoundKey] = useState('')
-  useEffect(() => {
-    if (!initialSetting || settings.length === 0) return
-    const found = settings.find(s => s.key === initialSetting)
-    if (found) { setCategory(found.category); setFoundKey(found.key) }
-    onClearSetting?.()
-  }, [initialSetting, settings, onClearSetting])
+  /* The category on screen, in the path by its slug (`/settings/cold-storage`); the first category
+     the API returned is the bare page. A category that disappears leaves the address, and the first
+     takes over. */
+  const slugs = groups.map(g => pathSlug(g.category))
+  const [categoryId, setCategoryId] = useUrlTab('settings', slugs, slugs[0], { ready: !loading })
+  const setCategory = (category) => setCategoryId(pathSlug(category))
+  /* A setting the search bar named, `?setting=<key>`: highlighted, and its category shown. Choosing
+     a category by hand drops it, as any tab change drops the query. */
+  const [foundKey, setFoundKey] = useUrlState('setting', '', { allowed: loading ? null : settings.map(s => s.key) })
+  const found = settings.find(s => s.key === foundKey)
 
-  /* Falls back to the first category whenever the held one is not in the current list -- the first
-     read, and a category that disappears. Chosen during render rather than in an effect, so the page
-     never paints a tablist with nothing selected. */
-  const activeCategory = groups.some(g => g.category === category) ? category : groups[0]?.category
+  const activeCategory = found
+    ? found.category
+    : (groups.find(g => pathSlug(g.category) === categoryId) || groups[0])?.category
   const activeGroup = groups.find(g => g.category === activeCategory)
 
   return (

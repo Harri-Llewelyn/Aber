@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback } from 'react'
 import { api } from '../../api'
 import { POLL_INTERVAL_MS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
@@ -8,6 +8,7 @@ import { HelpTip } from '../common/HelpTip'
 import { LoadingState } from '../common/LoadingState'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
+import { useUrlTab } from '../../hooks/useUrlState'
 import CopyableId from '../common/CopyableId'
 import { formatDateTime } from '../../utils/format'
 
@@ -440,7 +441,7 @@ function ServiceTable({ rows, onNotify }) {
   )
 }
 
-export function DirectoryTab({ showToast, initialSection = '', onClearSection }) {
+export function DirectoryTab({ showToast }) {
   const [services, setServices] = useState([])
   const [loading, setLoading]   = useState(true)
   // The latest read's failure, cleared by the next success; `lastGoodAt` is when `services` was read.
@@ -471,20 +472,11 @@ export function DirectoryTab({ showToast, initialSection = '', onClearSection })
   usePolling(loadAll, POLL_INTERVAL_MS)
 
   const groups = groupServices(services)
-  // Null until a tab is chosen, which means the first. A group has a tab only while it has rows, so
-  // if the chosen one empties between polls the first tab takes over and keeps the selection.
-  const [groupId, setGroupId] = useState(null)
+  // The tab, in the path (`/directory/<group>`); the first group is the bare page. A group has a
+  // tab only while it has rows, so one that empties between polls leaves the address and the first
+  // tab takes over. Before the first read the path is held until the list arrives.
+  const [groupId, setGroupId] = useUrlTab('directory', groups.map(g => g.id), groups[0]?.id, { ready: !loading })
   const active = groups.find(g => g.id === groupId) || groups[0]
-  if (groupId !== null && active && active.id !== groupId) setGroupId(active.id)
-
-  // Opens the group a search-bar card named (`initialSection`, a group id), then drops the request
-  // so a later visit starts on the first tab. Before the first read there are no groups to fall
-  // back from, so the choice holds until the list arrives.
-  useEffect(() => {
-    if (!initialSection) return
-    setGroupId(initialSection)
-    onClearSection?.()
-  }, [initialSection, onClearSection])
 
   return (
     <div className="page-layout page-fill">

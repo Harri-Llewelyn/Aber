@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { RouteLink } from '../common/RouteLink'
+import { deviceUrl, devicesForSchemaUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
@@ -24,6 +26,7 @@ import {
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
+import { useUrlState } from '../../hooks/useUrlState'
 import { plural } from '../../utils/format'
 import { schemaIdsForDevice } from '../../utils/deviceTags'
 
@@ -32,10 +35,9 @@ import { schemaIdsForDevice } from '../../utils/deviceTags'
  *
  * @param {Function} onSelectDevice Opens one device on the Devices page.
  *
- * @param {string} initialSchemaId A schema to open on arrival, handed over by a device drawer's
- * Schema chip.
+ * A device drawer's Schema chip arrives as `?search=<uuid>`, which opens that schema's drawer.
  */
-export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectDevice, initialSchemaId }) {
+export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectDevice }) {
   const [schemas, setSchemas]         = useState([])
   const [catalog, setCatalog]         = useState([])
   const [devices, setDevices]         = useState([])
@@ -46,8 +48,8 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   // `selectedId` is the row whose drawer is open, an id rather than the object because the list
   // reloads after every version created, publish and discard. `detailSchema` is the version being
   // read or edited; `forkTarget` the one a new version is created from, reachable from the drawer
-  // and from the detail dialog.
-  const [selectedId, setSelectedId] = useState(null)
+  // and from the detail dialog. In the address as `?schema=`.
+  const [selectedId, setSelectedId] = useUrlState('schema', '', { allowed: loaded ? schemas.map(sc => sc.schema_uuid) : null })
   const [detailSchema, setDetailSchema] = useState(null)
   const [forkTarget, setForkTarget] = useState(null)
   // The draft awaiting a discard confirmation. Held as the OBJECT so the dialog can name the
@@ -55,8 +57,10 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   const [discardTarget, setDiscardTarget] = useState(null)
   // `current` is the default status, so superseded versions stay out of the working list until
   // asked for.
-  const [statusFilter, setStatusFilter] = useState('current')
-  const [schemaSearch, setSchemaSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useUrlState('status', 'current', {
+    allowed: ['current', SCHEMA_STATUS.ACTIVE, SCHEMA_STATUS.DRAFT, SCHEMA_STATUS.ARCHIVED, 'all']
+  })
+  const [schemaSearch, setSchemaSearch] = useUrlState('search')
 
   const load = useCallback(async () => {
     try {
@@ -217,22 +221,18 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   const schemaFilterCount = (statusFilter !== 'current' ? 1 : 0) + (schemaSearchTerm ? 1 : 0)
   const clearSchemaFilters = () => { setStatusFilter('current'); setSchemaSearch('') }
 
-  // Arriving from a device drawer's Schema chip. Read from the prop and the URL: the query string
-  // survives a reload and a shared link, the prop covers a navigation that pushed none.
-  const arrivingSchemaId =
-    new URLSearchParams(window.location.search).get('search') || initialSchemaId || ''
   /**
-   * Arriving opens the drawer and reveals the row. The hook matches over every schema, so the
-   * drawer could open on a row the filters hide; the arrival widens whatever would hide it. Widen
-   * rather than clear: `current` is itself the filter that hides a superseded version.
+   * Arriving from a device drawer's Schema chip, as the search: an exact uuid opens that schema's
+   * drawer and reveals the row. The search already matches the uuid; the status filter could still
+   * hide the row, so the arrival widens it. Widen rather than clear: `current` is itself the filter
+   * that hides a superseded version.
    */
   useArrivalSelection(
-    arrivingSchemaId,
+    schemaSearch,
     schemas,
     (s, term) => s.schema_uuid === term,
     (s) => {
       setSelectedId(s.schema_uuid)
-      setSchemaSearch('')
       setStatusFilter(prev => {
         const shown = prev === 'all'
           || (prev === 'current' ? isCurrentSchema(s) : schemaStatus(s) === prev)
@@ -370,14 +370,14 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                         {/* A link to "which devices are these?": the Devices page filtered to this
                             schema. Nothing to open at zero, so a plain dash. */}
                         {count > 0 ? (
-                          <button
-                            type="button"
+                          <RouteLink
                             className="count-link"
-                            onClick={() => onSelectSchema?.(sch.schema_uuid)}
+                            to={devicesForSchemaUrl(sch.schema_uuid)}
+                            onNavigate={() => onSelectSchema?.(sch.schema_uuid)}
                             title={`Show the ${plural(count, 'device')} using this schema`}
                           >
                             {plural(count, 'device')}
-                          </button>
+                          </RouteLink>
                         ) : '—'}
                       </td>
                     </tr>
@@ -497,15 +497,16 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               return (
                 <div className="context-device-list">
                   {attached.map(d => (
-                    <button
+                    <RouteLink
                       key={d.asset_id}
                       className="chip chip-link"
-                      onClick={() => onSelectDevice?.(d.asset_id)}
+                      to={deviceUrl(d.asset_id)}
+                      onNavigate={() => onSelectDevice?.(d.asset_id)}
                       title={`Open ${d.asset_name} on the Devices page`}
                     >
                       <IconCpu size={11} />
                       <span className="chip-name">{d.asset_name}</span>
-                    </button>
+                    </RouteLink>
                   ))}
                 </div>
               )
@@ -540,6 +541,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           {
             label: `View ${deviceCountFor(selectedSchema.schema_uuid)} Provisioned Device(s)`,
             icon: <IconCpu size={13} />,
+            to: devicesForSchemaUrl(selectedSchema.schema_uuid),
             onClick: () => onSelectSchema?.(selectedSchema.schema_uuid),
             disabled: deviceCountFor(selectedSchema.schema_uuid) === 0,
             title: deviceCountFor(selectedSchema.schema_uuid) === 0

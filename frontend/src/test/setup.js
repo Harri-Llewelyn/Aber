@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom'
-import { vi } from 'vitest'
+import { beforeEach, vi } from 'vitest'
 
 /**
  * `@google/model-viewer`, stubbed for every suite. Model3DViewer imports it dynamically; the real
@@ -66,3 +66,12 @@ if (!import.meta.env.VITE_SUPABASE_URL) {
 if (!import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) {
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_test'
 }
+
+/**
+ * Every test starts at `/`. The pages keep their tab, filters and open drawer in the address
+ * (hooks/useUrlState.js), and jsdom keeps one address per file, so without this a filter one test
+ * set would still be on when the next test renders the page.
+ */
+beforeEach(() => {
+  window.history.replaceState(null, '', '/')
+})

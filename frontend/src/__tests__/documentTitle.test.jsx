@@ -91,7 +91,7 @@ describe('the tab title in the app', () => {
   it('follows a click in the rail, using the rail label', async () => {
     render(<App />)
     await waitFor(() => expect(document.title).toBe('Aber | Site Map'))
-    fireEvent.click(screen.getByRole('button', { name: /^Devices$/ }))
+    fireEvent.click(screen.getByRole('link', { name: /^Devices$/ }))
     await waitFor(() => expect(document.title).toBe('Aber | Devices'))
   })
 

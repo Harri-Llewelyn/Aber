@@ -1,68 +1,46 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useEffect, useCallback } from 'react'
 import { VALID_TABS } from '../constants'
+import { navigate, pageUrl, pathSegments, queryOf, useUrl } from './useUrlState'
 
-const pathTab = () => window.location.pathname.replace(/^\/+|\/+$/g, '')
-
-const getTabFromPath = () => {
-  const path = pathTab()
-  return VALID_TABS.includes(path) ? path : 'site-map'
+/**
+ * The page the address names, from its first path segment: `/devices/quarantine` is Devices, and
+ * the rest of the path belongs to the page. Anything else is the Site Map.
+ */
+export const tabFromUrl = (url) => {
+  const [page] = pathSegments(url)
+  return VALID_TABS.includes(page) ? page : 'site-map'
 }
 
 /**
- * Tab routing and URL synchronisation.
- *
- * @param {Function} setSelectedDeviceFilter State setter for the Devices page's search filter
- *
- * @param {Function} setSelectedGatewayFilter State setter for the Gateways page's search filter
- *
- * @param {Function} setSelectedSchemaFilter State setter for the Devices page's schema filter
- *
- * @param {Function} setSelectedCellFilter State setter for the Cells page's search filter
+ * Which page is open, read from the address. Every view setting below the page (its tab, filters,
+ * open drawer) is the page's own, through `useUrlState`, so a link, a reload and Back all land on
+ * the same view.
  */
-export function useAppRouting(setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter, setSelectedCellFilter, setSelectedTrailEntity, setPendingVocabularyEntry, setSelectedAreaFilter) {
-  const [tab, setTabState] = useState(getTabFromPath)
+export function useAppRouting() {
+  const url = useUrl()
+  const tab = tabFromUrl(url)
+  const [page] = pathSegments(url)
 
-  const setTab = useCallback((newTab, queryParams = {}) => {
+  // An address that names no page is rewritten to the Site Map, query and all. Not while the
+  // sign-in callback's own parameters are present: supabase-js reads them from the address.
+  useEffect(() => {
+    if (VALID_TABS.includes(page)) return
+    const params = queryOf()
+    if (params.has('code') || params.has('state')) return
+    navigate('/site-map', { replace: true })
+  }, [page])
+
+  /**
+   * Open a page, with `queryParams` as its query string. Adds a history entry unless `replace`, for
+   * a redirect the person did not ask for, which Back should not return to.
+   */
+  const setTab = useCallback((newTab, queryParams = {}, { replace = false } = {}) => {
     if (!VALID_TABS.includes(newTab)) return
-    setTabState(newTab)
-    let targetPath = `/${newTab}`
-    const queryString = new URLSearchParams(queryParams).toString()
-    if (queryString) {
-      targetPath += `?${queryString}`
-    }
-    if (window.location.pathname + window.location.search !== targetPath) {
-      window.history.pushState({}, '', targetPath)
-    }
+    navigate(pageUrl(newTab, queryParams), { replace })
   }, [])
 
-  // A nav click is an explicit start-fresh, so cross-page filters handed over by a drill-down are
-  // dropped.
-  const handleNavClick = useCallback((tabId) => {
-    if (setSelectedDeviceFilter) setSelectedDeviceFilter('')
-    if (setSelectedGatewayFilter) setSelectedGatewayFilter('')
-    if (setSelectedSchemaFilter) setSelectedSchemaFilter('')
-    if (setSelectedCellFilter) setSelectedCellFilter('')
-    if (setSelectedAreaFilter) setSelectedAreaFilter('')
-    // Including the audit-trace handover: clicking "Audit Trail" in the nav means "show me
-    // everything", not "show me whichever device I last drilled into".
-    if (setSelectedTrailEntity) setSelectedTrailEntity(null)
-    if (setPendingVocabularyEntry) setPendingVocabularyEntry(null)
-    setTab(tabId)
-  }, [setTab, setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter, setSelectedCellFilter, setSelectedTrailEntity, setPendingVocabularyEntry, setSelectedAreaFilter])
-
-  useEffect(() => {
-    if (window.location.search.includes('code=') || window.location.search.includes('state=')) return
-    const path = pathTab()
-    if (!VALID_TABS.includes(path)) {
-      window.history.replaceState({}, '', `/${tab}`)
-    }
-
-    const handlePopState = () => {
-      setTabState(getTabFromPath())
-    }
-    window.addEventListener('popstate', handlePopState)
-    return () => window.removeEventListener('popstate', handlePopState)
-  }, [tab])
+  // A nav click starts the page fresh: the bare path, so no filter or drawer comes along.
+  const handleNavClick = useCallback((tabId) => setTab(tabId), [setTab])
 
   return {
     tab,

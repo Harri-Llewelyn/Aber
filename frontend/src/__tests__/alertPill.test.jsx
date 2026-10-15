@@ -201,6 +201,8 @@ describe('AlertPill', () => {
       fireEvent.click(pill())
 
       expect(row()).toHaveAttribute('title', expect.stringContaining('dev220000000000400080000'))
+      // A link to the Devices page's address, so Ctrl-click opens the device in a new tab.
+      expect(row()).toHaveAttribute('href', '/devices?search=dev220000000000400080000')
       fireEvent.click(row())
       // The sparkplug id, not a name: platform_alerts carries no device name, and the Devices search
       // matches on the id anyway.
@@ -268,6 +270,7 @@ describe('AlertPill', () => {
       fireEvent.click(pill())
 
       const link = screen.getByTitle(/on the Gateways page$/)
+      expect(link).toHaveAttribute('href', '/gateways?search=gwy160000000000400080000')
       fireEvent.click(link)
       expect(onSelectGateway).toHaveBeenCalledWith('gwy160000000000400080000')
       expect(onSelectDevice).not.toHaveBeenCalled()

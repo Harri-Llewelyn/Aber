@@ -1,4 +1,6 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useCallback, useMemo } from 'react'
+import { RouteLink } from '../common/RouteLink'
+import { cellUrl, deviceUrl, gatewayUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
@@ -6,6 +8,7 @@ import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
+import { useUrlState } from '../../hooks/useUrlState'
 import {
   SCOPE_AREA_WIDE, SOURCE_AREA_WIDE, groupCellsByArea, groupDevicesByCell
 } from '../../utils/cellResolution'
@@ -48,7 +51,7 @@ import {
  * Area-Wide, which is set on the Devices page. An area's plan is managed from its details panel,
  * whose preview opens the Site Map on the area through `onShowOnSiteMap`.
  */
-export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGateway, onViewTrail, onShowOnSiteMap, hasPermission, initialSearchFilter, onClearFilter }) {
+export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGateway, onViewTrail, onShowOnSiteMap, hasPermission }) {
   const [areas, setAreas]       = useState([])
   const [cells, setCells]       = useState([])
   const [assets, setAssets]     = useState([])
@@ -65,24 +68,11 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   // Archive, never delete, from this page: the delete is the Archived Entities page's. The table
   // opens on Active; archived areas are shown, tinted, under the lifecycle filter.
   const [archiveTarget, setArchiveTarget] = useState(null)
-  const [filterMode, setFilterMode] = useState('active')
-  const [searchQuery, setSearchQuery] = useState(() => {
-    const params = new URLSearchParams(window.location.search)
-    return params.get('search') || initialSearchFilter || ''
-  })
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const urlSearch = params.get('search')
-    if (urlSearch) setSearchQuery(urlSearch)
-    else if (initialSearchFilter) setSearchQuery(initialSearchFilter)
-  }, [initialSearchFilter])
-
-  const clearSearch = useCallback(() => {
-    setSearchQuery('')
-    if (window.location.search) window.history.replaceState({}, '', window.location.pathname)
-    if (onClearFilter) onClearFilter()
-  }, [onClearFilter])
+  // The filters are query parameters; an area handed over from another page arrives as
+  // `?search=<area_id>`.
+  const [filterMode, setFilterMode] = useUrlState('lifecycle', 'active', { allowed: ['all', 'active', 'archived'] })
+  const [searchQuery, setSearchQuery] = useUrlState('search')
+  const clearSearch = useCallback(() => setSearchQuery(''), [setSearchQuery])
 
   const loadAll = useCallback(async (signal) => {
     try {
@@ -204,7 +194,8 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
     if (cell) fileCell(cell, areaId)
   }
 
-  const [selectedId, setSelectedId] = useState(null)
+  // In the address as `?area=`.
+  const [selectedId, setSelectedId] = useUrlState('area', '', { allowed: loading ? null : areas.map(a => a.area_id) })
   const toggleArea = (areaId) => setSelectedId(id => id === areaId ? null : areaId)
   // Enter or Space on the element itself acts as its click; a key on a control inside it is that
   // control's.
@@ -242,21 +233,21 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
   const selectedWideDevices = selectedArea ? areaWideDevices(selectedArea.area_id) : []
   const selectedWideGateways = selectedArea ? areaWideGateways(selectedArea.area_id) : []
 
+  // A link to the cell's page; the click stops here, so it does not also select the area row.
   const cellChip = (c) => (
-    <span
+    <RouteLink
       key={c.cell_id}
       className={`chip chip-link${canManage ? ' chip-draggable' : ''}`}
       draggable={canManage}
       onDragStart={e => handleDragStart(e, c)}
-      onClick={e => { e.stopPropagation(); onSelectCell?.(c.cell_id) }}
-      role="button"
-      tabIndex={0}
-      onKeyDown={onOwnKey(() => onSelectCell?.(c.cell_id))}
+      to={cellUrl(c.cell_id)}
+      onClick={e => e.stopPropagation()}
+      onNavigate={() => onSelectCell?.(c.cell_id)}
       title={`${c.cell_name} — ${(devicesByCell.get(c.cell_id) || []).length} device(s). ${canManage ? 'Drag onto an area to file it; click' : 'Click'} to open on the Cells page`}
     >
       <CellIcon cell={c} size={11} />
       <span className="chip-name">{c.cell_name}</span>
-    </span>
+    </RouteLink>
   )
 
   return (
@@ -524,14 +515,14 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               ? (
                 <div className="context-device-list">
                   {selectedWideGateways.map(g => (
-                    <button key={g.gateway_id} className="chip chip-link chip-gw" onClick={() => onSelectGateway?.(g.gateway_id)} title={`Open ${g.gateway_name} on the Gateways page`}>
+                    <RouteLink key={g.gateway_id} className="chip chip-link chip-gw" to={gatewayUrl(g.gateway_id)} onNavigate={() => onSelectGateway?.(g.gateway_id)} title={`Open ${g.gateway_name} on the Gateways page`}>
                       <IconRadio size={11} /><span className="chip-name">{g.gateway_name}</span>
-                    </button>
+                    </RouteLink>
                   ))}
                   {selectedWideDevices.map(d => (
-                    <button key={d.asset_id} className="chip chip-link" onClick={() => onSelectDevice?.(d.asset_id)} title={`Open ${d.asset_name} on the Devices page`}>
+                    <RouteLink key={d.asset_id} className="chip chip-link" to={deviceUrl(d.asset_id)} onNavigate={() => onSelectDevice?.(d.asset_id)} title={`Open ${d.asset_name} on the Devices page`}>
                       <IconCpu size={11} /><span className="chip-name">{d.asset_name}</span>
-                    </button>
+                    </RouteLink>
                   ))}
                 </div>
               )
@@ -568,6 +559,7 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
           },
           canReadTrail && {
             label: 'View Audit Trail', icon: <IconHistory size={13} />,
+            to: trailUrl(selectedArea.area_id, 'AREA'),
             onClick: () => onViewTrail?.(selectedArea),
             title: 'Open the immutable audit trace for this area'
           },

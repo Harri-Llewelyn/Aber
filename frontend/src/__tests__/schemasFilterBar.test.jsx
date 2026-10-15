@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SchemasTab } from '../components/tabs/SchemasTab'
 import { api } from '../api'
+import { schemaUrl } from '../routes'
 
 /**
  * The schema registry's filter bar and its scroll cap. The registry gains a row per publish, so it
@@ -236,7 +237,8 @@ describe('arriving on a schema that a filter would hide', () => {
   /* A navigation has already chosen its target, so a filter must not veto it: useArrivalSelection
      matches over every schema, and the filter is widened so the selected row is visible. */
   it('widens the status filter so the selected row is visible', async () => {
-    renderTab({ initialSchemaId: '22222222-0000-4000-8000-000000000002' })
+    window.history.replaceState(null, '', schemaUrl('22222222-0000-4000-8000-000000000002'))
+    renderTab()
     await ready()
 
     await waitFor(() => expect(registryNames()).toContain('CNC_Mill_Profile_v1'))
@@ -247,7 +249,8 @@ describe('arriving on a schema that a filter would hide', () => {
   })
 
   it('leaves the filter alone when the target is already visible', async () => {
-    renderTab({ initialSchemaId: '33333333-0000-4000-8000-000000000003' })
+    window.history.replaceState(null, '', schemaUrl('33333333-0000-4000-8000-000000000003'))
+    renderTab()
     await ready()
 
     // A draft is `current`, so nothing needs widening and history stays out of the working list.
