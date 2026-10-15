@@ -15,7 +15,7 @@ import { api } from '../api'
 import { ENTITY_KIND_BY_TABLE, ENTITY_TABLE_BY_KIND } from '../constants'
 import { formatDateTime } from '../utils/format'
 import { approvalsForUrl } from '../routes'
-import { expectCardHeading } from '../test/cardHeading'
+import { expectCardHeading, expectSearchFirst } from '../test/cardHeading'
 
 vi.mock('../api', () => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), getAuditTrailRow: vi.fn() }
@@ -1027,6 +1027,20 @@ describe('one card, two tabs, no counts, and attention only on work this viewer 
     expect(card.querySelector(':scope > .tab-strip + .filter-bar')).toBeTruthy()
     expect(within(strip).queryByRole('button', { name: 'About the open queue' })).toBeNull()
     expect(within(strip).getByRole('button', { name: 'About decided proposals' }).parentElement).toHaveClass('tab-strip-help')
+  })
+
+  it('starts each queue’s toolbar with the search box, then the kind, with Clear filters at the right', async () => {
+    mockLoad([])
+    renderTab()
+    await screen.findByText('Nothing is waiting. A proposal appears here when somebody asks for a change they cannot make themselves.')
+    const search = expectSearchFirst('Filter open proposals by what they are about')
+    expect(search.nextElementSibling).toBe(screen.getByLabelText('Filter open proposals by kind'))
+    fireEvent.change(within(search).getByRole('searchbox'), { target: { value: 'pump' } })
+    expect(screen.getByRole('button', { name: /Clear filters \(1\)/ }).parentElement).toHaveClass('filter-bar-actions')
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Decided' }))
+    expect(expectSearchFirst('Filter decided proposals by what they are about').nextElementSibling)
+      .toBe(screen.getByLabelText('Filter decided proposals by kind'))
   })
 
   it('counts nothing on the heading or the tabs, and flags nothing while nothing waits', async () => {

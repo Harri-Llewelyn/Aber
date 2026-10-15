@@ -1258,14 +1258,17 @@ describe('the filter bar', () => {
     const help = card.querySelector(':scope > .tab-strip > .tab-strip-help')
     expect(help.firstElementChild).toHaveClass('help-tip')
     expect(help.firstElementChild).toHaveAttribute('aria-label', 'About capturing gateways')
-    // Both tabs have filters, so each keeps its toolbar row, which starts with them.
+    // Both tabs have filters, so each keeps its toolbar row, which starts with the search box and
+    // then the stored filter; the Devices tab adds the gateway filter after them.
     const bar = card.querySelector(':scope > .tab-strip + .filter-bar')
     expect(bar.querySelector('.help-tip')).toBeNull()
-    expect(bar.firstElementChild).toBe(screen.getByLabelText('Stored capture filter'))
+    expect(within(bar.firstElementChild).getByRole('searchbox')).toHaveAccessibleName('Search subjects')
+    expect(bar.firstElementChild.nextElementSibling).toBe(screen.getByLabelText('Stored capture filter'))
     fireEvent.click(screen.getByRole('tab', { name: 'Devices' }))
     expect(help.firstElementChild).toHaveAttribute('aria-label', 'About capturing devices')
     expect(card.querySelector(':scope > .tab-strip + .filter-bar')).toBe(bar)
-    expect(bar).toContainElement(screen.getByLabelText('Gateway filter'))
+    expect(within(bar.firstElementChild).getByRole('searchbox')).toHaveAccessibleName('Search subjects')
+    expect(screen.getByLabelText('Stored capture filter').nextElementSibling).toBe(screen.getByLabelText('Gateway filter'))
     expect(card.querySelector(':scope > .table-wrap')).not.toBeNull()
   })
 

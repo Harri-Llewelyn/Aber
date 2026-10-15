@@ -30,6 +30,16 @@ export function pageToolbar() {
 }
 
 /**
+ * Assert that the toolbar's first control is its search box, named `name`, and return the box's
+ * element in the row, so a test can read what follows it. A toolbar with a search box starts with it.
+ */
+export function expectSearchFirst(name) {
+  const first = pageToolbar().firstElementChild
+  expect(within(first).getByRole('searchbox')).toHaveAccessibleName(name)
+  return first
+}
+
+/**
  * Assert that a page's button is in its toolbar's right-hand group, `.filter-bar-actions`, and
  * return it.
  */

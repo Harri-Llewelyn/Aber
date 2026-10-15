@@ -569,11 +569,13 @@ line keeps search, status and the key toggle and moves the rest into `common/Fil
 
 **Every page has one toolbar, in one place, with one look.** It is the `.filter-bar` row straight
 under the `CardHeading`, or under the tab bar on a tabbed page, a direct child of the card. The
-filters go on the left. The page's buttons go in `.filter-bar-actions` at the right-hand end:
-`ClearFilters` first, then secondary buttons such as Export or a destination button, then the main
-button last. A legend that explains the page, as on the Site Map, goes there too. The row runs edge
-to edge and is ruled off from what is below it. A page or tab with nothing to filter and no buttons
-draws no toolbar.
+filters go on the left, **the search box first when the toolbar has one**, so the control people
+reach for most is in the same place on every page; `toolbarSearchFirst.test.js` reads every
+toolbar in the source and holds to it. The other filters follow in the page's own order. The
+page's buttons go in `.filter-bar-actions` at the right-hand end: `ClearFilters` first, then
+secondary buttons such as Export or a destination button, then the main button last. A legend that
+explains the page, as on the Site Map, goes there too. The row runs edge to edge and is ruled off
+from what is below it. A page or tab with nothing to filter and no buttons draws no toolbar.
 
 `CardHeading` takes no buttons: it has no `actions` prop, and `cardHeading.test.jsx` fails on a
 page that passes one. So a page's main button is in the same place whether or not it has tabs.

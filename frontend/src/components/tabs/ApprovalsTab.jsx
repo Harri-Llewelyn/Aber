@@ -393,6 +393,13 @@ function ProposalFilters({ rows, kind, onKind, query, onQuery, placeholder, labe
   const activeFilterCount = (kind !== 'all' ? 1 : 0) + (query ? 1 : 0)
   return (
     <div className="filter-bar">
+      <SearchInput
+        width="lg"
+        value={query}
+        onChange={onQuery}
+        placeholder={placeholder}
+        ariaLabel={`Filter ${label} by what they are about`}
+      />
       <select
         className="form-control control-md"
         value={kind}
@@ -407,14 +414,9 @@ function ProposalFilters({ rows, kind, onKind, query, onQuery, placeholder, labe
           </option>
         ))}
       </select>
-      <SearchInput
-        width="lg"
-        value={query}
-        onChange={onQuery}
-        placeholder={placeholder}
-        ariaLabel={`Filter ${label} by what they are about`}
-      />
-      <ClearFilters count={activeFilterCount} onClear={() => { onKind('all'); onQuery('') }} />
+      <div className="filter-bar-actions">
+        <ClearFilters count={activeFilterCount} onClear={() => { onKind('all'); onQuery('') }} />
+      </div>
     </div>
   )
 }

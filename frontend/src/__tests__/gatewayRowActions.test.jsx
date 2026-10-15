@@ -3,7 +3,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { api } from '../api'
-import { expectCardHeading, expectToolbarButton } from '../test/cardHeading'
+import { expectCardHeading, expectSearchFirst, expectToolbarButton } from '../test/cardHeading'
 import { PERMISSION_UUIDS } from '../constants'
 
 vi.mock('../api', async () => {
@@ -68,6 +68,12 @@ describe('the gateways card header', () => {
     await show([{ gateway_id: 'g1', gateway_name: 'Host_Gateway_NodeRED', type: 'HOST', status: 'ONLINE' }])
     expectCardHeading('Gateways', /edge nodes/)
     expectToolbarButton(/New Gateway/)
+  })
+
+  it('starts the toolbar with the search box, then the lifecycle', async () => {
+    await show([{ gateway_id: 'g1', gateway_name: 'Host_Gateway_NodeRED', type: 'HOST', status: 'ONLINE' }])
+    const lifecycle = expectSearchFirst('Search gateways by name, UUID or Sparkplug ID').nextElementSibling
+    expect(lifecycle).toHaveAttribute('title', 'Filter by lifecycle state')
   })
 })
 

@@ -3,7 +3,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SchemasTab } from '../components/tabs/SchemasTab'
 import { api } from '../api'
-import { expectCardHeading, expectToolbarButton } from '../test/cardHeading'
+import { expectCardHeading, expectSearchFirst, expectToolbarButton } from '../test/cardHeading'
 
 /**
  * The schema registry. The metric catalog left this page for its own (MetricsTab.test.jsx), so
@@ -51,6 +51,13 @@ describe('the schemas card header', () => {
     await waitForRegistry()
     expectCardHeading('Schemas', /modelled to publish/)
     expectToolbarButton(/Build Schema from Catalog/)
+  })
+
+  it('starts the toolbar with the search box, then the status', async () => {
+    renderTab()
+    await waitForRegistry()
+    expect(expectSearchFirst('Search the schema registry').nextElementSibling)
+      .toBe(screen.getByLabelText('Filter schemas by lifecycle state'))
   })
 })
 

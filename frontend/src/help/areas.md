@@ -6,7 +6,7 @@ A floor is not a level of its own. If part of the site has several floors and yo
 
 ## What the controls do
 
-- **The filters** are the lifecycle select (Active by default, or Archived, or All), which shows how many areas each option holds, and a search on the area's name or ID. **Clear filters** appears while either is changed.
+- **The filters** are a search on the area's name or ID, then the lifecycle select (Active by default, or Archived, or All), which shows how many areas each option holds. **Clear filters** appears while either is changed.
 - **New Area** creates an area. Its name becomes part of every `uns/` topic beneath it, so it cannot contain `/`, `+` or `#`. Its icon says what the area is: offices, a production hall, a warehouse, a laboratory, a loading bay, a car park, an open yard or a plant room.
 - **The table** lists each area with its plan, the cells in it and how many devices belong to it, with its Area-Wide equipment counted separately. Click a row, or press Enter on it, to open its details panel on the right.
 - **A column's heading sorts the table** by that column. Click it again to reverse the order, and a third time to go back to the usual order. A status sorts the most serious first, and an empty cell always sorts last. The page's address keeps the order, so a link or a reload shows the table the same way.

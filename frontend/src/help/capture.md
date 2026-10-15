@@ -5,7 +5,7 @@ Use this page to record what the broker actually carried, and play it back later
 ## What the controls do
 
 - **The Gateways and Devices tabs** choose what the list holds. You record one subject at a time. A gateway's capture holds everything it publishes, including every device beneath it. A device's capture holds that one device, plus its gateway's birth certificate. There is no capture of the whole broker.
-- **The Stored filter** narrows the list to subjects with or without a capture. Use **the search box** to find a name or a Sparkplug ID. On the Devices tab, **the gateway filter** narrows the list to one gateway's devices.
+- **The search box** finds a name or a Sparkplug ID. **The Stored filter** beside it narrows the list to subjects with or without a capture. On the Devices tab, **the gateway filter** narrows the list to one gateway's devices.
 - **The columns** are the subject, its Sparkplug ID and its Type (Remote, Host or Simulated). The last column is the one stored capture, with its messages, size and date. **UPLOADED** marks a file that was not recorded here. **NO BIRTH** marks a capture with no birth certificate in it.
 - **A column's heading sorts the table** by that column, on both tabs. Click it again to reverse the order, and a third time to go back to the usual order. A status sorts the most serious first, and an empty cell always sorts last. The page's address keeps the order, so a link or a reload shows the table the same way.
 - **Selecting a row**, by clicking it or pressing Enter on it, opens the details panel. It shows the recorded rate, the devices and metrics the capture holds, and the actions.

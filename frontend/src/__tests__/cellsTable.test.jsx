@@ -3,7 +3,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CellsTab } from '../components/tabs/CellsTab'
 import { api } from '../api'
-import { expectCardHeading, expectToolbarButton } from '../test/cardHeading'
+import { expectCardHeading, expectSearchFirst, expectToolbarButton } from '../test/cardHeading'
 
 /**
  * The Cells page as a table. The context drawer holds the UUID, both membership lists as linking
@@ -265,6 +265,12 @@ describe('filters still narrow the table', () => {
     await waitFor(() => expect(document.querySelector('.empty-state')).toBeTruthy())
     expectCardHeading('Cells', /area/)
     expectToolbarButton(/New Cell/)
+  })
+
+  it('starts the toolbar with the search box, then the lifecycle', async () => {
+    renderCells({}, { cells: [] })
+    await waitFor(() => expect(document.querySelector('.empty-state')).toBeTruthy())
+    expect(expectSearchFirst('Search cells').nextElementSibling).toBe(screen.getByLabelText('Lifecycle'))
   })
 
   it('says there are none yet on an empty stack, with no count on the heading', async () => {

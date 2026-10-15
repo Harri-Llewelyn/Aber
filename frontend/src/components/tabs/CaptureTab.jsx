@@ -445,6 +445,13 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
           />
 
           <div className="filter-bar">
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              placeholder="Search name or Sparkplug ID…"
+              ariaLabel="Search subjects"
+            />
+
             <select
               className="form-control control-md"
               value={storedFilter}
@@ -475,13 +482,6 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 ))}
               </select>
             )}
-
-            <SearchInput
-              value={search}
-              onChange={setSearch}
-              placeholder="Search name or Sparkplug ID…"
-              ariaLabel="Search subjects"
-            />
 
             <div className="filter-bar-actions">
               <ClearFilters count={activeFilterCount} onClear={clearFilters} />
