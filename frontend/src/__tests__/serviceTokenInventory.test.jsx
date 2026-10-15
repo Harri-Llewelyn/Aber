@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import { ServiceTokenInventoryModal } from '../components/modals/ServiceTokenInventoryModal'
@@ -152,5 +152,63 @@ describe('ServiceTokenInventoryModal', () => {
     const copy = container.textContent.replace(/\s+/g, ' ')
     expect(copy).toMatch(/Storage, realtime, the edge functions and Studio verify the signature independently/i)
     expect(copy).toMatch(/cannot be undone/i)
+  })
+})
+
+describe('ServiceTokenInventoryModal: sorting by a column (#801)', () => {
+  /** Issued `issuedDaysAgo` days before NOW (null: no record of when), expiring `daysAhead` after. */
+  const token = (jti, issuedDaysAgo, daysAhead) => ({
+    jti,
+    issued_at: issuedDaysAgo === null ? null : new Date(NOW - issuedDaysAgo * DAY).toISOString(),
+    expires_at: new Date(NOW + daysAhead * DAY).toISOString(),
+  })
+  // Newest expiry first by default: undated, pulled (revoked), live, lapsed (expired).
+  const TOKENS = [token('live', 2, 10), token('lapsed', 40, -1), token('pulled', 20, 30), token('undated', null, 60)]
+
+  const open = () => render(
+    <ServiceTokenInventoryModal
+      principalName="MCP read-only client"
+      status={tokenStatus(TOKENS, NOW, new Set(['pulled']))}
+      now={NOW}
+      onClose={vi.fn()}
+      onChanged={vi.fn()}
+      showToast={vi.fn()}
+    />
+  )
+  const jtis = () => screen.getAllByRole('row').slice(1).map(r => r.cells[0].textContent)
+  const sortBy = (label) => fireEvent.click(screen.getByRole('button', { name: label }))
+
+  it('sorts by when each token was issued, with one of unknown issue last either way', () => {
+    open()
+    expect(jtis()).toEqual(['undated', 'pulled', 'live', 'lapsed'])
+
+    sortBy('Issued')
+    expect(jtis()).toEqual(['lapsed', 'pulled', 'live', 'undated'])
+    expect(screen.getByRole('columnheader', { name: 'Issued' })).toHaveAttribute('aria-sort', 'ascending')
+    sortBy('Issued')
+    expect(jtis()).toEqual(['live', 'pulled', 'lapsed', 'undated'])
+    expect(screen.getByRole('columnheader', { name: 'Issued' })).toHaveAttribute('aria-sort', 'descending')
+  })
+
+  /** Revoked, then expired, then active; a token revoked in the dialog moves up at once. */
+  it('sorts by state, revoked first, and ranks a token revoked here with the revoked', async () => {
+    api.revokeServiceToken.mockResolvedValue(1)
+    open()
+
+    sortBy('State')
+    expect(jtis()).toEqual(['pulled', 'lapsed', 'undated', 'live'])
+    fireEvent.click(within(screen.getByText('live').closest('tr')).getByRole('button', { name: /Revoke/i }))
+    await waitFor(() => expect(jtis()).toEqual(['pulled', 'live', 'lapsed', 'undated']))
+  })
+
+  it('sorts by expiry, soonest first, and leaves the page address alone', () => {
+    window.history.replaceState(null, '', '/access-control/identities?sort=-tokens')
+    open()
+
+    sortBy('Expires')
+    expect(jtis()).toEqual(['lapsed', 'live', 'pulled', 'undated'])
+    sortBy('Expires')
+    expect(jtis()).toEqual(['undated', 'pulled', 'live', 'lapsed'])
+    expect(window.location.pathname + window.location.search).toBe('/access-control/identities?sort=-tokens')
   })
 })

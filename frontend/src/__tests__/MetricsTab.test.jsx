@@ -2136,3 +2136,121 @@ describe('Add Metric — Group picker follows the Standard', () => {
     ))
   })
 })
+
+/**
+ * Sorting by a column (#801). The catalog sorts inside each group, the groups keeping their order;
+ * the Deprecated Metrics tab adds Superseded By. A column sorts on what its cell shows: a datatype
+ * by its name, a local extension as "Local extension", a replacement by its name, and a "—" last.
+ */
+describe('Metrics — sorting by a column (#801)', () => {
+  // Datatype codes in another order from their names: 3 Int32, 7 UInt32, 10 Double, 11 Boolean,
+  // 12 String.
+  const SORT_CATALOG = [
+    { metric_uuid: 's1', name: 'Spindle/SPEED', metric_group: 'Spindle', datatype: 10, units: 'REVOLUTION/MINUTE', standard: 'MTConnect', deprecated: false },
+    { metric_uuid: 's2', name: 'Spindle/LOAD', metric_group: 'Spindle', datatype: 3, units: 'PERCENT', standard: null, deprecated: false },
+    { metric_uuid: 's3', name: 'Spindle/STATE', metric_group: 'Spindle', datatype: 12, units: null, standard: 'ISO 22400', deprecated: false },
+    { metric_uuid: 's4', name: 'Spindle/ENABLED', metric_group: 'Spindle', datatype: 11, units: null, standard: 'OPC UA', deprecated: false },
+    { metric_uuid: 'a1', name: 'Axes/POSITION', metric_group: 'Axes', datatype: 12, standard: 'MTConnect', deprecated: false },
+    { metric_uuid: 'a2', name: 'Axes/ANGLE', metric_group: 'Axes', datatype: 10, standard: 'MTConnect', deprecated: false },
+    { metric_uuid: 'u1', name: 'counter', metric_group: null, datatype: 7, standard: null, deprecated: false },
+    { metric_uuid: 'u2', name: 'alarm', metric_group: null, datatype: 11, standard: null, deprecated: false },
+    // The replacements' uuids sort the other way from their names (s1 Spindle/SPEED, u2 alarm).
+    { metric_uuid: 'd3', name: 'old_three', metric_group: null, datatype: 10, deprecated: true, superseded_by: null },
+    { metric_uuid: 'd1', name: 'old_one', metric_group: null, datatype: 10, deprecated: true, superseded_by: 's1' },
+    { metric_uuid: 'd2', name: 'old_two', metric_group: null, datatype: 10, deprecated: true, superseded_by: 'u2' }
+  ]
+
+  const withSortCatalog = () => api.get.mockImplementation((path) =>
+    Promise.resolve(path.startsWith('/api/v1/metric-catalog')
+      ? SORT_CATALOG
+      : (routes[Object.keys(routes).find(r => path.startsWith(r))] || [])))
+
+  /** The metric names the table on show lists, in order, group header rows left out. */
+  const listed = () =>
+    [...document.querySelector('.card table').querySelectorAll('tbody tr:not(.table-group-row) td:first-child .mono')]
+      .map(el => el.textContent)
+  const sortBy = (name) => fireEvent.click(screen.getByRole('button', { name }))
+  const header = (name) => screen.getByRole('columnheader', { name })
+  const sortInAddress = () => new URLSearchParams(window.location.search).get('sort')
+
+  it('sorts the catalog by Datatype\'s name inside each group, the groups keeping their order either way', async () => {
+    withSortCatalog()
+    renderTab()
+    await waitForCatalog()
+    expect(listed()).toEqual([
+      'Axes/ANGLE', 'Axes/POSITION',
+      'Spindle/ENABLED', 'Spindle/LOAD', 'Spindle/SPEED', 'Spindle/STATE',
+      'alarm', 'counter'
+    ])
+
+    sortBy('Datatype')
+    // Boolean, Double, Int32, String: by the code, Int32 would lead the Spindle group.
+    expect(listed()).toEqual([
+      'Axes/ANGLE', 'Axes/POSITION',
+      'Spindle/ENABLED', 'Spindle/SPEED', 'Spindle/LOAD', 'Spindle/STATE',
+      'alarm', 'counter'
+    ])
+    expect(header('Datatype')).toHaveAttribute('aria-sort', 'ascending')
+    expect(sortInAddress()).toBe('datatype')
+
+    sortBy('Datatype')
+    expect(listed()).toEqual([
+      'Axes/POSITION', 'Axes/ANGLE',
+      'Spindle/STATE', 'Spindle/LOAD', 'Spindle/SPEED', 'Spindle/ENABLED',
+      'counter', 'alarm'
+    ])
+    expect(header('Datatype')).toHaveAttribute('aria-sort', 'descending')
+    expect(sortInAddress()).toBe('-datatype')
+    expect([...catalogTable().querySelectorAll('.table-group-label')].map(el => el.textContent))
+      .toEqual(['Axes', 'Spindle', 'Ungrouped'])
+  })
+
+  it('sorts a local extension under its label rather than last, and a metric with no units last either way', async () => {
+    withSortCatalog()
+    renderTab()
+    await waitForCatalog()
+    const spindle = () => listed().filter(name => name.startsWith('Spindle/'))
+
+    sortBy('Standard')
+    expect(spindle()).toEqual(['Spindle/STATE', 'Spindle/LOAD', 'Spindle/SPEED', 'Spindle/ENABLED'])
+    sortBy('Standard')
+    expect(spindle()).toEqual(['Spindle/ENABLED', 'Spindle/SPEED', 'Spindle/LOAD', 'Spindle/STATE'])
+
+    // ENABLED and STATE have no units, and keep their default order below the others.
+    sortBy('Units')
+    expect(spindle()).toEqual(['Spindle/LOAD', 'Spindle/SPEED', 'Spindle/ENABLED', 'Spindle/STATE'])
+    expect(header('Standard')).not.toHaveAttribute('aria-sort')
+    sortBy('Units')
+    expect(spindle()).toEqual(['Spindle/SPEED', 'Spindle/LOAD', 'Spindle/ENABLED', 'Spindle/STATE'])
+  })
+
+  it('sorts Deprecated Metrics by the replacement\'s name, not its uuid, with a metric that names none last either way', async () => {
+    withSortCatalog()
+    renderTab()
+    await waitFor(() => expect(cardTable('Deprecated Metrics')).toBeTruthy())
+    expect(listed()).toEqual(['old_three', 'old_one', 'old_two'])
+
+    sortBy('Superseded By')
+    expect(listed()).toEqual(['old_two', 'old_one', 'old_three'])
+    expect(header('Superseded By')).toHaveAttribute('aria-sort', 'ascending')
+    expect(window.location.pathname).toBe('/metrics/deprecated')
+    expect(sortInAddress()).toBe('superseded_by')
+
+    sortBy('Superseded By')
+    expect(listed()).toEqual(['old_one', 'old_two', 'old_three'])
+    expect(header('Superseded By')).toHaveAttribute('aria-sort', 'descending')
+    expect(sortInAddress()).toBe('-superseded_by')
+  })
+
+  it('opens Deprecated Metrics sorted when the address names a sort, which the hidden catalog table leaves in place', async () => {
+    // Superseded By is not a column of the catalog, whose table is not on show.
+    withSortCatalog()
+    window.history.replaceState(null, '', '/metrics/deprecated?sort=-superseded_by')
+    renderTab()
+
+    await waitFor(() => expect(listed()).toEqual(['old_one', 'old_two', 'old_three']))
+    expect(screen.getByRole('tab', { name: 'Deprecated Metrics' })).toHaveAttribute('aria-selected', 'true')
+    expect(header('Superseded By')).toHaveAttribute('aria-sort', 'descending')
+    expect(window.location.pathname + window.location.search).toBe('/metrics/deprecated?sort=-superseded_by')
+  })
+})

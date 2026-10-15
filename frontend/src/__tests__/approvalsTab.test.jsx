@@ -1223,3 +1223,100 @@ describe('the drawer carries the proposal icon and one primary action, listed fi
     expect(firstAction()).toHaveTextContent('View in Audit Trail')
   })
 })
+
+/**
+ * Both queues sort by the same five columns (#801). The sort is held in the address, so a sorted
+ * queue can be linked to; a queue change drops it with the filters.
+ */
+describe('Approvals: sorting by a column (#801)', () => {
+  const at = (url) => window.history.replaceState(null, '', url)
+  const address = () => window.location.pathname + window.location.search
+  const subjects = () => screen.getAllByTestId('proposal-row').map(r => r.querySelector('td strong').textContent)
+  const sortBy = (label) => fireEvent.click(screen.getByRole('button', { name: label }))
+
+  const decision = (label, status, decidedAt, over = {}) => deviceProposal({
+    id: label, target_label: label, status, decided_by: MANAGER_ID, decided_at: decidedAt,
+    proposed_at: '2026-08-01T00:00:00Z', ...over
+  })
+
+  it('ranks Status by its colour, a rejection first and an application last, and reverses on a second click', async () => {
+    at('/approvals/decided')
+    // Handed over newest decision first, which is the decided queue's own order.
+    mockLoad([
+      decision('Applied', 'applied', '2026-09-09T00:00:00Z'),
+      decision('Withdrawn', 'withdrawn', '2026-09-08T00:00:00Z'),
+      decision('Rejected', 'rejected', '2026-09-07T00:00:00Z'),
+      decision('Expired', 'expired', '2026-09-06T00:00:00Z')
+    ])
+    renderTab()
+    await screen.findAllByTestId('proposal-row')
+    expect(subjects()).toEqual(['Applied', 'Withdrawn', 'Rejected', 'Expired'])
+
+    sortBy('Status')
+    // Red, then amber, then grey, then green: alphabetically it would be applied first.
+    expect(subjects()).toEqual(['Rejected', 'Expired', 'Withdrawn', 'Applied'])
+    expect(screen.getByRole('columnheader', { name: 'Status' })).toHaveAttribute('aria-sort', 'ascending')
+    expect(address()).toBe('/approvals/decided?sort=status')
+
+    sortBy('Status')
+    expect(subjects()).toEqual(['Applied', 'Withdrawn', 'Expired', 'Rejected'])
+    expect(screen.getByRole('columnheader', { name: 'Status' })).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/approvals/decided?sort=-status')
+  })
+
+  it('sorts When by the decision, or by the filing where a row has no decision time, as its cell shows', async () => {
+    at('/approvals/decided')
+    mockLoad([
+      decision('Decided 5 Sep', 'applied', '2026-09-05T00:00:00Z', { proposed_at: '2026-08-01T00:00:00Z' }),
+      decision('Filed 3 Sep', 'withdrawn', null, { proposed_at: '2026-09-03T00:00:00Z' }),
+      decision('Decided 1 Sep', 'rejected', '2026-09-01T00:00:00Z', { proposed_at: '2026-08-31T00:00:00Z' })
+    ])
+    renderTab()
+    await screen.findAllByTestId('proposal-row')
+
+    sortBy('When')
+    // By the filing alone it would read 5 Sep, 1 Sep, 3 Sep; by the decision alone, 3 Sep last.
+    expect(subjects()).toEqual(['Decided 1 Sep', 'Filed 3 Sep', 'Decided 5 Sep'])
+    sortBy('When')
+    expect(subjects()).toEqual(['Decided 5 Sep', 'Filed 3 Sep', 'Decided 1 Sep'])
+  })
+
+  it('sorts Change and Field(s) changed by the words shown, not by the stored table and column names', async () => {
+    at('/approvals')
+    // Oldest first, as the open queue lists them.
+    mockLoad([
+      deviceProposal({ id: 'p2', target_label: 'Press_02', entity_type: 'device_nameplate',
+        patch: { serial_number: 'SN-9' }, current: {}, proposed_at: '2026-09-01T00:00:00Z' }),
+      deviceProposal({ id: 'p1', target_label: 'Lathe_01', entity_type: 'devices',
+        patch: { model_3d_path: 'lathe.glb' }, current: {}, proposed_at: '2026-09-02T00:00:00Z' }),
+      deviceProposal({ id: 'p3', target_label: 'Weld Bay', entity_type: 'cells',
+        patch: { area_id: 'area-paint' }, current: {}, proposed_at: '2026-09-03T00:00:00Z' })
+    ])
+    renderTab()
+    await screen.findAllByTestId('proposal-row')
+
+    sortBy('Change')
+    // Cell details, Device details, Device nameplate; by table name device_nameplate would lead
+    // devices.
+    expect(subjects()).toEqual(['Weld Bay', 'Lathe_01', 'Press_02'])
+
+    sortBy('Field(s) changed')
+    // 3D model path, Area, Serial number; by column name area_id would lead model_3d_path.
+    expect(subjects()).toEqual(['Lathe_01', 'Weld Bay', 'Press_02'])
+    expect(address()).toBe('/approvals?sort=fields')
+  })
+
+  it('arrives sorted when the address already holds a sort', async () => {
+    at('/approvals/decided?sort=-status')
+    mockLoad([
+      decision('Rejected', 'rejected', '2026-09-09T00:00:00Z'),
+      decision('Applied', 'applied', '2026-09-08T00:00:00Z'),
+      decision('Expired', 'expired', '2026-09-07T00:00:00Z')
+    ])
+    renderTab()
+    await screen.findAllByTestId('proposal-row')
+    expect(subjects()).toEqual(['Applied', 'Expired', 'Rejected'])
+    expect(screen.getByRole('columnheader', { name: 'Status' })).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/approvals/decided?sort=-status')
+  })
+})

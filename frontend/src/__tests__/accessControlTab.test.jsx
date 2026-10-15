@@ -1180,3 +1180,192 @@ describe('AccessControlTab card composition', () => {
     expect(document.body.textContent).not.toMatch(/Database principals|service principal|Service identit|machine principal/i)
   })
 })
+
+/**
+ * Each tab's table sorts by what its column means (#801): a state by its badge's severity, a count
+ * by the number, and a dash or Not read last whichever way. The sort is in the address.
+ */
+describe('Access Control: sorting by a column (#801)', () => {
+  const at = (url) => window.history.replaceState(null, '', url)
+  const address = () => window.location.pathname + window.location.search
+  /** The first cell of each row of the shown tab's table, in the order shown. */
+  const firstCells = () => [...card().querySelectorAll('tbody tr')].map(r => r.cells[0].textContent)
+  const sortBy = (label) => fireEvent.click(screen.getByRole('button', { name: label }))
+  const header = (label) => screen.getByRole('columnheader', { name: label })
+
+  // With `enrolled` (Issued) and `provisioned` (No platform record), one gateway in each state.
+  const revoked = {
+    ...provisioned, id: '3a000000-0000-4000-8000-000000000001', name: 'Cell 9 Robot',
+    sparkplug_id: 'gwy3a0000000000400080000', credential_revoked_at: '2026-09-01T00:00:00Z'
+  }
+  const awaiting = {
+    ...enrolled, id: '2b000000-0000-4000-8000-000000000001', name: 'Cell 5 Press Line',
+    sparkplug_id: 'gwy2b0000000000400080000', enrolled_at: null, status: 'PENDING_ENROLLMENT'
+  }
+
+  /**
+   * The broker's live rules for three roles. Admin is declared as publishing, but the broker
+   * reports no publish rule for it, so it reads READ ONLY; its denial is not a rule the Rules column
+   * counts. i3x and gateway are not reported: Not read.
+   */
+  const LIVE = {
+    clients: [],
+    roles: [
+      { rolename: 'monitor', acls: [{ acltype: 'subscribePattern', topic: '$SYS/#', allow: true }] },
+      {
+        rolename: 'ingestion',
+        acls: [
+          { acltype: 'subscribePattern', topic: 'spBv1.0/#', allow: true },
+          { acltype: 'publishClientReceive', topic: 'spBv1.0/#', allow: true },
+          { acltype: 'publishClientSend', topic: 'spBv1.0/+/NCMD/+', allow: true },
+        ],
+      },
+      {
+        rolename: 'admin',
+        acls: [
+          { acltype: 'subscribePattern', topic: '$CONTROL/dynamic-security/#', allow: true },
+          { acltype: 'publishClientReceive', topic: '$CONTROL/dynamic-security/#', allow: true },
+          { acltype: 'subscribePattern', topic: 'spBv1.0/#', allow: false },
+        ],
+      },
+    ],
+  }
+
+  it('sorts gateways by credential and broker state, the most in need of attention first', async () => {
+    api.listGatewayCredentials.mockResolvedValue([enrolled, provisioned, revoked, awaiting])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [
+        { username: enrolled.sparkplug_id, roles: ['gateway'], disabled: false },
+        { username: provisioned.sparkplug_id, roles: ['gateway'], disabled: false },
+        { username: revoked.sparkplug_id, roles: ['gateway'], disabled: true },
+      ],
+      roles: [],
+    })
+    at('/access-control')
+    render(<AccessControlTab showToast={vi.fn()} />)
+    await screen.findByText('Disabled')
+
+    // Revoked, Setup outstanding, No platform record, Issued: by severity, not by the words.
+    sortBy('Credential')
+    expect(firstCells()).toEqual(['Cell 9 Robot', 'Cell 5 Press Line', 'Sim_Gateway_Cell1_Machining', 'Cell 4 Press Line'])
+    expect(header('Credential')).toHaveAttribute('aria-sort', 'ascending')
+    expect(address()).toBe('/access-control?sort=credential')
+    sortBy('Credential')
+    expect(firstCells()).toEqual(['Cell 4 Press Line', 'Sim_Gateway_Cell1_Machining', 'Cell 5 Press Line', 'Cell 9 Robot'])
+    expect(header('Credential')).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/access-control?sort=-credential')
+
+    // Disabled, No account, then the two Active in the order they came, either way.
+    sortBy('Broker')
+    expect(firstCells()).toEqual(['Cell 9 Robot', 'Cell 5 Press Line', 'Cell 4 Press Line', 'Sim_Gateway_Cell1_Machining'])
+    expect(header('Broker')).toHaveAttribute('aria-sort', 'ascending')
+    expect(header('Credential')).not.toHaveAttribute('aria-sort')
+    sortBy('Broker')
+    expect(firstCells()).toEqual(['Cell 4 Press Line', 'Sim_Gateway_Cell1_Machining', 'Cell 5 Press Line', 'Cell 9 Robot'])
+    expect(address()).toBe('/access-control?sort=-broker')
+  })
+
+  it('sorts machine identities by how many tokens are outstanding, with no token on record last', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    const ingestor = { ...MCP_PRINCIPAL, principal_id: 'b0000000-0000-4000-8000-000000000002' }
+    const playback = { ...MCP_PRINCIPAL, principal_id: 'b0000000-0000-4000-8000-000000000003' }
+    const report = { ...MCP_PRINCIPAL, principal_id: 'c0000000-0000-4000-8000-000000000009', name: 'Line 4 OEE report' }
+    api.listServicePrincipals.mockResolvedValue([ingestor, MCP_PRINCIPAL, report, playback])
+    const live = (jti) => ({ jti, issued_at: '2026-09-01T00:00:00Z', expires_at: '2099-01-01T00:00:00Z' })
+    const lapsed = (jti) => ({ jti, issued_at: '2026-01-01T00:00:00Z', expires_at: '2026-02-01T00:00:00Z' })
+    api.listServiceTokens.mockResolvedValue(new Map([
+      [MCP_PRINCIPAL.principal_id, [live('a'), live('b')]],
+      // Three on record and none outstanding: 0 active, which is neither 3 nor a dash.
+      [report.principal_id, [lapsed('c'), lapsed('d'), lapsed('e')]],
+      [playback.principal_id, [live('f')]],
+    ]))
+    await renderTab('Machine identities')
+    await screen.findByRole('button', { name: '0 active' })
+
+    sortBy('Tokens')
+    expect(firstCells()).toEqual(['Line 4 OEE report', 'Service_Playback', 'MCP read-only client', 'Service_Ingestor'])
+    expect(header('Tokens')).toHaveAttribute('aria-sort', 'ascending')
+    expect(address()).toBe('/access-control/identities?sort=tokens')
+    sortBy('Tokens')
+    expect(firstCells()).toEqual(['MCP read-only client', 'Service_Playback', 'Line 4 OEE report', 'Service_Ingestor'])
+    expect(header('Tokens')).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/access-control/identities?sort=-tokens')
+  })
+
+  it('sorts broker accounts by the purpose the row shows, name first, and by broker state', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listBrokerInventory.mockResolvedValue({
+      clients: [
+        { username: 'aber_ingestion', roles: ['ingestion'], disabled: false },
+        { username: 'aber_monitor', roles: ['monitor'], disabled: true },
+        { username: 'dynsec-admin', roles: ['admin'], disabled: false },
+        { username: 'gwy110000000000400080000', roles: ['gateway'], disabled: false },
+        { username: 'gwy999999999999999999999', roles: ['gateway'], disabled: false },
+      ],
+      roles: [],
+    })
+    await renderTab('Broker accounts')
+    await screen.findByRole('button', { name: /aber_monitor/ })
+    const usernames = () => screen.getAllByRole('button', { name: /Copy MQTT username/ }).map(b => b.textContent)
+    expect(usernames()).toEqual([
+      'aber_ingestion', 'aber_monitor', 'dynsec-admin', 'gwy110000000000400080000', 'gwy999999999999999999999',
+    ])
+
+    // The validator fixture's purpose begins "ingestion/validate.py", but its row reads
+    // "Validator test gateway." first, and sorts there. The stray reads "Shaped like…".
+    sortBy('Purpose')
+    expect(usernames()).toEqual([
+      'gwy999999999999999999999', 'aber_monitor', 'dynsec-admin', 'aber_ingestion', 'gwy110000000000400080000',
+    ])
+
+    // Disabled first; the Active accounts keep the policy order between them, either way.
+    sortBy('Broker')
+    expect(usernames()).toEqual([
+      'aber_monitor', 'aber_ingestion', 'dynsec-admin', 'gwy110000000000400080000', 'gwy999999999999999999999',
+    ])
+    sortBy('Broker')
+    expect(usernames()).toEqual([
+      'aber_ingestion', 'dynsec-admin', 'gwy110000000000400080000', 'gwy999999999999999999999', 'aber_monitor',
+    ])
+    expect(address()).toBe('/access-control/accounts?sort=-broker')
+  })
+
+  it('sorts broker roles by whether they publish, and by the broker’s rule count with Not read last', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listBrokerInventory.mockResolvedValue(LIVE)
+    await renderTab('Broker roles')
+    await waitFor(() => expect(card().querySelectorAll('tbody tr.row-selectable')).toHaveLength(3))
+
+    // CAN PUBLISH first: ingestion by its live rules, gateway by its declaration. Admin's live
+    // rules hold no publish, so it reads READ ONLY whatever was declared.
+    sortBy('Access')
+    expect(firstCells()).toEqual(['ingestion', 'gateway', 'i3x', 'monitor', 'admin'])
+    sortBy('Access')
+    expect(firstCells()).toEqual(['i3x', 'monitor', 'admin', 'ingestion', 'gateway'])
+
+    // 1, 2 and 3 allowed rules; the two the broker did not report go last either way.
+    sortBy('Rules')
+    expect(firstCells()).toEqual(['monitor', 'admin', 'ingestion', 'i3x', 'gateway'])
+    expect(header('Rules')).toHaveAttribute('aria-sort', 'ascending')
+    expect(address()).toBe('/access-control/roles?sort=rules')
+    sortBy('Rules')
+    expect(firstCells()).toEqual(['ingestion', 'admin', 'monitor', 'i3x', 'gateway'])
+    expect(header('Rules')).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/access-control/roles?sort=-rules')
+  })
+
+  /**
+   * The four tabs' tables live in one component, and only the shown tab's reads the sort. The
+   * hidden tables offer no `rules` column, and must not tidy it out of the address.
+   */
+  it('arrives sorted from the address, and the hidden tabs leave the sort alone', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    api.listBrokerInventory.mockResolvedValue(LIVE)
+    at('/access-control/roles?sort=-rules')
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(firstCells()).toEqual(['ingestion', 'admin', 'monitor', 'i3x', 'gateway']))
+    expect(header('Rules')).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/access-control/roles?sort=-rules')
+  })
+})

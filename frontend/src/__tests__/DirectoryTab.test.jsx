@@ -874,3 +874,88 @@ describe('serviceTypeLabel', () => {
     expect(serviceTypeLabel(null)).toBe('')
   })
 })
+
+/**
+ * Each group's table sorts by its columns (#801), the sort held in the address. Every fixture here
+ * is MONITORING, so all of them are on the first tab and its default order is by name.
+ */
+describe('DirectoryTab: sorting by a column (#801)', () => {
+  beforeEach(() => { vi.clearAllMocks() })
+
+  const at = (url) => window.history.replaceState(null, '', url)
+  const address = () => window.location.pathname + window.location.search
+  const names = () => [...document.querySelectorAll('tbody tr td:first-child')].map(td => td.textContent)
+  const sortBy = (label) => fireEvent.click(screen.getByRole('button', { name: label }))
+  const monitoring = (name, over) => ({ ...svc(name, 'MONITORING', `http://${name.toLowerCase()}.plant.local`), ...over })
+
+  it('sorts Version in natural order, reading the upstream version and dropping a leading "v", with no image last either way', async () => {
+    at('/directory')
+    api.get.mockResolvedValue([
+      monitoring('Grafana', { image: 'grafana/grafana:13.2.0' }),
+      monitoring('Node-RED', { image: 'ghcr.io/harri-llewelyn/aber/node-red:1.4.0', upstream_version: 'v5.0.7' }),
+      monitoring('Prometheus', { image: 'prom/prometheus:v3.14.0' }),
+      monitoring('Registered', { image: null }),
+      monitoring('Uptime', { image: 'example/uptime:2.9.1' })
+    ])
+    await renderTab()
+
+    sortBy('Version')
+    // 2.9.1, 3.14.0, 5.0.7, 13.2.0. Keeping the "v" would put both v-tags after 13.2.0, and the
+    // image tag would put Node-RED's 1.4.0 first.
+    expect(names()).toEqual(['Uptime', 'Prometheus', 'Node-RED', 'Grafana', 'Registered'])
+    expect(screen.getByRole('columnheader', { name: 'Version' })).toHaveAttribute('aria-sort', 'ascending')
+    expect(address()).toBe('/directory?sort=version')
+
+    sortBy('Version')
+    expect(names()).toEqual(['Grafana', 'Node-RED', 'Prometheus', 'Uptime', 'Registered'])
+    expect(screen.getByRole('columnheader', { name: 'Version' })).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/directory?sort=-version')
+  })
+
+  it('sorts Reach from network to host to internal, with "not recorded" last either way', async () => {
+    at('/directory')
+    api.get.mockResolvedValue([
+      monitoring('Alpha', { exposure: 'INTERNAL' }),
+      monitoring('Bravo', { exposure: 'UNKNOWN' }),
+      monitoring('Charlie', { exposure: 'NETWORK' }),
+      monitoring('Delta', { exposure: 'HOST' })
+    ])
+    await renderTab()
+
+    sortBy('Reach')
+    // By the words shown it would be host only, internal, network, not recorded.
+    expect(names()).toEqual(['Charlie', 'Delta', 'Alpha', 'Bravo'])
+    sortBy('Reach')
+    expect(names()).toEqual(['Alpha', 'Delta', 'Charlie', 'Bravo'])
+  })
+
+  it('sorts Liveness with a DOWN service first, and "not observed" last either way', async () => {
+    at('/directory')
+    api.get.mockResolvedValue([
+      monitoring('Alpha', { status: 'ACTIVE' }),
+      monitoring('Bravo', { status: 'UNKNOWN', last_heartbeat: null }),
+      monitoring('Charlie', { status: 'DOWN', last_heartbeat: null }),
+      monitoring('Delta', { status: 'ACTIVE' })
+    ])
+    await renderTab()
+
+    sortBy('Liveness')
+    expect(names()).toEqual(['Charlie', 'Alpha', 'Delta', 'Bravo'])
+    sortBy('Liveness')
+    expect(names()).toEqual(['Alpha', 'Delta', 'Charlie', 'Bravo'])
+    expect(address()).toBe('/directory?sort=-liveness')
+  })
+
+  it('arrives sorted when the address already holds a sort', async () => {
+    at('/directory?sort=-reach')
+    api.get.mockResolvedValue([
+      monitoring('Alpha', { exposure: 'NETWORK' }),
+      monitoring('Bravo', { exposure: 'INTERNAL' }),
+      monitoring('Charlie', { exposure: 'HOST' })
+    ])
+    await renderTab()
+    expect(names()).toEqual(['Bravo', 'Charlie', 'Alpha'])
+    expect(screen.getByRole('columnheader', { name: 'Reach' })).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/directory?sort=-reach')
+  })
+})

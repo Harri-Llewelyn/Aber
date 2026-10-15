@@ -83,7 +83,7 @@ import { HelpTip } from '../common/HelpTip'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
 import { useSortableRows } from '../../hooks/useTableSort'
-import { ARCHIVED_RANK, severityRank } from '../../utils/tableSort'
+import { severityRank } from '../../utils/tableSort'
 
 // Sentinel values for the cell filter's two derived lanes. Prefixed so they can never collide
 // with a cell UUID, and kept out of `cells` because neither lane is a row in that table.
@@ -569,15 +569,16 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   ])
 
   // Each column sorts on what its cell shows. Status takes the more severe of the lifecycle badge
-  // and a firing alert, and an archived device comes after every live one. A device with no
-  // modelled group, or no cell resolved, goes last.
+  // and a firing alert. An archived device has no lifecycle state (archived is its own axis,
+  // utils/deviceStatus.js), so it goes last either way, as does a device with no modelled group or
+  // no cell resolved.
   const rosterSortColumns = useMemo(() => ({
     name: { type: 'text', value: a => a.asset_name },
     uuid: { type: 'text', value: a => a.asset_id },
     status: {
       type: 'rank',
       value: a => {
-        if (a.is_archived) return ARCHIVED_RANK
+        if (a.is_archived) return null
         const alert = alertFor(a)
         const lifecycle = severityRank(deviceStatusBadge(a).tone)
         return alert ? Math.min(lifecycle, severityRank(alert.severity === 'critical' ? 'danger' : 'warning')) : lifecycle

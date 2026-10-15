@@ -1696,3 +1696,92 @@ describe('the playback progress bar', () => {
     expect(bar.firstChild.style.width).toBe('100%')
   })
 })
+
+// =============================================================================================
+/**
+ * The subject tables sort by their columns (#801), the sort held in the address. Stored capture
+ * sorts by when the capture was recorded, and the Devices tab's Gateway column by the gateway's
+ * name; a subject with no capture, and a device whose gateway is not listed, go last either way.
+ */
+describe('Capture: sorting by a column (#801)', () => {
+  const at = (url) => window.history.replaceState(null, '', url)
+  const address = () => window.location.pathname + window.location.search
+  const names = () => [...document.querySelectorAll('tbody tr')].map(tr => tr.cells[0].textContent)
+  const sortBy = (label) => fireEvent.click(screen.getByRole('button', { name: label }))
+
+  const lists = (gateways, devices = []) => api.get.mockImplementation(path => Promise.resolve(
+    path.includes('gateways') ? gateways : path.includes('devices') ? devices : []))
+
+  const gateway = (id, name) => ({ ...GATEWAY, id, name, sparkplug_id: `gwy-${id}` })
+  const capturedAt = (gatewayId, recordedAt) => ({
+    ...CAPTURE, id: `cap-${gatewayId}`, gateway_id: gatewayId, recorded_at: recordedAt
+  })
+
+  // Line 1 Gateway, Playback Target, and one whose name sorts after "Unbound". The archived one is
+  // not a capture subject, so a device still filed under it reads Unbound.
+  const YARD = gateway('gw-yard', 'Yard Gateway')
+  const RETIRED_LINE = { ...gateway('gw-old', 'Old Line Gateway'), is_archived: true }
+  const device = (name, gatewayId) => ({ ...DEVICE, id: `dev-${name}`, name, gateway_id: gatewayId })
+  const DEVICES = [
+    device('Spindle 1', 'gw-yard'),
+    device('Spindle 2', 'gw-old'),
+    device('Spindle 3', 'gw-1'),
+    device('Spindle 4', 'gw-2')
+  ]
+
+  it('sorts gateways by when their capture was recorded, one with none last either way, and names in natural order', async () => {
+    at('/capture')
+    lists([
+      gateway('gw-10', 'Line 10 Gateway'), gateway('gw-9', 'Line 9 Gateway'),
+      gateway('gw-2b', 'Line 2 Gateway'), gateway('gw-bh', 'Boiler House Gateway')
+    ])
+    api.listCaptures.mockResolvedValue([
+      capturedAt('gw-10', '2026-08-27T14:30:00.000Z'),
+      capturedAt('gw-2b', '2026-09-01T09:00:00.000Z'),
+      capturedAt('gw-bh', '2026-08-01T08:00:00.000Z')
+    ])
+    renderTab()
+    await screen.findByText('Line 10 Gateway')
+
+    sortBy('Stored capture')
+    expect(names()).toEqual(['Boiler House Gateway', 'Line 10 Gateway', 'Line 2 Gateway', 'Line 9 Gateway'])
+    expect(screen.getByRole('columnheader', { name: 'Stored capture' })).toHaveAttribute('aria-sort', 'ascending')
+    expect(address()).toBe('/capture?sort=stored')
+
+    sortBy('Stored capture')
+    expect(names()).toEqual(['Line 2 Gateway', 'Line 10 Gateway', 'Boiler House Gateway', 'Line 9 Gateway'])
+    expect(screen.getByRole('columnheader', { name: 'Stored capture' })).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/capture?sort=-stored')
+
+    sortBy('Gateway')
+    // Natural order: Line 2 before Line 9 before Line 10.
+    expect(names()).toEqual(['Boiler House Gateway', 'Line 2 Gateway', 'Line 9 Gateway', 'Line 10 Gateway'])
+  })
+
+  it('sorts devices by the name of their gateway, an Unbound one last either way', async () => {
+    at('/capture/device')
+    lists([GATEWAY, SIM_GATEWAY, YARD, RETIRED_LINE], DEVICES)
+    renderTab()
+    await screen.findByText('Spindle 1')
+    expect(within(screen.getByText('Spindle 2').closest('tr')).getByText('Unbound')).toBeInTheDocument()
+
+    sortBy('Gateway')
+    // As text, "Unbound" would sit between Playback Target and Yard Gateway.
+    expect(names()).toEqual(['Spindle 3', 'Spindle 4', 'Spindle 1', 'Spindle 2'])
+    expect(address()).toBe('/capture/device?sort=gateway')
+
+    sortBy('Gateway')
+    expect(names()).toEqual(['Spindle 1', 'Spindle 4', 'Spindle 3', 'Spindle 2'])
+    expect(address()).toBe('/capture/device?sort=-gateway')
+  })
+
+  it('arrives sorted when the address already holds a sort', async () => {
+    at('/capture/device?sort=-gateway')
+    lists([GATEWAY, SIM_GATEWAY, YARD, RETIRED_LINE], DEVICES)
+    renderTab()
+    await screen.findByText('Spindle 1')
+    expect(names()).toEqual(['Spindle 1', 'Spindle 4', 'Spindle 3', 'Spindle 2'])
+    expect(screen.getByRole('columnheader', { name: 'Gateway' })).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/capture/device?sort=-gateway')
+  })
+})

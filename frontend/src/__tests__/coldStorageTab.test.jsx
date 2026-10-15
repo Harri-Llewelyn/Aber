@@ -516,3 +516,75 @@ describe('the page layout', () => {
     expect(copy.querySelector('.copyable-id-tail').textContent).toMatch(/\.parquet$/)
   })
 })
+
+/**
+ * The object table sorts by its columns (#801), the sort held in the address. State follows the
+ * export sequence with a failed chunk first, since that is the row that needs a person; Rows and
+ * Size are numbers, not the text the cells show.
+ */
+describe('the object table sorts by a column (#801)', () => {
+  const at = (url) => window.history.replaceState(null, '', url)
+  const address = () => window.location.pathname + window.location.search
+  const chunks = () => [...within(screen.getByRole('table')).getAllByRole('row')].slice(1).map(r => r.cells[0].textContent)
+  const sortBy = (label) => fireEvent.click(screen.getByRole('button', { name: label }))
+
+  // A chunk not yet written has no object: no key and no size.
+  const unwritten = { object_key: null, object_bytes: null, on_cold_storage: false, dropped_at: null }
+
+  it('ranks State failed first, then claimed, exported, verified and on cold storage, a state it does not know last', async () => {
+    at('/cold-storage')
+    await show([
+      row({ chunk_name: 'c_archived' }),
+      row({ chunk_name: 'c_verified', state: 'verified', on_cold_storage: false }),
+      row({ chunk_name: 'c_failed', state: 'failed', on_cold_storage: false, last_error: 'timed out' }),
+      row({ chunk_name: 'c_unknown', state: 'reticulating' }),
+      row({ chunk_name: 'c_claimed', state: 'claimed', ...unwritten }),
+      row({ chunk_name: 'c_exported', state: 'exported', on_cold_storage: false })
+    ])
+    await screen.findByText('c_archived')
+
+    sortBy('State')
+    // By the label it would be Claimed, Exported, Failed, On cold storage, Verified.
+    expect(chunks()).toEqual(['c_failed', 'c_claimed', 'c_exported', 'c_verified', 'c_archived', 'c_unknown'])
+    expect(screen.getByRole('columnheader', { name: 'State' })).toHaveAttribute('aria-sort', 'ascending')
+    expect(address()).toBe('/cold-storage?sort=state')
+
+    sortBy('State')
+    expect(chunks()).toEqual(['c_archived', 'c_verified', 'c_exported', 'c_claimed', 'c_failed', 'c_unknown'])
+    expect(screen.getByRole('columnheader', { name: 'State' })).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/cold-storage?sort=-state')
+  })
+
+  it('sorts Rows and Size by number, a chunk with no object yet last by size either way', async () => {
+    at('/cold-storage')
+    await show([
+      row({ chunk_name: 'c_1000', row_count: 1000, object_bytes: 4938 }),
+      row({ chunk_name: 'c_900', row_count: 900, object_bytes: 120000 }),
+      row({ chunk_name: 'c_10000', row_count: 10000, object_bytes: 950 }),
+      row({ chunk_name: 'c_50', row_count: 50, state: 'claimed', ...unwritten })
+    ])
+    await screen.findByText('c_1000')
+
+    sortBy('Rows')
+    // As the text shown ("1,000", "10,000", "50", "900") the order would be different.
+    expect(chunks()).toEqual(['c_50', 'c_900', 'c_1000', 'c_10000'])
+
+    sortBy('Size')
+    expect(chunks()).toEqual(['c_10000', 'c_1000', 'c_900', 'c_50'])
+    sortBy('Size')
+    expect(chunks()).toEqual(['c_900', 'c_1000', 'c_10000', 'c_50'])
+  })
+
+  it('arrives sorted when the address already holds a sort', async () => {
+    at('/cold-storage?sort=-rows')
+    await show([
+      row({ chunk_name: 'c_900', row_count: 900 }),
+      row({ chunk_name: 'c_10000', row_count: 10000 }),
+      row({ chunk_name: 'c_1000', row_count: 1000 })
+    ])
+    await screen.findByText('c_900')
+    expect(chunks()).toEqual(['c_10000', 'c_1000', 'c_900'])
+    expect(screen.getByRole('columnheader', { name: 'Rows' })).toHaveAttribute('aria-sort', 'descending')
+    expect(address()).toBe('/cold-storage?sort=-rows')
+  })
+})
