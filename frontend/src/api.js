@@ -2559,9 +2559,10 @@ const apiMethods = {
         // case that needs an appliance is the one an operator must opt OUT of, or a gateway can be
         // created that quietly never gets hardware.
         deployment: body.deployment === 'host' ? 'host' : 'remote',
-        // Defaulted rather than omitted so a gateway created for playback can be flagged in one
-        // step. The column is NOT NULL DEFAULT false (0052), so `false` here and an absent key
-        // reach the same row -- being explicit is for the reader, not the database.
+        // Defaulted rather than omitted so a simulated gateway is created flagged in one step. The
+        // column is NOT NULL DEFAULT false (0052), so `false` here and an absent key reach the same
+        // row -- being explicit is for the reader, not the database. `is_shadow` is never sent: the
+        // API refuses it (0187), and only the seeded Playback gateway has it.
         is_simulated: !!body.is_simulated,
         status: body.status || 'OFFLINE',
         ...locationFieldsFrom(body)
