@@ -68,8 +68,8 @@ const SPECS = [
     companionSpec: 'OPC 40001 Machinery',
     namespaceUri: 'http://opcfoundation.org/UA/Machinery/',
     path: 'Machinery/Opc.Ua.Machinery.NodeSet2.xml',
-    version: '1.04.1',
-    publicationDate: '2026-01-01T00:00:00Z',
+    version: '1.04.2',
+    publicationDate: '2026-11-01T00:00:00Z',
     groups: { Machine: null },
     // Not here: OperationalTime, which no Machinery NodeSet declares. A machine's identification
     // object is a MachineIdentificationType, which inherits all but ProductInstanceUri from
@@ -389,7 +389,7 @@ function parseNodeSet(xml) {
       references: [...body.matchAll(/<Reference\b([^>]*)>([^<]*)<\/Reference>/g)].map((r) => {
         const refAttrs = readAttrs(r[1]);
         return {
-          type: refAttrs.ReferenceType,
+          type: referenceTypeName(refAttrs.ReferenceType, aliases),
           forward: refAttrs.IsForward !== 'false',
           target: r[2].trim()
         };
@@ -419,6 +419,14 @@ function expandedNodeId(nodeId, doc, where) {
   if (!uri) throw new Error(`${where}: ${nodeId} names namespace ${index}, which NamespaceUris does not list`);
   return `nsu=${uri.replace(/%/g, '%25').replace(/;/g, '%3B')};${m[2]}=${m[3]}`;
 }
+
+/**
+ * A ReferenceType is written either as an alias (`HasProperty`) or as the raw namespace-0 NodeId
+ * (`i=46`): Machinery 1.04.2 dropped its <Aliases> block and writes every one raw. Both are read as
+ * the standard name, which is what the walks below compare against.
+ */
+const REFERENCE_TYPES = { 'i=45': 'HasSubtype', 'i=46': 'HasProperty', 'i=47': 'HasComponent' };
+const referenceTypeName = (type, aliases) => REFERENCE_TYPES[aliases.get(type) ?? type] ?? type;
 
 function readAttrs(text) {
   const attrs = {};
