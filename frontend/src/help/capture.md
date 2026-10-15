@@ -27,7 +27,7 @@ Playback needs the playback worker, which every install runs. If the playback di
 
 Playback also needs a broker credential of its own, for the Playback gateway. When that credential is issued, Aber delivers it to the playback worker within about a minute. It is not created by whoever presses the button. It is also not the credential of the gateway whose traffic is played back. So a playback cannot be mistaken for the machine it imitates, on the wire or in the historian.
 
-If a playback completes but loses readings whose timestamps were too old for the historian, it says so above the list.
+If a playback completes but loses readings whose timestamps were too old or too far in the future for the historian, it says so above the list. A slow playback speed can cause this. It stretches the gap between a reading's timestamp and its arrival. Try the playback again at 1x.
 
 ## Who can use it
 
