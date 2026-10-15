@@ -174,7 +174,6 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const [newMetric, setNewMetric] = useState(BLANK_METRIC)
   const [deprecateTarget, setDeprecateTarget] = useState(null)
   const [restoreTarget, setRestoreTarget] = useState(null)
-  const [editTarget, setEditTarget] = useState(null)
   // The uncatalogued_metrics rows: null until the first read, and while a read has failed.
   const [uncatalogued, setUncatalogued] = useState(null)
   const [uncataloguedError, setUncataloguedError] = useState(null)
@@ -183,6 +182,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const [allDevicesShown, setAllDevicesShown] = useState({})
   // The Uncatalogued row Add Metric was opened from by Catalogue; null for any other opening.
   const [cataloguing, setCataloguing] = useState(null)
+  const [editTarget, setEditTarget] = useState(null)
   // Which tab of the card is shown: 'catalog', 'deprecated' or 'uncatalogued'.
   const [view, setView] = useState('catalog')
   // Expansion state for the catalog's group sections, keyed by label; absent means collapsed.
@@ -1069,7 +1069,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                                 {!showAll && (
                                   <button
                                     type="button"
-                                    className="btn btn-sm btn-ghost"
+                                    className="chip chip-link"
                                     onClick={() => setAllDevicesShown(prev => ({ ...prev, [u.metric_name]: true }))}
                                     title="Show every device that declares this name"
                                   >
@@ -1091,7 +1091,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                               <td className="row-actions">
                                 <button
                                   type="button"
-                                  className="btn btn-sm btn-ghost"
+                                  className={`btn btn-sm btn-ghost${nameProblem ? ' btn-disabled' : ''}`}
                                   disabled={!!nameProblem}
                                   onClick={() => handleCatalogue(u)}
                                   title={nameProblem
