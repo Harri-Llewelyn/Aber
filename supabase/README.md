@@ -722,6 +722,36 @@ keep-in-step obligation `deriveMetricGroup()` and `utils/sparkplugId.js` carry.
 
 A fresh database has no catalog rows to validate, and every example metric's name conforms.
 
+### Uncatalogued metrics (0189)
+
+Ingestion records the names each device's last DBIRTH declared in `devices.last_birth_metrics`
+(`ingest_record_declared_metrics`) and never checks them against `metric_catalog`. The view
+`uncatalogued_metrics` makes that comparison, one row per name no catalog row has:
+`(metric_name, device_count, devices, last_declared_at, datatypes)`. The Metrics page's
+Uncatalogued tab reads it; it is a view rather than a computation in the browser so that a Grafana
+panel or an alert rule can read the same rows.
+
+- **A name matches exactly, case included.** That is the catalog's unique key, and how i3X and the
+  AAS export look a metric up. A deprecated row is still a row, so its name is not listed.
+- **Archived devices and replay lanes are left out** with the fleet counts' predicate
+  (`NOT d.is_archived`, `NOT g.is_shadow` through `gateways`, as `platform_health_rows()` has it).
+  Quarantined devices stay in, flagged in `devices`: a metric can be catalogued before its device
+  is approved.
+- **Sparkplug's control metrics are left out**: `bdSeq`, `Node Control/*` and `Device Control/*`.
+  They are commands to the edge node or device, not readings, and their names hold spaces the name
+  format above refuses. A DBIRTH may carry `Device Control/*` (Sparkplug 3.0, *Payload (DBIRTH)*),
+  and the gateway appliance sends `Device Control/Rebirth`. `Properties/*` stays. It is the
+  device's own data under a valid name, and catalogued with an OPC 40001 Machinery identification
+  id such as `Manufacturer`'s, it fills that Digital Nameplate field in the AAS export.
+- **`last_declared_at`** is the latest `last_birth_metrics_at` among the devices. That stamp moves
+  only when a device's declared set changes, so a rebirth that declares the same names leaves it.
+- **`datatypes`** are the Sparkplug codes the births carried, from `asset_config`. Ingestion writes
+  a row there only for a metric declared with a value, so a name declared without one has none.
+
+It is `security_invoker`: the caller's policies on `devices`, `gateways`, `asset_config` and
+`metric_catalog` apply. `authenticated` may `SELECT` it, and `anon` holds nothing.
+`test_uncatalogued_metrics.py` holds all of the above.
+
 ### The Sparkplug group is part of the address (archived migration 0008)
 
 Ingestion parsed `spBv1.0/<group>/<type>/<node>/<device>` and **never read the group**, so two
@@ -1368,6 +1398,7 @@ holds them for every other writer, a Manager's PATCH included.
 | `device_locations` | A device's effective cell: `COALESCE(device.cell_id, gateway.cell_id)` |
 | `device_schemas` | Every schema attached to a device, one row per (device, schema): its `device_submodels` rows. `source` is always `device_submodels` (`0168`, `0175`) |
 | `concept_definitions` | Each semantic id a vocabulary defines, with the vocabulary's own text, for the AAS export's ConceptDescriptions (`0169`) |
+| `uncatalogued_metrics` | Each metric name devices declare that no `metric_catalog` row has, with the devices that declare it (`0189`) |
 | `telemetry` | `security_invoker` view over `timescale.telemetry`, a `postgres_fdw` foreign table |
 
 > The raw foreign table lives in its own `timescale` schema, deliberately kept out of

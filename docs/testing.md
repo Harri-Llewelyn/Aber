@@ -474,6 +474,11 @@ python supabase/migrations/test_a_shadow_gateway_is_never_stale.py
 # is_shadow column it tests.
 python supabase/migrations/test_a_shadow_gateway_holds_no_health.py
 python supabase/migrations/test_metric_catalog_seed.py
+# The metric names devices declare that no catalog row describes (0189), which the Metrics page's
+# Uncatalogued tab lists. A deprecated row counts as catalogued, and a name matches exactly; archived
+# devices, replay lanes and Sparkplug control metrics are left out. The view runs as its caller, so
+# a device or catalog row the caller's RLS hides changes what it counts; anon cannot read it.
+python supabase/migrations/test_uncatalogued_metrics.py
 # A constraint, policy or trigger is re-created only when it differs from its migration (0001,
 # section 3c). Every one the chain states is changed live, and its own call or guard must put it
 # back; after the chain, every one matches, running the calls takes no ACCESS EXCLUSIVE lock, and

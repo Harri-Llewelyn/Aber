@@ -686,6 +686,14 @@ export const SUITES = {
       'registered with a missing or wrong semantic id breaks nothing at runtime -- it asserts an ' +
       'interoperability claim that is simply untrue, which no other check would notice.',
   },
+  'supabase/migrations/test_uncatalogued_metrics.py': {
+    lanes: ['db'],
+    why:
+      '0189 -- what the Metrics page lists as uncatalogued: a declared name no catalog row has, ' +
+      'deprecated rows counting as catalogued; archived devices, replay lanes and Sparkplug ' +
+      'control metrics left out; and the caller\'s RLS applying through the view, which anon ' +
+      'cannot read.',
+  },
   'supabase/migrations/test_replay_recreates_only_what_differs.py': {
     lanes: ['db'],
     why:

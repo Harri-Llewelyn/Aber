@@ -10,8 +10,9 @@ import { datatypeLabel, SPARKPLUG_DATATYPES } from '../../utils/sparkplugDatatyp
 import {
   groupCatalog, knownGroupNames, groupOptionsForStandard, canonicaliseGroup, isValidMetricName,
   metricNameError,
-  composeMetricName
+  composeMetricName, METRIC_GROUP_SEPARATOR
 } from '../../utils/metricGroup'
+import { formatDateTime } from '../../utils/format'
 import { modelledMetrics } from '../../utils/deviceTags'
 import {
   typesByCategory, subTypes, unitNames, categoryOfType, CATEGORY_WITH_UNITS
@@ -33,13 +34,15 @@ import { Modal } from '../common/Modal'
 import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
 import { SearchInput } from '../common/SearchInput'
+import { RouteLink } from '../common/RouteLink'
+import { deviceUrl } from '../../routes'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
 import { SemanticIdField } from '../common/SemanticIdField'
 import {
   IconPlus, IconAlertTriangle, IconArchive, IconChevronDown, IconChevronUp, IconRefreshCw,
-  IconPencil, IconBookOpen, IconTag
+  IconPencil, IconBookOpen, IconTag, IconCpu, IconCheck
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
@@ -112,6 +115,25 @@ const VIEW_HELP = {
     label: 'About deprecated metrics',
     text: 'Withheld from the schema builder, not deleted: schemas that model one keep it, and its readings stay. Restore offers it to schema authors again and clears the replacement it names.',
   },
+  uncatalogued: {
+    label: 'About uncatalogued metrics',
+    text: 'Names devices declared in their last birth certificate that no catalog row describes. Their readings are stored, but carry no unit or semantic id, and no schema can model them until Catalogue adds one.',
+  },
+}
+
+// Device chips an Uncatalogued row shows before "more": a name a whole fleet declares would
+// otherwise fill the row with one chip per device.
+const UNCATALOGUED_DEVICES_SHOWN = 3
+
+/** Why Catalogue cannot prefill a datatype from what the births carried, or null when it can. */
+const catalogueDatatypeNote = (row) => {
+  const codes = row?.datatypes || []
+  if (codes.length === 0) return 'No device gave it a value in its birth certificate, so how it is encoded is not recorded.'
+  if (codes.length > 1) return `Its devices declare it as ${codes.map(datatypeLabel).join(' and ')}.`
+  if (!SPARKPLUG_DATATYPES.some(d => d.code === codes[0])) {
+    return `Its devices declare it as ${datatypeLabel(codes[0])}, which this form does not offer.`
+  }
+  return null
 }
 
 /**
@@ -152,6 +174,14 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const [newMetric, setNewMetric] = useState(BLANK_METRIC)
   const [deprecateTarget, setDeprecateTarget] = useState(null)
   const [restoreTarget, setRestoreTarget] = useState(null)
+  // The uncatalogued_metrics rows: null until the first read, and while a read has failed.
+  const [uncatalogued, setUncatalogued] = useState(null)
+  const [uncataloguedError, setUncataloguedError] = useState(null)
+  const [uncataloguedSearch, setUncataloguedSearch] = useUrlState('name')
+  // Rows showing every device chip, keyed by metric name.
+  const [allDevicesShown, setAllDevicesShown] = useState({})
+  // The Uncatalogued row Add Metric was opened from by Catalogue; null for any other opening.
+  const [cataloguing, setCataloguing] = useState(null)
   const [editTarget, setEditTarget] = useState(null)
   // Which tab of the card is shown, one per VIEW_HELP entry; the default is the catalog.
   const [view, setView] = useUrlTab('metrics', Object.keys(VIEW_HELP), 'catalog')
@@ -184,11 +214,24 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const closeAddMetric = () => {
     setNewMetric(BLANK_METRIC)
     setAddError(null)
+    setCataloguing(null)
     setShowAddMetric(false)
   }
 
-  // Re-read after every change this page makes.
+  // A read of its own, not awaited by load(): a failure leaves the catalog's tabs working and is
+  // said on the Uncatalogued tab.
+  const loadUncatalogued = useCallback(async () => {
+    try {
+      const rows = await api.get('/api/v1/uncatalogued-metrics')
+      setUncatalogued(rows || []); setUncataloguedError(null)
+    } catch (e) {
+      setUncatalogued(null); setUncataloguedError(e.message)
+    }
+  }, [])
+
+  // Re-read after every change this page makes: adding a metric can take a name off Uncatalogued.
   const load = useCallback(async () => {
+    loadUncatalogued()
     try {
       const [cat, grp, sch] = await Promise.all([
         api.get('/api/v1/metric-catalog'),
@@ -197,7 +240,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       ])
       setCatalog(cat); setGroups(grp); setSchemas(sch)
     } finally { setLoaded(true) }
-  }, [])
+  }, [loadUncatalogued])
 
   useEffect(() => { load() }, [load])
 
@@ -274,6 +317,32 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       ...m, standard: STANDARDS.MTCONNECT, type: typeName, companionSpec: '', customType: '',
       vocabSemanticId: '', semanticIdOwn: keepTypedSemanticId(m.semanticIdOwn)
     }))
+    setShowAddMetric(true)
+  }
+
+  /**
+   * Catalogue, on the Uncatalogued tab: Add Metric as a Custom metric under the declared name, its
+   * first segment the group, its last the name and any between the instance. A group the Custom
+   * picker does not list goes through + New group, which takes an existing group's spelling and
+   * warns when the case differs. The datatype is filled only when the births agree on one the form
+   * offers: like the name, it cannot be changed afterwards.
+   */
+  const handleCatalogue = (row) => {
+    const segments = row.metric_name.split(METRIC_GROUP_SEPARATOR)
+    const leaf = segments.pop()
+    const [group = '', ...instance] = segments
+    const offered = groupOptionsForStandard(groups, catalog, STANDARDS.CUSTOM)
+      .some(bucket => bucket.names.includes(group))
+    setNewMetric({
+      ...BLANK_METRIC,
+      standard: STANDARDS.CUSTOM,
+      group: offered || !group ? group : NEW_GROUP,
+      newGroup: offered ? '' : group,
+      instance: instance.join(METRIC_GROUP_SEPARATOR),
+      customType: leaf,
+      datatype: catalogueDatatypeNote(row) ? undefined : row.datatypes[0]
+    })
+    setCataloguing(row)
     setShowAddMetric(true)
   }
 
@@ -496,6 +565,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const unmappedCount = currentCatalog.filter(isUnmapped).length
   // Its own tab, unfiltered: the search and the filters belong to the catalog tab.
   const deprecatedCatalog = catalog.filter(m => m.deprecated)
+  // By name only, as the catalog's search: a match on a device name could be in a chip not shown.
+  const shownUncatalogued = (uncatalogued || []).filter(u =>
+    !uncataloguedSearch || u.metric_name.toLowerCase().includes(uncataloguedSearch.trim().toLowerCase()))
   const selected = catalog.find(m => m.metric_uuid === selectedId) || null
   // Grouped by the name's first `/`-separated segment; ungrouped metrics fall into a trailing bucket.
   const catalogGroups = groupCatalog(activeCatalog)
@@ -741,10 +813,11 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           <CardHeading
             icon={<IconTag size={15} />}
             title="Metrics"
-            description="The catalog of metrics that schemas are built from, and the ones since deprecated."
+            description="The catalog of metrics that schemas are built from, the ones since deprecated, and the names devices declare that it lacks."
           />
 
-          {/* Both tabs are always there, so a deprecation has a known place to be undone. */}
+          {/* Every tab is always there, so a deprecation has a known place to be undone. Uncatalogued
+              carries its count once read, so an empty list reads as good news from the tab bar. */}
           <TabStrip
             ariaLabel="Metric list"
             value={view}
@@ -752,6 +825,11 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             tabs={[
               { id: 'catalog', label: 'Metric Catalog', title: 'The metrics schema authors can build from' },
               { id: 'deprecated', label: 'Deprecated Metrics', title: 'Metrics withheld from the schema builder, and what replaced each' },
+              {
+                id: 'uncatalogued',
+                label: uncatalogued ? `Uncatalogued (${uncatalogued.length})` : 'Uncatalogued',
+                title: 'Metric names devices declare that no catalog row describes'
+              },
             ]}
             help={<HelpTip {...VIEW_HELP[view]} />}
           />
@@ -895,6 +973,126 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
                                 ? <span className="mono">{replacement.name}</span>
                                 : <span className="cell-meta" title="No replacement was named">—</span>}
                             </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+
+          {view === 'uncatalogued' && (
+            <>
+              {/* Drawn once there is a list to narrow: a fleet on an empty catalog lists every name. */}
+              {uncatalogued?.length > 0 && (
+                <div className="filter-bar">
+                  <SearchInput
+                    value={uncataloguedSearch}
+                    onChange={setUncataloguedSearch}
+                    placeholder="Search names…"
+                    ariaLabel="Search the uncatalogued metrics"
+                  />
+                </div>
+              )}
+
+              {uncataloguedError ? (
+                <div className="callout callout-danger">
+                  <IconAlertTriangle size={13} className="callout-icon" />
+                  <span>The uncatalogued metrics could not be read: {uncataloguedError}</span>
+                </div>
+              ) : !uncatalogued ? <LoadingState label="uncatalogued metrics" /> : shownUncatalogued.length === 0 ? (
+                <EmptyState
+                  icon={uncatalogued.length === 0 ? <IconCheck size={36} /> : <IconTag size={36} />}
+                  filtered={uncatalogued.length > 0}
+                  message="Every metric the devices declare is in the catalog."
+                  filteredMessage={<>No uncatalogued metric matches <strong>{uncataloguedSearch}</strong>.</>}
+                />
+              ) : (
+                <div className="table-wrap">
+                  <table className="metric-table metric-table-uncatalogued">
+                    <colgroup>
+                      <col className="metric-col-name" />
+                      <col className="metric-col-count" />
+                      <col />
+                      <col className="metric-col-datatype" />
+                      <col className="metric-col-declared" />
+                      {canManageSchema && <col className="metric-col-action" />}
+                    </colgroup>
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th title="How many devices declare this name">Devices</th>
+                        <th title="The devices that declare it. Each opens on the Devices page.">Declared By</th>
+                        <th title="The datatype the devices' birth certificates gave it, where one gave it a value">Datatype</th>
+                        <th title="The latest birth certificate that changed what one of these devices declares. A rebirth that declares the same names does not move it.">Last Declared</th>
+                        {canManageSchema && <th className="row-actions" aria-label="Actions" />}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {shownUncatalogued.map(u => {
+                        const devices = u.devices || []
+                        const showAll = allDevicesShown[u.metric_name] || devices.length <= UNCATALOGUED_DEVICES_SHOWN + 1
+                        const hidden = devices.length - UNCATALOGUED_DEVICES_SHOWN
+                        const datatypes = u.datatypes || []
+                        const nameProblem = metricNameError(u.metric_name)
+                        return (
+                          <tr key={u.metric_name}>
+                            <td><span className="mono">{u.metric_name.split('/').map((part, i, all) => (
+                              <React.Fragment key={i}>{part}{i < all.length - 1 && <>/<wbr /></>}</React.Fragment>
+                            ))}</span></td>
+                            <td className="cell-meta">{u.device_count}</td>
+                            <td>
+                              <div className="context-device-list">
+                                {(showAll ? devices : devices.slice(0, UNCATALOGUED_DEVICES_SHOWN)).map(d => (
+                                  <RouteLink
+                                    key={d.id}
+                                    className="chip chip-link"
+                                    to={deviceUrl(d.id)}
+                                    title={`Open ${d.name} on the Devices page${d.quarantined ? '. It is in quarantine, awaiting approval.' : ''}`}
+                                  >
+                                    <IconCpu size={11} />
+                                    <span className="chip-name">{d.name}</span>
+                                    {d.quarantined && <span className="cell-meta">quarantined</span>}
+                                  </RouteLink>
+                                ))}
+                                {!showAll && (
+                                  <button
+                                    type="button"
+                                    className="chip chip-link"
+                                    onClick={() => setAllDevicesShown(prev => ({ ...prev, [u.metric_name]: true }))}
+                                    title="Show every device that declares this name"
+                                  >
+                                    {hidden} more
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                            <td
+                              className="cell-meta"
+                              title={datatypes.length === 0
+                                ? 'No device gave it a value in its birth certificate, so how it is encoded is not recorded'
+                                : datatypes.length > 1 ? 'Its devices declare it with different datatypes' : undefined}
+                            >
+                              {datatypes.length ? datatypes.map(datatypeLabel).join(', ') : '—'}
+                            </td>
+                            <td className="cell-meta">{formatDateTime(u.last_declared_at)}</td>
+                            {canManageSchema && (
+                              <td className="row-actions">
+                                <button
+                                  type="button"
+                                  className={`btn btn-sm btn-ghost${nameProblem ? ' btn-disabled' : ''}`}
+                                  disabled={!!nameProblem}
+                                  onClick={() => handleCatalogue(u)}
+                                  title={nameProblem
+                                    ? `The catalog cannot hold this name as the devices declare it. ${nameProblem} Rename it on the devices.`
+                                    : 'Add this name to the catalog as a Custom metric'}
+                                >
+                                  <IconPlus size={12} /> Catalogue
+                                </button>
+                              </td>
+                            )}
                           </tr>
                         )
                       })}
@@ -1234,7 +1432,25 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           {!datatypeChosen && (
             <div className="callout callout-warning">
               <IconAlertTriangle size={13} className="callout-icon" />
-              <span>Choose a Sparkplug datatype. The vocabulary entry does not say how this value is encoded, and the datatype cannot be changed once the metric exists.</span>
+              <span>
+                Choose a Sparkplug datatype.{' '}
+                {cataloguing
+                  ? catalogueDatatypeNote(cataloguing)
+                  : 'The vocabulary entry does not say how this value is encoded.'}
+                {' '}The datatype cannot be changed once the metric exists.
+              </span>
+            </div>
+          )}
+
+          {/* Catalogue's point is the name the devices already publish; anything else is a new
+              metric they do not send. */}
+          {cataloguing && composedName !== cataloguing.metric_name && (
+            <div className="callout callout-warning">
+              <IconAlertTriangle size={13} className="callout-icon" />
+              <span>
+                The devices declare <span className="mono">{cataloguing.metric_name}</span>. This adds{' '}
+                <span className="mono">{composedName || '…'}</span>, which they do not publish.
+              </span>
             </div>
           )}
 

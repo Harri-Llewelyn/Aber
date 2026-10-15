@@ -1399,6 +1399,31 @@ paths:
         '204': { description: Updated. }
         '400': { description: '`name` or `datatype` in the body; both are immutable.' }
 
+  /rest/v1/uncatalogued_metrics:
+    get:
+      tags: [Registry]
+      summary: List the metric names devices declare that the catalog does not describe
+      description: |
+        Read-only view (`0189`), one row per name a device's last DBIRTH declared
+        (`devices.last_birth_metrics`) that no `metric_catalog` row has. A deprecated row counts as
+        catalogued, and names match exactly, case included. Archived devices, replay lanes and the
+        Sparkplug control metrics (`bdSeq`, `Node Control/*`, `Device Control/*`) are left out;
+        quarantined devices are not. The Metrics page's Uncatalogued tab reads it, ordered with
+        `?order=metric_name`.
+
+        `security_invoker`, so the caller's own policies on the tables beneath apply.
+        `authenticated` only; `anon` is refused.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - { name: metric_name, in: query, schema: { type: string }, description: 'e.g. `eq.Spindle/LOAD`, or `like.Spindle/*`' }
+      responses:
+        '200':
+          description: Uncatalogued names.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/UncataloguedMetric' } }
+
   /rest/v1/metric_groups:
     get:
       tags: [Registry]
@@ -5033,6 +5058,37 @@ components:
         description: { type: string, nullable: true }
         semantic_id: { type: string, nullable: true }
         semantic_id_type: { $ref: '#/components/schemas/SemanticIdType' }
+
+    UncataloguedMetric:
+      type: object
+      readOnly: true
+      description: >-
+        A metric name devices declare that no catalog row describes. Its readings are stored, but it
+        has no description, unit or semantic id until a catalog row is added under the same name.
+      properties:
+        metric_name: { type: string, example: Spindle/LOAD, description: 'As the devices declare it. It may not match the catalog name format.' }
+        device_count: { type: integer, example: 2, description: 'How many devices declare it.' }
+        devices:
+          type: array
+          description: 'The devices that declare it, by name.'
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string, example: Lathe_01 }
+              quarantined: { type: boolean, description: 'Awaiting approval on the Devices page.' }
+        last_declared_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            The latest `last_birth_metrics_at` among those devices. It moves only when a device's
+            declared set changes, not on every rebirth.
+        datatypes:
+          type: array
+          items: { type: integer }
+          example: [10]
+          description: 'The Sparkplug datatype codes their births carried with a value, in order. Empty when no birth gave it one.'
 
     MetricGroup:
       type: object
