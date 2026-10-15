@@ -50,8 +50,8 @@ export function clearStoredHistory() {
  * The toasts on screen and the notification history behind the top bar's bell. `showToast(msg,
  * type, options)` is the only way in: each call shows a toast and records a message in the history,
  * the same one unless `options.detail` gives the history a longer text than the toast carries.
- * `options.onOpen` makes the toast clickable (see Toast). Every callback is stable, so passing them
- * down re-renders nothing.
+ * `options.onOpen` makes the toast clickable (see Toast), and `options.openTitle` is the tooltip
+ * on its message. Every callback is stable, so passing them down re-renders nothing.
  */
 export function useToast() {
   const [toasts, setToasts] = useState([])
@@ -62,14 +62,14 @@ export function useToast() {
 
   useEffect(() => { writeStoredHistory(history) }, [history])
 
-  const showToast = useCallback((msg, type = 'success', { detail, onOpen } = {}) => {
+  const showToast = useCallback((msg, type = 'success', { detail, onOpen, openTitle } = {}) => {
     const entry = {
       id: nextId.current++,
       msg: msg == null ? '' : String(msg),
       type: TOAST_TYPES.includes(type) ? type : 'info',
       at: Date.now()
     }
-    const toast = onOpen ? { ...entry, onOpen } : entry
+    const toast = onOpen ? { ...entry, onOpen, openTitle } : entry
     const recordedMsg = detail == null ? entry.msg : String(detail)
     const sameToast = (e) => e.msg === entry.msg && e.type === entry.type
     const sameEntry = (e) => e.msg === recordedMsg && e.type === entry.type

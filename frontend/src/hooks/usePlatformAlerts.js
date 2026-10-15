@@ -62,7 +62,8 @@ export function usePlatformAlerts(showToast, onOpenAlerts) {
             row.severity === 'critical' ? 'error' : 'warning',
             {
               detail: `${row.alert_name}${row.summary ? ` — ${row.summary}` : ''}`,
-              onOpen: onOpenRef.current ? (id) => onOpenRef.current?.(id) : undefined
+              onOpen: onOpenRef.current ? (id) => onOpenRef.current?.(id) : undefined,
+              openTitle: 'Show the firing alerts'
             }
           )
         }

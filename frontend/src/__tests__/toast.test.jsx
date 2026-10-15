@@ -439,9 +439,39 @@ describe('a firing platform alert', () => {
     expect(document.querySelector('.toast')).toBeNull()
   })
 
+  it('says on hover where the alert toast leads', async () => {
+    await mountAlerts([row], vi.fn())
+    expect(screen.getByRole('button', { name: /Historian Backup Stale/ })).toHaveAttribute('title', 'Show the firing alerts')
+  })
+
   it('leaves other toasts unclickable', () => {
     renderStack()
     show('Saved', 'success')
     expect(within(toastFor('Saved')).queryAllByRole('button').map(b => b.getAttribute('aria-label'))).toEqual(['Dismiss'])
+  })
+})
+
+describe('a clickable toast', () => {
+  it('carries the tooltip it was given on its message, and none otherwise', () => {
+    renderStack()
+    act(() => { hook.showToast('Exported', 'warning', { onOpen: vi.fn(), openTitle: 'Open the Metrics page' }) })
+    act(() => { hook.showToast('Elsewhere', 'warning', { onOpen: vi.fn() }) })
+
+    expect(within(toastFor('Exported')).getByRole('button', { name: /Exported/ })).toHaveAttribute('title', 'Open the Metrics page')
+    expect(within(toastFor('Elsewhere')).getByRole('button', { name: /Elsewhere/ })).not.toHaveAttribute('title')
+  })
+
+  it('calls onOpen with its id from the message, and not from Dismiss', () => {
+    renderStack()
+    const onOpen = vi.fn()
+    act(() => { hook.showToast('Exported', 'warning', { onOpen }) })
+
+    fireEvent.click(within(toastFor('Exported')).getByRole('button', { name: 'Dismiss' }))
+    expect(onOpen).not.toHaveBeenCalled()
+
+    act(() => { hook.showToast('Exported again', 'warning', { onOpen }) })
+    fireEvent.click(within(toastFor('Exported again')).getByRole('button', { name: /Exported again/ }))
+    expect(onOpen).toHaveBeenCalledTimes(1)
+    expect(onOpen).toHaveBeenCalledWith(hook.toasts[0].id)
   })
 })
