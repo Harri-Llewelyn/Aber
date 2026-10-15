@@ -428,6 +428,21 @@ class ShadowGatewayNodeMessageTest(NodeMessageTestCase):
         self.assertEqual((call["p_gateway_id"], call["p_status"]), (self.gateway["id"], "ONLINE"))
         self.assertIn("aber_ingestion_gateway_heartbeats_total 1.0", samples())
 
+    def test_a_shadow_gateways_status_is_the_message_types(self):
+        # DEGRADED is not reserved, so accept_reported_status() lets an ordinary gateway report it.
+        for msg_type, expected in (("NBIRTH", "ONLINE"), ("NDATA", "ONLINE"), ("NDEATH", "OFFLINE")):
+            with self.subTest(msg_type):
+                self.fresh(is_shadow=True)
+                self.node([self.text("Gateway_Status", "DEGRADED")], msg_type=msg_type)
+                self.assertEqual(self.heartbeat()["p_status"], expected)
+
+    def test_an_ordinary_gateway_still_reports_its_own_status(self):
+        for row in ({}, {"is_shadow": False}):
+            with self.subTest(row):
+                self.fresh(**row)
+                self.node([self.text("Gateway_Status", "DEGRADED")])
+                self.assertEqual(self.heartbeat()["p_status"], "DEGRADED")
+
     def test_an_ordinary_gateway_still_records_all_three(self):
         # A row cached before the column was fetched has no key at all; it is an ordinary gateway.
         for row in ({}, {"is_shadow": False}):

@@ -1642,9 +1642,10 @@ daemon does with it:
   device ONLINE, its rows are not republished on the UNS (whose retained topics are current
   values), and a historical node message sets no gateway status, health or clock offset.
   A node message from a shadow gateway, the Playback gateway, records no health, outage report or
-  clock offset whether or not its metrics are historical: a replay republishes a recorded
-  appliance's, so they are not the Playback gateway's. Its heartbeat and status are written as for
-  any gateway.
+  clock offset whether or not its metrics are historical, and its `Gateway_Status` is ignored: a
+  replay republishes a recorded appliance's, so they are not the Playback gateway's. Its heartbeat
+  is written as for any gateway, with the status the message type implies (ONLINE, or OFFLINE for an
+  NDEATH).
 - **A replay out of order is not a gap.** The appliance stamps its seq as it publishes, so its
   replay is in sequence and checked like any message. A historical message from another edge node
   whose seq is not the next one, a replay under the seq it was first given, is counted in

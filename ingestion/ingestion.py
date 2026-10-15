@@ -2411,7 +2411,7 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
 
     NBIRTH/NDATA mark the edge node ONLINE; NDEATH marks it and every device behind it OFFLINE. A
     `Gateway_Status` metric overrides the gateway's derived status, subject to
-    accept_reported_status(). Gateways are never auto-created.
+    accept_reported_status(), except for a shadow gateway's. Gateways are never auto-created.
 
     An NDEATH whose bdSeq names an earlier session than the open one changes nothing: see
     stale_death().
@@ -2492,6 +2492,15 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
             )
         return
 
+    # A shadow gateway publishes only recordings of other machines, so its clock, outage report,
+    # health and reported status are theirs whether or not the metrics are marked historical. The
+    # first three are left out as a replay's are, and the status is the message type's. The
+    # heartbeat below still counts.
+    shadow = bool(gateway.get("is_shadow"))
+    own_readings = not replay and not shadow
+    if shadow:
+        status = "OFFLINE" if msg_type == "NDEATH" else "ONLINE"
+
     # Not skippable: `public.gateway_status` derives staleness from `last_heartbeat` at read time,
     # so suppressing this write would make a live gateway read STALE. The audit trigger subtracts
     # the columns a heartbeat writes (audit_telemetry_columns(), 0100) before comparing, so a
@@ -2499,11 +2508,6 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
     # records itself as a FLOW_DEPLOYED row. The comparison below only decides the log level.
     previous_status = gateway.get("status")
     transitioned = previous_status is not None and previous_status != status
-
-    # A shadow gateway publishes only recordings of other machines, so its clock, outage report and
-    # health are theirs whether or not the metrics are marked historical. Left out as a replay's
-    # are; the heartbeat below still counts.
-    own_readings = not replay and not gateway.get("is_shadow")
 
     # NDEATH excluded here, beside the msg_type the rest of this function branches on; see
     # record_gateway_clock_offset(). After the registration check, before health because this does

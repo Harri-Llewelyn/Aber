@@ -1243,8 +1243,10 @@ appliance's node messages as the Playback gateway, and the daemon used to record
 memory, free disk, CA date, agent version and flow hash as the gateway's own. The *Gateway Fleet
 Health* dashboard showed another machine's figures as Playback's, *Gateway CA Expiring* fired for it,
 and a replayed flow hash that differed wrote a `FLOW_DEPLOYED` audit row for a deployment that never
-happened. The daemon now writes a shadow gateway's heartbeat and status and no health, and `0186` sets
-the eight health columns of every shadow gateway back to NULL once; a second boot changes nothing.
+happened. The daemon now writes a shadow gateway's heartbeat and no health, and takes its status from the
+message type alone, since a replayed `Gateway_Status` is the recorded appliance's claim too. `0186`
+sets the eight health columns of every shadow gateway back to NULL once; a second boot changes
+nothing.
 `FLOW_DEPLOYED` rows already written stay, since `audit_trail` is append-only. The Playback row in
 `gateway_health` now shows a heartbeat and no readings.
 
