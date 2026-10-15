@@ -21,7 +21,7 @@ This page does not make backups itself. **Take a backup** queues a request, and 
 - **Replace Key** asks before it overwrites the stored key, because the old one cannot be recovered. A wrong key shows only when the next off-site copy fails.
 - **Address the bucket by path** is for MinIO and most self-hosted stores. Leave it off for AWS, R2 and B2.
 - **Remove the destination** stops the copies and deletes the secret key. Copies already made stay in the bucket.
-- **The filter** shows every run, or only the completed ones, or only the failed ones. A cancelled run is listed under all runs only.
+- **The filter**, at the left of the toolbar, shows every run, or only the completed ones, or only the failed ones. A cancelled run is listed under all runs only.
 - The list shows the newest 30 runs that match the filter. The foot says how many are loaded, such as `30 of 57`, beside **Show 27 more**. That adds older runs, up to 30 at a time. At the end it says **All 57 shown.**
 - **A run** opens its panel when you select anywhere on its row, or press Enter or Space on it. The panel shows the whole of any failure, and when the run was queued, started and finished. For a backup, it shows where its files are, each file with its size, and its off-site copy. **Release** is there too, on a pinned backup.
 
@@ -38,7 +38,7 @@ Either line clears itself at the next successful backup. If the backup service h
 
 ## The figures above the list
 
-A row of figures sits at the top of the page. It shows whether backups are heading for trouble, which the line above the list cannot: that line clears at the next success.
+A row of figures sits under the toolbar. It shows whether backups are heading for trouble, which the line above the list cannot: that line clears at the next success.
 
 - **Last good backup** is how long ago the last backup that completed was taken.
 - **Succeeded, 30 days** counts the runs that ended in the last 30 days, such as `29 of 30`. A cancelled run is not counted. Any failure turns it amber, so a backup that fails every other night shows here.
@@ -113,7 +113,7 @@ The backup volume is usually on the same disk as both databases. So on its own, 
 
 Each file is encrypted with age before it leaves the service, to the public key you entered. So neither the bucket's credential nor the service can read a copy. Only the matching identity (the private key) can decrypt it.
 
-- **The destination button** in the header says whether copies are made. While there is no off-site copy it reads **Set a destination**. While the destination is missing a field it reads **Complete the destination**. Both are amber with a warning icon, and say what is missing. Once copies can be made it reads **Change destination**, and its tooltip names where they go.
+- **The destination button**, in the toolbar beside **Take a backup**, says whether copies are made. While there is no off-site copy it reads **Set a destination**. While the destination is missing a field it reads **Complete the destination**. Both are amber with a warning icon, and say what is missing. Once copies can be made it reads **Change destination**, and its tooltip names where they go.
 - **The Off site column** says, for each backup, **Copied**, **Waiting** or **Failed, retrying**. Hover over **Copied** for where and when. **Waiting** means the service has not reached it yet; it copies newest first, one at a time. **Failed, retrying** has the store's reason in the tooltip.
 - **Copied** stays on a backup after the destination is removed. A backup copied to a destination that was since replaced goes back to **Waiting**, and the service copies it again. **—** means no destination is set and no copy was made.
 - A failed copy never fails the backup. The local backup is still good, and the service tries the copy again a few minutes later.

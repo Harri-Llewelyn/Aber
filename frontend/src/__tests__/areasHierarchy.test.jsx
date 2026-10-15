@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { AreasTab } from '../components/tabs/AreasTab'
 import { SiteMapTab } from '../components/tabs/SiteMapTab'
 import { api } from '../api'
-import { expectCardHeading } from '../test/cardHeading'
+import { expectCardHeading, expectToolbarButton, pageToolbar } from '../test/cardHeading'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -103,7 +103,8 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(within(cards[0]).getByRole('heading', { name: /^Site Map/ })).toHaveClass('section-title')
     const header = expectCardHeading('Site Map', /plan/)
     expect(cards[0].querySelector(':scope > .card-header')).toBe(header)
-    expect(header.querySelector('.shopfloor-legend')).toHaveTextContent('Alert firing')
+    // The legend explains the map, so it ends the toolbar under the heading.
+    expect(pageToolbar().querySelector(':scope > .filter-bar-actions .shopfloor-legend')).toHaveTextContent('Alert firing')
     expect(cards[0].querySelector(':scope > .card-body')).toContainElement(hierarchy)
   })
 
@@ -449,6 +450,9 @@ describe('SiteMapTab draws the areas on the Site Map', () => {
     expect(pinNames()).toEqual([])
     const toggle = screen.getByRole('button', { name: /Show archived areas \(1\)/ })
     expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    // A filter, so on the toolbar's left, ahead of the legend's group.
+    expect(toggle.parentElement).toBe(pageToolbar())
+    expect(follows(toggle, pageToolbar().querySelector('.filter-bar-actions'))).toBe(true)
     // Says what is hidden with it: North Shop's two cells, CNC_01 in Bay 1 and its BMS.
     expect(toggle).toHaveAttribute('title', expect.stringMatching(/2 cells and 2 devices/))
 
@@ -722,10 +726,11 @@ describe('AreasTab is the house list card', () => {
     expect(document.querySelector('.card-fill > .table-wrap')).toBeInTheDocument()
   })
 
-  it('names the page in its card header, with no title tip', async () => {
+  it('names the page in its card header, with no title tip, and New Area ends the toolbar', async () => {
     await renderAreas()
     expectCardHeading('Areas', /ISA-95/)
-    expect(within(document.querySelector('.card-header')).getByRole('button', { name: /New Area/ })).toBeInTheDocument()
+    const button = expectToolbarButton(/New Area/)
+    expect(button.parentElement.lastElementChild).toBe(button)
   })
 
   it('narrows the list under a search, and keeps the counts in the lifecycle options', async () => {

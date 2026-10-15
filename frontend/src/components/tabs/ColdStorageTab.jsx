@@ -27,7 +27,7 @@ import {
  * Cold Storage: telemetry tiered out of the hypertable as Parquet objects. Not Archived Entities,
  * which sits two places below it in the rail, past Backups, and has a Restore button and a purge
  * timer; there is no restore here. An Administrator sets the destination and the on/off switch
- * from the header button's dialog. The catalogue leads with the span the manifest covers and what
+ * from the toolbar button's dialog. The catalogue leads with the span the manifest covers and what
  * is outstanding, since the hypertable can no longer say how far back the data goes. Exporting and
  * dropping are done by `python -m cold_archive`.
  */
@@ -54,7 +54,7 @@ export function ColdStorageTab({ showToast, userRole }) {
   const [editing, setEditing] = useState(false)
 
   // The destination is Administrator-only: its settings are flagged `sensitive`, so for anybody
-  // else the read below omits them and the header button is not rendered.
+  // else the read below omits them and the toolbar button is not rendered.
   const isAdmin = userRole === 'Administrator'
 
   const load = useCallback((initial = false) => {
@@ -113,15 +113,22 @@ export function ColdStorageTab({ showToast, userRole }) {
             title="Cold Storage"
             description="Telemetry aged out of the historian into object storage outside this cluster, where each object is the only copy of its span."
             note={rawWindowStatement(rawWindow, archiveEnabled)}
-            actions={isAdmin && settingsRead && (
-              <DestinationButton
-                enabled={archiveEnabled}
-                missing={missing}
-                destination={destination}
-                onOpen={() => setEditing(true)}
-              />
-            )}
           />
+
+          {/* The page has nothing to filter, so the toolbar is the destination button alone, at the
+              right-hand end where Backups has its own. */}
+          {isAdmin && settingsRead && (
+            <div className="filter-bar">
+              <div className="filter-bar-actions">
+                <DestinationButton
+                  enabled={archiveEnabled}
+                  missing={missing}
+                  destination={destination}
+                  onOpen={() => setEditing(true)}
+                />
+              </div>
+            </div>
+          )}
 
           {loading ? (
             <LoadingState label="the cold storage catalogue" />
@@ -183,7 +190,7 @@ export function ColdStorageTab({ showToast, userRole }) {
                       list is empty because of your role, not because nothing is archived.
                     </div>
                   ) : archiveEnabled && isAdmin && missing.length > 0 ? (
-                    /* On and unable to run: the header button says what is missing, and this arm
+                    /* On and unable to run: the toolbar button says what is missing, and this arm
                        keeps the empty state from blaming eligibility instead. */
                     <div className="empty-text">
                       Nothing has been archived because there is nowhere to write it yet: the
@@ -290,7 +297,7 @@ export function ColdStorageTab({ showToast, userRole }) {
 }
 
 /**
- * The header's way into the destination dialog, in three states: off (neutral, and its tooltip
+ * The toolbar's way into the destination dialog, in three states: off (neutral, and its tooltip
  * says what is lost meanwhile), on but incomplete (a warning naming what is missing, also given to
  * a screen reader), and on and complete (neutral, naming where objects go). Administrator only,
  * rendered by the caller on that condition: for anybody else the sensitive reads come back empty

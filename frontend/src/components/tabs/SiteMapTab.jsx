@@ -662,32 +662,34 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
             icon={<IconMap size={15} />}
             title="Site Map"
             description="Every area in service drawn as its plan, with its cells pinned and coloured by device state; the lanes hold whatever belongs to no area."
-            actions={(
-              <div className="site-map-heading-actions">
-                {/* Offered only while an area is archived; the count is what it would draw. */}
-                {archivedAreas.length > 0 && (
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${showArchived ? 'btn-primary' : 'btn-ghost'}`}
-                    onClick={() => setShowArchived(v => !v)}
-                    aria-pressed={showArchived}
-                    title={`Archived areas are left off the map, and with them the ${plural(hiddenWithArchived.cells, 'cell')} and ${plural(hiddenWithArchived.devices, 'device')} filed in them.`}
-                  >
-                    <IconArchive size={13} /> Show archived areas ({archivedAreas.length})
-                  </button>
-                )}
-                {/* The legend decodes the pin colours below and the tile dots in the lanes. */}
-                <div className="shopfloor-legend">
-                  <span title={STATUS_LABEL.normal}><span className="tile-dot tile-dot-normal" /> Online</span>
-                  <span title={STATUS_LABEL.attention}><span className="tile-dot tile-dot-attention" /> Needs attention</span>
-                  <span title={STATUS_LABEL.idle}><span className="tile-dot tile-dot-idle" /> Nothing live</span>
-                  {/* A chip swatch, not a dot: an alert belongs to one device, and a pin turns red
-                      for it while the dots roll up a whole tile. */}
-                  <span title={STATUS_LABEL.alert}><span className="legend-chip legend-chip-danger" /> Alert firing</span>
-                </div>
-              </div>
-            )}
           />
+
+          {/* The toolbar: the archived toggle on the left, the legend at the right-hand end. */}
+          <div className="filter-bar">
+            {/* Offered only while an area is archived; the count is what it would draw. */}
+            {archivedAreas.length > 0 && (
+              <button
+                type="button"
+                className={`btn btn-sm ${showArchived ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => setShowArchived(v => !v)}
+                aria-pressed={showArchived}
+                title={`Archived areas are left off the map, and with them the ${plural(hiddenWithArchived.cells, 'cell')} and ${plural(hiddenWithArchived.devices, 'device')} filed in them.`}
+              >
+                <IconArchive size={13} /> Show archived areas ({archivedAreas.length})
+              </button>
+            )}
+            {/* The legend decodes the pin colours below and the tile dots in the lanes. */}
+            <div className="filter-bar-actions">
+              <div className="shopfloor-legend">
+                <span title={STATUS_LABEL.normal}><span className="tile-dot tile-dot-normal" /> Online</span>
+                <span title={STATUS_LABEL.attention}><span className="tile-dot tile-dot-attention" /> Needs attention</span>
+                <span title={STATUS_LABEL.idle}><span className="tile-dot tile-dot-idle" /> Nothing live</span>
+                {/* A chip swatch, not a dot: an alert belongs to one device, and a pin turns red
+                    for it while the dots roll up a whole tile. */}
+                <span title={STATUS_LABEL.alert}><span className="legend-chip legend-chip-danger" /> Alert firing</span>
+              </div>
+            </div>
+          </div>
 
           <div className="card-body site-map-body">
             {loading ? <LoadingState label="site map" /> : (

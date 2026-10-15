@@ -291,30 +291,15 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
         </div>
       )}
 
-      {/* One card, composed as every card is: title, primary action, then the filters that narrow
-          what is below. */}
+      {/* One card, composed as every card is: the title, then the toolbar that narrows what is
+          below and ends in the primary action. */}
       <div className="card card-fill">
         <CardHeading
           icon={<IconLayoutDashboard size={15} />}
           title="Cells"
           description="A line, bay or group of assets within an area. Gateways and devices are filed in cells, which can be pinned on the area’s plan."
-          actions={(
-            <>
-              {/* The primary action in the header, where every card keeps its. */}
-              <ActionButton
-                className="btn btn-primary btn-sm"
-                permitted={canManage}
-                deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.CELL_MANAGE)}
-                title="Configure new cell"
-                onClick={() => openForm(null, blank)}
-              >
-                <IconPlus size={14} /> New Cell
-              </ActionButton>
-            </>
-          )}
         />
 
-        <div className="card-body">
           <div className="filter-bar">
             {/* Lifecycle is a filter like the rest; the counts are in the option labels. */}
             <select
@@ -352,12 +337,22 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
               Empty ({emptyCount})
             </button>
 
-            <ClearFilters
-              count={activeFilterCount}
-              onClear={() => { clearSearch(); setAttentionOnly(false); setEmptyOnly(false); setFilterMode('active') }}
-            />
+            <div className="filter-bar-actions">
+              <ClearFilters
+                count={activeFilterCount}
+                onClear={() => { clearSearch(); setAttentionOnly(false); setEmptyOnly(false); setFilterMode('active') }}
+              />
+              <ActionButton
+                className="btn btn-primary btn-sm"
+                permitted={canManage}
+                deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.CELL_MANAGE)}
+                title="Configure new cell"
+                onClick={() => openForm(null, blank)}
+              >
+                <IconPlus size={14} /> New Cell
+              </ActionButton>
+            </div>
           </div>
-        </div>
 
         {/* One table, not a card per cell: a cell reads as one row and the drawer holds its detail,
             which is what keeps the page scannable at any fleet size. */}

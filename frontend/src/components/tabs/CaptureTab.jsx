@@ -411,18 +411,6 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             icon={<IconRecord size={15} />}
             title="Capture"
             description="What the plant actually published, kept verbatim and played back through the real broker as the Playback gateway."
-            actions={(
-              /* Stored first, then played: the worker reads its capture out of Storage. */
-              <ActionButton
-                className="btn btn-ghost btn-sm"
-                permitted={canManage}
-                deniedTitle={DENIED_TITLE}
-                onClick={() => playFileRef.current?.click()}
-                title="Store a capture file and go straight to playing it back. Dropping the file on this card does the same."
-              >
-                <IconPlay size={13} /> Play a file…
-              </ActionButton>
-            )}
           />
 
           <TabStrip
@@ -482,7 +470,19 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               ariaLabel="Search subjects"
             />
 
-            <ClearFilters count={activeFilterCount} onClear={clearFilters} />
+            <div className="filter-bar-actions">
+              <ClearFilters count={activeFilterCount} onClear={clearFilters} />
+              {/* Stored first, then played: the worker reads its capture out of Storage. */}
+              <ActionButton
+                className="btn btn-ghost btn-sm"
+                permitted={canManage}
+                deniedTitle={DENIED_TITLE}
+                onClick={() => playFileRef.current?.click()}
+                title="Store a capture file and go straight to playing it back. Dropping the file on this card does the same."
+              >
+                <IconPlay size={13} /> Play a file…
+              </ActionButton>
+            </div>
           </div>
 
           {/* What is in flight or has just failed, on either tab. Each strip renders nothing when

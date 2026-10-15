@@ -3,7 +3,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CellsTab } from '../components/tabs/CellsTab'
 import { api } from '../api'
-import { expectCardHeading } from '../test/cardHeading'
+import { expectCardHeading, expectToolbarButton } from '../test/cardHeading'
 
 /**
  * The Cells page as a table. The context drawer holds the UUID, both membership lists as linking
@@ -260,11 +260,11 @@ describe('filters still narrow the table', () => {
     expect(document.querySelector('.empty-state')).toHaveTextContent('No cells match these filters.')
   })
 
-  it('names the page in its card header, with no title tip', async () => {
+  it('names the page in its card header, with no title tip, and New Cell in the toolbar', async () => {
     renderCells({}, { cells: [] })
     await waitFor(() => expect(document.querySelector('.empty-state')).toBeTruthy())
-    const header = expectCardHeading('Cells', /area/)
-    expect(header).toHaveTextContent('New Cell')
+    expectCardHeading('Cells', /area/)
+    expectToolbarButton(/New Cell/)
   })
 
   it('says there are none yet on an empty stack, with no count on the heading', async () => {

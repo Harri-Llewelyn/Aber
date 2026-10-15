@@ -3,7 +3,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SchemasTab } from '../components/tabs/SchemasTab'
 import { api } from '../api'
-import { expectCardHeading } from '../test/cardHeading'
+import { expectCardHeading, expectToolbarButton } from '../test/cardHeading'
 
 /**
  * The schema registry. The metric catalog left this page for its own (MetricsTab.test.jsx), so
@@ -46,11 +46,11 @@ beforeEach(() => {
 })
 
 describe('the schemas card header', () => {
-  it('names the page with its icon, title and description, and no title tip', async () => {
+  it('names the page with its icon, title and description, and no title tip, and its button in the toolbar', async () => {
     renderTab()
     await waitForRegistry()
-    const header = expectCardHeading('Schemas', /modelled to publish/)
-    expect(header).toHaveTextContent('Build Schema from Catalog')
+    expectCardHeading('Schemas', /modelled to publish/)
+    expectToolbarButton(/Build Schema from Catalog/)
   })
 })
 

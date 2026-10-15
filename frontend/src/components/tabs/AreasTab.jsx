@@ -288,22 +288,8 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
           icon={<IconFactory size={15} />}
           title="Areas"
           description="The ISA-95 level between the site and its cells, such as a hall or a yard, so readings can say where they came from."
-          actions={(
-            <>
-              <ActionButton
-                className="btn btn-primary btn-sm"
-                permitted={canManage}
-                deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.CELL_MANAGE)}
-                title="Add an area"
-                onClick={() => openForm(null, blank)}
-              >
-                <IconPlus size={14} /> New Area
-              </ActionButton>
-            </>
-          )}
         />
 
-        <div className="card-body">
           <div className="filter-bar">
             {/* Lifecycle is a filter like the rest, as it is on the Cells page; the counts are in
                 the option labels. */}
@@ -324,9 +310,19 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               placeholder="Search by area ID or name…"
               ariaLabel="Search areas"
             />
-            <ClearFilters count={activeFilterCount} onClear={() => { clearSearch(); setFilterMode('active') }} />
+            <div className="filter-bar-actions">
+              <ClearFilters count={activeFilterCount} onClear={() => { clearSearch(); setFilterMode('active') }} />
+              <ActionButton
+                className="btn btn-primary btn-sm"
+                permitted={canManage}
+                deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.CELL_MANAGE)}
+                title="Add an area"
+                onClick={() => openForm(null, blank)}
+              >
+                <IconPlus size={14} /> New Area
+              </ActionButton>
+            </div>
           </div>
-        </div>
 
         {loading ? (
           <LoadingState label="areas" />

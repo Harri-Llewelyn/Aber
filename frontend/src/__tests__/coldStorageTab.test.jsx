@@ -144,7 +144,7 @@ describe('the cold storage catalogue', () => {
     expect(screen.queryByText(/No telemetry has been archived/i)).toBeNull()
   })
 
-  it('tells a privileged reader that nothing is archived, and that the switch is the header button', async () => {
+  it('tells a privileged reader that nothing is archived, and that the switch is the toolbar button', async () => {
     await show([], 'Administrator')
     await waitFor(() => expect(screen.getByText(/No telemetry has been archived/i)).toBeInTheDocument())
     const text = screen.getByText(/No telemetry has been archived/i).textContent
@@ -355,8 +355,13 @@ describe('the destination button', () => {
   /** The archive settings the page reads come back through api.get. */
   const withDestination = (rows) => api.get.mockResolvedValue(rows)
 
-  /** The card heading, where the button sits. */
-  const header = () => catalogue().querySelector('.card-heading')
+  /** The right-hand group of the toolbar under the card heading, where the button sits. */
+  const toolbarActions = () => catalogue().querySelector(':scope > .card-heading + .filter-bar > .filter-bar-actions')
+  const findInToolbar = async (name) => {
+    const button = await screen.findByRole('button', { name })
+    expect(toolbarActions()).toContainElement(button)
+    return button
+  }
 
   it('is not rendered for a reader who cannot see the destination', async () => {
     // The archive settings are flagged `sensitive`, so an Auditor's read omits them, and a button
@@ -364,13 +369,15 @@ describe('the destination button', () => {
     withDestination([])
     await show([], 'Auditor')
     await waitFor(() => expect(screen.getByText(/No telemetry has been archived/i)).toBeInTheDocument())
-    expect(within(header()).queryByRole('button')).toBeNull()
+    // The page has nothing else for the toolbar to hold, so there is none.
+    expect(catalogue().querySelector('.filter-bar')).toBeNull()
+    expect(within(catalogue().querySelector('.card-heading')).queryByRole('button')).toBeNull()
   })
 
   it('offers to set up cold storage while archiving is off, saying what is lost meanwhile', async () => {
     withDestination([{ key: 'archive.enabled', value: false }])
     await show([], 'Administrator')
-    const button = await within(header()).findByRole('button', { name: 'Set up cold storage' })
+    const button = await findInToolbar('Set up cold storage')
     expect(button).toHaveClass('btn-ghost')
     expect(button.getAttribute('title')).toMatch(/dropped and cannot be recovered/)
   })
@@ -379,7 +386,7 @@ describe('the destination button', () => {
     // On, and nowhere to write: the state the dialog exists to prevent.
     withDestination([{ key: 'archive.enabled', value: true }])
     await show([], 'Administrator')
-    const button = await within(header()).findByRole('button', { name: /Complete the destination/ })
+    const button = await findInToolbar(/Complete the destination/)
     expect(button).toHaveClass('btn-warning')
     expect(button.querySelector('svg')).not.toBeNull()
     // Not tooltip-only: the missing parts reach a screen reader through aria-describedby.
@@ -391,7 +398,7 @@ describe('the destination button', () => {
     withDestination(ENABLED_AND_CONFIGURED)
     api.archiveCredentialIsSet.mockResolvedValue(true)
     await show([], 'Administrator')
-    const button = await within(header()).findByRole('button', { name: 'Change destination' })
+    const button = await findInToolbar('Change destination')
     expect(button).toHaveClass('btn-ghost')
     await waitFor(() => expect(button.getAttribute('title'))
       .toMatch('https://s3.eu-west-2.amazonaws.com/plant-history/site=broughton-7f3a9c21/'))
@@ -402,7 +409,7 @@ describe('the destination button', () => {
     api.archiveCredentialIsSet.mockResolvedValue(true)
     api.patchSetting.mockResolvedValue({})
     await show([], 'Administrator')
-    fireEvent.click(await within(header()).findByRole('button', { name: 'Change destination' }))
+    fireEvent.click(await findInToolbar('Change destination'))
     expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(screen.getByLabelText('S3 bucket')).toHaveValue('plant-history')
 
@@ -490,13 +497,16 @@ describe('the page layout', () => {
     expect(card.querySelector('.section-count')).toBeNull()
   })
 
-  it('titles the page as the rail does, and puts the destination button in that heading', async () => {
+  it('titles the page as the rail does, and puts the destination button in the toolbar under it', async () => {
     api.get.mockResolvedValue([])
     await show([row()])
     const heading = await screen.findByRole('heading', { name: 'Cold Storage' })
     expect(heading.closest('.card-heading')).toBeTruthy()
-    const header = heading.closest('.card-header')
-    expect(await within(header).findByRole('button', { name: 'Set up cold storage' })).toBeInTheDocument()
+    const button = await screen.findByRole('button', { name: 'Set up cold storage' })
+    // Where Backups has its own: the toolbar's right-hand group, straight under the heading.
+    expect(button.closest('.filter-bar-actions')).toBe(
+      heading.closest('.card').querySelector(':scope > .card-heading + .filter-bar > .filter-bar-actions'))
+    expect(heading.closest('.card-header')).not.toContainElement(button)
   })
 
   it('keeps the end of a long object key, which names the span, and copies the whole key', async () => {

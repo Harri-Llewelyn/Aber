@@ -58,17 +58,18 @@ describe('the tokens', () => {
 
 describe('every container refers to the token rather than restating it', () => {
 
-  // The card edge. It and the page edge were the two outliers, at 20px and 24px.
+  // The card edge. It and the page edge were the two outliers, at 20px and 24px. The toolbar runs
+  // edge to edge under the heading, so it takes the card's inset too.
   it.each([
     ['.card-header', 'a card header'],
-    ['.card-body', 'a card body']
+    ['.card-body', 'a card body'],
+    ['.filter-bar', 'a page toolbar']
   ])('%s insets by var(--inset)', (selector) => {
     expect(rule(selector)).toMatch(/padding:[^;]*var\(--inset\)/)
   })
 
   // Chrome that already sits on a panel, one step further in.
   it.each([
-    ['.filter-bar'],
     ['.context-panel-header'],
     ['.context-panel-body']
   ])('%s insets by var(--inset-tight)', (selector) => {

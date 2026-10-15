@@ -465,6 +465,21 @@ line keeps search, status and the key toggle and moves the rest into `common/Fil
 
 ---
 
+## The toolbar
+
+**Every page has one toolbar, in one place, with one look.** It is the `.filter-bar` row straight
+under the `CardHeading`, or under the tab bar on a tabbed page, a direct child of the card. The
+filters go on the left. The page's buttons go in `.filter-bar-actions` at the right-hand end:
+`ClearFilters` first, then secondary buttons such as Export or a destination button, then the main
+button last. A legend that explains the page, as on the Site Map, goes there too. The row runs edge
+to edge and is ruled off from what is below it. A page or tab with nothing to filter and no buttons
+draws no toolbar.
+
+`CardHeading` takes no buttons: it has no `actions` prop, and `cardHeading.test.jsx` fails on a
+page that passes one. So a page's main button is in the same place whether or not it has tabs.
+
+---
+
 ## Words and rules
 
 The words and rules every page follows, so a page is checked against one list rather than against
@@ -499,7 +514,8 @@ in "building management system".
 
 - **Page identity.** A page has one card. Its icon, title and one-sentence description are the
   card's `CardHeading`, stated once; there is no `PageHeading` above it. A tabbed page puts its tab
-  bar inside that card, and the tab's "?" and the toolbar row follow [Tabs](#tabs).
+  bar inside that card, and the tab's "?" and the toolbar row follow [Tabs](#tabs). Buttons go in
+  the toolbar, never the heading ([The toolbar](#the-toolbar)).
 - **Scroll.** Every page scrolls inside its card, Access Control, Directory and Approvals included.
 - **Counts.** None on card headings, section headings or tabs. A count stays where it states what is
   loaded ("30 of 55" beside Show more), what a filter option or toggle holds ("Active (4)", "Show
@@ -508,7 +524,8 @@ in "building management system".
 - **Queues are tabs.** Devices' quarantine queue is its Quarantine tab, not a card above the roster;
   a tab with work waiting takes `attention`.
 - **Clear filters (N).** N counts every control that is off its default, the lifecycle select
-  included. The button (`common/ClearFilters.jsx`) sits at the right end of the filter bar.
+  included. The button (`common/ClearFilters.jsx`) sits at the right end of the toolbar, first in
+  `.filter-bar-actions` when the page has buttons.
 - **Empty states** tell "none yet" from "none match".
 - **Permission hints** name the roles that hold the permission ("Requires Administrator or Shopfloor
   Manager"), from one helper, never "Admin".

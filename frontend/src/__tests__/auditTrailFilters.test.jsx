@@ -12,7 +12,7 @@ import {
   AuditTrailTab, classifyEvent, diffFields, tickFormatter, shortId, timeWindow, MARKERS, CLUSTER_GAP_PX
 } from '../components/tabs/AuditTrailTab'
 import { api } from '../api'
-import { expectCardHeading } from '../test/cardHeading'
+import { expectCardHeading, expectToolbarButton } from '../test/cardHeading'
 
 /* Newlines normalised on read, because `cssRule()` matches multi-line selectors with `\n` and
    .gitattributes checks this file out with the platform's native ending, CRLF on Windows. */
@@ -139,10 +139,10 @@ const kindSelect = () => { openFilters(); return screen.getByTitle(/Show only ev
 const actionSelect = () => { openFilters(); return screen.getByTitle(/Filter by the database action/) }
 
 describe('Audit Trail card header', () => {
-  it('names the page with its icon, title and description, and Export on the right', async () => {
+  it('names the page with its icon, title and description, and nothing else', async () => {
     await show()
     const header = expectCardHeading('Audit Trail', /attributed change/)
-    expect(header).toHaveTextContent('Export CSV')
+    expect(header).not.toHaveTextContent('Export CSV')
   })
 })
 
@@ -1050,7 +1050,7 @@ describe('Audit Trail — removed tag filter', () => {
   it('leaves two controls in the bar, four in the custom range mode, and two in the popover', async () => {
     await show()
 
-    // The bar's own controls: the search box and the range. Export sits in the card header.
+    // The bar's own controls: the search box and the range. Export is a button, not a control.
     const controls = () => document.querySelectorAll('.filter-bar select, .filter-bar input')
     expect(controls().length).toBe(2)
 
@@ -1063,19 +1063,19 @@ describe('Audit Trail — removed tag filter', () => {
     expect(screen.getByRole('dialog', { name: 'Filters' }).querySelectorAll('select')).toHaveLength(2)
   })
 
-  it('puts export in the card header, where a card keeps its actions', async () => {
-    /* Export sits in the card header at title height, because it does not filter anything, and the
+  it('puts export at the right-hand end of the toolbar, after Clear filters', async () => {
+    /* Export is the page's one button, so it ends the toolbar as every page's buttons do, and the
        count stays the filtered count so the button says how many rows it will write.
        `.page-actions` must not come back. */
     await show()
 
     expect(document.querySelector('.page-actions')).toBeNull()
-    const header = document.querySelector('.page-main .card > .card-header')
-    expect(header).toBeTruthy()
-    expect(within(header).getByRole('button', { name: /Export CSV/ })).toBeInTheDocument()
-    // And not in the filter bar it used to live in.
-    const bar = document.querySelector('.filter-bar')
-    expect(within(bar).queryByRole('button', { name: /Export CSV/ })).toBeNull()
+    const exportButton = expectToolbarButton(/Export CSV/)
+    expect(exportButton.parentElement.lastElementChild).toBe(exportButton)
+
+    fireEvent.change(screen.getByPlaceholderText('Search a name or any ID…'), { target: { value: 'Press' } })
+    const clear = await screen.findByRole('button', { name: /Clear filters/ })
+    expect(clear.nextElementSibling).toBe(exportButton)
   })
 
   it('no longer offers the auto-refresh control, having replaced it with a poll (issue #42)', async () => {
