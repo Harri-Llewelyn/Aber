@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react'
+import React from 'react'
 import { IconUser, IconLock, IconAlertTriangle } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
+import { useUrlTab } from '../../hooks/useUrlState'
 import { SIDEBAR_MODES } from '../../hooks/useSidebarMode'
 import { MIN_PASSWORD_LENGTH } from '../../utils/passwords'
 
@@ -64,20 +65,13 @@ function ProfileTable({ children }) {
  * `settingsSource` is that hook's `source`; 'browser' means the row could not be read or written.
  * `passwordBlocked` is why Change Password is unavailable (a machine identity), or null.
  * `userRole` is undefined while it is still being read, and null for an account with no role.
+ * The tab is the path: `/profile/appearance`.
  */
 export function ProfileTab({
   email, userRole, passwordBlocked = null, onChangePassword,
   theme, onChangeTheme, sidebarMode, onChangeSidebarMode, settingsSource = 'account',
-  initialSection = '', onClearSection,
 }) {
-  const [section, setSection] = useState(PROFILE_SECTIONS[0].id)
-
-  // Opens the tab a search-bar card named, then drops the request so a later visit starts on Account.
-  useEffect(() => {
-    if (!initialSection) return
-    if (PROFILE_SECTIONS.some(s => s.id === initialSection)) setSection(initialSection)
-    onClearSection?.()
-  }, [initialSection, onClearSection])
+  const [section, setSection] = useUrlTab('profile', PROFILE_SECTIONS.map(s => s.id), PROFILE_SECTIONS[0].id)
 
   const mode = SIDEBAR_MODES.find(m => m.id === sidebarMode) || SIDEBAR_MODES[0]
 

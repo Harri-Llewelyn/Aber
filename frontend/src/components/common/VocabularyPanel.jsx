@@ -6,6 +6,7 @@ import { TabStrip } from './TabStrip'
 import { SearchInput } from './SearchInput'
 import { EmptyState } from './EmptyState'
 import { ExpandAllToggle } from './ExpandAllToggle'
+import { useUrlState, useUrlTab, pathSlug } from '../../hooks/useUrlState'
 
 /**
  * The standard vocabularies as the page's one card: its heading, a tab per standard with the selected
@@ -19,8 +20,13 @@ import { ExpandAllToggle } from './ExpandAllToggle'
  */
 export function VocabularyPanel({ title = 'Vocabulary', subtitle, tabs, canAddMetric }) {
   const available = (tabs || []).filter(Boolean)
-  const [activeId, setActiveId] = useState(available[0]?.id)
-  const [search, setSearch] = useState('')
+  // The standard on show, in the path by its slug (`/vocabulary/opc-ua`); the first is the bare
+  // page. The search is a query parameter that stays across a switch, so one query asks every
+  // standard.
+  const [activeSlug, setActiveSlug] = useUrlTab('vocabulary', available.map(t => pathSlug(t.id)), pathSlug(available[0]?.id), { keep: ['search'] })
+  const activeId = available.find(t => pathSlug(t.id) === activeSlug)?.id
+  const setActiveId = (id) => setActiveSlug(pathSlug(id))
+  const [search, setSearch] = useUrlState('search')
   const [expanded, setExpanded] = useState({})
 
   // Falls back to the first tab rather than rendering nothing: the vocabularies load

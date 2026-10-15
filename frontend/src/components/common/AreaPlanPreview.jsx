@@ -2,6 +2,8 @@ import React from 'react'
 import { AreaPlan, AreaPlanPin } from './AreaPlan'
 import { cellIconComponent } from '../../utils/cellIcon'
 import { isPlaced } from '../../utils/areaPlans'
+import { RouteLink } from './RouteLink'
+import { siteMapAreaUrl } from '../../routes'
 
 /**
  * An area's plan drawn read-only, with the area's placed cells pinned on it, for the Areas and
@@ -17,25 +19,20 @@ import { isPlaced } from '../../utils/areaPlans'
  * @param {string} [highlightCellId] The cell the panel is about. Its pin is ringed and full size;
  * every other pin is small and dimmed. Without it every pin is drawn alike.
  *
- * @param {Function} [onOpen] Called with the area id on a click or Enter, to open the Site Map on
- * that area. Without it the preview is not a control.
+ * @param {Function} [onOpen] Called with the area id on a plain click, to open the Site Map on that
+ * area. With it the preview is a link to that address; without it the preview is not a control.
  */
 export function AreaPlanPreview({ area, cells, highlightCellId = null, onOpen }) {
   const pinned = (cells || []).filter(c =>
     c.area_id === area.area_id && isPlaced(c) && (!c.is_archived || c.cell_id === highlightCellId))
-  const open = onOpen ? () => onOpen(area.area_id) : null
   const label = `Open ${area.area_name} on the Site Map`
+  const Frame = onOpen ? RouteLink : 'div'
+  const link = onOpen
+    ? { to: siteMapAreaUrl(area.area_id), onNavigate: () => onOpen(area.area_id), 'aria-label': label, title: label }
+    : {}
 
   return (
-    <div
-      className="area-plan-preview"
-      role={open ? 'link' : undefined}
-      tabIndex={open ? 0 : undefined}
-      aria-label={open ? label : undefined}
-      title={open ? label : undefined}
-      onClick={open || undefined}
-      onKeyDown={open ? (e => { if (e.key === 'Enter') { e.preventDefault(); open() } }) : undefined}
-    >
+    <Frame className="area-plan-preview" {...link}>
       <AreaPlan area={area}>
         {pinned.map(c => {
           const subject = c.cell_id === highlightCellId
@@ -54,6 +51,6 @@ export function AreaPlanPreview({ area, cells, highlightCellId = null, onOpen })
           )
         })}
       </AreaPlan>
-    </div>
+    </Frame>
   )
 }

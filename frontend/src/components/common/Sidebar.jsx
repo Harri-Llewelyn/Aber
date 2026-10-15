@@ -4,6 +4,7 @@ import { SIDEBAR_MODES } from '../../hooks/useSidebarMode'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { IconPanelLeft, IconCheck } from './Icons'
+import { RouteLink } from './RouteLink'
 
 /**
  * The primary navigation: a 52px rail of icons with a labelled panel.
@@ -19,10 +20,13 @@ import { IconPanelLeft, IconCheck } from './Icons'
  * transparent labels is not navigation. A focus that arrives while the pointer is already on the
  * rail is a click, and is ignored so the panel does not stay open over the page it navigated to.
  *
+ * Each page is a link to `hrefFor(id)`, so Ctrl-click, middle-click and "Copy link address" work. A
+ * plain click navigates in place, through `onNavigate(id)` when it is given.
+ *
  * `account` is the account control App.jsx renders (its `UserMenu`), placed at the foot above the
  * behaviour control.
  */
-export function Sidebar({ tabs, currentTab, onNavigate, mode = 'hover', onChangeMode, signals = {}, account = null }) {
+export function Sidebar({ tabs, currentTab, onNavigate, hrefFor = id => `/${id}`, mode = 'hover', onChangeMode, signals = {}, account = null }) {
   const [hovered, setHovered] = useState(false)
   const [focused, setFocused] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -53,10 +57,11 @@ export function Sidebar({ tabs, currentTab, onNavigate, mode = 'hover', onChange
               // and label (the count is aria-hidden: the label already carries it).
               const signal = signals[t.id]
               return (
-                <button
+                <RouteLink
                   key={t.id}
+                  to={hrefFor(t.id)}
+                  onNavigate={onNavigate ? () => onNavigate(t.id) : undefined}
                   className={`sidebar-item${currentTab === t.id ? ' active' : ''}${signal ? ` sidebar-item-${signal.tone}` : ''}`}
-                  onClick={() => onNavigate(t.id)}
                   title={signal ? `${t.label} — ${signal.note}` : `Navigate to ${t.label} page`}
                   aria-label={signal ? `${t.label} — ${signal.note}` : t.label}
                   aria-current={currentTab === t.id ? 'page' : undefined}
@@ -64,7 +69,7 @@ export function Sidebar({ tabs, currentTab, onNavigate, mode = 'hover', onChange
                   <span className="sidebar-item-icon">{t.icon}</span>
                   <span className="sidebar-item-label">{t.label}</span>
                   {signal?.count > 0 && <span className="sidebar-item-count" aria-hidden="true">{signal.count > 99 ? '99+' : signal.count}</span>}
-                </button>
+                </RouteLink>
               )
             })}
           </div>

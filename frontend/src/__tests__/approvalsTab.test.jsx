@@ -14,6 +14,7 @@ import { canDecide } from '../utils/proposalAuthority'
 import { api } from '../api'
 import { ENTITY_KIND_BY_TABLE, ENTITY_TABLE_BY_KIND } from '../constants'
 import { formatDateTime } from '../utils/format'
+import { approvalsForUrl } from '../routes'
 import { expectCardHeading } from '../test/cardHeading'
 
 vi.mock('../api', () => ({
@@ -438,7 +439,10 @@ describe('following an approval into the Audit Trail', () => {
     showDecided()
     await selectRow()
 
-    fireEvent.click(screen.getByRole('button', { name: /view in audit trail/i }))
+    const link = screen.getByRole('link', { name: /view in audit trail/i })
+    // A link, so it opens in a new tab with Ctrl-click; the address is the trail's own.
+    expect(link).toHaveAttribute('href', '/audit-trail?search=dev-1')
+    fireEvent.click(link)
     // THE TARGET, NOT THE PROPOSAL. What a reader wants after an approval is the machine's history
     // with the approval in it, beside everything else that happened to it.
     expect(onViewTrail).toHaveBeenCalledWith({ id: 'dev-1', type: 'DEVICE', purged: false })
@@ -461,7 +465,9 @@ describe('following an approval into the Audit Trail', () => {
     showDecided()
     await selectRow()
 
-    fireEvent.click(screen.getByRole('button', { name: /view in audit trail/i }))
+    const link = screen.getByRole('link', { name: /view in audit trail/i })
+    expect(link).toHaveAttribute('href', `/audit-trail?search=${lane}-1&type=${encodeURIComponent(kind)}`)
+    fireEvent.click(link)
     expect(onViewTrail).toHaveBeenCalledWith({ id: `${lane}-1`, type: kind, purged: false })
   })
 
@@ -483,7 +489,9 @@ describe('following an approval into the Audit Trail', () => {
     showDecided()
     await selectRow()
 
-    fireEvent.click(screen.getByRole('button', { name: /view in audit trail/i }))
+    const link = screen.getByRole('link', { name: /view in audit trail/i })
+    expect(link).toHaveAttribute('href', '/audit-trail?search=cell-gone&type=CELL&deleted=1')
+    fireEvent.click(link)
     expect(onViewTrail).toHaveBeenCalledWith({ id: 'cell-gone', type: 'CELL', purged: true })
   })
 
@@ -663,18 +671,23 @@ describe('arriving from another page', () => {
       deviceProposal({ id: 'open-1', entity_id: 'dev-1', target_label: 'Lathe_01' }),
       deviceProposal({ id: 'open-2', entity_id: 'dev-9', target_label: 'Press_02' })
     ])
-    renderTab({ initialSubject: 'dev-1' })
+    window.history.replaceState(null, '', approvalsForUrl('dev-1'))
+    renderTab()
     await screen.findAllByTestId('proposal-row')
     const rows = screen.getAllByTestId('proposal-row')
     expect(rows).toHaveLength(1)
     expect(within(rows[0]).getByText('Lathe_01')).toBeInTheDocument()
   })
 
-  it('lets go of the hand-over so the filter is not permanent', async () => {
-    const onClearFocus = vi.fn()
+  it('holds the hand-over in the address, where the search box shows it and Clear drops it', async () => {
     mockLoad([deviceProposal({ entity_id: 'dev-1' })])
-    renderTab({ initialSubject: 'dev-1', onClearFocus })
-    await waitFor(() => expect(onClearFocus).toHaveBeenCalled())
+    window.history.replaceState(null, '', approvalsForUrl('dev-1'))
+    renderTab()
+    await screen.findAllByTestId('proposal-row')
+    expect(screen.getByLabelText(/filter open proposals by what/i)).toHaveValue('dev-1')
+
+    fireEvent.click(screen.getAllByRole('button', { name: /clear filters/i })[0])
+    expect(window.location.search).toBe('')
   })
 
   it('hands back to the entity rather than opening a form of its own', async () => {
@@ -685,7 +698,9 @@ describe('arriving from another page', () => {
     renderTab({ userRole: 'Operator', currentUserId: OPERATOR_ID, onOpenSubject })
     await selectRow()
 
-    fireEvent.click(screen.getByRole('button', { name: /add to this proposal/i }))
+    const link = screen.getByRole('link', { name: /add to this proposal/i })
+    expect(link).toHaveAttribute('href', '/devices?search=dev-1')
+    fireEvent.click(link)
     expect(onOpenSubject).toHaveBeenCalledWith(expect.objectContaining({ entity_id: 'dev-1' }))
   })
 
@@ -694,7 +709,7 @@ describe('arriving from another page', () => {
     mockLoad([deviceProposal({ proposed_by: 'somebody-else' })])
     renderTab({ onOpenSubject })
     await selectRow()
-    expect(screen.queryByRole('button', { name: /add to this proposal/i })).toBeNull()
+    expect(screen.queryByRole('link', { name: /add to this proposal/i })).toBeNull()
   })
 })
 
@@ -734,7 +749,8 @@ describe('the queue that is waiting can be filtered too', () => {
       deviceProposal({ id: 'open-1', entity_id: 'dev-1', target_label: 'Lathe_01' }),
       deviceProposal({ id: 'open-2', entity_id: 'dev-9', target_label: 'Press_02' })
     ])
-    renderTab({ initialSubject: 'dev-1' })
+    window.history.replaceState(null, '', approvalsForUrl('dev-1'))
+    renderTab()
     await screen.findAllByTestId('proposal-row')
     expect(screen.getAllByTestId('proposal-row')).toHaveLength(1)
 

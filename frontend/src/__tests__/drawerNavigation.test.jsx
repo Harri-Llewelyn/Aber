@@ -8,6 +8,7 @@ import { CellsTab } from '../components/tabs/CellsTab'
 import { SchemasTab } from '../components/tabs/SchemasTab'
 import { useArrivalSelection } from '../hooks/useArrivalSelection'
 import { api } from '../api'
+import { cellUrl, deviceUrl, gatewayUrl, schemaUrl } from '../routes'
 
 /**
  * Cross-drawer navigation: the hops between the pages' context drawers. Two halves have to work and
@@ -93,8 +94,9 @@ const openRow = async (name) => {
   fireEvent.click(list().getByText(name))
   await waitFor(() => expect(isOpen()).toBe(true))
 }
-/** A chip is a BUTTON, which is what separates it from the text it replaced. */
-const chip = (name) => within(panel()).getByRole('button', { name: new RegExp(name, 'i') })
+/** A chip is a LINK to the other page's address, which is what separates it from the text it
+ *  replaced, and lets Ctrl-click open it in a new tab. */
+const chip = (name) => within(panel()).getByRole('link', { name: new RegExp(name, 'i') })
 
 describe('a drawer names its neighbours, and each one is a way to reach them', () => {
   it('cell drawer -> gateway chip hands over the gateway id', async () => {
@@ -103,6 +105,7 @@ describe('a drawer names its neighbours, and each one is a way to reach them', (
       onSelectDevice={vi.fn()} onSelectGateway={onSelectGateway} />)
     await openRow('Assembly Line 1')
 
+    expect(chip('Sim_Gateway_CNC')).toHaveAttribute('href', '/gateways?search=gw-1')
     fireEvent.click(chip('Sim_Gateway_CNC'))
     expect(onSelectGateway).toHaveBeenCalledWith('gw-1')
   })
@@ -113,6 +116,7 @@ describe('a drawer names its neighbours, and each one is a way to reach them', (
       onSelectDevice={onSelectDevice} onSelectGateway={vi.fn()} />)
     await openRow('Assembly Line 1')
 
+    expect(chip('Sim_CNC_Mill_01')).toHaveAttribute('href', '/devices?search=dev-1')
     fireEvent.click(chip('Sim_CNC_Mill_01'))
     expect(onSelectDevice).toHaveBeenCalledWith('dev-1')
   })
@@ -130,7 +134,7 @@ describe('a drawer names its neighbours, and each one is a way to reach them', (
   it('gateway drawer -> device chip hands over the device id', async () => {
     const onSelectDevice = vi.fn()
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
-      initialSearchFilter="" onClearFilter={vi.fn()} onSelectDevice={onSelectDevice} />)
+      onSelectDevice={onSelectDevice} />)
     await openRow('Sim_Gateway_CNC')
 
     fireEvent.click(chip('Sim_CNC_Mill_01'))
@@ -140,9 +144,10 @@ describe('a drawer names its neighbours, and each one is a way to reach them', (
   it('device drawer -> schema chip hands over the schema uuid', async () => {
     const onSelectSchema = vi.fn()
     render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
-      initialSearchFilter="" onClearFilter={vi.fn()} onSelectSchema={onSelectSchema} />)
+      onSelectSchema={onSelectSchema} />)
     await openRow('Sim_CNC_Mill_01')
 
+    expect(chip('Machining_Cell_Schema')).toHaveAttribute('href', '/schemas?search=sch-machining')
     fireEvent.click(chip('Machining_Cell_Schema'))
     expect(onSelectSchema).toHaveBeenCalledWith('sch-machining')
   })
@@ -162,7 +167,7 @@ describe('a drawer names its neighbours, and each one is a way to reach them', (
 describe('the device drawer resolves every attached schema', () => {
   const renderDevices = (extra = {}) => render(
     <DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
-      initialSearchFilter="" onClearFilter={vi.fn()} onSelectSchema={vi.fn()} {...extra} />
+      onSelectSchema={vi.fn()} {...extra} />
   )
 
   it('finds a schema attached through device_submodels', async () => {
@@ -177,7 +182,7 @@ describe('the device drawer resolves every attached schema', () => {
     }))
     renderDevices()
     await openRow('Sim_CNC_Mill_01')
-    expect(within(panel()).queryByRole('button', { name: /Machining_Cell_Schema/i })).toBeNull()
+    expect(within(panel()).queryByRole('link', { name: /Machining_Cell_Schema/i })).toBeNull()
   })
 
   it('renders every attached schema, not just the first', async () => {
@@ -325,42 +330,46 @@ describe('useArrivalSelection', () => {
 /** The four pages, each opening the entity it was handed. */
 describe('arriving with an identifier opens that entity\'s drawer', () => {
   it('Devices, by asset id', async () => {
-    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
-      initialSearchFilter="dev-1" onClearFilter={vi.fn()} />)
+    window.history.replaceState(null, '', deviceUrl('dev-1'))
+    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(isOpen()).toBe(true))
     expect(within(panel()).getByText('Sim_CNC_Mill_01')).toBeTruthy()
+    // The open drawer joins the address, so a reload keeps it open.
+    expect(new URLSearchParams(window.location.search).get('device')).toBe('dev-1')
   })
 
   it('Devices, by sparkplug id -- which is what an alert row carries', async () => {
-    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
-      initialSearchFilter="dev220000000000400080000" onClearFilter={vi.fn()} />)
+    window.history.replaceState(null, '', deviceUrl('dev220000000000400080000'))
+    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(isOpen()).toBe(true))
   })
 
   it('Gateways, by gateway id', async () => {
-    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
-      initialSearchFilter="gw-1" onClearFilter={vi.fn()} />)
+    window.history.replaceState(null, '', gatewayUrl('gw-1'))
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(isOpen()).toBe(true))
   })
 
   it('Cells, by cell id', async () => {
+    window.history.replaceState(null, '', cellUrl('cell-1'))
     render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
-      onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} initialSearchFilter="cell-1" />)
+      onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} />)
     await waitFor(() => expect(isOpen()).toBe(true))
   })
 
   it('Schemas, by schema uuid', async () => {
     // The device drawer's Schema chip must land on that one schema, not on an unfiltered list of
     // every schema in the registry.
+    window.history.replaceState(null, '', schemaUrl('sch-machining'))
     render(<SchemasTab showToast={vi.fn()} hasPermission={() => true} onSelectSchema={vi.fn()}
-      onSelectDevice={vi.fn()} initialSchemaId="sch-machining" />)
+      onSelectDevice={vi.fn()} />)
     await waitFor(() => expect(isOpen()).toBe(true))
     expect(within(panel()).getByText('Machining_Cell_Schema')).toBeTruthy()
   })
 
   it('opens nothing when the page is merely searched', async () => {
-    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()}
-      initialSearchFilter="Mill" onClearFilter={vi.fn()} />)
+    window.history.replaceState(null, '', deviceUrl('Mill'))
+    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Sim_CNC_Mill_01')).toBeInTheDocument())
     expect(isOpen()).toBe(false)
   })

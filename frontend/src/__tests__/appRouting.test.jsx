@@ -4,11 +4,11 @@
  * early on an unknown id), and neither can derive from the other without constants.js importing
  * components. A tab in one and not the other is a dead button with no error.
  */
-import { describe, it, expect, afterEach } from 'vitest'
-import { renderHook } from '@testing-library/react'
+import { describe, it, expect, afterEach, vi } from 'vitest'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { TABS, tabIsVisible } from '../navigation'
 import { VALID_TABS } from '../constants'
-import { useAppRouting } from '../hooks/useAppRouting'
+import { useAppRouting, tabFromUrl } from '../hooks/useAppRouting'
 
 describe('the nav and the router agree', () => {
   it('accepts every tab the nav renders', () => {
@@ -88,5 +88,62 @@ describe('an unknown address', () => {
     const { result } = renderHook(() => useAppRouting())
     expect(result.current.tab).toBe('site-map')
     expect(window.location.pathname + window.location.search).toBe('/site-map')
+  })
+
+  it('tests for the sign-in callback\'s own parameters by name, not by substring', () => {
+    // supabase-js reads `code` and `state` from the address, so those stay where they are.
+    window.history.replaceState({}, '', '/?code=abc&state=xyz')
+    renderHook(() => useAppRouting())
+    expect(window.location.search).toBe('?code=abc&state=xyz')
+
+    // A parameter that merely contains the word is not the callback.
+    window.history.replaceState({}, '', '/no-such-page?show_state=1')
+    renderHook(() => useAppRouting())
+    expect(window.location.pathname + window.location.search).toBe('/site-map')
+  })
+})
+
+describe('the page in the address', () => {
+  it('is the first path segment; the rest belongs to the page', () => {
+    expect(tabFromUrl('/devices/quarantine?search=x')).toBe('devices')
+    expect(tabFromUrl('/access-control/roles')).toBe('access-control')
+    expect(tabFromUrl('/settings')).toBe('settings')
+    expect(tabFromUrl('/nowhere/devices')).toBe('site-map')
+    expect(tabFromUrl('/')).toBe('site-map')
+  })
+
+  it('leaves a deep link alone, tab, filters and all', () => {
+    window.history.replaceState({}, '', '/devices/quarantine?search=held')
+    const { result } = renderHook(() => useAppRouting())
+    expect(result.current.tab).toBe('devices')
+    expect(window.location.pathname + window.location.search).toBe('/devices/quarantine?search=held')
+  })
+
+  it('follows Back, even while the sign-in callback\'s parameters are in the address', async () => {
+    window.history.replaceState({}, '', '/devices?code=abc')
+    const { result } = renderHook(() => useAppRouting())
+    act(() => result.current.setTab('gateways'))
+    expect(result.current.tab).toBe('gateways')
+    act(() => { window.history.back() })
+    await waitFor(() => expect(result.current.tab).toBe('devices'))
+  })
+
+  it('opens a page fresh from a nav click, and with its filters from a drill-down', () => {
+    window.history.replaceState({}, '', '/devices?search=x')
+    const { result } = renderHook(() => useAppRouting())
+    act(() => result.current.handleNavClick('gateways'))
+    expect(window.location.pathname + window.location.search).toBe('/gateways')
+    act(() => result.current.setTab('devices', { schema: 'sch-1' }))
+    expect(window.location.pathname + window.location.search).toBe('/devices?schema=sch-1')
+  })
+
+  it('rewrites the entry for a redirect the person did not ask for', () => {
+    window.history.replaceState({}, '', '/settings')
+    const push = vi.spyOn(window.history, 'pushState')
+    const { result } = renderHook(() => useAppRouting())
+    act(() => result.current.setTab('site-map', {}, { replace: true }))
+    expect(push).not.toHaveBeenCalled()
+    expect(window.location.pathname).toBe('/site-map')
+    push.mockRestore()
   })
 })

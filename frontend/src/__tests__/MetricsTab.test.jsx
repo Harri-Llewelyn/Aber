@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
+import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -7,6 +7,8 @@ import { MetricsTab } from '../components/tabs/MetricsTab'
 import { api } from '../api'
 import { PERMISSION_UUIDS } from '../constants'
 import { requiresRolesTitle } from '../hooks/usePermissions'
+import { unmappedMetricsUrl } from '../routes'
+import { navigate } from '../hooks/useUrlState'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -941,10 +943,11 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
   describe('opened with a filter handed over by another page', () => {
     const tab = (name) => screen.getByRole('tab', { name })
 
-    it('opens the catalog on the metrics with no semantic id, the toggle on, and clears the hand-over once', async () => {
+    it('opens the catalog on the metrics with no semantic id, the toggle on', async () => {
       mockFilterCatalog()
-      const onClearFilter = vi.fn()
-      renderTab({ initialFilter: 'unmapped', onClearFilter })
+      // The export warning links here.
+      window.history.replaceState(null, '', unmappedMetricsUrl())
+      renderTab()
 
       await waitFor(() => expect(listed().length).toBeGreaterThan(0))
       expect(listed()).toEqual(['Controller/EXECUTION', 'Controller/FIRMWARE', 'OEE/MTBF', 'safety_interlock'])
@@ -952,32 +955,31 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
       expect(unmappedButton()).toHaveClass('btn-primary')
       expect(standardFilter().value).toBe('')
       expect(search().value).toBe('')
-      expect(onClearFilter).toHaveBeenCalledTimes(1)
     })
 
     it('replaces a search, a standard and the Deprecated Metrics tab already in use', async () => {
       mockFilterCatalog()
-      const onClearFilter = vi.fn()
-      const view = renderTab()
+      renderTab()
       await waitFor(() => expect(within(catalogTable()).getAllByTitle(/^Expand /).length).toBeGreaterThan(0))
       fireEvent.change(search(), { target: { value: 'o' } })
       chooseStandard('MTConnect')
       fireEvent.click(tab('Deprecated Metrics'))
       expect(tab('Deprecated Metrics').getAttribute('aria-selected')).toBe('true')
 
-      view.rerender(<MetricsTab showToast={vi.fn()} hasPermission={() => true} initialFilter="unmapped" onClearFilter={onClearFilter} />)
+      // The warning's link is an address, so what was on screen does not survive it.
+      act(() => navigate(unmappedMetricsUrl()))
 
       await waitFor(() => expect(tab('Metric Catalog').getAttribute('aria-selected')).toBe('true'))
       expect(search().value).toBe('')
       expect(standardFilter().value).toBe('')
       expect(unmappedButton().getAttribute('aria-pressed')).toBe('true')
       expect(listed()).toEqual(['Controller/EXECUTION', 'Controller/FIRMWARE', 'OEE/MTBF', 'safety_interlock'])
-      expect(onClearFilter).toHaveBeenCalledTimes(1)
     })
 
     it('can be turned off again, and Clear filters resets it', async () => {
       mockFilterCatalog()
-      renderTab({ initialFilter: 'unmapped' })
+      window.history.replaceState(null, '', unmappedMetricsUrl())
+      renderTab()
       await waitFor(() => expect(listed().length).toBeGreaterThan(0))
 
       fireEvent.click(screen.getByRole('button', { name: /Clear filters \(1\)/ }))
@@ -988,13 +990,15 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
 
     it('starts unfiltered with no hand-over, and drops one it does not know', async () => {
       mockFilterCatalog()
-      const onClearFilter = vi.fn()
-      renderTab({ initialFilter: 'no-such-filter', onClearFilter })
+      // Values the page does not offer read as the defaults, and leave the address.
+      window.history.replaceState(null, '', '/metrics?unmapped=yes&standard=no-such-standard')
+      renderTab()
 
       await waitFor(() => expect(within(catalogTable()).getAllByTitle(/^Expand /).length).toBeGreaterThan(0))
       expect(unmappedButton().getAttribute('aria-pressed')).toBe('false')
+      expect(standardFilter().value).toBe('')
       expect(listed()).toEqual([])
-      expect(onClearFilter).toHaveBeenCalledTimes(1)
+      expect(window.location.search).toBe('')
     })
   })
 

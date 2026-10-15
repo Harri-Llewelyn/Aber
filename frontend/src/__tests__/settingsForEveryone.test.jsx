@@ -55,7 +55,7 @@ describe('the Settings page', () => {
     const page = await screen.findByTestId('settings-page')
     expect(page).toHaveAttribute('data-read-only', 'true')
     const rail = within(document.querySelector('.sidebar')).getByRole('navigation', { name: /primary/i })
-    expect(within(rail).getByRole('button', { name: 'Settings' })).toBeInTheDocument()
+    expect(within(rail).getByRole('link', { name: 'Settings' })).toBeInTheDocument()
     // Not bounced to the Site Map once the role arrives: the page is theirs to read.
     await waitFor(() => expect(window.location.pathname).toBe('/settings'))
   })

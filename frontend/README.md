@@ -30,6 +30,7 @@ the origins the chart derives, so `http://localhost:3000` must also be in `globa
 ```
 src/
 ├── App.jsx                  shell, routing, auth gate, theme
+├── routes.js                the addresses one page links to on another -- see Routing
 ├── api.js                   every server call, in one module
 ├── constants.js             PERMISSION_UUIDS and role mappings
 ├── lib/supabaseClient.js    the single Supabase client
@@ -208,6 +209,14 @@ record and not for the credential: *No credential* would be a claim about the br
 The broker read may fail without failing the page. The Broker column then reads *Not read*, which
 is a fact about the page load and not about any account, and the reason is stated once in the
 card. The page does not show sessions: an *Active* account is one that may connect.
+
+People, Broker credentials and Machine identities are searched and filtered in the browser: each
+list is tens of rows, read whole. What is gone is hidden the same way on every tab, behind a **Show
+… (N)** toggle that appears only while N is above 0: removed people (`accessRemoved()` in
+`utils/people.js`, which leaves out a removal whose sign-in is still open, since that row needs
+Remove Access again), archived gateways and withdrawn identities. The tab and the filters are in
+the address (see [Routing](#routing)), which is why the page has no Refresh: every action reads its
+list again, and a reload returns to the same view.
 
 The **People** tab (`components/tabs/PeopleSection.jsx`) is offered only when `App.jsx` passes
 `userRole` Administrator, and the page opens on it. Roles go through `set_person_role()`; adding,
@@ -450,6 +459,66 @@ Three things it is not:
 
 Unknown renders nothing, and that is the point: an unlabelled build, or a plain image build that
 supplies no release version, is not evidence of drift.
+
+---
+
+## Routing
+
+**The address names the view on screen**, so a view can be bookmarked, shared, reloaded and walked
+back with Back. There is no router library: `hooks/useAppRouting.js` reads the page from the first
+path segment, and `hooks/useUrlState.js` holds everything below it.
+
+| Part of the view | Where it lives | Example | A change |
+| :--- | :--- | :--- | :--- |
+| Page | first path segment | `/devices` | adds a history entry |
+| Tab | second path segment, `useUrlTab(page, ids, fallback)` | `/devices/quarantine` | adds a history entry, so Back returns to the previous tab |
+| Filter | query parameter, `useUrlState(key, default)` | `/devices?lifecycle=archived&gateway=<id>` | rewrites the current entry, so Back does not replay each keystroke |
+| Open drawer | query parameter, `useUrlState` | `/devices?device=<uuid>` | rewrites the current entry |
+
+- **Defaults are left out**: `/devices`, not `/devices/registered?lifecycle=active`. A value the
+  page does not offer reads as the default, and the address is tidied to match. A list that loads
+  (gateway ids, settings categories) passes `allowed: null` or `ready: false` until it arrives, so a
+  good value is not tidied away first.
+- **A tab change drops the query**, so each tab opens on its own defaults. `keep` names the filters a
+  page shares across its tabs: the Vocabulary search, and Capture's stored filter and search.
+- **`useUrlState` returns `[value, setValue]`**, as `useState` does. A setter reads the address when
+  it runs, so several setters called in one handler compose.
+- **A new tab needs only its id in the page's list.** Most pages take the list from their tab help
+  (`Object.keys(VIEW_HELP)`).
+- **A rail click goes to the bare page**, so nothing a drill-down set comes along. A drill-down goes
+  to an address built in `routes.js` (`deviceUrl(id)` is `/devices?search=<id>`); the page reads its
+  filters from it, and `useArrivalSelection` opens the drawer on an exact id.
+- **The rail's entries and the drill-downs are real links**, `common/RouteLink.jsx`: an `<a href>`
+  that navigates in place on a plain click and leaves Ctrl, Cmd, Shift and middle clicks to the
+  browser, which opens a new tab. A `ContextPanel` action takes `to` for the same.
+- **A hand-over that carries an object stays state.** The Vocabulary page's Use
+  (`pendingVocabularyEntry`) opens Add Metric prefilled: an act to perform once, not a view.
+- **Nothing goes in the address that should not be in a log**: nginx writes query strings to its
+  access log. Search text and ids are fine. `sort` is reserved for sortable tables.
+- **Any path loads.** nginx serves `index.html` for any path (`try_files`), and every asset URL is
+  absolute (Vite's `base` is `/`). An address carrying the sign-in callback's `code` or `state` is
+  left alone for supabase-js to read.
+- **Tests start at `/`** (`src/test/setup.js`). A test that needs a view sets the address before it
+  renders the page.
+
+| Page | Tabs in the path | Query keys (drawer last) |
+| :--- | :--- | :--- |
+| Site Map | | `archived`; the panel: `area`, `cell` or `lane` |
+| Areas | | `search`, `lifecycle`; `area` |
+| Cells | | `search`, `lifecycle`, `attention`, `empty`; `cell` |
+| Gateways | | `search`, `lifecycle`, `status`, `type`, `quarantined`; `gateway` |
+| Devices | `quarantine` | `search`, `status`, `attention`, `lifecycle`, `type`, `schema`, `gateway`, `cell`, `replay`; `device` |
+| Audit Trail | | `search`, `type`, `action`, `range`, `since`, `until`, `deleted`; `event` |
+| Schemas | | `search`, `status`; `schema` |
+| Metrics | `deprecated` | `search`, `standard`, `unmapped`; `metric` |
+| Vocabulary | the standard, as a slug (`opc-ua`) | `search` |
+| Approvals | `decided` | `kind`, `search`; `proposal` |
+| Capture | `device` | `stored`, `search`, `gateway`; `subject` |
+| Archives | `retired` | |
+| Directory | the group | |
+| Access Control | `credentials`, `identities`, `accounts`, `roles` | People: `search`, `role`, `status`, `removed`. Broker credentials: `search`, `state`, `archived`. Machine identities: `search`, `withdrawn`. Broker roles: `broker-role` |
+| Backups | | `status`; `run` |
+| Settings | the category, as a slug (`cold-storage`) | `setting`, the search bar's highlight |
 
 ---
 

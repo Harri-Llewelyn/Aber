@@ -9,6 +9,7 @@ import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SettingsTab, coerceValue, displayValue, fallbackCopy, groupByCategory } from '../components/tabs/SettingsTab'
 import { api } from '../api'
+import { settingUrl } from '../routes'
 import { COLD_STORAGE_DIALOG_KEYS } from '../utils/coldStorage'
 
 vi.mock('../api', async () => {
@@ -296,9 +297,10 @@ describe('the page', () => {
     const original = Element.prototype.scrollIntoView
     Element.prototype.scrollIntoView = scrollIntoView
     try {
-      const onClear = vi.fn()
+      // The search bar links to the setting by its key.
+      window.history.replaceState(null, '', settingUrl('alerts.retention_days'))
       await act(async () => {
-        render(<SettingsTab showToast={vi.fn()} initialSetting="alerts.retention_days" onClearSetting={onClear} />)
+        render(<SettingsTab showToast={vi.fn()} />)
       })
       expect(screen.getByRole('tab', { name: /^Retention/ })).toHaveAttribute('aria-selected', 'true')
       const row = document.querySelector('[data-setting="alerts.retention_days"]')
@@ -307,7 +309,10 @@ describe('the page', () => {
       expect(row).toHaveClass('setting-row-found')
       expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' })
       expect(scrollIntoView.mock.contexts[0]).toBe(row)
-      expect(onClear).toHaveBeenCalled()
+      // Choosing a category by hand puts it in the path and drops the highlight with the query.
+      fireEvent.click(screen.getAllByRole('tab')[0])
+      expect(window.location.search).toBe('')
+      expect(document.querySelector('.setting-row-found')).toBeNull()
     } finally {
       Element.prototype.scrollIntoView = original
     }

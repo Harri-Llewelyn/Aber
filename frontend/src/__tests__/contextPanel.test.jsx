@@ -594,9 +594,10 @@ describe('Tables shed what the panel now carries', () => {
     expect(within(panel()).queryByTitle(/Rebind this device/i)).toBeNull()
 
     const link = within(panel()).getByTitle(/Open this gateway on the Gateways page/i)
-    // A button, not an anchor: this is an in-app tab switch with filter state, and an <a> would
-    // promise middle-click and "copy link address" that this app cannot honour.
-    expect(link.tagName).toBe('BUTTON')
+    // An anchor: the Gateways page's address names the gateway, so middle-click and "copy link
+    // address" work, and a plain click navigates in place.
+    expect(link.tagName).toBe('A')
+    expect(link).toHaveAttribute('href', '/gateways?search=gw-1')
     fireEvent.click(link)
     expect(onSelectGateway).toHaveBeenCalledWith('gw-1')
   })

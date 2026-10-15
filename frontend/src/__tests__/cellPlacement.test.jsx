@@ -88,7 +88,7 @@ describe('CellsTab places a cell on its area plan', () => {
     render(<CellsTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} onShowOnSiteMap={onShowOnSiteMap} />)
     await waitFor(() => expect(screen.getByText('Bay 1')).toBeInTheDocument())
     fireEvent.click(screen.getByText('Bay 1'))
-    fireEvent.keyDown(screen.getByRole('link', { name: 'Open North Shop on the Site Map' }), { key: 'Enter' })
+    fireEvent.click(screen.getByRole('link', { name: 'Open North Shop on the Site Map' }))
     expect(onShowOnSiteMap).toHaveBeenCalledWith('area-1')
   })
 
@@ -224,14 +224,16 @@ describe('AreaPlanPreview on its own', () => {
     expect(pinFor('Old Bay')).toHaveClass('area-plan-pin-selected')
   })
 
-  it('is a link to the Site Map by click or Enter, and nothing to tab to without one', () => {
+  it('is a link to the Site Map, and nothing to tab to without one', () => {
     const onOpen = vi.fn()
     const { unmount } = render(<AreaPlanPreview area={area} cells={placed} onOpen={onOpen} />)
     const link = screen.getByRole('link', { name: 'Open North Shop on the Site Map' })
+    // A real <a>: the keyboard reaches and follows it, and Ctrl-click opens the map in a new tab.
+    expect(link.tagName).toBe('A')
+    expect(link).toHaveAttribute('href', '/site-map?area=area-1')
     fireEvent.click(link)
-    fireEvent.keyDown(link, { key: ' ' })
-    fireEvent.keyDown(link, { key: 'Enter' })
-    expect(onOpen.mock.calls).toEqual([['area-1'], ['area-1']])
+    fireEvent.click(link, { ctrlKey: true })
+    expect(onOpen.mock.calls).toEqual([['area-1']])
     // The pins are marks inside the link, not controls of their own.
     expect(link.querySelector('button')).toBeNull()
     unmount()

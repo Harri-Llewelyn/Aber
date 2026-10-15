@@ -1,5 +1,5 @@
 import React from 'react'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import { AccessControlTab } from '../components/tabs/AccessControlTab'
@@ -246,16 +246,18 @@ describe('AccessControlTab', () => {
     api.listGatewayCredentials.mockResolvedValue([{ ...provisioned, is_archived: true }])
     render(<AccessControlTab showToast={vi.fn()} />)
 
-    // Archived is a filter value, not a toggle. The empty message says the list is filtered, not
-    // that nothing is registered.
-    await waitFor(() => expect(screen.getByText(/No gateway matches this filter/i)).toBeTruthy())
+    // Archived is a toggle, as removed people and withdrawn identities are on their tabs. The empty
+    // message says the list is filtered, not that nothing is registered.
+    await waitFor(() => expect(screen.getByText(/No gateway matches these filters/i)).toBeTruthy())
     const filter = screen.getByLabelText('Filter gateways by credential state')
-    expect(within(filter).getByText('Archived (1)')).toBeTruthy()
-    expect(within(filter).getByText('Active (0)')).toBeTruthy()
-    fireEvent.change(filter, { target: { value: 'archived' } })
+    expect(within(filter).getByText('Any state (0)')).toBeTruthy()
+    expect(within(filter).queryByText(/Archived/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Show archived (1)' }))
 
     await waitFor(() => expect(screen.getByText(/Restore to issue/i)).toBeTruthy())
     expect(screen.queryByText(/Generate/)).toBeNull()
+    // While they are shown, the state filter can narrow to them.
+    expect(within(filter).getByText('Archived (1)')).toBeTruthy()
   })
 
   /** The filter's values are the Credential column's states, with a count on each. */
@@ -269,7 +271,7 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByText('Sim_Gateway_Cell1_Machining')).toBeTruthy())
     expect(screen.getByText('Cell 5 Press Line')).toBeTruthy()
     const filter = screen.getByLabelText('Filter gateways by credential state')
-    expect(within(filter).getByText('Active (2)')).toBeTruthy()
+    expect(within(filter).getByText('Any state (2)')).toBeTruthy()
     expect(within(filter).getByText('Setup outstanding (1)')).toBeTruthy()
     expect(within(filter).getByText('No platform record (1)')).toBeTruthy()
 
@@ -330,23 +332,36 @@ describe('AccessControlTab', () => {
     expect(screen.getByRole('tab', { name: 'Broker accounts' }).getAttribute('aria-selected')).toBe('true')
   })
 
-  /** A search-bar card names one list; the page opens on its tab and hands the request back. */
-  it('opens the tab a search-bar card names, and drops the request', async () => {
+  /** The tab is the path: a search-bar card links to it, and a reload or Back returns to it. */
+  it('opens the tab the address names', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    const onClearSection = vi.fn()
-    render(<AccessControlTab showToast={vi.fn()} initialSection="roles" onClearSection={onClearSection} />)
+    window.history.replaceState(null, '', '/access-control/roles')
+    render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByRole('tab', { name: 'Broker roles' }).getAttribute('aria-selected')).toBe('true'))
-    expect(onClearSection).toHaveBeenCalled()
   })
 
-  it('ignores a section it does not have, and still drops the request', async () => {
+  it('opens the default tab for one it does not have, and tidies the address', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
-    const onClearSection = vi.fn()
-    render(<AccessControlTab showToast={vi.fn()} initialSection="services" onClearSection={onClearSection} />)
+    window.history.replaceState(null, '', '/access-control/services')
+    render(<AccessControlTab showToast={vi.fn()} />)
 
-    await waitFor(() => expect(onClearSection).toHaveBeenCalled())
     expect(screen.getByRole('tab', { name: 'Broker credentials' }).getAttribute('aria-selected')).toBe('true')
+    await waitFor(() => expect(window.location.pathname).toBe('/access-control'))
+  })
+
+  it('puts a chosen tab in the path, so Back returns to the one before', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    window.history.replaceState(null, '', '/access-control')
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Broker roles' }))
+    expect(window.location.pathname).toBe('/access-control/roles')
+    act(() => {
+      window.history.back()
+    })
+    await waitFor(() => expect(window.location.pathname).toBe('/access-control'))
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Broker credentials' }).getAttribute('aria-selected')).toBe('true'))
   })
 
   /** A declared fixture is named rather than marked as a stray; anything undeclared is the stray. */
@@ -649,6 +664,8 @@ describe('AccessControlTab', () => {
     ]]))
     await renderTab('Machine identities')
 
+    // A withdrawn identity is left off the list until it is asked for.
+    fireEvent.click(await screen.findByRole('button', { name: 'Show withdrawn (1)' }))
     await waitFor(() => expect(screen.getByText('WITHDRAWN')).toBeTruthy())
     expect(screen.queryByText('REVOKED')).toBeNull()
     expect(screen.queryByRole('button', { name: /Issue Token/i })).toBeNull()
@@ -998,7 +1015,7 @@ describe('AccessControlTab card composition', () => {
     expect(wrap.getAttribute('style')).toBeNull()
   })
 
-  it('puts the tab’s filter on the left and its actions on the right of the toolbar', async () => {
+  it('puts the tab’s search and filter on the left and Clear filters on the right of the toolbar', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     render(<AccessControlTab showToast={vi.fn()} />)
 
@@ -1006,15 +1023,18 @@ describe('AccessControlTab card composition', () => {
     const bar = card().querySelector(':scope > .tab-strip + .filter-bar')
     expect(bar).toBeTruthy()
     expect(bar.querySelector('.help-tip')).toBeNull()
-    expect(bar.firstElementChild.getAttribute('aria-label')).toBe('Filter gateways by credential state')
+    expect(within(bar.firstElementChild).getByRole('searchbox')).toHaveAccessibleName('Search credentials by gateway name or MQTT username')
     expect(within(bar).getByLabelText('Filter gateways by credential state').closest('.filter-bar-actions')).toBeNull()
-    expect(within(bar).getByRole('button', { name: /Refresh/ }).closest('.filter-bar-actions')).toBeTruthy()
+    fireEvent.change(within(bar).getByLabelText('Filter gateways by credential state'), { target: { value: 'issued' } })
+    expect(within(bar).getByRole('button', { name: /Clear filters/ }).closest('.filter-bar-actions')).toBeTruthy()
+    // No Refresh: every action reads the list again, and F5 now returns to this tab and filter.
+    expect(within(bar).queryByRole('button', { name: /Refresh/ })).toBeNull()
     // The heading holds the title and description only.
     expect(card().querySelector('.card-header select')).toBeNull()
     expect(card().querySelector('.card-header .help-tip')).toBeNull()
   })
 
-  it('offers Clear filters only while the credential filter is off Active', async () => {
+  it('offers Clear filters only while the credential filter is off its default', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     render(<AccessControlTab showToast={vi.fn()} />)
 
@@ -1022,7 +1042,7 @@ describe('AccessControlTab card composition', () => {
     expect(screen.queryByRole('button', { name: /Clear filters/ })).toBeNull()
     fireEvent.change(screen.getByLabelText('Filter gateways by credential state'), { target: { value: 'issued' } })
     fireEvent.click(screen.getByRole('button', { name: /Clear filters \(1\)/ }))
-    expect(screen.getByLabelText('Filter gateways by credential state').value).toBe('active')
+    expect(screen.getByLabelText('Filter gateways by credential state').value).toBe('')
   })
 
   it('puts no count on the heading or the tabs; the filter options keep theirs', async () => {
@@ -1040,7 +1060,7 @@ describe('AccessControlTab card composition', () => {
       expect(screen.getByRole('tab', { name: label }).textContent).toBe(label)
     }
     fireEvent.click(screen.getByRole('tab', { name: 'Broker credentials' }))
-    expect(within(screen.getByLabelText('Filter gateways by credential state')).getByText('Active (1)')).toBeTruthy()
+    expect(within(screen.getByLabelText('Filter gateways by credential state')).getByText('Any state (1)')).toBeTruthy()
   })
 
   it('explains the selected tab with one tip in the tab bar, and none as a paragraph', async () => {
@@ -1138,7 +1158,7 @@ describe('AccessControlTab card composition', () => {
 
     await waitFor(() => expect(card().querySelector('tbody tr')).toBeTruthy())
     fireEvent.change(screen.getByLabelText('Filter gateways by credential state'), { target: { value: 'revoked' } })
-    expect(screen.getByText('No gateway matches this filter.')).toBeTruthy()
+    expect(screen.getByText('No gateway matches these filters.')).toBeTruthy()
     expect(screen.queryByText(/No gateways registered/)).toBeNull()
   })
 

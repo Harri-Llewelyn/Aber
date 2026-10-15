@@ -2,9 +2,19 @@
 
 This page shows who and what may reach Aber. Its first tab, **People**, lists everyone who signs in to the dashboard, with their role. The other four tabs cover the things that do not sign in: gateways, and Aber's own processes. Only Administrators can open it.
 
-The page is one card with five tabs: **People**, **Broker credentials**, **Machine identities**, **Broker accounts** and **Broker roles**. The page opens on People. The list inside the card scrolls, and the page stays put. The **?** just after the tab names explains the selected tab.
+The page is one card with five tabs: **People**, **Broker credentials**, **Machine identities**, **Broker accounts** and **Broker roles**. The page opens on People. Each tab has its own address, so a reload, a bookmark or **Back** returns to the same tab, with its filters. The list inside the card scrolls, and the page stays put. The **?** just after the tab names explains the selected tab.
 
-People has a row of controls under the tabs, with **Refresh** and **Add Person**. Broker credentials has its filter on the left, and its buttons at the right-hand end. Machine identities has one for **New Machine Identity**. Broker accounts and Broker roles have no controls, so their lists start straight under the tabs.
+People, Broker credentials and Machine identities each have a row of controls under the tabs. The search box and filters are on the left, and the buttons at the right-hand end: **Add Person** on People, **New Machine Identity** on Machine identities. Broker accounts and Broker roles have no controls, so their lists start straight under the tabs.
+
+There is no Refresh button. Every change you make here reads the list again. To pick up a change made somewhere else, such as by another Administrator, reload the page: it opens on the same tab and filters.
+
+## Finding a person
+
+- The **search** box matches the email address.
+- The **role** filter offers each role, and **No role**. The **status** filter offers the Status column's states. Each option shows how many people it would list.
+- People whose access is removed are hidden. Select **Show removed** to list them. The button shows how many there are, and appears only while there are some. While it is on, the status filter also offers **Access removed**.
+- A **Sign-in still open** row is never hidden. Its removal did not finish, so it still needs **Remove Access**.
+- **Clear filters** resets the search, both filters and Show removed. When nothing matches, the list says so.
 
 ## Adding and removing people
 
@@ -33,7 +43,8 @@ People has a row of controls under the tabs, with **Refresh** and **Add Person**
 ## The other tabs
 
 - **Broker credentials** has one row per gateway, with the credential it uses to connect to the broker.
-- The **credential filter** opens on **Active**. It offers each credential state with its count, and **Archived**. **Refresh** reads everything again, and **Clear filters** sets the filter back to Active.
+- The **search** box matches a gateway's name and its MQTT username. The **state filter** offers each credential state with its count.
+- Archived gateways are hidden. Select **Show archived** to list them. While it is on, the state filter also offers **Archived**. **Clear filters** resets the search, the filter and Show archived.
 - **Type** is the kind of gateway: Remote, Host, Simulated or Playback.
 - **Credential** is what Aber issued and recorded. **Broker** is what the broker holds right now, read live. They sit side by side because they can disagree, and a disagreement is worth looking into.
 - **Generate** issues a broker credential for a Host, Simulated or Playback gateway, and shows it. An Administrator can show a Host or Simulated gateway's credential again, from the gateway's drawer on the Gateways page.
@@ -41,6 +52,7 @@ People has a row of controls under the tabs, with **Refresh** and **Add Person**
 - An archived gateway offers neither, only **Restore to issue**. Its credential was disabled at the broker. Once the gateway is restored, it can be issued a new one.
 - The Playback gateway's credential is shown only once. If it is lost, issue another.
 - **Machine identities** lists Aber's own non-human identities on the database side. **Broker accounts** lists the broker's own accounts, read live. **Broker roles** lists what each role may publish, receive and subscribe to. Search for one of the five tab names in the search bar to open the page on that tab.
+- On **Machine identities**, the search box matches an identity's name. Withdrawn identities are hidden. Select **Show withdrawn** to list them.
 - **No gateway** marks a broker account that looks like a gateway's, but that no gateway claims and nothing declares. It is listed under **Broker accounts**, after Aber's own accounts. It is usually the account of a gateway that was deleted before deleting a gateway also disabled its broker account. `scripts/revoke-orphaned-broker-accounts.mjs` lists such accounts and disables them. It never deletes one.
 - **New Machine Identity** creates an identity for a process that uses Aber through the API. You give a name, a purpose and permissions from a fixed menu, then issue its first token.
 - Machines propose, and people decide. The menu's two writes are filing change proposals and versioning schemas. Nothing on it lets a machine write a device, decide a proposal or a quarantine, or change who has access.

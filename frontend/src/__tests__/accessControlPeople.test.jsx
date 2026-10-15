@@ -77,6 +77,11 @@ async function row(email) {
   return (await screen.findByText(email)).closest('tr')
 }
 
+/** Removed accounts are left off People until this toggle is on. */
+async function showRemoved() {
+  fireEvent.click(await screen.findByRole('button', { name: /^Show removed/ }))
+}
+
 describe('the People tab', () => {
   it('is the first tab for an Administrator, and the page opens on it', async () => {
     renderPeople()
@@ -100,6 +105,8 @@ describe('the People tab', () => {
     renderPeople()
     expect(within(await row('operator@site.test')).getByText('Active')).toBeInTheDocument()
     expect(within(await row('invited@site.test')).getByText('Invited')).toBeInTheDocument()
+    expect(within(await row('half@site.test')).getByText('Sign-in still open')).toBeInTheDocument()
+    await showRemoved()
     const removed = await row('removed@site.test')
     expect(within(removed).getByText('Access removed')).toBeInTheDocument()
     expect(within(removed).getByText('Shopfloor Manager when restored')).toBeInTheDocument()
@@ -157,6 +164,7 @@ describe('the People tab', () => {
   it('restores access after it is confirmed, naming the role that comes back', async () => {
     api.restorePersonAccess.mockResolvedValue({ user_id: REMOVED, access: 'active', role: 'Shopfloor_Manager' })
     const toast = renderPeople()
+    await showRemoved()
     const removed = await row('removed@site.test')
     expect(within(removed).getByRole('combobox')).toBeDisabled()
     expect(within(removed).queryByRole('button', { name: 'Remove Access' })).toBeNull()
@@ -249,6 +257,7 @@ describe('setting a new password', () => {
     const mine = within(await row('me@site.test')).getByRole('button', { name: 'Set New Password' })
     expect(mine).toBeDisabled()
     expect(mine).toHaveAttribute('title', expect.stringMatching(/Change Password on your Profile page/))
+    await showRemoved()
     const removed = within(await row('removed@site.test')).getByRole('button', { name: 'Set New Password' })
     expect(removed).toBeDisabled()
     expect(removed).toHaveAttribute('title', expect.stringMatching(/Restore it first/))

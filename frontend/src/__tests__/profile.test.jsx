@@ -16,7 +16,6 @@ const renderProfile = (props = {}) => {
     onChangePassword: vi.fn(),
     onChangeTheme: vi.fn(),
     onChangeSidebarMode: vi.fn(),
-    onClearSection: vi.fn(),
   }
   render(
     <ProfileTab
@@ -57,10 +56,12 @@ describe('the page', () => {
     expect(headers()).toEqual(['Setting', 'Description', 'Value', 'Actions'])
   })
 
-  it('opens the tab the search bar named, once', () => {
-    const { onClearSection } = renderProfile({ initialSection: 'appearance' })
+  it('keeps its tab in the path, so /profile/appearance opens Appearance', () => {
+    window.history.replaceState({}, '', '/profile/appearance')
+    renderProfile()
     expect(tab('Appearance')).toHaveAttribute('aria-selected', 'true')
-    expect(onClearSection).toHaveBeenCalled()
+    fireEvent.click(tab('Account'))
+    expect(window.location.pathname).toBe('/profile')
   })
 })
 

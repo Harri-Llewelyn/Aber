@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { RouteLink } from '../common/RouteLink'
+import { cellUrl, deviceUrl, trailUrl } from '../../routes'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, STALENESS_TICK_MS, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
@@ -58,8 +60,9 @@ import {
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
+import { useUrlState } from '../../hooks/useUrlState'
 
-export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevice, hasPermission, userRole, initialSearchFilter, onClearFilter, activeAlerts = [] }) {
+export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevice, hasPermission, userRole, activeAlerts = [] }) {
   /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js (issue #34). */
   const alerts = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
   const [gateways, setGateways] = useState([])
@@ -70,7 +73,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   const [editing, setEditing]   = useState(null)
   const [archiveTarget, setArchiveTarget] = useState(null)
   // The drawer holds an id, not the object: resolving it every render keeps it as live as the row.
-  const [selectedId, setSelectedId] = useState(null)
+  // In the address as `?gateway=`.
+  const [selectedId, setSelectedId] = useUrlState('gateway', '', { allowed: loading ? null : gateways.map(g => g.gateway_id) })
   // `location_scope` defaults to 'cell'. `deployment` is where the connector runs, not where its
   // devices are; 'remote' is the default because it is the type that needs setup.
   const blank = { gateway_id: '', gateway_name: '', status: 'OFFLINE', deployment: 'remote', is_simulated: false, access_url: '', cell_id: '', area_id: '', location_scope: SCOPE_CELL }
@@ -89,35 +93,12 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
   // Whether this deployment can enrol an appliance, from gateway-bundle's GET. null until answered
   // or when the probe failed: an unknown never blocks.
   const [enrolment, setEnrolment] = useState(null)
-  const [filterMode, setFilterMode] = useState('active')
-
-  const getInitialSearch = () => {
-    const params = new URLSearchParams(window.location.search)
-    return params.get('search') || initialSearchFilter || ''
-  }
-
-  const [searchQuery, setSearchQuery] = useState(getInitialSearch)
-  const [liveStatusFilter, setLiveStatusFilter] = useState('')
-  const [kindFilter, setKindFilter] = useState('')
-  const [quarantineOnly, setQuarantineOnly] = useState(false)
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const urlSearch = params.get('search')
-    if (urlSearch) {
-      setSearchQuery(urlSearch)
-    } else if (initialSearchFilter) {
-      setSearchQuery(initialSearchFilter)
-    }
-  }, [initialSearchFilter])
-
-  const handleClearSearch = () => {
-    setSearchQuery('')
-    if (window.location.search) {
-      window.history.replaceState({}, '', window.location.pathname)
-    }
-    if (onClearFilter) onClearFilter()
-  }
+  // The filters are query parameters; a drill-down from another page arrives as `?search=<id>`.
+  const [filterMode, setFilterMode] = useUrlState('lifecycle', 'active', { allowed: ['active', 'archived', 'all'] })
+  const [searchQuery, setSearchQuery] = useUrlState('search')
+  const [liveStatusFilter, setLiveStatusFilter] = useUrlState('status', '', { allowed: ['ONLINE', 'STALE', 'OFFLINE'] })
+  const [kindFilter, setKindFilter] = useUrlState('type', '', { allowed: LISTED_TYPES })
+  const [quarantineOnly, setQuarantineOnly] = useUrlState('quarantined', false)
 
   const resetFilters = () => {
     setSearchQuery('')
@@ -125,7 +106,6 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
     setKindFilter('')
     setQuarantineOnly(false)
     setFilterMode('active')
-    handleClearSearch()
   }
 
   const load = useCallback(async (signal) => {
@@ -838,14 +818,15 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                   ? `Area-Wide — ${areas.find(ar => ar.area_id === selected.area_id)?.area_name || selected.area_id}`
                 : selectedCell
                   ? (
-                      <button
+                      <RouteLink
                         className="chip chip-link"
-                        onClick={() => onSelectCell?.(selectedCell.cell_id)}
+                        to={cellUrl(selectedCell.cell_id)}
+                        onNavigate={() => onSelectCell?.(selectedCell.cell_id)}
                         title="Open this cell on the Cells page"
                       >
                         <IconLayoutDashboard size={11} />
                         <span className="chip-name">{selectedCell.cell_name}</span>
-                      </button>
+                      </RouteLink>
                     )
                   : (selected.cell_id || null),
             title: !gatewayAcceptsCell(selected)
@@ -1124,6 +1105,7 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           // Withheld from a reader who may not open the Audit Trail page.
           canReadTrail && {
             label: 'View Audit Trail', icon: <IconHistory size={13} />,
+            to: trailUrl(selected.gateway_id, 'GATEWAY'),
             onClick: () => onViewTrail?.(selected),
             title: 'Open the immutable audit trace for this gateway'
           },
@@ -1171,15 +1153,16 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
                   {selectedDevices.map(d => {
                     const status = deviceLifecycleStatus(d)
                     return (
-                      <button
+                      <RouteLink
                         key={d.asset_id}
                         className="chip chip-link"
-                        onClick={() => onSelectDevice?.(d.asset_id)}
+                        to={deviceUrl(d.asset_id)}
+                        onNavigate={() => onSelectDevice?.(d.asset_id)}
                         title={`Open ${d.asset_name} on the Devices page — ${alertForDevice(alerts, d) ? `ALERT: ${alertForDevice(alerts, d).alert_name}` : deviceStatusTitle(status)}`}
                       >
                         <span className="badge-dot" style={{ background: deviceDotColor(d, alertForDevice(alerts, d)) }} />
                         <span className="chip-name">{d.asset_name}</span>
-                      </button>
+                      </RouteLink>
                     )
                   })}
                 </div>
