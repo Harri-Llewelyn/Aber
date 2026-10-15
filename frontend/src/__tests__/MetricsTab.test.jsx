@@ -113,8 +113,8 @@ const routes = {
 
 const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
 
-const renderTab = () => render(
-  <MetricsTab showToast={vi.fn()} hasPermission={() => true} />
+const renderTab = (props = {}) => render(
+  <MetricsTab showToast={vi.fn()} hasPermission={() => true} {...props} />
 )
 
 /**
@@ -785,11 +785,13 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
     'All standards (8)', 'MTConnect (3)', 'ISO 22400 (2)', 'OPC UA (1)', 'ASHRAE 223P (0)', 'Local extension (2)'
   ]
 
+  const mockFilterCatalog = () => api.get.mockImplementation((path) =>
+    Promise.resolve(path.startsWith('/api/v1/metric-catalog')
+      ? FILTER_CATALOG
+      : (routes[Object.keys(routes).find(r => path.startsWith(r))] || [])))
+
   const setup = async () => {
-    api.get.mockImplementation((path) =>
-      Promise.resolve(path.startsWith('/api/v1/metric-catalog')
-        ? FILTER_CATALOG
-        : (routes[Object.keys(routes).find(r => path.startsWith(r))] || [])))
+    mockFilterCatalog()
     renderTab()
     await waitFor(() => expect(within(catalogTable()).getAllByTitle(/^Expand /).length).toBeGreaterThan(0))
   }
@@ -934,6 +936,66 @@ describe('Metric Catalog — Standard and Unmapped filters', () => {
     expect(listed()).toEqual([])
     expect(within(catalogTable()).getAllByTitle(/^Expand /)).toHaveLength(6)
     expect(screen.queryByRole('button', { name: /Clear filters/ })).toBeNull()
+  })
+
+  describe('opened with a filter handed over by another page', () => {
+    const tab = (name) => screen.getByRole('tab', { name })
+
+    it('opens the catalog on the metrics with no semantic id, the toggle on, and clears the hand-over once', async () => {
+      mockFilterCatalog()
+      const onClearFilter = vi.fn()
+      renderTab({ initialFilter: 'unmapped', onClearFilter })
+
+      await waitFor(() => expect(listed().length).toBeGreaterThan(0))
+      expect(listed()).toEqual(['Controller/EXECUTION', 'Controller/FIRMWARE', 'OEE/MTBF', 'safety_interlock'])
+      expect(unmappedButton().getAttribute('aria-pressed')).toBe('true')
+      expect(unmappedButton()).toHaveClass('btn-primary')
+      expect(standardFilter().value).toBe('')
+      expect(search().value).toBe('')
+      expect(onClearFilter).toHaveBeenCalledTimes(1)
+    })
+
+    it('replaces a search, a standard and the Deprecated Metrics tab already in use', async () => {
+      mockFilterCatalog()
+      const onClearFilter = vi.fn()
+      const view = renderTab()
+      await waitFor(() => expect(within(catalogTable()).getAllByTitle(/^Expand /).length).toBeGreaterThan(0))
+      fireEvent.change(search(), { target: { value: 'o' } })
+      chooseStandard('MTConnect')
+      fireEvent.click(tab('Deprecated Metrics'))
+      expect(tab('Deprecated Metrics').getAttribute('aria-selected')).toBe('true')
+
+      view.rerender(<MetricsTab showToast={vi.fn()} hasPermission={() => true} initialFilter="unmapped" onClearFilter={onClearFilter} />)
+
+      await waitFor(() => expect(tab('Metric Catalog').getAttribute('aria-selected')).toBe('true'))
+      expect(search().value).toBe('')
+      expect(standardFilter().value).toBe('')
+      expect(unmappedButton().getAttribute('aria-pressed')).toBe('true')
+      expect(listed()).toEqual(['Controller/EXECUTION', 'Controller/FIRMWARE', 'OEE/MTBF', 'safety_interlock'])
+      expect(onClearFilter).toHaveBeenCalledTimes(1)
+    })
+
+    it('can be turned off again, and Clear filters resets it', async () => {
+      mockFilterCatalog()
+      renderTab({ initialFilter: 'unmapped' })
+      await waitFor(() => expect(listed().length).toBeGreaterThan(0))
+
+      fireEvent.click(screen.getByRole('button', { name: /Clear filters \(1\)/ }))
+
+      expect(unmappedButton().getAttribute('aria-pressed')).toBe('false')
+      expect(listed()).toEqual([])
+    })
+
+    it('starts unfiltered with no hand-over, and drops one it does not know', async () => {
+      mockFilterCatalog()
+      const onClearFilter = vi.fn()
+      renderTab({ initialFilter: 'no-such-filter', onClearFilter })
+
+      await waitFor(() => expect(within(catalogTable()).getAllByTitle(/^Expand /).length).toBeGreaterThan(0))
+      expect(unmappedButton().getAttribute('aria-pressed')).toBe('false')
+      expect(listed()).toEqual([])
+      expect(onClearFilter).toHaveBeenCalledTimes(1)
+    })
   })
 
   it('opens a filtered row’s drawer, whose Edit offers the suggested id and the vocabulary search', async () => {
@@ -1851,6 +1913,8 @@ describe('Metric Catalog table — standard and semantic id columns', () => {
 
     const localRow = screen.getByText('safety_interlock').closest('tr')
     expect(within(localRow).getAllByText('Local extension').length).toBeGreaterThan(0)
+    // The Standard column is the one place a local extension is marked: nothing follows its name.
+    expect(localRow.querySelector('td:first-child').textContent).toBe('safety_interlock')
   })
 
   it('renders an unmapped metric as a dash rather than an empty cell', async () => {

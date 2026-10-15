@@ -35,9 +35,9 @@ export const TOAST_SPOKEN_PREFIX = { warning: 'Warning: ', error: 'Error: ' }
  * already closes the modal or drawer the toast is floating over.
  *
  * With `onOpen` the message is a button that calls it with the toast's id; the close button never
- * does.
+ * does. `openTitle` is the button's tooltip, saying where it goes.
  */
-export function Toast({ id, msg, type, onDismiss, onExpire, onOpen }) {
+export function Toast({ id, msg, type, onDismiss, onExpire, onOpen, openTitle }) {
   const duration = toastDuration(msg, type)
   const remaining = useRef(duration)
   const startedAt = useRef(0)
@@ -96,7 +96,7 @@ export function Toast({ id, msg, type, onDismiss, onExpire, onOpen }) {
     >
       <span className="toast-icon" aria-hidden="true"><Icon size={16} /></span>
       {onOpen ? (
-        <button type="button" className="toast-msg toast-open" onClick={() => onOpen(id)} title="Show the firing alerts">
+        <button type="button" className="toast-msg toast-open" onClick={() => onOpen(id)} title={openTitle}>
           {text}
         </button>
       ) : (
@@ -116,7 +116,7 @@ export function Toast({ id, msg, type, onDismiss, onExpire, onOpen }) {
  */
 export function ToastStack({ toasts = [], onDismiss, onExpire }) {
   const renderToast = (t) => (
-    <Toast key={t.id} id={t.id} msg={t.msg} type={t.type} onDismiss={onDismiss} onExpire={onExpire} onOpen={t.onOpen} />
+    <Toast key={t.id} id={t.id} msg={t.msg} type={t.type} onDismiss={onDismiss} onExpire={onExpire} onOpen={t.onOpen} openTitle={t.openTitle} />
   )
   return (
     <div className="toast-stack">

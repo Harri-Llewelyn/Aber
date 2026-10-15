@@ -669,15 +669,18 @@ corner and records the same message in the history behind the bell in the top ba
   it, and an unread state that followed a user between browsers would need a per-user table with
   RLS. Supabase Queues (pgmq) does not fit that either, because a queue is single-consumer and
   cannot fan one event out to several signed-in users.
-- **A firing alert toasts its name only.** `showToast(msg, type, { detail, onOpen })`: `detail` is
-  what the history records when it differs from the toast text, and `onOpen` turns the message
-  into a button that is called with the toast's id. A platform alert passes its name as the text
+- **A firing alert toasts its name only.** `showToast(msg, type, { detail, onOpen, openTitle })`:
+  `detail` is what the history records when it differs from the toast text, `onOpen` turns the
+  message into a button that is called with the toast's id, and `openTitle` is that button's hover
+  text. A platform alert passes its name as the text
   and "name — summary" as the detail, because the summary can be several sentences with a SQL
   statement, which stacked as tall red blocks, kept a warning up longer and was read aloud in full
   by the `role="alert"` region. Clicking the toast opens the alert pill's list, where the summary
   is, and dismisses the toast: `App` owns the pill's open state (`AlertPill` takes optional
-  `open` and `onOpenChange`, and keeps its own state without them). Other toasts are not clickable.
-  "Resolved — name" is unchanged.
+  `open` and `onOpenChange`, and keeps its own state without them). "Resolved — name" is unchanged.
+  The one other clickable toast is an AAS export's warning about metrics with no semantic id: it
+  opens the Metrics page with Unmapped on and dismisses itself. `App` passes that link only to a
+  reader who has the Metrics page. Other toasts are not clickable.
 - **It is not the alert pill.** The pill says what is firing now, and its count is a reason to act.
   The history says what the toasts said, resolved and routine messages included; merging the two
   would fill the pill's count with entries nobody needs to act on.

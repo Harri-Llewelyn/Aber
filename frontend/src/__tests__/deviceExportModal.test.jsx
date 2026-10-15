@@ -111,6 +111,60 @@ describe('DeviceExportModal', () => {
     ))
   })
 
+  it('leaves the unmapped warning plain text when it is given nowhere to lead', async () => {
+    api.post.mockResolvedValue({ aas: {}, stats: { submodels: 2, telemetry_metrics: 4, unmapped_semantic_ids: 2 } })
+    const { dialog, showToast } = open()
+    fireEvent.click(exportButton(dialog))
+    await waitFor(() => expect(showToast).toHaveBeenCalled())
+    expect(showToast.mock.calls).toEqual([
+      ["AAS JSON exported for 'CNC_01' (2 submodels, 4 metrics) — 2 metrics carried no semantic id", 'warning']
+    ])
+  })
+
+  it('makes the unmapped warning open the Metrics page when it can', async () => {
+    api.post.mockResolvedValue({ aas: {}, stats: { submodels: 2, telemetry_metrics: 4, unmapped_semantic_ids: 2 } })
+    const onShowUnmappedMetrics = vi.fn()
+    const { dialog, showToast } = open({ onShowUnmappedMetrics })
+    fireEvent.click(exportButton(dialog))
+    await waitFor(() => expect(showToast).toHaveBeenCalledTimes(1))
+
+    const [message, type, options] = showToast.mock.calls[0]
+    expect(message).toBe(
+      "AAS JSON exported for 'CNC_01' (2 submodels, 4 metrics) — 2 metrics carried no semantic id. Open them on the Metrics page to map them."
+    )
+    expect(type).toBe('warning')
+    expect(options.openTitle).toMatch(/Metrics page/)
+    expect(onShowUnmappedMetrics).not.toHaveBeenCalled()
+    // The toast calls it with its own id, which the page uses to dismiss the toast.
+    options.onOpen(7)
+    expect(onShowUnmappedMetrics).toHaveBeenCalledWith(7)
+  })
+
+  it('says "it" for a single unmapped metric', async () => {
+    api.post.mockResolvedValue({ aas: {}, stats: { submodels: 1, telemetry_metrics: 1, unmapped_semantic_ids: 1 } })
+    const { dialog, showToast } = open({ initialFormat: 'aasx', onShowUnmappedMetrics: vi.fn() })
+    fireEvent.click(exportButton(dialog))
+    await waitFor(() => expect(showToast).toHaveBeenCalledTimes(1))
+    expect(showToast.mock.calls[0][0]).toMatch(/1 metric carried no semantic id\. Open it on the Metrics page to map it\.$/)
+  })
+
+  it('does not lead anywhere from the model URL warning', async () => {
+    const onShowUnmappedMetrics = vi.fn()
+    api.post.mockResolvedValue({ aas: {}, stats: { unmapped_semantic_ids: 2 }, warning: 'the 3D model URL is loopback' })
+    const warned = open({ onShowUnmappedMetrics })
+    fireEvent.click(exportButton(warned.dialog))
+    await waitFor(() => expect(warned.showToast).toHaveBeenCalledTimes(1))
+    expect(warned.showToast.mock.calls[0]).toHaveLength(2)
+  })
+
+  it('does not lead anywhere from a clean export', async () => {
+    api.post.mockResolvedValue({ aas: {}, stats: { submodels: 2, telemetry_metrics: 4, unmapped_semantic_ids: 0 } })
+    const { dialog, showToast } = open({ onShowUnmappedMetrics: vi.fn() })
+    fireEvent.click(exportButton(dialog))
+    await waitFor(() => expect(showToast).toHaveBeenCalledTimes(1))
+    expect(showToast.mock.calls[0]).toEqual(["AAS JSON exported for 'CNC_01' (2 submodels, 4 metrics)", 'success'])
+  })
+
   it('reports the model URL warning ahead of unmapped metrics', async () => {
     api.post.mockResolvedValue({ aas: {}, stats: { unmapped_semantic_ids: 2 }, warning: 'the 3D model URL is loopback' })
     const { dialog, showToast } = open()

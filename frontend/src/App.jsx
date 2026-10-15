@@ -428,6 +428,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   // Set by clicking an entry on the Vocabulary page; consumed by MetricsTab, which resolves it
   // against the vocabularies it already holds and opens its Add Metric dialog.
   const [pendingVocabularyEntry, setPendingVocabularyEntry] = useState(null)
+  // Set by the export warning about unmapped metrics; applied once by MetricsTab, which clears it.
+  const [selectedMetricFilter, setSelectedMetricFilter] = useState('')
   const [showBugReport, setShowBugReport] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [showChangePassword, setShowChangePassword] = useState(false)
@@ -465,6 +467,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   /* A setting is reached by its key, not a UUID: the key is what the page, the code and every
      migration call it, and it is what a link to one should carry. */
   const showSetting = (key) => { setSelectedSettingKey(key); setTab('settings', { search: key }) }
+  /** The Metrics catalog with Unmapped on, from the export's warning toast, which it dismisses. */
+  const showUnmappedMetrics = (toastId) => { setSelectedMetricFilter('unmapped'); setTab('metrics'); dismissToast(toastId) }
   const showSection = (tabId, section) => { handleNavClick(tabId); setSelectedSection(section) }
   /** The opposite direction: every device provisioned with a schema. Note the `schema` key. */
   const showDevicesForSchema = (uuid) => {
@@ -560,6 +564,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   // Computed once and used twice: the rail draws it and the search palette indexes it. Filtering
   // in both places would let the search offer a page the rail does not.
   const navTabs = TABS.filter(t => tabIsVisible(t, hasPermission, userRole))
+  // The export warning leads to Metrics only for a reader who has that page in the rail.
+  const unmappedMetricsLink = navTabs.some(t => t.id === 'metrics') ? showUnmappedMetrics : undefined
 
   return (
     <div className="app-shell">
@@ -688,7 +694,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
             {tab === 'areas'          && <AreasTab showToast={showToast} onViewTrail={a => viewTrailFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} initialSearchFilter={selectedAreaFilter} onClearFilter={() => setSelectedAreaFilter('')} />}
             {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewTrail={c => viewTrailFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
             {tab === 'gateways'       && <GatewaysTab userRole={userRole} activeAlerts={firingAlerts} showToast={showToast} onViewTrail={g => viewTrailFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
-            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewTrail={a => viewTrailFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} initialSection={selectedSection} onClearSection={() => setSelectedSection('')} activeAlerts={firingAlerts} />}
+            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewTrail={a => viewTrailFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} initialSection={selectedSection} onClearSection={() => setSelectedSection('')} activeAlerts={firingAlerts} onShowUnmappedMetrics={unmappedMetricsLink} />}
             {/* Re-checked here: `tab` arrives from the URL as well as the nav, so hiding the item
                 is not the same as closing the page. */}
             {tab === 'audit-trail' && hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ) && (
@@ -700,7 +706,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
               />
             )}
             {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={showDevicesForSchema} onSelectDevice={showDevice} initialSchemaId={selectedSchemaId} />}
-            {tab === 'metrics'        && <MetricsTab showToast={showToast} hasPermission={hasPermission} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} />}
+            {tab === 'metrics'        && <MetricsTab showToast={showToast} hasPermission={hasPermission} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} initialFilter={selectedMetricFilter} onClearFilter={() => setSelectedMetricFilter('')} />}
             {tab === 'vocabulary'     && <VocabularyTab hasPermission={hasPermission} onUseEntry={entry => { setPendingVocabularyEntry(entry); setTab('metrics') }} />}
             {tab === 'directory'      && <DirectoryTab showToast={showToast} initialSection={selectedSection} onClearSection={() => setSelectedSection('')} />}
             {/* `currentUserId` lets the page say "you" and offer Edit and Withdraw on the
@@ -718,7 +724,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
                 roles that can record. */}
             {tab === 'capture' && ['Administrator', 'Shopfloor_Manager', 'Auditor'].includes(userRole) &&
               <CaptureTab showToast={showToast} userRole={userRole} onSelectSchema={showSchema} />}
-            {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} onViewTrail={t => viewTrailFor(t.id, t.type, t.purged)} />}
+            {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} onViewTrail={t => viewTrailFor(t.id, t.type, t.purged)} onShowUnmappedMetrics={unmappedMetricsLink} />}
             {/* Re-checked because routing can put `tab` on a value the nav never offered.
                 `userRole` lets the page tell "nothing archived" from "not yours to see";
                 cold_storage_rows() gates in its body. */}

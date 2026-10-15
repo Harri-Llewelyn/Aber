@@ -122,8 +122,12 @@ const VIEW_HELP = {
  * @param {Object} pendingVocabularyEntry Handed over by clicking an entry on the Vocabulary page:
  * identifiers for a standard's entry, resolved here because applyPrefill() is the only place that
  * knows how a vocabulary row becomes a metric.
+ *
+ * @param {string} [initialFilter] A catalog filter handed over from another page. 'unmapped' opens
+ * the Metric Catalog tab with only the metrics that have no semantic id; any other value is
+ * ignored. `onClearFilter` drops it once applied, so a later return to the page starts clean.
  */
-export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, onConsumeVocabularyEntry }) {
+export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, onConsumeVocabularyEntry, initialFilter = '', onClearFilter }) {
   const [catalog, setCatalog]         = useState([])
   const [groups, setGroups]           = useState([])
   // Read for the usage count on a deprecation or a semantic id edit and nothing else -- how many
@@ -157,11 +161,23 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const [catalogSearch, setCatalogSearch] = useState('')
   // The catalog's other filters: a standard (or LOCAL_STANDARD_FILTER), and metrics with no id.
   const [standardFilter, setStandardFilter] = useState('')
-  const [unmappedOnly, setUnmappedOnly] = useState(false)
+  // Starts on when the page is opened by the unmapped hand-over, so the first paint is already
+  // filtered; the effect below also applies it to a page that is already open.
+  const [unmappedOnly, setUnmappedOnly] = useState(initialFilter === 'unmapped')
   const catalogFilterCount = [catalogSearch, standardFilter, unmappedOnly].filter(Boolean).length
   const clearCatalogFilters = () => {
     setCatalogSearch(''); setStandardFilter(''); setUnmappedOnly(false)
   }
+
+  // Replaces whatever the catalog was filtered by with the filter handed over, then drops it.
+  useEffect(() => {
+    if (!initialFilter) return
+    if (initialFilter === 'unmapped') {
+      setView('catalog'); setSelectedId(null)
+      setCatalogSearch(''); setStandardFilter(''); setUnmappedOnly(true)
+    }
+    onClearFilter?.()
+  }, [initialFilter, onClearFilter])
 
   /**
    * A group is open when the operator opened it. While the search or a filter narrows the catalog it
@@ -653,13 +669,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   /** The cells both tabs share, so a metric reads the same in each. */
   const metricCells = (m) => (
     <>
-      <td>
-        <span className="mono">{m.name}</span>
-        {/* MTConnect permits local extensions, so this marks provenance, not a problem. */}
-        {!m.standard && m.category && (
-          <span className="cell-meta badge-follow" title="Local extension — not drawn from a standard vocabulary">local</span>
-        )}
-      </td>
+      <td><span className="mono">{m.name}</span></td>
       {/* Plain text in the row's one meta style: a pill would wrap a long standard name onto two lines. */}
       <td className="cell-meta" title={m.standard ? `Named from the ${m.standard} vocabulary` : undefined}>
         {m.standard || LOCAL_EXTENSION_LABEL}
