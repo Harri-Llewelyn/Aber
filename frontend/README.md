@@ -571,10 +571,21 @@ under the `CardHeading`, or under the tab bar on a tabbed page, a direct child o
 filters go on the left, **the search box first when the toolbar has one**, so the control people
 reach for most is in the same place on every page; `toolbarSearchFirst.test.js` reads every
 toolbar in the source and holds to it. The other filters follow in the page's own order. The
-page's buttons go in `.filter-bar-actions` at the right-hand end: `ClearFilters` first, then
-secondary buttons such as Export or a destination button, then the main button last. A legend that
-explains the page, as on the Site Map, goes there too. The row runs edge to edge and is ruled off
-from what is below it. A page or tab with nothing to filter and no buttons draws no toolbar.
+page's buttons go in `.filter-bar-actions` at the right-hand end: `ClearFilters` first, then other
+buttons such as Export or a destination button, then the main button last. A legend that explains
+the page, as on the Site Map, goes there too. The row runs edge to edge and is ruled off from what
+is below it. A page or tab with nothing to filter and no buttons draws no toolbar.
+
+**Actions are filled, filter controls are outlined.** Every action in `.filter-bar-actions` is
+`btn-primary`: New Device, Export CSV, Play a file…, Take a backup, a destination button. A filter
+control is `btn-ghost`, because it changes what the page shows rather than doing something: Clear
+filters, Filters (n), Expand all, and an on/off toggle such as Needs attention, which is filled
+only while it is on, so its look says whether it is. **Amber (`btn-warning`) marks a destination
+that needs finishing**: Set a destination and Complete the destination. Backups shows two filled
+buttons side by side, Change destination and Take a backup, with the main one still last. Only the
+toolbar follows this rule: a side panel keeps exactly one primary action, and Discard stays
+outlined beside Save. `toolbarActionsFilled.test.js` reads every `.filter-bar-actions` group in
+the source and fails on an outlined button written into one.
 
 `CardHeading` takes no buttons: it has no `actions` prop, and `cardHeading.test.jsx` fails on a
 page that passes one. So a page's main button is in the same place whether or not it has tabs.
