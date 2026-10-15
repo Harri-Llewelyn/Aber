@@ -224,9 +224,14 @@ describe('the `/` hint on the search box', () => {
   })
 
   it('is the same key cap as the top bar\'s Ctrl K hint', () => {
-    const rule = (selector) => APP_CSS.match(new RegExp(`\\n${selector.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&')} \\{([^}]*)\\}`))[1]
+    const rule = (selector) => {
+      const start = APP_CSS.indexOf(`\n${selector} {`)
+      expect(start, `${selector} is not in App.css`).toBeGreaterThan(-1)
+      return APP_CSS.slice(APP_CSS.indexOf('{', start) + 1, APP_CSS.indexOf('}', start))
+    }
     const cap = ['padding', 'border', 'border-radius', 'font-family', 'font-size', 'color']
     const declarations = (body) => Object.fromEntries(body.split(';').map(d => d.trim().split(/:\s*/)).filter(([k]) => cap.includes(k)))
+    expect(Object.keys(declarations(rule('.global-search-kbd')))).toHaveLength(cap.length)
     expect(declarations(rule('.search-input-kbd'))).toEqual(declarations(rule('.global-search-kbd')))
   })
 })
