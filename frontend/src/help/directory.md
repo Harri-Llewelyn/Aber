@@ -9,6 +9,7 @@ This page lists every service Aber runs, what each one is for, and how to reach 
 - The `?` just after the tab names says what the open group is.
 - **Service Name** and **Service Type** say what the service is. The type is a category in words, such as Edge node or REST API. Hover it to see the type the service was registered with.
 - **Endpoint URL** is where the service answers, for the deployment you are actually running.
+- **A column's heading sorts the table** by that column, on every tab. Click it again to reverse the order, and a third time to go back to the usual order. A status sorts the most serious first, and an empty cell always sorts last. The page's address keeps the order, so a link or a reload shows the table the same way.
 - **Version** is the image tag this release deploys for the service. It is shown without a leading `v`, so every row reads alike. Hover it for the full image reference, which is what a vulnerability scanner or a registry needs.
 - Some images are built by Aber from another product, such as Node-RED. For those, Version shows the product's version, not Aber's. The tooltip still gives the full image reference.
 - The version is recorded from the deployment at each install and upgrade. So it shows what the release asked for, not what a container reports about itself. If it reads **not recorded**, the service is switched off in this deployment, or something other than the deployment registered it.

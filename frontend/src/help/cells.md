@@ -12,6 +12,7 @@ In ISA-95 terms a cell is a work center. It is not a "work cell", which the stan
 - **Place on plan**, in a placed cell's details panel, draws its area's plan with this cell's pin ringed and the other cells small and dimmed. Click it, or press Enter on it, to open the Site Map on that area.
 - **Description** is optional. When a cell has one, it shows in the cell's panel on the Site Map and under its name in the table here.
 - **The table** opens a cell's details panel when you click its row, or press Enter on it.
+- **A column's heading sorts the table** by that column. Click it again to reverse the order, and a third time to go back to the usual order. A status sorts the most serious first, and an empty cell always sorts last. The page's address keeps the order, so a link or a reload shows the table the same way.
 - **Cell UUID** is the identifier to quote in a query or a ticket. Copy it from the details panel.
 - **Dashboard / UI URL** links the cell to a dashboard, which **Open Dashboard** in the panel opens. When a cell has one, that is the panel's main action; otherwise **Edit Details** is (or **Restore Cell** for an archived cell). It is a link, not an embedded view: dashboards and thresholds live in Grafana.
 - **Assigned Gateways** and **Devices** list what is in the cell now. To move them, edit the gateway or device on its own page.

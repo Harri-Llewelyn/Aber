@@ -473,6 +473,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Page | first path segment | `/devices` | adds a history entry |
 | Tab | second path segment, `useUrlTab(page, ids, fallback)` | `/devices/quarantine` | adds a history entry, so Back returns to the previous tab |
 | Filter | query parameter, `useUrlState(key, default)` | `/devices?lifecycle=archived&gateway=<id>` | rewrites the current entry, so Back does not replay each keystroke |
+| Table sort | query parameter `sort`, `useSortableRows` ([Sortable tables](#table-and-row-conventions)) | `/gateways?sort=-last_heartbeat` | rewrites the current entry |
 | Open drawer | query parameter, `useUrlState` | `/devices?device=<uuid>` | rewrites the current entry |
 
 - **Defaults are left out**: `/devices`, not `/devices/registered?lifecycle=active`. A value the
@@ -494,7 +495,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 - **A hand-over that carries an object stays state.** The Vocabulary page's Use
   (`pendingVocabularyEntry`) opens Add Metric prefilled: an act to perform once, not a view.
 - **Nothing goes in the address that should not be in a log**: nginx writes query strings to its
-  access log. Search text and ids are fine. `sort` is reserved for sortable tables.
+  access log. Search text and ids are fine.
 - **Any path loads.** nginx serves `index.html` for any path (`try_files`), and every asset URL is
   absolute (Vite's `base` is `/`). An address carrying the sign-in callback's `code` or `state` is
   left alone for supabase-js to read.
@@ -504,19 +505,19 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Page | Tabs in the path | Query keys (drawer last) |
 | :--- | :--- | :--- |
 | Site Map | | `archived`; the panel: `area`, `cell` or `lane` |
-| Areas | | `search`, `lifecycle`; `area` |
-| Cells | | `search`, `lifecycle`, `attention`, `empty`; `cell` |
-| Gateways | | `search`, `lifecycle`, `status`, `type`, `quarantined`; `gateway` |
-| Devices | `quarantine` | `search`, `status`, `attention`, `lifecycle`, `type`, `schema`, `gateway`, `cell`, `replay`; `device` |
+| Areas | | `search`, `lifecycle`, `sort`; `area` |
+| Cells | | `search`, `lifecycle`, `attention`, `empty`, `sort`; `cell` |
+| Gateways | | `search`, `lifecycle`, `status`, `type`, `quarantined`, `sort`; `gateway` |
+| Devices | `quarantine` | `search`, `status`, `attention`, `lifecycle`, `type`, `schema`, `gateway`, `cell`, `replay`, `sort`; `device` |
 | Audit Trail | | `search`, `type`, `action`, `range`, `since`, `until`, `deleted`; `event` |
-| Schemas | | `search`, `status`; `schema` |
-| Metrics | `deprecated` | `search`, `standard`, `unmapped`; `metric` |
+| Schemas | | `search`, `status`, `sort`; `schema` |
+| Metrics | `deprecated`, `uncatalogued` | `search`, `standard`, `unmapped`, `sort`; `metric`. Uncatalogued: `name`, `sort` |
 | Vocabulary | the standard, as a slug (`opc-ua`) | `search` |
-| Approvals | `decided` | `kind`, `search`; `proposal` |
-| Capture | `device` | `stored`, `search`, `gateway`; `subject` |
-| Archives | `retired` | |
-| Directory | the group | |
-| Access Control | `credentials`, `identities`, `accounts`, `roles` | People: `search`, `role`, `status`, `removed`. Broker credentials: `search`, `state`, `archived`. Machine identities: `search`, `withdrawn`. Broker roles: `broker-role` |
+| Approvals | `decided` | `kind`, `search`, `sort`; `proposal` |
+| Capture | `device` | `stored`, `search`, `gateway`, `sort`; `subject` |
+| Archives | `retired` | `sort` |
+| Directory | the group | `sort` |
+| Access Control | `credentials`, `identities`, `accounts`, `roles` | Every tab: `sort`. People: `search`, `role`, `status`, `removed`. Broker credentials: `search`, `state`, `archived`. Machine identities: `search`, `withdrawn`. Broker roles: `broker-role` |
 | Backups | | `status`; `run` |
 | Settings | the category, as a slug (`cold-storage`) | `setting`, the search bar's highlight |
 
@@ -860,6 +861,33 @@ Three rules that were each learned from a real bug:
   the row's last cell as a mask, reserving space on the right; a row without the class shows none.
   Row click opens the panel; a click on a button, link or input inside the row does not
   (`rowSelectHandler`).
+- **A table can be sorted by its columns** (#801). The rows go through
+  `useSortableRows(rows, columns)` (`hooks/useTableSort.js`) and each sortable header is a
+  `<SortHeader sort={sort} column="name" title="…">Name</SortHeader>` (`common/SortHeader.jsx`).
+  A click sorts ascending, a second descending, and a third returns the table to the order it had,
+  which is left as it was: a table nobody sorts reads as before, and no header claims that order.
+  - **A column sorts by what it means, not by its text** (`utils/tableSort.js`): `text` in natural
+    order ("Line 9" before "Line 10"), `number`, `time` by instant, and `rank`, a number the column
+    works out. A status ranks by its badge's colour, `severityRank(tone)`, so ascending puts red and
+    amber first; a status with a fixed order of its own (Cold Storage's export sequence) uses
+    `rankIn(order, value)`. A column sorts on the value its cell shows, so a count column counts
+    what the cell counts.
+  - **An empty cell goes last** in either direction: a dash, Never, no gateway. Rows that compare
+    equal keep their default order.
+  - **A column with no order between its rows is not sortable**: actions, an icon, a list of chips
+    another column counts, or a value column whose rows are different metrics in different units.
+  - **The sort is in the address**, `?sort=name` or `?sort=-name` for descending. A page shows one
+    table per tab, so the key is always `sort`, and a tab change drops it with the other filters.
+    A component that holds several tabs' tables passes `{ active: tab === '…' }`, so a hidden
+    table neither reads the sort nor tidies away one meant for the table on screen. A table in a
+    modal has no address and uses `useLocalSortableRows`.
+  - **Groups sort inside themselves.** The Metric Catalog's group bands keep their order, and
+    `useTableSort(columns).apply(rows)` sorts each group's rows.
+  - **A table loaded a page at a time from the server keeps its order** and has no sortable headers:
+    sorting in the browser would sort only the rows on screen. Backups is the one such table.
+  - **The arrow hangs in the header cell's right padding**, so a sortable column is no wider than it
+    was and the header keeps its one line. `sortableTables.test.js` lists every file that draws a
+    table, with the reason each unsortable one keeps its order, so a new table cannot ship unsorted.
 - **Row actions live in the details drawer.** Keep one or two primary actions visible in the row; the rest go in the drawer, which can also say *why* an action is disabled.
 - **`common/TagList.jsx` collapses long tag lists**, with `priority` entries pinned ahead of the
   cut — the entry that matters most is not the one that sorts first.

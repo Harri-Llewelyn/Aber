@@ -13,6 +13,7 @@ Taking something out of service has two steps. Archiving is the step you can und
 - **Auto-purge** is the timer: the date the archived record will be removed for good. It is chosen when the entity is archived. Within a week of that date it turns red and shows a warning icon. An entity marked **Never auto-purged** is kept until someone deletes it.
 - Archiving a gateway also disables its broker credential and archives its repository in the forge. Restore brings the repository back, but not the credential: issue a new one once the gateway is restored.
 - **Entity ID** and **Archived At** are the two facts to quote when the question is whether something was taken out on purpose.
+- **A column's heading sorts the table** by that column, on both tabs. Click it again to reverse the order, and a third time to go back to the usual order. A status sorts the most serious first, and an empty cell always sorts last. The page's address keeps the order, so a link or a reload shows the table the same way.
 - Without the archive permission (Administrator or Shopfloor Manager), the buttons are disabled and say who can use them.
 
 ## Retired entities
