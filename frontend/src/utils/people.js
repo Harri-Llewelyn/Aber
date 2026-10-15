@@ -33,16 +33,18 @@ export function personRoleLabel(role) {
   return PERSON_ROLES.find(r => r.name === role)?.label || (role ? String(role) : 'No role')
 }
 
-/** The Status column: a label, a Badge tone and what it means. */
+/** The Status column: a key (the People filter's value), a label, a Badge tone and what it means. */
 export function personStatus(person) {
   if (person.status === 'removed') {
     return person.sign_in_blocked
       ? {
+          key: 'removed',
           label: 'Access removed',
           tone: 'danger',
           title: 'Their role is removed and they cannot sign in. Restore Access gives the role back.',
         }
       : {
+          key: 'sign-in-open',
           label: 'Sign-in still open',
           tone: 'warning',
           title: 'Their role is removed, but their sign-in is not blocked yet. Remove Access again to block it.',
@@ -50,11 +52,29 @@ export function personStatus(person) {
   }
   if (person.status === 'invited') {
     return person.invited_at
-      ? { label: 'Invited', tone: 'pending', title: 'Sent an invitation by email, and not signed in yet.' }
-      : { label: 'Not signed in yet', tone: 'pending', title: 'Added with a password, and not signed in yet.' }
+      ? { key: 'invited', label: 'Invited', tone: 'pending', title: 'Sent an invitation by email, and not signed in yet.' }
+      : { key: 'not-signed-in', label: 'Not signed in yet', tone: 'pending', title: 'Added with a password, and not signed in yet.' }
   }
-  return { label: 'Active', tone: 'success', title: 'Has signed in.' }
+  return { key: 'active', label: 'Active', tone: 'success', title: 'Has signed in.' }
 }
+
+/** The Status column's labels, in the order the People filter offers them. */
+export const PERSON_STATUSES = [
+  { key: 'active', label: 'Active' },
+  { key: 'invited', label: 'Invited' },
+  { key: 'not-signed-in', label: 'Not signed in yet' },
+  { key: 'sign-in-open', label: 'Sign-in still open' },
+  { key: 'removed', label: 'Access removed' },
+]
+
+/** The People filter's value for a person who holds no role. */
+export const NO_ROLE = 'none'
+
+/**
+ * A person whose removal is finished: role gone and sign-in blocked. People hides these until
+ * Show removed is on. A removal still open is not one of them: it needs Remove Access again.
+ */
+export const accessRemoved = (person) => person.status === 'removed' && !!person.sign_in_blocked
 
 /** Administrators who can still sign in. A removed one, or one banned elsewhere, does not count. */
 export function administratorsWithAccess(people) {

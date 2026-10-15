@@ -210,6 +210,14 @@ The broker read may fail without failing the page. The Broker column then reads 
 is a fact about the page load and not about any account, and the reason is stated once in the
 card. The page does not show sessions: an *Active* account is one that may connect.
 
+People, Broker credentials and Machine identities are searched and filtered in the browser: each
+list is tens of rows, read whole. What is gone is hidden the same way on every tab, behind a **Show
+… (N)** toggle that appears only while N is above 0: removed people (`accessRemoved()` in
+`utils/people.js`, which leaves out a removal whose sign-in is still open, since that row needs
+Remove Access again), archived gateways and withdrawn identities. The tab and the filters are in
+the address (see [Routing](#routing)), which is why the page has no Refresh: every action reads its
+list again, and a reload returns to the same view.
+
 The **People** tab (`components/tabs/PeopleSection.jsx`) is offered only when `App.jsx` passes
 `userRole` Administrator, and the page opens on it. Roles go through `set_person_role()`; adding,
 removing, restoring and Set New Password go through `manage-people`, because GoTrue's admin API
@@ -478,7 +486,7 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 | Capture | `device` | `stored`, `search`, `gateway`; `subject` |
 | Archives | `retired` | |
 | Directory | the group | |
-| Access Control | `credentials`, `identities`, `accounts`, `roles` | `state`; `broker-role` |
+| Access Control | `credentials`, `identities`, `accounts`, `roles` | People: `search`, `role`, `status`, `removed`. Broker credentials: `search`, `state`, `archived`. Machine identities: `search`, `withdrawn`. Broker roles: `broker-role` |
 | Backups | | `status`; `run` |
 | Settings | the category, as a slug (`cold-storage`) | `setting`, the search bar's highlight |
 

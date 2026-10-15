@@ -1,16 +1,22 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
+import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
-import { IconPlus, IconRefreshCw, IconShieldAlert, IconUser } from '../common/Icons'
+import { IconArchive, IconPlus, IconShieldAlert, IconUser } from '../common/Icons'
 import { LoadingState } from '../common/LoadingState'
+import { SearchInput } from '../common/SearchInput'
+import { useUrlState } from '../../hooks/useUrlState'
 import { AddPersonModal } from '../modals/AddPersonModal'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { NewPasswordModal } from '../modals/NewPasswordModal'
 import { formatDateTime } from '../../utils/format'
 import {
+  NO_ROLE,
   PERSON_ROLES,
+  PERSON_STATUSES,
+  accessRemoved,
   passwordSetBlocked,
   personRoleLabel,
   personStatus,
@@ -25,6 +31,11 @@ import {
  * manage-people, which holds GoTrue's secret key. The database refuses your own role, access or
  * password and the last Administrator who can sign in; the controls are disabled for those with
  * the reason as their tooltip. A new password is shown once, in NewPasswordModal.
+ *
+ * The list is searched by email and filtered by role and status, in the browser: list_people()
+ * returns every account, and a site has tens of them. A removed account is hidden until Show
+ * removed is on; a removal that has not finished (Sign-in still open) is never hidden, because it
+ * still needs Remove Access again. The filters are in the address.
  */
 export function PeopleSection({ showToast, currentUserId }) {
   const [people, setPeople] = useState([])
@@ -37,6 +48,13 @@ export function PeopleSection({ showToast, currentUserId }) {
   const [newPassword, setNewPassword] = useState(null)
   // The user_id whose role is being saved, so its select shows the wait.
   const [savingRole, setSavingRole] = useState(null)
+  const [search, setSearch] = useUrlState('search')
+  const [roleFilter, setRoleFilter] = useUrlState('role', '', { allowed: [...PERSON_ROLES.map(r => r.name), NO_ROLE] })
+  const [showRemoved, setShowRemoved] = useUrlState('removed', false)
+  // Access removed is offered only while removed accounts are shown.
+  const [statusFilter, setStatusFilter] = useUrlState('status', '', {
+    allowed: PERSON_STATUSES.map(st => st.key).filter(key => showRemoved || key !== 'removed')
+  })
 
   const load = useCallback(() => {
     api.listPeople()
@@ -45,6 +63,26 @@ export function PeopleSection({ showToast, currentUserId }) {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  const removedCount = useMemo(() => people.filter(accessRemoved).length, [people])
+  // What the role and status options count: everyone the removed toggle lets in.
+  const listed = useMemo(() => people.filter(p => showRemoved || !accessRemoved(p)), [people, showRemoved])
+  const query = search.trim().toLowerCase()
+  const shown = useMemo(() => listed.filter(p => {
+    if (roleFilter && (p.role || NO_ROLE) !== roleFilter) return false
+    if (statusFilter && personStatus(p).key !== statusFilter) return false
+    return !query || String(p.email || p.user_id).toLowerCase().includes(query)
+  }), [listed, roleFilter, statusFilter, query])
+  const roleCount = (name) => listed.filter(p => (p.role || NO_ROLE) === name).length
+  const statusCount = (key) => listed.filter(p => personStatus(p).key === key).length
+  const filterCount = [search, roleFilter, statusFilter].filter(Boolean).length + (showRemoved ? 1 : 0)
+  const clearFilters = () => { setSearch(''); setRoleFilter(''); setStatusFilter(''); setShowRemoved(false) }
+
+  // The toggle shows only while there is something to show, so an address that turns it on with
+  // nothing removed is tidied once the list is in.
+  useEffect(() => {
+    if (!loading && !error && showRemoved && removedCount === 0) setShowRemoved(false)
+  }, [loading, error, showRemoved, removedCount, setShowRemoved])
 
   const changeRole = useCallback(async (person, role) => {
     if (!role || role === person.role) return
@@ -89,10 +127,57 @@ export function PeopleSection({ showToast, currentUserId }) {
     <>
       {!error && (
         <div className="filter-bar">
-          <div className="filter-bar-actions">
-            <button className="btn btn-ghost btn-sm" onClick={() => load()} title="Read the list again">
-              <IconRefreshCw size={14} /> Refresh
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="Search by email…"
+            ariaLabel="Search people by email"
+          />
+          <select
+            className="form-control control-md"
+            value={roleFilter}
+            onChange={e => setRoleFilter(e.target.value)}
+            aria-label="Filter people by role"
+            title="Filter by the Role column"
+          >
+            <option value="">All roles ({listed.length})</option>
+            {PERSON_ROLES.map(r => (
+              <option key={r.name} value={r.name}>{r.label} ({roleCount(r.name)})</option>
+            ))}
+            <option value={NO_ROLE}>No role ({roleCount(NO_ROLE)})</option>
+          </select>
+          <select
+            className="form-control control-md"
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+            aria-label="Filter people by status"
+            title="Filter by the Status column"
+          >
+            <option value="">Any status ({listed.length})</option>
+            {PERSON_STATUSES
+              // Sign-in still open only while someone is in that state; Access removed only while
+              // removed accounts are shown.
+              .filter(st => (st.key === 'removed' ? showRemoved
+                : st.key === 'sign-in-open' ? statusCount(st.key) > 0 || statusFilter === st.key
+                  : true))
+              .map(st => (
+                <option key={st.key} value={st.key}>{st.label} ({statusCount(st.key)})</option>
+              ))}
+          </select>
+          {/* Offered only while an account is removed; the count is what it would list. */}
+          {removedCount > 0 && (
+            <button
+              type="button"
+              className={`btn btn-sm ${showRemoved ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => setShowRemoved(v => !v)}
+              aria-pressed={showRemoved}
+              title="People whose access is removed are left off the list. Their accounts and history stay, and Restore Access gives the role back."
+            >
+              <IconArchive size={13} /> Show removed ({removedCount})
             </button>
+          )}
+          <div className="filter-bar-actions">
+            <ClearFilters count={filterCount} onClear={clearFilters} />
             <button
               className="btn btn-primary btn-sm"
               onClick={() => setAdding(true)}
@@ -113,8 +198,13 @@ export function PeopleSection({ showToast, currentUserId }) {
         </div>
       )}
 
-      {!error && (loading ? <LoadingState label="people" /> : people.length === 0 ? (
-        <EmptyState icon={<IconUser size={36} />} message="No person can sign in to this site yet." />
+      {!error && (loading ? <LoadingState label="people" /> : shown.length === 0 ? (
+        <EmptyState
+          icon={<IconUser size={36} />}
+          filtered={people.length > 0}
+          message="No person can sign in to this site yet."
+          filteredMessage="No person matches these filters."
+        />
       ) : (
         <div className="table-wrap">
           <table>
@@ -128,7 +218,7 @@ export function PeopleSection({ showToast, currentUserId }) {
               </tr>
             </thead>
             <tbody>
-              {people.map(p => {
+              {shown.map(p => {
                 const status = personStatus(p)
                 const roleBlocked = roleChangeBlocked(p, people, currentUserId)
                 const removeBlocked = removalBlocked(p, people, currentUserId)
