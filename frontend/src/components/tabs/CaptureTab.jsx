@@ -1141,11 +1141,11 @@ function RecentDiscards({ jobs }) {
             <div style={{ fontSize: '12px', flex: 1 }}>
               <strong>{job.gateways?.name || job.target_edge_node_id}</strong>
               {' — '}
-              {lost} of {plural(total, 'published message')} carried timestamps too old
-              for the historian, and those readings were discarded on ingest. The playback itself
-              succeeded.
+              {lost} of {plural(total, 'published message')} carried timestamps too old or too
+              far in the future for the historian, and those readings were discarded on ingest. The
+              playback itself succeeded.
               {' '}
-              <HelpTip label="Why readings were discarded" text="Playback rebases timestamps onto now but keeps each one's distance from the capture's epoch, so a reading already old when recorded stays too old. Speed is not the cause; correct the capture's timestamps." />
+              <HelpTip label="Why readings were discarded" text="Playback keeps the gap between a reading's timestamp and its message's arrival. A reading already old when recorded, or stamped by a fast device clock, stays outside the window. A slow speed stretches the gap: try 1x." />
             </div>
             <button
               className="btn btn-ghost btn-sm"

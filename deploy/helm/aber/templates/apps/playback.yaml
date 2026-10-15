@@ -116,6 +116,10 @@ spec:
               value: {{ .Values.supabaseStorage.captureBucket | quote }}
             - name: PLAYBACK_POLL_INTERVAL_SECONDS
               value: {{ .Values.playback.pollIntervalSeconds | quote }}
+            {{- /* The bound the daemon applies to is_historical readings (values.yaml), so the
+                   check before a replay judges them as the daemon will. */}}
+            - name: TELEMETRY_MAX_HISTORICAL_AGE_SECONDS
+              value: {{ .Values.ingestion.historicalMaxAgeSeconds | int | quote }}
             - name: PYTHONUNBUFFERED
               value: "1"
           securityContext:

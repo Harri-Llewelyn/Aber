@@ -1156,7 +1156,7 @@ describe('the playback strip', () => {
   it('says how many readings a completed playback lost to the sanity window', async () => {
     api.recentPlaybackJobs.mockResolvedValue([lossy()])
     renderTab()
-    expect(await screen.findByText(/3 of 412 published messages carried timestamps too old/i))
+    expect(await screen.findByText(/3 of 412 published messages carried timestamps too old or too far in the future/i))
       .toBeInTheDocument()
   })
 
@@ -1166,7 +1166,7 @@ describe('the playback strip', () => {
     api.recentPlaybackJobs.mockResolvedValue([lossy({ messages_out_of_window: 0 })])
     renderTab()
     await screen.findByText('Line 1 Gateway')
-    expect(screen.queryByText(/timestamps too old/i)).toBeNull()
+    expect(screen.queryByText(/timestamps too old or too far in the future/i)).toBeNull()
   })
 
   it('says nothing for a job written before the column existed', async () => {
@@ -1175,7 +1175,7 @@ describe('the playback strip', () => {
     api.recentPlaybackJobs.mockResolvedValue([lossy({ messages_out_of_window: undefined })])
     renderTab()
     await screen.findByText('Line 1 Gateway')
-    expect(screen.queryByText(/timestamps too old/i)).toBeNull()
+    expect(screen.queryByText(/timestamps too old or too far in the future/i)).toBeNull()
   })
 
   it('does not call a lossy playback a failure', async () => {
@@ -1184,7 +1184,7 @@ describe('the playback strip', () => {
     // playback that would have written NOTHING never reaches here -- the worker refuses it.
     api.recentPlaybackJobs.mockResolvedValue([lossy()])
     renderTab()
-    await screen.findByText(/timestamps too old/i)
+    await screen.findByText(/timestamps too old or too far in the future/i)
     expect(screen.queryByText(/playback failed/i)).toBeNull()
     expect(screen.queryByText(/playback cancelled/i)).toBeNull()
   })
@@ -1192,14 +1192,14 @@ describe('the playback strip', () => {
   it('dismisses the notice, and does not bring it back', async () => {
     api.recentPlaybackJobs.mockResolvedValue([lossy()])
     const { unmount } = renderTab()
-    await screen.findByText(/timestamps too old/i)
+    await screen.findByText(/timestamps too old or too far in the future/i)
     fireEvent.click(screen.getByRole('button', { name: /Dismiss the discarded-readings notice/i }))
-    expect(screen.queryByText(/timestamps too old/i)).toBeNull()
+    expect(screen.queryByText(/timestamps too old or too far in the future/i)).toBeNull()
 
     unmount()
     renderTab()
     await screen.findByText('Line 1 Gateway')
-    expect(screen.queryByText(/timestamps too old/i)).toBeNull()
+    expect(screen.queryByText(/timestamps too old or too far in the future/i)).toBeNull()
   })
 })
 
