@@ -1,5 +1,5 @@
-import React from 'react'
-import { IconUser, IconLock, IconAlertTriangle } from '../common/Icons'
+import React, { useState } from 'react'
+import { IconUser, IconLock, IconAlertTriangle, IconX } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { useUrlTab } from '../../hooks/useUrlState'
@@ -18,6 +18,19 @@ const THEME_OPTIONS = [
 ]
 
 /** One row of the Settings page's table: the name, what it does, its value, and what can be done. */
+/** Save and Discard for a row with an unsaved choice, as the Settings page shows them; nothing otherwise. */
+function SaveDiscard({ dirty, onSave, onDiscard }) {
+  if (!dirty) return null
+  return (
+    <div className="setting-actions">
+      <button type="button" className="btn btn-primary btn-sm" onClick={onSave}>Save</button>
+      <button type="button" className="btn btn-ghost btn-sm" onClick={onDiscard}>
+        <IconX size={13} /> Discard
+      </button>
+    </div>
+  )
+}
+
 function ProfileRow({ id, label, description, value, actions }) {
   return (
     <tr className="setting-row" data-profile-setting={id}>
@@ -73,7 +86,13 @@ export function ProfileTab({
 }) {
   const [section, setSection] = useUrlTab('profile', PROFILE_SECTIONS.map(s => s.id), PROFILE_SECTIONS[0].id)
 
-  const mode = SIDEBAR_MODES.find(m => m.id === sidebarMode) || SIDEBAR_MODES[0]
+  // Appearance holds a choice until Save, as Settings does; null means the row shows what is saved.
+  const [themeDraft, setThemeDraft] = useState(null)
+  const [modeDraft, setModeDraft] = useState(null)
+  const shownTheme = themeDraft ?? theme
+  const mode = SIDEBAR_MODES.find(m => m.id === (modeDraft ?? sidebarMode)) || SIDEBAR_MODES[0]
+  const themeDirty = themeDraft !== null && themeDraft !== theme
+  const modeDirty = modeDraft !== null && modeDraft !== sidebarMode
 
   return (
     <div className="page-layout page-fill">
@@ -153,12 +172,15 @@ export function ProfileTab({
                   <select
                     id="profile-theme"
                     className="form-control"
-                    value={theme}
-                    onChange={e => onChangeTheme?.(e.target.value)}
+                    value={shownTheme}
+                    onChange={e => setThemeDraft(e.target.value)}
                   >
                     {THEME_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
                   </select>
                 )}
+                actions={<SaveDiscard dirty={themeDirty}
+                  onSave={() => { onChangeTheme?.(themeDraft); setThemeDraft(null) }}
+                  onDiscard={() => setThemeDraft(null)} />}
               />
               <ProfileRow
                 id="sidebar"
@@ -169,13 +191,16 @@ export function ProfileTab({
                     id="profile-sidebar"
                     className="form-control"
                     value={mode.id}
-                    onChange={e => onChangeSidebarMode?.(e.target.value)}
+                    onChange={e => setModeDraft(e.target.value)}
                     aria-describedby="profile-sidebar-detail"
                   >
                     {SIDEBAR_MODES.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
                   </select>
                   <div id="profile-sidebar-detail" className="setting-bounds profile-detail">{mode.description}</div>
                 </>)}
+                actions={<SaveDiscard dirty={modeDirty}
+                  onSave={() => { onChangeSidebarMode?.(modeDraft); setModeDraft(null) }}
+                  onDiscard={() => setModeDraft(null)} />}
               />
             </ProfileTable>
           </>)}

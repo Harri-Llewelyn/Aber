@@ -94,22 +94,53 @@ describe('Account', () => {
 })
 
 describe('Appearance', () => {
-  it('shows the current theme and layout, and writes a change through at once', () => {
+  it('shows the current theme and layout, with nothing to save until one changes', () => {
+    renderProfile({ theme: 'dark', sidebarMode: 'collapsed' })
+    fireEvent.click(tab('Appearance'))
+
+    expect(screen.getByLabelText('Theme')).toHaveValue('dark')
+    expect(screen.getByLabelText('Sidebar layout')).toHaveValue('collapsed')
+    expect(within(row('Sidebar layout')).getByText(/Icons only/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Discard/ })).toBeNull()
+  })
+
+  it('applies a change only on Save, row by row, as Settings does', () => {
     const { onChangeTheme, onChangeSidebarMode } = renderProfile({ theme: 'dark', sidebarMode: 'collapsed' })
     fireEvent.click(tab('Appearance'))
 
-    const theme = screen.getByLabelText('Theme')
-    const sidebar = screen.getByLabelText('Sidebar layout')
-    expect(theme).toHaveValue('dark')
-    expect(sidebar).toHaveValue('collapsed')
-    expect(within(row('Sidebar layout')).getByText(/Icons only/)).toBeInTheDocument()
-
-    fireEvent.change(theme, { target: { value: 'light' } })
+    fireEvent.change(screen.getByLabelText('Theme'), { target: { value: 'light' } })
+    expect(onChangeTheme).not.toHaveBeenCalled()
+    // Only the changed row offers Save and Discard.
+    expect(within(row('Sidebar layout')).queryByRole('button', { name: 'Save' })).toBeNull()
+    fireEvent.click(within(row('Theme')).getByRole('button', { name: 'Save' }))
     expect(onChangeTheme).toHaveBeenCalledWith('light')
-    fireEvent.change(sidebar, { target: { value: 'expanded' } })
+    expect(within(row('Theme')).queryByRole('button', { name: 'Save' })).toBeNull()
+
+    fireEvent.change(screen.getByLabelText('Sidebar layout'), { target: { value: 'expanded' } })
+    // The detail line follows the choice before it is saved.
+    expect(within(row('Sidebar layout')).getByText(/Labels always shown/)).toBeInTheDocument()
+    fireEvent.click(within(row('Sidebar layout')).getByRole('button', { name: 'Save' }))
     expect(onChangeSidebarMode).toHaveBeenCalledWith('expanded')
-    // Applied as chosen: there is nothing to save.
-    expect(screen.queryByRole('button', { name: 'Save' })).toBeNull()
+  })
+
+  it('puts the saved value back on Discard, and saves nothing', () => {
+    const { onChangeTheme } = renderProfile({ theme: 'dark' })
+    fireEvent.click(tab('Appearance'))
+
+    fireEvent.change(screen.getByLabelText('Theme'), { target: { value: 'light' } })
+    fireEvent.click(within(row('Theme')).getByRole('button', { name: /Discard/ }))
+    expect(screen.getByLabelText('Theme')).toHaveValue('dark')
+    expect(onChangeTheme).not.toHaveBeenCalled()
+    expect(within(row('Theme')).queryByRole('button', { name: /Discard/ })).toBeNull()
+  })
+
+  it('offers nothing to save when the choice goes back to the saved value', () => {
+    renderProfile({ theme: 'dark' })
+    fireEvent.click(tab('Appearance'))
+    fireEvent.change(screen.getByLabelText('Theme'), { target: { value: 'light' } })
+    fireEvent.change(screen.getByLabelText('Theme'), { target: { value: 'dark' } })
+    expect(within(row('Theme')).queryByRole('button', { name: 'Save' })).toBeNull()
   })
 
   it('offers the three sidebar layouts and the two themes, nothing else', () => {
