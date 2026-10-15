@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react'
+import React, { useState, useCallback, useMemo, useEffect, useLayoutEffect, useRef } from 'react'
 import { RouteLink } from '../common/RouteLink'
 import { areaUrl, cellUrl, deviceUrl, gatewayUrl, tabUrl } from '../../routes'
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
@@ -150,18 +150,22 @@ export function SiteMapTab({ onSelectDevice, onSelectGateway, onSelectCell, onSe
 
   // Arriving from a plan on the Areas or Cells page names one area: open its panel, draw it even
   // when archived, and bring its card into view once it is drawn.
+  // The scroll waits in a ref for the render that draws the card: showing an archived area is an
+  // address change, which renders apart from React state.
   const [arrivalAreaId] = useState(() => queryOf().get('area') || '')
-  const [scrollToAreaId, setScrollToAreaId] = useState(null)
+  const scrollToAreaId = useRef(null)
   useArrivalSelection(arrivalAreaId, areas, (a, id) => a.area_id === id, (a) => {
     if (a.is_archived) setShowArchived(true)
     setOpenLane(null); setSelectedCellId(null); setSelectedAreaId(a.area_id)
-    setScrollToAreaId(a.area_id)
+    scrollToAreaId.current = a.area_id
   })
-  useEffect(() => {
-    if (!scrollToAreaId) return
-    document.querySelector(`.area-card[data-area="${scrollToAreaId}"]`)?.scrollIntoView?.({ block: 'nearest' })
-    setScrollToAreaId(null)
-  }, [scrollToAreaId])
+  useLayoutEffect(() => {
+    if (!scrollToAreaId.current) return
+    const card = document.querySelector(`.area-card[data-area="${scrollToAreaId.current}"]`)
+    if (!card) return
+    card.scrollIntoView?.({ block: 'nearest' })
+    scrollToAreaId.current = null
+  })
 
   // Archived equipment is out of service on purpose, so nothing on the map counts or lists it, as
   // with an archived cell. The Archived Entities page holds it.
