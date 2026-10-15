@@ -185,8 +185,8 @@ describe('Merged navigation shell', () => {
   })
 
   /**
-   * The shortcuts dialog, and the key that opens it. `?` is the only printable character bound
-   * anywhere, so it has to stand down inside a text field.
+   * The shortcuts dialog, and the key that opens it. `?` is a printable character, as `/` is
+   * (pageSearchShortcut.test.jsx), so it has to stand down inside a text field.
    */
   describe('the shortcuts dialog', () => {
 

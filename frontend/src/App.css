@@ -1075,9 +1075,9 @@ a.sidebar-item { text-decoration: none; }
   line-height: 1.3;
 }
 
-/* A page's only card, naming the page: icon and title on the first row with the count and the
-   actions, the description on its own line beneath. Icon gap and description type match
-   the page heading's. */
+/* A page's only card, naming the page: icon and title on the first row, the description on its own
+   line beneath. It holds no buttons; they are in the toolbar under it (.filter-bar). Icon gap and
+   description type match the page heading's. */
 .card-heading .section-title {
   display: flex;
   align-items: center;
@@ -1086,10 +1086,6 @@ a.sidebar-item { text-decoration: none; }
 
 .card-heading .section-title .section-count {
   margin-left: 2px;
-}
-
-.card-heading > :not(.section-title):not(.card-heading-description):not(.card-heading-note) {
-  margin-left: auto;
 }
 
 .card-heading .card-heading-description,
@@ -1110,18 +1106,6 @@ a.sidebar-item { text-decoration: none; }
   padding: 12px var(--inset);
 }
 
-/* A filter bar inside a card. The page-level one carries its own frame because it floats on the
-   page background; inside a card it keeps the layout and drops the chrome. */
-.card-body > .filter-bar {
-  margin-bottom: 0;
-  padding: 0;
-  background: none;
-  border: none;
-}
-
-/* The bar's bottom gap when something follows it in the card body. A bar that ends the body has none. */
-.card-body > .filter-bar:not(:last-child) { margin-bottom: 12px; }
-
 /* The seam between a card's body and the table it introduces: the same 1px the card header uses on
    its underside, so the card reads as header / body / table. */
 .card-body + .table-wrap,
@@ -1129,30 +1113,19 @@ a.sidebar-item { text-decoration: none; }
   border-top: 1px solid var(--border);
 }
 
-/* Filter bar: filters live on their own row so the header keeps only the title and primary actions,
-   and the controls wrap predictably. */
+/* A page's toolbar: the one row under the card's heading, and under its tab bar when it has one.
+   Filters on the left, then the page's buttons in .filter-bar-actions at the right-hand end. Flush
+   with the card's edges and ruled off from the content below, on every page; drawn only when the
+   page or tab has a filter or a button. The min-height is a row of 34px filter controls, so a bar
+   of buttons alone, or of a legend, is as tall as one of filters and the list starts level. */
 .filter-bar {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  margin-bottom: var(--stack);
-  padding: 10px var(--inset-tight);
-  background: var(--bg-glass);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-/* The toolbar row under a card's tab bar: flush, chromeless, ruled off from the content below. It
-   holds the tab's filters, then its actions in .filter-bar-actions, and is drawn only when the tab
-   has any. The selected tab's "?" sits in the bar after the last tab (TabStrip's `help`). */
-.card > .tab-strip + .filter-bar {
-  margin-bottom: 0;
+  min-height: 55px;
   padding: 10px var(--inset);
-  background: none;
-  border: none;
   border-bottom: 1px solid var(--border);
-  border-radius: 0;
 }
 
 .filter-bar .form-control {
@@ -1165,9 +1138,9 @@ a.sidebar-item { text-decoration: none; }
 /* Pushes everything after it to the right-hand end of the bar. */
 .filter-bar-spacer { margin-left: auto; }
 
-/* A group at the right-hand end, for a tab's actions and for export and refresh controls that fold
-   into the filter row. The margin is on the group rather than its first child, so the end stays
-   stable when a control is conditional. */
+/* The toolbar's right-hand group: Clear filters first, then secondary buttons such as Export, then
+   the page's main button last. The margin is on the group rather than its first child, so the end
+   stays stable when a control is conditional. */
 .filter-bar-actions {
   margin-left: auto;
   display: flex;
@@ -1181,7 +1154,8 @@ a.sidebar-item { text-decoration: none; }
 .control-md, .form-control.control-md { width: 190px; max-width: 100%; }
 .control-lg, .form-control.control-lg { width: 220px; max-width: 100%; }
 
-/* The "Clear filters (N)" button: always the right-hand end of the bar, wrapped or not. */
+/* The "Clear filters (N)" button: the right-hand end of a bar with no buttons, wrapped or not. In a
+   bar with buttons it leads .filter-bar-actions instead, as two auto margins would split the row. */
 .filter-bar-clear { margin-left: auto; }
 
 /* The Filters popover: fixed under its button (see FiltersPopover), on the popover rung. */
@@ -1245,6 +1219,24 @@ a.sidebar-item { text-decoration: none; }
 }
 .search-input-clear:hover { color: var(--text-primary); background: var(--bg-glass); }
 .search-input-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The `/` key hint, the same key cap as the top bar's .global-search-kbd. Drawn only where `/`
+   reaches the box, a page's toolbar in `main` (focusPageSearch), and gone while the box has focus;
+   SearchInput leaves it out while there is text, when the clear button takes the slot. */
+.search-input-kbd {
+  display: none;
+  position: absolute;
+  right: 8px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+main .filter-bar .search-input-kbd { display: inline-block; }
+main .filter-bar .search-input-field:focus ~ .search-input-kbd { display: none; }
 
 /* The foot of a list that loads in steps (ListFoot): a rule above, the button or the end line
    inside. It sits after the scroller, not in it. */
@@ -1562,6 +1554,10 @@ tbody tr:hover { background: var(--bg-glass); }
 .backup-run-failed { color: var(--danger-text); }
 .backup-run-holds { max-width: 28ch; }
 .backup-run-short { white-space: nowrap; }
+
+/* The Backups state callouts above the list. On a healthy stack with no database backups of its
+   own every one renders nothing, and the empty body would be a ruled-off blank band. */
+.backup-callouts:empty { display: none; }
 
 /* The files a backup holds, in its run's panel: each file's name, then its size. */
 .backup-files {
@@ -2489,9 +2485,6 @@ td.row-actions, th.row-actions {
 }
 
 .shopfloor-legend > span { display: flex; align-items: center; gap: 5px; }
-
-/* The Site Map header's right-hand side: the archived toggle, when there is one, then the legend. */
-.site-map-heading-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
 
 /* Areas and Cells tables: a badge that follows a name or another badge. */
 .badge-follow { margin-left: 8px; }

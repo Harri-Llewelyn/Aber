@@ -224,27 +224,40 @@ export function BackupsTab({ showToast }) {
             icon={<IconHardDrive size={15} />}
             title="Backups"
             description="Every backup run, newest first, and why any failed. Scheduled backups follow the retention window; requested ones are kept until released."
-            actions={(
-              <div className="btn-group">
-                <DestinationButton destination={offsite} onEdit={() => setEditingDestination(true)} />
-                {/* The primary action in the header, where every card keeps its. Disabled rather
-                    than hidden while one is in flight: the gate refuses a second anyway, and the
-                    callout below says why. */}
-                <button
-                  className="btn btn-primary btn-sm"
-                  disabled={!!activeJob}
-                  onClick={() => setAsking(true)}
-                  title={activeJob ? 'One backup runs at a time' : 'Queue a backup of the whole stack now'}
-                >
-                  <IconHardDrive size={14} /> Take a backup
-                </button>
-              </div>
-            )}
           />
+
+          {/* The status filter narrows the list of runs, so it waits for one. */}
+          <div className="filter-bar">
+            {!loading && !neverRun && (
+              <select
+                className="form-control control-sm"
+                value={filter}
+                onChange={e => onFilter(e.target.value)}
+                aria-label="Run status filter"
+                title="Show every run, or only the ones that completed or failed"
+              >
+                {Object.entries(FILTERS).map(([id, f]) => <option key={id} value={id}>{f.label}</option>)}
+              </select>
+            )}
+            <div className="filter-bar-actions">
+              <ClearFilters count={filter === 'all' ? 0 : 1} onClear={() => onFilter('all')} />
+              <DestinationButton destination={offsite} onEdit={() => setEditingDestination(true)} />
+              {/* The main button, last. Disabled rather than hidden while one is in flight: the
+                  gate refuses a second anyway, and the callout below says why. */}
+              <button
+                className="btn btn-primary btn-sm"
+                disabled={!!activeJob}
+                onClick={() => setAsking(true)}
+                title={activeJob ? 'One backup runs at a time' : 'Queue a backup of the whole stack now'}
+              >
+                <IconHardDrive size={14} /> Take a backup
+              </button>
+            </div>
+          </div>
 
           <BackupStats summary={summary} />
 
-          <div className="card-body stack">
+          <div className="card-body stack backup-callouts">
             {error && (
               <div className="callout callout-danger">
                 <IconShieldAlert size={14} className="callout-icon" />
@@ -263,21 +276,6 @@ export function BackupsTab({ showToast }) {
                 )}
               </React.Fragment>
             ))}
-
-            {!loading && !neverRun && (
-              <div className="filter-bar">
-                <select
-                  className="form-control control-sm"
-                  value={filter}
-                  onChange={e => onFilter(e.target.value)}
-                  aria-label="Run status filter"
-                  title="Show every run, or only the ones that completed or failed"
-                >
-                  {Object.entries(FILTERS).map(([id, f]) => <option key={id} value={id}>{f.label}</option>)}
-                </select>
-                <ClearFilters count={filter === 'all' ? 0 : 1} onClear={() => onFilter('all')} />
-              </div>
-            )}
           </div>
 
           {loading ? (
@@ -993,7 +991,7 @@ function offsiteBase(destination) {
 }
 
 /**
- * The off-site destination as a header button, left of Take a backup. Unset or incomplete is a
+ * The off-site destination as a toolbar button, left of Take a backup. Unset or incomplete is a
  * warning rather than an error: the backups are good, and they share a disk with the data they
  * protect. The warning is the button's description as well as its tooltip, so a screen reader
  * hears it. Set, it is a neutral button whose tooltip names where copies go.

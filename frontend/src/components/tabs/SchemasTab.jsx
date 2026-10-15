@@ -260,25 +260,8 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           icon={<IconClipboardList size={15} />}
           title="Schemas"
           description="What each device is modelled to publish, built from the Metrics page. A published schema is read-only; version it to edit."
-          actions={(
-            <>
-              {/* The only way to create a schema. Building from the catalog is what guarantees every
-                  metric has a standard and a semantic id, which device tags, unmodelled detection and
-                  the tag filters all read. */}
-              <ActionButton
-                className="btn btn-primary btn-sm"
-                permitted={canManageSchema}
-                deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)}
-                title="Compose a schema from catalog metrics. Attach it to a device on the Devices page"
-                onClick={() => setShowBuilderModal(true)}
-              >
-                <IconClipboardList size={14} /> Build Schema from Catalog
-              </ActionButton>
-            </>
-          )}
         />
 
-        <div className="card-body">
           <div className="filter-bar">
             <select
               className="form-control control-md"
@@ -302,9 +285,22 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               ariaLabel="Search the schema registry"
             />
 
-            <ClearFilters count={schemaFilterCount} onClear={clearSchemaFilters} />
+            <div className="filter-bar-actions">
+              <ClearFilters count={schemaFilterCount} onClear={clearSchemaFilters} />
+              {/* The only way to create a schema. Building from the catalog is what guarantees every
+                  metric has a standard and a semantic id, which device tags, unmodelled detection and
+                  the tag filters all read. */}
+              <ActionButton
+                className="btn btn-primary btn-sm"
+                permitted={canManageSchema}
+                deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.SCHEMA_MANAGE)}
+                title="Compose a schema from catalog metrics. Attach it to a device on the Devices page"
+                onClick={() => setShowBuilderModal(true)}
+              >
+                <IconClipboardList size={14} /> Build Schema from Catalog
+              </ActionButton>
+            </div>
           </div>
-        </div>
 
         {!loaded ? <LoadingState label="schemas" /> : visibleSchemas.length === 0 ? (
           <EmptyState

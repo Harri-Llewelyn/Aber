@@ -375,22 +375,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           icon={<IconRadio size={15} />}
           title="Gateways"
           description="The edge nodes that publish to the broker, each with its own broker credential, and the status each last reported."
-          actions={(
-            <>
-              <ActionButton
-                className="btn btn-primary btn-sm"
-                permitted={canManage}
-                deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.GATEWAY_MANAGE)}
-                onClick={() => { setEditing(null); setForm(blank); setShowForm(true) }}
-                title="Register new gateway"
-              >
-                <IconPlus size={14} /> New Gateway
-              </ActionButton>
-            </>
-          )}
         />
 
-        <div className="card-body">
       <div className="filter-bar">
         {/* Lifecycle is a filter like the rest; the counts are in the option labels. */}
         <select
@@ -435,10 +421,19 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           <IconShieldAlert size={13} /> Has quarantined devices ({gatewaysWithQuarantine.size})
         </button>
 
-        <ClearFilters count={activeFilterCount} onClear={resetFilters} />
+        <div className="filter-bar-actions">
+          <ClearFilters count={activeFilterCount} onClear={resetFilters} />
+          <ActionButton
+            className="btn btn-primary btn-sm"
+            permitted={canManage}
+            deniedTitle={requiresRolesTitle(PERMISSION_UUIDS.GATEWAY_MANAGE)}
+            onClick={() => { setEditing(null); setForm(blank); setShowForm(true) }}
+            title="Register new gateway"
+          >
+            <IconPlus size={14} /> New Gateway
+          </ActionButton>
+        </div>
       </div>
-
-        </div>{/* .card-body */}
 
         {loading ? <LoadingState label="gateways" /> :
          filteredGateways.length === 0 ? (

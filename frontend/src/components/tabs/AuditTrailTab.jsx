@@ -1422,30 +1422,13 @@ export function AuditTrailTab({ userRole, showToast }) {
        card, so the axis row has a scroller to pin to. See .page-fill in App.css. */
     <div className="page-layout page-fill">
       <div className="page-main">
-        {/* Export sits in the header with the other actions and states the filtered count it will
-            write. */}
+        {/* Export sits at the end of the toolbar and states the filtered count it will write. */}
         <div className="card card-fill">
           <CardHeading
             icon={<IconHistory size={15} />}
             title="Audit Trail"
             description="Every attributed change to the stack's entities, in order and with its cause. Rows cannot be edited; an owner retires whole months."
-            actions={(
-              /* Export writes the events the page is holding, not everything that matches, and
-                 the tooltip says so. */
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={() => downloadCSV(exportRows(), 'audit-trail-export.csv')}
-                title={hasMoreToLoad
-                  ? `Download the ${events.length} events loaded here as CSV. ${totalMatching} match `
-                    + 'the current filters -- load the rest first to export them all.'
-                  : 'Download the events matching the current filters as CSV'}
-              >
-                <IconDownload size={13} /> Export CSV ({eventRatio})
-              </button>
-            )}
           />
-
-          <div className="card-body">
 
         <div className="filter-bar">
           <SearchInput
@@ -1536,13 +1519,25 @@ export function AuditTrailTab({ userRole, showToast }) {
             </button>
           )}
 
-          <ClearFilters count={activeFilterCount} onClear={resetFilters} />
+          <div className="filter-bar-actions">
+            <ClearFilters count={activeFilterCount} onClear={resetFilters} />
+            {/* Export writes the events the page is holding, not everything that matches, and the
+                tooltip says so. */}
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => downloadCSV(exportRows(), 'audit-trail-export.csv')}
+              title={hasMoreToLoad
+                ? `Download the ${events.length} events loaded here as CSV. ${totalMatching} match `
+                  + 'the current filters -- load the rest first to export them all.'
+                : 'Download the events matching the current filters as CSV'}
+            >
+              <IconDownload size={13} /> Export CSV ({eventRatio})
+            </button>
+          </div>
         </div>
-          </div>{/* .card-body */}
 
-        {/* A second `.card-body`, so the controls and the trace get a divider from one rule.
-            `trail-timeline` is the one part of the card that gives way when the viewport is short; its own
-            scroller is `trail-scroll`. */}
+        {/* The toolbar's own rule divides it from the trace. `trail-timeline` is the one part of the
+            card that gives way when the viewport is short; its own scroller is `trail-scroll`. */}
         <div className="card-body card-fill-scroll trail-timeline">
           {/* One row above the timeline, always drawn so the card keeps its shape: the key. How
               much of the trail is loaded is stated at the foot, beside Show more. */}

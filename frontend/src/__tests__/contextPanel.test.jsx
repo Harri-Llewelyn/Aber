@@ -748,28 +748,27 @@ describe('Links accordion no longer duplicates the panel action', () => {
   })
 })
 
-describe('A card is a composition: header, description, filters, table', () => {
+describe('A card is a composition: header, description, toolbar, table', () => {
   /**
-   * A card is a title, a description, its actions, and the filters that narrow what is below it.
-   * The bar sits inside the card and the primary action in the header, asserted on every page that
+   * A card is a title and a description, then the toolbar: the filters that narrow what is below
+   * it, and its buttons at the right-hand end, the primary action last. Asserted on every page that
    * has one. `.page-actions` must not come back.
    */
   const composedCard = (label, cardSelector = '.page-main .card') => {
     const card = document.querySelector(cardSelector)
     expect(card).toBeTruthy()
 
-    // The primary action is in the header, not in the filter bar.
-    const header = card.querySelector('.card-header')
-    const btn = within(header).getByRole('button', { name: label })
-    expect(btn.className).toMatch(/btn-primary/)
+    // The heading says what the page is, in its own description line, and holds no button.
+    const header = card.querySelector(':scope > .card-heading')
+    expect(header.querySelector('.card-heading-description')).toBeTruthy()
+    expect(within(header).queryAllByRole('button')).toHaveLength(0)
 
-    // A single-card page says what it is in the header's own description line; a card among several
-    // keeps a "?" on its title. The filters are in the body, inside the card.
-    expect(header.querySelector('.card-heading-description') || header.querySelector('.section-title .help-tip')).toBeTruthy()
-    const body = card.querySelector('.card-body')
-    expect(body).toBeTruthy()
-    expect(body.querySelector('p')).toBeNull()
-    expect(body.querySelector('.filter-bar')).toBeTruthy()
+    // The toolbar is the next row, and the primary action ends it.
+    const bar = card.querySelector(':scope > .card-heading + .filter-bar')
+    expect(bar).toBeTruthy()
+    const btn = within(bar.querySelector(':scope > .filter-bar-actions')).getByRole('button', { name: label })
+    expect(btn.className).toMatch(/btn-primary/)
+    expect(btn.parentElement.lastElementChild).toBe(btn)
 
     // Nothing floats outside the card any more.
     expect(document.querySelector('.page-main > .filter-bar')).toBeNull()

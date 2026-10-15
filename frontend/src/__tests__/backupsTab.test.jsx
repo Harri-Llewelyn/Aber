@@ -39,7 +39,7 @@ vi.mock('../api', async () => {
 vi.mock('../hooks/usePolling', () => ({ usePolling: vi.fn() }))
 
 import { api } from '../api'
-import { expectCardHeading } from '../test/cardHeading'
+import { expectCardHeading, pageToolbar } from '../test/cardHeading'
 
 const hoursAgo = (h) => new Date(Date.now() - h * 60 * 60 * 1000).toISOString()
 
@@ -118,12 +118,15 @@ beforeEach(() => {
 })
 
 describe('the list of runs', () => {
-  it('names the page in its card header, with the destination and the action, and no count', async () => {
+  it('names the page in its card header with no count, and ends the toolbar with the destination and the action', async () => {
     renderTab()
     await screen.findByTestId('run-j-1')
     const header = expectCardHeading('Backups', /newest first/)
     expect(header.querySelector('.section-count')).toBeNull()
-    const buttons = within(header).getAllByRole('button').map(b => b.textContent.trim())
+    const bar = pageToolbar()
+    expect(within(bar).getByLabelText('Run status filter')).toBeInTheDocument()
+    const actions = bar.querySelector(':scope > .filter-bar-actions')
+    const buttons = within(actions).getAllByRole('button').map(b => b.textContent.trim())
     expect(buttons).toEqual(['Set a destination', 'Take a backup'])
   })
 

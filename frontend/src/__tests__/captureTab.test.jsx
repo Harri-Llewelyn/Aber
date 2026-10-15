@@ -1400,13 +1400,18 @@ describe('playing a file', () => {
   }
   const editedFile = () => new File([JSON.stringify(EDITED)], 'edited.json', { type: 'application/json' })
 
-  it('offers "Play a file…" in the card header, which opens the file chooser', async () => {
+  it('offers "Play a file…" at the end of the toolbar on both tabs, which opens the file chooser', async () => {
     const clicked = []
     const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function () { clicked.push(this) })
     renderTab()
     await screen.findByText('Line 1 Gateway')
+    const inToolbar = () => document.querySelector('.card > .tab-strip + .filter-bar > .filter-bar-actions')
+      ?.querySelector(':scope > button:last-child')
+    expect(document.querySelector('.card-heading button')).toBeNull()
+    expect(inToolbar()).toHaveTextContent('Play a file…')
+    fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
+    expect(inToolbar()).toHaveTextContent('Play a file…')
     const button = screen.getByRole('button', { name: /Play a file…/ })
-    expect(button.closest('.card-heading')).not.toBeNull()
     fireEvent.click(button)
     click.mockRestore()
 

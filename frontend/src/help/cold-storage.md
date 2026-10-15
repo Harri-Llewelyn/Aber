@@ -6,7 +6,7 @@ The line under the page's description says how long the historian keeps raw tele
 
 ## What the controls do
 
-- **The button in the header** opens the destination dialog. Only an Administrator sees it. It reads **Set up cold storage** while archiving is off. Until then, raw telemetry past the retention window is dropped and cannot be recovered.
+- **The button in the toolbar**, under the page's description, opens the destination dialog. Only an Administrator sees it. It reads **Set up cold storage** while archiving is off. Until then, raw telemetry past the retention window is dropped and cannot be recovered.
 - The button reads **Complete the destination**, in amber with a warning icon, when archiving is on but part of the destination is missing. Its tooltip names what is missing.
 - Once archiving is on and the destination is complete, the button reads **Change destination**. Its tooltip names the address objects are written to: the endpoint, the bucket and this site's key.
 - **The destination dialog** holds the S3 endpoint, region, bucket, access key ID and path style, and the secret access key. It also holds the **Archive telemetry before dropping it** switch.

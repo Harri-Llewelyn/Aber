@@ -6,8 +6,8 @@ Open it to see whether the plant is up. When something is wrong, every lane, pin
 
 ## What the controls do
 
-- **The legend** in the card header names the four states below. Hover an entry for its meaning.
-- **Show archived areas** appears beside the legend while any area is archived, with the number archived. Archived areas, and the cells in them, are left off the map; hover the button to see how many cells and devices that is. Turned on, each archived area is drawn faded, with its plan and pins, because its cells are still in it and its topics still carry its name. An archived cell is never pinned.
+- **The legend**, at the right-hand end of the toolbar, names the four states below. Hover an entry for its meaning.
+- **Show archived areas** appears at the left of the toolbar while any area is archived, with the number archived. Archived areas, and the cells in them, are left off the map; hover the button to see how many cells and devices that is. Turned on, each archived area is drawn faded, with its plan and pins, because its cells are still in it and its topics still carry its name. An archived cell is never pinned.
 - **Archived gateways and devices** are never on the map, whichever areas are shown. The lanes, the cards and the pins count only equipment in service. The Archived Entities page lists the rest.
 - **The hierarchy line** names the enterprise and the site. The enterprise is the Sparkplug group chosen at install (the `sparkplug.group_id` setting). The site is set on the Settings page, under Site. The Unified Namespace publishes under the site's name, so the line says when it is not set.
 - **The lanes** hold equipment that belongs to no area: **Site-Wide**, **Simulated**, and **Unassigned** (devices and gateways nobody has given a location). Click a lane to list its gateways and devices in the panel on the right, then click a chip to open that item on its own page. **Open Devices page** and **Open Gateways page** appear in the panel only while the lane holds something to file, and the first is the main action. On a narrow card a lane shrinks to its icon; hover it for its name and counts.

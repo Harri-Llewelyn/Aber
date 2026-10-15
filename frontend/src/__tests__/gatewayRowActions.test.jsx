@@ -3,7 +3,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { api } from '../api'
-import { expectCardHeading } from '../test/cardHeading'
+import { expectCardHeading, expectToolbarButton } from '../test/cardHeading'
 import { PERMISSION_UUIDS } from '../constants'
 
 vi.mock('../api', async () => {
@@ -64,10 +64,10 @@ const firstAction = () => document.querySelector('.context-panel .context-action
 beforeEach(() => vi.clearAllMocks())
 
 describe('the gateways card header', () => {
-  it('names the page with its icon, title and description, and no title tip', async () => {
+  it('names the page with its icon, title and description, and no title tip, and New Gateway in the toolbar', async () => {
     await show([{ gateway_id: 'g1', gateway_name: 'Host_Gateway_NodeRED', type: 'HOST', status: 'ONLINE' }])
-    const header = expectCardHeading('Gateways', /edge nodes/)
-    expect(header).toHaveTextContent('New Gateway')
+    expectCardHeading('Gateways', /edge nodes/)
+    expectToolbarButton(/New Gateway/)
   })
 })
 
