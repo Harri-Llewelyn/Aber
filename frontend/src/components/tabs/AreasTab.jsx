@@ -282,6 +282,12 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
         />
 
           <div className="filter-bar">
+            <SearchInput
+              value={searchQuery}
+              onChange={v => (v ? setSearchQuery(v) : clearSearch())}
+              placeholder="Search by area ID or name…"
+              ariaLabel="Search areas"
+            />
             {/* Lifecycle is a filter like the rest, as it is on the Cells page; the counts are in
                 the option labels. */}
             <select
@@ -295,12 +301,6 @@ export function AreasTab({ showToast, onSelectCell, onSelectDevice, onSelectGate
               <option value="active">Active ({areas.filter(a => !a.is_archived).length})</option>
               <option value="archived">Archived ({areas.filter(a => a.is_archived).length})</option>
             </select>
-            <SearchInput
-              value={searchQuery}
-              onChange={v => (v ? setSearchQuery(v) : clearSearch())}
-              placeholder="Search by area ID or name…"
-              ariaLabel="Search areas"
-            />
             <div className="filter-bar-actions">
               <ClearFilters count={activeFilterCount} onClear={() => { clearSearch(); setFilterMode('active') }} />
               <ActionButton

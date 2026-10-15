@@ -378,6 +378,13 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
         />
 
       <div className="filter-bar">
+        <SearchInput
+          value={searchQuery}
+          onChange={setSearchQuery}
+          placeholder="Search name, UUID or Sparkplug ID…"
+          ariaLabel="Search gateways by name, UUID or Sparkplug ID"
+        />
+
         {/* Lifecycle is a filter like the rest; the counts are in the option labels. */}
         <select
           className="form-control control-sm"
@@ -389,13 +396,6 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
           <option value="archived">Archived ({gateways.filter(g => g.is_archived).length})</option>
           <option value="all">All ({gateways.length})</option>
         </select>
-
-        <SearchInput
-          value={searchQuery}
-          onChange={setSearchQuery}
-          placeholder="Search name, UUID or Sparkplug ID…"
-          ariaLabel="Search gateways by name, UUID or Sparkplug ID"
-        />
 
         {/* Derived from heartbeat age as well as the stored status: STALE is never stored. */}
         <select className="form-control control-sm" value={liveStatusFilter} onChange={e => setLiveStatusFilter(e.target.value)} title="Filter by status; Stale is a heartbeat older than 90 seconds">

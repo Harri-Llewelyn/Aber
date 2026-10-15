@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { AreasTab } from '../components/tabs/AreasTab'
 import { SiteMapTab } from '../components/tabs/SiteMapTab'
 import { api } from '../api'
-import { expectCardHeading, expectToolbarButton, pageToolbar } from '../test/cardHeading'
+import { expectCardHeading, expectSearchFirst, expectToolbarButton, pageToolbar } from '../test/cardHeading'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -737,6 +737,11 @@ describe('AreasTab is the house list card', () => {
     expectCardHeading('Areas', /ISA-95/)
     const button = expectToolbarButton(/New Area/)
     expect(button.parentElement.lastElementChild).toBe(button)
+  })
+
+  it('starts the toolbar with the search box, then the lifecycle', async () => {
+    await renderAreas()
+    expect(expectSearchFirst('Search areas').nextElementSibling).toBe(screen.getByLabelText('Lifecycle'))
   })
 
   it('narrows the list under a search, and keeps the counts in the lifecycle options', async () => {

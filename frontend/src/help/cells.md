@@ -6,7 +6,7 @@ In ISA-95 terms a cell is a work center. It is not a "work cell", which the stan
 
 ## What the controls do
 
-- **The filters** are the lifecycle select (Active by default, or Archived, or All), which shows how many cells each option holds; a search on the cell's UUID or name; **Needs attention**; and **Empty**. **Clear filters** appears while any of them is changed.
+- **The filters** are a search on the cell's UUID or name; the lifecycle select (Active by default, or Archived, or All), which shows how many cells each option holds; **Needs attention**; and **Empty**. **Clear filters** appears while any of them is changed.
 - **New Cell** and **Edit Details** open the form. **Cell Name** and **Cell Icon** are what the rest of the dashboard shows. The icon comes from a fixed set, so every cell can be drawn. If you may not edit a cell, you see **Propose a Change** instead, and an approver decides.
 - **Area** files the cell in an area, or leaves it unfiled. Once you choose an area, **Place on the plan** shows its plan: click to pin the cell where it stands. **Clear place** removes the pin and keeps the cell in the area. An area with no plan shows the default outline. The Site Map shows only cells that have a place.
 - **Place on plan**, in a placed cell's details panel, draws its area's plan with this cell's pin ringed and the other cells small and dimmed. Click it, or press Enter on it, to open the Site Map on that area.

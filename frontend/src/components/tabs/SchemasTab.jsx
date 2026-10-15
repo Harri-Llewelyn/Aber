@@ -263,6 +263,13 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
         />
 
           <div className="filter-bar">
+            <SearchInput
+              value={schemaSearch}
+              onChange={setSchemaSearch}
+              placeholder="Search name, UUID or description…"
+              ariaLabel="Search the schema registry"
+            />
+
             <select
               className="form-control control-md"
               value={statusFilter}
@@ -277,13 +284,6 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               <option value={SCHEMA_STATUS.ARCHIVED}>Archived ({archivedCount})</option>
               <option value="all">All versions ({schemas.length})</option>
             </select>
-
-            <SearchInput
-              value={schemaSearch}
-              onChange={setSchemaSearch}
-              placeholder="Search name, UUID or description…"
-              ariaLabel="Search the schema registry"
-            />
 
             <div className="filter-bar-actions">
               <ClearFilters count={schemaFilterCount} onClear={clearSchemaFilters} />

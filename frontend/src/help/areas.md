@@ -6,7 +6,7 @@ A floor is not a level of its own. If part of the site has several floors and yo
 
 ## What the controls do
 
-- **The filters** are the lifecycle select (Active by default, or Archived, or All), which shows how many areas each option holds, and a search on the area's name or ID. **Clear filters** appears while either is changed.
+- **The filters** are a search on the area's name or ID, then the lifecycle select (Active by default, or Archived, or All), which shows how many areas each option holds. **Clear filters** appears while either is changed.
 - **New Area** creates an area. Its name becomes part of every `uns/` topic beneath it, so it cannot contain `/`, `+` or `#`. Its icon says what the area is: offices, a production hall, a warehouse, a laboratory, a loading bay, a car park, an open yard or a plant room.
 - **The table** lists each area with its plan, the cells in it and how many devices belong to it, with its Area-Wide equipment counted separately. Click a row, or press Enter on it, to open its details panel on the right.
 - **Cells** are filed into an area by dragging a cell's chip onto the area's row, or by choosing the area on the cell's Edit form on the Cells page, which also sets where it sits on the plan. Cells in no area are listed in the **unfiled cells** banner above the table, which disappears once every cell is filed. To take a cell out of an area, drag it onto another area, drop it on the banner, or clear the area on its Edit form.

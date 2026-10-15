@@ -276,6 +276,13 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
         />
 
           <div className="filter-bar">
+            <SearchInput
+              value={searchQuery}
+              onChange={v => (v ? setSearchQuery(v) : clearSearch())}
+              placeholder="Search by Cell UUID or name…"
+              ariaLabel="Search cells"
+            />
+
             {/* Lifecycle is a filter like the rest; the counts are in the option labels. */}
             <select
               className="form-control control-sm"
@@ -288,13 +295,6 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onSelectA
               <option value="active">Active ({cells.filter(c => !c.is_archived).length})</option>
               <option value="archived">Archived ({cells.filter(c => c.is_archived).length})</option>
             </select>
-
-            <SearchInput
-              value={searchQuery}
-              onChange={v => (v ? setSearchQuery(v) : clearSearch())}
-              placeholder="Search by Cell UUID or name…"
-              ariaLabel="Search cells"
-            />
 
             <button
               className={`btn btn-sm ${attentionOnly ? 'btn-primary' : 'btn-ghost'}`}
