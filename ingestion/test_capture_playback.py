@@ -25,10 +25,15 @@ which is why they are asserted here rather than left to a live run to reveal.
 capture.py deliberately imports neither supabase nor psycopg, so unlike the other suites here this
 one needs no stubbing of its own -- but it does have to UNDO theirs, see below.
 """
+import argparse
+import contextlib
+import io
 import json
 import os
 import sys
+import tempfile
 import unittest
+from types import SimpleNamespace
 
 INGESTION_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, INGESTION_DIR)
@@ -94,8 +99,24 @@ def message(offset_ms, msg_type, device=CAPTURED_DEV, metrics=None, **payload):
     return {"offset_ms": offset_ms, "topic": topic, "payload": body}
 
 
-def capture_file(messages=None):
+def births(messages):
+    """
+    What a replay opens with: an NBIRTH, then a DBIRTH for each device the messages name, all at
+    offset 0 and carrying no metrics, so they change no count the tests below assert.
+    """
+    devices = []
+    for msg in messages:
+        parts = msg["topic"].split("/")
+        if len(parts) == 5 and parts[4] not in devices:
+            devices.append(parts[4])
+    return [message(0, "NBIRTH", device=None)] + [message(0, "DBIRTH", device=d) for d in devices]
+
+
+def capture_file(messages=None, born=True):
+    """A capture file. `born` opens it with births(), as a recording from the Capture page opens."""
     messages = messages if messages is not None else [message(0, "DDATA")]
+    if born:
+        messages = births(messages) + messages
     return {
         "aber_capture_version": capture.CAPTURE_VERSION,
         "recorded_at": "2026-08-27T12:00:00+00:00",
@@ -143,6 +164,117 @@ class PayloadRoundTripTests(unittest.TestCase):
         self.assertIs(by_name["b"].boolean_value, True)
         self.assertEqual(by_name["i"].int_value, 7)
         self.assertEqual(by_name["l"].long_value, 2 ** 40)
+
+    @staticmethod
+    def _every_field():
+        """A payload using every field the proto defines beyond the six scalar values."""
+        payload = sparkplug_b_pb2.Payload()
+        payload.timestamp = EPOCH
+        payload.seq = 4
+        payload.uuid = "aber-test"
+        payload.body = b"\x00\x01raw"
+
+        declared = payload.metrics.add()
+        declared.name, declared.datatype, declared.timestamp = "Agent_Version", 12, EPOCH
+        declared.is_null = True
+        declared.is_transient = True
+        declared.metadata.content_type = "text/plain"
+        declared.metadata.size = 2 ** 40
+        declared.properties.keys.extend(["engUnit", "limits"])
+        unit = declared.properties.values.add()
+        unit.type, unit.string_value = 12, "°C"
+        limits = declared.properties.values.add()
+        limits.type = 20
+        limits.propertyset_value.keys.append("high")
+        high = limits.propertyset_value.values.add()
+        high.type, high.double_value = 10, 85.5
+
+        blob = payload.metrics.add()
+        blob.name, blob.datatype, blob.bytes_value = "Snapshot", 17, b"\xff\x00\x10"
+
+        table = payload.metrics.add()
+        table.name, table.datatype = "Recipe", 16
+        table.dataset_value.num_of_columns = 2
+        table.dataset_value.columns.extend(["step", "temp"])
+        table.dataset_value.types.extend([3, 10])
+        row = table.dataset_value.rows.add()
+        row.elements.add().int_value = 1
+        row.elements.add().double_value = 180.0
+
+        definition = payload.metrics.add()
+        definition.name, definition.datatype = "_types_/Motor", 19
+        definition.template_value.is_definition = True
+        definition.template_value.version = "1"
+        member = definition.template_value.metrics.add()
+        member.name, member.datatype, member.long_value = "Rpm", 8, 2 ** 63
+        parameter = definition.template_value.parameters.add()
+        parameter.name, parameter.type, parameter.string_value = "Rated", 12, "4kW"
+
+        instance = payload.metrics.add()
+        instance.name, instance.datatype, instance.alias = "Line/Motor1", 19, 9
+        instance.template_value.template_ref = "_types_/Motor"
+        instance.template_value.metrics.add().CopyFrom(member)
+
+        extended = payload.metrics.add()
+        extended.name = "Vendor"
+        # An extension's content is fields the proto does not name: kept as the bytes received.
+        extended.extension_value.MergeFromString(b"\x08\x96\x01")
+        return payload
+
+    def test_carries_every_metric_field_and_the_body(self):
+        """
+        The file is a faithful record: the replay is the message received
+        (tck-id-topics-nbirth-metrics, tck-id-payloads-template-definition-is-definition,
+        -members, -template-instance-ref).
+        """
+        payload = self._every_field()
+        data, restored = self._round_trip(payload)
+        self.assertEqual(restored.SerializeToString(), payload.SerializeToString())
+        declared = data["metrics"][0]
+        self.assertEqual((declared["is_null"], declared["is_transient"]), (True, True))
+        self.assertNotIn("string_value", declared)
+        self.assertTrue(restored.metrics[0].HasField("is_null"))
+        self.assertEqual(restored.metrics[3].template_value.is_definition, True)
+        self.assertEqual(restored.metrics[4].template_value.template_ref, "_types_/Motor")
+
+    def test_the_file_survives_json_and_a_json_replay_carries_the_same(self):
+        payload = self._every_field()
+        data = json.loads(json.dumps(capture.payload_to_dict(payload)))
+        self.assertEqual(capture.dict_to_payload_bytes(data), payload.SerializeToString())
+        wire = capture.encode_wire_payload(data, capture.ENCODING_JSON)
+        self.assertEqual(capture.json_payload(json.loads(wire)).SerializeToString(),
+                         payload.SerializeToString())
+
+    def test_a_flag_that_is_false_is_not_written(self):
+        payload = sparkplug_b_pb2.Payload()
+        m = payload.metrics.add()
+        m.name, m.double_value, m.is_null, m.is_transient = "t", 1.0, False, False
+        data = capture.payload_to_dict(payload)
+        self.assertEqual(data["metrics"][0], {"name": "t", "double_value": 1.0})
+
+    def test_a_file_without_the_new_fields_still_reads(self):
+        restored = capture.dict_to_payload({"timestamp": EPOCH, "metrics": [
+            {"name": "t", "datatype": 10, "double_value": 1.0}]})
+        metric = restored.metrics[0]
+        self.assertFalse(restored.HasField("body"))
+        for field in ("is_null", "is_transient", "metadata", "properties"):
+            self.assertFalse(metric.HasField(field), field)
+        self.assertEqual(metric.double_value, 1.0)
+
+    def test_a_field_not_in_the_files_form_costs_only_itself(self):
+        # The daemon reads JSON traffic with the same reader, and it ignored these keys before.
+        restored = capture.dict_to_payload({"body": "not base64!", "metrics": [
+            {"name": "a", "double_value": 1.0, "properties": {"engUnit": "C"}, "metadata": "x",
+             "is_null": "true"},
+            {"name": "b", "bytes_value": "%%%"},
+            {"name": "c", "dataset_value": {"rows": "many"}},
+        ]})
+        a, b, c = restored.metrics
+        self.assertFalse(restored.HasField("body"))
+        self.assertEqual(a.double_value, 1.0)
+        for field in ("properties", "metadata", "is_null"):
+            self.assertFalse(a.HasField(field), field)
+        self.assertEqual((b.WhichOneof("value"), c.WhichOneof("value")), (None, None))
 
     def test_an_absent_seq_stays_absent(self):
         # THE HasField TRAP. check_message_sequence() tests HasField('seq'); a materialised 0
@@ -344,7 +476,7 @@ class PlanTests(unittest.TestCase):
 
     def test_a_plan_carries_delay_topic_and_encoded_bytes(self):
         plan = self._plan()
-        delay_ms, topic, payload_bytes, payload = plan[0]
+        delay_ms, topic, payload_bytes, payload = plan[-1]
         self.assertEqual(delay_ms, 0)
         self.assertIn(GW, topic)
         # Re-encoded protobuf is what goes on the wire, so a real gateway and a playback are the
@@ -358,7 +490,7 @@ class PlanTests(unittest.TestCase):
         plan = self._plan(
             capture=capture_file([message(0, "DDATA"), message(60_000, "DDATA")]), speed=60.0,
         )
-        self.assertEqual([d for d, _, _, _ in plan], [0, 1000])
+        self.assertEqual([d for d, _, _, _ in plan][-2:], [0, 1000])
 
     def test_an_unknown_capture_version_is_refused(self):
         bad = capture_file()
@@ -386,16 +518,137 @@ class PlanTests(unittest.TestCase):
 
     def test_a_group_override_applies_to_every_message(self):
         plan = self._plan(group="Replay-Lab")
-        self.assertTrue(plan[0][1].startswith("spBv1.0/Replay-Lab/"))
-        self.assertIn(DEV_A, plan[0][1])
+        self.assertTrue(all(topic.startswith("spBv1.0/Replay-Lab/") for _, topic, _, _ in plan))
+        self.assertIn(DEV_A, plan[-1][1])
 
     def test_two_devices_map_independently(self):
         msgs = [message(0, "DDATA", device=CAPTURED_DEV), message(10, "DDATA", device=DEV_B)]
         plan = self._plan(
             capture=capture_file(msgs), device_map={CAPTURED_DEV: DEV_A, DEV_B: DEV_B},
         )
-        self.assertIn(DEV_A, plan[0][1])
-        self.assertIn(DEV_B, plan[1][1])
+        self.assertIn(DEV_A, plan[-2][1])
+        self.assertIn(DEV_B, plan[-1][1])
+
+
+class MalformedCaptureTests(unittest.TestCase):
+    """
+    A file reaches the plan from the page, an upload or a hand edit, so its shape is checked first
+    and a fault is refused as a CaptureError naming the message, never a KeyError or TypeError.
+    """
+
+    def refusal(self, document, **kwargs):
+        with self.assertRaises(capture.CaptureError) as caught:
+            capture.plan_playback(document, GW, kwargs.pop("device_map", DEFAULT_MAP), NOW,
+                                  **kwargs)
+        return str(caught.exception)
+
+    def with_message(self, index, **changes):
+        """A good capture whose message `index` (after births()) has `changes`; None deletes."""
+        document = capture_file([message(0, "DDATA"), message(10, "DDATA")])
+        msg = document["messages"][index]
+        for key, value in changes.items():
+            if value is None:
+                msg.pop(key, None)
+            else:
+                msg[key] = value
+        return document
+
+    def test_a_well_formed_capture_passes(self):
+        self.assertEqual(len(capture.check_capture(capture_file())), 3)
+
+    def test_the_document_must_be_an_object_of_the_known_shape(self):
+        for document, expected in (
+            ([], "is an array"),
+            (dict(capture_file(), aber_capture_version=2), "version 2"),
+            (dict(capture_file(), capture_epoch_ms="yesterday"), "capture_epoch_ms is a string"),
+            (dict(capture_file(), capture_epoch_ms=None), "capture_epoch_ms is null"),
+            (dict(capture_file(), messages="spBv1.0/Aber/NBIRTH/x"), "messages are a string"),
+            (dict(capture_file(), messages={"0": {}}), "messages are an object"),
+            (dict(capture_file(), messages=[]), "no messages"),
+        ):
+            self.assertIn(expected, self.refusal(document))
+
+    def test_a_message_without_a_topic_is_named_by_its_index(self):
+        self.assertIn("message 3: it has no topic", self.refusal(self.with_message(3, topic=None)))
+
+    def test_a_message_must_be_an_object_with_a_payload_object(self):
+        document = capture_file()
+        document["messages"][2] = "DDATA"
+        self.assertIn("message 2: it is a string", self.refusal(document))
+        self.assertIn("message 2: its payload is null",
+                      self.refusal(self.with_message(2, payload=None)))
+        self.assertIn("its payload is an array", self.refusal(self.with_message(2, payload=[])))
+
+    def test_metrics_must_be_an_array_of_objects(self):
+        self.assertIn("message 2: its metrics are an object", self.refusal(
+            self.with_message(2, payload={"timestamp": EPOCH, "metrics": {"name": "a"}})))
+        self.assertIn("its metric 1 is a number", self.refusal(
+            self.with_message(2, payload={"timestamp": EPOCH, "metrics": [{"name": "a"}, 5]})))
+        self.assertIn("its metrics are null", self.refusal(
+            self.with_message(2, payload={"timestamp": EPOCH, "metrics": None})))
+
+    def test_only_the_six_edge_node_message_types_are_accepted(self):
+        """tck-id-topic-structure-namespace-device-id-associated-message-types, -non-associated-."""
+        for topic in ("spBv1.0/Aber/NCMD/%s" % CAPTURED_GW,
+                      "spBv1.0/Aber/DCMD/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
+                      "spBv1.0/STATE/aber-ingestion",
+                      "spBv1.0/Aber/BOGUS/%s" % CAPTURED_GW,
+                      "spBv1.0/Aber/NDATA/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
+                      "spBv1.0/Aber/DDATA/%s" % CAPTURED_GW,
+                      "spBv1.0/Aber/DDATA/%s/%s/extra" % (CAPTURED_GW, CAPTURED_DEV),
+                      "spBv2.0/Aber/DDATA/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
+                      "factory/line1/temp", ""):
+            text = self.refusal(self.with_message(3, topic=topic))
+            self.assertIn("message 3: topic", text, topic)
+
+    def test_a_segment_may_hold_no_wildcard_no_nul_and_nothing_but_utf8(self):
+        """tck-id-topic-structure-namespace-valid-group-id, -valid-edge-node-id, -valid-device-id"""
+        for group, problem in (("Ab+", "contains '+'"), ("A#", "contains '#'"),
+                               ("A\x00b", "contains a NUL character"), ("", "is empty"),
+                               ("A\ud800", "is not valid UTF-8")):
+            text = self.refusal(self.with_message(
+                3, topic="spBv1.0/%s/DDATA/%s/%s" % (group, CAPTURED_GW, CAPTURED_DEV)))
+            self.assertIn("the group segment %s" % problem, text)
+        self.assertIn("the device segment contains '+'", self.refusal(self.with_message(
+            3, topic="spBv1.0/Aber/DDATA/%s/+" % CAPTURED_GW)))
+        self.assertIn("the edge node segment contains a NUL", self.refusal(self.with_message(
+            3, topic="spBv1.0/Aber/DDATA/gwy\x00/%s" % CAPTURED_DEV)))
+
+    def test_offsets_are_whole_ordered_and_within_a_day(self):
+        for offset, expected in ((None, "has no offset_ms"), ("10", "not a whole number"),
+                                 (1.5, "not a whole number"), (True, "not a whole number"),
+                                 (-1, "is negative"), (86_400_001, "more than 24 hours")):
+            text = self.refusal(self.with_message(3, offset_ms=offset))
+            self.assertIn("message 3:", text, offset)
+            self.assertIn(expected, text, offset)
+
+    def test_an_offset_earlier_than_the_one_before_is_refused(self):
+        self.assertIn("message 3: its offset_ms 10 is earlier than the message before it (20)",
+                      self.refusal(self.with_message(2, offset_ms=20)))
+
+    def test_thirty_years_after_the_first_message_is_refused(self):
+        """An upload whose second message would have planned a 946,728,000-second sleep."""
+        self.assertIn("more than 24 hours",
+                      self.refusal(self.with_message(3, offset_ms=946_728_000_000)))
+
+    def test_a_whole_float_offset_and_exactly_a_day_are_accepted(self):
+        plan = capture.plan_playback(self.with_message(3, offset_ms=86_400_000.0), GW,
+                                     DEFAULT_MAP, NOW)
+        self.assertEqual(plan[-1][0], 86_400_000)
+
+    def test_an_encoding_must_be_one_this_tool_knows(self):
+        self.assertIn("message 3: its encoding 'xml'",
+                      self.refusal(self.with_message(3, encoding="xml")))
+
+    def test_a_timestamp_that_is_not_a_number_is_refused_by_message(self):
+        self.assertIn("message 3: its payload timestamp 'noon' is not a number", self.refusal(
+            self.with_message(3, payload={"timestamp": "noon", "metrics": []})))
+        self.assertIn("message 3: its metric 0's timestamp", self.refusal(self.with_message(
+            3, payload={"timestamp": EPOCH, "metrics": [{"name": "t", "timestamp": "noon"}]})))
+
+    def test_a_group_override_is_held_to_the_segment_rule(self):
+        self.assertIn("the group 'Replay/Lab' contains '/'",
+                      self.refusal(capture_file(), group="Replay/Lab"))
 
 
 class SanityWindowTests(unittest.TestCase):
@@ -429,8 +682,8 @@ class SanityWindowTests(unittest.TestCase):
             )
 
     def _gap_capture(self, stamp_offset_ms, **metric):
-        """One DBIRTH at the capture epoch whose only metric is stamped `stamp_offset_ms` from it."""
-        return capture_file([message(0, "DBIRTH", metrics=[
+        """One DDATA at the capture epoch whose only metric is stamped `stamp_offset_ms` from it."""
+        return capture_file([message(0, "DDATA", metrics=[
             dict({"name": "Systems/TEMPERATURE", "timestamp": EPOCH + stamp_offset_ms,
                   "double_value": 20.0}, **metric),
         ])])
@@ -439,8 +692,8 @@ class SanityWindowTests(unittest.TestCase):
         plan = capture.plan_playback(document, GW, DEFAULT_MAP, NOW, speed=speed)
         return capture.window_outcome(plan, NOW)[2]
 
-    def test_a_slow_speed_stretches_how_old_a_reading_is_before_its_birth(self):
-        # A metric stamped 20 minutes before its birth message. The gap is divided by the
+    def test_a_slow_speed_stretches_how_old_a_reading_is_before_its_message(self):
+        # A metric stamped 20 minutes before its message. The gap is divided by the
         # speed, so it is 20 minutes at 1x, 200 minutes at 0.1x and 33 hours at 0.01x, which is
         # past the 24-hour bound. A faster speed shrinks it.
         document = self._gap_capture(-20 * 60 * 1000)
@@ -511,7 +764,7 @@ class SanityWindowTests(unittest.TestCase):
             {"name": "Systems/TEMPERATURE", "timestamp": 0, "double_value": 20.0},
         ])])
         plan = capture.plan_playback(zeroed, GW, DEFAULT_MAP, NOW)
-        self.assertEqual(plan[0][3]["metrics"][0]["timestamp"], 0, "rebasing moved a zero")
+        self.assertEqual(plan[-1][3]["metrics"][0]["timestamp"], 0, "rebasing moved a zero")
         self.assertEqual(capture.unsane_timestamps(plan, NOW), [])
 
     def test_a_payload_without_a_clock_is_stamped_on_arrival(self):
@@ -521,7 +774,7 @@ class SanityWindowTests(unittest.TestCase):
             {"name": "Systems/TEMPERATURE", "double_value": 20.0},
         ])])
         plan = capture.plan_playback(unstamped, GW, DEFAULT_MAP, NOW)
-        self.assertIsNone(plan[0][3]["timestamp"], "rebasing materialised a payload clock")
+        self.assertIsNone(plan[-1][3]["timestamp"], "rebasing materialised a payload clock")
         self.assertEqual(capture.unsane_timestamps(plan, NOW), [])
 
     def test_a_message_that_loses_one_metric_keeps_the_other(self):
@@ -644,7 +897,7 @@ class CaptureFileShapeTests(unittest.TestCase):
         reloaded = json.loads(json.dumps(original))
         self.assertEqual(reloaded, original)
         plan = capture.plan_playback(reloaded, GW, DEFAULT_MAP, NOW)
-        self.assertEqual(len(plan), 1)
+        self.assertEqual(len(plan), len(original["messages"]))
 
     def test_a_hand_edited_value_reaches_the_wire(self):
         # THE FEATURE'S WHOLE POINT: reproduce a fault by editing a number. If this stops being
@@ -653,7 +906,7 @@ class CaptureFileShapeTests(unittest.TestCase):
             {"name": "Systems/TEMPERATURE", "timestamp": EPOCH, "double_value": 999.9,
              "datatype": 10},
         ])])
-        _, _, payload_bytes, _ = capture.plan_playback(edited, GW, DEFAULT_MAP, NOW)[0]
+        _, _, payload_bytes, _ = capture.plan_playback(edited, GW, DEFAULT_MAP, NOW)[-1]
         decoded = sparkplug_b_pb2.Payload()
         decoded.ParseFromString(payload_bytes)
         self.assertEqual(decoded.metrics[0].double_value, 999.9)
@@ -757,10 +1010,10 @@ class WorkerOutOfWindowTests(unittest.TestCase):
         self.assertIn("too old or too far in the future", error)
 
     def test_a_slow_speed_is_named_as_a_cause_and_1x_as_the_retry(self):
-        # Every metric is stamped 20 minutes before its birth: in window at 1x, 33 hours behind
+        # Every metric is stamped 20 minutes before its message: in window at 1x, 33 hours behind
         # at 0.01x. The refusal says the speed did it and what to try, and does not say the
         # opposite.
-        document = capture_file([message(0, "DBIRTH", metrics=[
+        document = capture_file([message(0, "DDATA", metrics=[
             {"name": "Systems/TEMPERATURE", "timestamp": EPOCH - 20 * 60 * 1000,
              "double_value": 20.0},
         ])])
@@ -792,7 +1045,7 @@ class WorkerOutOfWindowTests(unittest.TestCase):
     def test_the_command_line_refusal_reads_the_same(self):
         import argparse
         import tempfile
-        document = capture_file([message(0, "DBIRTH", metrics=[
+        document = capture_file([message(0, "DDATA", metrics=[
             {"name": "Systems/TEMPERATURE", "timestamp": EPOCH - 20 * 60 * 1000,
              "double_value": 20.0},
         ])])
@@ -865,6 +1118,315 @@ class WorkerOutOfWindowTests(unittest.TestCase):
         )
         self.assertEqual((sent, out_of_window), (0, 0))
         self.assertIn("holds no broker credential", error)
+
+
+# =============================================================================================
+# THE COMMAND LINE: `record` keeps what the daemon ingests, `play` is the dashboard's session.
+# Against fake paho clients; no broker is reached.
+# =============================================================================================
+def wire_message(topic, payload=b"", retain=False):
+    return SimpleNamespace(topic=topic, payload=payload, retain=retain)
+
+
+def protobuf(seq=None, **metrics):
+    payload = sparkplug_b_pb2.Payload()
+    payload.timestamp = EPOCH
+    if seq is not None:
+        payload.seq = seq
+    for name, value in metrics.items():
+        m = payload.metrics.add()
+        m.name, m.datatype, m.double_value = name, 10, value
+    return payload.SerializeToString()
+
+
+class FakeRecorder:
+    """
+    The subscription: delivers `arriving` when the loop starts, retained messages first. Confirms
+    the subscription at once unless `suback` is False; records what is published.
+    """
+
+    def __init__(self, arriving, suback=True):
+        self.arriving = arriving
+        self.suback = suback
+        self.on_message = self.on_subscribe = None
+        self.events = []
+
+    def subscribe(self, topic, qos=0):
+        self.topic = topic
+        self.events.append(("subscribe", topic))
+        if self.suback and self.on_subscribe:
+            self.on_subscribe(self, None, 1, (0,))
+
+    def publish(self, topic, payload, qos=0, retain=False):
+        self.events.append(("publish", topic, payload, qos, retain))
+        return SimpleNamespace(rc=0)
+
+    def loop_start(self):
+        for msg in self.arriving:
+            self.on_message(self, None, msg)
+
+    def loop_stop(self):
+        pass
+
+    def disconnect(self):
+        pass
+
+
+class FakeBroker:
+    """A paho client for the playback session: CONNACK at once, every QoS 1 publish acknowledged."""
+    made = []
+    rc_after = None   # publishes after this many return MQTT_ERR_NO_CONN
+
+    def __init__(self, client_id=None, **_kwargs):
+        self.client_id = client_id
+        self.events = []
+        self.will = None
+        FakeBroker.made.append(self)
+
+    def username_pw_set(self, username, password):
+        self.username = username
+
+    def will_set(self, topic, payload, qos=0, retain=False):
+        self.will = (topic, payload, qos, retain)
+        self.events.append("will_set")
+
+    def tls_set(self, **_kwargs):
+        pass
+
+    def connect(self, host, port, keepalive):
+        self.events.append(("connect", host, port))
+        self.on_connect(self, None, {}, 0)
+
+    def loop_start(self):
+        self.events.append("loop_start")
+
+    def loop_stop(self):
+        self.events.append("loop_stop")
+
+    def subscribe(self, topic, qos=0):
+        self.events.append(("subscribe", topic, qos))
+        return 0, 1
+
+    def message_callback_add(self, sub, callback):
+        pass
+
+    def publish(self, topic, payload, qos=0, retain=False):
+        published = sum(1 for b in FakeBroker.made for e in b.events if e[0] == "publish")
+        lost = FakeBroker.rc_after is not None and published >= FakeBroker.rc_after
+        self.events.append(("publish", topic, payload, qos))
+        return SimpleNamespace(rc=4 if lost else 0, wait_for_publish=lambda timeout=None: None,
+                               is_published=lambda: not lost)
+
+    def disconnect(self):
+        self.events.append("disconnect")
+
+    def socket(self):
+        return None
+
+    def published(self):
+        return [e[1:] for e in self.events if e[0] == "publish"]
+
+
+def kind(topic):
+    return capture.split_topic(topic)[1]
+
+
+def bdseq_of(payload_bytes):
+    payload, _ = capture.decode_wire_payload(payload_bytes)
+    return next(m.long_value for m in payload.metrics if m.name == "bdSeq")
+
+
+class CommandLineTests(unittest.TestCase):
+
+    def setUp(self):
+        import playback_worker
+        self.worker = playback_worker
+        self.saved = (playback_worker.mqtt.Client, playback_worker.MQTT_HOST,
+                      playback_worker.MQTT_PORT, capture.PLAY_USER, capture.PLAY_PASSWORD,
+                      capture._connect)
+        playback_worker.mqtt.Client = FakeBroker
+        capture.PLAY_USER, capture.PLAY_PASSWORD = GW, "a-password"
+        FakeBroker.made, FakeBroker.rc_after = [], None
+        playback_worker._next_bdseq.clear()
+        self.folder = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        (self.worker.mqtt.Client, self.worker.MQTT_HOST, self.worker.MQTT_PORT, capture.PLAY_USER,
+         capture.PLAY_PASSWORD, capture._connect) = self.saved
+        self.worker._next_bdseq.clear()
+        self.folder.cleanup()
+
+    # -- record -----------------------------------------------------------------------------------
+    def record(self, arriving, topic="spBv1.0/#", no_rebirth=False, suback=True):
+        self.recorder = FakeRecorder(arriving, suback)
+        capture._connect = lambda *_args: self.recorder
+        path = os.path.join(self.folder.name, "recorded.json")
+        args = argparse.Namespace(out=path, seconds=0, topic=topic, verbose=False,
+                                  no_rebirth=no_rebirth)
+        self.output = io.StringIO()
+        with contextlib.redirect_stdout(self.output):
+            status = capture.cmd_record(args)
+        with open(path, encoding="utf-8") as fh:
+            return status, json.load(fh)
+
+    def rebirth_requests(self):
+        return [e[1:] for e in self.recorder.events if e[0] == "publish"]
+
+    def birth_and_data(self):
+        node = "spBv1.0/Aber/%s/" + CAPTURED_GW
+        return [wire_message(node % "NBIRTH", protobuf(seq=0, Uptime_s=1.0)),
+                wire_message(node % "NDATA", protobuf(seq=1, Uptime_s=2.0))]
+
+    def test_record_asks_the_edge_node_its_topic_names_for_a_birth(self):
+        """The same request the daemon sends, on that node's NCMD, after the SUBACK."""
+        self.record(self.birth_and_data(), topic="spBv1.0/Aber/+/%s/#" % CAPTURED_GW)
+        requests = self.rebirth_requests()
+        self.assertEqual(len(requests), 1)
+        topic, payload_bytes, qos, retain = requests[0]
+        self.assertEqual(topic, "spBv1.0/Aber/NCMD/" + CAPTURED_GW)
+        self.assertEqual((qos, retain), (0, False), "tck-id-payloads-ncmd-qos, -ncmd-retain")
+        payload = sparkplug_b_pb2.Payload()
+        payload.ParseFromString(payload_bytes)
+        self.assertFalse(payload.HasField("seq"), "tck-id-payloads-ncmd-seq")
+        self.assertGreater(payload.timestamp, 0, "tck-id-payloads-ncmd-timestamp")
+        self.assertEqual([(m.name, m.datatype, m.boolean_value) for m in payload.metrics],
+                         [("Node Control/Rebirth", 11, True)])
+        kinds = [e[0] for e in self.recorder.events]
+        self.assertLess(kinds.index("subscribe"), kinds.index("publish"),
+                        "asked before the subscription that records the answer")
+
+    def test_record_asks_nobody_when_its_topic_covers_several_edge_nodes(self):
+        for topic in ("spBv1.0/#", "spBv1.0/Aber/#", "spBv1.0/+/+/%s/#" % CAPTURED_GW,
+                      "spBv1.0/Aber/+/+/#"):
+            with self.subTest(topic=topic):
+                self.record(self.birth_and_data(), topic=topic)
+                self.assertEqual(self.rebirth_requests(), [])
+                self.assertIn("No rebirth asked for", self.output.getvalue())
+
+    def test_no_rebirth_asks_nobody(self):
+        self.record(self.birth_and_data(), topic="spBv1.0/Aber/+/%s/#" % CAPTURED_GW,
+                    no_rebirth=True)
+        self.assertEqual(self.rebirth_requests(), [])
+
+    def test_record_asks_nobody_without_a_suback(self):
+        """An answer that arrived before the subscription would not be recorded."""
+        saved = capture.SUBSCRIBE_TIMEOUT_SECONDS
+        capture.SUBSCRIBE_TIMEOUT_SECONDS = 0
+        try:
+            self.record(self.birth_and_data(), topic="spBv1.0/Aber/+/%s/#" % CAPTURED_GW,
+                        suback=False)
+        finally:
+            capture.SUBSCRIBE_TIMEOUT_SECONDS = saved
+        self.assertEqual(self.rebirth_requests(), [])
+
+    def test_a_request_no_birth_answered_says_what_may_be_wrong(self):
+        node = "spBv1.0/Aber/%s/" + CAPTURED_GW
+        self.record([wire_message(node % "NDATA", protobuf(seq=5, Uptime_s=2.0))],
+                    topic="spBv1.0/Aber/+/%s/#" % CAPTURED_GW)
+        self.assertIn("A rebirth was asked for and no NBIRTH arrived", self.output.getvalue())
+
+    def test_record_leaves_out_state_and_commands(self):
+        """The primary host's STATE is retained, so it arrives on subscribe, every time."""
+        node = "spBv1.0/Aber/%s/" + CAPTURED_GW
+        status, document = self.record([
+            wire_message("spBv1.0/STATE/aber-ingestion", b'{"online":true,"timestamp":1}', True),
+            wire_message(node % "NCMD", protobuf(**{"Node Control/Rebirth": 1.0})),
+            wire_message(node % "DCMD" + "/" + CAPTURED_DEV, protobuf(Setpoint=1.0)),
+            wire_message(node % "NDATA", b""),
+            wire_message(node % "NBIRTH", protobuf(seq=0, Uptime_s=1.0)),
+            wire_message(node % "DBIRTH" + "/" + CAPTURED_DEV, protobuf(seq=1, Temperature=20.0)),
+            wire_message(node % "DDATA" + "/" + CAPTURED_DEV, protobuf(seq=2, Temperature=21.0)),
+        ])
+        self.assertEqual(status, 0)
+        self.assertEqual([kind(m["topic"]) for m in document["messages"]],
+                         ["NBIRTH", "DBIRTH", "DDATA"])
+        self.assertEqual(document["identities"], {"edge_nodes": [CAPTURED_GW],
+                                                  "devices": [CAPTURED_DEV]})
+        self.assertEqual(len(capture.plan_playback(document, GW, DEFAULT_MAP, NOW)), 3)
+
+    def test_a_recording_of_state_alone_says_so(self):
+        with self.assertRaises(capture.CaptureError) as caught:
+            self.record([wire_message("spBv1.0/STATE/aber-ingestion", b'{"online":true}', True)])
+        self.assertIn("were STATE, NCMD or DCMD", str(caught.exception))
+
+    # -- play -------------------------------------------------------------------------------------
+    def play(self, messages, **overrides):
+        path = os.path.join(self.folder.name, "capture.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(capture_file(messages, born=False), fh)
+        args = argparse.Namespace(
+            capture=path, map=["%s=%s" % (CAPTURED_DEV, DEV_A)], as_gateway=GW, speed=1000.0,
+            group=None, allow_unsane=False, dry_run=False, head=5, verbose=False)
+        for key, value in overrides.items():
+            setattr(args, key, value)
+        with contextlib.redirect_stdout(io.StringIO()):
+            return capture.cmd_play(args)
+
+    @staticmethod
+    def session(bdseq=9):
+        return [message(0, "NBIRTH", device=None, metrics=[
+                    {"name": "bdSeq", "datatype": 4, "long_value": bdseq}]),
+                message(10, "DBIRTH"), message(20, "DDATA")]
+
+    def assert_a_session(self, client, bdseq):
+        """The Will is the session's NDEATH; the NBIRTH repeats its bdSeq; the death ends it."""
+        will_topic, will_payload, will_qos, will_retain = client.will
+        self.assertEqual(will_topic, "spBv1.0/Aber/NDEATH/" + GW)
+        self.assertEqual((will_qos, will_retain), (1, False))
+        self.assertLess(client.events.index("will_set"), 1)
+        first, last = client.published()[0], client.published()[-1]
+        self.assertEqual(kind(first[0]), "NBIRTH")
+        self.assertEqual(bdseq_of(first[1]), bdseq)
+        self.assertEqual(bdseq_of(will_payload), bdseq)
+        self.assertEqual((kind(last[0]), last[2], bdseq_of(last[1])), ("NDEATH", 1, bdseq))
+        self.assertEqual(client.events[-2:], ["loop_stop", "disconnect"])
+
+    def test_play_opens_and_ends_the_dashboards_session(self):
+        """tck-id-payloads-ndeath-will-message, -nbirth-bdseq-repeat, -intentional-disconnect."""
+        self.assertEqual(self.play(self.session(bdseq=9)), 0)
+        client, = FakeBroker.made
+        self.assertEqual(client.username, GW)
+        self.assertEqual(client.events[1], ("connect", capture.MQTT_HOST, capture.MQTT_PORT))
+        self.assertEqual([kind(t) for t, _, _ in client.published()],
+                         ["NBIRTH", "DBIRTH", "DDATA", "NDEATH"])
+        self.assert_a_session(client, bdseq=0)
+
+    def test_a_recorded_ndeath_ends_one_session_and_the_next_opens_with_the_next_bdseq(self):
+        messages = self.session() + [message(30, "NDEATH", device=None),
+                                     message(40, "NBIRTH", device=None),
+                                     message(50, "NDATA", device=None)]
+        self.play(messages)
+        first, second = FakeBroker.made
+        self.assert_a_session(first, bdseq=0)
+        self.assert_a_session(second, bdseq=1)
+
+    def test_a_lost_connection_stops_the_run_instead_of_reporting_success(self):
+        FakeBroker.rc_after = 2
+        with self.assertRaises(capture.CaptureError) as caught:
+            self.play(self.session())
+        self.assertIn("publishing stopped after 2 message(s): the broker connection was lost",
+                      str(caught.exception))
+
+    def test_a_birthless_capture_is_refused_before_connecting(self):
+        with self.assertRaises(capture.CaptureError) as caught:
+            self.play([message(0, "DDATA")])
+        self.assertIn("holds no NBIRTH", str(caught.exception))
+        self.assertEqual(FakeBroker.made, [])
+
+    def test_the_credential_advice_is_the_gateways_page_and_the_delivered_secret(self):
+        capture.PLAY_USER = ""
+        with self.assertRaises(capture.CaptureError) as caught:
+            self.play(self.session())
+        text = str(caught.exception)
+        self.assertIn("Gateways page", text)
+        self.assertIn("mosquitto-passwords", text)
+        self.assertIn("playback_credentials.json", text)
+        self.assertNotIn("mosquitto-provision-gateway", text)
+        self.assertEqual(FakeBroker.made, [])
+
+    def test_the_map_help_names_the_replay_lanes(self):
+        text = capture.build_parser()._subparsers._group_actions[0].choices["play"].format_help()
+        self.assertIn("Prepare replay lanes", " ".join(text.split()))
 
 
 if __name__ == "__main__":

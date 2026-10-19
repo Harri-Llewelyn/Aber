@@ -73,6 +73,14 @@ class FakePayload:
         self.metrics = [FakeMetric(n) for n in names]
 
 
+class BdSeqMetric(FakeMetric):
+    """A certificate's bdSeq, as payload_bdseq() reads it."""
+    def __init__(self, bdseq):
+        super().__init__("bdSeq")
+        self.long_value = bdseq
+        self._present.add("long_value")
+
+
 class AliasPayload:
     """A birth payload declaring `{alias: name}`, or a DATA payload carrying bare aliases."""
     def __init__(self, declarations=None, bare_aliases=(), named=()):
@@ -93,6 +101,9 @@ def reset_module_state():
     reset them would pass or fail depending on execution order.
     """
     ingestion._alias_map.clear()
+    ingestion._alias_datatypes.clear()
+    ingestion._name_datatypes.clear()
+    ingestion._session_bdseq.clear()
     ingestion._rebirth_requested.clear()
     ingestion._device_seen.clear()
     ingestion._device_offline.clear()
@@ -316,6 +327,50 @@ class TestAliasRegistration(unittest.TestCase):
         self.assertEqual(
             ingestion.resolve_metric_name(GROUP, NODE_A, FakeMetric("", alias=2)), "New/METRIC"
         )
+
+    # An applied NDEATH ends the session whose births declared the aliases, so none of them may
+    # resolve the next session's data -- a replay onto the Playback gateway would otherwise file
+    # its readings under the previous replay's names.
+    def node_message(self, msg_type, node=NODE_A, bdseq=None):
+        payload = AliasPayload({1: "Systems/TEMPERATURE"} if msg_type == "NBIRTH" else None)
+        if bdseq is not None:
+            payload.metrics.append(BdSeqMetric(bdseq))
+        ingestion.process_node_message(node, msg_type, payload, group_id=GROUP)
+
+    def resolves(self, node=NODE_A):
+        return ingestion.resolve_metric_name(GROUP, node, FakeMetric("", alias=1))
+
+    def test_an_ndeath_clears_the_node_table(self):
+        self.node_message("NBIRTH")
+        self.assertEqual(self.resolves(), "Systems/TEMPERATURE")
+        self.node_message("NDEATH")
+        self.assertIsNone(self.resolves())
+        self.assertNotIn((GROUP, NODE_A), ingestion._alias_datatypes)
+        self.assertNotIn((GROUP, NODE_A), ingestion._name_datatypes)
+
+    def test_an_ndeath_of_the_open_session_clears_it(self):
+        self.node_message("NBIRTH", bdseq=4)
+        self.node_message("NDEATH", bdseq=4)
+        self.assertIsNone(self.resolves())
+
+    def test_a_stale_ndeath_leaves_the_open_session_its_aliases(self):
+        """A Last Will from an earlier connection, delivered after the node was born again."""
+        self.node_message("NBIRTH", bdseq=5)
+        self.node_message("NDEATH", bdseq=4)
+        self.assertEqual(self.resolves(), "Systems/TEMPERATURE")
+
+    def test_an_ndeath_clears_only_its_own_node(self):
+        self.node_message("NBIRTH", node=NODE_A)
+        self.node_message("NBIRTH", node=NODE_B)
+        self.node_message("NDEATH", node=NODE_A)
+        self.assertIsNone(self.resolves(NODE_A))
+        self.assertEqual(self.resolves(NODE_B), "Systems/TEMPERATURE")
+
+    def test_the_next_nbirth_declares_the_table_again(self):
+        self.node_message("NBIRTH")
+        self.node_message("NDEATH")
+        self.node_message("NBIRTH")
+        self.assertEqual(self.resolves(), "Systems/TEMPERATURE")
 
     def test_dbirth_merges_and_leaves_siblings_intact(self):
         """One device re-birthing must not wipe the aliases of the others on the same node."""
