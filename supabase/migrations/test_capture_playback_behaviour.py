@@ -172,9 +172,12 @@ class Base(unittest.TestCase):
 
     def _as(self, caller):
         """Become `caller` for what follows, as PostgREST does: role, then claims."""
-        if caller in ("anon", "service_role"):
-            self.cur.execute(f"SET LOCAL ROLE {caller};")
-            claims = '{"role": "%s"}' % caller
+        if caller == "anon":
+            self.cur.execute("SET LOCAL ROLE anon;")
+            claims = '{"role": "anon"}'
+        elif caller == "service_role":
+            self.cur.execute("SET LOCAL ROLE service_role;")
+            claims = '{"role": "service_role"}'
         else:
             sub = {"ingestion": INGESTION, "playback": PLAYBACK}.get(caller) or PEOPLE[caller]
             self.cur.execute("SET LOCAL ROLE authenticated;")

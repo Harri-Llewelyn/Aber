@@ -652,7 +652,7 @@ function edgeFunctionNames() {
   const named = new Set([...risk.matchAll(/`([a-z_]+)`/g)].map((m) => m[1]));
   const missing = published.filter((t) => !named.has(t));
   if (!published.length) {
-    fail(`check 103 found no \`intended\` publication list in ${BASELINE}, so it checks nothing`);
+    fail(`check 103 found no "intended" publication list in ${BASELINE}, so it checks nothing`);
   } else if (!risk) {
     fail(`${DOC} has no "Realtime leaks the timing of changes" accepted risk`);
   } else if (missing.length) {
