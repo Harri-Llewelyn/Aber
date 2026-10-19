@@ -42,6 +42,7 @@ import argparse
 import base64
 import binascii
 import json
+import math
 import os
 import re
 import sys
@@ -102,6 +103,14 @@ DEVICE_ID_RE = re.compile(r"^dev[0-9a-f]{21}$")
 ASSET_ID_METRIC = "Asset_ID"
 
 NODE_MESSAGE_TYPES = ("NBIRTH", "NDATA", "NDEATH")
+# The device segment is present on these three and absent on the node's three
+# (tck-id-topic-structure-namespace-device-id-associated-message-types, -non-associated-).
+DEVICE_MESSAGE_TYPES = ("DBIRTH", "DDATA", "DDEATH")
+# Everything an edge node publishes. NCMD, DCMD and STATE are a host's, and are never recorded.
+EDGE_NODE_MESSAGE_TYPES = NODE_MESSAGE_TYPES + DEVICE_MESSAGE_TYPES
+
+# The longest a capture may run from its first message, as its last `offset_ms`.
+MAX_OFFSET_MS = 24 * 60 * 60 * 1000
 
 # EVERY value field the proto defines for a scalar metric, and the list is exhaustive on purpose.
 # A field missing from here is a value the recorder reads and does not write down, which produces
@@ -455,6 +464,148 @@ def split_topic(topic):
     return group, msg_type, edge_node, device
 
 
+# ---------------------------------------------------------------------------------------------
+# What a capture file may hold
+# ---------------------------------------------------------------------------------------------
+# One rule set, restated in the page's upload check (frontend/src/api.js); see README.md -> "The
+# file is JSON". Errors name a message by its 0-based index.
+def _json_kind(value):
+    """The JSON name of a value's type, for a refusal."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "a boolean"
+    if isinstance(value, (int, float)):
+        return "a number"
+    if isinstance(value, str):
+        return "a string"
+    if isinstance(value, list):
+        return "an array"
+    return "an object" if isinstance(value, dict) else type(value).__name__
+
+
+def _is_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def segment_problem(segment):
+    """
+    What makes `segment` unfit to be a topic segment, or None. A group, edge node or device id is
+    valid UTF-8 without '+', '/' or '#' (tck-id-topic-structure-namespace-valid-group-id,
+    -valid-edge-node-id, -valid-device-id), and MQTT forbids NUL in a topic.
+    """
+    if not segment:
+        return "is empty"
+    for char, name in (("+", "'+'"), ("#", "'#'"), ("/", "'/'"), ("\x00", "a NUL character")):
+        if char in segment:
+            return "contains %s" % name
+    try:
+        segment.encode("utf-8")
+    except UnicodeEncodeError:
+        return "is not valid UTF-8"
+    return None
+
+
+def check_topic(topic):
+    """
+    (group, msg_type, edge_node, device) for a topic an edge node publishes; CaptureError for any
+    other, STATE and the two command types included.
+    """
+    if not isinstance(topic, str):
+        raise CaptureError("its topic is %s, not a string" % _json_kind(topic))
+    parts = topic.split("/")
+    if parts[0] != "spBv1.0" or len(parts) not in (4, 5):
+        raise CaptureError("topic %r is not spBv1.0/<group>/<type>/<edge node>[/<device>]"
+                           % (topic,))
+    msg_type = parts[2]
+    if msg_type not in EDGE_NODE_MESSAGE_TYPES:
+        raise CaptureError(
+            "topic %r: %s is not one of the six message types an edge node publishes (%s)"
+            % (topic, msg_type, ", ".join(EDGE_NODE_MESSAGE_TYPES)))
+    has_device = len(parts) == 5
+    if has_device != (msg_type in DEVICE_MESSAGE_TYPES):
+        raise CaptureError("topic %r: a %s %s a device segment" % (
+            topic, msg_type, "never has" if has_device else "always has"))
+    for name, segment in (("group", parts[1]), ("edge node", parts[3]),
+                          ("device", parts[4] if has_device else None)):
+        problem = segment is not None and segment_problem(segment)
+        if problem:
+            raise CaptureError("topic %r: the %s segment %s" % (topic, name, problem))
+    return parts[1], msg_type, parts[3], parts[4] if has_device else None
+
+
+def _check_message(msg, previous_offset):
+    """One message's shape. Returns its offset_ms."""
+    if not isinstance(msg, dict):
+        raise CaptureError("it is %s, not an object" % _json_kind(msg))
+    if "topic" not in msg:
+        raise CaptureError("it has no topic")
+    check_topic(msg["topic"])
+    payload = msg.get("payload")
+    if not isinstance(payload, dict):
+        raise CaptureError("its payload is %s, not an object" % _json_kind(payload))
+    if "metrics" in payload:
+        metrics = payload["metrics"]
+        if not isinstance(metrics, list):
+            raise CaptureError("its metrics are %s, not an array" % _json_kind(metrics))
+        for index, metric in enumerate(metrics):
+            if not isinstance(metric, dict):
+                raise CaptureError("its metric %d is %s, not an object"
+                                   % (index, _json_kind(metric)))
+    encoding = msg.get("encoding", ENCODING_PROTOBUF)
+    if encoding not in (ENCODING_PROTOBUF, ENCODING_JSON):
+        raise CaptureError("its encoding %r is neither %r nor %r"
+                           % (encoding, ENCODING_PROTOBUF, ENCODING_JSON))
+
+    if "offset_ms" not in msg:
+        raise CaptureError("it has no offset_ms")
+    offset = msg["offset_ms"]
+    if not _is_number(offset) or offset != int(offset):
+        raise CaptureError("its offset_ms is %r, not a whole number of milliseconds" % (offset,))
+    if offset < 0:
+        raise CaptureError("its offset_ms %d is negative" % offset)
+    if offset < previous_offset:
+        raise CaptureError("its offset_ms %d is earlier than the message before it (%d): the "
+                           "messages are out of order" % (offset, previous_offset))
+    if offset > MAX_OFFSET_MS:
+        raise CaptureError("its offset_ms %d is more than 24 hours after the first message, the "
+                           "longest a capture may run" % offset)
+    return int(offset)
+
+
+def check_capture(capture):
+    """
+    The capture file's shape, checked before anything is planned. Returns its messages; raises
+    CaptureError naming the first problem.
+    """
+    if not isinstance(capture, dict):
+        raise CaptureError("a capture file is a JSON object, and this one is %s"
+                           % _json_kind(capture))
+    version = capture.get("aber_capture_version")
+    if version != CAPTURE_VERSION:
+        raise CaptureError(
+            "capture file is version %r, this tool reads version %d. Refusing to guess at the "
+            "difference." % (version, CAPTURE_VERSION)
+        )
+    if "capture_epoch_ms" not in capture:
+        raise CaptureError("capture has no capture_epoch_ms; it cannot be rebased")
+    if not _is_number(capture["capture_epoch_ms"]):
+        raise CaptureError("capture_epoch_ms is %s, not a number; it cannot be rebased"
+                           % _json_kind(capture["capture_epoch_ms"]))
+    messages = capture.get("messages")
+    if not isinstance(messages, list):
+        raise CaptureError("the capture's messages are %s, not an array" % _json_kind(messages))
+    if not messages:
+        raise CaptureError("capture contains no messages")
+    previous = 0
+    for index, msg in enumerate(messages):
+        try:
+            previous = _check_message(msg, previous)
+        except CaptureError as err:
+            raise CaptureError("message %d: %s" % (index, err)) from None
+    return messages
+
+
 def capture_identities(messages):
     """
     Every edge node and device id the capture publishes under, in first-seen order.
@@ -539,18 +690,20 @@ def rebase_payload(payload_dict, capture_epoch_ms, play_epoch_ms, speed=1.0):
     if speed <= 0:
         raise CaptureError("speed must be greater than zero, got %r" % (speed,))
 
-    def move(ts):
+    def move(ts, what):
+        if not _is_number(ts):
+            raise CaptureError("%s %r is not a number" % (what, ts))
         return int(play_epoch_ms + (int(ts) - capture_epoch_ms) / speed)
 
     out = dict(payload_dict)
     if out.get("timestamp"):
-        out["timestamp"] = move(out["timestamp"])
+        out["timestamp"] = move(out["timestamp"], "its payload timestamp")
 
     metrics = []
-    for m in payload_dict.get("metrics", []):
+    for index, m in enumerate(payload_dict.get("metrics", [])):
         entry = dict(m)
         if entry.get("timestamp"):
-            entry["timestamp"] = move(entry["timestamp"])
+            entry["timestamp"] = move(entry["timestamp"], "its metric %d's timestamp" % index)
         metrics.append(entry)
     out["metrics"] = metrics
     return out
@@ -669,13 +822,7 @@ def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, gro
     NDEATH; a recorded NDEATH ends it and the next is one more, wrapping 255 to 0. None keeps the
     recorded numbers. README.md -> "A replay is its own Sparkplug session".
     """
-    version = capture.get("aber_capture_version")
-    if version != CAPTURE_VERSION:
-        raise CaptureError(
-            "capture file is version %r, this tool reads version %d. Refusing to guess at the "
-            "difference." % (version, CAPTURE_VERSION)
-        )
-
+    messages = check_capture(capture)
     if not GATEWAY_ID_RE.match(gateway_id or ""):
         raise CaptureError(
             "%r is not a gateway sparkplug_id ('gwy' followed by 21 lowercase hex characters). "
@@ -688,56 +835,57 @@ def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, gro
                 "%r maps to %r, which is not a device sparkplug_id ('dev' followed by 21 "
                 "lowercase hex characters)." % (captured, target)
             )
+    problem = group and segment_problem(group)
+    if problem:
+        raise CaptureError("the group %r %s" % (group, problem))
 
-    messages = capture.get("messages", [])
-    if not messages:
-        raise CaptureError("capture contains no messages")
-
-    capture_epoch_ms = capture.get("capture_epoch_ms")
-    if capture_epoch_ms is None:
-        raise CaptureError("capture has no capture_epoch_ms; it cannot be rebased")
-
+    capture_epoch_ms = capture["capture_epoch_ms"]
     plan = []
     session = bdseq
     seq = 0
     born = False        # an NBIRTH has opened the session and no NDEATH has ended it
     devices = set()     # devices whose DBIRTH this session has published
     births = data = left_out = 0
-    for msg in messages:
-        topic, payload = rewrite_identity(msg["topic"], msg["payload"], gateway_id, device_map)
-        _, msg_type, _, device = split_topic(topic)
-        if msg_type == "NBIRTH":
-            born, devices, seq = True, set(), 0
-            births += 1
-        elif not born or (msg_type in ("DDATA", "DDEATH") and device not in devices):
-            left_out += 1
-            continue
-        elif msg_type == "DBIRTH":
-            devices.add(device)
-        elif msg_type == "DDEATH":
-            devices.discard(device)
-        if group:
-            topic = "spBv1.0/%s/%s/%s" % (group, msg_type, gateway_id)
-            if device:
-                topic = "%s/%s" % (topic, device)
-        payload = rebase_payload(payload, capture_epoch_ms, play_epoch_ms, speed)
-        if msg_type == "NDEATH":
-            # tck-id-payloads-ndeath-seq: an NDEATH carries no seq.
-            payload.pop("seq", None)
-            born, devices = False, set()
-        else:
-            payload["seq"] = seq
-            seq = (seq + 1) % 256
-        if msg_type in ("NDATA", "DDATA"):
-            data += 1
-        if session is not None and msg_type in ("NBIRTH", "NDEATH"):
-            payload = with_bdseq(payload, session)
+    for index, msg in enumerate(messages):
+        try:
+            topic, payload = rewrite_identity(msg["topic"], msg["payload"], gateway_id, device_map)
+            _, msg_type, _, device = split_topic(topic)
+            if msg_type == "NBIRTH":
+                born, devices, seq = True, set(), 0
+                births += 1
+            elif not born or (msg_type in ("DDATA", "DDEATH") and device not in devices):
+                left_out += 1
+                continue
+            elif msg_type == "DBIRTH":
+                devices.add(device)
+            elif msg_type == "DDEATH":
+                devices.discard(device)
+            if group:
+                topic = "spBv1.0/%s/%s/%s" % (group, msg_type, gateway_id)
+                if device:
+                    topic = "%s/%s" % (topic, device)
+            payload = rebase_payload(payload, capture_epoch_ms, play_epoch_ms, speed)
             if msg_type == "NDEATH":
-                session = (session + 1) % 256
-        delay_ms = int(msg["offset_ms"] / speed)
-        # An absent encoding is protobuf: the Sparkplug B default and the daemon's first branch.
-        encoding = msg.get("encoding", ENCODING_PROTOBUF)
-        plan.append((delay_ms, topic, encode_wire_payload(payload, encoding), payload))
+                # tck-id-payloads-ndeath-seq: an NDEATH carries no seq.
+                payload.pop("seq", None)
+                born, devices = False, set()
+            else:
+                payload["seq"] = seq
+                seq = (seq + 1) % 256
+            if msg_type in ("NDATA", "DDATA"):
+                data += 1
+            if session is not None and msg_type in ("NBIRTH", "NDEATH"):
+                payload = with_bdseq(payload, session)
+                if msg_type == "NDEATH":
+                    session = (session + 1) % 256
+            delay_ms = int(msg["offset_ms"] / speed)
+            # An absent encoding is protobuf: the Sparkplug B default and the daemon's first branch.
+            encoding = msg.get("encoding", ENCODING_PROTOBUF)
+            plan.append((delay_ms, topic, encode_wire_payload(payload, encoding), payload))
+        except CaptureError as err:
+            raise CaptureError("message %d: %s" % (index, err)) from None
+        except (AttributeError, KeyError, OverflowError, TypeError, ValueError) as err:
+            raise CaptureError("message %d cannot be encoded: %s" % (index, err)) from None
 
     if not births:
         raise CaptureError(

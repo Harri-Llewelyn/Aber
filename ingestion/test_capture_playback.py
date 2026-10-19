@@ -525,6 +525,127 @@ class PlanTests(unittest.TestCase):
         self.assertIn(DEV_B, plan[-1][1])
 
 
+class MalformedCaptureTests(unittest.TestCase):
+    """
+    A file reaches the plan from the page, an upload or a hand edit, so its shape is checked first
+    and a fault is refused as a CaptureError naming the message, never a KeyError or TypeError.
+    """
+
+    def refusal(self, document, **kwargs):
+        with self.assertRaises(capture.CaptureError) as caught:
+            capture.plan_playback(document, GW, kwargs.pop("device_map", DEFAULT_MAP), NOW,
+                                  **kwargs)
+        return str(caught.exception)
+
+    def with_message(self, index, **changes):
+        """A good capture whose message `index` (after births()) has `changes`; None deletes."""
+        document = capture_file([message(0, "DDATA"), message(10, "DDATA")])
+        msg = document["messages"][index]
+        for key, value in changes.items():
+            if value is None:
+                msg.pop(key, None)
+            else:
+                msg[key] = value
+        return document
+
+    def test_a_well_formed_capture_passes(self):
+        self.assertEqual(len(capture.check_capture(capture_file())), 3)
+
+    def test_the_document_must_be_an_object_of_the_known_shape(self):
+        for document, expected in (
+            ([], "is an array"),
+            (dict(capture_file(), aber_capture_version=2), "version 2"),
+            (dict(capture_file(), capture_epoch_ms="yesterday"), "capture_epoch_ms is a string"),
+            (dict(capture_file(), capture_epoch_ms=None), "capture_epoch_ms is null"),
+            (dict(capture_file(), messages="spBv1.0/Aber/NBIRTH/x"), "messages are a string"),
+            (dict(capture_file(), messages={"0": {}}), "messages are an object"),
+            (dict(capture_file(), messages=[]), "no messages"),
+        ):
+            self.assertIn(expected, self.refusal(document))
+
+    def test_a_message_without_a_topic_is_named_by_its_index(self):
+        self.assertIn("message 3: it has no topic", self.refusal(self.with_message(3, topic=None)))
+
+    def test_a_message_must_be_an_object_with_a_payload_object(self):
+        document = capture_file()
+        document["messages"][2] = "DDATA"
+        self.assertIn("message 2: it is a string", self.refusal(document))
+        self.assertIn("message 2: its payload is null",
+                      self.refusal(self.with_message(2, payload=None)))
+        self.assertIn("its payload is an array", self.refusal(self.with_message(2, payload=[])))
+
+    def test_metrics_must_be_an_array_of_objects(self):
+        self.assertIn("message 2: its metrics are an object", self.refusal(
+            self.with_message(2, payload={"timestamp": EPOCH, "metrics": {"name": "a"}})))
+        self.assertIn("its metric 1 is a number", self.refusal(
+            self.with_message(2, payload={"timestamp": EPOCH, "metrics": [{"name": "a"}, 5]})))
+        self.assertIn("its metrics are null", self.refusal(
+            self.with_message(2, payload={"timestamp": EPOCH, "metrics": None})))
+
+    def test_only_the_six_edge_node_message_types_are_accepted(self):
+        """tck-id-topic-structure-namespace-device-id-associated-message-types, -non-associated-."""
+        for topic in ("spBv1.0/Aber/NCMD/%s" % CAPTURED_GW,
+                      "spBv1.0/Aber/DCMD/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
+                      "spBv1.0/STATE/aber-ingestion",
+                      "spBv1.0/Aber/BOGUS/%s" % CAPTURED_GW,
+                      "spBv1.0/Aber/NDATA/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
+                      "spBv1.0/Aber/DDATA/%s" % CAPTURED_GW,
+                      "spBv1.0/Aber/DDATA/%s/%s/extra" % (CAPTURED_GW, CAPTURED_DEV),
+                      "spBv2.0/Aber/DDATA/%s/%s" % (CAPTURED_GW, CAPTURED_DEV),
+                      "factory/line1/temp", ""):
+            text = self.refusal(self.with_message(3, topic=topic))
+            self.assertIn("message 3: topic", text, topic)
+
+    def test_a_segment_may_hold_no_wildcard_no_nul_and_nothing_but_utf8(self):
+        """tck-id-topic-structure-namespace-valid-group-id, -valid-edge-node-id, -valid-device-id"""
+        for group, problem in (("Ab+", "contains '+'"), ("A#", "contains '#'"),
+                               ("A\x00b", "contains a NUL character"), ("", "is empty"),
+                               ("A\ud800", "is not valid UTF-8")):
+            text = self.refusal(self.with_message(
+                3, topic="spBv1.0/%s/DDATA/%s/%s" % (group, CAPTURED_GW, CAPTURED_DEV)))
+            self.assertIn("the group segment %s" % problem, text)
+        self.assertIn("the device segment contains '+'", self.refusal(self.with_message(
+            3, topic="spBv1.0/Aber/DDATA/%s/+" % CAPTURED_GW)))
+        self.assertIn("the edge node segment contains a NUL", self.refusal(self.with_message(
+            3, topic="spBv1.0/Aber/DDATA/gwy\x00/%s" % CAPTURED_DEV)))
+
+    def test_offsets_are_whole_ordered_and_within_a_day(self):
+        for offset, expected in ((None, "has no offset_ms"), ("10", "not a whole number"),
+                                 (1.5, "not a whole number"), (True, "not a whole number"),
+                                 (-1, "is negative"), (86_400_001, "more than 24 hours")):
+            text = self.refusal(self.with_message(3, offset_ms=offset))
+            self.assertIn("message 3:", text, offset)
+            self.assertIn(expected, text, offset)
+
+    def test_an_offset_earlier_than_the_one_before_is_refused(self):
+        self.assertIn("message 3: its offset_ms 10 is earlier than the message before it (20)",
+                      self.refusal(self.with_message(2, offset_ms=20)))
+
+    def test_thirty_years_after_the_first_message_is_refused(self):
+        """An upload whose second message would have planned a 946,728,000-second sleep."""
+        self.assertIn("more than 24 hours",
+                      self.refusal(self.with_message(3, offset_ms=946_728_000_000)))
+
+    def test_a_whole_float_offset_and_exactly_a_day_are_accepted(self):
+        plan = capture.plan_playback(self.with_message(3, offset_ms=86_400_000.0), GW,
+                                     DEFAULT_MAP, NOW)
+        self.assertEqual(plan[-1][0], 86_400_000)
+
+    def test_an_encoding_must_be_one_this_tool_knows(self):
+        self.assertIn("message 3: its encoding 'xml'",
+                      self.refusal(self.with_message(3, encoding="xml")))
+
+    def test_a_timestamp_that_is_not_a_number_is_refused_by_message(self):
+        self.assertIn("message 3: its payload timestamp 'noon' is not a number", self.refusal(
+            self.with_message(3, payload={"timestamp": "noon", "metrics": []})))
+        self.assertIn("message 3: its metric 0's timestamp", self.refusal(self.with_message(
+            3, payload={"timestamp": EPOCH, "metrics": [{"name": "t", "timestamp": "noon"}]})))
+
+    def test_a_group_override_is_held_to_the_segment_rule(self):
+        self.assertIn("the group 'Replay/Lab' contains '/'",
+                      self.refusal(capture_file(), group="Replay/Lab"))
+
+
 class SanityWindowTests(unittest.TestCase):
     """
     The check that catches a playback which would report success and write nothing.

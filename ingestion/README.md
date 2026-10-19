@@ -481,6 +481,27 @@ before 1.5 has none of these and still reads.
   (1.000×): a data message rarely carries any of these fields. The indent=2 file grows by the same
   ratios. Births are a few messages in a capture, so the caps are unaffected in practice.
 
+**A file is checked before anything is planned**, by `check_capture()`, and a fault is refused
+naming the message by its 0-based index (`message 17: …`) rather than escaping as a `KeyError` or
+`TypeError`. The page's upload check (`frontend/src/api.js`) states the same rules, because a file
+can reach the bucket by other routes:
+
+1. The document is an object; `aber_capture_version` is the version this code reads;
+   `capture_epoch_ms` is a number; `messages` is a non-empty array.
+2. Each message is an object with a string `topic`, an object `payload` and an `offset_ms` that
+   is a whole number (a JSON number with no fraction, so `1000.0` counts), at least 0, no earlier
+   than the message before it, and at most 86,400,000 (a capture runs at most 24 hours from its
+   first message, so an upload cannot plan a sleep of years). `payload.metrics`, when present, is
+   an array of objects; `encoding`, when present, is `protobuf` or `json`.
+3. The topic is `spBv1.0/<group>/<type>/<edge node>`, or `…/<device>` for the three device types,
+   and the type is one an edge node publishes: NBIRTH, NDATA, NDEATH, DBIRTH, DDATA, DDEATH. The
+   device segment is present on the D types and absent on the N types
+   (`tck-id-topic-structure-namespace-device-id-associated-message-types`,
+   `-non-associated-message-types`), so NCMD, DCMD and STATE are refused. Every segment is
+   non-empty valid UTF-8 without `+`, `/` or `#` (`tck-id-topic-structure-namespace-valid-group-id`,
+   `-valid-edge-node-id`, `-valid-device-id`) and without NUL, which MQTT forbids in a topic and
+   a broker answers by closing the connection. A `--group` override is held to the same rule.
+
 **Playback re-encodes into the encoding each message arrived in.** Both reach the daemon: a standard
 Sparkplug B edge node, the gateway appliance included, publishes protobuf, and a Node-RED flow or
 another publisher may send the JSON shape `parse_sparkplug_payload()` accepts. They enter the
