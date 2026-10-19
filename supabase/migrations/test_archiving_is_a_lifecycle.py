@@ -303,6 +303,68 @@ class AShadowFollowsItsOriginal(LifecycleBase):
         self.assertFalse(self.row("devices", other_lane)["is_archived"])
 
 
+class ACaptureGoesWithItsSubject(LifecycleBase):
+    """
+    The user's decision (#932): a capture is deleted with its subject. Archiving keeps it; the purge
+    (or a Permanent Delete) takes the row by cascade, and the file is then claimed by nothing, which
+    is what lets the ingestion daemon delete it through the Storage API (0190).
+    """
+
+    INGESTION = "b0000000-0000-4000-8000-000000000002"
+
+    def setUp(self):
+        super().setUp()
+        self.gw = self.gateway()
+        self.dev = self.device(gateway_id=self.gw)
+        self.paths = {}
+        for kind, subject in (("gateway", self.gw), ("device", self.dev)):
+            wire = self.row(f"{kind}s", subject)["sparkplug_id"]
+            self.paths[kind] = f"{wire}/capture.json"
+            self.cur.execute(
+                "INSERT INTO public.captures (subject_kind, gateway_id, device_id, "
+                "subject_sparkplug_id, storage_path, size_bytes, message_count) "
+                "VALUES (%s, %s, %s, %s, %s, 1, 1);",
+                (kind, self.gw, subject if kind == "device" else None, wire, self.paths[kind]),
+            )
+
+    def unclaimed(self, path):
+        """Asked as the daemon, which deletes what this answers true for."""
+        self.cur.execute("SAVEPOINT ask;")
+        self.cur.execute("SET LOCAL ROLE authenticated;")
+        self.cur.execute("SELECT set_config('request.jwt.claims', %s, true);",
+                         ('{"sub": "%s", "role": "authenticated"}' % self.INGESTION,))
+        self.cur.execute("SELECT public.is_unclaimed_capture_object(%s) AS free;", (path,))
+        free = self.cur.fetchone()["free"]
+        self.cur.execute("ROLLBACK TO SAVEPOINT ask;")
+        return free
+
+    def captures(self):
+        self.cur.execute("SELECT subject_kind FROM public.captures WHERE gateway_id = %s "
+                         "ORDER BY subject_kind;", (self.gw,))
+        return [r["subject_kind"] for r in self.cur.fetchall()]
+
+    def test_an_archived_subject_keeps_its_capture(self):
+        self.archive("devices", self.dev)
+        self.archive("gateways", self.gw)
+        self.assertEqual(self.captures(), ["device", "gateway"])
+        for path in self.paths.values():
+            self.assertFalse(self.unclaimed(path), "an archived subject's capture would be swept")
+
+    def test_purging_a_subject_releases_its_capture_file_for_deletion(self):
+        self.archive("devices", self.dev, days=0)
+        self.archive("gateways", self.gw, days=0)
+        # The purge job's two statements, narrowed to this suite's rows.
+        self.cur.execute("DELETE FROM public.devices WHERE is_archived AND auto_delete_at <= NOW() "
+                         "AND id = %s;", (self.dev,))
+        self.assertEqual(self.captures(), ["gateway"])
+        self.assertTrue(self.unclaimed(self.paths["device"]), "a purged device's file is still claimed")
+        self.assertFalse(self.unclaimed(self.paths["gateway"]))
+        self.cur.execute("DELETE FROM public.gateways WHERE is_archived AND auto_delete_at <= NOW() "
+                         "AND id = %s;", (self.gw,))
+        self.assertEqual(self.captures(), [])
+        self.assertTrue(self.unclaimed(self.paths["gateway"]), "a purged gateway's file is still claimed")
+
+
 class ADeletedAssetLeavesATombstone(LifecycleBase):
     def test_an_archived_device_is_tombstoned_with_its_row_and_its_audit_id(self):
         gateway = self.gateway()

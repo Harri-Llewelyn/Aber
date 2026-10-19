@@ -379,7 +379,6 @@ class RecordedCaptureReplays(unittest.TestCase):
         if cls.device["conformance_policy"] != "audit":
             raise AssertionError(
                 f"the fixture device is {cls.device['conformance_policy']}, not audit")
-        cls.storage_path = f"{cls.device['sparkplug_id']}/capture.json"
         cls.edge = cls._connect_edge_node(cls._issue_gateway_credential())
         cls.edge.start()
         cls._await_live_birth()
@@ -506,6 +505,8 @@ class RecordedCaptureReplays(unittest.TestCase):
             raise AssertionError(f"the job names capture {cls.capture_id}, which cannot be read: "
                                  f"{status} {rows}")
         cls.capture_row = rows[0]
+        # The job's own path, deleted at clean-up once the row is.
+        cls.storage_path = cls.capture_row["storage_path"]
         status, raw = download(cls.session, cls.capture_row["storage_path"])
         if status != 200:
             raise AssertionError(f"the row names {cls.capture_row['storage_path']}, and {BUCKET} "
@@ -721,8 +722,8 @@ class RecordedCaptureReplays(unittest.TestCase):
         self.assertEqual(row["subject_kind"], "device")
         self.assertEqual(row["device_id"], SOURCE_DEVICE_ID)
         self.assertEqual(row["subject_sparkplug_id"], dev)
-        self.assertEqual(row["storage_path"], f"{dev}/capture.json",
-                         "a capture is filed under the subject recorded")
+        self.assertEqual(row["storage_path"], f"{dev}/{job['id']}.json",
+                         "a capture is filed under the subject recorded, at its job's own path")
         self.assertEqual(row["note"], self.note)
         self.assertEqual(row["created_by"], self.user_id,
                          "the capture does not name who recorded it")
