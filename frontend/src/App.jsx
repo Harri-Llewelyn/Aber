@@ -65,6 +65,7 @@ import { api } from './api'
 import { ToastStack } from './components/common/Toast'
 import { AlertPill } from './components/common/AlertPill'
 import { NotificationHistory } from './components/common/NotificationHistory'
+import { SegmentedControl } from './components/common/SegmentedControl'
 import { HelpPanel } from './components/common/HelpPanel'
 import { HelpDrawerContext } from './components/common/ContextPanel'
 import { usePlatformAlerts } from './hooks/usePlatformAlerts'
@@ -274,18 +275,22 @@ function AuthScreen({ onLoginSuccess, notice }) {
   )
 }
 
+/** The account menu's theme switch, one segment per theme useTheme offers. */
+const THEME_SEGMENTS = [
+  { id: 'light', label: 'Light', icon: <IconSun size={14} /> },
+  { id: 'dark', label: 'Dark', icon: <IconMoon size={14} /> }
+]
+
 /**
  * The account control at the foot of the rail: the avatar, with the address beside it whenever the
  * rail shows labels. Its menu's head states the address, role and version; its rows are Profile, the
- * quick theme toggle, Report Bug and Sign Out. Click, not hover: a hover menu holding Sign Out puts
- * an irreversible action one stray movement away. The menu opens beside the rail (App.css).
+ * Light/Dark theme switch, Report Bug and Sign Out. Click, not hover: a hover menu holding Sign Out
+ * puts an irreversible action one stray movement away. The menu opens beside the rail (App.css).
  */
-function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReportBug, onOpenProfile, profileOpen = false }) {
+function UserMenu({ persona, userRole, onSignOut, theme, onChangeTheme, onReportBug, onOpenProfile, profileOpen = false }) {
   const [open, setOpen] = useState(false)
   const wrapRef = useClickOutside(() => setOpen(false), open)
   useEscapeKey(() => setOpen(false), open)
-
-  const nextTheme = theme === 'dark' ? 'Light' : 'Dark'
 
   /* Read from the injected global, which `config.js` set at page load. Comparing it with the baked
      bundle version is how a page cached from before an upgrade, or a pinned frontend.image.tag,
@@ -375,20 +380,15 @@ function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReport
             <IconUser size={14} /> <span>Profile</span>
           </button>
 
-          {/* The label states the current theme; the icon shows the destination. The same setting
-              as Profile > Appearance. */}
-          <button
-            className="user-popover-action"
-            role="menuitem"
-            onClick={onToggleTheme}
-            title={`Switch to the ${nextTheme.toLowerCase()} theme`}
-          >
-            {theme === 'dark' ? <IconSun size={14} /> : <IconMoon size={14} />}
-            <span>Theme: <strong>{theme === 'dark' ? 'Dark' : 'Light'}</strong></span>
-            <span className="user-popover-hint">{nextTheme}</span>
-          </button>
+          {/* The themes as a switch, the current one checked: the same setting as Profile >
+              Appearance. The group carries the name "Theme", so the visible label is not read
+              twice. */}
+          <div className="user-popover-theme">
+            <span aria-hidden="true">Theme</span>
+            <SegmentedControl menu label="Theme" value={theme} onChange={onChangeTheme} options={THEME_SEGMENTS} />
+          </div>
 
-          {/* The menu stays open on the theme toggle, whose result is visible behind it, and closes
+          {/* The menu stays open on the theme switch, whose result is visible behind it, and closes
               on the others. */}
           <button
             className="user-popover-action"
@@ -464,8 +464,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
    */
   const openProposalSubject = (proposal) => navigate(proposalSubjectUrl(proposal))
   // One source for both: the person's user_settings row, cached in this browser. The account menu's
-  // toggle, the rail's foot control and the Profile page all write through it.
-  const { theme, setTheme, toggleTheme, sidebarMode, setSidebarMode, source: settingsSource } = useUserSettings(session?.user?.id)
+  // theme switch, the rail's foot control and the Profile page all write through it.
+  const { theme, setTheme, sidebarMode, setSidebarMode, source: settingsSource } = useUserSettings(session?.user?.id)
   const { toasts, showToast, expireToast, dismissToast, history, markRead, clearHistory } = useToast()
 
   const { userRole, hasPermission, loadingPerms } = usePermissions(session)
@@ -545,7 +545,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
       userRole={userRole}
       onSignOut={onSignOut}
       theme={theme}
-      onToggleTheme={toggleTheme}
+      onChangeTheme={setTheme}
       onReportBug={() => setShowBugReport(true)}
       onOpenProfile={() => handleNavClick('profile')}
       profileOpen={tab === 'profile'}
@@ -712,7 +712,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
             {tab === 'backups' && userRole === 'Administrator' && <BackupsTab showToast={showToast} />}
             {tab === 'settings' && !loadingPerms && <SettingsTab showToast={showToast} readOnly={userRole !== 'Administrator'} />}
             {/* Every person's own page. Appearance writes through useUserSettings, as the account
-                menu's toggle and the rail's foot control do. */}
+                menu's theme switch and the rail's foot control do. */}
             {tab === 'profile' && (
               <ProfileTab
                 email={session?.user?.email}

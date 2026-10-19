@@ -279,7 +279,11 @@ row and all, so the two read alike.
 - **Profile is not in the page list.** Its `TABS` entry has no group, so `groupedNav()` leaves it
   out of the rail; the router, the help drawer, the tab title and the search still know it. The way
   in is the account menu, App.jsx's `UserMenu`, which `Sidebar` draws at the rail's pinned foot
-  above the behaviour control: Profile first, then the quick Theme toggle, Report Bug and Sign Out.
+  above the behaviour control: Profile first, then the Theme switch, Report Bug and Sign Out. The
+  switch is a `SegmentedControl` with `menu`: a `role="group"` named Theme holding a Light (sun)
+  and a Dark (moon) `menuitemradio`, the current theme checked, so the row names the theme that is
+  on and offers the other beside it. Choosing applies at once and the menu stays open, since the
+  result shows behind it. A third theme would be a third segment.
 - **Settings is every role's.** Every signed-in account may read a setting, so the page is in every
   rail and the search offers its rows to everyone. `SettingsTab`'s `readOnly`, which `App.jsx`
   passes for anyone but an Administrator, disables each field and puts "Only an Administrator can
@@ -290,8 +294,8 @@ row and all, so the two read alike.
   browser's copy in localStorage (`aber_theme`, `aber_sidebar_mode`), so the page paints at once and
   the sign-in screen shows the theme last used here; once the row loads it wins. A person with no
   row is seeded from that copy (`utils/userSettings.js`, ON CONFLICT DO NOTHING, then a second
-  read). Each change goes to the copy at once and to the row behind it, and the menu's toggle, the
-  rail's control and Appearance all write through the one hook. A choice made before the row
+  read). Each change goes to the copy at once and to the row behind it, and the menu's theme switch,
+  the rail's control and Appearance all write through the one hook's setters. A choice made before the row
   arrives is not undone by it.
 - **Without the row the page works as it did before.** A failed read or write leaves `source` at
   `browser`: Appearance says the choices are this browser's, and a change holds here only.

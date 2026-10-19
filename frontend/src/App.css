@@ -599,17 +599,20 @@ html, body, #root {
   transition: var(--transition);
 }
 
-/* The item's own label grows to fill, so the hint below is pushed to the right edge of the menu
-   rather than sitting against the label it belongs to. */
-.user-popover-action > span:not(.user-popover-hint) { flex: 1; min-width: 0; }
+/* The item's own label grows to fill the row. */
+.user-popover-action > span { flex: 1; min-width: 0; }
 
-/* The theme item's destination -- "Dark" / "Light" as a quiet right-aligned tail, so the row's
-   left-hand half stays a statement of the CURRENT value. */
-.user-popover-hint {
-  font-size: 11px;
-  color: var(--text-muted);
-  letter-spacing: 0.3px;
-  flex-shrink: 0;
+/* The Theme row: its label where the other rows' labels start (after their 14px icon and 8px gap),
+   and the Light/Dark switch, a SegmentedControl, at the right edge. */
+.user-popover-theme {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 12px 5px 34px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
 }
 
 .user-popover-action:hover { background: var(--bg-glass); }
