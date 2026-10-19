@@ -690,13 +690,18 @@ class TheRefusalsNoLongerPointAtAnotherGateway(Base):
                 self.assertIn("No other gateway can be made a playback target", message)
                 self.assertNotIn("Mark another", message)
 
-    def test_a_stack_with_no_playback_gateway_is_told_to_restore_it(self):
+    def test_a_stack_with_no_playback_gateway_is_told_the_upgrade_creates_it(self):
+        """
+        Not to restore it from Archived Entities: since 0193 the last one can be neither archived
+        nor deleted, so a stack without it lost it earlier, and the seed creates it again.
+        """
         self.cur.execute("UPDATE public.gateways SET is_shadow = false WHERE is_shadow;")
         capture = self._capture(self._gateway()[0], [])
         with self.assertRaises(psycopg2.Error) as ctx:
             self._call("Shopfloor_Manager", "SELECT public.ensure_shadow_devices(%s);", (capture,))
         message = str(ctx.exception)
-        self.assertIn("restore it from Archived Entities", message)
+        self.assertIn("the upgrade creates it again", message)
+        self.assertNotIn("Archived Entities", message)
         self.assertNotIn("another gateway", message)
 
 

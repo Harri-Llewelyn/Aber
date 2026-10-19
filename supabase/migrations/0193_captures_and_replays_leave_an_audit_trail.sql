@@ -19,7 +19,8 @@
 --   * playback_finish() sets the target OFFLINE, with its replay lanes, when it ends a RUNNING
 --     job. The broker sends no Will when it cuts a session, and the worker cannot send the NDEATH.
 --   * start_playback_job() no longer says a credential is issued to obtain the worker's password:
---     the platform delivers it (0078).
+--     the platform delivers it (0078). ensure_shadow_devices() no longer says to restore the
+--     Playback gateway from Archived Entities: it can be neither archived nor deleted.
 --
 -- Reasoning: supabase/README.md, "Captures and replays leave an audit trail (0193)". Idempotent.
 
@@ -926,8 +927,9 @@ ALTER FUNCTION public.start_playback_job(p_capture_id uuid, p_target_gateway_id 
 
 COMMENT ON FUNCTION public.start_playback_job(p_capture_id uuid, p_target_gateway_id uuid, p_device_map jsonb, p_speed numeric) IS
   'Queue a capture for publication onto the Playback gateway. The only way a playback_jobs row is '
-  'created. Refuses a target that is not is_simulated (the trigger playback_target_must_be_shadow() '
-  'admits the Playback gateway alone), one holding no broker credential or whose credential the '
+  'created. Refuses a target that is not is_simulated, and the BEFORE INSERT trigger '
+  'playback_target_must_be_shadow() refuses one that is not is_shadow, which only the seeded Playback '
+  'gateway is. Refuses too a target holding no broker credential or whose credential the '
   'worker has not picked up since its re-issue, a device map naming a device that is not an active '
   'replay lane of the gateway and of the device its key names, and a second concurrent playback onto '
   'the same edge node. Writes a PLAYBACK_STARTED audit row naming the capture, its subject and the '
@@ -1160,6 +1162,116 @@ SELECT public.ensure_cron_job(
 );
 
 -- -------------------------------------------------------------------------------------------------
+-- 13. ensure_shadow_devices() no longer sends an operator to restore the Playback gateway
+-- -------------------------------------------------------------------------------------------------
+-- It cannot be archived or deleted, so a stack without it lost it before 0193; the seed creates it
+-- again on the next boot. Otherwise unchanged from 0190.
+CREATE OR REPLACE FUNCTION public.ensure_shadow_devices(p_capture_id uuid) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_capture   public.captures;
+    v_gateway   public.gateways;
+    v_wire_id   text;
+    v_origin    public.devices;
+    v_shadow_id uuid;
+    v_map       jsonb := '{}'::jsonb;
+BEGIN
+    IF NOT public.may_manage_captures() THEN
+        RAISE EXCEPTION
+          'ensure_shadow_devices: creating playback lanes requires Administrator or '
+          'Shopfloor_Manager'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    SELECT * INTO v_capture FROM public.captures WHERE id = p_capture_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'ensure_shadow_devices: no capture %', p_capture_id
+            USING ERRCODE = 'foreign_key_violation';
+    END IF;
+
+    -- The Playback gateway: the seed alone sets is_shadow, and an older second one loses to it.
+    SELECT * INTO v_gateway FROM public.gateways
+     WHERE is_shadow AND NOT is_archived
+     ORDER BY created_at
+     LIMIT 1;
+    IF NOT FOUND THEN
+        PERFORM public.raise_not_found(
+          'ensure_shadow_devices: this stack has no Playback gateway, and a capture can be played '
+          'back only there. If it is still missing, upgrade the release: the upgrade creates it '
+          'again. No other gateway can be made one.');
+    END IF;
+
+    FOR v_wire_id IN
+        SELECT jsonb_array_elements_text(coalesce(v_capture.manifest -> 'device_ids', '[]'::jsonb))
+    LOOP
+        SELECT * INTO v_origin FROM public.devices WHERE sparkplug_id = v_wire_id;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION
+              'ensure_shadow_devices: the capture records device %, which this stack does not '
+              'know. A replay lane stands in for a device that exists here, so a capture from '
+              'another site, or of a device since deleted, cannot be played back.', v_wire_id
+                USING ERRCODE = 'foreign_key_violation';
+        END IF;
+
+        -- A capture of a playback: replay onto the lane itself rather than shadow a shadow.
+        IF v_origin.shadow_of IS NOT NULL THEN
+            RAISE EXCEPTION
+              'ensure_shadow_devices: % is itself a playback lane. Replay onto it directly rather '
+              'than shadowing it.', v_origin.name
+                USING ERRCODE = 'check_violation';
+        END IF;
+
+        SELECT id INTO v_shadow_id FROM public.devices
+         WHERE gateway_id = v_gateway.id AND shadow_of = v_origin.id;
+
+        IF NOT FOUND THEN
+            INSERT INTO public.devices (
+                name, gateway_id, shadow_of, status, conformance_policy, description
+            ) VALUES (
+                left(v_origin.name, 96) || ' (replay)',
+                v_gateway.id,
+                v_origin.id,
+                'OFFLINE',
+                v_origin.conformance_policy,
+                'Replays recordings of ' || v_origin.name || '. Not a machine: its readings are '
+                'genuine but were observed elsewhere, at another time.'
+            )
+            RETURNING id INTO v_shadow_id;
+
+            -- The original's schemas, so a replay is judged as the original is.
+            INSERT INTO public.device_submodels (device_id, schema_id, submodel_key)
+            SELECT v_shadow_id, ds.schema_id, ds.submodel_key
+              FROM public.device_submodels ds
+             WHERE ds.device_id = v_origin.id;
+        END IF;
+
+        v_map := v_map || jsonb_build_object(
+            v_wire_id,
+            (SELECT sparkplug_id FROM public.devices WHERE id = v_shadow_id)
+        );
+    END LOOP;
+
+    IF v_map = '{}'::jsonb THEN
+        IF v_capture.subject_kind = 'device' THEN
+            PERFORM public.raise_not_found(format(
+              'ensure_shadow_devices: capture %s of device %s holds none of that device''s messages, '
+              'only its edge node''s, so there is nothing to replay. Record it again while the device '
+              'is publishing.', p_capture_id, v_capture.subject_sparkplug_id));
+        END IF;
+        PERFORM public.raise_not_found(format(
+          'ensure_shadow_devices: capture %s names no devices, so there is nothing to replay as. It '
+          'holds only the gateway''s own node-level messages.', p_capture_id));
+    END IF;
+
+    RETURN v_map;
+END;
+$$;
+
+ALTER FUNCTION public.ensure_shadow_devices(p_capture_id uuid) OWNER TO postgres;
+
+-- -------------------------------------------------------------------------------------------------
 -- Self-check: this file's own declarations
 -- -------------------------------------------------------------------------------------------------
 DO $check$
@@ -1190,6 +1302,10 @@ BEGIN
   IF position('how you obtain' IN (SELECT prosrc FROM pg_proc
                                      WHERE oid = 'public.start_playback_job(uuid, uuid, jsonb, numeric)'::regprocedure)) > 0 THEN
     RAISE EXCEPTION '0193: start_playback_job() still says a credential is issued to obtain the worker''s password';
+  END IF;
+  IF position('Archived Entities' IN (SELECT prosrc FROM pg_proc
+                                        WHERE oid = 'public.ensure_shadow_devices(uuid)'::regprocedure)) > 0 THEN
+    RAISE EXCEPTION '0193: ensure_shadow_devices() still sends an operator to restore the Playback gateway';
   END IF;
   IF position('''OFFLINE''' IN (SELECT prosrc FROM pg_proc
                                   WHERE oid = 'public.playback_finish(uuid, integer, text, integer)'::regprocedure)) = 0 THEN

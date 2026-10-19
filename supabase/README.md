@@ -1200,7 +1200,10 @@ Each carries the subject's `name` and `sparkplug_id`, which the Audit Trail name
   until this transaction commits, and a finish for a job that already ended (a stalled job Stop
   ended) changes nothing.
 - **`start_playback_job()`'s credential refusal** no longer says a credential is issued to obtain
-  the worker's password: the platform delivers it (`0078`).
+  the worker's password: the platform delivers it (`0078`). Its comment names the gate that decides
+  the target, `playback_target_must_be_shadow()` on `is_shadow`. **`ensure_shadow_devices()`** no
+  longer says to restore a missing Playback gateway from Archived Entities, since it can be neither
+  archived nor deleted: the upgrade creates it again.
 
 `test_capture_audit.py` holds every act, the deletion guard, the purge and the session's end.
 
