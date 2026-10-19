@@ -885,8 +885,9 @@ def rewrite_identity(topic, payload_dict, gateway_id, device_map):
         if new_device is None:
             raise CaptureError(
                 "device %r appears in the capture but has no mapping. Every captured device needs "
-                "one: publishing it unmapped would address an asset this gateway does not own, "
-                "which the broker drops silently." % (device,)
+                "one, onto a replay lane: published unmapped, its readings would reach the "
+                "ingestion daemon as a device the Playback gateway has no lane for, and be "
+                "quarantined." % (device,)
             )
         new_topic = "%s/%s" % (new_topic, new_device)
 
