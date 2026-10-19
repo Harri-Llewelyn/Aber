@@ -664,10 +664,10 @@ def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, gro
 
     A session opens with an NBIRTH, so a capture without one is refused. Left out: what comes
     before the first NBIRTH, after a recorded NDEATH until the next NBIRTH, and a device's messages
-    outside its DBIRTH..DDEATH. `bdseq` is the bdSeq of the MQTT session the plan starts in,
-    carried by every NBIRTH and NDEATH; a recorded NDEATH ends it and the next is one more,
-    wrapping 255 to 0. None keeps the recorded numbers. README.md -> "A replay is its own Sparkplug
-    session".
+    outside its DBIRTH..DDEATH. `seq` is numbered per session, 0 on each NBIRTH and none on an
+    NDEATH. `bdseq` is the bdSeq of the MQTT session the plan starts in, carried by every NBIRTH and
+    NDEATH; a recorded NDEATH ends it and the next is one more, wrapping 255 to 0. None keeps the
+    recorded numbers. README.md -> "A replay is its own Sparkplug session".
     """
     version = capture.get("aber_capture_version")
     if version != CAPTURE_VERSION:
@@ -699,6 +699,7 @@ def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, gro
 
     plan = []
     session = bdseq
+    seq = 0
     born = False        # an NBIRTH has opened the session and no NDEATH has ended it
     devices = set()     # devices whose DBIRTH this session has published
     births = data = left_out = 0
@@ -706,7 +707,7 @@ def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, gro
         topic, payload = rewrite_identity(msg["topic"], msg["payload"], gateway_id, device_map)
         _, msg_type, _, device = split_topic(topic)
         if msg_type == "NBIRTH":
-            born, devices = True, set()
+            born, devices, seq = True, set(), 0
             births += 1
         elif not born or (msg_type in ("DDATA", "DDEATH") and device not in devices):
             left_out += 1
@@ -721,7 +722,12 @@ def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, gro
                 topic = "%s/%s" % (topic, device)
         payload = rebase_payload(payload, capture_epoch_ms, play_epoch_ms, speed)
         if msg_type == "NDEATH":
+            # tck-id-payloads-ndeath-seq: an NDEATH carries no seq.
+            payload.pop("seq", None)
             born, devices = False, set()
+        else:
+            payload["seq"] = seq
+            seq = (seq + 1) % 256
         if msg_type in ("NDATA", "DDATA"):
             data += 1
         if session is not None and msg_type in ("NBIRTH", "NDEATH"):

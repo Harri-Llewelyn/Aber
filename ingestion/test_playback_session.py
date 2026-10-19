@@ -7,8 +7,9 @@ A replay is one or more MQTT sessions as the Playback gateway. Each registers it
 Will and ends by publishing it before DISCONNECT, so the gateway reads OFFLINE between replays
 instead of going stale. What this suite holds:
 
-  * THE PLAN NUMBERS ITS SESSIONS. Every replayed NBIRTH and NDEATH carries the bdSeq of the session
-    the worker publishes it in, not the recorded one, and a recorded NDEATH ends a session.
+  * THE PLAN IS A SESSION. It opens at an NBIRTH and leaves out what no session carries; every
+    replayed NBIRTH and NDEATH carries the bdSeq of the session the worker publishes it in, not the
+    recorded one; seq is numbered per session; and a recorded NDEATH ends a session.
   * THE WORKER ENDS EVERY JOB WITH THE DEATH: finished, stopped by the operator, or failed while
     publishing. The death is QoS 1 and acknowledged before DISCONNECT; one the broker never
     acknowledged is left to the Will.
@@ -251,6 +252,66 @@ class SessionPlanTests(unittest.TestCase):
                        recorded(10, "DDATA", device=CAPTURED_DEV, value=1.0)])
         self.assertIn("1 message(s) recorded outside a Sparkplug session", str(caught.exception))
 
+    # ---------------------------------------------------------------------------------------------
+    # seq is one counter per session, whatever was recorded
+    # ---------------------------------------------------------------------------------------------
+    def seqs(self, messages, encoding="protobuf"):
+        out = []
+        for _, body in self.plan([dict(m, encoding=encoding) for m in messages]):
+            payload = ingestion.parse_sparkplug_payload(SimpleNamespace(topic="t", payload=body))
+            out.append(payload.seq if payload.HasField("seq") else None)
+        return out
+
+    def test_a_device_scoped_plan_numbers_seq_contiguously(self):
+        """
+        A device capture of a node with two devices keeps the node's messages and one device's, so
+        the recorded seq skips every sibling's message (tck-id-payloads-sequence-num-incrementing).
+        """
+        messages = [recorded(0, "NBIRTH", bdseq=7, seq=0),
+                    recorded(10, "DBIRTH", device=CAPTURED_DEV, value=1.0, seq=1)] + [
+            recorded(20 + i, "DDATA", device=CAPTURED_DEV, value=float(i), seq=3 + 2 * i)
+            for i in range(6)]
+        for encoding in ("protobuf", "json"):
+            self.assertEqual(self.seqs(messages, encoding), list(range(8)), encoding)
+
+    def test_the_daemon_sees_no_gap_in_a_device_scoped_replay(self):
+        messages = [recorded(0, "NBIRTH", bdseq=7, seq=0),
+                    recorded(10, "DBIRTH", device=CAPTURED_DEV, value=1.0, seq=1)] + [
+            recorded(20 + i, "DDATA", device=CAPTURED_DEV, value=float(i), seq=3 + 2 * i)
+            for i in range(6)]
+        ingestion._last_seq.clear()
+        try:
+            verdicts = [
+                ingestion.check_message_sequence(GROUP, GW, kind, decode(body))
+                for kind, body in self.plan(messages)]
+        finally:
+            ingestion._last_seq.clear()
+        self.assertEqual(verdicts, [True] * len(messages))
+
+    def test_seq_restarts_at_each_nbirth_and_an_ndeath_carries_none(self):
+        """tck-id-topics-nbirth-seq-num, tck-id-payloads-ndeath-seq."""
+        messages = [recorded(0, "NBIRTH", bdseq=7, seq=40),
+                    recorded(10, "NDATA", value=1.0, seq=41), recorded(20, "NDEATH", bdseq=7),
+                    recorded(30, "NBIRTH", bdseq=8, seq=9),
+                    recorded(40, "NDATA", value=2.0, seq=10)]
+        self.assertEqual(self.seqs(messages), [0, 1, None, 0, 1])
+
+    def test_a_recorded_seq_on_an_ndeath_is_dropped(self):
+        death = dict(recorded(20, "NDEATH", bdseq=7))
+        death["payload"] = dict(death["payload"], seq=12)
+        messages = [recorded(0, "NBIRTH", bdseq=7), recorded(10, "NDATA", value=1.0), death]
+        self.assertEqual(self.seqs(messages)[2], None)
+
+    def test_seq_wraps_from_255_to_0(self):
+        messages = [recorded(0, "NBIRTH", bdseq=7)] + [
+            recorded(1 + i, "NDATA", value=float(i)) for i in range(300)]
+        self.assertEqual(self.seqs(messages), [i % 256 for i in range(301)])
+
+    def test_the_source_capture_keeps_its_recorded_seq(self):
+        messages = [recorded(0, "NBIRTH", bdseq=7, seq=40),
+                    recorded(10, "NDATA", value=1.0, seq=41)]
+        self.plan(messages)
+        self.assertEqual([m["payload"]["seq"] for m in messages], [40, 41])
 
 
 # -------------------------------------------------------------------------------------------------

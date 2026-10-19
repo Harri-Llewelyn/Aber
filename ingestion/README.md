@@ -383,6 +383,13 @@ NDEATH."*
   Each message keeps its recorded delay, so a replay that left out its first seconds waits them.
 - **A plan with no NDATA or DDATA left is refused** as holding only birth certificates: it would
   publish, report COMPLETED, and write nothing.
+- **`seq` is numbered per session**: 0 on each NBIRTH (`tck-id-topics-nbirth-seq-num`), one more
+  on every later message, 255 wrapping to 0 (`tck-id-payloads-sequence-num-incrementing`,
+  `-ddata-seq-inc`, `-dbirth-seq-inc`), and none on an NDEATH (`tck-id-payloads-ndeath-seq`). A
+  device capture keeps one device of a node's several, so the recorded numbers skip every
+  sibling's message; replayed as recorded, the daemon counted a sequence gap and asked the
+  Playback gateway to rebirth on almost every message, and *Sparkplug Message Loss* fired. A gap
+  recorded live in a gateway capture is not replayed either: the replay is its own session.
 - **bdSeq is the session's**, carried by every replayed NBIRTH and NDEATH, so births within one
   session repeat it (`tck-id-operational-behavior-data-commands-rebirth-action-3`) and a recorded
   NDEATH ends it: the worker publishes that death, disconnects, and opens the next session
