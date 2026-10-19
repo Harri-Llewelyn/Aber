@@ -5,8 +5,9 @@
 The MIT licence in [`LICENSE`](LICENSE) covers the work in this repository: the Helm chart, the SQL in [`timescaledb/`](timescaledb/) and
 [`supabase/migrations/`](supabase/migrations/), the frontend, the ingestion, playback and i3X
 services, the Node-RED flows, the Grafana dashboard definitions, the scripts and the documentation.
-The two exceptions are [`sparkplug_b.proto`](#sparkplug_bproto--eclipse-public-license-20) and
-[the dashboard's fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11), which keep their own
+The three exceptions are [`sparkplug_b.proto`](#sparkplug_bproto--eclipse-public-license-20),
+[the dashboard's fonts](#outfit-and-jetbrains-mono--sil-open-font-license-11) and
+[the ASHRAE 223P ontology](#the-ashrae-223p-ontology--apache-license-20), which keep their own
 licences.
 
 It does **not** cover the third-party software this configuration deploys. Those images are pulled
@@ -44,6 +45,19 @@ both the repository and the image redistribute them.
 They are Fontsource's variable-weight builds of the latin and latin-ext subsets, copied byte for
 byte. Each file carries its copyright and the licence's URL in its own metadata. The fonts' folder has a
 README naming where each file came from.
+
+## The ASHRAE 223P ontology — Apache License 2.0
+
+[`scripts/vocabularies/223p-v1.0.0-2026.ttl`](scripts/vocabularies/223p-v1.0.0-2026.ttl) is the
+open223 ontology for ASHRAE Standard 223P, release `v1.0.0-2026`, copyright 2026 ASHRAE. The file
+declares the Apache License 2.0 itself, and its text is beside it in
+[`LICENSE-2.0.txt`](scripts/vocabularies/LICENSE-2.0.txt). It is unmodified. The MIT licence above
+does not cover it.
+
+`scripts/generate-ashrae223-vocabulary.mjs` builds the `ashrae223_vocabulary` seed rows from it.
+Upstream: [`github.com/open223/defs.open223.info`](https://github.com/open223/defs.open223.info),
+`ontologies/223p.ttl`. Upstream no longer serves this release; the folder's
+[README](scripts/vocabularies/README.md) says why it is kept here.
 
 ## TimescaleDB — Timescale License
 
