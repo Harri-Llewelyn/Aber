@@ -317,9 +317,8 @@ def _begin(job_row):
 
     if _rebirth is not None:
         try:
-            # False means REBIRTH_REQUEST_INTERVAL_SECONDS has not elapsed since the last request to
-            # this node. The recording still runs -- it simply may open without a birth, which
-            # `birth_captured` then records honestly rather than the capture pretending otherwise.
+            # The request is forced past the throttle, so False means it could not be published.
+            # The recording still runs, and `birth_captured` says whether a birth arrived anyway.
             state.rebirth_requested = bool(_rebirth(state.group, state.edge_node))
         except Exception as err:
             logger.warning("Capture %s: rebirth request failed: %s", state.id, err)
@@ -328,7 +327,8 @@ def _begin(job_row):
         "Capture %s started: %sedge node %s, caps %ds / %d messages / %d bytes%s",
         state.id, "device %s on " % state.device if state.device else "", state.edge_node,
         state.max_seconds, state.max_messages, state.max_bytes,
-        "" if state.rebirth_requested else " (rebirth rate-limited; may open without a birth)",
+        "" if state.rebirth_requested
+        else " (the rebirth request could not be published; it may record no birth)",
     )
     return state
 

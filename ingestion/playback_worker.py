@@ -1054,7 +1054,7 @@ def main():
         # Not fatal: a stack that has issued no playback credential yet is correctly configured.
         logger.warning(
             "This worker holds no playback credentials yet, so every job will be refused for want "
-            "of an identity to publish as. Issuing a broker credential for a simulated gateway "
+            "of an identity to publish as. Issuing a broker credential for the Playback gateway "
             "(Gateways page, Generate Broker Credential) delivers it here, and the worker picks it "
             "up without a restart."
         )
