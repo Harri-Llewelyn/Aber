@@ -443,6 +443,7 @@ html, body, #root {
 .user-menu { position: relative; }
 
 .user-menu-button {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -486,10 +487,14 @@ html, body, #root {
 }
 
 /* The icon takes the accent on hover rather than the border alone: a 1px ring on a 28px circle is a
-   very small change to notice. Filled while the menu is open, and while Profile is the page. */
+   very small change to notice. Filled while the menu is open. */
 .user-menu-button:hover .user-avatar { border-color: var(--accent); color: var(--accent); }
-.user-menu-button-open .user-avatar,
-.user-menu-button.active .user-avatar { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+.user-menu-button-open .user-avatar { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+
+/* Profile is the current page: marked as a rail page is, the accent and the bar on the rail's left
+   edge (`.sidebar-item.active::before`), with no fill. */
+.user-menu-button.active { color: var(--accent-text); font-weight: 600; }
+.user-menu-button.active .user-avatar { border-color: var(--accent); color: var(--accent); }
 
 /* Opens upward beside the rail, as the behaviour menu does: `fixed`, so the panel's overflow
    never clips it, and readable while the rail is collapsed. */
@@ -675,19 +680,20 @@ html, body, #root {
 .sidebar-divider {
   height: 1px;
   background: var(--border);
-  margin: 8px 2px;
+  margin: 6px 2px;
   flex-shrink: 0;
 }
 
+/* 36px rows, so an Administrator's whole rail fits under the bar on a 1080p screen. */
 .sidebar-item {
   position: relative;
   display: flex;
   align-items: center;
   gap: 11px;
   width: 100%;
-  padding: 8px 9px;
-  /* A transparent border, not `none`: the active item adds a 1px accent border, and an item that
-     only grows one when selected would shift its neighbours by 2px on every navigation. */
+  padding: 6px 9px;
+  /* The transparent border is part of the row's height and of the icon's 18px inset (the panel's
+     8px, this 1px, the 9px padding), which centres the icon on the 52px rail. */
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: none;
@@ -715,19 +721,32 @@ html, body, #root {
 .sidebar-item-label { opacity: 0; transition: opacity 0.12s ease; }
 .sidebar-expanded .sidebar-item-label { opacity: 1; }
 
-.sidebar-item:hover { color: var(--text-primary); background: var(--bg-glass); }
+/* No fill: the scrollbar narrows the row from the right, so a filled row would sit off the rail's
+   centre while its icon stays on it. */
+.sidebar-item:hover { color: var(--text-primary); }
 
-/* Three signals carry the current page -- fill, border and weight -- so none is doing the job
-   alone. It has to survive the collapsed state, where the label is transparent and this is the
-   ONLY thing distinguishing the page you are on. */
+/* The current page: the accent icon, and a 3px bar on the rail's left edge, where the scrollbar
+   cannot move it. The bar is what marks it while the rail is collapsed and the label is
+   transparent, so it does not rest on colour alone. The label is the accent's text shade at 600.
+   After the hover rule, so pointing at the current page leaves it marked. */
 .sidebar-item.active {
-  color: var(--accent);
-  background: var(--accent-dim);
-  border-color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
 }
 
-.sidebar-item.active:hover { background: var(--accent-dim); color: var(--accent); }
+.sidebar-item.active .sidebar-item-icon { color: var(--accent); }
+
+/* -9px is the panel's 8px padding and the row's 1px border; -1px top and bottom spans the border.
+   Drawn as a border, not a fill, so it still shows in forced-colours mode, which drops backgrounds. */
+.sidebar-item.active::before,
+.user-menu-button.active::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: -9px;
+  border-left: 3px solid var(--accent);
+}
 
 .sidebar-item:focus-visible {
   outline: 2px solid var(--accent);
@@ -741,7 +760,7 @@ html, body, #root {
 .sidebar-item.sidebar-item-warning:not(.active):hover { color: var(--warning-text); }
 
 /* The number: a badge on the icon's top-right corner while the rail is collapsed, the end of the
-   label once it is expanded. Filled, so it reads on the active item's accent too. */
+   label once it is expanded. Filled, so it stands apart from the active item's accent icon too. */
 .sidebar-item-count {
   position: absolute;
   top: 0;
@@ -5271,7 +5290,7 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   align-items: center;
   gap: 11px;
   width: 100%;
-  padding: 8px 9px;
+  padding: 6px 9px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: none;

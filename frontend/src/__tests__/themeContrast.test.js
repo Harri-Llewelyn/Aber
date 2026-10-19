@@ -165,8 +165,11 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['danger-reveal label on hover',   '--danger-text', on(paint('.btn-danger.btn-danger-reveal:hover'), card), AA_TEXT],
     ['btn-danger label at rest',       '--danger-text', on(paint('.btn-danger'), card),    AA_TEXT],
     ['btn-danger label on hover',      '--danger-text', on(paint('.btn-danger:hover'), card), AA_TEXT],
-    // The rail's flagged item paints --warning-text on the sidebar's ground, which is the card's.
-    ['--warning-text on rail item',    '--warning-text', card,                             AA_TEXT],
+    // The rail is --bg-surface. A flagged item paints --warning-text on it. The current page's bar
+    // and icon are non-text marks; its label, at 14px, is the accent's text shade.
+    ['--warning-text on rail item',    '--warning-text', surface,                          AA_TEXT],
+    ['current page bar on the rail',   '--accent',       surface,                          AA_LARGE],
+    ['current page label on the rail', '--accent-text',  surface,                          AA_TEXT],
     // Brand badges. The label is --text-primary ON the brand tint precisely because the brand
     // colours themselves are not legible as text -- see the negative guard below.
     ['sharepoint badge label',         '--text-primary', on(mix('--brand-sharepoint', 15), surface), AA_TEXT],

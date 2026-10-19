@@ -576,6 +576,56 @@ describe('sidebar warning tone', () => {
   })
 })
 
+/**
+ * The current page is the accent icon and a bar on the rail's left edge, not a filled box: the
+ * scrollbar narrows a row from the right, which pushed a box off the rail's centre. The rows are
+ * 36px so an Administrator's rail fits at 1080p.
+ */
+describe('the current page in the rail', () => {
+  const css = APP_CSS.replace(/\r\n/g, '\n')
+  /** The body of the rule whose selector starts a line and is exactly `selector`. */
+  const rule = (selector) => {
+    const at = css.indexOf(`\n${selector} {`)
+    if (at < 0) return undefined
+    const open = at + selector.length + 3
+    return css.slice(open, css.indexOf('}', open))
+  }
+
+  it('draws a 3px accent bar on the rail\'s left edge, for a page and for Profile', () => {
+    const bar = rule('.sidebar-item.active::before,\n.user-menu-button.active::before')
+    expect(bar, 'no shared bar rule for the active row and Profile').toBeTruthy()
+    expect(bar).toMatch(/position:\s*absolute/)
+    // The panel's 8px padding plus the row's 1px border, so the bar is flush with the rail's edge.
+    expect(bar).toMatch(/left:\s*-9px/)
+    expect(bar).toMatch(/top:\s*-1px/)
+    expect(bar).toMatch(/bottom:\s*-1px/)
+    expect(bar).toMatch(/border-left:\s*3px solid var\(--accent\)/)
+    expect(rule('.sidebar-item')).toMatch(/position:\s*relative/)
+    expect(rule('.user-menu-button')).toMatch(/position:\s*relative/)
+  })
+
+  it('paints no fill or border on the active row, at rest or on hover', () => {
+    const active = rule('.sidebar-item.active')
+    expect(active).toMatch(/font-weight:\s*600/)
+    expect(active).toMatch(/color:\s*var\(--accent-text\)/)
+    expect(active).not.toMatch(/background|border/)
+    expect(rule('.sidebar-item.active .sidebar-item-icon')).toMatch(/color:\s*var\(--accent\)/)
+    expect(rule('.sidebar-item:hover')).not.toMatch(/background/)
+    expect(css).not.toMatch(/\n\.sidebar-item\.active:hover \{/)
+  })
+
+  it('marks Profile without a fill on the avatar, which the open menu keeps', () => {
+    expect(rule('.user-menu-button.active .user-avatar')).not.toMatch(/background/)
+    expect(rule('.user-menu-button-open .user-avatar')).toMatch(/background:\s*var\(--accent-dim\)/)
+  })
+
+  it('keeps the rows at 36px and the dividers tight', () => {
+    expect(rule('.sidebar-item')).toMatch(/padding:\s*6px 9px/)
+    expect(rule('.sidebar-mode-button')).toMatch(/padding:\s*6px 9px/)
+    expect(rule('.sidebar-divider')).toMatch(/margin:\s*6px 2px/)
+  })
+})
+
 /** The KPI ribbon above the Site Map is retired; its stylesheet must not come back. */
 describe('the retired KPI ribbon', () => {
   it('does not come back', () => {
