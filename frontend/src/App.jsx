@@ -65,6 +65,7 @@ import { api } from './api'
 import { ToastStack } from './components/common/Toast'
 import { AlertPill } from './components/common/AlertPill'
 import { NotificationHistory } from './components/common/NotificationHistory'
+import { SegmentedControl } from './components/common/SegmentedControl'
 import { HelpPanel } from './components/common/HelpPanel'
 import { HelpDrawerContext } from './components/common/ContextPanel'
 import { usePlatformAlerts } from './hooks/usePlatformAlerts'
@@ -274,18 +275,22 @@ function AuthScreen({ onLoginSuccess, notice }) {
   )
 }
 
+/** The account menu's theme switch, one segment per theme useTheme offers. */
+const THEME_SEGMENTS = [
+  { id: 'light', label: 'Light', icon: <IconSun size={14} /> },
+  { id: 'dark', label: 'Dark', icon: <IconMoon size={14} /> }
+]
+
 /**
  * The account control at the foot of the rail: the avatar, with the address beside it whenever the
  * rail shows labels. Its menu's head states the address, role and version; its rows are Profile, the
- * quick theme toggle, Report Bug and Sign Out. Click, not hover: a hover menu holding Sign Out puts
- * an irreversible action one stray movement away. The menu opens beside the rail (App.css).
+ * Light/Dark theme switch, Report Bug and Sign Out. Click, not hover: a hover menu holding Sign Out
+ * puts an irreversible action one stray movement away. The menu opens beside the rail (App.css).
  */
-function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReportBug, onOpenProfile, profileOpen = false }) {
+function UserMenu({ persona, userRole, onSignOut, theme, onChangeTheme, onReportBug, onOpenProfile, profileOpen = false }) {
   const [open, setOpen] = useState(false)
   const wrapRef = useClickOutside(() => setOpen(false), open)
   useEscapeKey(() => setOpen(false), open)
-
-  const nextTheme = theme === 'dark' ? 'Light' : 'Dark'
 
   /* Read from the injected global, which `config.js` set at page load. Comparing it with the baked
      bundle version is how a page cached from before an upgrade, or a pinned frontend.image.tag,
@@ -375,20 +380,15 @@ function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReport
             <IconUser size={14} /> <span>Profile</span>
           </button>
 
-          {/* The label states the current theme; the icon shows the destination. The same setting
-              as Profile > Appearance. */}
-          <button
-            className="user-popover-action"
-            role="menuitem"
-            onClick={onToggleTheme}
-            title={`Switch to the ${nextTheme.toLowerCase()} theme`}
-          >
-            {theme === 'dark' ? <IconSun size={14} /> : <IconMoon size={14} />}
-            <span>Theme: <strong>{theme === 'dark' ? 'Dark' : 'Light'}</strong></span>
-            <span className="user-popover-hint">{nextTheme}</span>
-          </button>
+          {/* The themes as a switch, the current one checked: the same setting as Profile >
+              Appearance. The group carries the name "Theme", so the visible label is not read
+              twice. */}
+          <div className="user-popover-theme">
+            <span aria-hidden="true">Theme</span>
+            <SegmentedControl menu label="Theme" value={theme} onChange={onChangeTheme} options={THEME_SEGMENTS} />
+          </div>
 
-          {/* The menu stays open on the theme toggle, whose result is visible behind it, and closes
+          {/* The menu stays open on the theme switch, whose result is visible behind it, and closes
               on the others. */}
           <button
             className="user-popover-action"
@@ -447,8 +447,6 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   /* A setting is reached by its key, not a UUID: the key is what the page, the code and every
      migration call it, and it is what a link to one should carry. */
   const showSetting = (key) => navigate(settingUrl(key))
-  /** The Metrics catalog with Unmapped on, from the export's warning toast, which it dismisses. */
-  const showUnmappedMetrics = (toastId) => { navigate(unmappedMetricsUrl()); dismissToast(toastId) }
   /** One tab of a page: a search-bar card, or the rail's quarantine signal. */
   const showSection = (tabId, section) => navigate(tabUrl(tabId, section))
   /** The opposite direction: every device provisioned with a schema. Note the `schema` key. */
@@ -464,9 +462,9 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
    */
   const openProposalSubject = (proposal) => navigate(proposalSubjectUrl(proposal))
   // One source for both: the person's user_settings row, cached in this browser. The account menu's
-  // toggle, the rail's foot control and the Profile page all write through it.
-  const { theme, setTheme, toggleTheme, sidebarMode, setSidebarMode, source: settingsSource } = useUserSettings(session?.user?.id)
-  const { toasts, showToast, expireToast, dismissToast, history, markAllRead, clearHistory } = useToast()
+  // theme switch, the rail's foot control and the Profile page all write through it.
+  const { theme, setTheme, sidebarMode, setSidebarMode, source: settingsSource } = useUserSettings(session?.user?.id)
+  const { toasts, showToast, expireToast, dismissToast, history, markRead, clearHistory } = useToast()
 
   const { userRole, hasPermission, loadingPerms } = usePermissions(session)
 
@@ -506,11 +504,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   useQuarantineAlerts(showToast)
 
   // Grafana's firing alerts, via platform_alerts. Owned by App rather than a tab so an alert is
-  // visible whichever page is open.
-  // A platform-alert toast opens the pill's list and goes away.
-  const [alertsOpen, setAlertsOpen] = useState(false)
-  const openAlertsFromToast = useCallback((id) => { setAlertsOpen(true); dismissToast(id) }, [dismissToast])
-  const firingAlerts = usePlatformAlerts(showToast, openAlertsFromToast)
+  // visible whichever page is open. Each alert's toast links to its rule in Grafana.
+  const firingAlerts = usePlatformAlerts(showToast)
 
   // Whether the page is still refreshing, from every poll and Realtime channel. Read by the strip
   // under the bar and the tab title.
@@ -545,7 +540,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
       userRole={userRole}
       onSignOut={onSignOut}
       theme={theme}
-      onToggleTheme={toggleTheme}
+      onChangeTheme={setTheme}
       onReportBug={() => setShowBugReport(true)}
       onOpenProfile={() => handleNavClick('profile')}
       profileOpen={tab === 'profile'}
@@ -555,8 +550,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   // Computed once and used twice: the rail draws it and the search palette indexes it. Filtering
   // in both places would let the search offer a page the rail does not.
   const navTabs = TABS.filter(t => tabIsVisible(t, hasPermission, userRole))
-  // The export warning leads to Metrics only for a reader who has that page in the rail.
-  const unmappedMetricsLink = navTabs.some(t => t.id === 'metrics') ? showUnmappedMetrics : undefined
+  // The export warning links to Metrics with Unmapped on, only for a reader who has that page.
+  const unmappedMetricsTo = navTabs.some(t => t.id === 'metrics') ? unmappedMetricsUrl() : undefined
   // Where each rail entry goes: the bare page, except Devices, which opens the Quarantine tab while
   // the rail flags a waiting device.
   const railHref = (id) => (id === 'devices' && navSignals.devices ? tabUrl('devices', 'quarantine') : tabUrl(id))
@@ -612,13 +607,11 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
             alerts={firingAlerts}
             onSelectDevice={showDevice}
             onSelectGateway={showGateway}
-            open={alertsOpen}
-            onOpenChange={setAlertsOpen}
           />
 
           {/* What the toasts said, beside what is wrong now and separate from it: the pill's count
               is a reason to act, and this list holds resolved and routine messages too. */}
-          <NotificationHistory entries={history} onMarkRead={markAllRead} onClear={clearHistory} />
+          <NotificationHistory entries={history} onMarkRead={markRead} onClear={clearHistory} />
 
           {/* A discovery aid rather than a preference, so it stays in the bar. */}
           <button
@@ -674,7 +667,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
             {tab === 'areas'          && <AreasTab showToast={showToast} onViewTrail={a => viewTrailFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} />}
             {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewTrail={c => viewTrailFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} />}
             {tab === 'gateways'       && <GatewaysTab userRole={userRole} activeAlerts={firingAlerts} showToast={showToast} onViewTrail={g => viewTrailFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} />}
-            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewTrail={a => viewTrailFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} activeAlerts={firingAlerts} onShowUnmappedMetrics={unmappedMetricsLink} />}
+            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewTrail={a => viewTrailFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} activeAlerts={firingAlerts} unmappedMetricsTo={unmappedMetricsTo} />}
             {/* Re-checked here: `tab` arrives from the URL as well as the nav, so hiding the item
                 is not the same as closing the page. */}
             {tab === 'audit-trail' && hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ) && (
@@ -700,7 +693,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
                 roles that can record. */}
             {tab === 'capture' && ['Administrator', 'Shopfloor_Manager', 'Auditor'].includes(userRole) &&
               <CaptureTab showToast={showToast} userRole={userRole} onSelectSchema={showSchema} />}
-            {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} onViewTrail={t => viewTrailFor(t.id, t.type, t.purged)} onShowUnmappedMetrics={unmappedMetricsLink} />}
+            {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} onViewTrail={t => viewTrailFor(t.id, t.type, t.purged)} unmappedMetricsTo={unmappedMetricsTo} />}
             {/* Re-checked because routing can put `tab` on a value the nav never offered.
                 `userRole` lets the page tell "nothing archived" from "not yours to see";
                 cold_storage_rows() gates in its body. */}
@@ -712,7 +705,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
             {tab === 'backups' && userRole === 'Administrator' && <BackupsTab showToast={showToast} />}
             {tab === 'settings' && !loadingPerms && <SettingsTab showToast={showToast} readOnly={userRole !== 'Administrator'} />}
             {/* Every person's own page. Appearance writes through useUserSettings, as the account
-                menu's toggle and the rail's foot control do. */}
+                menu's theme switch and the rail's foot control do. */}
             {tab === 'profile' && (
               <ProfileTab
                 email={session?.user?.email}

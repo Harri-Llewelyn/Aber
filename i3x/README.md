@@ -1088,7 +1088,8 @@ than minutes, and why `0` disables the cache outright.
   raised on every conformance run and is otherwise rediscovered on each reading of the log.
 - **`isExtended` reads `last_birth_metrics`**, so it reflects the device's most recent DBIRTH,
   judged against every schema attached to the device. A device that has never birthed reports
-  `false` rather than unknown. The DBIRTH *datatypes* are held only in this process: after a
+  `false` rather than unknown. Identity metrics, `bdSeq`, `Node Control/*` and `Device Control/*`
+  are plumbing (`is_plumbing_metric()`): never a component, never counted, never a value. The DBIRTH *datatypes* are held only in this process: after a
   restart, a metric the catalog lacks is `UnknownType`, and its `schemaExtensions` fragment `{}`
   unless the catalog has its datatype, until the device births again.
 - **`GET /objects` has no paging**, because i3X 1.0 defines none. Measured on 2026-09-28 with

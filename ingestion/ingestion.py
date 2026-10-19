@@ -369,6 +369,9 @@ UUID_PATTERN = re.compile(
 # Metrics that carry identity rather than configuration or telemetry. None is stored as a
 # parameter, a sample or a declared metric: a schema models measurements, not identity.
 IDENTITY_METRICS = ("Asset_ID", "Asset_Name", "Instance_UUID", "Schema_UUID")
+# Sparkplug's control metrics: commands a birth may declare (Node Control/Rebirth, Device
+# Control/Rebirth), not readings. With bdSeq they are what is_control_metric() names.
+CONTROL_METRIC_PREFIXES = ("Node Control/", "Device Control/")
 
 # The Factory+ Sparkplug payload marker, carried in the payload's top-level `uuid` field. Read
 # for logging only: the topic is still what identifies the asset.
@@ -1684,16 +1687,21 @@ def store_birth_parameters(sparkplug_id: str, payload):
     except Exception as e:
         logger.error("Error storing DBIRTH parameters for '%s': %s", sparkplug_id, e, exc_info=True)
 
+def is_control_metric(name):
+    """bdSeq or a Node Control/Device Control metric: Sparkplug plumbing, which no schema models."""
+    return name == BDSEQ_METRIC_NAME or name.startswith(CONTROL_METRIC_PREFIXES)
+
 def extract_declared_metrics(payload):
     """
-    The set of metric names a birth certificate declares, sorted, minus the identity metrics.
+    The set of metric names a birth certificate declares, sorted, minus the identity and control
+    metrics.
 
     Unlike store_birth_parameters(), a metric declared with no value still counts. This records
     what was observed; whether it falls outside the schema is derived at read time.
     """
     return sorted({
         metric.name for metric in payload.metrics
-        if metric.name and metric.name not in IDENTITY_METRICS
+        if metric.name and metric.name not in IDENTITY_METRICS and not is_control_metric(metric.name)
     })
 
 def record_declared_metrics(device: dict, payload):

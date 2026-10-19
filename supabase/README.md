@@ -740,7 +740,9 @@ panel or an alert rule can read the same rows.
 - **Sparkplug's control metrics are left out**: `bdSeq`, `Node Control/*` and `Device Control/*`.
   They are commands to the edge node or device, not readings, and their names hold spaces the name
   format above refuses. A DBIRTH may carry `Device Control/*` (Sparkplug 3.0, *Payload (DBIRTH)*),
-  and the gateway appliance sends `Device Control/Rebirth`. `Properties/*` stays. It is the
+  and the gateway appliance sends `Device Control/Rebirth`. Since 1.5 ingestion leaves them out of
+  `last_birth_metrics` too; the view still excludes them for a row no birth has rewritten since.
+  `Properties/*` stays. It is the
   device's own data under a valid name, and catalogued with an OPC 40001 Machinery identification
   id such as `Manufacturer`'s, it fills that Digital Nameplate field in the AAS export.
 - **`last_declared_at`** is the latest `last_birth_metrics_at` among the devices. That stamp moves

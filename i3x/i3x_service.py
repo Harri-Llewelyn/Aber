@@ -169,6 +169,13 @@ MAX_ALIASES_PER_NODE = int(os.getenv("MAX_ALIASES_PER_NODE", "5000"))
 # whole demonstrator address space is under a hundred elements.
 MAX_BULK_ELEMENT_IDS = int(os.getenv("I3X_MAX_BULK_ELEMENT_IDS", "1000"))
 IDENTITY_METRICS = ("Asset_ID", "Asset_Name", "Instance_UUID", "Schema_UUID")
+CONTROL_METRIC_PREFIXES = ("Node Control/", "Device Control/")
+
+
+def is_plumbing_metric(name: str) -> bool:
+    """An identity metric, bdSeq or a Sparkplug control metric: never a component or a value."""
+    return name in IDENTITY_METRICS or name == "bdSeq" or name.startswith(CONTROL_METRIC_PREFIXES)
+
 
 _values: Dict[str, Dict[str, dict]] = {}
 _values_lock = threading.RLock()
@@ -502,8 +509,8 @@ def _birth_datatypes() -> Dict[str, Dict[str, int]]:
 
 
 def _component_names(names) -> list:
-    """The metric names that are components, sorted: no identity metric, no unaddressable name."""
-    return sorted(n for n in names if n not in IDENTITY_METRICS and A.metric_name_is_addressable(n))
+    """The metric names that are components, sorted: no plumbing metric, no unaddressable name."""
+    return sorted(n for n in names if not is_plumbing_metric(n) and A.metric_name_is_addressable(n))
 
 
 def _device_metrics(device: dict, declared: list, modelled: set, modelled_names: list,
@@ -562,7 +569,7 @@ def _build_objects(space: dict) -> Dict[str, dict]:
             )
             modelled_by_set[schema_ids] = (modelled, _component_names(modelled))
         modelled, modelled_names = modelled_by_set[schema_ids]
-        declared = [n for n in device.get("last_birth_metrics") or () if n not in IDENTITY_METRICS]
+        declared = [n for n in device.get("last_birth_metrics") or () if not is_plumbing_metric(n)]
         device["_is_extended"] = A.is_extended(declared, modelled)
         metrics, extensions = _device_metrics(
             device, declared, modelled, modelled_names, catalog, catalog_types, births
@@ -969,7 +976,7 @@ def _device_updates(sparkplug_id: str, metrics: Dict[str, dict], names, now: flo
     device, gateway = _staging_rows(sparkplug_id)
     updates = {sparkplug_id: A.device_value(device, metrics, gateway, now=now)}
     for name in names:
-        if name in metrics and name not in IDENTITY_METRICS and A.metric_name_is_addressable(name):
+        if name in metrics and not is_plumbing_metric(name) and A.metric_name_is_addressable(name):
             element_id = A.metric_element_id(sparkplug_id, name)
             updates[element_id] = A.device_metric_value(
                 device, element_id, metrics[name], gateway, now=now
@@ -3096,10 +3103,9 @@ def on_message(client, userdata, msg):  # noqa: ARG001
         named = {}
         for metric in metrics:
             name = resolve_metric_name(group_id, edge_node_id, metric)
-            if not name or name in IDENTITY_METRICS:
-                # Identity metrics are wire plumbing, not observations -- the same reason ingestion
-                # excludes them from `last_birth_metrics`. Including them here would make every
-                # conformant device report two values no schema models.
+            if not name or is_plumbing_metric(name):
+                # Not observations, so not components: ingestion leaves them out of
+                # `last_birth_metrics` for the same reason.
                 continue
             if metric.get("field") in UNSERVED_VALUE_FIELDS:
                 continue

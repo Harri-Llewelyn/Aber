@@ -109,12 +109,12 @@ describe('a choice', () => {
     expect(saveUserSetting).toHaveBeenCalledWith(ALICE, 'sidebar_mode', 'collapsed')
   })
 
-  /** The account menu's quick toggle and Profile > Appearance write the one value. */
-  it('from the quick toggle is the same write as one from the Profile page', async () => {
+  /** The account menu's theme switch and Profile > Appearance write the one value, through setTheme. */
+  it('from the account menu is the same write as one from the Profile page', async () => {
     const { result } = renderHook(() => useUserSettings(ALICE))
     await settle(result)
 
-    act(() => result.current.toggleTheme())
+    act(() => result.current.setTheme('light'))
     expect(result.current.theme).toBe('light')
     expect(saveUserSetting).toHaveBeenLastCalledWith(ALICE, 'theme', 'light')
 

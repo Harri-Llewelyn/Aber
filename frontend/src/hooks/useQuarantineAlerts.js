@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { api } from '../api'
 import { REALTIME_ENABLED } from '../constants'
+import { tabUrl } from '../routes'
 
 /** Fallback poll interval used only when Realtime is disabled. */
 const POLL_INTERVAL_MS = 10000
@@ -9,7 +10,8 @@ const POLL_INTERVAL_MS = 10000
 /**
  * Toast when a device newly appears in the Quarantine queue. Event-driven with Realtime (a filtered
  * subscription on devices where is_quarantined = true), polled otherwise. The initial fetch primes
- * the set of already-known quarantined devices so a page load does not re-toast the queue.
+ * the set of already-known quarantined devices so a page load does not re-toast the queue. The
+ * toast links to the Quarantine tab, not to the device in it: the tab's address carries no search.
  *
  * @param {Function} showToast Toast notification function
  */
@@ -47,7 +49,8 @@ export function useQuarantineAlerts(showToast) {
       knownQuarantineIds.current.add(key)
       showToastRef.current?.(
         `New device '${describe(device)}' discovered in the Quarantine queue`,
-        'info'
+        'info',
+        { to: tabUrl('devices', 'quarantine') }
       )
     }
 

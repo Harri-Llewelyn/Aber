@@ -75,6 +75,12 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     return value
   }
   const mix = (token, pct) => `color-mix(in srgb, var(${token}) ${pct}%, transparent)`
+  /** The token a rule's `var(--token)` value names. */
+  const tokenIn = (value) => {
+    const m = value.match(/^var\((--[a-z0-9-]+)\)$/)
+    if (!m) throw new Error(`not a single token: ${value}`)
+    return m[1]
+  }
 
   // .callout-warning's tint, the lightest amber surface that carries text.
   const alertCard = on(paint('.callout-warning'), card)
@@ -165,8 +171,11 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['danger-reveal label on hover',   '--danger-text', on(paint('.btn-danger.btn-danger-reveal:hover'), card), AA_TEXT],
     ['btn-danger label at rest',       '--danger-text', on(paint('.btn-danger'), card),    AA_TEXT],
     ['btn-danger label on hover',      '--danger-text', on(paint('.btn-danger:hover'), card), AA_TEXT],
-    // The rail's flagged item paints --warning-text on the sidebar's ground, which is the card's.
-    ['--warning-text on rail item',    '--warning-text', card,                             AA_TEXT],
+    // The rail is --bg-surface. A flagged item paints --warning-text on it. The current page's bar
+    // and icon are non-text marks; its label, at 14px, is the accent's text shade.
+    ['--warning-text on rail item',    '--warning-text', surface,                          AA_TEXT],
+    ['current page bar on the rail',   '--accent',       surface,                          AA_LARGE],
+    ['current page label on the rail', '--accent-text',  surface,                          AA_TEXT],
     // Brand badges. The label is --text-primary ON the brand tint precisely because the brand
     // colours themselves are not legible as text -- see the negative guard below.
     ['sharepoint badge label',         '--text-primary', on(mix('--brand-sharepoint', 15), surface), AA_TEXT],
@@ -179,11 +188,19 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['pending badge label',            '--accent-text',  on(paint('.badge-pending'), card),        AA_TEXT],
     ['pending badge label on hover',   '--accent-text',  on(paint('.badge-pending'), glass(card)), AA_TEXT],
     ['provisioned badge label',        '--accent-text',  on(paint('.badge-provisioned'), card),    AA_TEXT],
-    // The toast types and the bell's badge tones, each ink on its own tint over --bg-card.
-    ['info toast label',               '--accent-text',  on(paint('.toast-info', 'background-image'), card),    AA_TEXT],
-    ['warning toast label',            '--warning-text', on(paint('.toast-warning', 'background-image'), card), AA_TEXT],
-    ['success toast label',            '--success-text', on(paint('.toast-success', 'background-image'), card), AA_TEXT],
-    ['error toast label',              '--danger-text',  on(paint('.toast-error', 'background-image'), card),   AA_TEXT],
+    // A toast is a plain card: its text in the colour the rule gives it, and each icon tone at the
+    // 3:1 an icon needs (WCAG 1.4.11), read from the rules that set them. The light theme's amber
+    // is the tightest, at 3.19:1 on white.
+    ['toast text',                     tokenIn(paint('.toast', 'color')),                       card, AA_TEXT],
+    ['toast dismiss button',           tokenIn(paint('.toast-dismiss', 'color')),               card, AA_TEXT],
+    ['accent icon tone',               tokenIn(paint('.signal-tone-accent', '--signal-tone')),  card, AA_LARGE],
+    ['warning icon tone',              tokenIn(paint('.signal-tone-warning', '--signal-tone')), card, AA_LARGE],
+    ['danger icon tone',               tokenIn(paint('.signal-tone-danger', '--signal-tone')),  card, AA_LARGE],
+    ['success icon tone',              tokenIn(paint('.signal-tone-success', '--signal-tone')), card, AA_LARGE],
+    // The bell's badge tones, each ink on its own tint over --bg-card.
+    ['info bell badge',                '--accent-text',  on(paint('.notif-badge-info', 'background-image'), card),    AA_TEXT],
+    ['warning bell badge',             '--warning-text', on(paint('.notif-badge-warning', 'background-image'), card), AA_TEXT],
+    ['error bell badge',               '--danger-text',  on(paint('.notif-badge-error', 'background-image'), card),   AA_TEXT],
     // The notification list: the timestamp is the dimmest text in it.
     ['notification time',              '--text-dim',     card,                              AA_TEXT],
   ]
@@ -515,9 +532,17 @@ describe('toast opacity', () => {
     }
   })
 
+  it('paints no tint on a toast: the colour is on its icon', () => {
+    const rule = ruleFor('.toast')
+    expect(rule).not.toMatch(/background-image\s*:/)
+    expect(rule).not.toMatch(/(^|[;{\s])background\s*:/)
+    expect(rule).toMatch(/border\s*:\s*1px solid var\(--border\)/)
+    // The leading-edge stripe is the icon's tone, not a tint.
+    expect(rule).toMatch(/box-shadow\s*:\s*inset 3px 0 0 var\(--signal-tone\), var\(--shadow\)/)
+  })
+
   it.each([
-    '.toast-success', '.toast-info', '.toast-warning', '.toast-error',
-    // The bell's unread badge uses the same tints on the same opaque base.
+    // The bell's unread badge tints on the same opaque base a toast has.
     '.notif-badge-info', '.notif-badge-warning', '.notif-badge-error'
   ])(
     '%s tints with background-image and never resets the opaque colour',

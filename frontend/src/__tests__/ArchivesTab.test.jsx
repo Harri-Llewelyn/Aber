@@ -558,8 +558,7 @@ describe('ArchivesTab exports a device before it goes', () => {
     api.post.mockResolvedValue({
       blob: new Blob(['PK']), format: 'aasx', stats: { submodels: 1, telemetry_metrics: 2, unmapped_semantic_ids: 3 }
     })
-    const onShowUnmappedMetrics = vi.fn()
-    const { showToast } = await showLifecycle({ archives: [ARCHIVED_DEVICE] }, { onShowUnmappedMetrics })
+    const { showToast } = await showLifecycle({ archives: [ARCHIVED_DEVICE] }, { unmappedMetricsTo: '/metrics?unmapped=1' })
 
     fireEvent.click(screen.getByRole('button', { name: /Export Bundle/i }))
     const dialog = within(await screen.findByRole('dialog'))
@@ -570,8 +569,7 @@ describe('ArchivesTab exports a device before it goes', () => {
     const [message, type, options] = showToast.mock.calls[0]
     expect(message).toMatch(/3 metrics carried no semantic id\. Open them on the Metrics page/)
     expect(type).toBe('warning')
-    options.onOpen(9)
-    expect(onShowUnmappedMetrics).toHaveBeenCalledWith(9)
+    expect(options).toEqual({ to: '/metrics?unmapped=1' })
   })
 
   it('notes the latest export beside the row, so a second one is a choice rather than a habit', async () => {

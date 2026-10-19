@@ -219,7 +219,7 @@ describe('Merged navigation shell', () => {
     })
   })
 
-  it('moves the theme toggle and Report Bug behind the account button, not out of the app', async () => {
+  it('moves the theme switch and Report Bug behind the account button, not out of the app', async () => {
     await renderShell()
 
     // Neither is in the bar any more...
@@ -231,12 +231,12 @@ describe('Merged navigation shell', () => {
     fireEvent.click(screen.getByRole('button', { name: /account menu/i }))
     const menu = screen.getByRole('menu')
     expect(within(menu).getByRole('menuitem', { name: /report bug/i })).toBeTruthy()
-    expect(within(menu).getByRole('menuitem', { name: /theme/i })).toBeTruthy()
+    expect(within(menu).getByRole('group', { name: 'Theme' })).toBeTruthy()
   })
 
   /**
    * The account menu, at the foot of the rail: a 28px avatar with the address beside it, whose menu
-   * holds Profile, the theme toggle and Report Bug alongside Sign Out. These pin reachability and
+   * holds Profile, the theme switch and Report Bug alongside Sign Out. These pin reachability and
    * the facts the button names.
    */
   describe('Account menu', () => {
@@ -275,10 +275,13 @@ describe('Merged navigation shell', () => {
       await renderShell()
 
       fireEvent.click(trigger())
-      const items = within(screen.getByRole('menu')).getAllByRole('menuitem')
-      expect(items.map(i => i.textContent.trim())).toEqual([
-        'Profile', expect.stringMatching(/^Theme:/), 'Report Bug', 'Sign Out'
+      const menu = screen.getByRole('menu')
+      // In order, the theme's two segments between Profile and Report Bug.
+      const rows = [...menu.querySelectorAll('[role="menuitem"], [role="menuitemradio"]')]
+      expect(rows.map(i => i.getAttribute('aria-label') || i.textContent.trim())).toEqual([
+        'Profile', 'Light', 'Dark', 'Report Bug', 'Sign Out'
       ])
+      const items = within(menu).getAllByRole('menuitem')
 
       fireEvent.click(items[0])
       expect(screen.queryByRole('menu')).toBeNull()
@@ -303,18 +306,24 @@ describe('Merged navigation shell', () => {
       expect(supabase.auth.signOut).toHaveBeenCalled()
     })
 
-    it('states the CURRENT theme rather than the destination, and stays open on toggle', async () => {
+    it('checks the CURRENT theme in a Light/Dark switch, and stays open when the other is chosen', async () => {
       await renderShell()
       fireEvent.click(trigger())
 
-      const item = () => screen.getByRole('menuitem', { name: /theme/i })
-      expect(item()).toHaveTextContent(/Theme:\s*Dark/)
+      const theme = within(screen.getByRole('menu')).getByRole('group', { name: 'Theme' })
+      const segment = (name) => within(theme).getByRole('menuitemradio', { name })
+      expect(segment('Dark')).toHaveAttribute('aria-checked', 'true')
+      expect(segment('Light')).toHaveAttribute('aria-checked', 'false')
+      // Each segment names its own theme: the sun is Light, the moon is Dark.
+      expect(segment('Light')).toHaveAttribute('title', 'Light')
 
-      fireEvent.click(item())
-      // STILL OPEN. Toggling is the one action here whose result is visible behind the menu, so
-      // closing would mean reopening to change your mind about a two-state choice.
+      fireEvent.click(segment('Light'))
+      // STILL OPEN. The theme is the one choice here whose result is visible behind the menu, so
+      // closing would mean reopening to change your mind about it.
       expect(screen.getByRole('menu')).toBeTruthy()
-      expect(item()).toHaveTextContent(/Theme:\s*Light/)
+      expect(segment('Light')).toHaveAttribute('aria-checked', 'true')
+      expect(segment('Dark')).toHaveAttribute('aria-checked', 'false')
+      expect(document.documentElement).toHaveAttribute('data-theme', 'light')
     })
 
     it('closes on the items whose result is NOT visible behind it', async () => {
@@ -573,6 +582,56 @@ describe('area plan row', () => {
 describe('sidebar warning tone', () => {
   it('colours a flagged item, and never the current page', () => {
     expect(APP_CSS).toMatch(/\.sidebar-item\.sidebar-item-warning:not\(\.active\) \{ color: var\(--warning-text\); \}/)
+  })
+})
+
+/**
+ * The current page is the accent icon and a bar on the rail's left edge, not a filled box: the
+ * scrollbar narrows a row from the right, which pushed a box off the rail's centre. The rows are
+ * 36px so an Administrator's rail fits at 1080p.
+ */
+describe('the current page in the rail', () => {
+  const css = APP_CSS.replace(/\r\n/g, '\n')
+  /** The body of the rule whose selector starts a line and is exactly `selector`. */
+  const rule = (selector) => {
+    const at = css.indexOf(`\n${selector} {`)
+    if (at < 0) return undefined
+    const open = at + selector.length + 3
+    return css.slice(open, css.indexOf('}', open))
+  }
+
+  it('draws a 3px accent bar on the rail\'s left edge, for a page and for Profile', () => {
+    const bar = rule('.sidebar-item.active::before,\n.user-menu-button.active::before')
+    expect(bar, 'no shared bar rule for the active row and Profile').toBeTruthy()
+    expect(bar).toMatch(/position:\s*absolute/)
+    // The panel's 8px padding plus the row's 1px border, so the bar is flush with the rail's edge.
+    expect(bar).toMatch(/left:\s*-9px/)
+    expect(bar).toMatch(/top:\s*-1px/)
+    expect(bar).toMatch(/bottom:\s*-1px/)
+    expect(bar).toMatch(/border-left:\s*3px solid var\(--accent\)/)
+    expect(rule('.sidebar-item')).toMatch(/position:\s*relative/)
+    expect(rule('.user-menu-button')).toMatch(/position:\s*relative/)
+  })
+
+  it('paints no fill or border on the active row, at rest or on hover', () => {
+    const active = rule('.sidebar-item.active')
+    expect(active).toMatch(/font-weight:\s*600/)
+    expect(active).toMatch(/color:\s*var\(--accent-text\)/)
+    expect(active).not.toMatch(/background|border/)
+    expect(rule('.sidebar-item.active .sidebar-item-icon')).toMatch(/color:\s*var\(--accent\)/)
+    expect(rule('.sidebar-item:hover')).not.toMatch(/background/)
+    expect(css).not.toMatch(/\n\.sidebar-item\.active:hover \{/)
+  })
+
+  it('marks Profile without a fill on the avatar, which the open menu keeps', () => {
+    expect(rule('.user-menu-button.active .user-avatar')).not.toMatch(/background/)
+    expect(rule('.user-menu-button-open .user-avatar')).toMatch(/background:\s*var\(--accent-dim\)/)
+  })
+
+  it('keeps the rows at 36px and the dividers tight', () => {
+    expect(rule('.sidebar-item')).toMatch(/padding:\s*6px 9px/)
+    expect(rule('.sidebar-mode-button')).toMatch(/padding:\s*6px 9px/)
+    expect(rule('.sidebar-divider')).toMatch(/margin:\s*6px 2px/)
   })
 })
 
