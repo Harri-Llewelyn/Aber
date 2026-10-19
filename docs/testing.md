@@ -345,6 +345,15 @@ python supabase/migrations/test_playback_stop_and_sweep.py
 # let it publish as that machine. Also pins is_simulated NOT NULL, which is what makes 0078's coalesce
 # dead code rather than the thing deciding deliveries.
 python supabase/migrations/test_playback_credential_delivery.py
+# What the capture and playback gates do when called, matched on SQLSTATE rather than on their
+# source or wording. ensure_shadow_devices() refuses a caller, a missing capture and a capture of a
+# lane, mints each lane with its origin's policy and schemas, and reuses it. start_playback_job()
+# refuses a missing capture or gateway, a real gateway, a simulator, an archived or credential-less
+# Playback gateway and a busy target, and clamps the speed. The manifest keeps 50 names and the true
+# count. Both startup sweeps fail only what is in flight and answer only their own worker. RLS and
+# grants on captures, capture_jobs, playback_jobs, playback_worker_status and capture_uploads are
+# checked for every role, both machine principals and anon, with which of them Realtime publishes.
+python supabase/migrations/test_capture_playback_behaviour.py
 # A stored capture is never lost, orphaned or taken on trust (0190). A recording and an upload each
 # write a path of their own and the row is repointed in one transaction; an upload's replace is
 # decided before anything is written, and it is refused while its subject records or when a capture

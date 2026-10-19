@@ -813,6 +813,16 @@ export const SUITES = {
       'the only one the broker will accept, and getting this wrong shows up as CONNACK rc=5 with ' +
       'nothing naming the cause.',
   },
+  'supabase/migrations/test_capture_playback_behaviour.py': {
+    lanes: ['db'],
+    why:
+      'What the capture and playback gates do when called. ensure_shadow_devices() and ' +
+      "start_playback_job() refuse each case by SQLSTATE, not by a reading of their source; a lane " +
+      'is minted with its origin\'s contract and reused; the manifest is capped at 50 names with ' +
+      'the true count; both startup sweeps fail only what is in flight and answer only their own ' +
+      'worker; and RLS and grants on the five capture and playback tables admit each role, both ' +
+      'machine principals and anon to exactly what the README says.',
+  },
   'supabase/migrations/test_capture_retention.py': {
     lanes: ['db'],
     why:

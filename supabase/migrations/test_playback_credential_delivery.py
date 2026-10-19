@@ -221,26 +221,46 @@ class PlaybackCredentialDelivery(unittest.TestCase):
     # -----------------------------------------------------------------------------------------
     def test_delivery_and_the_job_gate_agree(self):
         """
-        Delivery is scoped to `is_shadow` because that is what `playback_target_must_be_shadow()`,
-        the trigger on `playback_jobs`, admits a target by. If one moved without the other, the
-        worker would hold credentials for gateways it may not target -- and nothing would fail. It
-        would simply hold more than it needs, which is what 0183 corrected.
+        A password is delivered for exactly the gateways `start_playback_job()` accepts as a target.
+        If the two moved apart, the worker would hold credentials for gateways it may not target --
+        and nothing would fail. It would simply hold more than it needs, which is what 0183
+        corrected. Asked of each kind of gateway by calling both, not by reading their source.
         """
-        for fn in ("playback_target_must_be_shadow", "gateway_is_playback_delivery_target"):
-            self.assertIn("is_shadow", self._source(fn), f"{fn}() no longer reads is_shadow")
-        self.assertNotIn(
-            "is_simulated", self._source("gateway_is_playback_delivery_target"),
-            "the delivery predicate reads is_simulated again, which delivers every simulator",
-        )
-
-    def _source(self, fn):
+        subject = self._gateway(simulated=False, deployment="remote")
         self.cur.execute(
-            "SELECT prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
-            " WHERE n.nspname = 'public' AND p.proname = %s", (fn,)
+            "INSERT INTO public.captures (subject_kind, gateway_id, subject_sparkplug_id, "
+            "storage_path, size_bytes, message_count) VALUES ('gateway', %s, %s, %s, 1, 1) "
+            "RETURNING id", (subject, self._sparkplug_id(subject), f"{subject}/capture.json"),
         )
-        row = self.cur.fetchone()
-        self.assertIsNotNone(row, f"{fn}() is missing")
-        return row[0]
+        capture = self.cur.fetchone()[0]
+        self.cur.execute("DELETE FROM public.playback_worker_status")
+        kinds = {
+            "a Playback gateway": dict(simulated=True, shadow=True),
+            "a simulator": dict(simulated=True),
+            "a host-run gateway": dict(simulated=False),
+            "an archived Playback gateway": dict(simulated=True, shadow=True, archived=True),
+        }
+        for kind, flags in kinds.items():
+            with self.subTest(kind=kind):
+                gid = self._gateway(**{**flags, "archived": False})
+                # Each holds a credential, so only what kind of gateway it is can decide.
+                self.cur.execute(
+                    "SELECT public.record_gateway_credential_issued_by_service(%s)", (gid,))
+                if flags.get("archived"):
+                    self.cur.execute(
+                        "UPDATE public.gateways SET is_archived = true WHERE id = %s", (gid,))
+                self.cur.execute("SAVEPOINT job")
+                try:
+                    self.cur.execute("SELECT public.start_playback_job(%s, %s)", (capture, gid))
+                    accepted = True
+                except psycopg2.Error:
+                    accepted = False
+                self.cur.execute("ROLLBACK TO SAVEPOINT job")
+                self.assertEqual(
+                    self._deliverable(gid), accepted,
+                    f"{kind}: delivery says {self._deliverable(gid)}, the job gate {accepted}")
+        self.assertTrue(self._deliverable(self._gateway(simulated=True, shadow=True)),
+                        "the control: a Playback gateway is delivered to")
 
     # -----------------------------------------------------------------------------------------
     # The list the credential service prunes the delivered file by
