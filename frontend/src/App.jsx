@@ -447,8 +447,6 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   /* A setting is reached by its key, not a UUID: the key is what the page, the code and every
      migration call it, and it is what a link to one should carry. */
   const showSetting = (key) => navigate(settingUrl(key))
-  /** The Metrics catalog with Unmapped on, from the export's warning toast, which it dismisses. */
-  const showUnmappedMetrics = (toastId) => { navigate(unmappedMetricsUrl()); dismissToast(toastId) }
   /** One tab of a page: a search-bar card, or the rail's quarantine signal. */
   const showSection = (tabId, section) => navigate(tabUrl(tabId, section))
   /** The opposite direction: every device provisioned with a schema. Note the `schema` key. */
@@ -506,11 +504,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   useQuarantineAlerts(showToast)
 
   // Grafana's firing alerts, via platform_alerts. Owned by App rather than a tab so an alert is
-  // visible whichever page is open.
-  // A platform-alert toast opens the pill's list and goes away.
-  const [alertsOpen, setAlertsOpen] = useState(false)
-  const openAlertsFromToast = useCallback((id) => { setAlertsOpen(true); dismissToast(id) }, [dismissToast])
-  const firingAlerts = usePlatformAlerts(showToast, openAlertsFromToast)
+  // visible whichever page is open. Each alert's toast links to its rule in Grafana.
+  const firingAlerts = usePlatformAlerts(showToast)
 
   // Whether the page is still refreshing, from every poll and Realtime channel. Read by the strip
   // under the bar and the tab title.
@@ -555,8 +550,8 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   // Computed once and used twice: the rail draws it and the search palette indexes it. Filtering
   // in both places would let the search offer a page the rail does not.
   const navTabs = TABS.filter(t => tabIsVisible(t, hasPermission, userRole))
-  // The export warning leads to Metrics only for a reader who has that page in the rail.
-  const unmappedMetricsLink = navTabs.some(t => t.id === 'metrics') ? showUnmappedMetrics : undefined
+  // The export warning links to Metrics with Unmapped on, only for a reader who has that page.
+  const unmappedMetricsTo = navTabs.some(t => t.id === 'metrics') ? unmappedMetricsUrl() : undefined
   // Where each rail entry goes: the bare page, except Devices, which opens the Quarantine tab while
   // the rail flags a waiting device.
   const railHref = (id) => (id === 'devices' && navSignals.devices ? tabUrl('devices', 'quarantine') : tabUrl(id))
@@ -612,8 +607,6 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
             alerts={firingAlerts}
             onSelectDevice={showDevice}
             onSelectGateway={showGateway}
-            open={alertsOpen}
-            onOpenChange={setAlertsOpen}
           />
 
           {/* What the toasts said, beside what is wrong now and separate from it: the pill's count
@@ -674,7 +667,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
             {tab === 'areas'          && <AreasTab showToast={showToast} onViewTrail={a => viewTrailFor(a.area_id, 'AREA')} onSelectCell={showCell} onSelectDevice={showDevice} onSelectGateway={showGateway} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} />}
             {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewTrail={c => viewTrailFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectArea={showArea} onShowOnSiteMap={showOnSiteMap} hasPermission={hasPermission} />}
             {tab === 'gateways'       && <GatewaysTab userRole={userRole} activeAlerts={firingAlerts} showToast={showToast} onViewTrail={g => viewTrailFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} />}
-            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewTrail={a => viewTrailFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} activeAlerts={firingAlerts} onShowUnmappedMetrics={unmappedMetricsLink} />}
+            {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectGateway={showGateway} onSelectCell={showCell} onSelectArea={showArea} onSelectSchema={showSchema} onViewTrail={a => viewTrailFor(a.asset_id, 'DEVICE')} onViewApprovals={showApprovalsFor} hasPermission={hasPermission} activeAlerts={firingAlerts} unmappedMetricsTo={unmappedMetricsTo} />}
             {/* Re-checked here: `tab` arrives from the URL as well as the nav, so hiding the item
                 is not the same as closing the page. */}
             {tab === 'audit-trail' && hasPermission(PERMISSION_UUIDS.AUDIT_TRAIL_READ) && (
@@ -700,7 +693,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
                 roles that can record. */}
             {tab === 'capture' && ['Administrator', 'Shopfloor_Manager', 'Auditor'].includes(userRole) &&
               <CaptureTab showToast={showToast} userRole={userRole} onSelectSchema={showSchema} />}
-            {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} onViewTrail={t => viewTrailFor(t.id, t.type, t.purged)} onShowUnmappedMetrics={unmappedMetricsLink} />}
+            {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} onViewTrail={t => viewTrailFor(t.id, t.type, t.purged)} unmappedMetricsTo={unmappedMetricsTo} />}
             {/* Re-checked because routing can put `tab` on a value the nav never offered.
                 `userRole` lets the page tell "nothing archived" from "not yours to see";
                 cold_storage_rows() gates in its body. */}

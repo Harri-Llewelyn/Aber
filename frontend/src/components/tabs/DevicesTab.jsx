@@ -113,7 +113,7 @@ const QUARANTINE_SORT = {
   discovered_at: { type: 'time', value: q => q.discovered_at },
 }
 
-export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewTrail, onViewApprovals, hasPermission, activeAlerts = [], onShowUnmappedMetrics }) {
+export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectArea, onSelectSchema, onViewTrail, onViewApprovals, hasPermission, activeAlerts = [], unmappedMetricsTo }) {
   /**
    * Which devices have an alert firing on them, via utils/deviceAlerts.js so the Site Map, Cells and
    * Gateways resolve alerts the same way.
@@ -1403,7 +1403,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
               : null}
           onClose={() => setExportFor(null)}
           showToast={showToast}
-          onShowUnmappedMetrics={onShowUnmappedMetrics}
+          unmappedMetricsTo={unmappedMetricsTo}
         />
       )}
       </div>

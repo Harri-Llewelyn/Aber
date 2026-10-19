@@ -71,10 +71,10 @@ const RETIRED_SORT = {
  * audit trail, a gateway's repository in the forge, any bundle exported while it was alive, and the
  * historian id its readings are still keyed by. The two tables share their first three columns.
  *
- * `onShowUnmappedMetrics` is handed to the export dialog, whose warning about metrics with no
- * semantic id then leads to the Metrics page. Omit it for a reader who cannot open that page.
+ * `unmappedMetricsTo` is handed to the export dialog, whose warning about metrics with no semantic
+ * id then links to the Metrics page. Omit it for a reader who cannot open that page.
  */
-export function ArchivesTab({ showToast, hasPermission, onViewTrail, onShowUnmappedMetrics }) {
+export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMetricsTo }) {
   const [archives, setArchives] = useState([])
   const [retired, setRetired]   = useState([])
   const [exports, setExports]   = useState([])
@@ -369,7 +369,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, onShowUnmap
           bundleDisabledReason={canReadTrail ? null : `The bundle carries the Audit Trail. ${requiresRolesTitle(PERMISSION_UUIDS.AUDIT_TRAIL_READ)}.`}
           onClose={() => { setExportFor(null); load() }}
           showToast={showToast}
-          onShowUnmappedMetrics={onShowUnmappedMetrics}
+          unmappedMetricsTo={unmappedMetricsTo}
         />
       )}
       {confirmPurge && (

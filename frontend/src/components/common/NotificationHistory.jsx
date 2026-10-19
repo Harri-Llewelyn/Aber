@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { IconBell, IconX } from './Icons'
-import { GROUP_ICONS, spokenPrefix, toastTone } from './Toast'
+import { GROUP_ICONS, MessageLink, isExternalDestination, spokenPrefix, toastTone } from './Toast'
+import { isPlainClick } from './RouteLink'
 import { SegmentedControl } from './SegmentedControl'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useClickOutside } from '../../hooks/useClickOutside'
-import { HISTORY_LIMIT, groupOf } from '../../hooks/useToast'
+import { HISTORY_LIMIT, groupOf, isSafeDestination } from '../../hooks/useToast'
 import { formatRelative } from '../../utils/format'
 
 /**
@@ -46,7 +47,8 @@ const TONE_WORD = { error: 'an error', warning: 'a warning' }
  * would hide entries that opening then marks read. For the same reason only the entries on show are
  * marked read while a filter is on.
  *
- * @param {Array} entries `{id, msg, type, group, at, read, count}`, newest first; see hooks/useToast.
+ * @param {Array} entries `{id, msg, type, group, to, at, read, count}`, newest first; see
+ * hooks/useToast. An entry with `to` is a link to what it is about.
  *
  * @param {Function} onMarkRead Called with the ids of the unread entries on show, as the panel
  * opens and as more arrive while it is open.
@@ -102,6 +104,12 @@ export function NotificationHistory({ entries = [], onMarkRead, onClear }) {
   // Tabbing out of the control closes it; a click outside is useClickOutside's to handle.
   const onBlur = (e) => {
     if (open && e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) setOpen(false)
+  }
+
+  // A link that leaves this page closes the list: a plain click on a path, or Grafana's new tab.
+  // Ctrl-click and a middle click open a page in a new tab and leave the list where it was.
+  const followed = (to, ev) => {
+    if (isExternalDestination(to) || isPlainClick(ev)) setOpen(false)
   }
 
   // Clear disables itself, so focus goes back to the panel rather than being dropped on the page.
@@ -197,13 +205,13 @@ export function NotificationHistory({ entries = [], onMarkRead, onClear }) {
                 const group = groupOf(e)
                 const Icon = GROUP_ICONS[group]
                 const when = new Date(e.at)
+                const text = <><span className="sr-only">{spokenPrefix(group, e.type)}</span>{e.msg}</>
                 return (
                   <li key={e.id} className={`notif-item signal-tone-${toastTone(group, e.type)}`}>
                     <span className="notif-item-icon" aria-hidden="true"><Icon size={14} /></span>
                     <div className="notif-item-body">
                       <div className="notif-item-msg">
-                        <span className="sr-only">{spokenPrefix(group, e.type)}</span>
-                        {e.msg}
+                        {isSafeDestination(e.to) ? <MessageLink to={e.to} className="notif-item-link" onFollow={(ev) => followed(e.to, ev)}>{text}</MessageLink> : text}
                       </div>
                       <div className="notif-item-meta">
                         <time dateTime={when.toISOString()} title={when.toLocaleString()}>

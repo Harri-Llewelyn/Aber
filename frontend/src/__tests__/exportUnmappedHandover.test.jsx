@@ -98,8 +98,9 @@ describe('the export warning about unmapped metrics', () => {
   it('opens the Metrics catalog with Unmapped on, and goes away', async () => {
     await exportAs('Administrator')
 
-    const toast = await screen.findByRole('button', { name: /2 metrics carried no semantic id\. Open them on the Metrics page/ })
-    expect(toast).toHaveAttribute('title', 'Open the Metrics page with the Unmapped filter on')
+    const toast = await screen.findByRole('link', { name: /2 metrics carried no semantic id\. Open them on the Metrics page/ })
+    expect(toast).toHaveAttribute('title', 'Go to Metrics')
+    expect(toast).toHaveAttribute('href', '/metrics?unmapped=1')
     fireEvent.click(toast)
 
     await waitFor(() => expect(window.location.pathname).toBe('/metrics'))
@@ -110,12 +111,12 @@ describe('the export warning about unmapped metrics', () => {
     expect(unmapped).toHaveTextContent('Unmapped (2)')
     expect(screen.getByText('safety_interlock')).toBeInTheDocument()
     expect(screen.queryByText('Axes/DISPLACEMENT')).toBeNull()
-    expect(screen.queryByRole('button', { name: /carried no semantic id/ })).toBeNull()
+    expect(screen.queryByRole('link', { name: /carried no semantic id/ })).toBeNull()
   })
 
   it('applies once: leaving the Metrics page and coming back by the navigation starts unfiltered', async () => {
     await exportAs('Administrator')
-    fireEvent.click(await screen.findByRole('button', { name: /Open them on the Metrics page/ }))
+    fireEvent.click(await screen.findByRole('link', { name: /Open them on the Metrics page/ }))
     await screen.findByRole('button', { name: /^Unmapped \(\d+\)$/ })
 
     fireEvent.click(within(screen.getByRole('navigation')).getByText('Devices'))
@@ -130,7 +131,7 @@ describe('the export warning about unmapped metrics', () => {
     'is offered to %s, because every role has the Metrics page',
     async (role) => {
       await exportAs(role)
-      expect(await screen.findByRole('button', { name: /Open them on the Metrics page/ })).toBeInTheDocument()
+      expect(await screen.findByRole('link', { name: /Open them on the Metrics page/ })).toBeInTheDocument()
     }
   )
 })
@@ -150,12 +151,12 @@ describe('the export warning for a role that cannot open the Metrics page', () =
 
     expect(await screen.findByText(/2 metrics carried no semantic id/)).toBeInTheDocument()
     expect(screen.queryByText(/Metrics page/)).toBeNull()
-    expect(screen.queryByRole('button', { name: /carried no semantic id/ })).toBeNull()
+    expect(screen.queryByRole('link', { name: /carried no semantic id/ })).toBeNull()
   })
 
   it('is still a link for a role that can open it', async () => {
     await exportAs('Administrator')
 
-    expect(await screen.findByRole('button', { name: /Open them on the Metrics page/ })).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: /Open them on the Metrics page/ })).toBeInTheDocument()
   })
 })

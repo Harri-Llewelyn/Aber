@@ -2407,19 +2407,21 @@ td.row-actions, th.row-actions {
 /* Wraps anywhere: an error can carry a long identifier with no spaces in it. */
 .toast-msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 
-/* A toast that opens something: the message is a button drawn as text, so only the cursor and the
-   focus ring say it is clickable. */
-.toast-open {
-  padding: 0;
-  border: none;
-  background: none;
+/* A message that links to what it is about (MessageLink in Toast.jsx): the toast's text and a
+   history row's. It keeps the text's colour, so the underline, the pointer and the focus ring say it
+   is a link; a link to Grafana adds the external-link icon. */
+.toast-link,
+.notif-item-link {
   color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--text-dim);
+  text-underline-offset: 3px;
 }
-.toast-open:hover { text-decoration: underline; }
-.toast-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.toast-link:hover,
+.notif-item-link:hover { text-decoration-color: currentColor; }
+.toast-link:focus-visible,
+.notif-item-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+.message-link-external { margin-left: 4px; vertical-align: -1px; color: var(--text-muted); }
 
 /* 24px, the WCAG 2.2 minimum target. Muted until pointed at, so the message leads. */
 .toast-dismiss {

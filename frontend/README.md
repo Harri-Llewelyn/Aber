@@ -837,25 +837,37 @@ corner and records the same message in the history behind the bell in the top ba
   choosing. The chosen segment takes a sunken fill (`--bg-base`) and a border, so the choice is not
   shown by colour alone (WCAG 1.4.1), and its icon takes the option's `tone`.
 - **Where it is kept.** In `sessionStorage` under `aber_notification_history`, so it survives a
-  reload and stays in that browser tab. It holds message text only, and every read and write is
-  wrapped so a blocked store degrades to memory. `App` clears it whenever the tab is left without a
+  reload and stays in that browser tab. It holds text only (the message, its group and its
+  destination), and every read and write is wrapped so a blocked store degrades to memory. `App` clears it whenever the tab is left without a
   session (Sign Out, a sign-out in another tab, a rejected stored session), so the next person to
   sign in there starts with an empty list. Nothing goes to the server: most entries never touched
   it, and an unread state that followed a user between browsers would need a per-user table with
   RLS. Supabase Queues (pgmq) does not fit that either, because a queue is single-consumer and
   cannot fan one event out to several signed-in users.
-- **A firing alert toasts its name only.** `showToast(msg, type, { detail, onOpen, openTitle })`:
-  `detail` is what the history records when it differs from the toast text, `onOpen` turns the
-  message into a button that is called with the toast's id, and `openTitle` is that button's hover
-  text. A platform alert passes its name as the text
+- **A firing alert toasts its name only.** `showToast(msg, type, { detail })`: `detail` is what the
+  history records when it differs from the toast text. A platform alert passes its name as the text
   and "name — summary" as the detail, because the summary can be several sentences with a SQL
-  statement, which stacked as tall red blocks, kept a warning up longer and was read aloud in full
-  by the `role="alert"` region. Clicking the toast opens the alert pill's list, where the summary
-  is, and dismisses the toast: `App` owns the pill's open state (`AlertPill` takes optional
-  `open` and `onOpenChange`, and keeps its own state without them). "Resolved — name" is unchanged.
-  The one other clickable toast is an AAS export's warning about metrics with no semantic id: it
-  opens the Metrics page with Unmapped on and dismisses itself. `App` passes that link only to a
-  reader who has the Metrics page. Other toasts are not clickable.
+  statement, which stacked as tall blocks, kept a warning up longer and was read aloud in full by
+  the `role="alert"` region.
+- **A message links to what it is about.** `showToast(msg, type, { to })` takes a destination as
+  text: a path from `routes.js` or a Grafana URL. It is stored with the history entry, so the toast's
+  message and the list's row are both links (`MessageLink` in `common/Toast.jsx`). A path is a
+  `RouteLink`: a plain click navigates in place, and Ctrl-click or a middle click opens a new tab.
+  Grafana opens in a new tab with the external-link icon, as the alert pill's platform-wide rows do,
+  and needs the browser to reach `VITE_GRAFANA_URL` as those rows already do. Following a toast's
+  link dismisses it; a plain click on a row's link (or any click on a Grafana one) closes the list.
+  The tooltip names the page and tab (`destinationTitle`). `isSafeDestination` checks `to` as the
+  message comes in and again as the history is read back: one leading `/` (never `//`), or the
+  configured `GRAFANA_URL` followed by `/`, `?` or `#`, and no space, control character or
+  backslash, which browsers strip or read as a slash. Anything else is dropped and the entry stays
+  plain text, so nothing stored can become a `javascript:` or off-site link. The links today: a
+  Grafana alert, firing or resolved, goes to its rule (`grafanaAlertUrl`); a device new to the
+  Quarantine queue goes to `tabUrl('devices', 'quarantine')` (the tab's address carries no search,
+  so not to the device itself); and an AAS export's warning about metrics with no semantic id goes
+  to `unmappedMetricsUrl()`, which `App` passes only to a reader who has the Metrics page. The rest
+  of the messages report something just done on the page in view, so they carry none. This replaced
+  `onOpen`/`openTitle`, a function the history could not store; a firing alert's toast used to open
+  the pill's list, and the pill no longer takes `open`/`onOpenChange` from `App`.
 - **It is not the alert pill.** The pill says what is firing now, and its count is a reason to act.
   The history says what the toasts said, resolved and routine messages included; merging the two
   would fill the pill's count with entries nobody needs to act on.

@@ -9,6 +9,7 @@ import {
   useToast, readStoredHistory, clearStoredHistory,
   HISTORY_LIMIT, HISTORY_STORAGE_KEY, MAX_VISIBLE_TOASTS
 } from '../hooks/useToast'
+import { grafanaAlertUrl } from '../constants'
 
 /**
  * The toast and the history behind it. What is pinned: each toast owns its timer, so a second one
@@ -383,7 +384,7 @@ describe('a firing platform alert', () => {
   }
   const FULL = `${row.alert_name} — ${row.summary}`
 
-  async function mountAlerts(rows, onOpenAlerts) {
+  async function mountAlerts(rows) {
     let current = []
     const { supabase } = await import('../lib/supabaseClient')
     vi.spyOn(supabase.auth, 'getSession').mockResolvedValue({ data: { session: {} } })
@@ -395,8 +396,7 @@ describe('a firing platform alert', () => {
     const { usePlatformAlerts } = await import('../hooks/usePlatformAlerts')
     function AlertsHarness() {
       hook = useToast()
-      const open = React.useCallback((id) => { onOpenAlerts?.(id); hook.dismissToast(id) }, [])
-      usePlatformAlerts(hook.showToast, open)
+      usePlatformAlerts(hook.showToast)
       return <ToastStack toasts={hook.toasts} onDismiss={hook.dismissToast} onExpire={hook.expireToast} />
     }
     render(<AlertsHarness />)
@@ -423,57 +423,29 @@ describe('a firing platform alert', () => {
     expect(screen.getByText('Spindle Overtemperature').closest('.toast')).toHaveTextContent(/^Alert: /)
   })
 
-  it('opens the alerts list on a click or Enter, and dismisses the toast', async () => {
-    const onOpen = vi.fn()
-    await mountAlerts([row], onOpen)
-    const button = screen.getByRole('button', { name: /Historian Backup Stale/ })
-    expect(button.tagName).toBe('BUTTON') // a native button answers Enter and Space with a click
-    fireEvent.click(button)
-    expect(onOpen).toHaveBeenCalledTimes(1)
+  it('links the toast to its rule in Grafana, in a new tab, and dismisses it when followed', async () => {
+    await mountAlerts([row])
+    const link = screen.getByRole('link', { name: /Historian Backup Stale/ })
+    expect(link).toHaveAttribute('href', grafanaAlertUrl('Historian Backup Stale'))
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(link).toHaveAttribute('title', 'Open in Grafana, in a new tab')
+    expect(hook.history[0].to).toBe(grafanaAlertUrl('Historian Backup Stale'))
+    fireEvent.click(link)
     expect(document.querySelector('.toast')).toBeNull()
+    expect(hook.history[0].read).toBe(true)
   })
 
-  it('does not open the list from the Dismiss button', async () => {
-    const onOpen = vi.fn()
-    await mountAlerts([row], onOpen)
+  it('dismisses from the Dismiss button without following the link', async () => {
+    await mountAlerts([row])
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
-    expect(onOpen).not.toHaveBeenCalled()
     expect(document.querySelector('.toast')).toBeNull()
   })
 
-  it('says on hover where the alert toast leads', async () => {
-    await mountAlerts([row], vi.fn())
-    expect(screen.getByRole('button', { name: /Historian Backup Stale/ })).toHaveAttribute('title', 'Show the firing alerts')
-  })
-
-  it('leaves other toasts unclickable', () => {
+  it('leaves a toast with no destination as plain text', () => {
     renderStack()
     show('Saved', 'success')
     expect(within(toastFor('Saved')).queryAllByRole('button').map(b => b.getAttribute('aria-label'))).toEqual(['Dismiss'])
-  })
-})
-
-describe('a clickable toast', () => {
-  it('carries the tooltip it was given on its message, and none otherwise', () => {
-    renderStack()
-    act(() => { hook.showToast('Exported', 'warning', { onOpen: vi.fn(), openTitle: 'Open the Metrics page' }) })
-    act(() => { hook.showToast('Elsewhere', 'warning', { onOpen: vi.fn() }) })
-
-    expect(within(toastFor('Exported')).getByRole('button', { name: /Exported/ })).toHaveAttribute('title', 'Open the Metrics page')
-    expect(within(toastFor('Elsewhere')).getByRole('button', { name: /Elsewhere/ })).not.toHaveAttribute('title')
-  })
-
-  it('calls onOpen with its id from the message, and not from Dismiss', () => {
-    renderStack()
-    const onOpen = vi.fn()
-    act(() => { hook.showToast('Exported', 'warning', { onOpen }) })
-
-    fireEvent.click(within(toastFor('Exported')).getByRole('button', { name: 'Dismiss' }))
-    expect(onOpen).not.toHaveBeenCalled()
-
-    act(() => { hook.showToast('Exported again', 'warning', { onOpen }) })
-    fireEvent.click(within(toastFor('Exported again')).getByRole('button', { name: /Exported again/ }))
-    expect(onOpen).toHaveBeenCalledTimes(1)
-    expect(onOpen).toHaveBeenCalledWith(hook.toasts[0].id)
+    expect(within(toastFor('Saved')).queryByRole('link')).toBeNull()
   })
 })
