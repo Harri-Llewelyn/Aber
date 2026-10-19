@@ -2,7 +2,7 @@ import React from 'react'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { CaptureTab } from '../components/tabs/CaptureTab'
-import { captureManifest, capturePath } from '../api'
+import { captureManifest } from '../api'
 import { tabIsVisible, TABS, groupedNav } from '../navigation'
 
 /**
@@ -244,7 +244,8 @@ describe('the playback lane', () => {
     await screen.findByText('Line 1 Gateway')
     const doc = {
       aber_capture_version: 1,
-      messages: [{ topic: 'spBv1.0/G/NDATA/gwy120000000000400080000', payload: {} }],
+      capture_epoch_ms: 1700000000000,
+      messages: [{ topic: 'spBv1.0/G/NDATA/gwy120000000000400080000', offset_ms: 0, payload: {} }],
       identities: { edge_nodes: ['gwy120000000000400080000'], devices: [] }
     }
     dropOnCard(new File([JSON.stringify(doc)], 'edited.json', { type: 'application/json' }))
@@ -1398,7 +1399,8 @@ describe('the details panel', () => {
 describe('playing a file', () => {
   const EDITED = {
     aber_capture_version: 1,
-    messages: [{ topic: 'spBv1.0/G/NDATA/gwy120000000000400080000', payload: {} }],
+    capture_epoch_ms: 1700000000000,
+    messages: [{ topic: 'spBv1.0/G/NDATA/gwy120000000000400080000', offset_ms: 0, payload: {} }],
     identities: { edge_nodes: ['gwy120000000000400080000'], devices: [] }
   }
   const editedFile = () => new File([JSON.stringify(EDITED)], 'edited.json', { type: 'application/json' })
@@ -1498,7 +1500,8 @@ describe('playing a file', () => {
     await screen.findByText('Line 1 Gateway')
     const doc = {
       aber_capture_version: 1,
-      messages: [{ topic: 'spBv1.0/G/NDATA/gwy999999999999999999999', payload: {} }],
+      capture_epoch_ms: 1700000000000,
+      messages: [{ topic: 'spBv1.0/G/NDATA/gwy999999999999999999999', offset_ms: 0, payload: {} }],
       identities: { edge_nodes: ['gwy999999999999999999999'], devices: [] }
     }
     dropOnCard(new File([JSON.stringify(doc)], 'foreign.json', { type: 'application/json' }))
@@ -1585,19 +1588,6 @@ describe('the gateway filter', () => {
     expect(screen.queryByText('Other Device')).not.toBeInTheDocument()
   })
 })
-
-// =============================================================================================
-describe('the storage path', () => {
-  /**
-   * Deterministic: a timestamped path would leave the previous file behind on every re-record, and
-   * the gate derives this same string, so a path composed differently is refused by RLS.
-   */
-  it('is one file per subject, derived from the subject alone', () => {
-    expect(capturePath('gwy120000000000400080000')).toBe('gwy120000000000400080000/capture.json')
-    expect(capturePath('dev270000000000400080000')).toBe('dev270000000000400080000/capture.json')
-  })
-})
-
 
 // =============================================================================================
 /**

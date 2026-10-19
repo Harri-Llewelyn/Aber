@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { captureManifest, CAPTURE_VERSION } from '../../api'
+import { captureManifest, captureFileProblem } from '../../api'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
@@ -9,10 +9,15 @@ import { plural } from '../../utils/format'
 /**
  * Take a capture file and file it against a subject. A capture is stored per subject, so the dialog
  * asks which one; that also makes a page-level drop zone possible. It validates the file before
- * asking, though `uploadCapture()` checks again on the way out since it is reachable from
- * elsewhere. The replace warning guards the same decision StartCaptureModal does.
+ * asking with the rules playback applies (`captureFileProblem`), though `uploadCapture()` checks
+ * again on the way out since it is reachable from elsewhere. The replace warning guards the same
+ * decision StartCaptureModal does, and the server makes it again before anything is written.
+ *
+ * `forPlayback` is the "Play a file…" path: the file is stored to be played back at once, so a
+ * file naming a device this site does not have (`knownDeviceIds`) is refused here, before it can
+ * replace a stored capture with one that cannot play.
  */
-export function UploadCaptureModal({ file, subjects, presetSubject, onConfirm, onCancel }) {
+export function UploadCaptureModal({ file, subjects, presetSubject, forPlayback = false, knownDeviceIds = null, onConfirm, onCancel }) {
   const [subjectKey, setSubjectKey] = useState(
     presetSubject ? `${presetSubject.kind}:${presetSubject.id}` : ''
   )
@@ -27,20 +32,8 @@ export function UploadCaptureModal({ file, subjects, presetSubject, onConfirm, o
     file.text()
       .then(text => {
         const doc = JSON.parse(text)
-        const version = doc?.aber_capture_version
-        if (version === undefined) {
-          throw new Error('That file carries no aber_capture_version, so it is not a broker capture.')
-        }
-        if (version !== CAPTURE_VERSION) {
-          throw new Error(
-            `That capture is version ${version} and this stack reads version ` +
-            `${CAPTURE_VERSION}. capture.py refuses a version it does not know rather than ` +
-            'guessing at the difference.'
-          )
-        }
-        if (!Array.isArray(doc.messages) || doc.messages.length === 0) {
-          throw new Error('That capture contains no messages, so there would be nothing to play back.')
-        }
+        const problem = captureFileProblem(doc)
+        if (problem) throw new Error(problem)
         if (!cancelled) setParsed(doc)
       })
       .catch(err => {
@@ -57,12 +50,16 @@ export function UploadCaptureModal({ file, subjects, presetSubject, onConfirm, o
 
   const subject = subjects.find(s => `${s.kind}:${s.id}` === subjectKey) || null
   const manifest = parsed ? captureManifest(parsed) : null
-  const ready = !!parsed && !!subject
+  // A replay lane stands in for a device that exists here; one with no original cannot be made.
+  const unknownDevices = forPlayback && manifest && knownDeviceIds
+    ? manifest.device_ids.filter(id => !knownDeviceIds.has(id))
+    : []
+  const ready = !!parsed && !!subject && unknownDevices.length === 0
 
   const submit = () => run(async () => {
     setError(null)
     try {
-      await onConfirm({ subject, replace: !!subject.capture })
+      await onConfirm({ subject, replace: !!subject.capture, expectedCaptureId: subject.capture?.id || null })
     } catch (err) {
       setError(err.message)
     }
@@ -83,7 +80,11 @@ export function UploadCaptureModal({ file, subjects, presetSubject, onConfirm, o
             pending={pending}
             pendingLabel="Uploading…"
             disabled={!ready}
-            title={ready ? undefined : (readError ? 'This file is not a capture' : 'Choose a subject')}
+            title={ready ? undefined : (
+              readError ? 'This file is not a capture'
+                : unknownDevices.length > 0 ? 'This file records devices this site does not have'
+                  : 'Choose a subject'
+            )}
             onClick={submit}
           >
             {subject?.capture ? 'Replace and upload' : 'Upload'}
@@ -112,6 +113,26 @@ export function UploadCaptureModal({ file, subjects, presetSubject, onConfirm, o
         </p>
       )}
 
+      {forPlayback && parsed && unknownDevices.length === 0 && (
+        <p className="form-hint">
+          Every device the file recorded must exist on this site. A playback stands each one in
+          with a replay lane of that device.
+        </p>
+      )}
+
+      {unknownDevices.length > 0 && (
+        <div className="callout callout-danger">
+          <IconShieldAlert size={14} className="callout-icon" />
+          <div>
+            This file records {plural(unknownDevices.length, 'device')} this site does not have:{' '}
+            <span className="mono">{unknownDevices.join(', ')}</span>. It cannot be played back
+            here. A playback stands each recorded device in with a replay lane of the same device on
+            this site, so a capture from another site has nothing to stand in for. Nothing has been
+            stored.
+          </div>
+        </div>
+      )}
+
       {/* Only when the capture actually depends on the alias table -- see StartPlaybackModal. */}
       {parsed && manifest && !manifest.birth_captured && manifest.uses_aliases && (
         <div className="callout callout-warning">
@@ -124,7 +145,7 @@ export function UploadCaptureModal({ file, subjects, presetSubject, onConfirm, o
         </div>
       )}
 
-      {parsed && (
+      {parsed && unknownDevices.length === 0 && (
         <div className="form-group">
           <label className="form-label" htmlFor="upload-subject">File it against</label>
           <select
@@ -151,8 +172,8 @@ export function UploadCaptureModal({ file, subjects, presetSubject, onConfirm, o
             </optgroup>
           </select>
           <p className="form-hint">
-            A capture is stored per subject, and the file is filed under that subject's own
-            prefix — which is what the storage policy checks.
+            A capture is stored per subject, under that subject&apos;s own prefix. A subject being
+            recorded cannot take an upload until the recording ends.
           </p>
         </div>
       )}

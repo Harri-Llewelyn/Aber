@@ -28,7 +28,7 @@ const SPEEDS = [
  * captured ids come from the manifest; a capture recorded before the manifest carried them falls
  * back to reading the file.
  */
-export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
+export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, onCancel }) {
   const [targets, setTargets] = useState(null)
   const [worker, setWorker] = useState(undefined)   // undefined = not loaded, null = never reported
   // sparkplug_ids whose credential was re-issued after the worker last picked one up (#217).
@@ -106,6 +106,9 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
   const workerHoldsCurrent = (t) => workerHolds(t) && !stale.includes(t.sparkplug_id)
 
   const unmapped = (capturedDevices || []).filter(d => !deviceMap[d])
+  // A lane stands in for a device this site has; one recorded elsewhere has none to stand in for,
+  // and ensure_shadow_devices() refuses the whole capture.
+  const unknown = knownDeviceIds ? (capturedDevices || []).filter(d => !knownDeviceIds.has(d)) : []
 
   // playback.enabled off: no worker exists to run a job, so none is queued.
   const deployed = playbackWorkerDeployed()
@@ -344,7 +347,18 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
           </p>
           {/* The button writes: it creates one replay lane per captured device and returns the map
               the playback job needs. Reused on the next run. */}
-          {unmapped.length > 0 && (
+          {unknown.length > 0 && (
+            <div className="callout callout-danger">
+              <IconShieldAlert size={14} className="callout-icon" />
+              <div>
+                This capture records {plural(unknown.length, 'device')} this site does not have:{' '}
+                <span className="mono">{unknown.join(', ')}</span>. Every recorded device must exist
+                here to be played back, so this capture cannot be. It was recorded on another site,
+                or the device has since been deleted.
+              </div>
+            </div>
+          )}
+          {unmapped.length > 0 && unknown.length === 0 && (
             <div className="form-group">
               <ActionButton
                 className="btn btn-ghost btn-sm"

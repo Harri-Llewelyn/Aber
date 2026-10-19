@@ -305,6 +305,12 @@ row and all, so the two read alike.
 `supabase-realtime` publishes `cells`, `gateways`, `devices`, `areas`, `platform_alerts`,
 `capture_jobs` and `playback_jobs`, and deliberately not `audit_trail`. Tabs subscribe through `hooks/useRealtimeTable.js`.
 
+- **`captures` is not published either.** Realtime tells a subscriber that a published table
+  changed even when RLS hides the row ([`docs/security-model.md`](../docs/security-model.md)), and
+  an Operator may not read captures. The Capture page re-reads its list on every capture job change
+  and whenever the upload dialog opens, and `begin_capture_upload()` decides any replace on the
+  server, so a page that has not caught up cannot replace a capture it never showed.
+
 - **`telemetry` is unpublishable, not merely unpublished.** It is a `postgres_fdw` foreign table
   whose rows enter TimescaleDB's WAL, never Supabase's. Adding it to the publication does not
   error — it silently emits nothing, which is the worse failure. **Do not "fix" the telemetry

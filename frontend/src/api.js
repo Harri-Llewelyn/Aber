@@ -394,16 +394,97 @@ function filenameFromDisposition(header) {
   return match ? match[1] : null;
 }
 
+/** The payload encodings a capture file may name, as ingestion/capture.py reads them. */
+export const CAPTURE_ENCODINGS = ['protobuf', 'json'];
+
+/** The six message types an edge node publishes; the D types carry a device segment. */
+const EDGE_NODE_TYPES = ['NBIRTH', 'NDEATH', 'NDATA', 'DBIRTH', 'DDEATH', 'DDATA'];
+
+/** The latest a message may come after the first one: 24 hours. */
+const MAX_OFFSET_MS = 86400000;
+
+const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+
 /**
- * `<sparkplug_id>/capture.json`: one path per subject, derived rather than composed.
+ * What is wrong with a parsed capture file, or null when nothing is.
  *
- * The schema stores exactly one capture per subject, so a re-record overwrites this key and no
- * orphan is left, and the path satisfies the bucket's prefix policy by construction. A label
- * goes in `captures.note`, where a slash is just a character. `sparkplugId` is the subject's
- * (`gwy…` or `dev…`), not the gateway a capture plays back as.
+ * The rule set `plan_playback()` in ingestion/capture.py applies again before a playback, stated
+ * once for both: the document's version, epoch and messages; each message's shape and offset; and
+ * a topic an edge node publishes. A message is named by its 0-based index. Whether the file holds
+ * a birth certificate is not a rule here: a birthless file stores, and playback refuses it.
  */
-export function capturePath(sparkplugId) {
-  return `${sparkplugId}/capture.json`;
+export function captureFileProblem(doc) {
+  if (Array.isArray(doc)) return 'That looks like a Node-RED flow export, not a capture.';
+  if (!isObject(doc)) return 'A capture is a JSON object. This file is not one.';
+  const version = doc.aber_capture_version;
+  if (version === undefined) {
+    return 'That file carries no aber_capture_version, so it is not a broker capture.';
+  }
+  if (version !== CAPTURE_VERSION) {
+    return `That capture is version ${version} and this stack reads version ${CAPTURE_VERSION}. ` +
+      'capture.py refuses a version it does not know rather than guessing at the difference.';
+  }
+  if (typeof doc.capture_epoch_ms !== 'number' || !Number.isFinite(doc.capture_epoch_ms)) {
+    return 'capture_epoch_ms is not a number, so the messages cannot be placed in time.';
+  }
+  if (!Array.isArray(doc.messages) || doc.messages.length === 0) {
+    return 'That capture contains no messages, so there would be nothing to play back.';
+  }
+  let previous = 0;
+  for (let i = 0; i < doc.messages.length; i += 1) {
+    const problem = messageProblem(doc.messages[i], previous);
+    if (problem) return `message ${i}: ${problem}`;
+    previous = doc.messages[i].offset_ms;
+  }
+  return null;
+}
+
+function messageProblem(message, previous) {
+  if (!isObject(message)) return 'is not an object';
+  if (typeof message.topic !== 'string') return 'has no topic';
+  if (!isObject(message.payload)) return 'has no payload object';
+  const offset = message.offset_ms;
+  if (!Number.isInteger(offset)) return 'offset_ms is not a whole number';
+  if (offset < 0) return 'offset_ms is negative';
+  if (offset < previous) return `offset_ms ${offset} is earlier than the message before it (${previous})`;
+  if (offset > MAX_OFFSET_MS) return 'offset_ms is more than 24 hours after the first message';
+  const metrics = message.payload.metrics;
+  if (metrics !== undefined && (!Array.isArray(metrics) || !metrics.every(isObject))) {
+    return 'payload.metrics is not a list of metrics';
+  }
+  if (message.encoding !== undefined && !CAPTURE_ENCODINGS.includes(message.encoding)) {
+    return `encoding ${JSON.stringify(message.encoding)} is not one this stack reads`;
+  }
+  return topicProblem(message.topic);
+}
+
+function topicProblem(topic) {
+  const parts = topic.split('/');
+  if (parts[0] !== 'spBv1.0' || parts.length < 4 || parts.length > 5) {
+    return `topic ${JSON.stringify(topic)} is not spBv1.0/<group>/<type>/<edge node>[/<device>]`;
+  }
+  // A '/' inside a segment has already split it, so a segment is checked for the other three.
+  const bad = parts.slice(1).find(s => s === '' || /[+#\0]/.test(s));
+  if (bad !== undefined) {
+    return `topic ${JSON.stringify(topic)} has an empty segment or one holding +, # or NUL`;
+  }
+  const type = parts[2];
+  if (!EDGE_NODE_TYPES.includes(type)) {
+    return `message type ${JSON.stringify(type)} is not one an edge node publishes`;
+  }
+  const device = type.startsWith('D');
+  if (device && parts.length !== 5) return `a ${type} topic needs a device segment`;
+  if (!device && parts.length !== 4) return `an ${type} topic takes no device segment`;
+  return null;
+}
+
+/**
+ * False for Sparkplug plumbing (bdSeq, Node Control/*, Device Control/*) and the identity metrics,
+ * which are not the machine's. capture_worker.is_machine_metric() states the same rule.
+ */
+export function isMachineMetric(name) {
+  return !(name === 'bdSeq' || name.startsWith('Node Control/') || name.startsWith('Device Control/')
+    || ['Asset_ID', 'Asset_Name', 'Instance_UUID', 'Schema_UUID'].includes(name));
 }
 
 /**
@@ -444,12 +525,13 @@ export function captureManifest(parsed) {
       if (!metric?.name && metric?.alias !== undefined && metric?.alias !== null) usesAliases = true;
       if (metric?.name && !seen.has(metric.name)) {
         seen.add(metric.name);
-        names.push(metric.name);
+        if (isMachineMetric(metric.name)) names.push(metric.name);
       }
     }
   }
 
   const durationMs = Number(parsed?.duration_ms) || 0;
+  const lastOffset = Number(messages[messages.length - 1]?.offset_ms) || 0;
   return {
     metric_names: names,
     topic_count: topics.size,
@@ -462,7 +544,9 @@ export function captureManifest(parsed) {
     rebirth_requested: null,
     edge_node_ids: edgeNodes,
     device_ids: devices,
-    uses_aliases: usesAliases
+    uses_aliases: usesAliases,
+    // How long the file spans. No stop reason: this stack did not make the recording.
+    duration_ms: lastOffset
   };
 }
 
@@ -1426,9 +1510,10 @@ const apiMethods = {
   },
 
   /**
-   * Ask a running capture to finish now. A column on the other side: the daemon observes
-   * `stop_requested` on its next message. Returns false when the job had already finished, which
-   * is not an error.
+   * Ask a running capture to finish now. A column on the other side: the daemon reads
+   * `stop_requested` on its next one-second progress tick, and a recording it has not reported on
+   * for two minutes is ended at once, with nothing stored. Returns false when the job had already
+   * finished, which is not an error.
    */
   stopCapture: async (jobId) => {
     const { data, error } = await supabase.rpc('request_capture_stop', { p_job_id: jobId });
@@ -1437,14 +1522,17 @@ const apiMethods = {
   },
 
   /**
-   * Upload a capture recorded elsewhere.
+   * Upload a capture recorded elsewhere, as the subject's capture.
    *
-   * Validated as a capture before it is sent, since the bucket's MIME check is close to none and
-   * a bad file would otherwise be discovered at playback. The object goes up first and the row is
-   * written second: the path is deterministic, so a stray object is overwritten by the next
-   * upload. The manifest is built here because the file is already parsed.
+   * Validated before anything is sent (`captureFileProblem`). Then three steps, and a failure at
+   * any of them leaves the stored capture whole: `begin_capture_upload()` decides on the server
+   * whether this may replace the stored capture and issues a path of the upload's own; the file
+   * goes to that path; `register_uploaded_capture()` repoints the row. Only then is the replaced
+   * file deleted. `expectedCaptureId` is the capture the page showed the operator, so a capture
+   * stored since is not replaced unseen. A file left by a refused register is deleted here, and
+   * the ingestion daemon's sweep deletes any this misses.
    */
-  uploadCapture: async ({ subjectKind, subjectId, sparkplugId, file, note, replace = false }) => {
+  uploadCapture: async ({ subjectKind, subjectId, file, note, replace = false, expectedCaptureId = null }) => {
     const text = await file.text();
     let parsed;
     try {
@@ -1452,36 +1540,26 @@ const apiMethods = {
     } catch {
       throw new Error(`"${file.name}" is not valid JSON. Record one with: python ingestion/capture.py record --out <file>`);
     }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('A capture is a JSON object. This file is not one.');
-    }
-    const version = parsed.aber_capture_version;
-    if (version === undefined) {
-      // The likeliest wrong file in this dialog by a distance, since both are JSON and both are
-      // things an engineer downloads from this same application.
-      if (Array.isArray(parsed)) {
-        throw new Error('That looks like a Node-RED flow export, not a capture.');
-      }
-      throw new Error('That file carries no aber_capture_version, so it is not a broker capture.');
-    }
-    if (version !== CAPTURE_VERSION) {
-      throw new Error(
-        `That capture is version ${version} and this stack reads version ${CAPTURE_VERSION}. ` +
-        'capture.py refuses a version it does not know rather than guessing at the difference.'
-      );
-    }
-    if (!Array.isArray(parsed.messages) || parsed.messages.length === 0) {
-      throw new Error('That capture contains no messages, so there would be nothing to play back.');
-    }
+    const problem = captureFileProblem(parsed);
+    if (problem) throw new Error(problem);
 
-    const path = capturePath(sparkplugId);
+    const { data: issued, error: beginError } = await supabase.rpc('begin_capture_upload', {
+      p_subject_kind: subjectKind,
+      p_subject_id: subjectId,
+      p_replace: replace,
+      p_expected_capture_id: expectedCaptureId
+    });
+    if (beginError) {
+      if (/insufficient_privilege|requires Administrator/i.test(beginError.message || '')) {
+        throw new Error('Uploading a capture requires Administrator or Shopfloor Manager.');
+      }
+      throw new Error(beginError.message || 'Could not begin the upload');
+    }
+    const path = issued.storage_path;
+
     const { error } = await supabase.storage
       .from(CAPTURE_BUCKET)
-      // upsert TRUE, where this used to be false. The path no longer carries a timestamp, so the
-      // one capture a subject holds lives at one key and replacing it IS an overwrite. The
-      // confirmation that authorises it happens before this call, not here.
-      .upload(path, file, { upsert: true, contentType: 'application/json' });
-
+      .upload(path, file, { upsert: false, contentType: 'application/json' });
     if (error) {
       if (/row-level security|Unauthorized/i.test(error.message || '')) {
         throw new Error('You do not have permission to upload a capture for this subject.');
@@ -1497,17 +1575,24 @@ const apiMethods = {
       p_subject_kind: subjectKind,
       p_subject_id: subjectId,
       p_storage_path: path,
+      // Not used: the database records the object's own size.
       p_size_bytes: file.size,
       p_message_count: parsed.messages.length,
       p_manifest: manifest,
       p_note: note || null,
       p_replace: replace
     });
-    if (rpcError) throw new Error(rpcError.message || 'The file uploaded but could not be recorded');
+    if (rpcError) {
+      // Nothing names the file now. A failure here is the sweep's to finish.
+      await supabase.storage.from(CAPTURE_BUCKET).remove([path]).catch(() => {});
+      throw new Error(rpcError.message || 'The file uploaded but could not be recorded');
+    }
+    if (issued.replaces_storage_path && issued.replaces_storage_path !== path) {
+      await supabase.storage.from(CAPTURE_BUCKET).remove([issued.replaces_storage_path]).catch(() => {});
+    }
 
-    // THE MANIFEST COMES BACK, so a caller that goes straight on to publish this capture has the
-    // device ids it needs to build a mapping. The alternative is re-reading the list and hunting
-    // for the row that just appeared, which races the refresh that put it there.
+    // The manifest comes back, so a caller that goes straight on to publish this capture has the
+    // device ids it needs to build a mapping.
     return { id: captureId, path, messages: parsed.messages.length, manifest };
   },
 
@@ -1674,8 +1759,9 @@ const apiMethods = {
   },
 
   /**
-   * Remove a capture: the row and the object. The row goes first, the opposite of upload: a failed
-   * object delete leaves unreferenced bytes that the next capture of that subject overwrites.
+   * Remove a capture: the row and the object. The row goes first: the bucket lets nobody delete a
+   * file a row still names, and a failed object delete leaves a file the ingestion daemon's sweep
+   * deletes.
    */
   deleteCapture: async (capture) => {
     const { error } = await supabase.from('captures').delete().eq('id', capture.id);
@@ -1690,7 +1776,7 @@ const apiMethods = {
     if (objectError) {
       throw new Error(
         `The capture was removed from the list, but its file could not be deleted: ` +
-        `${objectError.message}. It will be overwritten by the next capture of this subject.`
+        `${objectError.message}. The ingestion daemon deletes it within the hour.`
       );
     }
   },
