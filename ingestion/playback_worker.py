@@ -419,7 +419,7 @@ def _connect_accepted(edge_node, password, will_topic, bdseq, ncmd_topic, state_
 
 
 def _open_session(edge_node, password, will_topic, bdseq, *, primary_host_id=None, tick=None,
-                  source=None, fallbacks=()):
+                  source=None, fallbacks=(), confirm_subscription=False):
     """
     One Sparkplug session as the target gateway, ready for its NBIRTH. Returns (client, None), or
     (None, the reason the job fails).
@@ -428,8 +428,10 @@ def _open_session(edge_node, password, will_topic, bdseq, *, primary_host_id=Non
     the password moves on to the next of `fallbacks`, [(source, password), ...], with the next
     bdSeq; `client.aber` records the bdSeq and the source accepted. Subscribe at QoS 1 to the node's
     own NCMD topic (tck-id-message-flow-edge-node-ncmd-subscribe) and, when a primary host is
-    configured, to its STATE topic, and wait for the SUBACK. Then wait for that host to say it is
-    online (tck-id-message-flow-edge-node-birth-publish-phid-wait, -online).
+    configured, to its STATE topic; with `confirm_subscription`, wait for the SUBACK and fail on a
+    refusal. Then wait for that host to say it is online (tck-id-message-flow-edge-node-birth-
+    publish-phid-wait, -online). The broker handles the SUBSCRIBE before the NBIRTH that follows it
+    either way; a one-shot caller such as `capture.py play` need not wait.
 
     `primary_host_id` None means the PRIMARY_HOST_ID environment variable; "" means no wait. `tick`
     is called while waiting and may raise to abandon the session, which is then closed.
@@ -462,12 +464,12 @@ def _open_session(edge_node, password, will_topic, bdseq, *, primary_host_id=Non
         topics = [(ncmd_topic, 1)] + ([(state_topic, 1)] if state_topic else [])
         result, mid = client.subscribe(topics)
         names = " and ".join(t for t, _ in topics)
-        if result != mqtt.MQTT_ERR_SUCCESS or not _await(lambda: mid in client.aber.subacks,
-                                                          CONNACK_TIMEOUT_SECONDS):
+        if result != mqtt.MQTT_ERR_SUCCESS or (confirm_subscription and not _await(
+                lambda: mid in client.aber.subacks, CONNACK_TIMEOUT_SECONDS)):
             _close_unborn(client)
             return None, ("the broker did not acknowledge this worker's subscription to %s within "
                           "%ss" % (names, CONNACK_TIMEOUT_SECONDS))
-        if any(granted >= 0x80 for granted in client.aber.subacks[mid]):
+        if any(granted >= 0x80 for granted in client.aber.subacks.get(mid, ())):
             _close_unborn(client)
             return None, ("the broker refused this worker's subscription to %s as %s, so it could "
                           "not hear a rebirth request or the primary host. The gateway role grants "
@@ -807,7 +809,8 @@ def _run_job(supabase, storage, credentials, job, outcome=None):
         fallbacks = () if "accepted" in outcome else candidates[1:]
         client, failure = _open_session(edge_node, password, will_topic, bdseq,
                                         primary_host_id=host, tick=progress.report,
-                                        source=source, fallbacks=fallbacks)
+                                        source=source, fallbacks=fallbacks,
+                                        confirm_subscription=True)
         if failure:
             raise _JobFailed(failure if not progress.sent else
                              "publishing stopped after %d message(s): %s" % (progress.sent, failure))
@@ -821,6 +824,7 @@ def _run_job(supabase, storage, credentials, job, outcome=None):
     try:
         session = open_session()
         if session.client.aber.bdseq != bdseq:
+            # A refused password spent a bdSeq. The first plan is let go before the second is built.
             bdseq = session.client.aber.bdseq
             plan = None
             plan = make_plan(bdseq)

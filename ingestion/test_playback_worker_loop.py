@@ -119,6 +119,7 @@ class FakeBroker:
         self.refuse_publish_from = None   # the 1-based publish from which paho answers NO_CONN
         self.retained = {}                # topic -> payload, delivered on subscribe
         self.refuse_subscribe = False
+        self.silent_suback = False        # never answer a SUBSCRIBE
         self.accepts = None               # the passwords the broker accepts; None accepts any
         self.refusal = 5                  # the CONNACK rc for any other
 
@@ -163,7 +164,8 @@ class FakeClient:
     def subscribe(self, topics):
         self.events.append(("subscribe", tuple(topics)))
         granted = tuple(0x80 if FakeClient.broker.refuse_subscribe else qos for _, qos in topics)
-        self.on_subscribe(self, None, 7, granted)
+        if not FakeClient.broker.silent_suback:
+            self.on_subscribe(self, None, 7, granted)
         for topic, _ in topics:
             if topic in FakeClient.broker.retained:
                 self.deliver(topic, FakeClient.broker.retained[topic])
@@ -634,6 +636,26 @@ class RebirthTests(WorkerLoopCase):
         self.assertEqual(bdseq_in(client.will[1]), 5)
         playback_worker._end_session(client, client.will[0], client.will[1])
         self.assertEqual(client.events[-1], "disconnect")
+
+
+class SubackTests(ClockedCase):
+    def test_a_one_shot_caller_does_not_wait_for_the_suback(self):
+        """capture.py play's positional call: subscribed, and on to the NBIRTH at once."""
+        self.broker.silent_suback = True
+        start = self.clock.now
+        client, error = playback_worker._open_session(
+            GW, "a-password", "spBv1.0/%s/NDEATH/%s" % (GROUP, GW), 0)
+        self.assertIsNone(error)
+        self.assertEqual(client.subscriptions(), [((NCMD, 1),)])
+        self.assertEqual(self.clock.now, start)
+
+    def test_the_worker_waits_for_the_suback_and_fails_without_one(self):
+        self.broker.silent_suback = True
+        sent, _, error = self.run_job(a_session())
+        self.assertEqual(sent, 0)
+        self.assertIn("did not acknowledge this worker's subscription to %s" % NCMD, error)
+        client, = self.broker.clients
+        self.assertEqual(client.published_types(), [])
 
 
 class LongGapRebirthTests(ClockedCase):

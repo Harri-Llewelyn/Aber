@@ -258,9 +258,8 @@ def recorded_flow_hash(metric):
 
 def build_capture(recorded_gateway, recorded_device, metric, epoch_ms):
     """
-    A five-message capture: the node's birth and the device's, one node heartbeat carrying the
-    recorded appliance's health and an outage report, then two readings. A replay is a Sparkplug
-    session, so it opens with the NBIRTH, as a recording from the page does.
+    A four-message capture: the device's birth, one node heartbeat carrying the recorded
+    appliance's health and an outage report, then two readings.
 
     THE HEARTBEAT IS THE RECORDED APPLIANCE'S, not the Playback gateway's: the replay republishes
     it as the Playback gateway, and the daemon must record none of it for that gateway.
@@ -299,12 +298,6 @@ def build_capture(recorded_gateway, recorded_device, metric, epoch_ms):
         {"name": "Outage/Buffering", "datatype": 11, "boolean_value": True},
     ]
     messages = [
-        {"offset_ms": 0, "encoding": "json",
-         "topic": f"spBv1.0/Aber/NBIRTH/{recorded_gateway}",
-         "payload": {"timestamp": epoch_ms, "seq": 0, "metrics": [
-             {"name": "bdSeq", "datatype": 4, "long_value": 0, "timestamp": epoch_ms},
-             {"name": "Node Control/Rebirth", "datatype": 11, "boolean_value": False,
-              "timestamp": epoch_ms}]}},
         {"offset_ms": 0, "encoding": "json",
          "topic": f"spBv1.0/Aber/DBIRTH/{recorded_gateway}/{recorded_device}",
          "payload": payload(0, 1.0, True)},
