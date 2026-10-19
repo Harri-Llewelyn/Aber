@@ -1571,15 +1571,14 @@ const apiMethods = {
   },
 
   /**
-   * What the playback worker can actually publish as, and when it last said so.
-   *
-   * The one fact the database cannot derive: the password is minted in a browser and pasted into
-   * the worker's environment by hand. Null when nothing has ever reported, treated as stale.
+   * What the playback worker can actually publish as, which password source it uses for each
+   * gateway, and when it last said so. Only the worker knows whether a delivery reached it. Null
+   * when nothing has ever reported, treated as stale.
    */
   playbackWorkerStatus: async () => {
     const { data, error } = await supabase
       .from('playback_worker_status')
-      .select('held_edge_nodes, reported_at')
+      .select('held_edge_nodes, reported_at, credential_sources')
       .maybeSingle();
     if (error) throw new Error(error.message || 'Could not read the playback worker status');
     return data || null;

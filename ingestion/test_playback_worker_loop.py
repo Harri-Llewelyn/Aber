@@ -119,6 +119,8 @@ class FakeBroker:
         self.refuse_publish_from = None   # the 1-based publish from which paho answers NO_CONN
         self.retained = {}                # topic -> payload, delivered on subscribe
         self.refuse_subscribe = False
+        self.accepts = None               # the passwords the broker accepts; None accepts any
+        self.refusal = 5                  # the CONNACK rc for any other
 
 
 class FakeClient:
@@ -147,8 +149,10 @@ class FakeClient:
 
     def connect(self, host, port, keepalive):
         self.events.append("connect")
-        self.connected = True
-        self.on_connect(self, None, {}, 0)
+        accepts = FakeClient.broker.accepts
+        rc = 0 if accepts is None or self.password in accepts else FakeClient.broker.refusal
+        self.connected = rc == 0
+        self.on_connect(self, None, {}, rc)
 
     def loop_start(self):
         self.events.append("loop_start")
@@ -342,7 +346,7 @@ class LongGapTests(ClockedCase):
         sent, _, error = playback_worker._run_job(
             supabase, FakeStorage(capture_file(with_a_long_gap())), {GW: "a-password"},
             self.job(speed=1.0), outcome=outcome)
-        self.assertEqual((sent, error, outcome), (3, None, {"stopped": True}))
+        self.assertEqual((sent, error, outcome.get("stopped")), (3, None, True))
         self.assertLessEqual(self.clock.now - stop_at, 1.0)
         client, = self.broker.clients
         self.assertNotIn("DDATA", client.published_types()[3:], "the reading after the gap went out")
@@ -383,10 +387,10 @@ class MainLoopTests(ClockedCase):
         super().setUp()
         self._saved_main = (playback_worker._supabase, playback_worker._storage,
                             playback_worker._start_heartbeat, playback_worker._run_job,
-                            playback_worker._credentials, playback_worker.SUPABASE_PLAYBACK_KEY)
+                            playback_worker._credential_sources, playback_worker.SUPABASE_PLAYBACK_KEY)
         playback_worker._storage = lambda: None
         playback_worker._start_heartbeat = lambda holdings: self.heartbeats.append(holdings)
-        playback_worker._credentials = lambda: {GW: "a-password"}
+        playback_worker._credential_sources = lambda: {GW: [("delivered", "a-password")]}
         playback_worker.SUPABASE_PLAYBACK_KEY = "a-key"
         self.heartbeats = []
         self.ran = []
@@ -398,7 +402,7 @@ class MainLoopTests(ClockedCase):
 
     def tearDown(self):
         (playback_worker._supabase, playback_worker._storage, playback_worker._start_heartbeat,
-         playback_worker._run_job, playback_worker._credentials,
+         playback_worker._run_job, playback_worker._credential_sources,
          playback_worker.SUPABASE_PLAYBACK_KEY) = self._saved_main
         super().tearDown()
 
@@ -465,12 +469,13 @@ class HeartbeatTests(unittest.TestCase):
     """The timer thread, which reports whether or not a job is running."""
 
     def setUp(self):
-        self._saved = (playback_worker._credentials, playback_worker.CREDENTIAL_REPORT_INTERVAL_SECONDS)
-        playback_worker._credentials = lambda: {GW: "a-password"}
+        self._saved = (playback_worker._credential_sources,
+                       playback_worker.CREDENTIAL_REPORT_INTERVAL_SECONDS)
+        playback_worker._credential_sources = lambda: {GW: [("delivered", "a-password")]}
         playback_worker.CREDENTIAL_REPORT_INTERVAL_SECONDS = 0.01
 
     def tearDown(self):
-        playback_worker._credentials, playback_worker.CREDENTIAL_REPORT_INTERVAL_SECONDS = self._saved
+        playback_worker._credential_sources, playback_worker.CREDENTIAL_REPORT_INTERVAL_SECONDS = self._saved
 
     def test_it_keeps_reporting_on_its_own_thread_and_survives_a_failed_report(self):
         import threading
@@ -502,7 +507,7 @@ class HeartbeatTests(unittest.TestCase):
     def test_a_change_is_logged_by_id_and_wakes_the_heartbeat(self):
         holdings = playback_worker._Holdings()
         holdings._changed.clear()
-        playback_worker._credentials = lambda: {GW: "a-new-password"}
+        playback_worker._credential_sources = lambda: {GW: [("delivered", "a-new-password")]}
         with self.assertLogs(playback_worker.logger, level="INFO") as logs:
             holdings.refresh()
         self.assertIn("rotated %s" % GW, "\n".join(logs.output))
@@ -685,7 +690,7 @@ class PrimaryHostTests(ClockedCase):
         sent, _, error = playback_worker._run_job(
             supabase, FakeStorage(capture_file(a_session())), {GW: "a-password"}, self.job(),
             outcome=outcome)
-        self.assertEqual((sent, error, outcome), (0, None, {"stopped": True}))
+        self.assertEqual((sent, error, outcome.get("stopped")), (0, None, True))
         self.assertEqual(supabase.called("playback_progress")[0]["p_messages_total"], 5)
         self.assertEqual(self.published_types(), [])
         self.assertLess(self.clock.now - start, 7)
@@ -733,6 +738,131 @@ class WireHelperTests(unittest.TestCase):
         for bad in (b"{}", b'{"online": "true", "timestamp": 1}', b'{"online": true}',
                     b'{"online": true, "timestamp": true}', b"nope"):
             self.assertIsNone(playback_worker._host_state(bad), bad)
+
+
+# -------------------------------------------------------------------------------------------------
+# Which password: the delivered one first, then the Helm value
+# -------------------------------------------------------------------------------------------------
+STALE_DELIVERED = ("delivered", "stale-delivered-value")
+HELM_VALUE = ("helm", "current-helm-value")
+
+
+class CredentialFallbackTests(WorkerLoopCase):
+    def run_with_both(self, messages=None):
+        self.outcome = {}
+        self.supabase = FakeSupabase()
+        return playback_worker._run_job(
+            self.supabase, FakeStorage(capture_file(messages or a_session())),
+            {GW: [STALE_DELIVERED, HELM_VALUE]}, self.job(), outcome=self.outcome)
+
+    def test_a_refused_delivered_password_falls_back_to_the_helm_value(self):
+        """The case the credential dialog's fallback is for: a re-issue whose delivery failed."""
+        self.broker.accepts = {HELM_VALUE[1]}
+        with self.assertLogs(playback_worker.logger, level="INFO") as logs:
+            sent, _, error = self.run_with_both()
+        self.assertEqual((sent, error), (5, None))
+        refused, accepted = self.broker.clients
+        self.assertEqual((refused.password, accepted.password), (STALE_DELIVERED[1], HELM_VALUE[1]))
+        self.assertEqual(refused.published(), [])
+        self.assertEqual(self.outcome["accepted"], HELM_VALUE)
+        log = "\n".join(logs.output)
+        self.assertIn("accepted the password in secrets.mqttPlaybackCredentials for %s after "
+                      "refusing the delivered password (CONNACK rc=5)" % GW, log)
+        self.assertIn("connected as %s with the password in secrets.mqttPlaybackCredentials" % GW, log)
+        self.assertNotIn(STALE_DELIVERED[1], log)
+        self.assertNotIn(HELM_VALUE[1], log)
+
+    def test_the_accepted_connect_carries_the_next_bdseq_and_the_nbirth_repeats_it(self):
+        """Each CONNECT spends a bdSeq, so the plan is renumbered for the one accepted."""
+        self.broker.accepts = {HELM_VALUE[1]}
+        self.run_with_both()
+        refused, accepted = self.broker.clients
+        self.assertEqual((bdseq_in(refused.will[1]), bdseq_in(accepted.will[1])), (0, 1))
+        self.assertEqual(bdseq_in(accepted.published()[0][2]), 1)
+        self.assertEqual(bdseq_in(accepted.published()[-1][2]), 1)
+
+    def test_both_refused_fails_naming_both(self):
+        self.broker.accepts = set()
+        sent, _, error = self.run_with_both()
+        self.assertEqual(sent, 0)
+        self.assertIn("rc=5", error)
+        self.assertIn("Also refused: the delivered password (CONNACK rc=5)", error)
+
+    def test_a_refusal_that_is_not_about_the_password_does_not_fall_back(self):
+        self.broker.accepts, self.broker.refusal = set(), 3
+        sent, _, error = self.run_with_both()
+        self.assertEqual(len(self.broker.clients), 1)
+        self.assertIn("rc=3", error)
+
+    def test_a_later_session_in_the_job_uses_the_password_accepted(self):
+        self.broker.accepts = {HELM_VALUE[1]}
+        messages = a_session(readings=1) + [recorded(40, "NDEATH"), recorded(50, "NBIRTH"),
+                                            recorded(60, "NDATA", value=1.0)]
+        sent, _, error = self.run_with_both(messages)
+        self.assertEqual((sent, error), (6, None))
+        self.assertEqual([c.password for c in self.broker.clients],
+                         [STALE_DELIVERED[1], HELM_VALUE[1], HELM_VALUE[1]])
+
+
+class CredentialSourceTests(unittest.TestCase):
+    """_credential_sources() and what the worker reports about them."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "credentials.json")
+        self._saved_env = {k: os.environ.get(k) for k in (
+            "MQTT_PLAYBACK_CREDENTIALS", "MQTT_PLAYBACK_USER", "MQTT_PLAYBACK_PASSWORD")}
+        for k in self._saved_env:
+            os.environ.pop(k, None)
+        self._saved_file = playback_worker.PLAYBACK_CREDENTIAL_FILE
+        playback_worker.PLAYBACK_CREDENTIAL_FILE = self.path
+
+    def tearDown(self):
+        playback_worker.PLAYBACK_CREDENTIAL_FILE = self._saved_file
+        for k, v in self._saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        self.tmp.cleanup()
+
+    def deliver(self, value):
+        with open(self.path, "w", encoding="utf-8") as handle:
+            json.dump({GW: value}, handle)
+
+    def test_the_delivered_password_comes_first_then_the_helm_value(self):
+        self.deliver(STALE_DELIVERED[1])
+        os.environ["MQTT_PLAYBACK_CREDENTIALS"] = json.dumps({GW: HELM_VALUE[1]})
+        self.assertEqual(playback_worker._credential_sources(), {GW: [STALE_DELIVERED, HELM_VALUE]})
+        self.assertEqual(playback_worker._credentials(), {GW: STALE_DELIVERED[1]})
+
+    def test_a_password_two_sources_agree_on_is_tried_once(self):
+        self.deliver(HELM_VALUE[1])
+        os.environ["MQTT_PLAYBACK_CREDENTIALS"] = json.dumps({GW: HELM_VALUE[1]})
+        self.assertEqual(playback_worker._credential_sources(), {GW: [("delivered", HELM_VALUE[1])]})
+
+    def test_the_accepted_one_goes_first_until_a_new_delivery(self):
+        self.deliver(STALE_DELIVERED[1])
+        os.environ["MQTT_PLAYBACK_CREDENTIALS"] = json.dumps({GW: HELM_VALUE[1]})
+        holdings = playback_worker._Holdings()
+        holdings.accepted(GW, HELM_VALUE)
+        self.assertEqual(holdings.for_jobs(), {GW: [HELM_VALUE, STALE_DELIVERED]})
+        self.deliver("a-newer-delivery")
+        holdings.refresh()
+        self.assertEqual(holdings.for_jobs()[GW][0], ("delivered", "a-newer-delivery"))
+
+    def test_the_heartbeat_reports_the_sources_in_the_order_tried(self):
+        self.deliver(STALE_DELIVERED[1])
+        os.environ["MQTT_PLAYBACK_CREDENTIALS"] = json.dumps({GW: HELM_VALUE[1]})
+        holdings = playback_worker._Holdings()
+        supabase = FakeSupabase()
+        holdings.report(supabase)
+        holdings.accepted(GW, HELM_VALUE)
+        holdings.report(supabase)
+        self.assertEqual([p["p_sources"] for p in supabase.called("playback_report_credential_sources")],
+                         [{GW: ["delivered", "helm"]}, {GW: ["helm", "delivered"]}])
+        self.assertNotIn(HELM_VALUE[1], json.dumps(supabase.calls))
 
 
 if __name__ == "__main__":

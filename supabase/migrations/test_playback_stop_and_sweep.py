@@ -185,5 +185,41 @@ class StopTests(Base):
         self.assertIs(self.stop(job_id), False)
 
 
+PLAYBACK_GW = "gwy160000000000400080000"
+OTHER_GW = "gwy990000000000400080000"
+
+
+class CredentialSourceTests(Base):
+    """playback_report_credential_sources(): which password the worker uses, never the password."""
+
+    def report(self, sources, held=(PLAYBACK_GW,)):
+        self.as_caller(PLAYBACK_WORKER)
+        self.cur.execute("SELECT public.playback_report_credentials(%s, '{}')", (list(held),))
+        self.cur.execute("SELECT public.playback_report_credential_sources(%s::jsonb)",
+                         (json.dumps(sources),))
+        self.cur.execute("RESET ROLE")
+        self.cur.execute("SELECT credential_sources FROM public.playback_worker_status WHERE id")
+        return self.cur.fetchone()[0]
+
+    def test_the_order_is_kept_and_only_held_gateways_and_known_names_are_stored(self):
+        stored = self.report({PLAYBACK_GW: ["helm", "delivered", "a-password", "helm", 7],
+                              OTHER_GW: ["delivered"]})
+        self.assertEqual(stored, {PLAYBACK_GW: ["helm", "delivered"]})
+
+    def test_anything_but_an_object_stores_nothing(self):
+        self.assertEqual(self.report(["delivered"]), {})
+
+    def test_only_the_playback_worker_may_report(self):
+        self.as_caller(MANAGER)
+        with self.assertRaises(pg_errors.InsufficientPrivilege):
+            self.cur.execute("SELECT public.playback_report_credential_sources('{}'::jsonb)")
+
+    def test_anon_holds_nothing_on_it(self):
+        self.cur.execute("RESET ROLE")
+        self.cur.execute("SELECT has_function_privilege('anon', "
+                         "'public.playback_report_credential_sources(jsonb)', 'EXECUTE')")
+        self.assertFalse(self.cur.fetchone()[0])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -20,6 +20,27 @@ const SPEEDS = [
   { value: 60, label: '60× — an hour a minute' }
 ]
 
+/** The password sources the playback worker reports, as a reader would name them. */
+const PASSWORD_SOURCES = {
+  delivered: 'the password delivered when this gateway’s credential was issued',
+  helm: 'the password in the Helm value secrets.mqttPlaybackCredentials',
+  environment: 'the password in MQTT_PLAYBACK_PASSWORD'
+}
+
+/**
+ * Which password the worker uses for a gateway, from the sources it holds one from in the order it
+ * tries them. Null when it reports none, as a worker from before 0191 does.
+ */
+function describeWorkerPassword(sources) {
+  const known = (Array.isArray(sources) ? sources : []).filter(s => PASSWORD_SOURCES[s])
+  if (known.length === 0) return null
+  const [inUse, ...fallbacks] = known
+  const then = fallbacks.length
+    ? ` If the broker refuses it, the worker tries ${fallbacks.map(s => PASSWORD_SOURCES[s]).join(', then ')}.`
+    : ''
+  return `The playback worker uses ${PASSWORD_SOURCES[inUse]}.${then}`
+}
+
 /**
  * Play back a stored capture through the Playback gateway. The device map is built from dropdowns
  * off the gateway's devices, only a shadow gateway is offered, and whether it holds a broker
@@ -104,6 +125,9 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
      accept without changing which ids the worker reports, so this is the one that decides whether a
      playback would actually connect. */
   const workerHoldsCurrent = (t) => workerHolds(t) && !stale.includes(t.sparkplug_id)
+  const passwordInUse = target && workerHolds(target)
+    ? describeWorkerPassword(worker?.credential_sources?.[target.sparkplug_id])
+    : null
 
   const unmapped = (capturedDevices || []).filter(d => !deviceMap[d])
 
@@ -249,6 +273,7 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
               Only the Playback gateway is listed: nothing else publishes as it, so a playback never
               shares a live publisher's sequence numbers.
             </p>
+            {passwordInUse && <p className="form-hint">{passwordInUse}</p>}
           </>
         )}
       </div>

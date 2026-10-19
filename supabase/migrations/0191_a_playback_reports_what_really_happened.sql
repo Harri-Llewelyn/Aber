@@ -12,8 +12,12 @@
 --     is more than a minute old ends the job here: CANCELLED, with what it had reported published.
 --     A worker that comes back is told to stop by its next playback_progress() call, which answers
 --     true for a row that is no longer RUNNING, and its playback_finish() leaves the row alone.
+--   * playback_worker_status.credential_sources, written by the new
+--     playback_report_credential_sources(), says which password source the worker uses for each
+--     gateway: the delivered one, or the Helm value it falls back to when the broker refuses the
+--     delivered one.
 --
--- Signatures, return types and grants are 0001's.
+-- The redeclared functions keep 0001's signatures, return types and grants.
 
 -- -------------------------------------------------------------------------------------------------
 -- When the worker last reported
@@ -110,6 +114,59 @@ $$;
 COMMENT ON FUNCTION public.request_playback_stop(p_job_id uuid) IS 'Stop a playback. A PENDING job is cancelled outright. A RUNNING job gets stop_requested, which the worker reads within a second; one whose worker has not reported for more than a minute is ended here as CANCELLED, saying how much it had reported published, so a stalled worker cannot hold the target (0191). Returns false for a job already finished.';
 
 -- -------------------------------------------------------------------------------------------------
+-- Which password the worker uses for each gateway
+-- -------------------------------------------------------------------------------------------------
+-- The worker holds up to three passwords per gateway: the one delivered when its credential was
+-- issued, the Helm value secrets.mqttPlaybackCredentials, and the MQTT_PLAYBACK_USER/PASSWORD
+-- pair. It tries them in that order, the one the broker last accepted first, and reports the order
+-- here by source name, so the playback dialog can say which password it holds. Never a password.
+ALTER TABLE public.playback_worker_status
+    ADD COLUMN IF NOT EXISTS credential_sources jsonb DEFAULT '{}'::jsonb NOT NULL;
+
+COMMENT ON COLUMN public.playback_worker_status.credential_sources IS 'For each gateway the worker holds a password for, the sources it holds one from, in the order it tries them: "delivered", "helm" or "environment". The first is the one in use. Written by playback_report_credential_sources() (0191).';
+
+CREATE OR REPLACE FUNCTION public.playback_report_credential_sources(p_sources jsonb) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_held    text[];
+    v_sources jsonb;
+BEGIN
+    PERFORM public.require_playback_caller('playback_report_credential_sources');
+
+    SELECT held_edge_nodes INTO v_held FROM public.playback_worker_status WHERE id;
+
+    -- Only gateways the worker reports holding, and only the three source names, each once.
+    v_sources := COALESCE(
+      (SELECT jsonb_object_agg(e.key, (
+                SELECT coalesce(jsonb_agg(s.name ORDER BY s.first), '[]'::jsonb)
+                  FROM (SELECT v.value #>> '{}' AS name, min(v.ordinality) AS first
+                          FROM jsonb_array_elements(e.value) WITH ORDINALITY AS v(value, ordinality)
+                         WHERE jsonb_typeof(v.value) = 'string'
+                           AND v.value #>> '{}' IN ('delivered', 'helm', 'environment')
+                         GROUP BY 1) s))
+         FROM jsonb_each(CASE WHEN jsonb_typeof(p_sources) = 'object' THEN p_sources
+                              ELSE '{}'::jsonb END) AS e
+        WHERE e.key = ANY(coalesce(v_held, '{}'))
+          AND jsonb_typeof(e.value) = 'array'),
+      '{}'::jsonb
+    );
+
+    UPDATE public.playback_worker_status
+       SET credential_sources = v_sources
+     WHERE id AND credential_sources IS DISTINCT FROM v_sources;
+END;
+$$;
+
+ALTER FUNCTION public.playback_report_credential_sources(p_sources jsonb) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.playback_report_credential_sources(p_sources jsonb) FROM PUBLIC, anon;
+GRANT ALL ON FUNCTION public.playback_report_credential_sources(p_sources jsonb) TO service_role;
+GRANT ALL ON FUNCTION public.playback_report_credential_sources(p_sources jsonb) TO authenticated;
+
+COMMENT ON FUNCTION public.playback_report_credential_sources(p_sources jsonb) IS 'The playback worker reporting, for each gateway it holds, the password sources in the order it tries them ("delivered", "helm", "environment"); the first is the one in use. Keeps only gateways in held_edge_nodes and those three names. Called on the worker''s heartbeat after playback_report_credentials(); only the playback worker may call it (0191).';
+
+-- -------------------------------------------------------------------------------------------------
 -- Self-check: this file's own declarations
 -- -------------------------------------------------------------------------------------------------
 DO $$
@@ -126,5 +183,13 @@ BEGIN
     IF position('v_silent > 60' IN
                 (SELECT prosrc FROM pg_proc WHERE oid = 'public.request_playback_stop(uuid)'::regprocedure)) = 0 THEN
         RAISE EXCEPTION '0191 self-check: request_playback_stop() does not end a stalled job';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'playback_worker_status'
+                      AND column_name = 'credential_sources') THEN
+        RAISE EXCEPTION '0191 self-check: playback_worker_status.credential_sources is missing';
+    END IF;
+    IF has_function_privilege('anon', 'public.playback_report_credential_sources(jsonb)', 'EXECUTE') THEN
+        RAISE EXCEPTION '0191 self-check: anon may call playback_report_credential_sources()';
     END IF;
 END $$;

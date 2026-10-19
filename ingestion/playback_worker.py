@@ -148,31 +148,35 @@ def _file_credentials(path=None):
     return {str(k): str(v) for k, v in parsed.items()}
 
 
-def _credentials():
+DELIVERED, HELM, ENVIRONMENT = "delivered", "helm", "environment"
+
+# What each source is called in a job's error and the log. Never the password.
+SOURCE_NAMES = {
+    DELIVERED: "the delivered password",
+    HELM: "the password in secrets.mqttPlaybackCredentials",
+    ENVIRONMENT: "the password in MQTT_PLAYBACK_PASSWORD",
+}
+
+
+def _credential_sources():
     """
-    The broker passwords this worker holds, keyed by gateway `sparkplug_id`.
+    Every broker password this worker holds, as {gateway sparkplug_id: [(source, password), ...]}
+    in the order to try them: the delivered file, then the Helm value (MQTT_PLAYBACK_CREDENTIALS,
+    a JSON map), then the MQTT_PLAYBACK_USER / MQTT_PLAYBACK_PASSWORD pair. A password two sources
+    agree on is listed once. The worker cannot authenticate as a gateway it holds none for.
 
-    TIER TWO OF THREE, AND THE ONLY ONE THAT LIVES OUTSIDE THE DATABASE. The job gate refuses a
-    target that is not `is_simulated`; the broker ACL confines whatever connects to its own edge
-    node; and this is the middle one -- the worker simply cannot authenticate as a gateway whose
-    password it was not given, so a compromised queue cannot make it publish as a real machine.
-
-    THREE SOURCES, THE DELIVERED FILE WINNING. Issuing a credential for an `is_shadow` gateway
-    delivers its password to PLAYBACK_CREDENTIAL_FILE (archived migration 0078), re-read every pass.
-    MQTT_PLAYBACK_CREDENTIALS (the chart's `secrets.mqttPlaybackCredentials`) carries passwords
-    supplied by hand, as a JSON map because playback has as many identities as it has targets.
-    MQTT_PLAYBACK_USER / MQTT_PLAYBACK_PASSWORD, the pair `capture.py play` reads, is a
-    single-target fallback.
-
-    NOT LOGGED, EVER. The keys are gateway ids and are safe; the values are broker passwords.
+    Delivered first because issuing replaces the broker's one password per gateway, so a delivery
+    is normally the newest. The Helm value is the fallback the credential dialog gives when a
+    delivery failed, so the connect path tries it when the broker refuses the delivered one.
+    Passwords are never logged.
     """
+    helm = {}
     raw = os.getenv("MQTT_PLAYBACK_CREDENTIALS", "").strip()
-    credentials = {}
     if raw:
         try:
             parsed = json.loads(raw)
             if isinstance(parsed, dict):
-                credentials = {str(k): str(v) for k, v in parsed.items()}
+                helm = {str(k): str(v) for k, v in parsed.items()}
             else:
                 logger.error(
                     "MQTT_PLAYBACK_CREDENTIALS is not a JSON object, so no playback target has a "
@@ -183,20 +187,27 @@ def _credentials():
                 "MQTT_PLAYBACK_CREDENTIALS is not valid JSON (%s), so no playback target has a "
                 "credential.", err,
             )
-
+    pair = {}
     user = os.getenv("MQTT_PLAYBACK_USER", "").strip()
     password = os.getenv("MQTT_PLAYBACK_PASSWORD", "")
-    if user and password and user not in credentials:
-        credentials[user] = password
+    if user and password:
+        pair[user] = password
 
-    # THE DELIVERED FILE WINS, and the reason is the broker rather than a preference about
-    # configuration. Mosquitto holds ONE password per username, so issuing a credential REPLACES the
-    # one before it -- which means a value in the environment is not an alternative to the delivered
-    # one, it is an OLDER one, and after any re-issue it is simply wrong. Letting the environment
-    # override would make the documented repair for a refused playback ("issue a new credential")
-    # the one thing that could not fix it.
-    credentials.update(_file_credentials())
-    return credentials
+    sources = {}
+    for source, held in ((DELIVERED, _file_credentials()), (HELM, helm), (ENVIRONMENT, pair)):
+        for gateway, secret in held.items():
+            candidates = sources.setdefault(gateway, [])
+            if secret and all(secret != known for _, known in candidates):
+                candidates.append((source, secret))
+    return {gateway: candidates for gateway, candidates in sources.items() if candidates}
+
+
+def _credentials():
+    """
+    The password tried first for each gateway: {sparkplug_id: password}. Tier two of three: the
+    worker cannot authenticate as a gateway whose password it was not given (README.md).
+    """
+    return {gateway: candidates[0][1] for gateway, candidates in _credential_sources().items()}
 
 
 def _supabase():
@@ -371,15 +382,54 @@ def _await(condition, seconds, tick=None):
     return True
 
 
-def _open_session(edge_node, password, will_topic, bdseq, *, primary_host_id=None, tick=None):
+# The CONNACK return codes that mean the password, under MQTT 3.1.1 which this worker speaks: 4 bad
+# user name or password, 5 not authorised. Only these move on to the next password a worker holds.
+BAD_CREDENTIALS = (4, 5)
+
+
+def _connect_accepted(edge_node, password, will_topic, bdseq, ncmd_topic, state_topic):
+    """CONNECT with the NDEATH for `bdseq` as the Will and wait for the CONNACK.
+    Returns (client, None, 0), or (None, error, CONNACK rc or None)."""
+    try:
+        client = _connect(edge_node, password, will_topic,
+                          capture.node_death(bdseq, int(time.time() * 1000)),
+                          ncmd_topic=ncmd_topic, state_topic=state_topic)
+    except Exception as err:
+        return None, "could not connect to the broker as %s: %s" % (edge_node, err), None
+
+    # The CONNECT carrying this bdSeq was sent, whatever the broker answers.
+    _next_bdseq[edge_node] = (bdseq + 1) % 256
+    client.loop_start()
+
+    # Nothing counts as sent until the broker accepts the CONNECT: a wrong password connects at the
+    # socket and is refused afterwards.
+    if not _await(lambda: client.aber.connack, CONNACK_TIMEOUT_SECONDS):
+        client.loop_stop()
+        return None, (
+            "the broker never answered the connection as %s within %ss. It is reachable at %s:%s "
+            "or this would have failed above, so it accepted the socket and said nothing."
+            % (edge_node, CONNACK_TIMEOUT_SECONDS, MQTT_HOST, MQTT_PORT)
+        ), None
+    rc = client.aber.connack[0]
+    if rc != 0:
+        client.loop_stop()
+        return None, _refused(edge_node, rc), rc
+    client.aber.bdseq = bdseq
+    return client, None, 0
+
+
+def _open_session(edge_node, password, will_topic, bdseq, *, primary_host_id=None, tick=None,
+                  source=None, fallbacks=()):
     """
     One Sparkplug session as the target gateway, ready for its NBIRTH. Returns (client, None), or
     (None, the reason the job fails).
 
-    CONNECT with the NDEATH for `bdseq` as its Will, and wait for the CONNACK. Subscribe at QoS 1
-    to the node's own NCMD topic (tck-id-message-flow-edge-node-ncmd-subscribe) and, when a primary
-    host is configured, to its STATE topic, and wait for the SUBACK. Then wait for that host to say
-    it is online (tck-id-message-flow-edge-node-birth-publish-phid-wait, -online).
+    CONNECT with the NDEATH for `bdseq` as its Will, and wait for the CONNACK. A CONNACK refusing
+    the password moves on to the next of `fallbacks`, [(source, password), ...], with the next
+    bdSeq; `client.aber` records the bdSeq and the source accepted. Subscribe at QoS 1 to the node's
+    own NCMD topic (tck-id-message-flow-edge-node-ncmd-subscribe) and, when a primary host is
+    configured, to its STATE topic, and wait for the SUBACK. Then wait for that host to say it is
+    online (tck-id-message-flow-edge-node-birth-publish-phid-wait, -online).
 
     `primary_host_id` None means the PRIMARY_HOST_ID environment variable; "" means no wait. `tick`
     is called while waiting and may raise to abandon the session, which is then closed.
@@ -388,32 +438,25 @@ def _open_session(edge_node, password, will_topic, bdseq, *, primary_host_id=Non
     group = will_topic.split("/")[1]
     ncmd_topic = "spBv1.0/%s/NCMD/%s" % (group, edge_node)
     state_topic = "spBv1.0/STATE/%s" % host if host else None
-    try:
-        client = _connect(edge_node, password, will_topic,
-                          capture.node_death(bdseq, int(time.time() * 1000)),
-                          ncmd_topic=ncmd_topic, state_topic=state_topic)
-    except Exception as err:
-        return None, "could not connect to the broker as %s: %s" % (edge_node, err)
 
-    # The CONNECT carrying this bdSeq was sent, whatever the broker answers.
-    _next_bdseq[edge_node] = (bdseq + 1) % 256
-    client.loop_start()
-
-    # Nothing counts as sent until the broker accepts the CONNECT: a wrong password connects at the
-    # socket and is refused afterwards. rc 4 and 5 are the two an operator fixes by issuing a
-    # credential, so they are named.
-    if not _await(lambda: client.aber.connack, CONNACK_TIMEOUT_SECONDS):
-        client.loop_stop()
-        return None, (
-            "the broker never answered the connection as %s within %ss. It is reachable at %s:%s "
-            "or this would have failed above, so it accepted the socket and said nothing."
-            % (edge_node, CONNACK_TIMEOUT_SECONDS, MQTT_HOST, MQTT_PORT)
-        )
-
-    rc = client.aber.connack[0]
-    if rc != 0:
-        client.loop_stop()
-        return None, _refused(edge_node, rc)
+    attempts = [(source, password)] + list(fallbacks)
+    refused = []
+    for index, (label, secret) in enumerate(attempts):
+        client, error, rc = _connect_accepted(edge_node, secret, will_topic, bdseq,
+                                              ncmd_topic, state_topic)
+        if client is not None:
+            client.aber.source = label
+            if refused:
+                logger.warning("The broker accepted %s for %s after refusing %s.",
+                               SOURCE_NAMES.get(label, "the next password"), edge_node,
+                               " and ".join(refused))
+            break
+        if rc not in BAD_CREDENTIALS or index + 1 == len(attempts):
+            if refused:
+                error += " Also refused: %s." % " and ".join(refused)
+            return None, error
+        refused.append("%s (CONNACK rc=%s)" % (SOURCE_NAMES.get(label, "a password"), rc))
+        bdseq = _next_bdseq[edge_node]
 
     try:
         topics = [(ncmd_topic, 1)] + ([(state_topic, 1)] if state_topic else [])
@@ -646,18 +689,21 @@ def _wait_until(target, progress, session, job_id=None):
 
 def _run_job(supabase, storage, credentials, job, outcome=None):
     """
-    Publish one capture. Returns (messages_sent, messages_out_of_window, error or None); sets
-    outcome["stopped"] when the operator stopped it.
+    Publish one capture. Returns (messages_sent, messages_out_of_window, error or None).
+
+    `credentials` maps a gateway to its password, or to [(source, password), ...] in the order to
+    try them. `outcome` gets "stopped" when the operator stopped the job, and "accepted", the
+    (source, password) the broker accepted.
     """
     job_id = job["id"]
     edge_node = job["target_edge_node_id"]
-    password = credentials.get(edge_node)
+    held = credentials.get(edge_node)
+    candidates = [(None, held)] if isinstance(held, str) else list(held or [])
+    outcome = {} if outcome is None else outcome
 
-    if not password:
-        # REFUSED HERE RATHER THAN ATTEMPTED. Without a password the connect fails with a broker
-        # error that names neither the gateway nor the missing secret, and at QoS 0 a publish that
-        # the ACL refuses is dropped with no PUBACK -- so a wrong-credential playback would
-        # otherwise report success and move nothing.
+    if not candidates:
+        # Refused before connecting: a connect with no password fails naming neither the gateway
+        # nor the missing secret.
         return 0, 0, (
             "this worker holds no broker credential for %s, so it cannot authenticate as that "
             "gateway. Issue one from the gateway's drawer on the Gateways page (Generate Broker "
@@ -683,19 +729,22 @@ def _run_job(supabase, storage, credentials, job, outcome=None):
     # ------------------------------------------------------------------------------------------
     # The plan
     # ------------------------------------------------------------------------------------------
-    # EVERYTHING THAT CAN BE WRONG IS DECIDED HERE, with no broker and no clock -- an unmapped
-    # device, a rebasing that lands outside the daemon's sanity window, a malformed topic. The
-    # publishing loop below cannot make a new decision, which is what makes a dry run and a real
-    # run the same computation.
+    # Everything that can be wrong is decided here, with no broker; the loop below decides nothing.
+    # Planned with the bdSeq the next CONNECT carries, and planned again if a refused password
+    # moved the accepted CONNECT on to a later one.
     play_epoch_ms = int(time.time() * 1000)
     speed = float(job.get("speed") or 1.0)
     device_map = job.get("device_map") or {}
     bdseq = _next_bdseq.get(edge_node, 0)
-    try:
-        plan = capture.plan_playback(
+
+    def make_plan(session_bdseq):
+        return capture.plan_playback(
             document, edge_node, device_map, play_epoch_ms, speed=speed,
-            group=job.get("sparkplug_group"), bdseq=bdseq,
+            group=job.get("sparkplug_group"), bdseq=session_bdseq,
         )
+
+    try:
+        plan = make_plan(bdseq)
     except capture.CaptureError as err:
         return 0, 0, str(err)
 
@@ -753,15 +802,28 @@ def _run_job(supabase, storage, credentials, job, outcome=None):
     error = None
 
     def open_session():
+        # The first session may fall back to a later password; the rest use the one accepted.
+        source, password = outcome.get("accepted") or candidates[0]
+        fallbacks = () if "accepted" in outcome else candidates[1:]
         client, failure = _open_session(edge_node, password, will_topic, bdseq,
-                                        primary_host_id=host, tick=progress.report)
+                                        primary_host_id=host, tick=progress.report,
+                                        source=source, fallbacks=fallbacks)
         if failure:
             raise _JobFailed(failure if not progress.sent else
                              "publishing stopped after %d message(s): %s" % (progress.sent, failure))
+        if "accepted" not in outcome:
+            outcome["accepted"] = next(c for c in candidates if c[0] == client.aber.source)
+            if source is not None:
+                logger.info("Playback %s: connected as %s with %s.", job_id, edge_node,
+                            SOURCE_NAMES.get(client.aber.source, "its password"))
         return _Session(client, host)
 
     try:
         session = open_session()
+        if session.client.aber.bdseq != bdseq:
+            bdseq = session.client.aber.bdseq
+            plan = None
+            plan = make_plan(bdseq)
         progress.started = time.monotonic()
         for delay_ms, topic, payload_bytes, _ in plan:
             # An absolute schedule: per-message sleeps would drift by every publish and progress
@@ -808,32 +870,66 @@ class _Holdings:
 
     The main loop re-reads the sources every pass (refresh()); a timer thread reports what is held
     every CREDENTIAL_REPORT_INTERVAL_SECONDS and at once after a change, whether or not a job is
-    running, so a long playback does not read as a worker that stopped. Ids only, never passwords:
-    `playback_worker_status` is readable by three roles.
+    running, so a long playback does not read as a worker that stopped. Ids and source names only,
+    never passwords: `playback_worker_status` is readable by three roles.
     """
 
     def __init__(self):
         self._lock = threading.Lock()
         self._changed = threading.Event()
-        self.credentials = _credentials()
+        self.sources = _credential_sources()
+        # The (source, password) the broker last accepted for each gateway, tried first while held.
+        self._accepted = {}
         # Gateways with a password picked up since the last report that got through. Everything
         # counts at startup: the sources were just read.
-        self._rotated = set(self.credentials)
+        self._rotated = set(self.sources)
+
+    @property
+    def credentials(self):
+        """{gateway: password tried first}."""
+        return {gateway: candidates[0][1] for gateway, candidates in self.for_jobs().items()}
+
+    def for_jobs(self):
+        """{gateway: [(source, password), ...]}, the one the broker last accepted first."""
+        with self._lock:
+            return self._ordered()
+
+    def _ordered(self):
+        ordered = {}
+        for gateway, candidates in self.sources.items():
+            accepted = self._accepted.get(gateway)
+            ordered[gateway] = ([accepted] + [c for c in candidates if c != accepted]
+                                if accepted in candidates else list(candidates))
+        return ordered
+
+    def accepted(self, gateway, choice):
+        """Remember which (source, password) the broker accepted; a change is reported at once."""
+        with self._lock:
+            if self._accepted.get(gateway) == choice:
+                return
+            self._accepted[gateway] = choice
+        logger.info("Playback credentials: %s is now used first for %s.",
+                    SOURCE_NAMES.get(choice[0], "the password the broker accepted"), gateway)
+        self._changed.set()
 
     def refresh(self):
         """Re-read the sources, log a change by gateway id, and wake the heartbeat for it."""
-        current = _credentials()
+        current = _credential_sources()
         with self._lock:
-            previous, self.credentials = self.credentials, current
+            previous, self.sources = self.sources, current
             if current == previous:
-                return current
+                return self._ordered()
             gained = sorted(set(current) - set(previous))
             lost = sorted(set(previous) - set(current))
-            # A re-issue keeps the id and changes the password, so maps are compared, not key sets.
+            # A re-issue keeps the id and changes a password, so the lists are compared.
             rotated = sorted(k for k in set(current) & set(previous) if current[k] != previous[k])
             self._rotated.update(gained)
             self._rotated.update(rotated)
             self._rotated.difference_update(lost)
+            # A new password anywhere puts the delivered one first again.
+            for gateway in rotated + lost:
+                self._accepted.pop(gateway, None)
+            ordered = self._ordered()
         parts = []
         if gained:
             parts.append("gained %s" % ", ".join(gained))
@@ -844,19 +940,23 @@ class _Holdings:
         logger.info("Playback credentials changed: now holding %d gateway(s) -- %s.",
                     len(current), "; ".join(parts) or "no change to which gateways are held")
         self._changed.set()
-        return current
+        return ordered
 
     def report(self, supabase):
         """One heartbeat. A rotation is cleared only once a report carrying it got through."""
         with self._lock:
-            held = sorted(self.credentials)
+            ordered = self._ordered()
             rotated = sorted(self._rotated)
         supabase.rpc("playback_report_credentials", {
-            "p_edge_nodes": held,
+            "p_edge_nodes": sorted(ordered),
             "p_rotated": rotated,
         }).execute()
         with self._lock:
             self._rotated.difference_update(rotated)
+        supabase.rpc("playback_report_credential_sources", {
+            "p_sources": {gateway: [source for source, _ in candidates]
+                          for gateway, candidates in ordered.items()},
+        }).execute()
 
     def run_heartbeat(self, supabase, stop=None):
         """The timer thread's body. A failed report is logged and retried on the next beat."""
@@ -999,6 +1099,8 @@ def main():
         except Exception as err:
             logger.error("Playback %s: unhandled error: %s", job["id"], err, exc_info=True)
             sent, out_of_window, error = 0, 0, "unhandled error: %s" % err
+        if outcome.get("accepted"):
+            holdings.accepted(job["target_edge_node_id"], outcome["accepted"])
 
         if not _finish(supabase, job, sent, error, out_of_window):
             continue

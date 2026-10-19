@@ -5432,8 +5432,20 @@ components:
           type: string
           format: date-time
           description: |
-            Heartbeat, restated every 30 seconds. Stale means the worker is not running — which is a
-            different problem from an empty list, and is why the timestamp is here.
+            Heartbeat, restated every 30 seconds, during a playback as well as between them. Stale
+            means the worker is not running — which is a different problem from an empty list, and
+            is why the timestamp is here.
+        credential_sources:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string, enum: [delivered, helm, environment] }
+          description: |
+            For each held gateway, where the worker's passwords for it come from, in the order it
+            tries them; the first is the one in use. `delivered` is the password delivered when the
+            credential was issued, `helm` is `secrets.mqttPlaybackCredentials`, `environment` is
+            `MQTT_PLAYBACK_USER` / `MQTT_PLAYBACK_PASSWORD`. Names only, never a password (0191).
+          example: { gwy160000000000400080000: [delivered, helm] }
 
     PlaybackJob:
       type: object

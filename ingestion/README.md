@@ -814,6 +814,21 @@ Three properties of that worth keeping:
   before `0129` — is not refused, or the release introducing this would break playback on the
   rollout that delivers it.
 
+**The delivered password is tried first, and the Helm value when the broker refuses it** (`0191`).
+The credential dialog's fallback, for a re-issue whose delivery failed, is to set
+`secrets.mqttPlaybackCredentials` and upgrade. The delivered file still holds the password the
+previous delivery wrote, which the re-issue has just replaced at the broker. When the file always
+won, the worker went on using that old password after the upgrade, and every playback failed at
+CONNACK. Neither fixed order is right: if the Helm value always won, a value set once during an
+outage would override every later delivery. So the worker holds every source's password for a
+gateway, in the order delivered, Helm value, `MQTT_PLAYBACK_USER`/`MQTT_PLAYBACK_PASSWORD`. When
+the CONNACK refuses one as bad credentials (rc 4 or 5; the worker speaks MQTT 3.1.1), it tries the
+next with a new CONNECT and the next bdSeq, and plans the replay again for that bdSeq. It logs which
+source the broker accepted and tries that one first on the next job, until any of the gateway's
+passwords changes. A refusal for any other reason is not retried. The worker reports the sources
+it holds, in the order it tries them, in `playback_worker_status.credential_sources`, and the
+Start Playback dialog says which password it uses.
+
 **The empty file is the normal state and must not read as a fault.** The chart creates
 `playback_credentials.json` on every install and the pod projects it whether or not anything has
 been delivered, so a stack with no playback target presents a *blank* file rather than a missing
@@ -856,7 +871,8 @@ resolved through `shadow_of` rather than duplicated, for the ordinary reason tha
 **The Playback gateway needs its own broker credential**, issued from the dashboard like any
 host-run gateway's. It is `is_shadow`, so the issue also delivers the password to the worker
 ([above](#issuing-a-playback-credential-delivers-it-0078)); `MQTT_PLAYBACK_CREDENTIALS`
-(`secrets.mqttPlaybackCredentials`) is a manual fallback, and a delivered password overrides it.
+(`secrets.mqttPlaybackCredentials`) is a manual fallback, which the worker tries when the broker
+refuses the delivered password.
 
 **Every job ends with the session's NDEATH, so the gateway reads `OFFLINE` between replays.** The
 worker registers that NDEATH as its Will at CONNECT and publishes it at QoS 1 before DISCONNECT,

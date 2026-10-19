@@ -117,10 +117,10 @@ python ingestion/test_stack_capture_cleanup.py
 # the race the loop opens by connecting with its lock released.
 python ingestion/test_startup_healer.py
 # How the playback worker resolves the broker passwords it holds (0078), and the precedence rule
-# that matters: a DELIVERED credential beats one in the environment. The broker keeps one password
-# per username, so a value in the environment is not an alternative to the delivered one -- it is an older
-# one. If the environment won, "issue a new credential" would be the one repair that could not fix
-# a refused playback.
+# that matters: a DELIVERED credential is tried before one in the environment. The broker keeps one
+# password per username, so a value in the environment is normally an older one. If the environment
+# came first, "issue a new credential" would be the one repair that could not fix a refused
+# playback. The environment value is tried only when the broker refuses the delivered one.
 python ingestion/test_playback_credentials.py
 # The playback worker as a Sparkplug edge node, against a fake broker and PostgREST: the NCMD
 # subscription and the rebirth answer, the wait for the primary host's STATE and the end of a job when
