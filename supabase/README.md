@@ -1199,6 +1199,8 @@ Each carries the subject's `name` and `sparkplug_id`, which the Audit Trail name
   overwritten: the one-per-target index admits no other `PENDING` or `RUNNING` job onto the gateway
   until this transaction commits, and a finish for a job that already ended (a stalled job Stop
   ended) changes nothing.
+- **`start_playback_job()`'s credential refusal** no longer says a credential is issued to obtain
+  the worker's password: the platform delivers it (`0078`).
 
 `test_capture_audit.py` holds every act, the deletion guard, the purge and the session's end.
 

@@ -18,6 +18,8 @@
 --     and added twice per boot. The nightly purge skips a gateway with replay history.
 --   * playback_finish() sets the target OFFLINE, with its replay lanes, when it ends a RUNNING
 --     job. The broker sends no Will when it cuts a session, and the worker cannot send the NDEATH.
+--   * start_playback_job() no longer says a credential is issued to obtain the worker's password:
+--     the platform delivers it (0078).
 --
 -- Reasoning: supabase/README.md, "Captures and replays leave an audit trail (0193)". Idempotent.
 
@@ -350,6 +352,11 @@ COMMENT ON FUNCTION public.request_capture_stop(p_job_id uuid) IS
   'finish on its next progress tick, or, when the daemon has not reported on it for two minutes, '
   'cancelled here with nothing stored (0190). Each stop that changes the job writes a CAPTURE_STOPPED '
   'audit row (0193). False for a job already finished. Administrator or Shopfloor_Manager.';
+
+COMMENT ON COLUMN public.capture_jobs.stop_requested IS
+  'Set by request_capture_stop(); the daemon reads it on its next one-second progress tick and stores '
+  'what it has recorded. A PENDING job is cancelled outright instead, and a RECORDING job the daemon '
+  'has not reported on for two minutes is CANCELLED by request_capture_stop() itself (0190, 0193).';
 
 -- -------------------------------------------------------------------------------------------------
 -- 5. Storing an upload
@@ -811,9 +818,9 @@ BEGIN
     -- gateway.
     IF NOT public.gateway_has_broker_credential(v_gateway) THEN
         RAISE EXCEPTION
-          'start_playback_job: gateway % holds no broker credential, so nothing can authenticate '
-          'as it. Issue one from the Access Control page first -- that is also how you obtain the '
-          'password the playback worker needs.', v_gateway.name
+          'start_playback_job: gateway % holds no broker credential, so the playback worker cannot '
+          'connect as it. Issue one from the Access Control page; the platform delivers the '
+          'password to the worker within about a minute.', v_gateway.name
             USING ERRCODE = 'check_violation';
     END IF;
 
@@ -918,11 +925,13 @@ $$;
 ALTER FUNCTION public.start_playback_job(p_capture_id uuid, p_target_gateway_id uuid, p_device_map jsonb, p_speed numeric) OWNER TO postgres;
 
 COMMENT ON FUNCTION public.start_playback_job(p_capture_id uuid, p_target_gateway_id uuid, p_device_map jsonb, p_speed numeric) IS
-  'Queue a capture for publication onto a simulated gateway. The only way a playback_jobs row is '
-  'created. Refuses a target that is not is_simulated, one holding no broker credential, a device map '
-  'naming a device that is not an active replay lane of the gateway and of the device its key names, '
-  'and a second concurrent playback onto the same edge node. Writes a PLAYBACK_STARTED audit row '
-  'naming the capture, its subject and the target (0193).';
+  'Queue a capture for publication onto the Playback gateway. The only way a playback_jobs row is '
+  'created. Refuses a target that is not is_simulated (the trigger playback_target_must_be_shadow() '
+  'admits the Playback gateway alone), one holding no broker credential or whose credential the '
+  'worker has not picked up since its re-issue, a device map naming a device that is not an active '
+  'replay lane of the gateway and of the device its key names, and a second concurrent playback onto '
+  'the same edge node. Writes a PLAYBACK_STARTED audit row naming the capture, its subject and the '
+  'target (0193).';
 
 -- -------------------------------------------------------------------------------------------------
 -- 10. Stopping a playback
@@ -1178,6 +1187,10 @@ BEGIN
     END IF;
   END LOOP;
 
+  IF position('how you obtain' IN (SELECT prosrc FROM pg_proc
+                                     WHERE oid = 'public.start_playback_job(uuid, uuid, jsonb, numeric)'::regprocedure)) > 0 THEN
+    RAISE EXCEPTION '0193: start_playback_job() still says a credential is issued to obtain the worker''s password';
+  END IF;
   IF position('''OFFLINE''' IN (SELECT prosrc FROM pg_proc
                                   WHERE oid = 'public.playback_finish(uuid, integer, text, integer)'::regprocedure)) = 0 THEN
     RAISE EXCEPTION '0193: playback_finish() does not end the target''s session';

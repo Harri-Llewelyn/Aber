@@ -468,6 +468,15 @@ class PlaybackIsAudited(Base):
         self.assertEqual(self.cur.fetchone()["n"], 0)
         self.assertEqual(self._audit(self.capture), before)
 
+    def test_the_credential_refusal_no_longer_sends_the_operator_for_the_worker_s_password(self):
+        target, _ = self._gateway(simulated=True)
+        with self.assertRaises(pg_errors.CheckViolation) as refused:
+            self._run("Shopfloor_Manager", self.START, (self.capture, target, "{}"))
+        message = str(refused.exception)
+        self.assertIn("holds no broker credential", message)
+        self.assertIn("delivers the password", message)
+        self.assertNotIn("how you obtain", message)
+
     def test_stopping_a_playback_is_one_row_and_progress_is_none(self):
         job = self._playback_job(capture_id=self.capture)
         self._run("playback", "SELECT public.playback_progress(%s, 4, 9, 2);", (job,))
