@@ -4,7 +4,7 @@ import { deviceUrl, gatewayUrl } from '../../routes'
 import { IconAlertTriangle, IconAlertCircle, IconShieldCheck, IconX, IconExternalLink } from './Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useClickOutside } from '../../hooks/useClickOutside'
-import { REALTIME_ENABLED, grafanaAlertUrl } from '../../constants'
+import { REALTIME_ENABLED, GRAFANA_ALERT_HISTORY_URL, grafanaAlertUrl } from '../../constants'
 import { POLL_INTERVAL_MS, RECONCILE_MS } from '../../hooks/usePlatformAlerts'
 
 /**
@@ -18,6 +18,10 @@ import { POLL_INTERVAL_MS, RECONCILE_MS } from '../../hooks/usePlatformAlerts'
  * A row goes where its subject lives, decided by the rule's `entity_type` label (checked by
  * `platform_alerts_entity_type_valid`), not by the id prefix. A platform alert has no asset and
  * opens the rule in Grafana Alerting.
+ *
+ * This is the only place in the dashboard that counts Grafana alerts: their toasts are not recorded
+ * in the bell's history. What fired and cleared is in Grafana's alert history, which the footer
+ * links to.
  *
  * @param {Array} alerts Rows from `platform_alerts_active`; see hooks/usePlatformAlerts.
  *
@@ -167,6 +171,20 @@ export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realti
             {' '}{realtime
               ? `Delivered live, reconciled every ${RECONCILE_MS / 1000}s.`
               : `Polled every ${POLL_INTERVAL_MS / 1000}s (Realtime disabled).`}
+            {/* The record of what has fired and cleared is Grafana's, so the list links to it
+                rather than keeping a second one. */}
+            <a
+              className="alert-pill-history"
+              href={GRAFANA_ALERT_HISTORY_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setOpen(false)}
+              title="Open Grafana's alert history, in a new tab: every alert that fired or resolved in the last 24 hours"
+            >
+              Alert history in Grafana
+              <span className="sr-only"> (opens Grafana in a new tab)</span>
+              <IconExternalLink size={10} aria-hidden="true" />
+            </a>
           </div>
         </div>
       )}

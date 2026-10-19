@@ -855,7 +855,10 @@ passes `{ record: false }`, as a Grafana alert does.
   for a firing and a resolved alert. The toast shows, with the Alert group's icon and colour and a
   link to the rule, but nothing is recorded, so the bell's badge never counts what the alert
   counter already counts. `readStoredHistory` drops any Alert entry a tab stored before this. The
-  counter shows what is firing now.
+  counter shows what is firing now. Grafana's alert history (Alerting > History,
+  `GRAFANA_ALERT_HISTORY_URL`, linked from the counter's footer) is the record of what fired and
+  cleared, including an alert that came and went while nobody was looking. That page needs
+  Grafana's alert state history in Loki (`grafana/README.md`).
 - **A firing alert toasts its name only.** The summary can be several sentences with a SQL
   statement, which stacked as tall blocks, kept a warning up longer and was read aloud in full by
   the `role="alert"` region. The summary is in the alert counter's list.

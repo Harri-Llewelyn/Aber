@@ -1,14 +1,16 @@
 import React from 'react'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import { AlertPill } from '../components/common/AlertPill'
 import { POLL_INTERVAL_MS, RECONCILE_MS } from '../hooks/usePlatformAlerts'
+import { GRAFANA_ALERT_HISTORY_URL, GRAFANA_URL } from '../constants'
 
 /**
  * The top bar's alert counter. What is pinned: it is permanent, including when healthy, because an
  * element absent when healthy is indistinguishable from one that is broken; a critical alert is not
  * averaged away by warnings; the count is spelled out rather than carried by colour; the healthy
- * state does not pulse and the firing states do.
+ * state does not pulse and the firing states do; and its footer links to Grafana's alert history,
+ * the record of what has fired and cleared.
  */
 
 const alert = (over = {}) => ({
@@ -157,6 +159,24 @@ describe('AlertPill', () => {
       render(<AlertPill alerts={[alert()]} realtime={realtime} />)
       fireEvent.click(pill())
       expect(screen.getByText(expected)).toBeInTheDocument()
+    })
+
+    it('links its footer to Grafana\'s alert history, in a new tab, healthy or firing', () => {
+      expect(GRAFANA_ALERT_HISTORY_URL).toBe(`${GRAFANA_URL}/alerting/history?from=now-24h&to=now`)
+      for (const alerts of [[], [alert()]]) {
+        const { unmount } = render(<AlertPill alerts={alerts} />)
+        fireEvent.click(pill())
+        const foot = document.querySelector('.alert-pill-foot')
+        const link = within(foot).getByRole('link', { name: /^Alert history in Grafana/ })
+        expect(link).toHaveAttribute('href', GRAFANA_ALERT_HISTORY_URL)
+        expect(link).toHaveAttribute('target', '_blank')
+        expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+        expect(link).toHaveAccessibleName(/opens Grafana in a new tab/)
+        // Following it leaves the dashboard, so the panel closes behind it.
+        fireEvent.click(link)
+        expect(screen.queryByRole('dialog', { name: 'Firing alerts' })).toBeNull()
+        unmount()
+      }
     })
 
     it('closes again on a second click and on the close control', () => {

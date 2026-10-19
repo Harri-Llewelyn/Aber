@@ -2703,7 +2703,9 @@ its `fsGroup` is **472**, not 1000.
 
 The two browser-facing URLs are set with `GF_*` environment variables rather than in the file:
 `GF_SERVER_ROOT_URL` and `GF_AUTH_GENERIC_OAUTH_AUTH_URL`. `token_url` and `api_url` inside the file
-are in-cluster (`http://supabase-envoy:8000`) and need no change.
+are in-cluster (`http://supabase-envoy:8000`) and need no change. The Loki that alert state history
+goes to is set the same way: `GF_UNIFIED_ALERTING_STATE_HISTORY_LOKI_REMOTE_URL`, the URL the logs
+datasource uses (`grafana/README.md`, *Alert state history*).
 
 An initContainer renders Grafana's datasource, just as one renders the gateway's config. The reason
 is the same: with `existingSecret` the chart cannot see the password, and Helm would substitute an

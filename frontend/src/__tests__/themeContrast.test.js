@@ -204,6 +204,8 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     // its sunken fill. Both the filter and the account menu sit on --bg-card.
     ['segment name',                   tokenIn(paint('.segmented-option', 'color')),            card, AA_TEXT],
     ['chosen segment name',            tokenIn(paint('.segmented-option-checked', 'color')),    on(paint('.segmented-option-checked'), card), AA_TEXT],
+    // The alert counter's link to Grafana's alert history, 11px in its footer.
+    ['alert history link',             tokenIn(paint('.alert-pill-history', 'color')),          card, AA_TEXT],
   ]
 
   it.each(cases)('%s clears its threshold', (label, token, bg, threshold) => {

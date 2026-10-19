@@ -225,6 +225,13 @@ export const grafanaAlertUrl = (alertName) =>
     ? `${GRAFANA_URL}/alerting/list?search=${encodeURIComponent(`rule:"${alertName}"`)}`
     : `${GRAFANA_URL}/alerting/list`);
 
+/**
+ * Grafana's alert history (Alerting > History): every rule's state changes, the record of alerts
+ * that fired and cleared. Opens on the last 24 hours; the page's own default is one. The page
+ * needs grafana.ini to keep that history in Loki (grafana/README.md).
+ */
+export const GRAFANA_ALERT_HISTORY_URL = `${GRAFANA_URL}/alerting/history?from=now-24h&to=now`;
+
 // How often tabs that render wall-clock-derived state re-render (hooks/useClockTick.js). A
 // gateway going quiet writes nothing, so it emits no Realtime event; 15s keeps STALE detection
 // close to the polling behaviour at no network cost.
