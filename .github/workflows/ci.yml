@@ -270,8 +270,8 @@ jobs:
           node scripts/generate-opcua-vocabulary.mjs
           node scripts/check-opcua-seed-sync.mjs
 
-      # ASHRAE 223P is still in public review, so the generator pins the ontology version and refuses
-      # to run when upstream moves.
+      # ASHRAE 223P is still in public review, so the generator reads the copy of the ontology kept in
+      # scripts/vocabularies/ and refuses any other file.
       - name: Verify ASHRAE 223P Vocabulary Seed Is In Sync
         run: |
           node scripts/generate-ashrae223-vocabulary.mjs
