@@ -23,6 +23,10 @@ AStoredCaptureIsNeverOverwritten holds the upload race against the real bucket: 
 caught up is refused before it writes, a refused register leaves the row and its file agreeing, and
 a deleted subject's capture file is claimed by nothing.
 
+ACaptureAtTheCapFitsBothWorkers records a device to the 50 MiB size cap and replays it, reading
+each worker's memory from its container's cgroup with kubectl: each peak must stay under 60% of the
+container's limit.
+
 The gateway is the suite's own rather than the validator's, so nothing else publishes under its edge
 node. The daemon asks for the capture's rebirth with `force`, so the rebirth rate limit does not
 apply to it.
@@ -84,6 +88,9 @@ SILENT_DEVICE_ID = "6e000000-0000-4000-8000-000000000001"
 # The upload race's own subject: a gateway and device no edge node publishes as.
 UPLOAD_GATEWAY_ID = "71000000-0000-4000-8000-000000000001"
 UPLOAD_DEVICE_ID = "72000000-0000-4000-8000-000000000001"
+# The memory case's own subject, recorded to the size cap.
+CAP_GATEWAY_ID = "73000000-0000-4000-8000-000000000001"
+CAP_DEVICE_ID = "74000000-0000-4000-8000-000000000001"
 
 # One DDATA a second; the capture runs until DATA_AFTER_BIRTH have followed the rebirth.
 DATA_INTERVAL = 1.0
@@ -1143,6 +1150,243 @@ class AStoredCaptureIsNeverOverwritten(unittest.TestCase):
         self.session.rest(f"/devices?id=eq.{UPLOAD_DEVICE_ID}", method="DELETE")
         self.assertEqual(self.row(), [])
         self.assertEqual([o.get("name") for o in self.session.remove(newer_path)], [newer_path])
+
+
+# DDATA of fifty aliased integers that no birth declares: the shape that cost the daemon the most
+# memory before 1.5. The daemon drops an undeclared alias, so neither the recording nor the replay
+# writes a historian row.
+CAP_ALIASES = 50
+CAP_RATE = 400                 # messages a second, as the audit published; the cap in about 65 s
+CAP_RECORD_TIMEOUT = 300
+CAP_SPEED = 4.0
+# Each worker's peak since its container started, as a share of its limit.
+CAP_MEMORY_SHARE = 0.6
+
+
+def cgroup_memory(deployment):
+    """(memory.peak, memory.max) of the deployment's container, in bytes; the limit is None
+    when there is none."""
+    result = stack_exec._kubectl("exec", f"deploy/{deployment}", "-c", deployment, "--", "cat",
+                                 "/sys/fs/cgroup/memory.peak", "/sys/fs/cgroup/memory.max")
+    if result.returncode != 0:
+        raise AssertionError(f"could not read deploy/{deployment}'s cgroup: {result.stderr.strip()}")
+    peak, limit = result.stdout.split()[:2]
+    return int(peak), int(limit) if limit.isdigit() else None
+
+
+class FloodEdgeNode(FixtureEdgeNode):
+    """The fixture edge node, publishing CAP_ALIASES undeclared aliases a message at CAP_RATE."""
+
+    def start(self):
+        self.sent = 0
+        self._birth()
+        self._thread = threading.Thread(target=self._run, name=f"flood-{self.node_id}", daemon=True)
+        self._thread.start()
+
+    def flood(self):
+        self._flood_start = time.monotonic()
+        self._data.set()
+
+    def _ddata(self, seq):
+        payload = sparkplug_b_pb2.Payload()
+        payload.timestamp = self._stamp()
+        payload.seq = seq
+        for i in range(CAP_ALIASES):
+            metric = payload.metrics.add()
+            metric.alias = 1000 + i
+            metric.int_value = (self.sent * 7 + i) % 100000
+        return payload.SerializeToString()
+
+    def _run(self):
+        while not self._halt.is_set():
+            with self._lock:
+                if self._rebirth.is_set():
+                    self._rebirth.clear()
+                    self._birth()
+                elif self._data.is_set():
+                    if self._send("DDATA", self.topic("DDATA", self.device_id), self._ddata):
+                        self.sent += 1
+            ahead = (self._flood_start + self.sent / CAP_RATE - time.monotonic()
+                     if self._data.is_set() else 0.02)
+            if ahead > 0:
+                time.sleep(ahead)
+
+
+class ACaptureAtTheCapFitsBothWorkers(unittest.TestCase):
+    """
+    A recording to the 50 MiB size cap and its replay, reading each worker's memory from its
+    container's cgroup. Before 1.5 the daemon held a recording as Python objects and OOM-killed
+    at the cap, and the playback worker held the parsed file and its plan, about 4.6 times the
+    file. Each peak must stay under CAP_MEMORY_SHARE of the container's limit. memory.peak counts
+    from the container's start: restart deploy/ingestion and deploy/playback first for a reading of
+    this case alone.
+    """
+
+    _issue_gateway_credential = RecordedCaptureReplays.__dict__["_issue_gateway_credential"]
+    _worker_holds = RecordedCaptureReplays.__dict__["_worker_holds"]
+    _ensure_worker_credential = RecordedCaptureReplays.__dict__["_ensure_worker_credential"]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.session = Session(sign_in())
+        cls.edge = cls.capture_job = cls.capture = cls.playback_job = cls.lane = None
+        cls.memory = {}
+        cls.metric = "CAPTURE/AT_THE_CAP_" + secrets.token_hex(6).upper()
+        cls.addClassCleanup(cls._clean_up)
+        cls.gateway = cls.session.upsert("gateways", {
+            "id": CAP_GATEWAY_ID, "name": "CAPTURE_CAP_Source_Gateway", "deployment": "host",
+            "description": "Fixture for ingestion/test_recorded_capture_replay.py. Safe to delete.",
+        })
+        cls.device = cls.session.upsert("devices", {
+            "id": CAP_DEVICE_ID, "name": "CAPTURE_CAP_Source_Device", "gateway_id": cls.gateway["id"],
+            "description": "Fixture for ingestion/test_recorded_capture_replay.py. Safe to delete.",
+        })
+        cls.memory["ingestion before"] = cgroup_memory("ingestion")
+        cls._record()
+        cls.memory["ingestion"] = cgroup_memory("ingestion")
+        cls._replay()
+        cls.memory["playback"] = cgroup_memory("playback")
+        print("cgroup memory (peak, limit) in MiB: " + ", ".join(
+            "%s %.0f of %s" % (name, peak / 2**20, "%.0f" % (limit / 2**20) if limit else "none")
+            for name, (peak, limit) in cls.memory.items()))
+
+    @classmethod
+    def _record(cls):
+        password = cls._issue_gateway_credential()
+        deadline = time.monotonic() + BROKER_ACCEPT_TIMEOUT
+        while True:
+            cls.edge = FloodEdgeNode(cls.gateway["sparkplug_group"], cls.gateway["sparkplug_id"],
+                                     cls.device, password, cls.metric)
+            if cls.edge.connect(MQTT_HOST, MQTT_PORT) == 0 and cls.edge.subscribed.is_set():
+                break
+            cls.edge.stop()
+            if time.monotonic() >= deadline:
+                raise AssertionError("the broker did not accept the memory case's gateway")
+            time.sleep(2)
+        cls.edge.start()
+
+        def device():
+            got, rows = cls.session.rest(
+                f"/devices?select=last_birth_metrics&id=eq.{CAP_DEVICE_ID}&limit=1")
+            return rows[0] if got == 200 and rows else {}
+        poll(device, lambda d: cls.metric in (d.get("last_birth_metrics") or []),
+             LIVE_BIRTH_TIMEOUT, 2)
+
+        status, job_id = cls.session.rpc("start_capture_job", {
+            "p_subject_kind": "device", "p_subject_id": CAP_DEVICE_ID, "p_max_seconds": 600,
+            "p_note": "memory at the size cap", "p_replace": True})
+        if status not in (200, 201) or not job_id:
+            raise AssertionError(f"start_capture_job refused the memory case: {status} {job_id}")
+        cls.capture_job_id = job_id
+
+        def job():
+            got, rows = cls.session.rest(f"/capture_jobs?select=*&id=eq.{job_id}&limit=1")
+            return rows[0] if got == 200 and rows else {}
+        poll(job, lambda j: j.get("status") == "RECORDING", CLAIM_TIMEOUT, 1)
+        started = time.monotonic()
+        poll(lambda: cls.edge.births_since(started), bool, REBIRTH_TIMEOUT, 0.2)
+        cls.edge.flood()
+        cls.capture_job = poll(job, lambda j: j.get("status") in TERMINAL, CAP_RECORD_TIMEOUT, 2)
+        cls.edge.stop()
+        if cls.capture_job.get("capture_id"):
+            status, rows = cls.session.rest(
+                f"/captures?select=*&id=eq.{cls.capture_job['capture_id']}&limit=1")
+            cls.capture = rows[0] if status == 200 and rows else None
+
+    @classmethod
+    def _replay(cls):
+        if not cls.capture:
+            return
+        status, rows = cls.session.rest("/gateways?select=id,sparkplug_id&is_shadow=eq.true"
+                                        "&is_archived=eq.false&limit=1")
+        cls.playback_gateway = rows[0]
+        cls._ensure_worker_credential()
+        status, mapping = cls.session.rpc("ensure_shadow_devices", {"p_capture_id": cls.capture["id"]})
+        if status != 200 or not mapping:
+            raise AssertionError(f"could not mint the replay lane: {status} {mapping}")
+        cls.lane = mapping.get(cls.device["sparkplug_id"])
+        status, job_id = cls.session.rpc("start_playback_job", {
+            "p_capture_id": cls.capture["id"], "p_target_gateway_id": cls.playback_gateway["id"],
+            "p_device_map": mapping, "p_speed": CAP_SPEED})
+        if status not in (200, 201) or not job_id:
+            raise AssertionError(f"start_playback_job refused the capture at the cap: {status} {job_id}")
+
+        def read():
+            got, rows = cls.session.rest(f"/playback_jobs?select=*&id=eq.{job_id}&limit=1")
+            return rows[0] if got == 200 and rows else {}
+        cls.playback_job = poll(read, lambda j: j.get("status") in TERMINAL,
+                                JOB_TIMEOUT + CAP_RECORD_TIMEOUT / CAP_SPEED, 2)
+
+    @classmethod
+    def _clean_up(cls):
+        if cls.edge is not None:
+            cls.edge.stop()
+        session = cls.session
+
+        def attempt(what, action):
+            try:
+                action()
+            except Exception as err:  # noqa: BLE001 -- cleanup must not mask a real failure
+                print(f"cleanup warning: {what}: {err}")
+
+        if getattr(cls, "capture_job_id", None):
+            attempt("stopping the capture", lambda: session.rpc(
+                "request_capture_stop", {"p_job_id": cls.capture_job_id}))
+        if cls.lane:
+            attempt("the lane", lambda: session.rest(f"/devices?sparkplug_id=eq.{cls.lane}",
+                                                     method="DELETE"))
+        if cls.capture:
+            attempt("the capture row", lambda: session.rest(f"/captures?id=eq.{cls.capture['id']}",
+                                                            method="DELETE"))
+            attempt("the stored file", lambda: session.remove(cls.capture["storage_path"]))
+        attempt("the device", lambda: session.rest(f"/devices?id=eq.{CAP_DEVICE_ID}", method="DELETE"))
+        attempt("the gateway", lambda: session.rest(f"/gateways?id=eq.{CAP_GATEWAY_ID}",
+                                                    method="DELETE"))
+        attempt("the broker account", lambda: delete_broker_account(cls.gateway["sparkplug_id"]))
+
+        def rows():
+            conn = historian()
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM telemetry WHERE metric_name = %s", (cls.metric,))
+            conn.close()
+            conn = owner_connection()
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM public.audit_trail WHERE entity_id = ANY(%s::uuid[])",
+                            ([CAP_GATEWAY_ID, CAP_DEVICE_ID],))
+            conn.close()
+        attempt("the historian and audit rows", rows)
+
+    def assert_under_share(self, name):
+        peak, limit = self.memory[name]
+        if limit is None:
+            self.skipTest(f"deploy/{name} has no memory limit to measure against")
+        self.assertLess(peak, CAP_MEMORY_SHARE * limit,
+                        f"deploy/{name} peaked at {peak / 2**20:.0f} MiB of its {limit / 2**20:.0f} MiB")
+
+    def test_the_recording_stopped_at_the_size_cap_and_was_stored(self):
+        job = self.capture_job or {}
+        self.assertEqual(job.get("status"), "COMPLETED", job.get("error"))
+        self.assertIsNotNone(self.capture, "the job names no stored capture")
+        self.assertEqual(self.capture["manifest"].get("stop_reason"), "size_cap")
+        cap = job["max_bytes"]
+        # The file is the counted bytes and its head and tail.
+        self.assertGreaterEqual(self.capture["size_bytes"], cap)
+        self.assertLess(self.capture["size_bytes"], cap + 64 * 1024)
+
+    def test_the_daemon_stayed_under_its_share_of_its_limit(self):
+        self.assert_under_share("ingestion")
+
+    def test_the_replay_published_every_planned_message(self):
+        job = self.playback_job or {}
+        self.assertEqual(job.get("status"), "COMPLETED", job.get("error"))
+        self.assertGreater(job.get("messages_total") or 0, 0)
+        self.assertEqual(job.get("messages_sent"), job.get("messages_total"))
+
+    def test_the_playback_worker_stayed_under_its_share_of_its_limit(self):
+        self.assertIn("playback", self.memory, "the replay did not run")
+        self.assert_under_share("playback")
 
 
 if __name__ == "__main__":

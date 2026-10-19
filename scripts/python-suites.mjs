@@ -1085,7 +1085,9 @@ export const SUITES = {
       'issues it, publishes live from the suite and answers the rebirth; an Administrator records it ' +
       'with start_capture_job() and stops it; the file and the row are checked against what was ' +
       'published; and that file is replayed into the historian under the replay lane and nowhere ' +
-      'else. Needs `playback.enabled`, which values-dev.yaml sets.',
+      'else. A second subject is recorded to the 50 MiB size cap and replayed, and the cgroup ' +
+      'memory.peak of each worker must stay under 60% of its limit. Needs `playback.enabled`, which ' +
+      'values-dev.yaml sets.',
   },
   'test-harness/test_load_generator.py': {
     // UNIT, AND THAT IS THE POINT. The suite exists precisely because the run it guards cannot be

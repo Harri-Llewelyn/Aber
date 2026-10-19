@@ -155,9 +155,10 @@ python ingestion/test_playback_replay.py
 # rebirth request the daemon sends when the capture starts. An Administrator starts the capture with
 # start_capture_job() and stops it with request_capture_stop(). The stored file, the `captures` row
 # and its manifest are checked against what was published, and the file the daemon wrote is replayed
-# through the playback worker into the historian, under the replay lane and nowhere else. Same needs
-# and environment as the suite above, whose helpers it reuses; kubectl removes the fixture's broker
-# account afterwards.
+# through the playback worker into the historian, under the replay lane and nowhere else. A second
+# subject is recorded to the 50 MiB size cap and replayed, and each worker's cgroup memory.peak must
+# stay under 60% of its limit. Same needs and environment as the suite above, whose helpers it
+# reuses; kubectl removes the fixture's broker account afterwards and reads the cgroups.
 python ingestion/test_recorded_capture_replay.py
 # Cold telemetry archival -- the object LAYOUT and the Parquet round trip. Needs pytest and pyarrow.
 #
