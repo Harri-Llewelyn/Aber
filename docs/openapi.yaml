@@ -1652,8 +1652,8 @@ paths:
         `manifest` describes a file nobody has downloaded — the metric names (capped at 50, with
         `metric_name_count` beside them), the topic count, the observed rate, and **`birth_captured`**.
         That last field is the one to read before trusting a capture: `false` means the recording
-        contains no `NBIRTH`/`DBIRTH`, so an alias-optimised gateway replays as `unresolved_alias`
-        and drops every metric — from a file that otherwise looks complete.
+        contains no `NBIRTH`, so a playback refuses it, since a replay opens with the edge node's
+        birth certificate. A capture stored before 1.5 set it for a `DBIRTH` alone too.
 
         `source` distinguishes a capture the daemon recorded from one uploaded through the browser.
         An uploaded capture has no `capture_jobs` row at all, which is why the artifact is a table
@@ -5286,9 +5286,9 @@ components:
             birth_captured:
               type: boolean
               description: |
-                **Read this before trusting the capture.** `false` means no `NBIRTH`/`DBIRTH` was
-                recorded, so an alias-optimised gateway replays as `unresolved_alias` and drops
-                every metric.
+                **Read this before trusting the capture.** `false` means no `NBIRTH` was recorded,
+                so a playback refuses the capture: a replay opens with the edge node's birth
+                certificate. Before 1.5 a `DBIRTH` alone also set it.
             rebirth_requested: { type: boolean }
             stop_reason:
               type: string

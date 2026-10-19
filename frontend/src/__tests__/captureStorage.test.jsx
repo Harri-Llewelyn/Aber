@@ -215,6 +215,14 @@ describe('the upload dialog and the stored captures', () => {
     identities: { edge_nodes: ['gwy120000000000400080000'], devices: [] }
   }
 
+  it('says a file with no NBIRTH stores but cannot be played back', async () => {
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    dropOnCard(fileOf(GOOD))
+    expect(await screen.findByText(/so a playback refuses it/)).toBeInTheDocument()
+    expect(screen.getByLabelText('File it against')).toBeInTheDocument()
+  })
+
   it('re-reads the stored captures when it opens, since captures is not published to Realtime', async () => {
     renderTab()
     await screen.findByText('Line 1 Gateway')

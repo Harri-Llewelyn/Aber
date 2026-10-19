@@ -558,16 +558,13 @@ the throttle exists to stop a flood driven by traffic, and a capture is one pers
 button under a single-flight lock. The throttle is still stamped, so a forced request does not leave
 the node open to being asked again by the next message that notices a gap.
 
-**`birth_captured` means the node's birth, not a device's.** An `NBIRTH` carries the alias table,
-which is what makes a capture replayable; announcing a *device* takes a `DBIRTH`, and only
-`process_dbirth()` sets a device `ONLINE`. So a capture holding an NBIRTH alone brings the target
-edge node up and delivers its telemetry to the historian, and leaves the devices `OFFLINE` until
-they birth on their own — all correct, and not what the single flag suggests.
-
-**A missing birth only costs anything on an alias-optimised fleet**, which is why the manifest also
-records `uses_aliases` — true only when some metric arrived with an alias and no name. A birthless
-capture of a named-metric fleet, this one included, replays perfectly well; what it does not do is
-announce the devices.
+**`birth_captured` says whether the edge node's birth certificate, an `NBIRTH`, was recorded, and a
+capture without one cannot be played back.** A replay is its own Sparkplug session, so the plan opens
+at the first NBIRTH and a device's data replays only after its DBIRTH (see *A replay is its own
+Sparkplug session* above). A `DBIRTH` alone does not set the flag. The recorder asks the edge node to
+rebirth for exactly that reason. `uses_aliases`, true only when some metric arrived with an alias and
+no name, no longer changes whether a capture plays. Captures stored before 1.5 keep the flag as it
+was then, when a DBIRTH alone also set it.
 
 **The manifest exists so the page can describe a file it has not downloaded**: the metric names seen
 (capped at 50 with the true count beside them, the way `record_ingestion_rejection()` caps

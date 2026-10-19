@@ -84,7 +84,8 @@ STOP_SIZE = "size_cap"
 # Node-level message types, which carry no device segment. A DEVICE capture records these too --
 # see the matching rule in `_JobState.matches()`.
 _NODE_TYPES = ("NBIRTH", "NDATA", "NDEATH")
-_BIRTH_TYPES = ("NBIRTH", "DBIRTH")
+# What sets birth_captured: a replay opens at the edge node's NBIRTH, and one without it is refused.
+_BIRTH_TYPES = ("NBIRTH",)
 
 # Sparkplug plumbing and identity, which are not the machine's metrics. ingestion.py holds the same
 # identity list (IDENTITY_METRICS) and cannot be imported here: it imports this module.
@@ -445,10 +446,10 @@ def _manifest(messages, state, stop=None):
     """
     What is in the file, so the page can describe a capture nobody has downloaded.
 
-    `birth_captured` makes the alias trap visible on the list. `metric_names` leaves out Sparkplug
-    plumbing and identity, and the database keeps the first 50 with the true count beside them
-    (`capped_capture_manifest()`). `stop_reason` and `duration_ms` say whether the recording ran
-    its window or a cap cut it short.
+    `birth_captured` says an NBIRTH was recorded; playback refuses a capture without one.
+    `metric_names` leaves out Sparkplug plumbing and identity, and the database keeps the first 50
+    with the true count beside them (`capped_capture_manifest()`). `stop_reason` and `duration_ms`
+    say whether the recording ran its window or a cap cut it short.
     """
     names, topics = [], set()
     seen = set()

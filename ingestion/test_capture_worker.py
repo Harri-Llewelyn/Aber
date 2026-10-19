@@ -863,6 +863,18 @@ class TheManifestSaysHowTheRecordingEnded(FinishBase):
         self.assertEqual(j.cap_code, capture_worker.STOP_MESSAGES)
 
 
+class BirthCapturedMeansTheNodesBirth(unittest.TestCase):
+    """A replay opens at the edge node's NBIRTH, so a DBIRTH alone does not make a capture playable."""
+
+    def test_a_dbirth_alone_is_not_a_birth_certificate(self):
+        j = job()
+        j.append("spBv1.0/%s/DBIRTH/%s/%s" % (GROUP, GWY, DEV), wire(seq=0), "DBIRTH")
+        self.assertFalse(j.birth_captured)
+        self.assertFalse(capture_worker._manifest(j.messages, j)["birth_captured"])
+        j.append("spBv1.0/%s/NBIRTH/%s" % (GROUP, GWY), wire(seq=1), "NBIRTH")
+        self.assertTrue(j.birth_captured)
+
+
 class CapturedMetricsAreTheMachines(unittest.TestCase):
     """Sparkplug plumbing and identity are not the machine's metrics (shared contract section 5)."""
 

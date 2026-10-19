@@ -397,21 +397,56 @@ function filenameFromDisposition(header) {
 /** The payload encodings a capture file may name, as ingestion/capture.py reads them. */
 export const CAPTURE_ENCODINGS = ['protobuf', 'json'];
 
-/** The six message types an edge node publishes; the D types carry a device segment. */
-const EDGE_NODE_TYPES = ['NBIRTH', 'NDEATH', 'NDATA', 'DBIRTH', 'DDEATH', 'DDATA'];
+/** What an edge node publishes, in capture.py's order; the D types carry a device segment. */
+const NODE_MESSAGE_TYPES = ['NBIRTH', 'NDATA', 'NDEATH'];
+const DEVICE_MESSAGE_TYPES = ['DBIRTH', 'DDATA', 'DDEATH'];
+const EDGE_NODE_MESSAGE_TYPES = [...NODE_MESSAGE_TYPES, ...DEVICE_MESSAGE_TYPES];
 
 /** The latest a message may come after the first one: 24 hours. */
-const MAX_OFFSET_MS = 86400000;
+const MAX_OFFSET_MS = 24 * 60 * 60 * 1000;
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const isNumber = (value) => typeof value === 'number' && Number.isFinite(value);
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/** capture.py's _json_kind(): a value's JSON type, for a refusal. A missing key reads as null. */
+function jsonKind(value) {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value === 'boolean') return 'a boolean';
+  if (typeof value === 'number') return 'a number';
+  if (typeof value === 'string') return 'a string';
+  return Array.isArray(value) ? 'an array' : 'an object';
+}
+
+/** A value as Python's repr() writes it, so a refusal reads the same here and in capture.py. */
+function pyRepr(value) {
+  if (value === null || value === undefined) return 'None';
+  if (typeof value === 'boolean') return value ? 'True' : 'False';
+  if (typeof value !== 'string') return JSON.stringify(value);
+  const quote = value.includes("'") && !value.includes('"') ? '"' : "'";
+  let body = '';
+  for (const ch of value) {
+    if (ch === '\\') body += '\\\\';
+    else if (ch === quote) body += `\\${quote}`;
+    else if (ch === '\n') body += '\\n';
+    else if (ch === '\r') body += '\\r';
+    else if (ch === '\t') body += '\\t';
+    else if (ch.codePointAt(0) >= 0xd800 && ch.codePointAt(0) <= 0xdfff) {
+      body += `\\u${ch.codePointAt(0).toString(16)}`;
+    } else if (ch.codePointAt(0) < 0x20 || ch.codePointAt(0) === 0x7f) {
+      body += `\\x${ch.codePointAt(0).toString(16).padStart(2, '0')}`;
+    } else body += ch;
+  }
+  return quote + body + quote;
+}
 
 /**
  * What is wrong with a parsed capture file, or null when nothing is.
  *
- * The rule set `plan_playback()` in ingestion/capture.py applies again before a playback, stated
- * once for both: the document's version, epoch and messages; each message's shape and offset; and
- * a topic an edge node publishes. A message is named by its 0-based index. Whether the file holds
- * a birth certificate is not a rule here: a birthless file stores, and playback refuses it.
+ * ingestion/capture.py's check_capture() applies the same rules again before a playback, with the
+ * same words: the document's version, epoch and messages; each message's shape, topic, metrics,
+ * encoding and offset, a message named by its 0-based index. Whether the file holds a birth
+ * certificate is not a rule here: a birthless file stores, and playback refuses it.
  */
 export function captureFileProblem(doc) {
   if (Array.isArray(doc)) return 'That looks like a Node-RED flow export, not a capture.';
@@ -424,10 +459,14 @@ export function captureFileProblem(doc) {
     return `That capture is version ${version} and this stack reads version ${CAPTURE_VERSION}. ` +
       'capture.py refuses a version it does not know rather than guessing at the difference.';
   }
-  if (typeof doc.capture_epoch_ms !== 'number' || !Number.isFinite(doc.capture_epoch_ms)) {
-    return 'capture_epoch_ms is not a number, so the messages cannot be placed in time.';
+  if (!('capture_epoch_ms' in doc)) return 'capture has no capture_epoch_ms; it cannot be rebased';
+  if (!isNumber(doc.capture_epoch_ms)) {
+    return `capture_epoch_ms is ${jsonKind(doc.capture_epoch_ms)}, not a number; it cannot be rebased`;
   }
-  if (!Array.isArray(doc.messages) || doc.messages.length === 0) {
+  if (!Array.isArray(doc.messages)) {
+    return `the capture's messages are ${jsonKind(doc.messages)}, not an array`;
+  }
+  if (doc.messages.length === 0) {
     return 'That capture contains no messages, so there would be nothing to play back.';
   }
   let previous = 0;
@@ -439,42 +478,76 @@ export function captureFileProblem(doc) {
   return null;
 }
 
+/** capture.py's _check_message(), in its order. */
 function messageProblem(message, previous) {
-  if (!isObject(message)) return 'is not an object';
-  if (typeof message.topic !== 'string') return 'has no topic';
-  if (!isObject(message.payload)) return 'has no payload object';
+  if (!isObject(message)) return `it is ${jsonKind(message)}, not an object`;
+  if (!('topic' in message)) return 'it has no topic';
+  const topic = topicProblem(message.topic);
+  if (topic) return topic;
+  const payload = message.payload;
+  if (!isObject(payload)) return `its payload is ${jsonKind(payload)}, not an object`;
+  if ('metrics' in payload) {
+    if (!Array.isArray(payload.metrics)) {
+      return `its metrics are ${jsonKind(payload.metrics)}, not an array`;
+    }
+    const index = payload.metrics.findIndex(metric => !isObject(metric));
+    if (index !== -1) {
+      return `its metric ${index} is ${jsonKind(payload.metrics[index])}, not an object`;
+    }
+  }
+  const encoding = 'encoding' in message ? message.encoding : 'protobuf';
+  if (!CAPTURE_ENCODINGS.includes(encoding)) {
+    return `its encoding ${pyRepr(encoding)} is neither 'protobuf' nor 'json'`;
+  }
+  if (!('offset_ms' in message)) return 'it has no offset_ms';
   const offset = message.offset_ms;
-  if (!Number.isInteger(offset)) return 'offset_ms is not a whole number';
-  if (offset < 0) return 'offset_ms is negative';
-  if (offset < previous) return `offset_ms ${offset} is earlier than the message before it (${previous})`;
-  if (offset > MAX_OFFSET_MS) return 'offset_ms is more than 24 hours after the first message';
-  const metrics = message.payload.metrics;
-  if (metrics !== undefined && (!Array.isArray(metrics) || !metrics.every(isObject))) {
-    return 'payload.metrics is not a list of metrics';
+  if (!isNumber(offset) || !Number.isInteger(offset)) {
+    return `its offset_ms is ${pyRepr(offset)}, not a whole number of milliseconds`;
   }
-  if (message.encoding !== undefined && !CAPTURE_ENCODINGS.includes(message.encoding)) {
-    return `encoding ${JSON.stringify(message.encoding)} is not one this stack reads`;
+  if (offset < 0) return `its offset_ms ${offset} is negative`;
+  if (offset < previous) {
+    return `its offset_ms ${offset} is earlier than the message before it (${previous}): the ` +
+      'messages are out of order';
   }
-  return topicProblem(message.topic);
+  if (offset > MAX_OFFSET_MS) {
+    return `its offset_ms ${offset} is more than 24 hours after the first message, the longest a ` +
+      'capture may run';
+  }
+  return null;
 }
 
-function topicProblem(topic) {
-  const parts = topic.split('/');
-  if (parts[0] !== 'spBv1.0' || parts.length < 4 || parts.length > 5) {
-    return `topic ${JSON.stringify(topic)} is not spBv1.0/<group>/<type>/<edge node>[/<device>]`;
+/** capture.py's segment_problem(): a group, edge node or device id an edge node may publish. */
+function segmentProblem(segment) {
+  if (!segment) return 'is empty';
+  for (const [ch, name] of [['+', "'+'"], ['#', "'#'"], ['/', "'/'"], ['\0', 'a NUL character']]) {
+    if (segment.includes(ch)) return `contains ${name}`;
   }
-  // A '/' inside a segment has already split it, so a segment is checked for the other three.
-  const bad = parts.slice(1).find(s => s === '' || /[+#\0]/.test(s));
-  if (bad !== undefined) {
-    return `topic ${JSON.stringify(topic)} has an empty segment or one holding +, # or NUL`;
+  const wellFormed = typeof segment.isWellFormed === 'function'
+    ? segment.isWellFormed()
+    : !LONE_SURROGATE.test(segment);
+  return wellFormed ? null : 'is not valid UTF-8';
+}
+
+/** capture.py's check_topic(): exactly spBv1.0/<group>/<type>/<edge node>[/<device>]. */
+function topicProblem(topic) {
+  if (typeof topic !== 'string') return `its topic is ${jsonKind(topic)}, not a string`;
+  const parts = topic.split('/');
+  if (parts[0] !== 'spBv1.0' || (parts.length !== 4 && parts.length !== 5)) {
+    return `topic ${pyRepr(topic)} is not spBv1.0/<group>/<type>/<edge node>[/<device>]`;
   }
   const type = parts[2];
-  if (!EDGE_NODE_TYPES.includes(type)) {
-    return `message type ${JSON.stringify(type)} is not one an edge node publishes`;
+  if (!EDGE_NODE_MESSAGE_TYPES.includes(type)) {
+    return `topic ${pyRepr(topic)}: ${type} is not one of the six message types an edge node ` +
+      `publishes (${EDGE_NODE_MESSAGE_TYPES.join(', ')})`;
   }
-  const device = type.startsWith('D');
-  if (device && parts.length !== 5) return `a ${type} topic needs a device segment`;
-  if (!device && parts.length !== 4) return `an ${type} topic takes no device segment`;
+  const hasDevice = parts.length === 5;
+  if (hasDevice !== DEVICE_MESSAGE_TYPES.includes(type)) {
+    return `topic ${pyRepr(topic)}: a ${type} ${hasDevice ? 'never has' : 'always has'} a device segment`;
+  }
+  for (const [name, segment] of [['group', parts[1]], ['edge node', parts[3]], ['device', hasDevice ? parts[4] : null]]) {
+    const problem = segment !== null && segmentProblem(segment);
+    if (problem) return `topic ${pyRepr(topic)}: the ${name} segment ${problem}`;
+  }
   return null;
 }
 
@@ -492,9 +565,8 @@ export function isMachineMetric(name) {
  *
  * The other half of a contract `capture_worker._manifest()` writes; the fields are named in
  * `captures.manifest`'s COMMENT, which is the authority. `birth_captured` is computed from the
- * messages, not trusted: false means the capture replays as `unresolved_alias` on an
- * alias-optimised gateway. Names are capped by `capped_capture_manifest()` in the database, not
- * here.
+ * messages, not trusted: false means a playback refuses it: a replay opens with the edge node's
+ * NBIRTH. Names are capped by `capped_capture_manifest()` in the database, not here.
  */
 export function captureManifest(parsed) {
   const messages = Array.isArray(parsed?.messages) ? parsed.messages : [];
@@ -515,7 +587,7 @@ export function captureManifest(parsed) {
       // spBv1.0/<group>/<type>/<edge>[/<device>]
       const parts = String(message.topic).split('/');
       const type = parts[2];
-      if (type === 'NBIRTH' || type === 'DBIRTH') birth = true;
+      if (type === 'NBIRTH') birth = true;
       if (parts[3] && !edgeNodes.includes(parts[3])) edgeNodes.push(parts[3]);
       if (parts[4] && !devices.includes(parts[4])) devices.push(parts[4]);
     }

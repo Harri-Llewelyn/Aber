@@ -74,9 +74,10 @@ beforeEach(() => {
   };
 });
 
-describe('the rules a capture file is checked against (shared with plan_playback)', () => {
-  it('accepts a well-formed file', () => {
+describe("the rules a capture file is checked against, in capture.py's check_capture() words", () => {
+  it('accepts a well-formed file, and an offset JSON writes as 1000.0', () => {
     expect(captureFileProblem(GOOD)).toBeNull();
+    expect(captureFileProblem(JSON.parse(JSON.stringify(GOOD).replace('"offset_ms":5', '"offset_ms":5.0')))).toBeNull();
   });
 
   it('checks the document: an object, the version this stack reads, an epoch, some messages', () => {
@@ -84,43 +85,56 @@ describe('the rules a capture file is checked against (shared with plan_playback
     expect(captureFileProblem('x')).toMatch(/JSON object/);
     expect(captureFileProblem({ ...GOOD, aber_capture_version: undefined })).toMatch(/no aber_capture_version/);
     expect(captureFileProblem({ ...GOOD, aber_capture_version: 2 })).toMatch(/version 2/);
-    expect(captureFileProblem({ ...GOOD, capture_epoch_ms: '1700000000000' })).toMatch(/capture_epoch_ms/);
+    const { capture_epoch_ms: _epoch, ...noEpoch } = GOOD;
+    expect(captureFileProblem(noEpoch)).toBe('capture has no capture_epoch_ms; it cannot be rebased');
+    expect(captureFileProblem({ ...GOOD, capture_epoch_ms: '1700000000000' }))
+      .toBe('capture_epoch_ms is a string, not a number; it cannot be rebased');
+    expect(captureFileProblem({ ...GOOD, messages: 'abc' })).toBe("the capture's messages are a string, not an array");
     expect(captureFileProblem({ ...GOOD, messages: [] })).toMatch(/no messages/);
-    expect(captureFileProblem({ ...GOOD, messages: 'abc' })).toMatch(/no messages/);
   });
 
   it('names a malformed message by its index', () => {
     const cases = [
-      [withMessage(1, 'x'), /^message 1: is not an object$/],
-      [withMessage(1, m => ({ ...m, topic: undefined })), /^message 1: has no topic$/],
-      [withMessage(1, m => ({ ...m, payload: [] })), /^message 1: has no payload object$/],
-      [withMessage(1, m => ({ ...m, offset_ms: 1.5 })), /^message 1: offset_ms is not a whole number$/],
-      [withMessage(0, m => ({ ...m, offset_ms: -1 })), /^message 0: offset_ms is negative$/],
-      [withMessage(1, m => ({ ...m, offset_ms: 86400001 })), /^message 1: offset_ms is more than 24 hours/],
-      [withMessage(1, m => ({ ...m, payload: { metrics: { name: 'T' } } })), /^message 1: payload\.metrics is not a list/],
-      [withMessage(1, m => ({ ...m, payload: { metrics: ['T'] } })), /^message 1: payload\.metrics is not a list/],
-      [withMessage(1, m => ({ ...m, encoding: 'xml' })), /^message 1: encoding "xml" is not one/]
+      [withMessage(1, 'x'), 'message 1: it is a string, not an object'],
+      [withMessage(1, ({ topic: _t, ...m }) => m), 'message 1: it has no topic'],
+      [withMessage(1, m => ({ ...m, topic: 7 })), 'message 1: its topic is a number, not a string'],
+      [withMessage(1, ({ payload: _p, ...m }) => m), 'message 1: its payload is null, not an object'],
+      [withMessage(1, m => ({ ...m, payload: [] })), 'message 1: its payload is an array, not an object'],
+      [withMessage(1, m => ({ ...m, payload: { metrics: null } })), 'message 1: its metrics are null, not an array'],
+      [withMessage(1, m => ({ ...m, payload: { metrics: { name: 'T' } } })), 'message 1: its metrics are an object, not an array'],
+      [withMessage(1, m => ({ ...m, payload: { metrics: [{}, 'T'] } })), 'message 1: its metric 1 is a string, not an object'],
+      [withMessage(1, m => ({ ...m, encoding: 'xml' })), "message 1: its encoding 'xml' is neither 'protobuf' nor 'json'"],
+      [withMessage(1, m => ({ ...m, encoding: null })), "message 1: its encoding None is neither 'protobuf' nor 'json'"],
+      [withMessage(1, ({ offset_ms: _o, ...m }) => m), 'message 1: it has no offset_ms'],
+      [withMessage(1, m => ({ ...m, offset_ms: 1.5 })), 'message 1: its offset_ms is 1.5, not a whole number of milliseconds'],
+      [withMessage(1, m => ({ ...m, offset_ms: '5' })), "message 1: its offset_ms is '5', not a whole number of milliseconds"],
+      [withMessage(0, m => ({ ...m, offset_ms: -1 })), 'message 0: its offset_ms -1 is negative'],
+      [withMessage(1, m => ({ ...m, offset_ms: 86400001 })),
+        'message 1: its offset_ms 86400001 is more than 24 hours after the first message, the longest a capture may run']
     ];
-    for (const [doc, expected] of cases) expect(captureFileProblem(doc)).toMatch(expected);
+    for (const [doc, expected] of cases) expect(captureFileProblem(doc)).toBe(expected);
   });
 
   it('refuses offsets that go back in time', () => {
     const doc = withMessage(0, m => ({ ...m, offset_ms: 10 }));
-    expect(captureFileProblem(doc)).toBe('message 1: offset_ms 5 is earlier than the message before it (10)');
+    expect(captureFileProblem(doc))
+      .toBe('message 1: its offset_ms 5 is earlier than the message before it (10): the messages are out of order');
   });
 
   it('accepts only an edge node topic, with the device segment its type needs', () => {
     const topic = (t) => captureFileProblem(withMessage(1, m => ({ ...m, topic: t })));
-    expect(topic('spBv1.0/Aber/NCMD/gwy1')).toMatch(/^message 1: message type "NCMD" is not one an edge node publishes$/);
-    expect(topic('spBv1.0/STATE/host')).toMatch(/is not spBv1.0\/<group>/);
+    expect(topic('spBv1.0/Aber/NCMD/gwy1')).toBe("message 1: topic 'spBv1.0/Aber/NCMD/gwy1': NCMD is not one of " +
+      'the six message types an edge node publishes (NBIRTH, NDATA, NDEATH, DBIRTH, DDATA, DDEATH)');
+    expect(topic('spBv1.0/STATE/host')).toBe("message 1: topic 'spBv1.0/STATE/host' is not spBv1.0/<group>/<type>/<edge node>[/<device>]");
     expect(topic('spAv1.0/Aber/NDATA/gwy1')).toMatch(/is not spBv1.0\/<group>/);
-    expect(topic('spBv1.0/Aber/DDATA/gwy1')).toMatch(/a DDATA topic needs a device segment/);
-    expect(topic('spBv1.0/Aber/NDATA/gwy1/dev1')).toMatch(/an NDATA topic takes no device segment/);
     expect(topic('spBv1.0/Aber/DDATA/gwy1/dev1/extra')).toMatch(/is not spBv1.0\/<group>/);
-    for (const bad of ['spBv1.0//NDATA/gwy1', 'spBv1.0/Aber/NDATA/gw+1', 'spBv1.0/Aber/NDATA/gw#',
-      'spBv1.0/Aber/NDATA/gw\u00001']) {
-      expect(topic(bad)).toMatch(/empty segment or one holding/);
-    }
+    expect(topic('spBv1.0/Aber/DDATA/gwy1')).toBe("message 1: topic 'spBv1.0/Aber/DDATA/gwy1': a DDATA always has a device segment");
+    expect(topic('spBv1.0/Aber/NDATA/gwy1/dev1')).toBe("message 1: topic 'spBv1.0/Aber/NDATA/gwy1/dev1': a NDATA never has a device segment");
+    expect(topic('spBv1.0//NDATA/gwy1')).toBe("message 1: topic 'spBv1.0//NDATA/gwy1': the group segment is empty");
+    expect(topic('spBv1.0/Aber/NDATA/gw+1')).toBe("message 1: topic 'spBv1.0/Aber/NDATA/gw+1': the edge node segment contains '+'");
+    expect(topic('spBv1.0/Aber/DDATA/gwy1/d#')).toBe("message 1: topic 'spBv1.0/Aber/DDATA/gwy1/d#': the device segment contains '#'");
+    expect(topic('spBv1.0/Aber/NDATA/gw\u00001')).toBe("message 1: topic 'spBv1.0/Aber/NDATA/gw\\x001': the edge node segment contains a NUL character");
+    expect(topic('spBv1.0/Aber/NDATA/gw\ud800')).toMatch(/the edge node segment is not valid UTF-8$/);
     for (const type of ['NBIRTH', 'NDEATH', 'NDATA']) expect(topic(`spBv1.0/Aber/${type}/gwy1`)).toBeNull();
     for (const type of ['DBIRTH', 'DDEATH', 'DDATA']) expect(topic(`spBv1.0/Aber/${type}/gwy1/dev1`)).toBeNull();
   });
@@ -133,6 +147,12 @@ describe('the metrics a capture lists', () => {
     expect(names.filter(isMachineMetric)).toEqual(['Properties/Serial', 'Temperature']);
     const doc = withMessage(0, m => ({ ...m, payload: { metrics: names.map(name => ({ name })) } }));
     expect(captureManifest(doc).metric_names).toEqual(['Properties/Serial', 'Temperature', 'T']);
+  });
+
+  it('counts only an NBIRTH as a birth certificate, since a replay opens with one', () => {
+    expect(captureManifest(GOOD).birth_captured).toBe(true);
+    const dbirthOnly = { ...GOOD, messages: [{ ...GOOD.messages[1], topic: 'spBv1.0/Aber/DBIRTH/gwy120000000000400080000/dev270000000000400080000' }] };
+    expect(captureManifest(dbirthOnly).birth_captured).toBe(false);
   });
 
   it('records how long the file spans', () => {
@@ -192,7 +212,7 @@ describe('uploading a capture', () => {
 
   it('refuses a malformed file before anything is sent', async () => {
     await expect(upload({ file: file(withMessage(1, m => ({ ...m, topic: 'spBv1.0/Aber/NCMD/gwy1' }))) }))
-      .rejects.toThrow('message 1: message type "NCMD"');
+      .rejects.toThrow('message 1: topic');
     expect(calls.log).toEqual([]);
   });
 });

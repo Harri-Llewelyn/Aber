@@ -702,16 +702,11 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             {
               label: 'Birth certificate',
               // The one field on this panel that changes what an operator does next.
-              value: capture.manifest?.birth_captured === false
-                ? (capture.manifest?.uses_aliases ? 'Not captured — aliases unresolvable' : 'Not captured')
-                : 'Captured',
-              // Danger only when it actually costs something. A birthless capture of a fleet that
-              // publishes full metric names replays fine, and colouring it red said otherwise.
-              danger: capture.manifest?.birth_captured === false && !!capture.manifest?.uses_aliases,
+              value: capture.manifest?.birth_captured === false ? 'Not captured' : 'Captured',
+              // A replay opens with the edge node's NBIRTH, so a playback refuses a capture without one.
+              danger: capture.manifest?.birth_captured === false,
               title: capture.manifest?.birth_captured === false
-                ? (capture.manifest?.uses_aliases
-                  ? 'No birth certificate, and this capture uses metric aliases — a playback cannot resolve them, so every aliased metric is dropped on ingest.'
-                  : 'No birth certificate. Every metric carries its full name, so a playback resolves them; it will not announce the devices, which stay OFFLINE until they birth on their own.')
+                ? 'No birth certificate, so a playback refuses this capture: a replay opens with the edge node’s birth certificate. Record it again; the recorder asks the edge node for one.'
                 /* Where the birth came from when the recorder had to ask for it: only a requested
                    rebirth interrupted the plant. */
                 : capture.manifest?.rebirth_requested
@@ -1307,16 +1302,14 @@ function SubjectRow({ row, selected, onSelect }) {
               {capture.source === 'uploaded' && (
                 <Badge size="sm" className="badge-follow">UPLOADED</Badge>
               )}
-              {/* The one badge here that changes a decision: whether the file will play back. A
-                  missing birth costs metrics only when `uses_aliases` is set. */}
+              {/* The one badge here that changes a decision: a capture with no birth certificate
+                  cannot be played back. */}
               {capture.manifest?.birth_captured === false && (
                 <Badge
-                  tone={capture.manifest?.uses_aliases ? 'warning' : 'neutral'}
+                  tone="warning"
                   size="sm"
                   className="badge-follow"
-                  title={capture.manifest?.uses_aliases
-                    ? 'No NBIRTH or DBIRTH was recorded and this capture uses metric aliases, so a playback cannot resolve them: every aliased metric is dropped on ingest.'
-                    : 'No NBIRTH or DBIRTH was recorded. Every metric here carries its full name, so a playback still resolves them — but it will not announce the devices, which stay OFFLINE until they birth on their own.'}
+                  title="No NBIRTH or DBIRTH was recorded, so a playback refuses this capture: a replay opens with the edge node’s birth certificate. Record it again to replace it."
                 >
                   NO BIRTH
                 </Badge>

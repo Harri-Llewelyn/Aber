@@ -133,14 +133,13 @@ export function UploadCaptureModal({ file, subjects, presetSubject, forPlayback 
         </div>
       )}
 
-      {/* Only when the capture actually depends on the alias table -- see StartPlaybackModal. */}
-      {parsed && manifest && !manifest.birth_captured && manifest.uses_aliases && (
+      {/* A birthless file stores; playback refuses it (plan_playback()). */}
+      {parsed && manifest && !manifest.birth_captured && (
         <div className="callout callout-warning">
           <IconShieldAlert size={14} className="callout-icon" />
           <div>
-            This capture contains no <code>NBIRTH</code> or <code>DBIRTH</code> and its metrics are
-            carried by <strong>alias</strong>. A playback will drop every one of them and still
-            report success.
+            This capture contains no <code>NBIRTH</code>, so a playback refuses it: a replay opens
+            with the edge node&apos;s birth certificate. It can still be stored.
           </div>
         </div>
       )}
