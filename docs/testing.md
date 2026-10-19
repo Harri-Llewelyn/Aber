@@ -331,6 +331,10 @@ python supabase/migrations/test_audit_trail_guard.py
 # and produced stamp. Both matchers are gated on has_role(), so this suite asserts their shape
 # rather than their answers -- it connects as the owner, which holds no role.
 python supabase/migrations/test_audit_trail_paging.py
+# How a playback ends (0191). Stop on a job whose worker has been silent for a minute ends it as
+# CANCELLED, so a stalled worker cannot hold the Playback gateway until it restarts, and the worker
+# coming back is told to stop and changes nothing.
+python supabase/migrations/test_playback_stop_and_sweep.py
 # The delivery gate on broker-credential issuance (0078). NOT the happy path: the test that earns
 # its place is that a REAL gateway is not a delivery target, because a true there writes a real
 # machine's broker password into a file the replay worker reads -- and its broker role would then

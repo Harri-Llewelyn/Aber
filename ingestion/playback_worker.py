@@ -54,6 +54,12 @@ SUPABASE_GATEWAY_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 BUCKET = os.getenv("CAPTURE_BUCKET", "broker-captures")
 POLL_INTERVAL_SECONDS = float(os.getenv("PLAYBACK_POLL_INTERVAL_SECONDS", "3"))
 PROGRESS_INTERVAL_SECONDS = float(os.getenv("PLAYBACK_PROGRESS_INTERVAL_SECONDS", "1"))
+# The longest single sleep while a job waits for its next message. request_playback_stop() treats a
+# job silent for a minute as stalled, so this stays far below that.
+SLEEP_SLICE_SECONDS = 1.0
+# How long playback_finish() is retried, with backoff, before the row is left RUNNING for Stop or
+# the next startup sweep to end.
+FINISH_RETRY_SECONDS = float(os.getenv("PLAYBACK_FINISH_RETRY_SECONDS", "300"))
 
 # How long to wait for the broker's CONNACK before failing the job.
 #
@@ -71,12 +77,9 @@ NDEATH_ACK_TIMEOUT_SECONDS = 5.0
 # every CONNECT sent, wrapping 255 to 0 (tck-id-topics-nbirth-bdseq-increment).
 _next_bdseq = {}
 
-# How often this worker restates which gateways it can publish as.
-#
-# IT IS A HEARTBEAT, NOT A CHANGE FEED, and that is why it repeats rather than reporting once. The
-# page has to tell "the worker holds no credentials" from "the worker is not running", and an empty
-# list reported once at startup looks identical to both. 30s against the page's own staleness
-# window means a worker that dies is visible as down well before anyone finishes reading a dialog.
+# The heartbeat: how often a timer thread restates which gateways this worker can publish as, while
+# idle and during a job. The playback dialog reads a report older than two minutes as a worker that
+# is not running.
 CREDENTIAL_REPORT_INTERVAL_SECONDS = float(
     os.getenv("PLAYBACK_CREDENTIAL_REPORT_INTERVAL_SECONDS", "30")
 )
@@ -368,8 +371,71 @@ def _connection_lost(sent):
     )
 
 
-def _run_job(supabase, storage, credentials, job):
-    """Publish one capture. Returns (messages_sent, messages_out_of_window, error or None)."""
+class _Stopped(Exception):
+    """The operator asked to stop, or the job's row is no longer RUNNING."""
+
+
+class _JobFailed(Exception):
+    """The job ends FAILED with this message."""
+
+
+class _Progress:
+    """A job's count, reported to `playback_progress()`, whose answer may stop the job."""
+
+    def __init__(self, supabase, job_id, total):
+        self.supabase = supabase
+        self.job_id = job_id
+        self.total = total
+        self.sent = 0
+        self.started = None
+        self._last = None
+        self._warned = None
+
+    def report(self, force=False):
+        """Report now if forced, on the first call, or once PROGRESS_INTERVAL_SECONDS has passed.
+        Raises _Stopped when the answer says to stop."""
+        now = time.monotonic()
+        if not force and self._last is not None and now - self._last < PROGRESS_INTERVAL_SECONDS:
+            return
+        self._last = now
+        elapsed = int(now - self.started) if self.started is not None else 0
+        try:
+            stop = self.supabase.rpc("playback_progress", {
+                "p_job_id": self.job_id,
+                "p_messages_sent": self.sent,
+                "p_messages_total": self.total,
+                "p_elapsed_seconds": elapsed,
+            }).execute().data is True
+        except Exception as err:
+            # The card stops moving; the playback does not. Logged at most every 30 seconds.
+            if self._warned is None or now - self._warned >= 30:
+                self._warned = now
+                logger.warning("Playback %s: progress update failed: %s", self.job_id, err)
+            return
+        if stop:
+            raise _Stopped()
+
+
+def _wait_until(target, progress, client):
+    """
+    Sleep until `target` (time.monotonic()) in slices of at most SLEEP_SLICE_SECONDS, reporting
+    progress after each, so Stop and a lost connection end a long gap within a slice.
+    """
+    while True:
+        remaining = target - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(SLEEP_SLICE_SECONDS, remaining))
+        if client is not None and client.aber.lost.is_set():
+            raise _JobFailed(_connection_lost(progress.sent))
+        progress.report(force=True)
+
+
+def _run_job(supabase, storage, credentials, job, outcome=None):
+    """
+    Publish one capture. Returns (messages_sent, messages_out_of_window, error or None); sets
+    outcome["stopped"] when the operator stopped it.
+    """
     job_id = job["id"]
     edge_node = job["target_edge_node_id"]
     password = credentials.get(edge_node)
@@ -472,30 +538,23 @@ def _run_job(supabase, storage, credentials, job):
     if error:
         return 0, out_of_window, error
 
-    sent = 0
-    started = time.monotonic()
-    last_report = 0.0
+    progress = _Progress(supabase, job_id, len(plan))
+    progress.started = time.monotonic()
 
     try:
         for delay_ms, topic, payload_bytes, _ in plan:
-            # THE SCHEDULE IS ABSOLUTE, not a sleep between messages. Accumulating per-message
-            # sleeps would drift by however long each publish and each progress call took, and an
-            # hour-long playback would finish measurably late with its timestamps -- rebased against
-            # the plan's clock, not the drifted one -- pulling further out of window as it went.
-            target = started + (delay_ms / 1000.0)
-            now = time.monotonic()
-            if target > now:
-                time.sleep(target - now)
+            # An absolute schedule: per-message sleeps would drift by every publish and progress
+            # call, and the rebased timestamps would drift out of window with them.
+            _wait_until(progress.started + delay_ms / 1000.0, progress, client)
 
             if client is None:
                 client, error = _open_session(edge_node, password, will_topic, bdseq)
                 if error:
-                    error = "publishing stopped after %d message(s): %s" % (sent, error)
-                    break
+                    raise _JobFailed("publishing stopped after %d message(s): %s"
+                                     % (progress.sent, error))
 
             if client.aber.lost.is_set():
-                error = _connection_lost(sent)
-                break
+                raise _JobFailed(_connection_lost(progress.sent))
             if capture.split_topic(topic)[1] == "NDEATH":
                 # A recorded death ends the session as it ended the recorded node's. The plan
                 # numbered the messages after it as the next session, which opens on the next one.
@@ -507,37 +566,153 @@ def _run_job(supabase, storage, credentials, job):
                 # counts once paho has accepted it on a connection that has not dropped.
                 info = client.publish(topic, payload_bytes, qos=0, retain=False)
                 if info.rc != mqtt.MQTT_ERR_SUCCESS:
-                    error = _connection_lost(sent)
-                    break
-            sent += 1
-
-            elapsed = time.monotonic() - started
-            if elapsed - last_report >= PROGRESS_INTERVAL_SECONDS:
-                last_report = elapsed
-                try:
-                    stop = supabase.rpc("playback_progress", {
-                        "p_job_id": job_id,
-                        "p_messages_sent": sent,
-                        "p_messages_total": len(plan),
-                        "p_elapsed_seconds": int(elapsed),
-                    }).execute()
-                    if stop.data is True:
-                        logger.info("Playback %s: stopped by the operator after %d message(s).",
-                                    job_id, sent)
-                        break
-                except Exception as err:
-                    # Transient and survivable: a progress tick that cannot reach Supabase means the
-                    # card stops moving, not that the playback should be abandoned.
-                    logger.warning("Playback %s: progress update failed: %s", job_id, err)
+                    raise _JobFailed(_connection_lost(progress.sent))
+            progress.sent += 1
+            progress.report()
+    except _Stopped:
+        logger.info("Playback %s: stopped by the operator after %d message(s).",
+                    job_id, progress.sent)
+        if outcome is not None:
+            outcome["stopped"] = True
+    except _JobFailed as err:
+        error = str(err)
     except Exception as err:
-        error = "publishing stopped after %d message(s): %s" % (sent, err)
+        error = "publishing stopped after %d message(s): %s" % (progress.sent, err)
     finally:
-        # Finished, stopped by the operator or failed: the open session ends with its NDEATH, so
-        # the gateway reads OFFLINE rather than going stale.
+        # However it ended, an open session ends with its NDEATH, so the gateway reads OFFLINE.
         if client is not None:
             _end_session(client, will_topic, capture.node_death(bdseq, int(time.time() * 1000)))
 
-    return sent, out_of_window, error
+    return progress.sent, out_of_window, error
+
+
+class _Holdings:
+    """
+    The broker passwords this worker holds, and the heartbeat that reports them.
+
+    The main loop re-reads the sources every pass (refresh()); a timer thread reports what is held
+    every CREDENTIAL_REPORT_INTERVAL_SECONDS and at once after a change, whether or not a job is
+    running, so a long playback does not read as a worker that stopped. Ids only, never passwords:
+    `playback_worker_status` is readable by three roles.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._changed = threading.Event()
+        self.credentials = _credentials()
+        # Gateways with a password picked up since the last report that got through. Everything
+        # counts at startup: the sources were just read.
+        self._rotated = set(self.credentials)
+
+    def refresh(self):
+        """Re-read the sources, log a change by gateway id, and wake the heartbeat for it."""
+        current = _credentials()
+        with self._lock:
+            previous, self.credentials = self.credentials, current
+            if current == previous:
+                return current
+            gained = sorted(set(current) - set(previous))
+            lost = sorted(set(previous) - set(current))
+            # A re-issue keeps the id and changes the password, so maps are compared, not key sets.
+            rotated = sorted(k for k in set(current) & set(previous) if current[k] != previous[k])
+            self._rotated.update(gained)
+            self._rotated.update(rotated)
+            self._rotated.difference_update(lost)
+        parts = []
+        if gained:
+            parts.append("gained %s" % ", ".join(gained))
+        if rotated:
+            parts.append("rotated %s" % ", ".join(rotated))
+        if lost:
+            parts.append("lost %s" % ", ".join(lost))
+        logger.info("Playback credentials changed: now holding %d gateway(s) -- %s.",
+                    len(current), "; ".join(parts) or "no change to which gateways are held")
+        self._changed.set()
+        return current
+
+    def report(self, supabase):
+        """One heartbeat. A rotation is cleared only once a report carrying it got through."""
+        with self._lock:
+            held = sorted(self.credentials)
+            rotated = sorted(self._rotated)
+        supabase.rpc("playback_report_credentials", {
+            "p_edge_nodes": held,
+            "p_rotated": rotated,
+        }).execute()
+        with self._lock:
+            self._rotated.difference_update(rotated)
+
+    def run_heartbeat(self, supabase, stop=None):
+        """The timer thread's body. A failed report is logged and retried on the next beat."""
+        stop = stop or threading.Event()
+        while not stop.is_set():
+            self._changed.clear()
+            try:
+                self.report(supabase)
+            except Exception as err:
+                logger.warning("Could not report held credentials: %s", err)
+            self._changed.wait(CREDENTIAL_REPORT_INTERVAL_SECONDS)
+
+
+def _start_heartbeat(holdings):
+    """The heartbeat on its own thread and its own Supabase client."""
+    thread = threading.Thread(target=holdings.run_heartbeat, args=(_supabase(),),
+                              name="playback-heartbeat", daemon=True)
+    thread.start()
+    return thread
+
+
+def _sweep(supabase):
+    """
+    Fail the jobs a previous run left in flight. Returns whether the sweep ran. Nothing is claimed
+    until it has: a row left RUNNING blocks its target, and a sweep after a claim would fail the
+    job just claimed.
+    """
+    try:
+        swept = supabase.rpc("playback_reconcile_jobs", {}).execute().data or 0
+    except Exception as err:
+        logger.error("Startup reconciliation failed: %s. No playback is started until it succeeds; "
+                     "retrying every %.0fs.", err, POLL_INTERVAL_SECONDS)
+        return False
+    if swept:
+        logger.warning("%d playback job(s) were left in flight by a previous run and have been "
+                       "failed. Whatever they had published is already in the historian.", swept)
+    return True
+
+
+def _finish(supabase, job, sent, error, out_of_window):
+    """
+    Record the end of a job, retrying with backoff for FINISH_RETRY_SECONDS. Returns whether it was
+    recorded. A row left RUNNING is ended by Stop once its progress is a minute old, or by the next
+    startup sweep.
+    """
+    params = {
+        "p_job_id": job["id"], "p_messages_sent": sent, "p_error": error,
+        "p_messages_out_of_window": out_of_window,
+    }
+    deadline = time.monotonic() + FINISH_RETRY_SECONDS
+    delay = 1.0
+    attempt = 1
+    while True:
+        try:
+            supabase.rpc("playback_finish", params).execute()
+            if attempt > 1:
+                logger.info("Playback %s: its end was recorded at attempt %d.", job["id"], attempt)
+            return True
+        except Exception as err:
+            if time.monotonic() + delay > deadline:
+                logger.error(
+                    "Playback %s finished but could not be recorded after %d attempt(s) (%s). The "
+                    "row stays RUNNING and blocks playbacks onto %s until Stop is pressed on the "
+                    "Capture page or this worker restarts.",
+                    job["id"], attempt, err, job["target_edge_node_id"],
+                )
+                return False
+            logger.warning("Playback %s: could not record its end (%s); retrying in %.0fs.",
+                           job["id"], err, delay)
+        time.sleep(delay)
+        delay = min(delay * 2, 30.0)
+        attempt += 1
 
 
 def main():
@@ -553,13 +728,10 @@ def main():
 
     supabase = _supabase()
     storage = _storage()
-    credentials = _credentials()
+    holdings = _Holdings()
 
-    if not credentials:
-        # NOT FATAL, deliberately, and the difference from the key above is worth stating. A worker
-        # with no Supabase key cannot do anything at all. A worker with no broker credentials is
-        # correctly configured for a stack that has not issued any playback targets yet -- it should
-        # come up, report the queue is unreachable to it, and start working the moment one is added.
+    if not holdings.credentials:
+        # Not fatal: a stack that has issued no playback credential yet is correctly configured.
         logger.warning(
             "This worker holds no playback credentials yet, so every job will be refused for want "
             "of an identity to publish as. Issuing a broker credential for a simulated gateway "
@@ -568,125 +740,25 @@ def main():
         )
     else:
         logger.info("Playback worker holds credentials for %d gateway(s): %s",
-                    len(credentials), ", ".join(sorted(credentials)))
+                    len(holdings.credentials), ", ".join(sorted(holdings.credentials)))
 
-    # SWEEP FIRST. A row left at RUNNING keeps matching the per-target unique index, so every future
-    # playback onto that gateway is refused -- and `is_active_playback_capture()` keeps returning
-    # true for its capture, leaving this worker a standing read of one object in the bucket for as
-    # long as the row survives.
-    try:
-        swept = supabase.rpc("playback_reconcile_jobs", {}).execute().data or 0
-        if swept:
-            logger.warning(
-                "%d playback job(s) were left in flight by a previous run and have been failed. "
-                "Whatever they had published is already in the historian.", swept,
-            )
-    except Exception as err:
-        logger.error("Startup reconciliation failed: %s", err)
-
+    _start_heartbeat(holdings)
     logger.info(
         "Playback worker running: polling every %.0fs, publishing to %s:%d.",
         POLL_INTERVAL_SECONDS, MQTT_HOST, MQTT_PORT,
     )
 
-    last_report = 0.0
-
-    # EVERYTHING HELD COUNTS AS ROTATED AT STARTUP, and that is correct rather than optimistic: the
-    # file was genuinely just read, so what it holds now is what this worker observed now. A restart
-    # therefore re-stamps every observation, which is exactly what it is entitled to claim.
-    pending_rotation = set(credentials)
-
+    swept = False
     while True:
-        # ------------------------------------------------------------------------------------
-        # Re-resolve what this worker holds, every pass.
-        # ------------------------------------------------------------------------------------
-        # ONCE AT STARTUP WAS THE BUG. A credential issued from the Gateways page lands in the
-        # delivery file seconds later, and a worker holding a snapshot from boot would go on
-        # refusing every job with "this worker holds no broker credential for ..." until somebody
-        # recreated the container -- while the platform's own `gateway_has_broker_credential()`
-        # said the credential existed. Both statements were true, which is what made it hard to see.
-        #
-        # A SMALL FILE READ EVERY THREE SECONDS, deliberately not cached on mtime. The file is a few
-        # hundred bytes and this loop already makes a network round trip; a cache would add a
-        # staleness window to the one thing whose entire purpose is not having one.
-        previous = credentials
-        credentials = _credentials()
-        if credentials != previous:
-            gained = sorted(set(credentials) - set(previous))
-            lost = sorted(set(previous) - set(credentials))
-            # ROTATION IS A CHANGE, AND COMPARING KEY SETS MISSED IT. This was written as
-            # `set(credentials) != set(previous)` and was silent on the case it exists for: the
-            # FIRST delivery on this stack replaced a stale `.env` password for a gateway already
-            # in the map, so the ids were identical before and after and nothing was logged. The
-            # worker had picked the new credential up and was working; the operator had no way to
-            # know. Comparing the maps catches a re-issue, which is the ordinary case from here on
-            # -- every mint after the first one rotates a gateway already held.
-            rotated = sorted(
-                k for k in set(credentials) & set(previous) if credentials[k] != previous[k]
-            )
-            # IDS ONLY, NEVER VALUES, which is why `rotated` names gateways rather than saying what
-            # changed. A log line is the one place a delivered password could leak into somewhere
-            # persistent and world-readable.
-            parts = []
-            if gained:
-                parts.append(f"gained {', '.join(gained)}")
-            if rotated:
-                parts.append(f"rotated {', '.join(rotated)}")
-            if lost:
-                parts.append(f"lost {', '.join(lost)}")
-            logger.info(
-                "Playback credentials changed: now holding %d gateway(s) -- %s.",
-                len(credentials), "; ".join(parts) or "no change to which gateways are held",
-            )
-            # WHICH GATEWAYS THIS WORKER HAS A NEW PASSWORD FOR, accumulated until a report gets
-            # through. A rotation does not change the reported ids, so before 0129 the row said the
-            # same thing before and after one and the dialog went on offering a target whose
-            # password had already been replaced (#217).
-            #
-            # IDS, NOT A TIME. The database stamps these with its own `now()`, which is the clock
-            # the CREDENTIAL_ISSUED row they are compared against also uses -- a timestamp taken
-            # here would make the answer depend on the offset between two clocks. And ids, not a
-            # fingerprint of the password: `playback_worker_status` is readable by three roles.
-            pending_rotation.update(gained)
-            pending_rotation.update(rotated)
-            pending_rotation.difference_update(lost)
+        # Re-read every pass: a credential issued from the Gateways page arrives in the file while
+        # this runs, and a snapshot from boot would refuse every job until a restart.
+        credentials = holdings.refresh()
 
-            # A ROTATION NOW MOVES THE ROW, so it reports on the same terms as a gain or a loss.
-            # The playback dialog reads that row to decide whether a target is offerable, so waiting
-            # up to thirty seconds after an issue is thirty seconds of a page saying the opposite of
-            # what is true.
-            if gained or lost or rotated:
-                last_report = 0.0
-
-        # ------------------------------------------------------------------------------------
-        # Say what this worker can publish as.
-        # ------------------------------------------------------------------------------------
-        # THE ONLY THING THAT KNOWS. `gateway_has_broker_credential()` answers whether the PLATFORM
-        # issued a credential; nothing in the database can answer whether this process was given
-        # the password. Without this the playback dialog showed a target as ready and the job then
-        # failed with "this worker holds no broker credential for …" -- correct, and far too late
-        # to be useful, because issuing a credential and its delivery reaching this process are
-        # two separate events.
-        #
-        # IN THE LOOP RATHER THAN ONCE AT STARTUP, because the page has to distinguish "holds
-        # nothing" from "is not running", and only a repeating timestamp does that. Failure is
-        # logged and otherwise ignored: a worker that cannot report is still a worker that can
-        # play back, and refusing to work because the status row is unreachable would turn a
-        # cosmetic outage into a real one.
-        now = time.monotonic()
-        if now - last_report >= CREDENTIAL_REPORT_INTERVAL_SECONDS:
-            last_report = now
-            try:
-                supabase.rpc("playback_report_credentials", {
-                    "p_edge_nodes": sorted(credentials.keys()),
-                    "p_rotated": sorted(pending_rotation),
-                }).execute()
-                # CLEARED ONLY ON SUCCESS, so a rotation is not lost to a report that failed --
-                # which would leave the row claiming an observation older than the credential the
-                # worker actually holds, and the dialog refusing a target that works.
-                pending_rotation.clear()
-            except Exception as err:
-                logger.warning("Could not report held credentials: %s", err)
+        if not swept:
+            swept = _sweep(supabase)
+            if not swept:
+                time.sleep(POLL_INTERVAL_SECONDS)
+                continue
 
         try:
             job = supabase.rpc("playback_claim_job", {}).execute().data
@@ -704,27 +776,15 @@ def main():
             job["id"], job["capture_storage_path"], job["target_edge_node_id"],
             job.get("speed"), len(job.get("device_map") or {}),
         )
+        outcome = {}
         try:
-            sent, out_of_window, error = _run_job(supabase, storage, credentials, job)
+            sent, out_of_window, error = _run_job(supabase, storage, credentials, job,
+                                                  outcome=outcome)
         except Exception as err:
             logger.error("Playback %s: unhandled error: %s", job["id"], err, exc_info=True)
             sent, out_of_window, error = 0, 0, "unhandled error: %s" % err
 
-        try:
-            supabase.rpc("playback_finish", {
-                "p_job_id": job["id"], "p_messages_sent": sent, "p_error": error,
-                # 0109. Named, so the argument lands whatever order the function declares it in;
-                # recorded on every outcome, because a FAILED job's count is the diagnosis.
-                "p_messages_out_of_window": out_of_window,
-            }).execute()
-        except Exception as err:
-            # The job stays RUNNING, and the next restart's reconciliation is what clears it. Said
-            # loudly because until then this gateway accepts no further playback.
-            logger.error(
-                "Playback %s finished but could not be recorded (%s). The row stays RUNNING and "
-                "will block further playbacks onto %s until this worker restarts.",
-                job["id"], err, job["target_edge_node_id"],
-            )
+        if not _finish(supabase, job, sent, error, out_of_window):
             continue
 
         if error:

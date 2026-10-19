@@ -794,6 +794,13 @@ export const SUITES = {
       '`NOT is_simulated OR deployment = host` -- which is what makes the dashboard’s single ' +
       'gateway-type control honest rather than a collapse of two independent facts.',
   },
+  'supabase/migrations/test_playback_stop_and_sweep.py': {
+    lanes: ['db'],
+    why:
+      'How a playback ends (0191). Stop on a job whose worker has been silent for a minute ends ' +
+      'it as CANCELLED, so a stalled worker cannot hold the Playback gateway until it restarts, ' +
+      'and the worker coming back is told to stop and changes nothing.',
+  },
   'supabase/migrations/test_playback_credential_delivery.py': {
     lanes: ['db'],
     why:

@@ -881,6 +881,27 @@ error, so the end state used to be indistinguishable from a capture published in
 now reads the flag, and an error still outranks it: a job that was asked to stop *and* failed is a
 failure.
 
+**Stop takes effect within a second, even in a long gap** (`0191`). The worker waits for each
+message's due time in slices of at most a second, and reports progress after each slice, which is
+when it reads the stop flag. It used to sleep until the next message in one call. A capture with a
+ten-minute silence kept a stopped job `RUNNING` for the whole silence, with its heartbeat frozen.
+Each report stamps `playback_jobs.progress_reported_at`. A Stop on a `RUNNING` job whose last
+report is more than a minute old ends the job in the database as `CANCELLED`, with the count it had
+reported. So a worker that has hung no longer holds the Playback gateway until it restarts. A
+worker that comes back is told to stop by its next report, and its finish leaves the row alone.
+
+**The end of a job, and the startup sweep, are retried.** `playback_finish()` is retried with
+backoff (1, 2, 4 … 30 seconds) for five minutes (`PLAYBACK_FINISH_RETRY_SECONDS`). A finish that
+never gets through leaves the row `RUNNING`, which Stop then ends as above. The startup sweep
+(`playback_reconcile_jobs()`) is retried every poll until it runs, and nothing is claimed before
+it has: a sweep that ran after a claim would fail the job just claimed. The pod's initContainer
+waits for PostgREST itself, not only for the API gateway. Before this, one `PGRST002` at either
+point left the job `RUNNING` until a restart.
+
+**The worker's heartbeat runs on a timer.** `playback_report_credentials()` is called from its own
+thread every 30 seconds, while a job runs as well as between jobs. It used to run only between
+jobs, so any playback longer than two minutes made the dialog say the worker was not running.
+
 **Past the CONNACK there is nothing to observe, and that is a property of Sparkplug rather than of
 this worker.** A publish the broker refuses is dropped with no PUBACK at QoS 0, so a job whose
 topics were wrong would count every message as sent and report success having moved nothing. The

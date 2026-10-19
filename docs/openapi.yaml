@@ -1936,7 +1936,9 @@ paths:
         gateway can be made one.
 
         **Stopping one is `request_playback_stop()`**, which sets `stop_requested`; the worker
-        observes it on its next progress tick. Progress arrives over Realtime.
+        observes it within a second, because it reports progress at least once a second while a job
+        runs. A `RUNNING` job whose worker has not reported for over a minute is ended by the call
+        itself, as `CANCELLED` (0191). Progress arrives over Realtime.
 
         `speed` divides both the send schedule and the timestamp rebasing, so it is bounded to
         `(0, 60]`. Zero is refused rather than treated as "as fast as possible": the historian
@@ -5485,6 +5487,14 @@ components:
         stop_requested:
           type: boolean
           description: 'Set by request_playback_stop(); observed by the worker on its next tick.'
+        progress_reported_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            When the worker last reported this job's progress; null until its first report. Stop
+            ends a RUNNING job whose last report, or claim when there is none, is over a minute old
+            (0191).
         error: { type: string, nullable: true }
         requested_by: { type: string, format: uuid, nullable: true }
         created_at: { type: string, format: date-time }

@@ -272,5 +272,222 @@ class PublishAccountingTests(WorkerLoopCase):
         self.assertEqual((sent, error), (6, None))
 
 
+# -------------------------------------------------------------------------------------------------
+# Waiting, stopping, and the end of a job
+# -------------------------------------------------------------------------------------------------
+class FakeClock:
+    """time.monotonic(), time.time() and time.sleep() for the worker, advancing only on sleep."""
+
+    def __init__(self):
+        self.now = 1000.0
+        self.sleeps = []
+
+    def monotonic(self):
+        return self.now
+
+    def time(self):
+        return 1_760_000_000.0 + self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+class ClockedCase(WorkerLoopCase):
+    def setUp(self):
+        super().setUp()
+        self._real_time = playback_worker.time
+        self.clock = playback_worker.time = FakeClock()
+
+    def tearDown(self):
+        playback_worker.time = self._real_time
+        super().tearDown()
+
+
+def with_a_long_gap(gap_ms=600_000):
+    """A session whose last reading comes ten minutes after the others, as the audit's did."""
+    messages = a_session(readings=1)
+    messages.append(recorded(gap_ms, "DDATA", device=CAPTURED_DEV, value=9.0))
+    return messages
+
+
+class LongGapTests(ClockedCase):
+    def test_stop_during_a_long_gap_ends_the_job_within_a_second(self):
+        start = self.clock.now
+        stop_at = start + 30.0
+        supabase = FakeSupabase(playback_progress=lambda _p: self.clock.now >= stop_at)
+        outcome = {}
+        self.supabase = supabase
+        sent, _, error = playback_worker._run_job(
+            supabase, FakeStorage(capture_file(with_a_long_gap())), {GW: "a-password"},
+            self.job(speed=1.0), outcome=outcome)
+        self.assertEqual((sent, error, outcome), (3, None, {"stopped": True}))
+        self.assertLessEqual(self.clock.now - stop_at, 1.0)
+        client, = self.broker.clients
+        self.assertNotIn("DDATA", client.published_types()[3:], "the reading after the gap went out")
+
+    def test_no_sleep_is_longer_than_a_second(self):
+        self.run_job(with_a_long_gap(gap_ms=5_500), speed=1.0)
+        self.assertTrue(self.clock.sleeps)
+        self.assertLessEqual(max(self.clock.sleeps), 1.0)
+
+    def test_progress_is_reported_through_the_gap(self):
+        self.run_job(with_a_long_gap(gap_ms=10_000), speed=1.0)
+        reports = self.supabase.called("playback_progress")
+        in_the_gap = [r for r in reports if r["p_messages_sent"] == 3]
+        self.assertGreaterEqual(len(in_the_gap), 10, "the ten-second gap was not reported each second")
+        self.assertTrue(all(r["p_messages_total"] == 4 for r in reports))
+
+    def test_a_connection_lost_in_a_gap_fails_the_job_within_a_second(self):
+        dropped_at = []
+
+        def drop_after_the_third(client, n):
+            if n == 3:
+                dropped_at.append(self.clock.now)
+                client.drop()
+
+        self.broker.after_publish = drop_after_the_third
+        sent, _, error = self.run_job(with_a_long_gap(), speed=1.0)
+        self.assertEqual(sent, 3)
+        self.assertIn("the broker connection was lost", error)
+        self.assertLessEqual(self.clock.now - dropped_at[0], 1.0)
+
+
+class Done(BaseException):
+    """Ends main()'s loop from a fake, past its `except Exception`."""
+
+
+class MainLoopTests(ClockedCase):
+    def setUp(self):
+        super().setUp()
+        self._saved_main = (playback_worker._supabase, playback_worker._storage,
+                            playback_worker._start_heartbeat, playback_worker._run_job,
+                            playback_worker._credentials, playback_worker.SUPABASE_PLAYBACK_KEY)
+        playback_worker._storage = lambda: None
+        playback_worker._start_heartbeat = lambda holdings: self.heartbeats.append(holdings)
+        playback_worker._credentials = lambda: {GW: "a-password"}
+        playback_worker.SUPABASE_PLAYBACK_KEY = "a-key"
+        self.heartbeats = []
+        self.ran = []
+
+        def run_job(supabase, storage, credentials, job, outcome=None):
+            self.ran.append(job["id"])
+            return 3, 0, None
+        playback_worker._run_job = run_job
+
+    def tearDown(self):
+        (playback_worker._supabase, playback_worker._storage, playback_worker._start_heartbeat,
+         playback_worker._run_job, playback_worker._credentials,
+         playback_worker.SUPABASE_PLAYBACK_KEY) = self._saved_main
+        super().tearDown()
+
+    def main(self, **answers):
+        claims = iter([self.job()])
+
+        def claim(_params):
+            try:
+                return next(claims)
+            except StopIteration:
+                raise Done()
+
+        answers.setdefault("playback_claim_job", claim)
+        supabase = FakeSupabase(**answers)
+        playback_worker._supabase = lambda: supabase
+        with self.assertRaises(Done):
+            playback_worker.main()
+        return supabase
+
+    @staticmethod
+    def failing(times, then=None):
+        """An answer that raises `times` times, then returns `then`."""
+        calls = []
+
+        def answer(_params):
+            calls.append(1)
+            if len(calls) <= times:
+                raise ConnectionError("PGRST002: schema cache not loaded")
+            return then
+        return answer
+
+    def test_a_failed_startup_sweep_is_retried_and_nothing_is_claimed_before_it_runs(self):
+        supabase = self.main(playback_reconcile_jobs=self.failing(2, then=0))
+        names = [n for n, _ in supabase.calls]
+        self.assertEqual(names[:3], ["playback_reconcile_jobs"] * 3)
+        self.assertLess(names.index("playback_reconcile_jobs"), names.index("playback_claim_job"))
+        self.assertEqual(names.count("playback_reconcile_jobs"), 3, "the sweep ran again after it succeeded")
+        self.assertEqual(self.ran, [JOB_ID])
+
+    def test_a_failed_finish_is_retried_with_backoff_until_recorded(self):
+        supabase = self.main(playback_finish=self.failing(3))
+        finishes = supabase.called("playback_finish")
+        self.assertEqual(len(finishes), 4)
+        self.assertEqual(finishes[-1], {"p_job_id": JOB_ID, "p_messages_sent": 3, "p_error": None,
+                                        "p_messages_out_of_window": 0})
+        self.assertEqual([s for s in self.clock.sleeps if s in (1.0, 2.0, 4.0)], [1.0, 2.0, 4.0])
+
+    def test_a_finish_that_never_succeeds_is_given_up_and_the_worker_carries_on(self):
+        with self.assertLogs(playback_worker.logger, level="ERROR") as logs:
+            supabase = self.main(playback_finish=self.failing(10_000))
+        self.assertIn("could not be recorded", "\n".join(logs.output))
+        self.assertGreater(len(supabase.called("playback_finish")), 5)
+        # Bounded, and then back to the queue.
+        self.assertLessEqual(sum(self.clock.sleeps), playback_worker.FINISH_RETRY_SECONDS + 3 * 30)
+        self.assertEqual(len(supabase.called("playback_claim_job")), 2)
+
+    def test_the_heartbeat_is_started_before_any_job(self):
+        self.main(playback_reconcile_jobs=lambda _p: 0)
+        self.assertEqual(len(self.heartbeats), 1)
+        self.assertEqual(self.heartbeats[0].credentials, {GW: "a-password"})
+
+
+class HeartbeatTests(unittest.TestCase):
+    """The timer thread, which reports whether or not a job is running."""
+
+    def setUp(self):
+        self._saved = (playback_worker._credentials, playback_worker.CREDENTIAL_REPORT_INTERVAL_SECONDS)
+        playback_worker._credentials = lambda: {GW: "a-password"}
+        playback_worker.CREDENTIAL_REPORT_INTERVAL_SECONDS = 0.01
+
+    def tearDown(self):
+        playback_worker._credentials, playback_worker.CREDENTIAL_REPORT_INTERVAL_SECONDS = self._saved
+
+    def test_it_keeps_reporting_on_its_own_thread_and_survives_a_failed_report(self):
+        import threading
+        reports = []
+        enough = threading.Event()
+
+        def report(params):
+            reports.append(params)
+            if len(reports) == 1:
+                raise ConnectionError("gateway restarting")
+            if len(reports) >= 4:
+                enough.set()
+
+        holdings = playback_worker._Holdings()
+        stop = threading.Event()
+        thread = threading.Thread(target=holdings.run_heartbeat,
+                                  args=(FakeSupabase(playback_report_credentials=report), stop))
+        with self.assertLogs(playback_worker.logger, level="WARNING"):
+            thread.start()
+            # The main thread is busy elsewhere, as it is during a playback.
+            self.assertTrue(enough.wait(5), "the heartbeat stopped reporting")
+        stop.set()
+        thread.join(5)
+        self.assertEqual(reports[0]["p_rotated"], [GW], "startup counts as picking the password up")
+        self.assertEqual(reports[1]["p_rotated"], [GW], "a failed report cleared the rotation")
+        self.assertEqual(reports[2]["p_rotated"], [])
+        self.assertEqual({tuple(r["p_edge_nodes"]) for r in reports}, {(GW,)})
+
+    def test_a_change_is_logged_by_id_and_wakes_the_heartbeat(self):
+        holdings = playback_worker._Holdings()
+        holdings._changed.clear()
+        playback_worker._credentials = lambda: {GW: "a-new-password"}
+        with self.assertLogs(playback_worker.logger, level="INFO") as logs:
+            holdings.refresh()
+        self.assertIn("rotated %s" % GW, "\n".join(logs.output))
+        self.assertNotIn("a-new-password", "\n".join(logs.output))
+        self.assertTrue(holdings._changed.is_set())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

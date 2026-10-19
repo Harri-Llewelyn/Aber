@@ -1047,6 +1047,25 @@ its lanes and the ability to archive it. Find one with
 `SELECT id, name FROM gateways WHERE is_shadow AND id <> '16000000-0000-4000-8000-000000000001'`.
 It cannot be unmarked through the API either; clearing the flag is a database owner's act.
 
+### A playback reports what really happened, and Stop ends a stalled one (0191)
+
+The playback worker reported progress only after a publish. A job waiting out a long gap in its
+capture, or a worker stuck before its first publish, left the row `RUNNING` with nothing to show it.
+`request_playback_stop()` only set a flag for the worker's next tick, so the one-per-target index
+refused every playback onto the Playback gateway until the worker restarted.
+
+- **`playback_progress()` stamps `playback_jobs.progress_reported_at`** on every call. The worker
+  now reports at least once a second while a job runs, including while it waits for a message.
+- **`request_playback_stop()` ends a stalled job.** On a `RUNNING` job whose last report, or its
+  claim when there is none, is more than a minute old, it sets `CANCELLED` and `finished_at` and
+  writes what the job had reported published into `error`. A fresh job still only gets
+  `stop_requested`, which the worker reads within a second. A worker that comes back is told to
+  stop by its next `playback_progress()`, which answers true for a row no longer `RUNNING`, and its
+  `playback_finish()` touches only `PENDING` and `RUNNING` rows.
+
+The column is additive and nullable: a job claimed before the upgrade has none, so its claim time
+is used. `test_playback_stop_and_sweep.py` holds both functions.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
