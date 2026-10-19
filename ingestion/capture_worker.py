@@ -17,9 +17,10 @@ Prometheus `/metrics`, and a flag survives a page reload. While idle the thread 
 second and is told, in the same round trip, whether to stop.
 
 Related: supabase/migrations/archive/0055_capture_orchestration.sql (the tables and every gate
-         called here), capture.py (the file format, and the encoding preservation this reuses),
-         README.md -> "Recording from the dashboard" (why the daemon hosts this, the two tables,
-         and the three caps a job auto-terminates on).
+         called here), 0190 (a path per recording, and deleting what nothing claims), capture.py
+         (the file format, and the encoding preservation this reuses), README.md -> "Recording
+         from the dashboard" (why the daemon hosts this, the two tables, and the three caps a job
+         auto-terminates on).
 """
 
 import json
@@ -57,10 +58,43 @@ PROGRESS_INTERVAL_SECONDS = float(os.getenv("CAPTURE_PROGRESS_INTERVAL_SECONDS",
 # How long to wait for the birth certificate before saying so. See `_JobState.birth_overdue`.
 REBIRTH_GRACE_SECONDS = float(os.getenv("CAPTURE_REBIRTH_GRACE_SECONDS", "10"))
 
+# The calls that settle a job are retried this far apart before the job is kept for the loop to
+# retry every UNSETTLED_RETRY_SECONDS: a job left RECORDING blocks every capture on the stack.
+TERMINAL_RETRY_DELAYS = (1, 2, 4, 8, 16)
+UNSETTLED_RETRY_SECONDS = float(os.getenv("CAPTURE_UNSETTLED_RETRY_SECONDS", "30"))
+
+# How often an idle worker deletes the stored files nothing refers to, and how long one must have
+# gone untouched first. A failed sweep is tried again after SWEEP_RETRY_SECONDS.
+SWEEP_INTERVAL_SECONDS = float(os.getenv("CAPTURE_SWEEP_INTERVAL_SECONDS", "3600"))
+SWEEP_MIN_AGE_SECONDS = int(os.getenv("CAPTURE_SWEEP_MIN_AGE_SECONDS", "3600"))
+SWEEP_RETRY_SECONDS = 300
+# ingest_unclaimed_capture_objects() answers at most this many; a full answer sweeps again soon.
+SWEEP_BATCH = 500
+
+# Finalise refused because the job is no longer RECORDING (22023) or no longer exists (23503): it
+# was ended elsewhere, and retrying cannot store it.
+_ENDED_ELSEWHERE = ("22023", "23503")
+
+# Why a recording stopped, as the manifest records it.
+STOP_DURATION = "duration"
+STOP_OPERATOR = "operator"
+STOP_MESSAGES = "message_cap"
+STOP_SIZE = "size_cap"
+
 # Node-level message types, which carry no device segment. A DEVICE capture records these too --
 # see the matching rule in `_JobState.matches()`.
 _NODE_TYPES = ("NBIRTH", "NDATA", "NDEATH")
 _BIRTH_TYPES = ("NBIRTH", "DBIRTH")
+
+# Sparkplug plumbing and identity, which are not the machine's metrics. ingestion.py holds the same
+# identity list (IDENTITY_METRICS) and cannot be imported here: it imports this module.
+_IDENTITY_METRICS = ("Asset_ID", "Asset_Name", "Instance_UUID", "Schema_UUID")
+
+
+def is_machine_metric(name):
+    """False for bdSeq, Node Control/*, Device Control/* and the identity metrics."""
+    return not (name == "bdSeq" or name.startswith(("Node Control/", "Device Control/"))
+                or name in _IDENTITY_METRICS)
 
 
 class _JobState:
@@ -75,6 +109,8 @@ class _JobState:
         self.edge_node = job["edge_node_id"]
         self.device = job.get("device_sparkplug_id")
         self.storage_path = job["storage_path"]
+        # The subject's folder in the bucket: <subject>/<job id>.json.
+        self.subject = self.storage_path.split("/")[0]
         self.max_seconds = int(job.get("max_seconds") or 7200)
         self.max_messages = int(job.get("max_messages") or 100000)
         self.max_bytes = int(job.get("max_bytes") or 52428800)
@@ -84,6 +120,9 @@ class _JobState:
         # Set by observe() on the paho thread when a cap is met, read by the worker thread on its
         # next tick. The recording stops at a message boundary rather than mid-append.
         self.cap_reason = None
+        self.cap_code = None
+        # Seconds from the start to the stop, set when the recording ends.
+        self.stopped_after = None
         self.first_ms = None
         self.birth_captured = False
         self.rebirth_requested = False
@@ -147,8 +186,10 @@ class _JobState:
                 self.birth_captured = True
 
             if len(self.messages) >= self.max_messages:
+                self.cap_code = STOP_MESSAGES
                 return "message cap reached (%d)" % self.max_messages
             if self.bytes >= self.max_bytes:
+                self.cap_code = STOP_SIZE
                 return "size cap reached (%d bytes)" % self.max_bytes
         return None
 
@@ -185,6 +226,11 @@ _active = None
 _supabase = None
 _storage = None
 _rebirth = None
+# A finished job whose failure could not be written yet: (state, message, uploaded). The loop
+# retries it before claiming anything else, so the job never drops out of view.
+_unsettled = None
+# When the idle loop next deletes the stored files nothing refers to (time.monotonic()).
+_next_sweep = 0.0
 
 
 def _storage_client():
@@ -286,23 +332,22 @@ def _begin(job_row):
     return state
 
 
-def _finish(state, reason):
-    """Serialise, upload, and hand the artifact to the database. Clears the active job first."""
+def _finish(state, reason, stop=None):
+    """
+    Serialise, upload to the job's own path, and hand the capture to the database.
+
+    The active job is cleared before the buffer is drained, so observe() stops appending to a list
+    about to be serialised: the capture ends at a message boundary. The previous capture of the
+    subject is untouched until finalise repoints the row, and its file is deleted only after that.
+    """
     global _active
-    # CLEARED BEFORE THE BUFFER IS DRAINED, so observe() stops appending to a list that is about to
-    # be serialised. A message arriving in between is dropped rather than half-recorded, which is
-    # the right direction: the capture ends at a message boundary either way.
     _active = None
+    state.stopped_after = state.elapsed
     messages = state.drain()
 
-    if not messages:
-        # An empty capture is almost always a credential, ACL or identity problem rather than a
-        # quiet fleet, and storing the file anyway would defer that discovery to playback.
-        _fail(state, (
-            "recorded no messages from edge node %s%s, in any Sparkplug group. Either nothing "
-            "published during the window, or the subject's ids do not match what is on the wire."
-            % (state.edge_node, " for device " + state.device if state.device else "")
-        ))
+    refusal = _nothing_recorded(state, messages)
+    if refusal:
+        _settle_failure(state, refusal)
         return
 
     # The first message's own clock, or when it was received: the offsets count from that receipt.
@@ -327,58 +372,88 @@ def _finish(state, reason):
     body = json.dumps(document, indent=2).encode("utf-8")
 
     try:
-        # UPSERT, because each subject has exactly one capture object at a path derived from its
-        # sparkplug id. Overwriting that key is what makes an orphaned file impossible -- and the
-        # previous capture survives right up to this moment, so a recording that failed anywhere
-        # above leaves the old one intact.
+        # The job's own path, so this never writes over the capture it may replace. Upsert, so a
+        # retried upload of the same path succeeds.
         _storage.from_(BUCKET).upload(
             path=state.storage_path,
             file=body,
             file_options={"content-type": "application/json", "upsert": "true"},
         )
     except Exception as err:
-        # 42501 HERE IS THE FAILURE THIS WHOLE DESIGN IS SHAPED AROUND -- see 0051. It is reported
-        # loudly and written to the job, because the alternative is a capture that recorded
-        # perfectly and then never appeared, with nothing anywhere saying why.
+        # Written to the job: a capture that recorded and never appeared must say why.
         logger.error("Capture %s: upload to %s failed: %s", state.id, state.storage_path, err)
-        _fail(state, "upload to %s failed: %s" % (state.storage_path, err))
+        _settle_failure(state, "upload to %s failed: %s" % (state.storage_path, err), uploaded=True)
         return
 
-    manifest = _manifest(messages, state)
+    manifest = _manifest(messages, state, stop)
     try:
-        _supabase.rpc("ingest_finalise_capture", {
+        _call("ingest_finalise_capture", {
             "p_job_id": state.id,
             "p_size_bytes": len(body),
             "p_message_count": len(messages),
             "p_manifest": manifest,
-        }).execute()
+        })
     except Exception as err:
-        logger.error("Capture %s: could not record the finished capture: %s", state.id, err)
-        _fail(state, "the capture uploaded but could not be recorded: %s" % err)
+        if _code(err) in _ENDED_ELSEWHERE:
+            logger.warning(
+                "Capture %s was ended outside the recorder before it could be stored (%s). Its file "
+                "is discarded; any earlier capture of the subject is unchanged.", state.id, err)
+            _remove_unclaimed(state.subject)
+        else:
+            logger.error("Capture %s: could not record the finished capture: %s", state.id, err)
+            _settle_failure(state, (
+                "the capture uploaded but could not be recorded: %s. Any earlier capture of the "
+                "subject is unchanged." % err), uploaded=True)
         return
 
+    # The row now names this capture's file; the one it replaced is unclaimed and goes now.
+    _remove_unclaimed(state.subject)
     logger.info(
         "Capture %s complete (%s): %d messages, %d bytes over %.1fs, birth_captured=%s",
-        state.id, reason, len(messages), len(body), state.elapsed, state.birth_captured,
+        state.id, reason, len(messages), len(body), state.stopped_after, state.birth_captured,
     )
 
 
-def _manifest(messages, state):
+def _nothing_recorded(state, messages):
+    """Why there is nothing worth storing, or None. Either way the stored capture is kept."""
+    if not messages:
+        # An empty capture is almost always a credential, ACL or identity problem rather than a
+        # quiet fleet, and storing the file anyway would defer that discovery to playback.
+        return (
+            "recorded no messages from edge node %s%s, in any Sparkplug group. Either nothing "
+            "published during the window, or the subject's ids do not match what is on the wire."
+            % (state.edge_node, " for device " + state.device if state.device else "")
+        )
+    # A device capture keeps its edge node's NBIRTH, which the capture's own rebirth request always
+    # produces, so only a message carrying the device's segment shows the device published.
+    if state.device and not any(_device_segment(m["topic"]) == state.device for m in messages):
+        return (
+            "recorded nothing from device %s: only %d message(s) from its edge node %s arrived. The "
+            "device published nothing during the window. Check that it is switched on and "
+            "publishing, then record again. The stored capture of this device is unchanged."
+            % (state.device, len(messages), state.edge_node)
+        )
+    return None
+
+
+def _device_segment(topic):
+    parts = topic.split("/")
+    return parts[4] if len(parts) > 4 else None
+
+
+def _manifest(messages, state, stop=None):
     """
     What is in the file, so the page can describe a capture nobody has downloaded.
 
-    `birth_captured` is the field that earns its place: it makes the alias trap visible on the list
-    rather than something discovered when a playback ingests nothing. The metric names are capped
-    by the database -- `capped_capture_manifest()` keeps 50 and records the true count beside them,
-    the same cap `record_ingestion_rejection()` applies to violations and for the same reason.
+    `birth_captured` makes the alias trap visible on the list. `metric_names` leaves out Sparkplug
+    plumbing and identity, and the database keeps the first 50 with the true count beside them
+    (`capped_capture_manifest()`). `stop_reason` and `duration_ms` say whether the recording ran
+    its window or a cap cut it short.
     """
     names, topics = [], set()
     seen = set()
-    # WHETHER THIS CAPTURE ACTUALLY DEPENDS ON THE ALIAS TABLE, which is what decides whether a
-    # missing birth certificate costs anything. A metric carrying an `alias` and NO `name` can only
-    # be resolved through the birth that defined it; one carrying its full name resolves on its own.
-    # Recorded rather than assumed, because "no birth" and "will drop every metric" are not the same
-    # claim -- this fleet publishes full names, so its birthless captures replay perfectly well.
+    # Whether a missing birth costs anything: a metric with an alias and no name resolves only
+    # through the birth that defined it.
     uses_aliases = False
     for m in messages:
         topics.add(m["topic"])
@@ -388,15 +463,14 @@ def _manifest(messages, state):
                 uses_aliases = True
             if name and name not in seen:
                 seen.add(name)
-                names.append(name)
+                if is_machine_metric(name):
+                    names.append(name)
 
-    # THE IDENTITIES, SO PLAYBACK CAN BE SET UP WITHOUT DOWNLOADING THE FILE. Every captured device
-    # id has to be mapped onto a device of the target gateway before a playback will start, and the
-    # page builds that map from dropdowns -- so it needs to know which ids are in here. Without this
-    # the dialog would have to fetch up to 100 MiB to populate a select.
+    # The identities, so the playback dialog can map devices without downloading the file.
     edge_nodes, devices = capture.capture_identities(messages)
 
     duration_s = max(messages[-1]["offset_ms"] / 1000.0, 0.001)
+    elapsed = state.stopped_after if state.stopped_after is not None else state.elapsed
     return {
         "metric_names": names,
         "topic_count": len(topics),
@@ -406,52 +480,171 @@ def _manifest(messages, state):
         "edge_node_ids": edge_nodes,
         "device_ids": devices,
         "uses_aliases": uses_aliases,
+        "stop_reason": stop,
+        "duration_ms": int(elapsed * 1000),
+        "requested_seconds": state.max_seconds,
     }
 
 
-def _fail(state, message):
-    try:
-        _supabase.rpc("ingest_fail_capture", {
-            "p_job_id": state.id, "p_error": message,
-        }).execute()
-    except Exception as err:
-        logger.error("Capture %s: could not even record the failure: %s", state.id, err)
-    logger.warning("Capture %s failed: %s", state.id, message)
+def _code(err):
+    """The PostgREST or Postgres code an exception carries, as a string, or ''."""
+    return str(getattr(err, "code", "") or "")
 
 
-def _tick(state):
-    """One progress report. Returns the reason to stop, or None."""
-    if state.cap_reason:
-        return state.cap_reason
-    if state.elapsed >= state.max_seconds:
-        return "duration cap reached (%ds)" % state.max_seconds
-
-    count, size, birth = state.snapshot()
-    try:
-        res = _supabase.rpc("ingest_capture_progress", {
-            "p_job_id": state.id,
-            "p_messages": count,
-            "p_bytes": size,
-            "p_elapsed_seconds": int(state.elapsed),
-            "p_birth_captured": birth,
-        }).execute()
-    except Exception as err:
-        # TRANSIENT AND SURVIVABLE. A progress tick that cannot reach Supabase means the card stops
-        # moving; it does not mean the recording should be thrown away. The caps are enforced here
-        # rather than by the database, so an unreachable Supabase cannot make a capture run forever.
-        logger.warning("Capture %s: progress update failed: %s", state.id, err)
-        return None
-
-    if res.data is True:
-        return "stopped by the operator"
+def _call(name, args):
+    """One gate call, retried with backoff. A refusal saying the job ended elsewhere is not."""
+    for delay in TERMINAL_RETRY_DELAYS + (None,):
+        try:
+            return _supabase.rpc(name, args).execute()
+        except Exception as err:
+            if delay is None or _code(err) in _ENDED_ELSEWHERE:
+                raise
+            logger.warning("Capture: %s failed, trying again in %ss: %s", name, delay, err)
+            time.sleep(delay)
     return None
 
 
-def _loop():
+def _settle_failure(state, message, uploaded=False):
+    """
+    Record the job as failed. Returns True once written.
+
+    When even the retries fail the job is kept in `_unsettled`, and the loop retries it before
+    claiming anything else; Stop on the page ends it meanwhile once its progress is stale.
+    """
+    global _unsettled
+    try:
+        _call("ingest_fail_capture", {"p_job_id": state.id, "p_error": message})
+    except Exception as err:
+        logger.error(
+            "Capture %s: could not record its failure (%s); trying again every %.0fs. Until then "
+            "the job reads as recording and no other capture can start.",
+            state.id, err, UNSETTLED_RETRY_SECONDS)
+        _unsettled = (state, message, uploaded)
+        return False
+    _unsettled = None
+    logger.warning("Capture %s failed: %s", state.id, message)
+    if uploaded:
+        # Its file is unclaimed now the job is not RECORDING.
+        _remove_unclaimed(state.subject)
+    return True
+
+
+def settle_unsettled():
+    """One more attempt at the failure the worker could not write. True when nothing is left."""
+    if _unsettled is None:
+        return True
+    state, message, uploaded = _unsettled
+    return _settle_failure(state, message, uploaded)
+
+
+def _remove_unclaimed(subject=None, min_age_seconds=0):
+    """
+    Delete the stored files nothing refers to, under one subject or anywhere. Returns how many the
+    database named, or None on failure.
+
+    Through the Storage API, because only it removes the bytes: a DELETE of the storage.objects
+    row in SQL leaves the file in the storage backend. The bucket's DELETE policy admits the daemon
+    to an unclaimed object alone, so a file a row, a recording, an open upload or a playback names
+    survives whatever this is asked.
+    """
+    where = " under %s/" % subject if subject else ""
+    try:
+        res = _supabase.rpc("ingest_unclaimed_capture_objects", {
+            "p_subject": subject, "p_min_age_seconds": int(min_age_seconds),
+        }).execute()
+        names = list(res.data or [])
+        if names:
+            _storage.from_(BUCKET).remove(names)
+            logger.info("Capture: deleted %d stored file(s)%s that nothing refers to any more.",
+                        len(names), where)
+        return len(names)
+    except Exception as err:
+        logger.warning("Capture: could not delete the stored files nothing refers to%s: %s. The "
+                       "hourly sweep tries again.", where, err)
+        return None
+
+
+def sweep():
+    """The idle loop's hourly pass over the whole bucket. Returns when the next is due."""
+    removed = _remove_unclaimed(None, SWEEP_MIN_AGE_SECONDS)
+    if removed is None:
+        return time.monotonic() + SWEEP_RETRY_SECONDS
+    if removed >= SWEEP_BATCH:
+        return time.monotonic() + POLL_INTERVAL_SECONDS
+    return time.monotonic() + SWEEP_INTERVAL_SECONDS
+
+
+def _report(state):
+    """continue, stop, ended or gone: what the database says about the job."""
+    count, size, birth = state.snapshot()
+    args = {
+        "p_job_id": state.id,
+        "p_messages": count,
+        "p_bytes": size,
+        "p_elapsed_seconds": int(state.elapsed),
+        "p_birth_captured": birth,
+    }
+    try:
+        return _supabase.rpc("ingest_report_capture_progress", args).execute().data
+    except Exception as err:
+        # PGRST202: the database predates the gate (db-init runs after the daemon on an upgrade).
+        # The older gate answers true for stop, ended and gone alike.
+        if _code(err) != "PGRST202":
+            raise
+        return "stop" if _supabase.rpc("ingest_capture_progress", args).execute().data is True \
+            else "continue"
+
+
+def _tick(state):
+    """
+    One progress report. Returns None to go on, ("finish", reason, stop) to store the capture, or
+    ("discard", answer) when the job ended elsewhere or no longer exists.
+    """
+    if state.cap_reason:
+        return ("finish", state.cap_reason, state.cap_code)
+    if state.elapsed >= state.max_seconds:
+        return ("finish", "duration cap reached (%ds)" % state.max_seconds, STOP_DURATION)
+
+    try:
+        answer = _report(state)
+    except Exception as err:
+        # Transient: the card stops moving, and the recording goes on. The caps are enforced here,
+        # so an unreachable Supabase cannot make a capture run for ever.
+        logger.warning("Capture %s: progress update failed: %s", state.id, err)
+        return None
+
+    if answer == "stop":
+        return ("finish", "stopped by the operator", STOP_OPERATOR)
+    if answer in ("ended", "gone"):
+        return ("discard", answer)
+    return None
+
+
+def _discard(state, answer):
+    """Drop a recording whose job is gone. Nothing is uploaded: there is no job to upload for."""
     global _active
+    _active = None
+    state.drain()
+    if answer == "gone":
+        logger.warning("Capture %s: its job no longer exists, because its subject was deleted while "
+                       "it recorded. The recording is discarded.", state.id)
+    else:
+        logger.warning("Capture %s: its job was ended outside the recorder (cancelled from the page, "
+                       "or swept). The recording is discarded.", state.id)
+
+
+def _loop():
+    global _active, _next_sweep
     while True:
+        if _unsettled is not None:
+            time.sleep(UNSETTLED_RETRY_SECONDS)
+            settle_unsettled()
+            continue
+
         state = _active
         if state is None:
+            if time.monotonic() >= _next_sweep:
+                _next_sweep = sweep()
             row = _claim()
             if row:
                 _begin(row)
@@ -461,22 +654,25 @@ def _loop():
 
         time.sleep(PROGRESS_INTERVAL_SECONDS)
         try:
-            reason = _tick(state)
+            outcome = _tick(state)
         except Exception as err:
-            # A bug in the tick must not take ingestion down with it, and must not leave a job
-            # counting down forever either.
+            # A bug in the tick must not take ingestion down, nor leave a job counting for ever.
             logger.error("Capture %s: progress loop error: %s", state.id, err, exc_info=True)
             _active = None
-            _fail(state, "progress loop error: %s" % err)
+            _settle_failure(state, "progress loop error: %s" % err)
             continue
 
-        if reason:
-            try:
-                _finish(state, reason)
-            except Exception as err:
-                logger.error("Capture %s: finalise error: %s", state.id, err, exc_info=True)
-                _active = None
-                _fail(state, "finalise error: %s" % err)
+        if outcome is None:
+            continue
+        if outcome[0] == "discard":
+            _discard(state, outcome[1])
+            continue
+        try:
+            _finish(state, outcome[1], outcome[2])
+        except Exception as err:
+            logger.error("Capture %s: finalise error: %s", state.id, err, exc_info=True)
+            _active = None
+            _settle_failure(state, "finalise error: %s" % err, uploaded=True)
 
 
 def reconcile(supabase):
