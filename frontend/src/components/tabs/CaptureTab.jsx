@@ -1002,8 +1002,8 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
         {/* Settles into `birth_captured` on the finished record. */}
         {!pending && !job.birth_captured && job.elapsed_seconds > 10 && (
           <div style={{ color: 'var(--warning-text)', fontSize: '12px', marginTop: '4px' }}>
-            No <code>NBIRTH</code> or <code>DBIRTH</code> has arrived. A playback of a capture without
-            a birth certificate is refused. The finished capture will be marked <strong>no birth</strong>.
+            No <code>NBIRTH</code> has arrived. A playback of a capture without the edge node’s
+            birth certificate is refused. The finished capture will be marked <strong>no birth</strong>.
           </div>
         )}
       </div>
@@ -1308,7 +1308,7 @@ function SubjectRow({ row, selected, onSelect }) {
                   tone="warning"
                   size="sm"
                   className="badge-follow"
-                  title="No NBIRTH or DBIRTH was recorded, so a playback refuses this capture: a replay opens with the edge node’s birth certificate. Record it again to replace it."
+                  title="No NBIRTH was recorded, so a playback refuses this capture: a replay opens with the edge node’s birth certificate. Record it again to replace it."
                 >
                   NO BIRTH
                 </Badge>

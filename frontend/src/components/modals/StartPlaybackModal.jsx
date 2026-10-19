@@ -202,8 +202,8 @@ export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, 
         <div className="callout callout-warning">
           <IconShieldAlert size={14} className="callout-icon" />
           <div>
-            This capture contains no <code>NBIRTH</code> or <code>DBIRTH</code>, so a playback
-            refuses it: a replay opens with the edge node’s birth certificate. Record it again.
+            This capture contains no <code>NBIRTH</code>, so a playback refuses it: a replay
+            opens with the edge node’s birth certificate. Record it again.
             The recorder asks the edge node for its birth certificate when it starts.
           </div>
         </div>

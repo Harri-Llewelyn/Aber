@@ -697,8 +697,8 @@ the node open to being asked again by the next message that notices a gap.
 
 **`birth_captured` says whether the edge node's birth certificate, an `NBIRTH`, was recorded, and a
 capture without one cannot be played back.** A replay is its own Sparkplug session, so the plan opens
-at the first NBIRTH and a device's data replays only after its DBIRTH (see *A replay is its own
-Sparkplug session* above). A `DBIRTH` alone does not set the flag. The recorder asks the edge node to
+at the first NBIRTH and a device's data replays only after its DBIRTH
+([A replay is its own Sparkplug session](#a-replay-is-its-own-sparkplug-session)). A `DBIRTH` alone does not set the flag. The recorder asks the edge node to
 rebirth for exactly that reason. `uses_aliases`, true only when some metric arrived with an alias and
 no name, no longer changes whether a capture plays. Captures stored before 1.5 keep the flag as it
 was then, when a DBIRTH alone also set it.
