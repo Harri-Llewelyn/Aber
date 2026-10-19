@@ -254,10 +254,14 @@ model*, and the model is what to re-check.
 
 An unauthenticated subscriber that can reach the Realtime WebSocket receives the change **envelope**
 for every published table. Realtime redacts the payload to `{}` and attaches a 401, but the message
-arrives — so the **fact and timing** of a change leak, even though its contents do not. `cells`,
-`gateways` and `devices` are published because the dashboard needs them live, so an observer can
-infer when an asset was created, edited, archived or changed state. In practice that is a timing
-side-channel on shift patterns, commissioning activity and the rate of configuration change.
+arrives — so the **fact and timing** of a change leak, even though its contents do not. Seven tables
+are published because the dashboard needs them live: `cells`, `gateways`, `devices`, `areas`,
+`platform_alerts`, `capture_jobs` and `playback_jobs`. So an observer can infer when an asset or
+an area was created, edited, archived or changed state, when a platform alert fired or cleared, and
+when a broker capture or a replay was started, made progress and ended. In practice that is a
+timing side-channel on shift patterns, commissioning activity, the rate of configuration change and
+fault investigation. `captures` itself is not published (0190), so the list of stored captures does
+not leak this way.
 
 **It cannot be fixed here** — it is upstream `supabase/realtime` behaviour. The gateway's `apikey`
 check does not mitigate it either: the publishable key is a registered key that is necessarily
@@ -272,7 +276,7 @@ does not justify degrading the dashboard's live updates.
 
 **Revisit if** the stack is exposed to a network where reaching the WebSocket is not already
 evidence of access: a public or partner-facing deployment, a shared cluster, or any move to
-multi-tenancy. At that point the choice is dropping the three tables from the publication and
+multi-tenancy. At that point the choice is dropping these tables from the publication and
 polling instead, or waiting for upstream to authenticate before delivering the envelope.
 
 ### Revocation reaches PostgREST and nothing else
