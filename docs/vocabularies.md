@@ -219,6 +219,13 @@ The artefact pinned is `open223/defs.open223.info` → `ontologies/223p.ttl` (53
 `v1.0.0-2026`. **Not `open223/Standard223`**: the obvious-looking `standard223-core.ttl` there is a
 35-byte placeholder, not the ontology.
 
+**A copy is kept in this repository**, at
+[`scripts/vocabularies/223p-v1.0.0-2026.ttl`](../scripts/vocabularies/223p-v1.0.0-2026.ttl), and the
+generator reads that copy, pinned by its SHA-256. On 2026-10-16 upstream rewrote its history and
+regenerated the file: the release above is gone from it, and the new file reports a git revision as
+its version and declares no licence. Without a declared licence it can't be used here. The folder's
+[README](../scripts/vocabularies/README.md) gives the steps for moving to a newer release.
+
 ### Licences
 
 Every vocabulary comes from an open, machine-readable source whose licence permits redistribution
