@@ -507,13 +507,20 @@ before 1.5 has none of these and still reads.
   publisher's `"is_null": true` is honoured. A field not in the file's form (a `properties`
   that is not a PropertySet, bytes that are not base64) is ignored and the metric kept, as the
   reader ignored every one of these keys before.
-- **What it costs.** Measured on 2026-10-19 by `len(json.dumps(entry))`, the count the capture
-  cap uses: the gateway appliance's NBIRTH (its metrics in
+- **What it costs.** Measured on 2026-10-19 by `len(json.dumps(entry))`, the JSON the capture
+  cap counts: the gateway appliance's NBIRTH (its metrics in
   `forge/gateway-platform/appliance/flows.template.json`, with the five outage metrics null) grows
   from 1,567 to 1,652 bytes, 1.054×; a freshly enrolled appliance's, with eleven nulls, from 1,342
   to 1,529, 1.139×. A DDATA of 50 aliased integers, and one of 10 named doubles, do not grow at all
-  (1.000×): a data message rarely carries any of these fields. The indent=2 file grows by the same
+  (1.000×): a data message rarely carries any of these fields. The file grows by the same
   ratios. Births are a few messages in a capture, so the caps are unaffected in practice.
+
+**One message to a line.** The file opens with its own fields, one to a line, then holds each
+message on a line of its own, in the order received. The recorder writes each message once, as it
+arrives, and uploads those lines ([Recording from the dashboard](#recording-from-the-dashboard)).
+Any layout of the same JSON reads the same: a file recorded before 1.5 is indented throughout, and
+an upload may be on one line. The playback worker reads the messages one at a time
+(`read_capture()`), whatever the layout.
 
 **A file is checked before anything is planned**, by `check_capture()`, and a fault is refused
 naming the message by its 0-based index (`message 17: …`) rather than escaping as a `KeyError` or
@@ -636,9 +643,9 @@ for an hour, and the file a finalise replaced at once. A SQL `DELETE` on `storag
 leave the bytes in the storage backend, so nothing does that.
 
 **100 MiB**, sized from the traffic rather than picked. At the fleet's measured 0.95 msg/s a full
-working day fits, and it sits above the 50 MiB cap `capture_jobs` puts on a recording — which is the
-constraint that matters, because a capture that terminated successfully and then failed to upload
-would be a recording lost at the last step.
+working day fits, and it is twice the 50 MiB cap `capture_jobs` puts on a recording, which counts
+the bytes the file holds. That is the constraint that matters, because a capture that terminated
+successfully and then failed to upload would be a recording lost at the last step.
 
 **A capture names devices that are not the gateway it is filed under**, because it records whatever
 was on the wire. That is not a leak across the prefix rule — every role that can read the bucket can
@@ -672,13 +679,21 @@ places and wrongly in one.
 | :--- | :--- | :--- |
 | duration | 2 hours | |
 | messages | 100,000 | ≈29 h at the fleet's 0.95 msg/s; ≈100 s at the 1,000 msg/s the stack sustains |
-| size | 50 MiB | the smallest cap that lets the message cap bind first, under a 100 MiB bucket |
+| size | 50 MiB | the file's own size: half the bucket's 100 MiB, and about a ninth of the daemon's 512Mi |
 
-The buffer is held in the daemon's memory, which the chart limits to 512Mi
-(`ingestion.resources.limits.memory`), so an oversized cap would not be refused at run time — it
-would meet that limit, and the container would be OOM-killed taking ingestion for the whole fleet
-with it. That is the argument for the smaller number, ahead of the
-storage one.
+**A recording is held as the bytes of its file, and uploaded from them.** Each message is encoded
+once, as it arrives, into the line it takes in the file, and the size cap counts those bytes. So a
+capture the cap stopped is a 50 MiB file. When the recording ends, the file is uploaded from those
+lines as a stream, with no second copy. Measured on 2026-10-19 with `tracemalloc`, recording to the
+caps through `_JobState.append()` and `_finish()`: the buffer holds 1.03 bytes per byte counted for
+a DDATA of ten named doubles, 1.02 for fifty aliased integers, and 1.14 at the message cap with one
+metric a message (28.8 MiB). The upload adds 0.6 MiB. So a recording at the cap costs the daemon
+about 55 MiB above what it uses already, about a ninth of `ingestion.resources.limits.memory`.
+
+Until 1.5 the buffer held each message as Python objects, 3.4 to 6.6 bytes per byte counted, and
+the file was built whole at the end with `indent=2`, 1.6 to 2.2 times larger again. On the dev
+stack the daemon peaked at 488 of its 512Mi recording to the cap. A recording of fifty aliased
+integers OOM-killed it at the end, which stopped ingestion for every gateway while it restarted.
 
 **A capture records its edge node under any Sparkplug group**, as ingestion accepts it
 ([Resolution precedence](#resolution-precedence)): `observe()` matches the node's `sparkplug_id`, and
@@ -820,6 +835,22 @@ start: the readings already published are written again, under the new run's tim
 `PRIMARY_HOST_ID` is the daemon's own variable, set from `ingestion.primaryHostId` on both pods. A
 worker started without it (outside the chart) does not wait, as a node with no primary host
 configured does not.
+
+**A capture is replayed a message at a time, so the worker's memory does not grow with it.** The
+worker downloads the capture into a temporary file in its `/tmp`, which the chart sizes to the
+bucket's file limit (`supabaseStorage.captureFileSizeLimit`) plus 16Mi. It reads that file three
+times, a message at a time: to check its shape, to plan and judge every message, and to publish.
+So every refusal `plan_playback()` makes still comes before the first publish (`capture.FilePlan`).
+Measured on 2026-10-19 with `tracemalloc`: 4.3 MiB above the worker's baseline for a 50 MiB
+capture, and the same for one of 100,000 messages. The temporary file's pages count in the
+container's `memory.current` while it is read, but the kernel can reclaim them.
+
+The cost is time. Planning a 50 MiB capture takes 3 to 10 seconds on one laptop core before the
+first message. Each message is then encoded as it is sent, in 30 to 300 µs depending on its
+metrics, so a fast replay of a large capture is paced by that rather than by its speed. Until 1.5
+the worker parsed the file whole and kept every planned message twice, about 39 MiB plus 4.6 times
+the file's size. On the dev stack an 85.5 MiB capture OOM-killed its 256Mi within five seconds,
+before it published anything.
 
 **Two identities, which is the arrangement to understand first.** `Service_Playback` is a Supabase
 principal — it reads the queue, reads the capture, writes status. The MQTT identity is **the target

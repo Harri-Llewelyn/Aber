@@ -32,6 +32,7 @@ import json
 import os
 import sys
 import tempfile
+import tracemalloc
 import unittest
 from types import SimpleNamespace
 
@@ -911,6 +912,171 @@ class CaptureFileShapeTests(unittest.TestCase):
         decoded.ParseFromString(payload_bytes)
         self.assertEqual(decoded.metrics[0].double_value, 999.9)
 
+    def test_the_written_file_is_one_message_per_line_and_reads_back_whole(self):
+        document = capture_file([message(0, "DDATA", metrics=[{"name": "Té", "double_value": 1.5}]),
+                                 message(5, "DDATA")])
+        out = io.BytesIO()
+        fields = {k: v for k, v in document.items() if k != "messages"}
+        capture.write_capture(out, fields, document["messages"])
+        body = out.getvalue()
+        self.assertEqual(json.loads(body), document)
+        rows = body.decode("ascii").splitlines()
+        self.assertEqual(rows[0], "{")
+        self.assertEqual(rows[1], '  "aber_capture_version": %d,' % capture.CAPTURE_VERSION)
+        self.assertEqual([json.loads(r.strip().rstrip(",")) for r in rows if r.startswith("    {")],
+                         document["messages"])
+
+
+def chunked(body, size):
+    """`body` as a file read `size` bytes at a time."""
+    return (body[i:i + size] for i in range(0, len(body), size))
+
+
+def layouts(document):
+    """The same capture as the files that hold it: written now, indented as before 1.5, compact,
+    UTF-8 unescaped, and with its messages before the other fields."""
+    out = io.BytesIO()
+    capture.write_capture(out, {k: v for k, v in document.items() if k != "messages"},
+                          document["messages"])
+    reordered = dict(messages=document["messages"],
+                     **{k: v for k, v in document.items() if k != "messages"})
+    return {
+        "written": out.getvalue(),
+        "indented": json.dumps(document, indent=2).encode(),
+        "compact": json.dumps(document, separators=(",", ":")).encode(),
+        "unescaped": json.dumps(document, ensure_ascii=False, indent=1).encode("utf-8"),
+        "messages first": json.dumps(reordered).encode(),
+    }
+
+
+class FilePlanTests(unittest.TestCase):
+    """The worker reads the file a message at a time; what it plans is plan_playback()'s."""
+
+    DOCUMENT = capture_file(
+        [message(10 + i, "DDATA", metrics=[{"name": "Température ☃", "alias": 1,
+                                            "timestamp": EPOCH + 10 + i, "double_value": i * 1.25}],
+                 **({"encoding": "json"} if i % 3 else {})) for i in range(30)]
+        + [message(50, "NDEATH", device=None, metrics=[{"name": "bdSeq", "long_value": 3}]),
+           message(60, "NBIRTH", device=None), message(61, "NDATA", device=None)])
+
+    def plan(self, body, size=1 << 20, **kwargs):
+        return capture.FilePlan(lambda: chunked(body, size), GW, DEFAULT_MAP, NOW, bdseq=7,
+                                **kwargs)
+
+    def test_every_layout_at_every_chunk_size_plans_what_plan_playback_lists(self):
+        expected = capture.plan_playback(self.DOCUMENT, GW, DEFAULT_MAP, NOW, bdseq=7)
+        lossy, kept, dropped = capture.window_outcome(expected, NOW)
+        for name, body in layouts(self.DOCUMENT).items():
+            for size in (1, 2, 3, 7, 64, 1 << 20):
+                with self.subTest(layout=name, chunk=size):
+                    plan = self.plan(body, size)
+                    self.assertEqual(list(plan), expected)
+                    self.assertEqual(len(plan), len(expected))
+                    self.assertEqual((plan.lossy, plan.metrics_kept, plan.metrics_dropped),
+                                     (len(lossy), kept, dropped))
+                    self.assertEqual(plan.message_count, len(self.DOCUMENT["messages"]))
+
+    def test_a_new_bdseq_changes_only_the_session_numbers(self):
+        """The worker sets the bdSeq the broker accepted after the plan is made."""
+        body = layouts(self.DOCUMENT)["written"]
+        plan = self.plan(body)
+        plan.bdseq = 9
+        self.assertEqual(list(plan), capture.plan_playback(self.DOCUMENT, GW, DEFAULT_MAP, NOW,
+                                                           bdseq=9))
+
+    def test_the_window_verdict_names_the_first_lossy_message(self):
+        stale = capture_file([message(0, "DDATA", metrics=[
+            {"name": "t", "timestamp": EPOCH - 2 * 86_400_000, "double_value": 1.0}])])
+        plan = self.plan(json.dumps(stale).encode())
+        lossy, _, _ = capture.window_outcome(
+            capture.plan_playback(stale, GW, DEFAULT_MAP, NOW, bdseq=7), NOW)
+        self.assertEqual((plan.lossy, plan.first_lossy), (1, lossy[0]))
+
+    def test_a_repeated_messages_key_reads_as_json_loads_reads_it(self):
+        first = json.dumps(capture_file([message(0, "DDATA")]))
+        body = (first[:-1] + ', "messages": ' + json.dumps(self.DOCUMENT["messages"]) + "}").encode()
+        self.assertEqual(list(self.plan(body, 5)),
+                         capture.plan_playback(json.loads(body), GW, DEFAULT_MAP, NOW, bdseq=7))
+
+
+class MalformedCaptureFileTests(MalformedCaptureTests):
+    """Every refusal of a malformed capture, word for word, when the file is read a message at a time."""
+
+    def refusal(self, document, **kwargs):
+        expected = super().refusal(document, **dict(kwargs))
+        device_map = kwargs.pop("device_map", DEFAULT_MAP)
+        body = json.dumps(document).encode("utf-8")
+        with self.assertRaises(capture.CaptureError) as caught:
+            capture.FilePlan(lambda: chunked(body, 7), GW, device_map, NOW, **kwargs)
+        self.assertEqual(str(caught.exception), expected)
+        return expected
+
+
+class CaptureFileTextTests(unittest.TestCase):
+    """A file that is not JSON is refused naming the place, as json.loads() names it."""
+
+    def test_the_place_is_the_files_at_every_chunk_size(self):
+        for text in ('{"a" 1}', '{"messages": [1 2]}', "", '  {"a": tru', '{"a": "x\n', "{} x",
+                     '{\n "aber_capture_version": 1,\n  "messages": [\n {"a": [1, 2,, 3]}]}',
+                     '{"messages": [{"a": 1}, {"b": "\\u12"}]}', '﻿{}'):
+            try:
+                json.loads(text)
+            except ValueError as err:
+                expected = str(err)
+            for size in (1, 3, 1 << 20):
+                with self.subTest(text=text, chunk=size):
+                    with self.assertRaises(ValueError) as caught:
+                        list(capture.read_capture(chunked(text.encode("utf-8"), size), {}))
+                    self.assertEqual(str(caught.exception), expected)
+
+    def test_a_file_that_is_not_utf8_says_where(self):
+        with self.assertRaises(ValueError) as caught:
+            list(capture.read_capture(chunked(b'{"a": "\xff"}', 2), {}))
+        self.assertIn("not UTF-8 at byte 7", str(caught.exception))
+
+    def test_a_document_that_is_not_an_object_is_named_by_its_kind(self):
+        for text, kind in (("[1, 2]", "an array"), ('"x"', "a string"), ("12", "a number"),
+                           ("null", "null"), ("true", "a boolean")):
+            with self.assertRaises(capture.CaptureError) as caught:
+                list(capture.read_capture(chunked(text.encode(), 4), {}))
+            self.assertIn("this one is %s" % kind, str(caught.exception))
+
+
+class FilePlanMemoryTests(unittest.TestCase):
+    """
+    The worker's plan holds one message at a time, so its memory does not grow with the file.
+    plan_playback() held the document and every planned message twice over, about 4.6 bytes per
+    byte of file, which is how a capture near the 50 MiB cap OOM-killed the worker's 256Mi.
+    """
+
+    @staticmethod
+    def body(readings):
+        metrics = [{"name": "Line1/Machine/Metric_%02d" % i, "timestamp": EPOCH, "datatype": 10,
+                    "double_value": i * 1.5} for i in range(10)]
+        document = capture_file([message(i, "DDATA", metrics=metrics) for i in range(readings)])
+        return layouts(document)["written"]
+
+    def peak(self, body):
+        tracemalloc.start()
+        self.addCleanup(tracemalloc.stop)
+        start, _ = tracemalloc.get_traced_memory()
+        planned = 0
+        for _ in capture.FilePlan(lambda: chunked(body, 64 * 1024), GW, DEFAULT_MAP, NOW):
+            planned += 1
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        return peak - start
+
+    def test_the_peak_does_not_grow_with_the_file(self):
+        peaks = {}
+        for readings in (400, 1600):
+            body = self.body(readings)
+            peaks[len(body)] = self.peak(body)
+        small, large = sorted(peaks)
+        self.assertGreater(large, 1.5 * 1024 * 1024)
+        self.assertLess(peaks[large], large / 4, peaks)
+        self.assertLess(peaks[large] - peaks[small], 64 * 1024, peaks)
+
 
 # =============================================================================================
 # WHAT THE WORKER DOES WITH THE COUNT unsane_timestamps() RETURNS (#216).
@@ -965,11 +1131,8 @@ class WorkerOutOfWindowTests(unittest.TestCase):
         def __init__(self, document):
             self._body = json.dumps(document).encode("utf-8")
 
-        def from_(self, _bucket):
-            return self
-
-        def download(self, _path):
-            return self._body
+        def download_to(self, _path, sink):
+            sink.write(self._body)
 
     def _run(self, document, speed=1.0):
         worker = self._worker()

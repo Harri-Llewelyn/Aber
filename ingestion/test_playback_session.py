@@ -396,11 +396,8 @@ class FakeStorage:
     def __init__(self, document):
         self.body = json.dumps(document).encode("utf-8")
 
-    def from_(self, _bucket):
-        return self
-
-    def download(self, _path):
-        return self.body
+    def download_to(self, _path, sink):
+        sink.write(self.body)
 
 
 class FakeSupabase:

@@ -102,10 +102,12 @@ python ingestion/test_telemetry_batching.py
 python ingestion/test_telemetry_writer.py
 # The directory refresher -- one request per table per pass, keyed as the per-entity path keys
 python ingestion/test_directory_refresh.py
-# Broker capture and playback -- identity rewriting, timestamp rebasing, wire encodings
+# Broker capture and playback -- identity rewriting, timestamp rebasing, wire encodings, and the
+# plan read from a file a message at a time: the same plan and refusals, in flat memory
 python ingestion/test_capture_playback.py
-# The daemon-side recording engine -- subject matching, the caps, the manifest, and the finish:
-# its own path, the replaced file deleted only after finalise, retried terminal writes
+# The daemon-side recording engine -- subject matching, the caps, the manifest, a buffer that is the
+# file's own bytes and is uploaded with no second copy, and the finish: its own path, the replaced
+# file deleted only after finalise, retried terminal writes
 python ingestion/test_capture_worker.py
 # The request the capture stack suites delete their stored file with, and that a refusal raises
 python ingestion/test_stack_capture_cleanup.py
@@ -128,7 +130,7 @@ python ingestion/test_playback_credentials.py
 # it goes offline, Stop and a dropped connection inside a long gap, the retried finish and startup
 # sweep, and the heartbeat thread. A message counts only once paho accepted it on a connection that
 # has not dropped: a replay whose credential was re-issued partway used to end COMPLETED with every
-# message counted.
+# message counted. A capture is read from a temporary file a message at a time, in flat memory.
 python ingestion/test_playback_worker_loop.py
 # The playback worker's Sparkplug session -- the NDEATH Will, the NDEATH that ends every job, and
 # the bdSeq the replayed NBIRTH shares with both, so the Playback gateway reads OFFLINE after a replay

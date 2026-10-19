@@ -8,10 +8,14 @@ Against a fake broker and a fake PostgREST, with no network. What this suite hol
   * A MESSAGE COUNTS ONLY WHEN PAHO ACCEPTED IT on a connection that has not dropped. A refused
     publish or a dropped connection fails the job with how many messages went out.
 """
+import io
 import json
 import os
 import sys
+import tracemalloc
 import unittest
+import unittest.mock
+import urllib.error
 from types import SimpleNamespace
 
 INGESTION_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -216,11 +220,8 @@ class FakeStorage:
     def __init__(self, document):
         self.body = json.dumps(document).encode("utf-8")
 
-    def from_(self, _bucket):
-        return self
-
-    def download(self, _path):
-        return self.body
+    def download_to(self, _path, sink):
+        sink.write(self.body)
 
 
 class FakeSupabase:
@@ -903,6 +904,106 @@ class CredentialSourceTests(unittest.TestCase):
         self.assertEqual([p["p_sources"] for p in supabase.called("playback_report_credential_sources")],
                          [{GW: ["delivered", "helm"]}, {GW: ["helm", "delivered"]}])
         self.assertNotIn(HELM_VALUE[1], json.dumps(supabase.calls))
+
+
+# -------------------------------------------------------------------------------------------------
+# Reading the capture
+# -------------------------------------------------------------------------------------------------
+class CountingClient(FakeClient):
+    """Counts what it publishes and keeps none of it, so a test measures the worker alone."""
+
+    def publish(self, topic, payload, qos=0, retain=False):
+        if not self.connected:
+            return FakeInfo(rc=mqtt.MQTT_ERR_NO_CONN)
+        self.publishes += 1
+        return FakeInfo()
+
+
+class FakeResponse(io.BytesIO):
+    def __init__(self, body, length=None):
+        super().__init__(body)
+        self.headers = {"Content-Length": str(len(body) if length is None else length)}
+
+
+class CaptureReadingTests(WorkerLoopCase):
+    """
+    The capture is downloaded to a temporary file and planned and published from it a message at a
+    time, so the worker's memory does not grow with the file. A 50 MiB capture used to cost about
+    four and a half times its size, over the worker's 256Mi.
+    """
+
+    def test_a_job_holds_one_message_at_a_time_not_the_capture(self):
+        playback_worker.mqtt.Client = CountingClient
+        chunk = playback_worker.DOWNLOAD_CHUNK_BYTES
+        playback_worker.DOWNLOAD_CHUNK_BYTES = 16 * 1024
+        self.addCleanup(setattr, playback_worker, "DOWNLOAD_CHUNK_BYTES", chunk)
+        peaks = {}
+        for readings in (1500, 6000):
+            storage = FakeStorage(capture_file(a_session(readings=readings, gap_ms=0)))
+            tracemalloc.start()
+            start, _ = tracemalloc.get_traced_memory()
+            sent, _, error = playback_worker._run_job(FakeSupabase(), storage, {GW: "a-password"},
+                                                      self.job())
+            _, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            self.assertEqual((sent, error), (readings + 2, None))
+            peaks[len(storage.body)] = peak - start
+        small, large = sorted(peaks)
+        self.assertLess(peaks[large], large / 4, peaks)
+        self.assertLess(peaks[large] - peaks[small], 64 * 1024, peaks)
+
+    def test_a_capture_that_is_not_json_is_refused_naming_the_place(self):
+        storage = FakeStorage(capture_file(a_session()))
+        storage.body = b'{"aber_capture_version": 1,\n "messages": [{"offset_ms": 0,}]}'
+        sent, _, error = playback_worker._run_job(FakeSupabase(), storage, {GW: "a-password"},
+                                                  self.job())
+        with self.assertRaises(ValueError) as parsed:
+            json.loads(storage.body)
+        self.assertEqual(sent, 0)
+        self.assertEqual(error, "dev880000000000400080000/capture.json is not valid JSON: %s"
+                         % parsed.exception)
+        self.assertEqual(self.broker.clients, [], "it connected for a capture it cannot read")
+
+    def download(self, response=None, error=None):
+        sink = io.BytesIO()
+        requests = []
+
+        def urlopen(request, timeout=None):
+            requests.append((request, timeout))
+            if error:
+                raise error
+            return response
+
+        with unittest.mock.patch.object(playback_worker, "SUPABASE_URL", "http://envoy:8000/"), \
+                unittest.mock.patch.object(playback_worker, "SUPABASE_PLAYBACK_KEY", "worker-key"), \
+                unittest.mock.patch.object(playback_worker, "SUPABASE_GATEWAY_KEY", "gateway-key"), \
+                unittest.mock.patch.object(playback_worker.urllib.request, "urlopen", urlopen):
+            playback_worker._storage().download_to("dev88/a capture.json", sink)
+        return sink.getvalue(), requests
+
+    def test_the_download_is_the_workers_own_read_of_the_object(self):
+        body = b"x" * (3 * playback_worker.DOWNLOAD_CHUNK_BYTES + 5)
+        got, requests = self.download(FakeResponse(body))
+        self.assertEqual(got, body)
+        (request, timeout), = requests
+        self.assertEqual(request.full_url,
+                         "http://envoy:8000/storage/v1/object/broker-captures/dev88/a%20capture.json")
+        self.assertEqual(request.get_header("Authorization"), "Bearer worker-key")
+        self.assertEqual(request.get_header("Apikey"), "gateway-key")
+        self.assertEqual(timeout, playback_worker.DOWNLOAD_TIMEOUT_SECONDS)
+
+    def test_a_refusal_says_what_storage_said(self):
+        refusal = urllib.error.HTTPError(
+            "http://envoy:8000/x", 400, "Bad Request", {}, io.BytesIO(
+                b'{"statusCode":"404","error":"not_found","message":"Object not found"}'))
+        with self.assertRaises(RuntimeError) as caught:
+            self.download(error=refusal)
+        self.assertEqual(str(caught.exception), "HTTP 400 not_found: Object not found")
+
+    def test_a_download_cut_short_is_an_error(self):
+        with self.assertRaises(RuntimeError) as caught:
+            self.download(FakeResponse(b"{}", length=10))
+        self.assertIn("stopped after 2 of 10 bytes", str(caught.exception))
 
 
 if __name__ == "__main__":
