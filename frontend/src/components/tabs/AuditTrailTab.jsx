@@ -7,7 +7,7 @@ import { ContextPanel } from '../common/ContextPanel'
 import {
   IconHistory, IconDownload, IconLayoutDashboard, IconFactory, IconRadio, IconCpu, IconTrash,
   IconShieldCheck, IconLock, IconClipboardList, IconSettings, IconTag, IconChevronRight,
-  IconRecord, IconFileText, IconPlay
+  IconRecord, IconFileText, IconRefreshCw
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { SearchInput } from '../common/SearchInput'
@@ -421,7 +421,7 @@ const SECTION_ICONS = {
   SETTING:            IconSettings,
   RECORDING:          IconRecord,
   CAPTURE:            IconFileText,
-  PLAYBACK:           IconPlay
+  PLAYBACK:           IconRefreshCw
 }
 
 /**
