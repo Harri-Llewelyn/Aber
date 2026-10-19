@@ -502,7 +502,7 @@ html, body, #root {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-popover);
   overflow: hidden;
   z-index: 200;
 }
@@ -1170,7 +1170,7 @@ a.sidebar-item { text-decoration: none; }
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-popover);
 }
 .filters-popover-controls {
   display: flex;
@@ -3280,7 +3280,7 @@ a.chip { text-decoration: none; }
   overscroll-behavior: contain;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   box-shadow: var(--shadow-popover);
 }
 
@@ -3455,7 +3455,7 @@ a.alert-pill-item-link[target='_blank'] .alert-pill-item-name { color: var(--acc
   overscroll-behavior: contain;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   box-shadow: var(--shadow-popover);
 }
 
@@ -3569,6 +3569,65 @@ a.alert-pill-item-link[target='_blank'] .alert-pill-item-name { color: var(--acc
   border-top: 1px solid var(--border);
   font-size: 11px;
   color: var(--text-muted);
+}
+
+/* ===== Popover arrows =====
+   The five panels that open from a button point at it: a square turned 45 degrees, centred on the
+   panel's border on the side facing the button. It is a pseudo-element of the panel's wrapper, not
+   of the panel, because the alert, notification and account panels clip or scroll their overflow;
+   the Filters panel clips nothing and carries its own. --bg-card is opaque in both themes, so the
+   half inside the panel hides the panel's border there and the two bordered sides carry the
+   outline on into the point. The rules below say where the centre goes and which way it turns. */
+.alert-pill-wrap:has(> .alert-pill-panel)::after,
+.notif-wrap:has(> .notif-panel)::after,
+.user-menu:has(> .user-popover)::after,
+.sidebar-mode:has(> .sidebar-mode-menu)::after,
+.filters-popover::before {
+  --arrow-size: 10px;
+  content: '';
+  position: absolute;
+  width: var(--arrow-size);
+  height: var(--arrow-size);
+  /* Centres the box on whichever offsets place it: top or bottom, and left. */
+  margin: calc(var(--arrow-size) / -2);
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  /* 45deg turns the bordered corner up, -45deg turns it left. */
+  transform: rotate(var(--arrow-turn, 45deg));
+  pointer-events: none;
+}
+
+/* Up, from the top bar: on the panel's top border (the panels open 8px below the wrapper), centred
+   on the button whatever its width, and above the panels' z-index 60. */
+.alert-pill-wrap:has(> .alert-pill-panel)::after,
+.notif-wrap:has(> .notif-panel)::after {
+  top: calc(100% + 8.5px);
+  left: 50%;
+  z-index: 61;
+}
+
+/* Left, from the foot of the rail: fixed like the two panels, on their left border, and level with
+   the centre of the button that opened each. The foot is 10px of padding, the 34px behaviour
+   button, a 2px gap, then the 38px account row, so the centres are 27px and 65px up. */
+.user-menu:has(> .user-popover)::after,
+.sidebar-mode:has(> .sidebar-mode-menu)::after {
+  --arrow-turn: -45deg;
+  position: fixed;
+  left: 60.5px;
+  z-index: 201;
+}
+.user-menu:has(> .user-popover)::after { bottom: 65px; }
+.sidebar-mode:has(> .sidebar-mode-menu)::after { bottom: 27px; }
+.sidebar-mode-expanded .user-menu:has(> .user-popover)::after,
+.sidebar-mode-expanded .sidebar-mode:has(> .sidebar-mode-menu)::after { left: 240.5px; }
+
+/* Up, from a toolbar's Filters button. The panel is kept inside the window, so FiltersPopover sets
+   --arrow-x, the button's centre from the panel's outer left edge; the 1px is the border the
+   containing block starts inside. */
+.filters-popover::before {
+  top: -0.5px;
+  left: calc(var(--arrow-x, 50%) - 1px);
 }
 
 /* The 3D model preview in the device drawer. One class on all three states (the element, the
@@ -5300,7 +5359,7 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-popover);
   z-index: 200;
 }
 
