@@ -1645,23 +1645,28 @@ paths:
         what bounds the `broker-captures` bucket.
 
         Filed **by the subject recorded**, not by the gateway a capture plays back as: a device
-        capture lives under its own `dev…` prefix. `storage_path` is where the bytes are, and the
-        object is fetched with the ordinary Storage API.
+        capture lives under its own `dev…` prefix, at a path of its own
+        (`<subject>/<job or upload id>.json`; `<subject>/capture.json` for one stored before 1.5).
+        `storage_path` is where the bytes are, and the object is fetched with the ordinary Storage API.
 
         `manifest` describes a file nobody has downloaded — the metric names (capped at 50, with
         `metric_name_count` beside them), the topic count, the observed rate, and **`birth_captured`**.
         That last field is the one to read before trusting a capture: `false` means the recording
-        contains no `NBIRTH`/`DBIRTH`, so an alias-optimised gateway replays as `unresolved_alias`
-        and drops every metric — from a file that otherwise looks complete.
+        contains no `NBIRTH`, so a playback refuses it, since a replay opens with the edge node's
+        birth certificate. A capture stored before 1.5 set it for a `DBIRTH` alone too.
 
         `source` distinguishes a capture the daemon recorded from one uploaded through the browser.
         An uploaded capture has no `capture_jobs` row at all, which is why the artifact is a table
         of its own.
 
         **Writes do not happen here.** INSERT and UPDATE are refused for every application role;
-        `start_capture_job()` and `register_uploaded_capture()` are the only doors. DELETE is
-        permitted directly, for `Administrator` and `Shopfloor_Manager`, because removing a capture
-        is the same session's act as removing the object from Storage.
+        `start_capture_job()` and, for an upload, `begin_capture_upload()` then
+        `register_uploaded_capture()` are the only doors. An upload begins on the server, which
+        decides whether it may replace the stored capture and issues the path to upload to; the
+        bucket admits a person's write to that path alone. DELETE is permitted directly, for
+        `Administrator` and `Shopfloor_Manager`. Delete the row first: the bucket refuses to delete
+        a file a row still names, and once the row is gone the object is removed through the Storage
+        API (the ingestion daemon deletes any left behind within the hour).
       parameters:
         - { name: subject_kind, in: query, schema: { type: string, enum: [gateway, device] }, description: 'e.g. `eq.gateway`' }
         - { name: gateway_id, in: query, schema: { type: string, format: uuid } }
@@ -1693,7 +1698,9 @@ paths:
 
         **Ending a capture early is `request_capture_stop()`, not a write here.** The daemon serves
         exactly one HTTP endpoint — Prometheus `/metrics` — so there is no REST tier to host a stop
-        call, and a flag the daemon observes on its next message survives a page reload.
+        call, and a flag the daemon reads on its next one-second progress tick survives a page
+        reload. A recording the daemon has not reported on for two minutes is ended by the call
+        itself, `CANCELLED` with nothing stored.
 
         A row left at `RECORDING` by a daemon restart is swept to `FAILED` at startup. Without that
         the single-flight index would keep matching it and refuse every future capture.
@@ -5253,8 +5260,10 @@ components:
           example: gwy120000000000400080000
         storage_path:
           type: string
-          description: 'Where the bytes are in the `broker-captures` bucket.'
-          example: gwy120000000000400080000/capture.json
+          description: |
+            Where the bytes are in the `broker-captures` bucket: `<subject>/<job or upload id>.json`,
+            or `<subject>/capture.json` for a capture stored before 1.5.
+          example: gwy120000000000400080000/7c9e6679-7425-40de-944b-e07fc1f90ae7.json
         size_bytes: { type: integer, format: int64 }
         message_count: { type: integer }
         note:
@@ -5277,10 +5286,21 @@ components:
             birth_captured:
               type: boolean
               description: |
-                **Read this before trusting the capture.** `false` means no `NBIRTH`/`DBIRTH` was
-                recorded, so an alias-optimised gateway replays as `unresolved_alias` and drops
-                every metric.
+                **Read this before trusting the capture.** `false` means no `NBIRTH` was recorded,
+                so a playback refuses the capture: a replay opens with the edge node's birth
+                certificate. Before 1.5 a `DBIRTH` alone also set it.
             rebirth_requested: { type: boolean }
+            stop_reason:
+              type: string
+              nullable: true
+              enum: [duration, operator, message_cap, size_cap]
+              description: |
+                Why a recording stopped. `message_cap` and `size_cap` mean a cap cut it short of the
+                length asked for. Absent for an upload and for a capture recorded before 1.5.
+            duration_ms:
+              type: integer
+              description: 'How long the recording ran; for an upload, how long the file spans.'
+            requested_seconds: { type: integer, description: 'The length the recording was asked for.' }
         source: { type: string, enum: [recorded, uploaded] }
         recorded_at: { type: string, format: date-time }
         created_at: { type: string, format: date-time }
@@ -5308,7 +5328,7 @@ components:
           description: 'The gateway the daemon matches topics against — for a device capture too.'
           example: gwy120000000000400080000
         device_sparkplug_id: { type: string, nullable: true, example: dev270000000000400080000 }
-        storage_path: { type: string, example: gwy120000000000400080000/capture.json }
+        storage_path: { type: string, example: gwy120000000000400080000/7c9e6679-7425-40de-944b-e07fc1f90ae7.json }
         status: { type: string, enum: [PENDING, RECORDING, COMPLETED, FAILED, CANCELLED] }
         note: { type: string, nullable: true }
         max_seconds: { type: integer, description: '5 … 7200.' }
@@ -5328,8 +5348,9 @@ components:
         stop_requested:
           type: boolean
           description: |
-            Set by `request_capture_stop()`. The daemon observes it on its next message, then
-            flushes and completes. A column rather than an endpoint, so it survives a page reload.
+            Set by `request_capture_stop()`. The daemon reads it on its next one-second progress
+            tick, then stores what it has recorded. A column rather than an endpoint, so it survives a
+            page reload.
         capture_id: { type: string, format: uuid, nullable: true }
         error: { type: string, nullable: true }
         requested_by: { type: string, format: uuid, nullable: true }

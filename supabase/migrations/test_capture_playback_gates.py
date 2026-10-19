@@ -341,18 +341,19 @@ class BrokerCapturePolicies(GatesBase):
 
     def test_each_caller_reaches_what_the_file_says(self):
         """
-        Read: the three reader roles everything; the daemon its recording; the worker the capture
-        it plays; an Operator nothing. Write: Administrator and Shopfloor_Manager anywhere under a
-        subject, the daemon its recording and nothing else. Delete: the two writer roles alone.
+        Read: the three reader roles everything; the daemon its recording and what nothing claims
+        (`other` here); the worker the capture it plays; an Operator nothing. Write: a person only a
+        path begin_capture_upload() issued them (none here, so nothing), the daemon its recording.
+        Delete: the two writer roles and the daemon, and only what nothing claims (0190).
         """
         new_object = self.recording.replace("capture.json", "new.json")
-        writer = {"see": (1, 1, 1), "insert": (1, 1), "update": (1, 1), "delete": 1}
+        writer = {"see": (1, 1, 1), "insert": (0, 0), "update": (0, 0), "delete": 1}
         expected = {
             "Administrator": writer,
             "Shopfloor_Manager": writer,
             "Auditor": {"see": (1, 1, 1), "insert": (0, 0), "update": (0, 0), "delete": 0},
             "Operator": {"see": (0, 0, 0), "insert": (0, 0), "update": (0, 0), "delete": 0},
-            "ingestion": {"see": (1, 0, 0), "insert": (1, 0), "update": (1, 0), "delete": 0},
+            "ingestion": {"see": (1, 0, 1), "insert": (1, 0), "update": (1, 0), "delete": 1},
             "playback": {"see": (0, 1, 0), "insert": (0, 0), "update": (0, 0), "delete": 0},
         }
         for caller, want in expected.items():

@@ -601,8 +601,9 @@ disk. To share a capture, or to keep the only copy of a fault off somebody's lap
 **`broker-captures`** bucket and the **Capture** page.
 
 **Filed by the subject recorded, not by the gateway a capture plays back as.** The path is
-`<sparkplug_id>/capture.json` — one capture per subject, and a new recording replaces it — so a
-`gwy…` prefix and a `dev…` prefix are both legitimate folders and the storage RLS admits each. The
+`<sparkplug_id>/<job or upload id>.json` — one capture per subject, each written to a path of its
+own — so a `gwy…` prefix and a `dev…` prefix are both legitimate folders and the storage RLS
+admits each. A capture stored before 1.5 keeps `<sparkplug_id>/capture.json`. The
 CLI files by target because that is the only fact available when a person uploads a file by hand; a
 page that records from a subject knows the subject, which is what makes the **Gateways** and
 **Devices** tabs coherent. Playback still names its own target, which is a separate question.
@@ -619,11 +620,29 @@ read. It also only ever covered gateways, and a device is now a subject in its o
 | Auditor | yes | **no** — a read-only role that can remove evidence is not one |
 | Operator | no | no |
 
-**The upload checks that the file is a capture**, not merely that it is JSON — `aber_capture_version`
-present, matching the version this stack reads, and a non-empty `messages` array. The bucket has to
-accept several JSON-ish MIME types because browsers report a hand-picked `.json` inconsistently, so
-the type is close to no check at all, and a wrong file is otherwise discovered when somebody tries to
-*play* it: the worst moment, and the furthest from the mistake.
+**The upload checks that the file is a capture**, not merely that it is JSON, with the rules
+`plan_playback()` applies again before a playback: `aber_capture_version` matching the version this
+stack reads, a numeric `capture_epoch_ms` and a non-empty `messages` array; each message an object
+with a string `topic`, an object `payload` and a whole `offset_ms` that never goes back and stays
+within 24 hours; and a topic an edge node publishes, with the device segment its type needs. A
+refusal names the message by its index. The bucket has to accept several JSON-ish MIME types because
+browsers report a hand-picked `.json` inconsistently, so the type is close to no check at all, and a
+wrong file is otherwise discovered when somebody tries to *play* it: the worst moment, and the
+furthest from the mistake.
+
+**An upload begins on the server, and the file goes up second.** The page calls
+`begin_capture_upload()`, which refuses to replace a stored capture the page did not show, or any
+capture of a subject being recorded, and issues the path; then it uploads to that path; then
+`register_uploaded_capture()` repoints the row, taking the size from the object rather than the
+browser. Only then is the replaced file deleted. A refusal at any step leaves the stored capture as it
+was. "Play a file…" also refuses a file naming a device this site does not have, because a replay
+lane stands in for a device that exists here.
+
+**A capture is deleted with its subject.** Deleting or purging a gateway or device cascades its
+`captures` row away, and nothing then claims the file. The ingestion daemon deletes, through the
+Storage API, every file no row, recording, open upload or playback names, once it has been untouched
+for an hour, and the file a finalise replaced at once. A SQL `DELETE` on `storage.objects` would
+leave the bytes in the storage backend, so nothing does that.
 
 **100 MiB**, sized from the traffic rather than picked. At the fleet's measured 0.95 msg/s a full
 working day fits, and it sits above the 50 MiB cap `capture_jobs` puts on a recording — which is the
@@ -685,22 +704,23 @@ the throttle exists to stop a flood driven by traffic, and a capture is one pers
 button under a single-flight lock. The throttle is still stamped, so a forced request does not leave
 the node open to being asked again by the next message that notices a gap.
 
-**`birth_captured` means the node's birth, not a device's.** An `NBIRTH` carries the alias table,
-which is what makes a capture replayable; announcing a *device* takes a `DBIRTH`, and only
-`process_dbirth()` sets a device `ONLINE`. So a capture holding an NBIRTH alone brings the target
-edge node up and delivers its telemetry to the historian, and leaves the devices `OFFLINE` until
-they birth on their own — all correct, and not what the single flag suggests.
-
-**A missing birth only costs anything on an alias-optimised fleet**, which is why the manifest also
-records `uses_aliases` — true only when some metric arrived with an alias and no name. A birthless
-capture of a named-metric fleet, this one included, replays perfectly well; what it does not do is
-announce the devices.
+**`birth_captured` says whether the edge node's birth certificate, an `NBIRTH`, was recorded, and a
+capture without one cannot be played back.** A replay is its own Sparkplug session, so the plan opens
+at the first NBIRTH and a device's data replays only after its DBIRTH
+([A replay is its own Sparkplug session](#a-replay-is-its-own-sparkplug-session)). A `DBIRTH` alone does not set the flag. The recorder asks the edge node to
+rebirth for exactly that reason. `uses_aliases`, true only when some metric arrived with an alias and
+no name, no longer changes whether a capture plays. Captures stored before 1.5 keep the flag as it
+was then, when a DBIRTH alone also set it.
 
 **The manifest exists so the page can describe a file it has not downloaded**: the metric names seen
 (capped at 50 with the true count beside them, the way `record_ingestion_rejection()` caps
 violations), `birth_captured`, `uses_aliases`, the topic count, the observed rate, and the captured
 `device_ids` and `edge_node_ids` — those last two so the playback dialog can offer one dropdown per
-captured device without pulling up to 100 MiB into a browser to populate a select. A capture
+captured device without pulling up to 100 MiB into a browser to populate a select. The metric names
+leave out Sparkplug plumbing (`bdSeq`, `Node Control/*`, `Device Control/*`) and the identity
+metrics, which are not the machine's. `stop_reason` (`duration`, `operator`, `message_cap`,
+`size_cap`), `duration_ms` and `requested_seconds` say whether the recording ran the window it was
+asked for or a cap cut it short, which the panel shows. A capture
 recorded before them falls back to reading the file, which is slower and correct. The browser fills
 a manifest for uploads on the pass that already validates the file, so an uploaded capture does not
 read as broken beside a recorded one.
@@ -715,30 +735,43 @@ endpoint — Prometheus `/metrics` — and `/api/v1/…` is a client-side conven
 `frontend/src/api.js` that maps onto PostgREST, so a `POST …/stop` would need a server invented to
 host it. Instead the daemon `UPDATE`s `capture_jobs` with bytes, messages and elapsed, `capture_jobs`
 is added to the `supabase_realtime` publication explicitly, and the page sets `stop_requested` for
-the daemon to observe on its next message. A flag also survives a page reload, which a fired-off
-POST would not.
+the daemon to read on its next one-second progress tick. A flag also survives a page reload, which a
+fired-off POST would not.
 
 **`capture_jobs` deliberately has no audit-trail trigger.** That trigger is opt-in per table, and
 adding it here would look like consistency while writing a row per progress tick into an append-only
 table no application role can prune.
 
 **Anything left `RECORDING` when the daemon boots becomes `FAILED`.** Without that, a restart
-mid-capture leaves a row counting down forever and a card that never clears.
+mid-capture leaves a row counting down forever and a card that never clears. A `PENDING` job swept
+the same way says it never started.
+
+**A job never drops out of the daemon's sight.** Finalise and the failure write are each retried with
+backoff (1, 2, 4, 8 and 16 seconds). A failure that still cannot be written is kept, and the worker
+retries it every 30 seconds before claiming anything else. Meanwhile the row reads `RECORDING` and
+the single-flight index refuses every other capture, so **Stop** ends a recording the daemon has not
+reported on for two minutes: `request_capture_stop()` records it `CANCELLED`, with nothing stored.
+A job that ended elsewhere, or whose subject was deleted, is dropped without an upload when the
+progress gate says so (`ingest_report_capture_progress()`).
+
+**A device capture must hold the device.** It records its edge node's `NBIRTH` too, and the rebirth
+request it opens with always produces one. So a device that published nothing during the window
+fails the job, as an empty capture does, and the stored capture of that device is kept.
 
 **The daemon's authority over the bucket is a policy arm, scoped rather than narrowed.** A capture's
 bytes travel over the Storage REST API, so no `SECURITY DEFINER` function can carry them into a
-bucket; and write-only is not achievable either, because replacing a capture is an upsert, storage-api
-serves that as `INSERT … ON CONFLICT DO UPDATE`, and Postgres checks the SELECT policy for the row
-being conflicted with. The arm is `is_ingestion_caller() AND is_active_capture_object(name)` — the
-daemon can read, insert and overwrite exactly the one path named by the job it is running, reaches
-nothing at all in the bucket with no capture in flight, and never deletes. Nothing is destroyed until
-its replacement has been written.
+bucket; and write-only is not achievable either, because the upload is an upsert, storage-api serves
+that as `INSERT … ON CONFLICT DO UPDATE`, and Postgres checks the SELECT policy for the row being
+conflicted with. The arm is `is_ingestion_caller() AND is_active_capture_object(name)` — the daemon
+can read, insert and overwrite exactly the one path named by the job it is running, which is never a
+stored capture's file. Its only other reach is a file nothing claims, which it may read and delete.
+Nothing is destroyed until its replacement's row is in place.
 
 **The note is a field because of where it is shown.** An optional label given when a capture starts
 — *"pre-trip bearing vibration baseline"* — appears on the list and, critically, inside the replace
-confirmation, which names what it destroys rather than asking "are you sure". Replace-in-place bounds
-storage and the cost is real: a capture of a rare fault can be destroyed by a routine re-record, and
-that modal is the only thing standing there.
+confirmation, which names what it destroys rather than asking "are you sure". One capture per
+subject bounds storage and the cost is real: a capture of a rare fault can be destroyed by a routine
+re-record, and that modal is the only thing standing there.
 
 ### Playback from the dashboard
 

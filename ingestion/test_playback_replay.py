@@ -547,14 +547,20 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
 
     @classmethod
     def _store_capture(cls):
-        """Upload the fixture and register it, the two steps the browser performs in that order."""
+        """Begin, upload and register the fixture, the three steps the browser performs in that order."""
         epoch_ms = int(time.time() * 1000)
         document = build_capture(
             cls.source["gateways"]["sparkplug_id"], cls.source["sparkplug_id"],
             cls.metric, epoch_ms,
         )
         cls.document = document
-        cls.storage_path = f"{cls.source['sparkplug_id']}/capture.json"
+        # The path is issued by the server, which decides the replace before anything is written.
+        status, issued = cls.session.rpc("begin_capture_upload", {
+            "p_subject_kind": "device", "p_subject_id": cls.source["id"], "p_replace": True,
+        })
+        if status != 200 or not (issued or {}).get("storage_path"):
+            raise AssertionError(f"begin_capture_upload refused the fixture: {status} {issued}")
+        cls.storage_path = issued["storage_path"]
 
         status, body = cls.session.upload(cls.storage_path, document)
         if status not in (200, 201):
@@ -834,8 +840,8 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
             f"&id=eq.{self.capture_id}&limit=1")
         self.assertEqual(status, 200)
         self.assertTrue(rows)
-        self.assertEqual(rows[0]["storage_path"],
-                         f"{self.source['sparkplug_id']}/capture.json")
+        self.assertEqual(rows[0]["storage_path"], self.storage_path)
+        self.assertTrue(self.storage_path.startswith(f"{self.source['sparkplug_id']}/"))
         self.assertEqual(rows[0]["source"], "uploaded")
 
 

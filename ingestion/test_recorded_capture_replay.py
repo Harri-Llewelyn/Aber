@@ -5,7 +5,7 @@ A capture recorded from the live broker reaches storage, and replays into the hi
 
 test_playback_replay.py replays a file it uploaded itself. This suite records one the way the
 Capture page does and replays that, so a recording that never reaches storage, or a file the daemon
-writes that playback cannot read, fails a suite. It walks five steps:
+writes that playback cannot read, fails a suite. It walks six steps:
 
   1. a Sparkplug 3.0.0 edge node in this process publishes live as a fixture Host gateway, with the
      broker credential the Gateways page issues (`gateway-credential`);
@@ -15,7 +15,13 @@ writes that playback cannot read, fails a suite. It walks five steps:
   4. the file in `broker-captures`, the `captures` row and its manifest are checked against what was
      published;
   5. that capture is replayed through the playback worker, and its readings must reach the
-     historian under the replay lane and nowhere else.
+     historian under the replay lane and nowhere else;
+  6. a capture of a second device the edge node never publishes must fail, and keep the capture
+     already stored for that device.
+
+AStoredCaptureIsNeverOverwritten holds the upload race against the real bucket: a page that had not
+caught up is refused before it writes, a refused register leaves the row and its file agreeing, and
+a deleted subject's capture file is claimed by nothing.
 
 The gateway is the suite's own rather than the validator's, so nothing else publishes under its edge
 node. The daemon asks for the capture's rebirth with `force`, so the rebirth rate limit does not
@@ -73,6 +79,11 @@ MQTT_PORT = int(os.getenv("MQTT_TEST_PORT", "1883"))
 # characters of the uuid, so ids sharing a long prefix collide.
 SOURCE_GATEWAY_ID = "6c000000-0000-4000-8000-000000000001"
 SOURCE_DEVICE_ID = "6d000000-0000-4000-8000-000000000001"
+# A second device of the fixture gateway, which its edge node never publishes.
+SILENT_DEVICE_ID = "6e000000-0000-4000-8000-000000000001"
+# The upload race's own subject: a gateway and device no edge node publishes as.
+UPLOAD_GATEWAY_ID = "71000000-0000-4000-8000-000000000001"
+UPLOAD_DEVICE_ID = "72000000-0000-4000-8000-000000000001"
 
 # One DDATA a second; the capture runs until DATA_AFTER_BIRTH have followed the rebirth.
 DATA_INTERVAL = 1.0
@@ -96,7 +107,59 @@ HISTORIAN_TIMEOUT = 60
 HISTORIAN_SETTLE = 3
 
 TERMINAL = ("COMPLETED", "FAILED", "CANCELLED")
-STAGES = ("the fixture", "the recording", "what was stored", "the replay")
+STAGES = ("the fixture", "the recording", "what was stored", "the replay", "the silent device")
+
+# Sparkplug plumbing and identity, which the manifest's metric names leave out (capture_worker).
+NOT_MACHINE_METRICS = ("bdSeq", "Asset_ID", "Asset_Name", "Instance_UUID", "Schema_UUID")
+
+
+def is_machine_metric(name):
+    return name not in NOT_MACHINE_METRICS and not name.startswith(("Node Control/", "Device Control/"))
+
+
+def small_capture(gateway, device, metric, epoch_ms):
+    """A valid capture file of one device: an NBIRTH, a DBIRTH and two DDATA."""
+    def message(offset, kind, device_segment, metrics):
+        topic = "spBv1.0/Aber/%s/%s%s" % (kind, gateway, "/" + device_segment if device_segment else "")
+        return {"offset_ms": offset, "topic": topic, "encoding": "json",
+                "payload": {"timestamp": epoch_ms + offset, "seq": offset // 1000,
+                            "metrics": metrics}}
+    reading = lambda value: [{"name": metric, "datatype": 10, "double_value": value}]  # noqa: E731
+    return {
+        "aber_capture_version": capture_version(),
+        "capture_epoch_ms": epoch_ms,
+        "duration_ms": 3000,
+        "identities": {"edge_nodes": [gateway], "devices": [device]},
+        "messages": [
+            message(0, "NBIRTH", None, [{"name": "bdSeq", "datatype": 8, "long_value": 0}]),
+            message(1000, "DBIRTH", device, reading(1.0)),
+            message(2000, "DDATA", device, reading(2.0)),
+            message(3000, "DDATA", device, reading(3.0)),
+        ],
+    }
+
+
+def store_upload(session, kind, subject_id, document, replace=True, expected=None, size=None):
+    """Begin, upload and register, as the page does. Returns (status, capture id or error, path)."""
+    status, issued = session.rpc("begin_capture_upload", {
+        "p_subject_kind": kind, "p_subject_id": subject_id, "p_replace": replace,
+        "p_expected_capture_id": expected,
+    })
+    if status != 200:
+        return status, issued, None
+    path = issued["storage_path"]
+    up, body = session.upload(path, document)
+    if up not in (200, 201):
+        return up, body, path
+    status, capture_id = session.rpc("register_uploaded_capture", {
+        "p_subject_kind": kind, "p_subject_id": subject_id, "p_storage_path": path,
+        "p_size_bytes": size if size is not None else len(json.dumps(document)),
+        "p_message_count": len(document["messages"]),
+        "p_manifest": {"device_ids": document["identities"]["devices"],
+                       "edge_node_ids": document["identities"]["edge_nodes"]},
+        "p_note": "test_recorded_capture_replay.py upload", "p_replace": replace,
+    })
+    return status, capture_id, path
 
 
 def setUpModule():
@@ -355,13 +418,15 @@ class RecordedCaptureReplays(unittest.TestCase):
     def setUpClass(cls):
         cls.reached = []
         cls.broken = None
-        cls.session = cls.edge = cls.gateway = cls.device = None
+        cls.session = cls.edge = cls.silent_edge = cls.gateway = cls.device = None
         cls.capture_job_id = cls.capture_id = cls.storage_path = None
         cls.lane = cls.lane_id = None
+        cls.password = cls.silent = cls.silent_job = cls.silent_capture_id = cls.silent_path = None
         cls.metric = "CAPTURE/RECORDED_" + secrets.token_hex(8).upper()
         cls.note = "recorded capture conformance fixture"
         cls.addClassCleanup(cls._clean_up)
-        steps = (cls._fixture, cls._record, cls._read_what_was_stored, cls._replay)
+        steps = (cls._fixture, cls._record, cls._read_what_was_stored, cls._replay,
+                 cls._record_the_silent_device)
         for stage, step in zip(STAGES, steps):
             try:
                 step()
@@ -400,8 +465,15 @@ class RecordedCaptureReplays(unittest.TestCase):
         if cls.device["conformance_policy"] != "audit":
             raise AssertionError(
                 f"the fixture device is {cls.device['conformance_policy']}, not audit")
-        cls.storage_path = f"{cls.device['sparkplug_id']}/capture.json"
-        cls.edge = cls._connect_edge_node(cls._issue_gateway_credential())
+        cls.silent = cls.session.upsert("devices", {
+            "id": SILENT_DEVICE_ID,
+            "name": "CAPTURE_RECORD_Silent_Device",
+            "gateway_id": cls.gateway["id"],
+            "description": "Fixture for ingestion/test_recorded_capture_replay.py. Never published. "
+                           "Safe to delete.",
+        })
+        cls.password = cls._issue_gateway_credential()
+        cls.edge = cls._connect_edge_node(cls.password)
         cls.edge.start()
         cls._await_live_birth()
 
@@ -527,6 +599,8 @@ class RecordedCaptureReplays(unittest.TestCase):
             raise AssertionError(f"the job names capture {cls.capture_id}, which cannot be read: "
                                  f"{status} {rows}")
         cls.capture_row = rows[0]
+        # The job's own path, deleted at clean-up once the row is.
+        cls.storage_path = cls.capture_row["storage_path"]
         status, raw = download(cls.session, cls.capture_row["storage_path"])
         if status != 200:
             raise AssertionError(f"the row names {cls.capture_row['storage_path']}, and {BUCKET} "
@@ -646,12 +720,48 @@ class RecordedCaptureReplays(unittest.TestCase):
         return read()
 
     # ------------------------------------------------------------------------------------------
+    # Stage 5: a device that publishes nothing keeps its stored capture
+    # ------------------------------------------------------------------------------------------
+    @classmethod
+    def _record_the_silent_device(cls):
+        """
+        The edge node answers the capture's rebirth with its NBIRTH, which a device capture keeps,
+        and publishes nothing as the silent device. The job must fail as an empty capture does,
+        and the capture stored for that device must stay as it was.
+        """
+        document = small_capture(cls.gateway["sparkplug_id"], cls.silent["sparkplug_id"], cls.metric,
+                                 int(time.time() * 1000))
+        status, capture_id, path = store_upload(cls.session, "device", SILENT_DEVICE_ID, document)
+        if status != 200:
+            raise AssertionError(f"could not store the silent device's capture: {status} {capture_id}")
+        cls.silent_capture_id, cls.silent_path = capture_id, path
+        cls.silent_stored = download(cls.session, path)[1]
+
+        # Its own edge node: the stage 2 tests read what `cls.edge` published.
+        cls.silent_edge = cls._connect_edge_node(cls.password)
+        cls.silent_edge.start()
+        status, job_id = cls.session.rpc("start_capture_job", {
+            "p_subject_kind": "device", "p_subject_id": SILENT_DEVICE_ID,
+            "p_note": "silent device", "p_max_seconds": 5, "p_replace": True,
+        })
+        if status not in (200, 201) or not job_id:
+            raise AssertionError(f"start_capture_job refused the silent device: {status} {job_id}")
+
+        def read():
+            got, rows = cls.session.rest(f"/capture_jobs?select=*&id=eq.{job_id}&limit=1")
+            return rows[0] if got == 200 and rows else {}
+        cls.silent_job = poll(read, lambda j: j.get("status") in TERMINAL,
+                              CLAIM_TIMEOUT + 5 + FINISH_TIMEOUT, 1)
+        cls.silent_edge.stop()
+
+    # ------------------------------------------------------------------------------------------
     # Cleanup, in the order the foreign keys want; also after a stage that broke
     # ------------------------------------------------------------------------------------------
     @classmethod
     def _clean_up(cls):
-        if cls.edge is not None:
-            cls.edge.stop()
+        for edge in (cls.edge, cls.silent_edge):
+            if edge is not None:
+                edge.stop()
         session = cls.session
         if session is None:
             return
@@ -673,6 +783,11 @@ class RecordedCaptureReplays(unittest.TestCase):
             attempt("the capture row", delete(f"/captures?id=eq.{cls.capture_id}"))
         if cls.storage_path:
             attempt("the stored file", lambda: session.remove(cls.storage_path))
+        if cls.silent_capture_id:
+            attempt("the silent device's capture row", delete(f"/captures?id=eq.{cls.silent_capture_id}"))
+        if cls.silent_path:
+            attempt("the silent device's stored file", lambda: session.remove(cls.silent_path))
+        attempt("the silent device", delete(f"/devices?id=eq.{SILENT_DEVICE_ID}"))
         # The device explicitly: deleting a gateway leaves its devices unassigned rather than gone.
         # Either delete also removes the capture job rows.
         attempt("the device", delete(f"/devices?id=eq.{SOURCE_DEVICE_ID}"))
@@ -706,7 +821,7 @@ class RecordedCaptureReplays(unittest.TestCase):
 
     @classmethod
     def _delete_audit_rows(cls):
-        ids = [i for i in (SOURCE_GATEWAY_ID, SOURCE_DEVICE_ID, cls.lane_id) if i]
+        ids = [i for i in (SOURCE_GATEWAY_ID, SOURCE_DEVICE_ID, SILENT_DEVICE_ID, cls.lane_id) if i]
         conn = owner_connection()
         conn.autocommit = True
         with conn.cursor() as cur:
@@ -745,8 +860,8 @@ class RecordedCaptureReplays(unittest.TestCase):
         self.assertEqual(row["subject_kind"], "device")
         self.assertEqual(row["device_id"], SOURCE_DEVICE_ID)
         self.assertEqual(row["subject_sparkplug_id"], dev)
-        self.assertEqual(row["storage_path"], f"{dev}/capture.json",
-                         "a capture is filed under the subject recorded")
+        self.assertEqual(row["storage_path"], f"{dev}/{job['id']}.json",
+                         "a capture is filed under the subject recorded, at its job's own path")
         self.assertEqual(row["note"], self.note)
         self.assertEqual(row["created_by"], self.user_id,
                          "the capture does not name who recorded it")
@@ -822,7 +937,7 @@ class RecordedCaptureReplays(unittest.TestCase):
         names = []
         for m in messages:
             for metric in m["payload"].get("metrics", []):
-                if metric.get("name") and metric["name"] not in names:
+                if metric.get("name") and metric["name"] not in names and is_machine_metric(metric["name"]):
                     names.append(metric["name"])
         self.assertEqual(manifest.get("device_ids"), [self.device["sparkplug_id"]])
         self.assertEqual(manifest.get("edge_node_ids"), [self.gateway["sparkplug_id"]])
@@ -833,6 +948,29 @@ class RecordedCaptureReplays(unittest.TestCase):
         self.assertIs(manifest.get("rebirth_requested"), True)
         self.assertIs(manifest.get("uses_aliases"), False)
         self.assertEqual(manifest.get("topic_count"), len({m["topic"] for m in messages}))
+        # Stopped from the page, well inside the length asked for.
+        self.assertEqual(manifest.get("stop_reason"), "operator")
+        self.assertEqual(manifest.get("requested_seconds"), CAPTURE_MAX_SECONDS)
+        self.assertGreater(manifest.get("duration_ms"), 0)
+        self.assertLess(manifest.get("duration_ms"), CAPTURE_MAX_SECONDS * 1000)
+
+    # ------------------------------------------------------------------------------------------
+    # The silent device
+    # ------------------------------------------------------------------------------------------
+    def test_a_device_that_published_nothing_fails_and_keeps_its_stored_capture(self):
+        self._needs("the silent device")
+        job, silent = self.silent_job, self.silent["sparkplug_id"]
+        self.assertEqual(job.get("status"), "FAILED",
+                         f"recording a silent device ended {job.get('status')}: {job.get('error')}")
+        self.assertIn(f"recorded nothing from device {silent}", job.get("error") or "")
+        self.assertIsNone(job.get("capture_id"))
+        status, rows = self.session.rest(
+            f"/captures?select=id,storage_path&subject_kind=eq.device&device_id=eq.{SILENT_DEVICE_ID}")
+        self.assertEqual((status, rows), (200, [{"id": self.silent_capture_id,
+                                                 "storage_path": self.silent_path}]),
+                         "the stored capture of the silent device was replaced")
+        self.assertEqual(download(self.session, self.silent_path)[1], self.silent_stored,
+                         "the stored file of the silent device changed")
 
     # ------------------------------------------------------------------------------------------
     # The replay
@@ -881,6 +1019,130 @@ class RecordedCaptureReplays(unittest.TestCase):
         self.assertEqual(rows[0]["gateway_id"], self.playback_gateway["id"])
         self.assertIn(self.metric, rows[0].get("last_birth_metrics") or [],
                       "the replayed DBIRTH did not reach the daemon")
+
+
+class AStoredCaptureIsNeverOverwritten(unittest.TestCase):
+    """
+    The upload race the audit saw, against the real bucket: a page that has not caught up uploads
+    over a capture stored since. Before 0190 the upload overwrote the stored file and the register
+    then refused, leaving the row describing other bytes. The tests run in order, on one subject no
+    edge node publishes as.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.session = Session(sign_in())
+        cls.paths = []
+        cls.addClassCleanup(cls._clean_up)
+        gateway = cls.session.upsert("gateways", {
+            "id": UPLOAD_GATEWAY_ID, "name": "CAPTURE_UPLOAD_Race_Gateway", "deployment": "host",
+            "description": "Fixture for ingestion/test_recorded_capture_replay.py. Safe to delete.",
+        })
+        cls.device = cls.session.upsert("devices", {
+            "id": UPLOAD_DEVICE_ID, "name": "CAPTURE_UPLOAD_Race_Device", "gateway_id": gateway["id"],
+            "description": "Fixture for ingestion/test_recorded_capture_replay.py. Safe to delete.",
+        })
+        cls.gw, cls.dev = gateway["sparkplug_id"], cls.device["sparkplug_id"]
+        epoch = int(time.time() * 1000)
+        cls.first = small_capture(cls.gw, cls.dev, "CAPTURE/UPLOAD_RACE", epoch)
+        status, cls.first_id, cls.first_path = store_upload(cls.session, "device", UPLOAD_DEVICE_ID,
+                                                            cls.first)
+        cls.paths.append(cls.first_path)
+        if status != 200:
+            raise AssertionError(f"could not store the first capture: {status} {cls.first_id}")
+        cls.first_bytes = download(cls.session, cls.first_path)[1]
+
+    @classmethod
+    def _clean_up(cls):
+        session = cls.session
+        for action in (
+            lambda: session.rest(f"/captures?subject_kind=eq.device&device_id=eq.{UPLOAD_DEVICE_ID}",
+                                 method="DELETE"),
+            *[lambda p=p: session.remove(p) for p in cls.paths if p],
+            lambda: session.rest(f"/devices?id=eq.{UPLOAD_DEVICE_ID}", method="DELETE"),
+            lambda: session.rest(f"/gateways?id=eq.{UPLOAD_GATEWAY_ID}", method="DELETE"),
+        ):
+            try:
+                action()
+            except Exception as err:  # noqa: BLE001 -- cleanup must not mask a real failure
+                print(f"cleanup warning: {err}")
+        try:
+            conn = owner_connection()
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM public.audit_trail WHERE entity_id = ANY(%s::uuid[])",
+                            ([UPLOAD_GATEWAY_ID, UPLOAD_DEVICE_ID],))
+            conn.close()
+        except Exception as err:  # noqa: BLE001
+            print(f"cleanup warning: the audit rows: {err}")
+
+    def row(self):
+        status, rows = self.session.rest(
+            f"/captures?select=id,storage_path,size_bytes&subject_kind=eq.device"
+            f"&device_id=eq.{UPLOAD_DEVICE_ID}")
+        self.assertEqual(status, 200)
+        return rows
+
+    def test_1_a_page_that_showed_no_capture_is_refused_before_it_writes(self):
+        status, body = self.session.rpc("begin_capture_upload", {
+            "p_subject_kind": "device", "p_subject_id": UPLOAD_DEVICE_ID, "p_replace": False})
+        self.assertEqual(status, 409, f"a stale page was issued a path: {body}")
+        self.assertIn("already exists", str(body))
+
+    def test_2_nobody_writes_the_stored_file_or_a_path_not_issued(self):
+        other = small_capture(self.gw, self.dev, "CAPTURE/UPLOAD_RACE_B", int(time.time() * 1000))
+        for path in (self.first_path, f"{self.dev}/capture.json", f"{self.dev}/anything.json"):
+            with self.subTest(path=path):
+                status, _ = self.session.upload(path, other)
+                self.assertNotIn(status, (200, 201), f"the bucket took a write to {path}")
+        self.assertEqual(download(self.session, self.first_path)[1], self.first_bytes)
+
+    def test_3_a_refused_register_leaves_the_row_and_its_file_agreeing(self):
+        stale = small_capture(self.gw, self.dev, "CAPTURE/UPLOAD_RACE_STALE", int(time.time() * 1000))
+        status, issued = self.session.rpc("begin_capture_upload", {
+            "p_subject_kind": "device", "p_subject_id": UPLOAD_DEVICE_ID, "p_replace": True,
+            "p_expected_capture_id": self.first_id})
+        self.assertEqual(status, 200, issued)
+        stale_path = issued["storage_path"]
+        self.paths.append(stale_path)
+        self.assertIn(self.session.upload(stale_path, stale)[0], (200, 201))
+
+        # Another operator stores a capture meanwhile, claiming a size no file has.
+        newer = small_capture(self.gw, self.dev, "CAPTURE/UPLOAD_RACE_NEWER", int(time.time() * 1000))
+        status, newer_id, newer_path = store_upload(self.session, "device", UPLOAD_DEVICE_ID, newer,
+                                                    size=10 ** 15)
+        self.paths.append(newer_path)
+        self.assertEqual(status, 200, newer_id)
+
+        status, body = self.session.rpc("register_uploaded_capture", {
+            "p_subject_kind": "device", "p_subject_id": UPLOAD_DEVICE_ID,
+            "p_storage_path": stale_path, "p_size_bytes": 1, "p_message_count": 4,
+            "p_manifest": {"device_ids": [self.dev]}, "p_replace": True})
+        self.assertEqual(status, 409, f"the stale upload was registered: {body}")
+
+        stored = download(self.session, newer_path)[1]
+        self.assertEqual(self.row(), [{"id": newer_id, "storage_path": newer_path,
+                                       "size_bytes": len(stored)}],
+                         "the row does not describe the file it names, or took the browser's size")
+        self.assertEqual(json.loads(stored)["messages"][1]["payload"]["metrics"][0]["name"],
+                         "CAPTURE/UPLOAD_RACE_NEWER")
+        # The refused upload's file and the replaced first file are claimed by nothing; the stored
+        # one is claimed, and survives a delete.
+        self.assertEqual([o.get("name") for o in self.session.remove(stale_path)], [stale_path])
+        self.assertEqual([o.get("name") for o in self.session.remove(self.first_path)], [self.first_path])
+        self.assertEqual(self.session.remove(newer_path), [])
+        self.assertEqual(download(self.session, newer_path)[0], 200)
+        type(self).newer_path = newer_path
+
+    def test_4_a_deleted_subject_releases_its_capture_file(self):
+        """A capture is deleted with its subject: the row goes by cascade, and its file is then
+        claimed by nothing, so it can be deleted (the ingestion daemon's sweep does it hourly)."""
+        newer_path = getattr(type(self), "newer_path", None)
+        if not newer_path:
+            self.skipTest("test_3 did not store a capture")
+        self.session.rest(f"/devices?id=eq.{UPLOAD_DEVICE_ID}", method="DELETE")
+        self.assertEqual(self.row(), [])
+        self.assertEqual([o.get("name") for o in self.session.remove(newer_path)], [newer_path])
 
 
 if __name__ == "__main__":

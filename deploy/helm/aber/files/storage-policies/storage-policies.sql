@@ -104,13 +104,15 @@ BEGIN
   RAISE NOTICE 'storage policies reconciled (4 asset-3d-models policies on storage.objects).';
 END $$;
 
--- broker-captures: private. Administrator and Shopfloor_Manager read, write, replace and delete;
--- Auditor reads; Operator nothing. Three ways in, two of them machines confined to one file each: a
--- person reading the whole bucket, the ingestion daemon on the object of the capture job it is
--- recording (SELECT included, because an upsert is checked against the SELECT policy), and the
--- playback worker on the capture of the job it is running. Every write is confined to <subject>/
--- naming a gateway or device that exists; SELECT is not, so a reader can find the capture of a
--- subject since deleted. storage.objects.name is qualified in every policy and must be:
+-- broker-captures: private. Administrator and Shopfloor_Manager read everything, write only a path
+-- begin_capture_upload() issued them and still open, and delete only an object nothing claims (no
+-- capture row, recording, open upload or playback names it); Auditor reads; Operator nothing. The
+-- ingestion daemon reads, inserts and overwrites the object of the capture job it is recording
+-- (SELECT included, because an upsert is checked against the SELECT policy), and reads and deletes
+-- an unclaimed object, which is how a replaced capture's file and an orphan leave the bucket. The
+-- playback worker reads the capture of the job it is running. A write is also confined to
+-- <subject>/ naming a gateway or device that exists; SELECT is not, so a reader can find an object
+-- whose subject is gone. storage.objects.name is qualified in every policy and must be:
 -- public.gateways has a name column of its own, and an unqualified reference binds to it.
 DROP POLICY IF EXISTS "broker_captures_read_privileged" ON storage.objects;
 CREATE POLICY "broker_captures_read_privileged" ON storage.objects
@@ -120,7 +122,8 @@ CREATE POLICY "broker_captures_read_privileged" ON storage.objects
     AND (
       public.has_role(ARRAY['Administrator', 'Shopfloor_Manager', 'Auditor'])
       OR (public.is_ingestion_caller()
-          AND public.is_active_capture_object(storage.objects.name))
+          AND (public.is_active_capture_object(storage.objects.name)
+               OR public.is_unclaimed_capture_object(storage.objects.name)))
       OR (public.is_playback_caller()
           AND public.is_active_playback_capture(storage.objects.name))
     )
@@ -133,21 +136,23 @@ CREATE POLICY "broker_captures_insert_privileged" ON storage.objects
     bucket_id = 'broker-captures'
     AND (
       (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
-       AND public.is_capture_subject_prefix((storage.foldername(storage.objects.name))[1]))
+       AND public.is_capture_subject_prefix((storage.foldername(storage.objects.name))[1])
+       AND public.is_open_capture_upload(storage.objects.name))
       OR (public.is_ingestion_caller()
           AND public.is_active_capture_object(storage.objects.name))
     )
   );
 
--- UPDATE covers upsert: true, which is how a re-record replaces the one capture per subject. USING
--- decides which objects may be targeted, WITH CHECK what the result may look like.
+-- UPDATE covers upsert: true, which a retried upload of the same path uses. USING decides which
+-- objects may be targeted, WITH CHECK what the result may look like.
 DROP POLICY IF EXISTS "broker_captures_update_privileged" ON storage.objects;
 CREATE POLICY "broker_captures_update_privileged" ON storage.objects
   FOR UPDATE TO authenticated
   USING (
     bucket_id = 'broker-captures'
     AND (
-      public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+      (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+       AND public.is_open_capture_upload(storage.objects.name))
       OR (public.is_ingestion_caller()
           AND public.is_active_capture_object(storage.objects.name))
     )
@@ -156,7 +161,8 @@ CREATE POLICY "broker_captures_update_privileged" ON storage.objects
     bucket_id = 'broker-captures'
     AND (
       (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
-       AND public.is_capture_subject_prefix((storage.foldername(storage.objects.name))[1]))
+       AND public.is_capture_subject_prefix((storage.foldername(storage.objects.name))[1])
+       AND public.is_open_capture_upload(storage.objects.name))
       OR (public.is_ingestion_caller()
           AND public.is_active_capture_object(storage.objects.name))
     )
@@ -167,7 +173,9 @@ CREATE POLICY "broker_captures_delete_privileged" ON storage.objects
   FOR DELETE TO authenticated
   USING (
     bucket_id = 'broker-captures'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+    AND (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+         OR public.is_ingestion_caller())
+    AND public.is_unclaimed_capture_object(storage.objects.name)
   );
 
 DO $$
@@ -177,9 +185,10 @@ DECLARE
   v_daemon_reads   integer;
   v_daemon_writes  integer;
 BEGIN
-  -- Reconcile: four policies; Auditor never writes; the daemon in exactly SELECT, INSERT and UPDATE,
-  -- each arm confined to the active job, and never DELETE; the worker in SELECT alone. Each exception
-  -- says what a missing arm looks like from outside, which is a job that failed for no stated reason.
+  -- Reconcile: four policies; Auditor never writes; a person's write confined to an issued path;
+  -- the daemon in all four, SELECT, INSERT and UPDATE confined to the active job's object and
+  -- SELECT and DELETE to an unclaimed one; every DELETE confined to an unclaimed object; the worker
+  -- in SELECT alone. Each exception says what a missing arm looks like from outside.
   SELECT count(*) INTO v_policies FROM pg_policies
    WHERE schemaname = 'storage' AND tablename = 'objects'
      AND policyname LIKE 'broker_captures_%';
@@ -202,6 +211,18 @@ BEGIN
       'bucket -- write authority is Administrator and Shopfloor_Manager only.', v_auditor_writes;
   END IF;
 
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+     WHERE schemaname = 'storage' AND tablename = 'objects'
+       AND policyname LIKE 'broker_captures_%' AND cmd IN ('INSERT', 'UPDATE')
+       AND coalesce(with_check, '') NOT LIKE '%is_open_capture_upload%'
+  ) THEN
+    RAISE EXCEPTION
+      'broker-captures: a write policy admits a person to a path begin_capture_upload() did not '
+      'issue them. Any path under a subject would then be writable, including the file a stored '
+      'capture names, and a refused upload would leave the row describing the new bytes (0190).';
+  END IF;
+
   SELECT count(*) INTO v_daemon_writes FROM pg_policies
    WHERE schemaname = 'storage' AND tablename = 'objects'
      AND policyname LIKE 'broker_captures_%'
@@ -210,10 +231,10 @@ BEGIN
        OR coalesce(with_check, '') LIKE '%is_ingestion_caller%');
   IF v_daemon_writes <> 3 THEN
     RAISE EXCEPTION
-      'broker-captures: the ingestion daemon appears in % of the 3 policies it needs (SELECT, '
-      'INSERT, UPDATE). Recording is a server-side act performed by the daemon, which holds '
-      'Operator and would otherwise have every upload refused with 42501 -- caught, logged, and '
-      'seen only as a capture that never appears. See 0055.', v_daemon_writes;
+      'broker-captures: the ingestion daemon appears in % of the 3 policies it records through '
+      '(SELECT, INSERT, UPDATE). Recording is a server-side act performed by the daemon, which '
+      'holds no role and would otherwise have every upload refused with 42501 -- caught, logged, '
+      'and seen only as a capture that never appears. See 0055.', v_daemon_writes;
   END IF;
 
   SELECT count(*) INTO v_daemon_reads FROM pg_policies
@@ -221,24 +242,38 @@ BEGIN
      AND policyname LIKE 'broker_captures_%'
      AND (coalesce(qual, '') LIKE '%is_ingestion_caller%'
        OR coalesce(with_check, '') LIKE '%is_ingestion_caller%')
-     AND (coalesce(qual, '') || coalesce(with_check, '')) NOT LIKE '%is_active_capture_object%';
+     AND (coalesce(qual, '') || coalesce(with_check, '')) NOT LIKE '%is_active_capture_object%'
+     AND (coalesce(qual, '') || coalesce(with_check, '')) NOT LIKE '%is_unclaimed_capture_object%';
   IF v_daemon_reads <> 0 THEN
     RAISE EXCEPTION
       'broker-captures: % polic(ies) admit the ingestion daemon WITHOUT confining it to the object '
-      'of the capture job it is running. is_ingestion_caller() alone is standing authority over '
-      'every capture in the bucket; it must be paired with is_active_capture_object(name).',
-      v_daemon_reads;
+      'of the capture job it is running or to an object nothing claims. is_ingestion_caller() '
+      'alone is standing authority over every capture in the bucket.', v_daemon_reads;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+     WHERE schemaname = 'storage' AND tablename = 'objects'
+       AND policyname = 'broker_captures_delete_privileged'
+       AND coalesce(qual, '') LIKE '%is_ingestion_caller%'
+       AND coalesce(qual, '') LIKE '%is_unclaimed_capture_object%'
+  ) THEN
+    RAISE EXCEPTION
+      'broker-captures: the DELETE policy does not admit the ingestion daemon to an unclaimed '
+      'object. The file a finalise replaced, and the capture of a deleted subject, then stay in '
+      'the bucket for ever, readable and in every backup (0190).';
   END IF;
 
   IF EXISTS (
     SELECT 1 FROM pg_policies
      WHERE schemaname = 'storage' AND tablename = 'objects'
        AND policyname LIKE 'broker_captures_%' AND cmd = 'DELETE'
-       AND coalesce(qual, '') LIKE '%is_ingestion_caller%'
+       AND coalesce(qual, '') NOT LIKE '%is_unclaimed_capture_object%'
   ) THEN
     RAISE EXCEPTION
-      'broker-captures: the DELETE policy admits the ingestion daemon. It has no reason to destroy '
-      'a capture -- replacing one is an overwrite -- and every reason not to be able to.';
+      'broker-captures: a DELETE policy reaches an object a capture row, a recording, an open '
+      'upload or a playback still names. Deleting it would leave a stored capture with no file '
+      '(0190).';
   END IF;
 
   IF NOT EXISTS (
@@ -250,7 +285,7 @@ BEGIN
   ) THEN
     RAISE EXCEPTION
       'broker-captures: the SELECT policy does not admit the playback worker, confined to the '
-      'capture of its running job. Service_Playback holds Operator, so every playback would fail '
+      'capture of its running job. Service_Playback holds no role, so every playback would fail '
       'at its first read with 42501 -- caught, logged, and seen only as a job that failed for no '
       'stated reason. See 0056.';
   END IF;
@@ -268,8 +303,9 @@ BEGIN
   END IF;
 
   RAISE NOTICE
-    'broker-captures policies reconciled (4 policies; Auditor read-only; the ingestion daemon '
-    'confined to the object of its running job, and never deleting).';
+    'broker-captures policies reconciled (4 policies; Auditor read-only; a person writes only an '
+    'issued upload path; the ingestion daemon confined to the object of its running job, and '
+    'deleting, like a person, only an object nothing claims).';
 END $$;
 
 -- asset-exports: written by the aas-export function as service_role, so no browser role writes,

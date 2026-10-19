@@ -23,6 +23,11 @@ file is wrong in a way nobody finds until a playback ingests nothing.
      birth and reported none is a file that will be distrusted for no reason -- or, the other way
      round, trusted when it should not be.
 
+  5. THE FINISH PATH. A recording goes to its job's own path, the row is repointed by finalise, and
+     only then is the replaced file deleted; finalise and the failure write are retried, and a job
+     whose failure cannot be written stays in the worker's view. A device that published nothing,
+     or a job that ended elsewhere, stores nothing and keeps the stored capture.
+
 Like its sibling this suite needs the REAL generated protobuf and has to undo the other suites'
 stub; see test_capture_playback.py's header for why that is, at length.
 """
@@ -562,6 +567,341 @@ class TheWindowIsTheDaemons(unittest.TestCase):
                                  "speed %s, %s" % (speed, encoding))
                 if speed == 1.0:
                     self.assertGreater(expected, 0, "the fixture drops nothing, so proves little")
+
+
+class FakeAPIError(Exception):
+    """What postgrest-py raises: a message and the code PostgREST or Postgres answered."""
+
+    def __init__(self, message, code):
+        super().__init__(message)
+        self.code = code
+
+
+TRANSIENT = FakeAPIError("Could not query the database for the schema cache. Retrying.", "PGRST002")
+
+
+class FakeSupabase:
+    """`rpc(name, args).execute()`. `answers[name]` is consumed in order; its last item repeats."""
+
+    def __init__(self, log, answers=None):
+        self.log, self.answers = log, {k: list(v) for k, v in (answers or {}).items()}
+
+    def rpc(self, name, args):
+        self.log.append(("rpc", name, args))
+        queue = self.answers.get(name, [None])
+
+        def execute():
+            item = queue.pop(0) if len(queue) > 1 else queue[0]
+            if isinstance(item, Exception):
+                raise item
+            return SimpleNamespace(data=item)
+        return SimpleNamespace(execute=execute)
+
+
+class FakeStorage:
+    def __init__(self, log, upload_error=None):
+        self.log, self.upload_error = log, upload_error
+
+    def from_(self, bucket):
+        return self
+
+    def upload(self, path, file, file_options):
+        self.log.append(("upload", path))
+        if self.upload_error:
+            raise self.upload_error
+
+    def remove(self, paths):
+        self.log.append(("remove", list(paths)))
+        return [{"name": p} for p in paths]
+
+
+JOB_PATH = GWY + "/00000000-0000-4000-8000-0000000000aa.json"
+OLD_PATH = GWY + "/capture.json"
+
+
+class FinishBase(unittest.TestCase):
+    def setUp(self):
+        self.log = []
+        for target, name, value in (
+            (capture_worker, "TERMINAL_RETRY_DELAYS", (0, 0, 0)),
+            (capture_worker, "_unsettled", None),
+            (capture_worker, "_active", None),
+        ):
+            patcher = patch.object(target, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def finish(self, answers=None, upload_error=None, device=None, messages=None, stop=None):
+        j = job(storage_path=JOB_PATH, device_sparkplug_id=device)
+        for topic, msg_type in messages or [("spBv1.0/%s/NDATA/%s" % (GROUP, GWY), "NDATA")]:
+            j.append(topic, wire(), msg_type)
+        with patch.object(capture_worker, "_supabase", FakeSupabase(self.log, answers)), \
+                patch.object(capture_worker, "_storage", FakeStorage(self.log, upload_error)):
+            capture_worker._finish(j, "duration cap reached (60s)", stop)
+        return j
+
+    def rpcs(self, name=None):
+        return [e for e in self.log if e[0] == "rpc" and (name is None or e[1] == name)]
+
+
+class TheFinishPath(FinishBase):
+    """A failure at any step leaves the stored capture whole; only then is a replaced file deleted."""
+
+    def test_the_file_goes_to_the_jobs_own_path_and_the_replaced_one_is_deleted_after_finalise(self):
+        self.finish({"ingest_finalise_capture": ["cap-new"],
+                     "ingest_unclaimed_capture_objects": [[OLD_PATH]]})
+        steps = [(e[0], e[1]) for e in self.log]
+        self.assertEqual(steps, [
+            ("upload", JOB_PATH),
+            ("rpc", "ingest_finalise_capture"),
+            ("rpc", "ingest_unclaimed_capture_objects"),
+            ("remove", [OLD_PATH]),
+        ])
+        # Only the subject's folder, and at once: the replaced file has no reason to wait.
+        self.assertEqual(self.rpcs("ingest_unclaimed_capture_objects")[0][2],
+                         {"p_subject": GWY, "p_min_age_seconds": 0})
+
+    def test_finalise_is_retried_before_the_job_is_failed(self):
+        self.finish({"ingest_finalise_capture": [TRANSIENT, "cap-new"]})
+        self.assertEqual(len(self.rpcs("ingest_finalise_capture")), 2)
+        self.assertEqual(self.rpcs("ingest_fail_capture"), [])
+
+    def test_a_finalise_that_keeps_failing_fails_the_job_and_deletes_only_its_own_file(self):
+        """
+        THE ONE THE AUDIT MEASURED. The old capture's file was overwritten before finalise, and the
+        row went on describing it. Now the new file is at the job's own path, the job fails, and
+        the database names what is unclaimed: the new file, never the stored capture's.
+        """
+        self.finish({"ingest_finalise_capture": [TRANSIENT],
+                     "ingest_unclaimed_capture_objects": [[JOB_PATH]]})
+        self.assertEqual([e[1] for e in self.log if e[0] == "upload"], [JOB_PATH])
+        self.assertEqual(len(self.rpcs("ingest_finalise_capture")), 4)
+        fail = self.rpcs("ingest_fail_capture")
+        self.assertEqual(len(fail), 1)
+        self.assertIn("could not be recorded", fail[0][2]["p_error"])
+        self.assertIn("earlier capture of the subject is unchanged", fail[0][2]["p_error"])
+        self.assertEqual([e[1] for e in self.log if e[0] == "remove"], [[JOB_PATH]])
+        self.assertIsNone(capture_worker._unsettled)
+
+    def test_a_job_ended_elsewhere_is_not_retried_or_failed(self):
+        ended = FakeAPIError("ingest_finalise_capture: job x is CANCELLED, not RECORDING", "22023")
+        self.finish({"ingest_finalise_capture": [ended],
+                     "ingest_unclaimed_capture_objects": [[JOB_PATH]]})
+        self.assertEqual(len(self.rpcs("ingest_finalise_capture")), 1)
+        self.assertEqual(self.rpcs("ingest_fail_capture"), [])
+        self.assertEqual([e[1] for e in self.log if e[0] == "remove"], [[JOB_PATH]])
+
+    def test_a_failed_upload_fails_the_job_before_finalise(self):
+        self.finish(upload_error=RuntimeError("new row violates row-level security policy"))
+        self.assertEqual(self.rpcs("ingest_finalise_capture"), [])
+        self.assertIn("upload to", self.rpcs("ingest_fail_capture")[0][2]["p_error"])
+
+
+class AFailureThatCannotBeWritten(FinishBase):
+    """A job whose terminal write fails stays in the worker's view until the write lands."""
+
+    def test_finalise_and_fail_both_raise(self):
+        self.finish({"ingest_finalise_capture": [TRANSIENT], "ingest_fail_capture": [TRANSIENT]})
+        self.assertEqual(len(self.rpcs("ingest_fail_capture")), 4, "the failure was not retried")
+        self.assertIsNotNone(capture_worker._unsettled, "the job dropped out of the worker's view")
+        state, message, uploaded = capture_worker._unsettled
+        self.assertEqual(state.id, row()["id"])
+        self.assertIn("could not be recorded", message)
+        self.assertTrue(uploaded)
+        # Nothing was deleted: the job still claims its file until the failure is written.
+        self.assertEqual([e for e in self.log if e[0] == "remove"], [])
+
+        # The loop's next attempt, with the database back.
+        later = []
+        with patch.object(capture_worker, "_supabase",
+                          FakeSupabase(later, {"ingest_unclaimed_capture_objects": [[JOB_PATH]]})), \
+                patch.object(capture_worker, "_storage", FakeStorage(later)):
+            self.assertTrue(capture_worker.settle_unsettled())
+        self.assertIsNone(capture_worker._unsettled)
+        self.assertEqual([e[1] for e in later if e[0] == "rpc"],
+                         ["ingest_fail_capture", "ingest_unclaimed_capture_objects"])
+        self.assertEqual(later[-1], ("remove", [JOB_PATH]))
+
+    def test_the_loop_claims_nothing_while_a_failure_is_unwritten(self):
+        state = job()
+        claims = []
+        with patch.object(capture_worker, "_unsettled", (state, "x", False)), \
+                patch.object(capture_worker, "_claim", lambda: claims.append(1)), \
+                patch.object(capture_worker, "settle_unsettled", side_effect=StopIteration), \
+                patch.object(capture_worker.time, "sleep", lambda s: None):
+            with self.assertRaises(StopIteration):
+                capture_worker._loop()
+        self.assertEqual(claims, [])
+
+
+class ADeviceThatPublishedNothing(FinishBase):
+    """
+    A device capture keeps its edge node's NBIRTH, and the capture's own rebirth request always
+    produces one, so `if not messages` never fired for a silent device: the job completed and
+    replaced a good capture with a file holding only the node's birth.
+    """
+
+    NBIRTH = ("spBv1.0/%s/NBIRTH/%s" % (GROUP, GWY), "NBIRTH")
+    DDATA = ("spBv1.0/%s/DDATA/%s/%s" % (GROUP, GWY, DEV), "DDATA")
+
+    def test_only_node_messages_fail_the_job_and_store_nothing(self):
+        self.finish(device=DEV, messages=[self.NBIRTH])
+        self.assertEqual([e for e in self.log if e[0] == "upload"], [], "the capture was stored")
+        self.assertEqual(self.rpcs("ingest_finalise_capture"), [])
+        error = self.rpcs("ingest_fail_capture")[0][2]["p_error"]
+        self.assertIn("recorded nothing from device %s" % DEV, error)
+        self.assertIn("stored capture of this device is unchanged", error)
+
+    def test_one_message_from_the_device_is_enough(self):
+        self.finish({"ingest_finalise_capture": ["cap-new"]}, device=DEV,
+                    messages=[self.NBIRTH, self.DDATA])
+        self.assertEqual(len(self.rpcs("ingest_finalise_capture")), 1)
+        self.assertEqual(self.rpcs("ingest_fail_capture"), [])
+
+    def test_a_sibling_device_does_not_count(self):
+        sibling = ("spBv1.0/%s/DDATA/%s/%s" % (GROUP, GWY, OTHER_DEV), "DDATA")
+        self.finish(device=DEV, messages=[self.NBIRTH, sibling])
+        self.assertEqual(self.rpcs("ingest_finalise_capture"), [])
+
+
+class TheProgressTick(unittest.TestCase):
+    """continue, stop, and a job that is no longer there are three answers, not two."""
+
+    def tick(self, answers, state=None):
+        log = []
+        state = state or job()
+        with patch.object(capture_worker, "_supabase", FakeSupabase(log, answers)):
+            return capture_worker._tick(state), log
+
+    def test_a_stop_request_finishes_and_says_why(self):
+        outcome, _ = self.tick({"ingest_report_capture_progress": ["stop"]})
+        self.assertEqual(outcome, ("finish", "stopped by the operator", capture_worker.STOP_OPERATOR))
+
+    def test_a_deleted_subject_is_discarded_not_finished(self):
+        """The old gate answered true for a missing row, which read as Stop, and the upload that
+        followed failed with a false row-level security error."""
+        for answer in ("gone", "ended"):
+            with self.subTest(answer=answer):
+                outcome, _ = self.tick({"ingest_report_capture_progress": [answer]})
+                self.assertEqual(outcome, ("discard", answer))
+
+    def test_a_discarded_job_uploads_nothing(self):
+        state = job()
+        state.append("spBv1.0/%s/NDATA/%s" % (GROUP, GWY), wire(), "NDATA")
+        log = []
+        with patch.object(capture_worker, "_storage", FakeStorage(log)), \
+                patch.object(capture_worker, "_supabase", FakeSupabase(log)):
+            capture_worker._discard(state, "gone")
+        self.assertEqual(log, [])
+        self.assertEqual(state.messages, [])
+
+    def test_a_database_without_the_new_gate_is_asked_the_old_way(self):
+        missing = FakeAPIError("Could not find the function", "PGRST202")
+        outcome, log = self.tick({"ingest_report_capture_progress": [missing],
+                                  "ingest_capture_progress": [True]})
+        self.assertEqual(outcome[0:2], ("finish", "stopped by the operator"))
+        self.assertEqual([e[1] for e in log], ["ingest_report_capture_progress", "ingest_capture_progress"])
+
+    def test_a_met_cap_finishes_with_its_reason(self):
+        state = job(max_messages=1)
+        state.append("spBv1.0/%s/NDATA/%s" % (GROUP, GWY), wire(), "NDATA")
+        state.cap_reason = "message cap reached (1)"
+        outcome, log = self.tick({}, state)
+        self.assertEqual(outcome, ("finish", "message cap reached (1)", capture_worker.STOP_MESSAGES))
+        self.assertEqual(log, [])
+
+
+class TheSweep(unittest.TestCase):
+    """Files nothing refers to leave the bucket through the Storage API, the only way bytes do."""
+
+    def sweep(self, answers):
+        log = []
+        with patch.object(capture_worker, "_supabase", FakeSupabase(log, answers)), \
+                patch.object(capture_worker, "_storage", FakeStorage(log)), \
+                patch.object(capture_worker.time, "monotonic", return_value=1000.0):
+            return capture_worker.sweep(), log
+
+    def test_it_deletes_what_has_been_unclaimed_for_an_hour(self):
+        orphans = [GWY + "/capture.json", DEV + "/capture.json"]
+        due, log = self.sweep({"ingest_unclaimed_capture_objects": [orphans]})
+        self.assertEqual(log[0], ("rpc", "ingest_unclaimed_capture_objects",
+                                  {"p_subject": None, "p_min_age_seconds": 3600}))
+        self.assertEqual(log[1], ("remove", orphans))
+        self.assertEqual(due, 1000.0 + capture_worker.SWEEP_INTERVAL_SECONDS)
+
+    def test_nothing_to_delete_deletes_nothing(self):
+        due, log = self.sweep({"ingest_unclaimed_capture_objects": [[]]})
+        self.assertEqual([e[0] for e in log], ["rpc"])
+        self.assertEqual(due, 1000.0 + capture_worker.SWEEP_INTERVAL_SECONDS)
+
+    def test_a_failed_sweep_is_tried_again_sooner(self):
+        due, _ = self.sweep({"ingest_unclaimed_capture_objects": [TRANSIENT]})
+        self.assertEqual(due, 1000.0 + capture_worker.SWEEP_RETRY_SECONDS)
+
+    def test_a_full_batch_sweeps_again_on_the_next_poll(self):
+        names = ["%s/%d.json" % (GWY, i) for i in range(capture_worker.SWEEP_BATCH)]
+        due, _ = self.sweep({"ingest_unclaimed_capture_objects": [names]})
+        self.assertEqual(due, 1000.0 + capture_worker.POLL_INTERVAL_SECONDS)
+
+
+class TheManifestSaysHowTheRecordingEnded(FinishBase):
+    def manifest(self, stop):
+        self.finish({"ingest_finalise_capture": ["cap-new"]}, stop=stop)
+        return self.rpcs("ingest_finalise_capture")[0][2]["p_manifest"]
+
+    def test_a_cap_is_recorded_as_the_stop_reason_with_the_duration(self):
+        m = self.manifest(capture_worker.STOP_SIZE)
+        self.assertEqual(m["stop_reason"], "size_cap")
+        self.assertEqual(m["requested_seconds"], 60)
+        self.assertIsInstance(m["duration_ms"], int)
+        self.assertGreaterEqual(m["duration_ms"], 0)
+
+    def test_each_cap_has_its_code(self):
+        j = job(max_bytes=200)
+        reason = None
+        while not reason:
+            reason = j.append("spBv1.0/%s/NDATA/%s" % (GROUP, GWY), wire(), "NDATA")
+        self.assertEqual(j.cap_code, capture_worker.STOP_SIZE)
+        j = job(max_messages=1)
+        j.append("spBv1.0/%s/NDATA/%s" % (GROUP, GWY), wire(), "NDATA")
+        self.assertEqual(j.cap_code, capture_worker.STOP_MESSAGES)
+
+
+class BirthCapturedMeansTheNodesBirth(unittest.TestCase):
+    """A replay opens at the edge node's NBIRTH, so a DBIRTH alone does not make a capture playable."""
+
+    def test_a_dbirth_alone_is_not_a_birth_certificate(self):
+        j = job()
+        j.append("spBv1.0/%s/DBIRTH/%s/%s" % (GROUP, GWY, DEV), wire(seq=0), "DBIRTH")
+        self.assertFalse(j.birth_captured)
+        self.assertFalse(capture_worker._manifest(j.messages, j)["birth_captured"])
+        j.append("spBv1.0/%s/NBIRTH/%s" % (GROUP, GWY), wire(seq=1), "NBIRTH")
+        self.assertTrue(j.birth_captured)
+
+
+class CapturedMetricsAreTheMachines(unittest.TestCase):
+    """Sparkplug plumbing and identity are not the machine's metrics (shared contract section 5)."""
+
+    def test_plumbing_and_identity_are_left_out(self):
+        j = job()
+        j.append("spBv1.0/%s/NBIRTH/%s" % (GROUP, GWY), wire(metrics=(
+            ("bdSeq", 0.0), ("Node Control/Rebirth", 0.0), ("Device Control/Reboot", 0.0),
+            ("Asset_ID", 0.0), ("Asset_Name", 0.0), ("Instance_UUID", 0.0), ("Schema_UUID", 0.0),
+            ("Properties/Serial", 0.0), ("Temperature", 1.0),
+        )), "NBIRTH")
+        self.assertEqual(capture_worker._manifest(j.messages, j)["metric_names"],
+                         ["Properties/Serial", "Temperature"])
+
+    def test_the_rule(self):
+        for name in ("bdSeq", "Node Control/Rebirth", "Device Control/Rebirth", "Asset_ID",
+                     "Asset_Name", "Instance_UUID", "Schema_UUID"):
+            self.assertFalse(capture_worker.is_machine_metric(name), name)
+        for name in ("Temperature", "Properties/Serial", "bdSeqX", "Node Controller/Mode"):
+            self.assertTrue(capture_worker.is_machine_metric(name), name)
+
+    def test_it_agrees_with_the_daemons_identity_list(self):
+        for name in ingestion.IDENTITY_METRICS:
+            self.assertFalse(capture_worker.is_machine_metric(name), name)
 
 
 if __name__ == "__main__":

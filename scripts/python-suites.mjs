@@ -329,7 +329,8 @@ export const SUITES = {
   'ingestion/test_capture_worker.py': {
     lanes: ['unit'],
     why:
-      'The daemon-side recording engine -- subject matching, the caps, and the manifest. The ' +
+      'The daemon-side recording engine -- subject matching, the caps, the manifest, and the finish ' +
+      'path, where a failed step must leave the stored capture whole. The ' +
       'manifest is what ensure_shadow_devices() reads to mint replay lanes, so an error here ' +
       'surfaces much later, as a playback naming devices this stack does not know.',
   },
@@ -792,6 +793,15 @@ export const SUITES = {
       'The delivery half of 0078. The worker must never mint its own; a delivered credential is ' +
       'the only one the broker will accept, and getting this wrong shows up as CONNACK rc=5 with ' +
       'nothing naming the cause.',
+  },
+  'supabase/migrations/test_capture_retention.py': {
+    lanes: ['db'],
+    why:
+      '0190 -- a stored capture is never lost, orphaned or taken on trust. Each failure here is ' +
+      'silent: a row describing a file that was overwritten, a refused upload that already ' +
+      'replaced the stored bytes, a browser-reported size of 900 TB, or a deleted subject whose ' +
+      'recording stays in the bucket and in every backup. Needs supabase_admin to stand in for ' +
+      'storage.objects, which only storage-api creates.',
   },
   'supabase/migrations/test_capture_playback_gates.py': {
     lanes: ['db'],

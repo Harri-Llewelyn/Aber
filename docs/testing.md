@@ -104,7 +104,8 @@ python ingestion/test_telemetry_writer.py
 python ingestion/test_directory_refresh.py
 # Broker capture and playback -- identity rewriting, timestamp rebasing, wire encodings
 python ingestion/test_capture_playback.py
-# The daemon-side recording engine -- subject matching, the caps, and the manifest
+# The daemon-side recording engine -- subject matching, the caps, the manifest, and the finish:
+# its own path, the replaced file deleted only after finalise, retried terminal writes
 python ingestion/test_capture_worker.py
 # The request the capture stack suites delete their stored file with, and that a refusal raises
 python ingestion/test_stack_capture_cleanup.py
@@ -332,6 +333,14 @@ python supabase/migrations/test_audit_trail_paging.py
 # let it publish as that machine. Also pins is_simulated NOT NULL, which is what makes 0078's coalesce
 # dead code rather than the thing deciding deliveries.
 python supabase/migrations/test_playback_credential_delivery.py
+# A stored capture is never lost, orphaned or taken on trust (0190). A recording and an upload each
+# write a path of their own and the row is repointed in one transaction; an upload's replace is
+# decided before anything is written, and it is refused while its subject records or when a capture
+# was stored since it began; the size is the object's, not the browser's. A file nothing claims is
+# listed for the ingestion daemon to delete, a deleted subject's included, and nobody may delete
+# one something claims. Creates a stand-in storage.objects as supabase_admin, since the db lane has
+# no storage-api.
+python supabase/migrations/test_capture_retention.py
 # The capture and playback helpers answer only a caller who could read the job (0184). An Operator
 # gets false from is_active_capture_object() and is_active_playback_capture() and no rows from
 # playback_stale_credentials(); the reader roles, the two machine principals and service_role get
