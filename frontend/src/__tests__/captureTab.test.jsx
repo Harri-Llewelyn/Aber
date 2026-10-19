@@ -336,6 +336,15 @@ describe('starting a capture', () => {
     expect(props.showToast).toHaveBeenCalled()
   })
 
+  /** A playback refuses a capture with no birth certificate, and every recording asks for one. */
+  it('says that recording starts by asking the gateway to rebirth', async () => {
+    renderTab()
+    const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
+    selectRow(row); fireEvent.click(panelAction(/Record/))
+    expect(await screen.findByText(/Recording starts by asking the gateway to rebirth/))
+      .toBeInTheDocument()
+  })
+
   /** The destroy-a-rare-fault guard, and the reason `captures.note` exists. */
   it('names the capture it is about to destroy, note included', async () => {
     api.listCaptures.mockResolvedValue([CAPTURE])
@@ -382,7 +391,7 @@ describe('starting a capture', () => {
     fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
     const row = (await screen.findByText('CNC Spindle')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Record/))
-    expect(await screen.findByText(/which carries the alias table/)).toBeInTheDocument()
+    expect(await screen.findByText(/plus its gateway's birth certificate/)).toBeInTheDocument()
   })
 })
 
