@@ -145,7 +145,7 @@ describe('NotificationHistory', () => {
       const items = within(screen.getByRole('dialog', { name: 'Notifications' })).getAllByRole('listitem')
       expect(items.map(li => li.querySelector('.notif-item-msg').lastChild.textContent))
         .toEqual(['Save failed', 'Cap reached', 'Saved'])
-      expect(items[0]).toHaveClass('notif-item-error')
+      expect(items[0]).toHaveClass('signal-tone-danger')
       expect(items[0]).toHaveTextContent(/^Error: Save failed/)
       expect(items[0].querySelector('.notif-item-icon svg')).toBeTruthy()
 

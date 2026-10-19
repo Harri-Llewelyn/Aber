@@ -2378,12 +2378,13 @@ td.row-actions, th.row-actions {
 
 .toast-region:not(:empty) + .toast-region:not(:empty) { margin-top: 8px; }
 
-/* The background must be opaque: a toast floats over arbitrary content, so the 0.15 tint is painted
-   as a background-image over an opaque background-color of --bg-card, which is the base the ratios
-   in themeContrast.test.js assume. Keep them as separate properties: the `background:` shorthand
-   resets background-color. */
+/* A plain card: the text is --text-primary, and the colour is on the signal only, the icon and a
+   3px stripe on the leading edge in its `signal-tone-*` (below), as Carbon's low-contrast
+   notifications draw it. The background must be opaque, because a toast floats over arbitrary
+   content; --bg-card is the base the ratios in themeContrast.test.js assume. */
 .toast {
   padding: 12px 10px 12px 16px;
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   font-size: 13px;
   font-weight: 500;
@@ -2392,12 +2393,13 @@ td.row-actions, th.row-actions {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  box-shadow: var(--shadow);
+  box-shadow: inset 3px 0 0 var(--signal-tone), var(--shadow);
   background-color: var(--bg-card);
+  color: var(--text-primary);
   pointer-events: auto;
 }
 
-.toast-icon { display: flex; flex-shrink: 0; margin-top: 2px; }
+.toast-icon { display: flex; flex-shrink: 0; margin-top: 2px; color: var(--signal-tone); }
 
 /* Wraps anywhere: an error can carry a long identifier with no spaces in it. */
 .toast-msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -2414,9 +2416,9 @@ td.row-actions, th.row-actions {
   cursor: pointer;
 }
 .toast-open:hover { text-decoration: underline; }
-.toast-open:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.toast-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* 24px, the WCAG 2.2 minimum target. Takes the toast's own ink, which each type measures on its tint. */
+/* 24px, the WCAG 2.2 minimum target. Muted until pointed at, so the message leads. */
 .toast-dismiss {
   display: inline-flex;
   align-items: center;
@@ -2429,40 +2431,20 @@ td.row-actions, th.row-actions {
   border: none;
   border-radius: 6px;
   background: none;
-  color: inherit;
+  color: var(--text-muted);
   cursor: pointer;
   transition: var(--transition);
 }
 
-.toast-dismiss:hover { background: var(--bg-glass); }
-.toast-dismiss:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
+.toast-dismiss:hover { background: var(--bg-glass); color: var(--text-primary); }
+.toast-dismiss:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-.toast-success {
-  background-image: linear-gradient(var(--success-tint), var(--success-tint));
-  border: 1px solid var(--success);
-  color: var(--success-text);
-}
-
-/* --accent-text, the accent's label ink on its own tint (the pending badge's pairing). */
-.toast-info {
-  background-image: linear-gradient(var(--accent-dim), var(--accent-dim));
-  border: 1px solid var(--accent);
-  color: var(--accent-text);
-}
-
-.toast-warning {
-  background-image: linear-gradient(var(--warning-tint), var(--warning-tint));
-  border: 1px solid var(--warning);
-  color: var(--warning-text);
-}
-
-/* --danger-text, not --danger: the bare signal colour is a border/icon tone and measures below
-   AA once the 0.15 rose fill lightens the surface beneath it. */
-.toast-error {
-  background-image: linear-gradient(var(--danger-tint), var(--danger-tint));
-  border: 1px solid var(--danger);
-  color: var(--danger-text);
-}
+/* The signal colour of a toast's or a history row's icon, from toastTone() in Toast.jsx. Each
+   clears 3:1 on --bg-card, the bar for an icon (WCAG 1.4.11); themeContrast.test.js measures them. */
+.signal-tone-accent  { --signal-tone: var(--accent); }
+.signal-tone-warning { --signal-tone: var(--warning); }
+.signal-tone-danger  { --signal-tone: var(--danger); }
+.signal-tone-success { --signal-tone: var(--success); }
 
 @keyframes slideInRight {
   from { opacity: 0; transform: translateX(20px); }
@@ -3404,8 +3386,8 @@ a.alert-pill-item-link[target='_blank'] .alert-pill-item-name { color: var(--acc
 .notif-button { position: relative; }
 
 /* The unread count on the bell's corner. Opaque, with each tone painted as a background-image
-   over --bg-card, so the ratios measured for the toasts hold here too. A routine success keeps the
-   neutral base: the tones are spent on what is worth opening the list for. */
+   over --bg-card, the base themeContrast.test.js measures each label on. A routine success keeps
+   the neutral base: the tones are spent on what is worth opening the list for. */
 .notif-badge {
   position: absolute;
   top: -7px;
@@ -3542,12 +3524,8 @@ a.alert-pill-item-link[target='_blank'] .alert-pill-item-name { color: var(--acc
 
 .notif-item:last-child { border-bottom: none; }
 
-/* The type's glyph in its signal colour, the icon tone each of these clears 3:1 in. */
-.notif-item-icon { display: flex; flex-shrink: 0; margin-top: 2px; }
-.notif-item-success .notif-item-icon { color: var(--success); }
-.notif-item-info .notif-item-icon    { color: var(--accent); }
-.notif-item-warning .notif-item-icon { color: var(--warning); }
-.notif-item-error .notif-item-icon   { color: var(--danger); }
+/* The group's glyph in the row's signal colour, as the toast draws it. */
+.notif-item-icon { display: flex; flex-shrink: 0; margin-top: 2px; color: var(--signal-tone); }
 
 .notif-item-body { flex: 1; min-width: 0; }
 

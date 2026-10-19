@@ -18,8 +18,9 @@ export const POLL_INTERVAL_MS = 15000
  * table, because a view cannot be in a publication. The initial fetch primes the known set so a
  * page load does not toast everything already firing.
  *
- * A firing toast carries the alert name only; the notification history keeps the summary too. When
- * `onOpenAlerts` is given the toast is clickable and calls it with the toast's id.
+ * A firing toast carries the alert name only; the notification history keeps the summary too. Both
+ * toasts, firing and resolved, are in the Alert group, whatever the severity. When `onOpenAlerts`
+ * is given the toast is clickable and calls it with the toast's id.
  */
 export function usePlatformAlerts(showToast, onOpenAlerts) {
   const [active, setActive] = useState([])
@@ -62,6 +63,7 @@ export function usePlatformAlerts(showToast, onOpenAlerts) {
             row.severity === 'critical' ? 'error' : 'warning',
             {
               detail: `${row.alert_name}${row.summary ? ` — ${row.summary}` : ''}`,
+              group: 'alert',
               onOpen: onOpenRef.current ? (id) => onOpenRef.current?.(id) : undefined,
               openTitle: 'Show the firing alerts'
             }
@@ -72,7 +74,7 @@ export function usePlatformAlerts(showToast, onOpenAlerts) {
       // learns to ignore, and "it recovered" is the half that tells them they can stop looking.
       for (const [fingerprint, row] of knownRef.current) {
         if (!next.has(fingerprint)) {
-          showToastRef.current?.(`Resolved — ${row.alert_name}`, 'success')
+          showToastRef.current?.(`Resolved — ${row.alert_name}`, 'success', { group: 'alert' })
         }
       }
     }

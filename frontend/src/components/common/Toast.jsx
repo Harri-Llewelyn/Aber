@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react'
-import { IconCheck, IconInfo, IconAlertTriangle, IconAlertCircle, IconX } from './Icons'
+import { IconInfo, IconAlertTriangle, IconShieldAlert, IconX } from './Icons'
+import { groupOf } from '../../hooks/useToast'
 
 /** The shortest time each type stays up. An error has none: it stays until it is dismissed. */
 export const TOAST_MIN_MS = { success: 4000, info: 4000, warning: 8000 }
@@ -18,26 +19,48 @@ export function toastDuration(msg, type) {
   return Math.min(TOAST_MAX_MS, Math.max(TOAST_MIN_MS[type] ?? TOAST_MIN_MS.info, reading))
 }
 
-/** One glyph per type, shared with the notification history so the two read alike. */
-export const TOAST_ICONS = {
-  success: IconCheck,
+/**
+ * One glyph per group (hooks/useToast), shared with the notification history and its filter so the
+ * three read alike. The shield is the firing partner of the alert pill's resting shield.
+ */
+export const GROUP_ICONS = {
   info: IconInfo,
   warning: IconAlertTriangle,
-  error: IconAlertCircle
+  alert: IconShieldAlert
 }
 
-/** Read out before the message: the icon and colour tell only a sighted user it is a warning. */
-export const TOAST_SPOKEN_PREFIX = { warning: 'Warning: ', error: 'Error: ' }
+/**
+ * The colour of a message's icon, the only colour a toast or a history row carries: a
+ * `signal-tone-*` class (App.css). Severity picks it within the group, so a failure stands out
+ * from a warning, and a resolved alert from a firing one.
+ */
+export function toastTone(group, type) {
+  if (group === 'info') return 'accent'
+  if (type === 'error') return 'danger'
+  if (group === 'alert') return { warning: 'warning', success: 'success' }[type] ?? 'accent'
+  return 'warning'
+}
 
 /**
- * One toast. Its timer pauses while the pointer is over it or focus is inside it, and the close
- * button is there for every type, since an error has no timer at all. Escape is not bound: it
- * already closes the modal or drawer the toast is floating over.
+ * Read out before the message, because the icon and its colour tell only a sighted reader. It
+ * names the group, and a failure in the dashboard's own group says "Error".
+ */
+export function spokenPrefix(group, type) {
+  if (group === 'alert') return 'Alert: '
+  if (type === 'error') return 'Error: '
+  return group === 'warning' ? 'Warning: ' : 'Info: '
+}
+
+/**
+ * One toast: a plain card whose icon alone is coloured. Its timer pauses while the pointer is over
+ * it or focus is inside it, and the close button is there for every type, since an error has no
+ * timer at all. Escape is not bound: it already closes the modal or drawer the toast is floating
+ * over. `type` is the severity, which sets the timer; `group` sets the icon.
  *
  * With `onOpen` the message is a button that calls it with the toast's id; the close button never
  * does. `openTitle` is the button's tooltip, saying where it goes.
  */
-export function Toast({ id, msg, type, onDismiss, onExpire, onOpen, openTitle }) {
+export function Toast({ id, msg, type, group, onDismiss, onExpire, onOpen, openTitle }) {
   const duration = toastDuration(msg, type)
   const remaining = useRef(duration)
   const startedAt = useRef(0)
@@ -78,17 +101,18 @@ export function Toast({ id, msg, type, onDismiss, onExpire, onOpen, openTitle })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const Icon = TOAST_ICONS[type] ?? IconInfo
+  const kind = groupOf({ type, group })
+  const Icon = GROUP_ICONS[kind]
   const text = (
     <>
-      {TOAST_SPOKEN_PREFIX[type] && <span className="sr-only">{TOAST_SPOKEN_PREFIX[type]}</span>}
+      <span className="sr-only">{spokenPrefix(kind, type)}</span>
       {msg}
     </>
   )
 
   return (
     <div
-      className={`toast toast-${type}`}
+      className={`toast signal-tone-${toastTone(kind, type)}`}
       onMouseEnter={() => hold('hover')}
       onMouseLeave={() => release('hover')}
       onFocus={() => hold('focus')}
@@ -116,7 +140,7 @@ export function Toast({ id, msg, type, onDismiss, onExpire, onOpen, openTitle })
  */
 export function ToastStack({ toasts = [], onDismiss, onExpire }) {
   const renderToast = (t) => (
-    <Toast key={t.id} id={t.id} msg={t.msg} type={t.type} onDismiss={onDismiss} onExpire={onExpire} onOpen={t.onOpen} openTitle={t.openTitle} />
+    <Toast key={t.id} id={t.id} msg={t.msg} type={t.type} group={t.group} onDismiss={onDismiss} onExpire={onExpire} onOpen={t.onOpen} openTitle={t.openTitle} />
   )
   return (
     <div className="toast-stack">

@@ -186,23 +186,8 @@ describe('the stack', () => {
   it('keeps the showToast(msg, type) signature, with success as the default type', () => {
     renderStack()
     act(() => { hook.showToast('Saved') })
-    expect(toastFor('Saved')).toHaveClass('toast-success')
-  })
-
-  it.each(['success', 'info', 'warning', 'error'])('styles a %s toast by its own class', (type) => {
-    renderStack()
-    show(`A ${type} message`, type)
-    expect(toastFor(`A ${type} message`)).toHaveClass(`toast-${type}`)
-  })
-
-  it('draws a different glyph for each type, and the cross only on the close button', () => {
-    const types = ['success', 'info', 'warning', 'error']
-    render(<ToastStack toasts={types.map((type, id) => ({ id, msg: `${type} glyph`, type }))} />)
-    const glyphs = [...document.querySelectorAll('.toast .toast-icon svg')].map(svg => svg.innerHTML)
-    expect(glyphs).toHaveLength(4)
-    expect(new Set(glyphs).size).toBe(4)
-    const cross = document.querySelector('.toast-dismiss svg').innerHTML
-    expect(glyphs).not.toContain(cross)
+    expect(hook.toasts[0]).toMatchObject({ type: 'success', group: 'info' })
+    expect(toastFor('Saved')).toHaveClass('signal-tone-accent')
   })
 })
 
@@ -233,12 +218,14 @@ describe('announcement', () => {
     expect(within(status).queryByText('Save failed')).toBeNull()
   })
 
-  it('says the type of a warning or an error in words, not only by icon and colour', () => {
+  it('says the group of a message in words, and "Error" for a failure, not only by icon and colour', () => {
     renderStack()
     show('Keep the file', 'warning')
     show('Save failed', 'error')
+    show('Saved', 'success')
     expect(toastFor('Keep the file')).toHaveTextContent(/^Warning: Keep the file$/)
     expect(toastFor('Save failed')).toHaveTextContent(/^Error: Save failed$/)
+    expect(toastFor('Saved')).toHaveTextContent(/^Info: Saved$/)
     expect(toastFor('Keep the file').querySelector('.sr-only')).toHaveTextContent('Warning:')
   })
 
@@ -264,8 +251,8 @@ describe('the history useToast keeps', () => {
     act(() => { result.current.showToast('Save failed', 'error') })
 
     const [newest, older] = result.current.history
-    expect(newest).toMatchObject({ msg: 'Save failed', type: 'error', read: false, count: 1 })
-    expect(older).toMatchObject({ msg: 'Saved', type: 'success', read: false })
+    expect(newest).toMatchObject({ msg: 'Save failed', type: 'error', group: 'warning', read: false, count: 1 })
+    expect(older).toMatchObject({ msg: 'Saved', type: 'success', group: 'info', read: false })
     expect(typeof newest.id).toBe('number')
     expect(newest.id).not.toBe(older.id)
     expect(newest.at).toBe(Date.now())
@@ -338,7 +325,7 @@ describe('the history useToast keeps', () => {
     const stored = JSON.parse(window.sessionStorage.getItem(HISTORY_STORAGE_KEY))
     expect(stored.map(e => e.msg)).toEqual(['Cap reached', 'Saved'])
     // Message text and its bookkeeping, nothing else.
-    expect(Object.keys(stored[0]).sort()).toEqual(['at', 'count', 'id', 'msg', 'read', 'type'])
+    expect(Object.keys(stored[0]).sort()).toEqual(['at', 'count', 'group', 'id', 'msg', 'read', 'type'])
 
     const second = renderHook(() => useToast())
     expect(second.result.current.history.map(e => e.msg)).toEqual(['Cap reached', 'Saved'])
@@ -361,7 +348,7 @@ describe('the history useToast keeps', () => {
       { id: 3, msg: 'bad type', type: 'shout', at: 3 },
       null
     ]))
-    expect(readStoredHistory()).toEqual([{ id: 1, msg: 'kept', type: 'success', at: 1, read: false, count: 1 }])
+    expect(readStoredHistory()).toEqual([{ id: 1, msg: 'kept', type: 'success', group: 'info', at: 1, read: false, count: 1 }])
   })
 
   it('carries on in memory when storage throws', () => {
@@ -419,6 +406,17 @@ describe('a firing platform alert', () => {
     expect(screen.getByText('Historian Backup Stale').closest('.toast')).toBeTruthy()
     expect(screen.queryByText(/SELECT 1/)).toBeNull()
     expect(hook.history[0].msg).toBe(FULL)
+  })
+
+  it('puts the alert in the Alert group, at the severity Grafana gave it', async () => {
+    await mountAlerts([row, { ...row, fingerprint: 'f2', alert_name: 'Spindle Overtemperature', severity: 'critical', summary: '' }])
+    expect(hook.history.map(e => [e.msg, e.type, e.group])).toEqual([
+      ['Spindle Overtemperature', 'error', 'alert'],
+      [FULL, 'warning', 'alert']
+    ])
+    expect(screen.getByText('Spindle Overtemperature').closest('.toast')).toHaveClass('signal-tone-danger')
+    expect(screen.getByText('Historian Backup Stale').closest('.toast')).toHaveClass('signal-tone-warning')
+    expect(screen.getByText('Spindle Overtemperature').closest('.toast')).toHaveTextContent(/^Alert: /)
   })
 
   it('opens the alerts list on a click or Enter, and dismisses the toast', async () => {

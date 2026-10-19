@@ -1,7 +1,22 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 
-/** The toast types. Anything else a caller passes is shown as `info`. */
+/**
+ * The toast types, which are severity: how long a toast stays and which live region reads it out
+ * (Toast.jsx). Anything else a caller passes is shown as `info`.
+ */
 const TOAST_TYPES = ['success', 'info', 'warning', 'error']
+
+/**
+ * The groups a message sorts into, which decide its icon and the notification list's filter. Info
+ * is routine news, successes included; Warning is the dashboard's own failures and warnings; Alert
+ * is a Grafana alert, firing or resolved.
+ */
+export const TOAST_GROUPS = ['info', 'warning', 'alert']
+const DEFAULT_GROUP = { success: 'info', info: 'info', warning: 'warning', error: 'warning' }
+
+/** A message's group: the one it was given, or its type's when it has none or an unknown one. */
+export const groupOf = ({ type, group } = {}) =>
+  (TOAST_GROUPS.includes(group) ? group : DEFAULT_GROUP[type] ?? 'info')
 
 /** Toasts on screen at once. A fourth pushes the oldest off; it stays in the history. */
 export const MAX_VISIBLE_TOASTS = 3
@@ -24,8 +39,9 @@ export function readStoredHistory() {
   try {
     const parsed = JSON.parse(window.sessionStorage.getItem(HISTORY_STORAGE_KEY) || '[]')
     if (!Array.isArray(parsed)) return []
-    return parsed.filter(isStoredEntry).slice(0, HISTORY_LIMIT).map(({ id, msg, type, at, read, count }) => ({
-      id, msg, type, at,
+    // An entry stored before groups existed takes its type's.
+    return parsed.filter(isStoredEntry).slice(0, HISTORY_LIMIT).map(({ id, msg, type, group, at, read, count }) => ({
+      id, msg, type, group: groupOf({ type, group }), at,
       read: read === true,
       count: Number.isInteger(count) && count > 1 ? count : 1
     }))
@@ -50,6 +66,7 @@ export function clearStoredHistory() {
  * The toasts on screen and the notification history behind the top bar's bell. `showToast(msg,
  * type, options)` is the only way in: each call shows a toast and records a message in the history,
  * the same one unless `options.detail` gives the history a longer text than the toast carries.
+ * `options.group` is needed only where the type's group is wrong: a Grafana alert passes 'alert'.
  * `options.onOpen` makes the toast clickable (see Toast), and `options.openTitle` is the tooltip
  * on its message. Every callback is stable, so passing them down re-renders nothing.
  */
@@ -62,17 +79,19 @@ export function useToast() {
 
   useEffect(() => { writeStoredHistory(history) }, [history])
 
-  const showToast = useCallback((msg, type = 'success', { detail, onOpen, openTitle } = {}) => {
+  const showToast = useCallback((msg, type = 'success', { detail, group, onOpen, openTitle } = {}) => {
+    const known = TOAST_TYPES.includes(type) ? type : 'info'
     const entry = {
       id: nextId.current++,
       msg: msg == null ? '' : String(msg),
-      type: TOAST_TYPES.includes(type) ? type : 'info',
+      type: known,
+      group: groupOf({ type: known, group }),
       at: Date.now()
     }
     const toast = onOpen ? { ...entry, onOpen, openTitle } : entry
     const recordedMsg = detail == null ? entry.msg : String(detail)
-    const sameToast = (e) => e.msg === entry.msg && e.type === entry.type
-    const sameEntry = (e) => e.msg === recordedMsg && e.type === entry.type
+    const sameToast = (e) => e.msg === entry.msg && e.type === entry.type && e.group === entry.group
+    const sameEntry = (e) => e.msg === recordedMsg && e.type === entry.type && e.group === entry.group
     // A message already on screen is replaced rather than stacked, so it restarts its timer and a
     // failure repeated by a poll shows once.
     setToasts(prev => [...prev.filter(t => !sameToast(t)), toast].slice(-MAX_VISIBLE_TOASTS))

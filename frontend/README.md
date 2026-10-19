@@ -779,6 +779,25 @@ one exists (Launch UI, Open Dashboard); otherwise Restore when archived; otherwi
 `success` (the default), `info`, `warning` or `error`. Each call puts a toast in the bottom-right
 corner and records the same message in the history behind the bell in the top bar.
 
+- **Three groups, and the group is not the severity.** Every message is in one group: **Info**
+  (routine news, successes included), **Warning** (the dashboard's own failures and warnings) or
+  **Alert** (a Grafana alert, firing or resolved, whatever its severity). `success` and `info`
+  default to Info, `warning` and `error` to Warning, and a caller passes `{ group }` only to
+  override that: `usePlatformAlerts` passes `'alert'`. The group picks the icon (`GROUP_ICONS` in
+  `common/Toast.jsx`: `IconInfo`, `IconAlertTriangle`, `IconShieldAlert`, the firing partner of the
+  pill's resting shield) and the notification filter. The type is still the severity: it sets the
+  timer and the live region, so a critical alert (`error`) stays until dismissed and is read out
+  assertively, and within the group it picks the icon's colour (`toastTone`): Info is `--accent`;
+  Warning is `--danger` for a failure and `--warning` otherwise; Alert is `--danger` critical,
+  `--warning` warning and `--success` resolved. A success has no tick: its words say it worked.
+- **A calm card.** A toast is `--bg-card` with the plain `--border` and `--text-primary` text, like
+  the panels it floats beside. Only the signal is coloured: the icon, and a 3px stripe on the
+  leading edge (an inset `box-shadow`, as Carbon's low-contrast notifications draw it), both from a
+  `signal-tone-*` class whose icon colour the history's rows share. Each tone clears the 3:1 an icon
+  needs on the card (WCAG 1.4.11); the light theme's amber is the tightest at 3.19:1. The four types
+  used to tint the whole card and set the text in the signal colour, so a failure was red text on
+  red, and a critical alert looked like a failed save.
+
 - **Each toast owns its timer.** Up to three stack, each keyed by its id; a fourth pushes the oldest
   off. A message already on screen is replaced, restarting its timer, rather than shown twice. The
   single slot this replaced let a second toast inherit what was left of the first one's 3.2 s.
@@ -790,8 +809,8 @@ corner and records the same message in the history behind the bell in the top ba
   WCAG 2.2 SC 2.2.1 (Timing Adjustable) asks for.
 - **Announced.** `ToastStack` renders two live regions all the time, empty when idle, because a
   region inserted together with its first message is not announced: errors in `role="alert"`, the
-  rest in `role="status"`. A warning or an error is prefixed "Warning:" or "Error:" in text only a
-  screen reader reads.
+  rest in `role="status"`. Each message is prefixed with its group in text only a screen reader
+  reads ("Info:", "Warning:", "Alert:"), and a failure with "Error:" (`spokenPrefix`).
 - **The history** (`common/NotificationHistory.jsx`) keeps the latest 50 messages, newest first. A
   repeat of the newest entry is counted on it rather than filling the list. The bell's badge counts
   the unread entries, is not rendered at zero, and takes the tone of the worst unread entry; a
@@ -844,11 +863,11 @@ Three rules that were each learned from a real bug:
   in both themes.
 
 - **A floating surface needs an opaque background.** A toast floats over arbitrary content, so its
-  `rgba(…, 0.15)` tint composited against whatever table was underneath. Each of the four types
-  now paints its tint as a `background-image` over an opaque `background-color: var(--bg-card)`,
-  and the bell's unread badge does the same. **Never fold those into the `background:` shorthand** —
-  that resets `background-color` and brings the transparency straight back. `themeContrast.test.js`
-  asserts both halves for every toast type and badge tone.
+  `rgba(…, 0.15)` tint once composited against whatever table was underneath. A toast is now an
+  opaque `background-color: var(--bg-card)` with no tint at all, and the bell's unread badge paints
+  its tint as a `background-image` over that same opaque colour. **Never fold the badge's into the
+  `background:` shorthand** — that resets `background-color` and brings the transparency straight
+  back. `themeContrast.test.js` asserts the toast's opaque base and both halves for every badge tone.
 - **Do not give `var()` a hardcoded fallback.** The sign-in card rendered white-on-white in light
   mode because it referenced `--text-main` / `--bg-main`, neither of which exists; the fallbacks
   made the typo look correct in dark mode and fail silently in light mode.

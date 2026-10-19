@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { IconBell, IconX } from './Icons'
-import { TOAST_ICONS, TOAST_SPOKEN_PREFIX } from './Toast'
+import { GROUP_ICONS, spokenPrefix, toastTone } from './Toast'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useClickOutside } from '../../hooks/useClickOutside'
-import { HISTORY_LIMIT } from '../../hooks/useToast'
+import { HISTORY_LIMIT, groupOf } from '../../hooks/useToast'
 import { formatRelative } from '../../utils/format'
 
 /** Most severe first. The badge takes the tone of the worst unread entry. */
@@ -25,7 +25,7 @@ const TONE_WORD = { error: 'an error', warning: 'a warning' }
  * behind it. Separate from AlertPill on purpose. The pill says what is wrong now and its count is a
  * reason to act; this says what the toasts said, resolved and routine messages included.
  *
- * @param {Array} entries `{id, msg, type, at, read, count}`, newest first; see hooks/useToast.
+ * @param {Array} entries `{id, msg, type, group, at, read, count}`, newest first; see hooks/useToast.
  *
  * @param {Function} onMarkRead Called when the panel opens with anything unread.
  *
@@ -137,14 +137,15 @@ export function NotificationHistory({ entries = [], onMarkRead, onClear }) {
           ) : (
             <ol className="notif-list">
               {entries.map((e) => {
-                const Icon = TOAST_ICONS[e.type] ?? TOAST_ICONS.info
+                const group = groupOf(e)
+                const Icon = GROUP_ICONS[group]
                 const when = new Date(e.at)
                 return (
-                  <li key={e.id} className={`notif-item notif-item-${e.type}`}>
+                  <li key={e.id} className={`notif-item signal-tone-${toastTone(group, e.type)}`}>
                     <span className="notif-item-icon" aria-hidden="true"><Icon size={14} /></span>
                     <div className="notif-item-body">
                       <div className="notif-item-msg">
-                        {TOAST_SPOKEN_PREFIX[e.type] && <span className="sr-only">{TOAST_SPOKEN_PREFIX[e.type]}</span>}
+                        <span className="sr-only">{spokenPrefix(group, e.type)}</span>
                         {e.msg}
                       </div>
                       <div className="notif-item-meta">
