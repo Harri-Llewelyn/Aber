@@ -19,6 +19,10 @@ edge node publishes from this process:
   6. the ingestion daemon restarted during a recording: the job fails, the stored capture of the
      subject is kept, and the next capture records.
 
+TheBucketAdmitsEachWorkerToItsOwnObject runs the broker-captures policies on the real
+storage.objects, as the storage-policies Job applied them: the daemon's arm, the worker's arm, and
+a device's folder. The db lane runs the same policy text on a stand-in table.
+
 Stages 5 and 6 restart a Deployment with `kubectl --context $ABER_KUBE_CONTEXT -n $KUBE_NAMESPACE
 rollout restart` (k3d-aber and aber by default), and wait for the rollout. They skip, saying why,
 when kubectl or that context is absent. Restarting ingestion stops ingestion for the whole stack for
@@ -41,6 +45,7 @@ import unittest
 from pathlib import Path
 
 import psycopg2
+from psycopg2 import errors as pg_errors
 
 INGESTION = Path(__file__).resolve().parent
 sys.path.insert(0, str(INGESTION))
@@ -48,7 +53,7 @@ sys.path.insert(0, str(INGESTION.parent / "test-harness"))
 
 from test_playback_replay import (  # noqa: E402
     PUBLISHABLE_KEY, SUPABASE_URL, Session, _epoch_seconds, _request, capture_version, historian,
-    sign_in,
+    sign_in, skip_or_fail,
 )
 from test_recorded_capture_replay import (  # noqa: E402
     MQTT_HOST, MQTT_PORT, TERMINAL, FixtureEdgeNode, delete_broker_account, download, msg_type,
@@ -868,6 +873,194 @@ class CaptureLifecycleOnTheStack(unittest.TestCase):
         job = self.next_recording
         self.assertEqual(job.get("status"), "COMPLETED", f"{job.get('status')}: {job.get('error')}")
         self.assertGreater(job.get("messages") or 0, 0)
+
+
+# -------------------------------------------------------------------------------------------------
+# The bucket's policies on the real table
+# -------------------------------------------------------------------------------------------------
+INGESTION_PRINCIPAL = "b0000000-0000-4000-8000-000000000002"
+PLAYBACK_PRINCIPAL = "b0000000-0000-4000-8000-000000000003"
+PLAYBACK_GATEWAY_ID = "16000000-0000-4000-8000-000000000001"
+BUCKET_ADMIN = "00000000-0000-4000-8000-0000000b9280"
+
+
+class TheBucketAdmitsEachWorkerToItsOwnObject(unittest.TestCase):
+    """
+    One transaction as the database owner, rolled back: a device recording, a stored capture being
+    replayed, a file nothing claims, and each caller's reach into storage.objects. Deleting needs
+    `storage.allow_delete_query`, the switch storage-api sets: without it a trigger refuses every
+    direct delete before row-level security is asked.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            conn = owner_connection()
+        except psycopg2.Error as err:
+            skip_or_fail(f"cannot reach the Supabase database as its owner: {err}")
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT to_regclass('storage.objects');")
+            if not cur.fetchone()[0]:
+                skip_or_fail("storage.objects does not exist: storage-api has not started")
+            cur.execute("SELECT count(*) FROM pg_policies WHERE schemaname = 'storage' AND "
+                        "tablename = 'objects' AND policyname LIKE 'broker_captures_%';")
+            if cur.fetchone()[0] != 4:
+                raise AssertionError("the four broker_captures_* policies are not on storage.objects: "
+                                     "the storage-policies Job did not apply them")
+        finally:
+            conn.rollback()
+            conn.close()
+
+    def setUp(self):
+        self.conn = owner_connection()
+        self.addCleanup(self.conn.close)
+        self.addCleanup(self.conn.rollback)
+        self.cur = cur = self.conn.cursor()
+        # Nothing else in flight, for the length of this transaction: one capture per stack and one
+        # playback per target.
+        cur.execute("UPDATE public.capture_jobs SET status = 'FAILED', finished_at = now() "
+                    "WHERE status IN ('PENDING', 'RECORDING');")
+        cur.execute("UPDATE public.playback_jobs SET status = 'FAILED', finished_at = now() "
+                    "WHERE status IN ('PENDING', 'RUNNING') AND target_gateway_id = %s;",
+                    (PLAYBACK_GATEWAY_ID,))
+        cur.execute("INSERT INTO auth.users (id, email) VALUES (%s, 'bucket-admin@test.local') "
+                    "ON CONFLICT (id) DO NOTHING;", (BUCKET_ADMIN,))
+        cur.execute("INSERT INTO public.user_roles (user_id, role_id) SELECT %s, id FROM public.roles "
+                    "WHERE name = 'Administrator' ON CONFLICT DO NOTHING;", (BUCKET_ADMIN,))
+        cur.execute("INSERT INTO public.gateways (name, deployment) VALUES "
+                    "('CAPTURE_LIFECYCLE_Bucket_Gateway', 'remote') RETURNING id, sparkplug_id;")
+        self.gw, self.gw_wire = cur.fetchone()
+        cur.execute("INSERT INTO public.devices (name, gateway_id) VALUES "
+                    "('CAPTURE_LIFECYCLE_Bucket_Device', %s) RETURNING id, sparkplug_id;", (self.gw,))
+        self.dev, self.dev_wire = cur.fetchone()
+
+        # A recording of the device, at its job's own path.
+        self.recording = f"{self.dev_wire}/recording.json"
+        cur.execute(
+            "INSERT INTO public.capture_jobs (subject_kind, gateway_id, device_id, sparkplug_group, "
+            "edge_node_id, device_sparkplug_id, subject_sparkplug_id, storage_path, status, started_at) "
+            "VALUES ('device', %s, %s, 'Aber', %s, %s, %s, %s, 'RECORDING', now());",
+            (self.gw, self.dev, self.gw_wire, self.dev_wire, self.dev_wire, self.recording))
+        self._put("ingestion", self.recording)
+
+        # A stored capture of the gateway, being replayed.
+        self.replaying = f"{self.gw_wire}/stored.json"
+        self._issue(self.replaying)
+        self._put("Administrator", self.replaying)
+        cur.execute(
+            "INSERT INTO public.captures (subject_kind, gateway_id, subject_sparkplug_id, storage_path, "
+            "size_bytes, message_count) VALUES ('gateway', %s, %s, %s, 1, 1) RETURNING id;",
+            (self.gw, self.gw_wire, self.replaying))
+        capture_id = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO public.playback_jobs (capture_id, capture_storage_path, target_gateway_id, "
+            "target_edge_node_id, sparkplug_group, status, started_at) "
+            "SELECT %s, %s, id, sparkplug_id, 'Aber', 'RUNNING', now() FROM public.gateways "
+            "WHERE id = %s;", (capture_id, self.replaying, PLAYBACK_GATEWAY_ID))
+
+        # A file nothing claims: its upload was begun three hours ago and never registered.
+        self.orphan = f"{self.dev_wire}/orphan.json"
+        self._issue(self.orphan)
+        self._put("Administrator", self.orphan)
+        cur.execute("UPDATE public.capture_uploads SET created_at = now() - interval '3 hours' "
+                    "WHERE storage_path = %s;", (self.orphan,))
+
+    # -- fixtures and callers -------------------------------------------------------------------
+    def _issue(self, path):
+        """An upload begun by BUCKET_ADMIN for `path`, as begin_capture_upload() records one."""
+        folder = path.split("/")[0]
+        kind, device = ("device", self.dev) if folder == self.dev_wire else ("gateway", None)
+        self.cur.execute(
+            "INSERT INTO public.capture_uploads (subject_kind, gateway_id, device_id, "
+            "subject_sparkplug_id, storage_path, created_by) VALUES (%s, %s, %s, %s, %s, %s);",
+            (kind, self.gw, device, folder, path, BUCKET_ADMIN))
+
+    def _run(self, caller, sql, args=(), keep=False):
+        """One statement as `caller`, in a savepoint: rolled back unless `keep`; a refusal raises."""
+        sub = {"ingestion": INGESTION_PRINCIPAL, "playback": PLAYBACK_PRINCIPAL,
+               "Administrator": BUCKET_ADMIN}[caller]
+        self.cur.execute("SAVEPOINT call;")
+        try:
+            self.cur.execute("SET LOCAL ROLE authenticated;")
+            self.cur.execute("SELECT set_config('request.jwt.claims', %s, true);",
+                             ('{"sub": "%s", "role": "authenticated"}' % sub,))
+            self.cur.execute("SET LOCAL storage.allow_delete_query = 'true';")
+            self.cur.execute(sql, args)
+            result = self.cur.rowcount
+        except Exception:
+            self.cur.execute("ROLLBACK TO SAVEPOINT call;")
+            raise
+        self.cur.execute("RESET ROLE;")
+        self.cur.execute("RELEASE SAVEPOINT call;" if keep else "ROLLBACK TO SAVEPOINT call;")
+        return result
+
+    def _put(self, caller, path):
+        self._run(caller, "INSERT INTO storage.objects (bucket_id, name) "
+                          "VALUES ('broker-captures', %s);", (path,), keep=True)
+
+    def _sees(self, caller, path):
+        return self._run(caller, "SELECT 1 FROM storage.objects WHERE bucket_id = 'broker-captures' "
+                                 "AND name = %s;", (path,)) == 1
+
+    def _writes(self, caller, path):
+        try:
+            self._run(caller, "INSERT INTO storage.objects (bucket_id, name) "
+                              "VALUES ('broker-captures', %s);", (path,))
+            return True
+        except pg_errors.InsufficientPrivilege:
+            return False
+
+    def _updates(self, caller, path):
+        try:
+            return self._run(caller, "UPDATE storage.objects SET metadata = '{}'::jsonb "
+                                     "WHERE bucket_id = 'broker-captures' AND name = %s;", (path,)) == 1
+        except pg_errors.InsufficientPrivilege:
+            return False
+
+    def _deletes(self, caller, path):
+        return self._run(caller, "DELETE FROM storage.objects WHERE bucket_id = 'broker-captures' "
+                                 "AND name = %s;", (path,)) == 1
+
+    # -- the arms -------------------------------------------------------------------------------
+    def test_the_daemon_reaches_its_recording_and_what_nothing_claims(self):
+        self.assertEqual(
+            {"sees recording": self._sees("ingestion", self.recording),
+             "sees orphan": self._sees("ingestion", self.orphan),
+             "sees replaying": self._sees("ingestion", self.replaying),
+             "overwrites recording": self._updates("ingestion", self.recording),
+             "writes elsewhere": self._writes("ingestion", f"{self.dev_wire}/elsewhere.json"),
+             "overwrites replaying": self._updates("ingestion", self.replaying),
+             "deletes orphan": self._deletes("ingestion", self.orphan),
+             "deletes replaying": self._deletes("ingestion", self.replaying)},
+            {"sees recording": True, "sees orphan": True, "sees replaying": False,
+             "overwrites recording": True, "writes elsewhere": False, "overwrites replaying": False,
+             "deletes orphan": True, "deletes replaying": False})
+
+    def test_the_worker_reads_the_capture_it_replays_and_nothing_else(self):
+        self.assertEqual(
+            {"sees replaying": self._sees("playback", self.replaying),
+             "sees recording": self._sees("playback", self.recording),
+             "sees orphan": self._sees("playback", self.orphan),
+             "overwrites replaying": self._updates("playback", self.replaying),
+             "writes": self._writes("playback", f"{self.gw_wire}/worker.json"),
+             "deletes orphan": self._deletes("playback", self.orphan)},
+            {"sees replaying": True, "sees recording": False, "sees orphan": False,
+             "overwrites replaying": False, "writes": False, "deletes orphan": False})
+
+    def test_the_worker_loses_the_capture_when_its_replay_ends(self):
+        self.cur.execute("UPDATE public.playback_jobs SET status = 'COMPLETED', finished_at = now() "
+                         "WHERE capture_storage_path = %s;", (self.replaying,))
+        self.assertFalse(self._sees("playback", self.replaying))
+
+    def test_a_device_folder_admits_only_a_path_issued_for_it(self):
+        issued = f"{self.dev_wire}/issued.json"
+        self._issue(issued)
+        self.assertTrue(self._writes("Administrator", issued))
+        self.assertFalse(self._writes("Administrator", f"{self.dev_wire}/not-issued.json"))
+        nobody = "dev" + "f" * 21
+        self.assertFalse(self._writes("Administrator", f"{nobody}/capture.json"),
+                         "a folder naming no device took a write")
 
 
 if __name__ == "__main__":
