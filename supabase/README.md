@@ -1187,9 +1187,9 @@ capture.
 a policy that also admits a direct write, is advice rather than a control — and the direct write is
 the door an API caller uses rather than the one the UI happens to.
 
-**Single-flight is an index, not application logic.** A partial unique index on
-`status = 'RECORDING'` permits one capture at a time across the whole stack, where two browser tabs
-cannot race it. Widening it to the subject is how concurrency would arrive, and would turn the
+**Single-flight is an index, not application logic.** A partial unique index on a status of
+`PENDING` or `RECORDING` permits one capture at a time across the whole stack, queued or running,
+where two browser tabs cannot race it. Widening it to the subject is how concurrency would arrive, and would turn the
 page's single running card into a list — a deliberate change rather than a default.
 
 **Neither job table gets an audit-trail trigger.** That trigger is opt-in per table, and both
@@ -2815,7 +2815,10 @@ a person, and the playback worker's is delivered to it.
 on the gateway and devices inherit it through `gateway_id` rather than carrying a copy: a stored
 device-level flag would need two triggers to maintain an invariant the join gives for nothing, and
 `verify_gateway_binding()` already guarantees a device's data reaches storage only from the gateway
-it is bound to.
+it is bound to. **Only a consumer of this database can make that join.** The historian's rows carry
+an asset id and no gateway or flag, so a reader of the historian alone, the Power BI role among
+them, cannot tell a simulated or replayed reading from the plant's
+([#935](https://github.com/Harri-Llewelyn/Aber/issues/935)).
 
 **`is_shadow` (`0059`) is a second lane, because provenance is not one axis.** A shadow gateway is
 necessarily simulated — `start_playback_job()` refuses a target that is not — so one lane could have

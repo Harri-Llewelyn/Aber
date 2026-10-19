@@ -1084,10 +1084,11 @@ export const SUITES = {
       'because a refused MQTT connection is invisible past CONNECT and Sparkplug publishes at ' +
       'QoS 0. So this mints the credential (which is what exercises the DELIVERY path), waits for ' +
       'the worker to report that it holds the target, replays a fixture, and asserts the rows ' +
-      'arrived. THE SENTINEL METRIC IS LOAD BEARING: the recorded device is a real device the ' +
-      'seeded fleet is publishing as, so "nothing was written under the recorded id" cannot be ' +
-      'asserted directly -- a metric name unique to the run can only have come from this replay, ' +
-      'which is what makes the identity rewrite checkable against a live historian. A second ' +
+      'arrived. The recorded gateway and device are fixtures the suite makes, since a fresh ' +
+      'install has none (#731). THE SENTINEL METRIC IS LOAD BEARING: a historian holding live ' +
+      'traffic and earlier runs cannot say which rows one replay wrote, and a metric name unique to ' +
+      'the run can only have come from this replay, which is what makes the identity rewrite ' +
+      'checkable against a live historian. A second ' +
       'replay has its credential re-issued partway, as the Gateways page does, and must end ' +
       'FAILED naming the lost connection and counting only what went out. Needs ' +
       '`playback.enabled`, which values-dev.yaml sets.',
