@@ -4,8 +4,11 @@
  *
  *   node scripts/generate-ashrae223-vocabulary.mjs
  *
- * Source: https://github.com/open223/defs.open223.info -> ontologies/223p.ttl. The ontology
- * DECLARES ITS OWN LICENCE in-band, asserted by the rights holder rather than inferred:
+ * Source: scripts/vocabularies/223p-v1.0.0-2026.ttl, a byte-for-byte copy of
+ * open223/defs.open223.info -> ontologies/223p.ttl at that release. Upstream no longer serves it:
+ * its history was rewritten on 2026-10-16, and the regenerated file declares no licence
+ * (docs/vocabularies.md, NOTICE.md). The ontology DECLARES ITS OWN LICENCE in-band, asserted by
+ * the rights holder rather than inferred:
  *
  *   <http://data.ashrae.org/standard223/1.0/model/all> a owl:Ontology ;
  *       dcterms:license <http://www.apache.org/licenses/LICENSE-2.0> ;
@@ -38,10 +41,9 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-const ONTOLOGY_URL =
-  'https://raw.githubusercontent.com/open223/defs.open223.info/main/ontologies/223p.ttl';
-
-/** Pinned. The pin is asserted against the file, so an upstream release fails rather than lands. */
+/** Pinned by content: a different file is refused rather than read. */
+const ONTOLOGY_FILE = 'scripts/vocabularies/223p-v1.0.0-2026.ttl';
+const ONTOLOGY_SHA256 = '47bdad8925032c84e750e46b3649d102f4e41190c8161df3c9efa3265009b0e0';
 const ONTOLOGY_VERSION = 'v1.0.0-2026';
 const ONTOLOGY_IRI = 'http://data.ashrae.org/standard223/1.0/model/all';
 
@@ -226,20 +228,22 @@ function parseConcepts(text) {
   return concepts;
 }
 
-const response = await fetch(ONTOLOGY_URL);
-if (!response.ok) throw new Error(`fetch failed: ${response.status} ${ONTOLOGY_URL}`);
-const turtle = await response.text();
+const source = readFileSync(join(ROOT, ONTOLOGY_FILE));
+const sourceSha256 = createHash('sha256').update(source).digest('hex');
+if (sourceSha256 !== ONTOLOGY_SHA256) {
+  throw new Error(
+    `${ONTOLOGY_FILE} is sha256:${sourceSha256}, pinned to sha256:${ONTOLOGY_SHA256}. ASHRAE 223 ` +
+    `is still in public review: a new release is reviewed (diff, licence, seed) before the pin moves.`
+  );
+}
+const turtle = source.toString('utf8');
 
-// THE PIN CHECK, for the same reason the OPC UA generator has one: everything below is only as
-// trustworthy as the release it was read from, and 223P is pre-publication, so an upstream revision
-// is a thing to review rather than absorb.
+// Everything below is only as trustworthy as the release it was read from, so the file's own
+// claims are checked too.
 const versionMatch = turtle.match(/owl:versionInfo\s+"([^"]+)"/);
 if (!versionMatch) throw new Error('no owl:versionInfo in the ontology; refusing to guess a version');
 if (versionMatch[1] !== ONTOLOGY_VERSION) {
-  throw new Error(
-    `upstream ontology is ${versionMatch[1]}, pinned to ${ONTOLOGY_VERSION}. ASHRAE 223 is still ` +
-    `in public review -- read the diff, update the pin, then re-run. Do not just bump the pin.`
-  );
+  throw new Error(`the ontology says it is ${versionMatch[1]}, pinned to ${ONTOLOGY_VERSION}`);
 }
 if (!turtle.includes(ONTOLOGY_IRI)) throw new Error(`ontology IRI ${ONTOLOGY_IRI} not found`);
 if (!turtle.includes('http://www.apache.org/licenses/LICENSE-2.0')) {
