@@ -179,8 +179,8 @@ tags, and `renovate.json` proposes the next one.
 - **`allow_duplicate_messages` is now on by default**, so a client whose subscriptions overlap
   receives a copy per matching subscription. No platform client's subscriptions overlap: ingestion
   and i3X subscribe once to `spBv1.0/#`, `validate.py` to `spBv1.0/+/NCMD/+` and `spBv1.0/STATE/#`
-  (no topic the platform publishes matches both), the playback worker subscribes to nothing, and
-  the appliance flow's STATE, NCMD and DCMD subscriptions are disjoint.
+  (no topic the platform publishes matches both), the playback worker to its own gateway's NCMD
+  and one STATE topic, and the appliance flow's STATE, NCMD and DCMD subscriptions are disjoint.
 - Refusal is still silent at QoS 0. The `Not authorized` reason code rides on PUBACK, which does
   not exist at QoS 0 under either protocol version, and Sparkplug B requires QoS 0 for every
   data and command message. A gateway publishing under the wrong edge node learns nothing from the broker by

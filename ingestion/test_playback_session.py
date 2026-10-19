@@ -321,6 +321,7 @@ class FakeInfo:
     def __init__(self, acked):
         self.acked = acked
         self.timeout = None
+        self.rc = 0
 
     def wait_for_publish(self, timeout=None):
         self.timeout = timeout
@@ -370,6 +371,10 @@ class FakeClient:
 
     def loop_stop(self):
         self.events.append("loop_stop")
+
+    def subscribe(self, topics):
+        self.on_subscribe(self, None, 1, tuple(qos for _, qos in topics))
+        return 0, 1
 
     def publish(self, topic, payload, qos=0, retain=False):
         if FakeClient.fail_on and msg_type_of(topic) == FakeClient.fail_on:

@@ -26,7 +26,11 @@ A capture with no birth certificate cannot be played back. A playback starts the
 
 Playback needs the playback worker, which every install runs. If the playback dialog says the worker is not deployed, set `playback.enabled: true` in the site's Helm values and upgrade the release. Until then a playback cannot start.
 
-Playback also needs a broker credential of its own, for the Playback gateway. When that credential is issued, Aber delivers it to the playback worker within about a minute. It is not created by whoever presses the button. It is also not the credential of the gateway whose traffic is played back. So a playback cannot be mistaken for the machine it imitates, on the wire or in the historian.
+Playback also needs a broker credential of its own, for the Playback gateway. When that credential is issued, Aber delivers it to the playback worker within about a minute. It is not created by whoever presses the button. It is also not the credential of the gateway whose traffic is played back. So a playback cannot be mistaken for the machine it imitates, on the wire or in the historian. If delivery fails, the credential dialog says how to set the password in the Helm values instead. The worker then uses that password whenever the broker refuses the delivered one, and the playback dialog says which one it uses.
+
+A playback waits for the ingestion service before it publishes anything. If ingestion stops while a playback runs, the playback stops too and says how far it got. Start it again once ingestion is back. If the broker connection drops, for example because the Playback gateway's credential was issued again, the playback fails the same way.
+
+A playback you stop shows above the list as stopped, with how many messages went out. It is not a failure.
 
 If a playback completes but loses readings whose timestamps were too old or too far in the future for the historian, it says so above the list. A slow playback speed can cause this. It stretches the gap between a reading's timestamp and its arrival. Try the playback again at 1x.
 

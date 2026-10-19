@@ -100,11 +100,12 @@ class FileCredentials(unittest.TestCase):
 
 class Precedence(unittest.TestCase):
     """
-    Which source wins, which is a question about the broker rather than about configuration.
+    Which source is tried first, which is a question about the broker rather than about
+    configuration.
 
     Mosquitto holds ONE password per username, so issuing REPLACES the one before it. A value in
-    `.env` is therefore not an alternative to a delivered one, it is an OLDER one -- and after any
-    re-issue it is simply wrong.
+    the environment is therefore normally an OLDER one than a delivered one. It is tried only when
+    the broker refuses the delivered one (test_playback_worker_loop.py, CredentialFallbackTests).
     """
 
     def setUp(self):

@@ -346,10 +346,22 @@ export const SUITES = {
     lanes: ['unit'],
     why:
       'How the playback worker resolves the broker passwords it holds (0078), and the precedence ' +
-      'rule that matters: a DELIVERED credential beats one in the environment. The broker keeps ' +
-      'one password per username, so a value in the environment is not an alternative to the delivered one ' +
-      '-- it is an older one. If the environment won, "issue a new credential" would be the one ' +
-      'repair that could not fix a refused playback (CONNACK rc=5).',
+      'rule that matters: a DELIVERED credential is tried before one in the environment. The broker keeps ' +
+      'one password per username, so a value in the environment is normally an older one. If the ' +
+      'environment came first, "issue a new credential" would be the one repair that could not fix a ' +
+      'refused playback (CONNACK rc=5). The environment value is tried only when the broker refuses ' +
+      'the delivered one (test_playback_worker_loop.py).',
+  },
+  'ingestion/test_playback_worker_loop.py': {
+    lanes: ['unit'],
+    why:
+      'The playback worker as a Sparkplug edge node, against a fake broker and PostgREST: the ' +
+      'NCMD subscription and the rebirth answer, the wait for the STATE of the primary host and the ' +
+      'end of a job when it goes offline, Stop and a dropped connection inside a long gap, the ' +
+      'retried finish and startup sweep, and the heartbeat thread. A message counts only once ' +
+      'paho accepted it on a connection that has not dropped: before this, a replay whose ' +
+      'credential was re-issued at message 8 ended COMPLETED with all 41 counted and 7 in the ' +
+      'historian.',
   },
   'ingestion/test_playback_session.py': {
     lanes: ['unit'],
@@ -787,6 +799,13 @@ export const SUITES = {
       '`NOT is_simulated OR deployment = host` -- which is what makes the dashboard’s single ' +
       'gateway-type control honest rather than a collapse of two independent facts.',
   },
+  'supabase/migrations/test_playback_stop_and_sweep.py': {
+    lanes: ['db'],
+    why:
+      'How a playback ends (0191). Stop on a job whose worker has been silent for a minute ends ' +
+      'it as CANCELLED, so a stalled worker cannot hold the Playback gateway until it restarts, ' +
+      'and the worker coming back is told to stop and changes nothing.',
+  },
   'supabase/migrations/test_playback_credential_delivery.py': {
     lanes: ['db'],
     why:
@@ -1047,7 +1066,9 @@ export const SUITES = {
       'arrived. THE SENTINEL METRIC IS LOAD BEARING: the recorded device is a real device the ' +
       'seeded fleet is publishing as, so "nothing was written under the recorded id" cannot be ' +
       'asserted directly -- a metric name unique to the run can only have come from this replay, ' +
-      'which is what makes the identity rewrite checkable against a live historian. Needs ' +
+      'which is what makes the identity rewrite checkable against a live historian. A second ' +
+      'replay has its credential re-issued partway, as the Gateways page does, and must end ' +
+      'FAILED naming the lost connection and counting only what went out. Needs ' +
       '`playback.enabled`, which values-dev.yaml sets.',
   },
   'ingestion/test_recorded_capture_replay.py': {

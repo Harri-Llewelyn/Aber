@@ -786,8 +786,49 @@ that image.
 `read spBv1.0/#` and `write spBv1.0/+/NCMD/+` — rebirth requests and nothing else — and teaching it
 to publish asset data would widen it, while `verify_gateway_binding()` cannot tell a forged message
 under a correctly bound device from a real one. The `seq` objection that kept *capture* inside the
-daemon does not apply in reverse: a playback worker only publishes, holds no subscription, and takes
-nothing away from the daemon's view of the stream.
+daemon does not apply in reverse: the worker takes nothing away from the daemon's view of the
+stream. Its only subscriptions are its own node's NCMD and the primary host's STATE (below), which
+carry no telemetry.
+
+**The worker is a full Sparkplug edge node** (decided 2026-10-14). Until 1.5 it held no
+subscription, on the argument that a second subscriber would split the daemon's view of `seq`. That
+argument never applied to a node's own NCMD topic, and the shared `gateway` role already let the
+credential receive `spBv1.0/+/+/%u/#` and `spBv1.0/STATE/#`. Without the subscription a replay
+could not answer a rebirth: a daemon restarted mid-replay lost its alias table, asked the Playback
+node to rebirth every 300 seconds, and wrote nothing for the rest of the job, which still ended
+`COMPLETED`. Without STATE a replay ran to `COMPLETED` while ingestion was down. Each session now:
+
+- subscribes at QoS 1 to `spBv1.0/<group>/NCMD/<gateway>` before its NBIRTH
+  (`tck-id-message-flow-edge-node-ncmd-subscribe`), and to `spBv1.0/STATE/<PRIMARY_HOST_ID>` in the
+  same SUBSCRIBE, and waits for the SUBACK. A refused subscription fails the job before any birth.
+- waits for that STATE to say `online: true` before the NBIRTH
+  (`tck-id-message-flow-edge-node-birth-publish-phid-wait`, `-phid-wait-online`). Only the
+  configured host's topic is subscribed (`-phid-wait-id`), and a STATE stamped earlier than the last
+  one seen is ignored (`-phid-wait-timestamp`). That is how the old connection's Will, arriving after
+  a restarted daemon's new STATE, is told apart. The wait is `PLAYBACK_PRIMARY_HOST_WAIT_SECONDS`
+  (60). If the host does not come online in that time, the session ends with a plain DISCONNECT
+  and no birth, and the job fails saying ingestion is not consuming. Progress is reported during
+  the wait, so Stop works.
+- answers `Node Control/Rebirth = true` on its NCMD topic. It stops sending data, re-publishes the
+  session's NBIRTH and the DBIRTH of each device born in it and not since dead, then continues
+  (`tck-id-operational-behavior-data-commands-rebirth-action-1`, `-2`). The NBIRTH keeps the
+  session's bdSeq, because no new connection was made (`-rebirth-action-3`). The births restart
+  `seq` at 0, so every later message of that session carries the worker's own count, re-stamped on
+  the wire bytes in the encoding each was recorded in. A request is answered within a second, even
+  in a long gap. One that arrives before the session's NBIRTH is answered by that NBIRTH.
+- ends the job when a valid STATE says `online: false`: it publishes the NDEATH, disconnects, and
+  fails the job with how many messages went out (`-phid-offline`).
+
+**Failing, not pausing, when ingestion goes offline.** Pausing until it returns was the
+alternative. A paused job would
+hold the one-per-target index for as long as ingestion stayed down, which during a crash loop is
+unbounded. The messages due during the outage would also go out late, in a burst. A failed job
+says what happened and frees the gateway. The cost is that a replay started again begins from the
+start: the readings already published are written again, under the new run's timestamps.
+
+`PRIMARY_HOST_ID` is the daemon's own variable, set from `ingestion.primaryHostId` on both pods. A
+worker started without it (outside the chart) does not wait, as a node with no primary host
+configured does not.
 
 **Two identities, which is the arrangement to understand first.** `Service_Playback` is a Supabase
 principal — it reads the queue, reads the capture, writes status. The MQTT identity is **the target
@@ -952,6 +993,21 @@ Three properties of that worth keeping:
   before `0129` — is not refused, or the release introducing this would break playback on the
   rollout that delivers it.
 
+**The delivered password is tried first, and the Helm value when the broker refuses it** (`0191`).
+The credential dialog's fallback, for a re-issue whose delivery failed, is to set
+`secrets.mqttPlaybackCredentials` and upgrade. The delivered file still holds the password the
+previous delivery wrote, which the re-issue has just replaced at the broker. When the file always
+won, the worker went on using that old password after the upgrade, and every playback failed at
+CONNACK. Neither fixed order is right: if the Helm value always won, a value set once during an
+outage would override every later delivery. So the worker holds every source's password for a
+gateway, in the order delivered, Helm value, `MQTT_PLAYBACK_USER`/`MQTT_PLAYBACK_PASSWORD`. When
+the CONNACK refuses one as bad credentials (rc 4 or 5; the worker speaks MQTT 3.1.1), it tries the
+next with a new CONNECT and the next bdSeq, and plans the replay again for that bdSeq. It logs which
+source the broker accepted and tries that one first on the next job, until any of the gateway's
+passwords changes. A refusal for any other reason is not retried. The worker reports the sources
+it holds, in the order it tries them, in `playback_worker_status.credential_sources`, and the
+Start Playback dialog says which password it uses.
+
 **The empty file is the normal state and must not read as a fault.** The chart creates
 `playback_credentials.json` on every install and the pod projects it whether or not anything has
 been delivered, so a stack with no playback target presents a *blank* file rather than a missing
@@ -994,7 +1050,8 @@ resolved through `shadow_of` rather than duplicated, for the ordinary reason tha
 **The Playback gateway needs its own broker credential**, issued from the dashboard like any
 host-run gateway's. It is `is_shadow`, so the issue also delivers the password to the worker
 ([above](#issuing-a-playback-credential-delivers-it-0078)); `MQTT_PLAYBACK_CREDENTIALS`
-(`secrets.mqttPlaybackCredentials`) is a manual fallback, and a delivered password overrides it.
+(`secrets.mqttPlaybackCredentials`) is a manual fallback, which the worker tries when the broker
+refuses the delivered password.
 
 **Every job ends with the session's NDEATH, so the gateway reads `OFFLINE` between replays.** The
 worker registers that NDEATH as its Will at CONNECT and publishes it at QoS 1 before DISCONNECT,
@@ -1029,8 +1086,8 @@ answer is yes, on the real device, on the day the capture was taken.
 **The gateway offers no Archive, no Rebirth and no Edit.** Archiving the last one is refused by
 [`0067`](../supabase/migrations/archive/0067_the_playback_gateway_cannot_be_archived_away.sql) in the
 database, because `ensure_shadow_devices()` finds the gateway *by flag* and the failure would
-otherwise surface weeks later at job time. A rebirth is addressed to a node nobody is listening as —
-the playback worker only publishes and holds no subscription. And **editing is withdrawn because the
+otherwise surface weeks later at job time. A rebirth from the page would reach the worker only
+while a replay runs, and the daemon already asks for one whenever it needs it. And **editing is withdrawn because the
 form offers writes the database refuses**: `gateways_shadow_is_simulated` is `NOT is_shadow OR
 is_simulated`, so choosing Remote or Host in the Type control sets `is_simulated = false` and the
 save comes back a CHECK violation. Two of that control's three options are dead ends on this one
@@ -1047,11 +1104,51 @@ reject, a broker that refused the socket — and, the one that used to be silent
 never came or came back non-zero. `rc=4` and `rc=5` are named apart from the rest, because they are
 the two an operator fixes by re-issuing the credential rather than by looking at the broker.
 
+**A connection lost mid-replay fails the job.** A message counts as published only once paho has
+accepted it on a connection that has not dropped. A refused publish (`MQTT_ERR_NO_CONN`) or a
+disconnect paho reports ends the job `FAILED`: *publishing stopped after N message(s): the broker
+connection was lost*. Re-issuing the Playback gateway's credential is the common cause, because the
+Dynamic Security plugin drops a client whose password changes. Before this, a replay re-issued at
+message 8 of 41 ended `COMPLETED` with all 41 counted, and the historian held 7 readings.
+
 **A playback the operator stops is `CANCELLED`, not `COMPLETED`** (`0107`). `request_playback_stop()`
 can only set the flag while a job is running, and the worker reports the count it reached with no
 error, so the end state used to be indistinguishable from a capture published in full. The status
 now reads the flag, and an error still outranks it: a job that was asked to stop *and* failed is a
 failure.
+
+**A stopped playback is an outcome, not a failure.** The Capture page shows a `CANCELLED` job as a
+neutral notice saying how many messages were published before it was stopped, and the worker logs
+it as stopped by the operator, not as complete. Only `FAILED` is red.
+
+**The startup sweep says what happened to each job it fails** (`0191`). A job still `PENDING`
+never started, so nothing was published. A `RUNNING` job whose last report was 0 published nothing.
+Any other gives the count from its last report. All three used to say *publishing stopped partway*,
+including a job killed for memory before its first message. The wording names no cause: the
+worker cannot tell a restart from a kill. The worker reports progress straight after its first
+publish, and while it waits for the primary host, so `messages_total` is on the row even for a
+playback that finishes within a second.
+
+**Stop takes effect within a second, even in a long gap** (`0191`). The worker waits for each
+message's due time in slices of at most a second, and reports progress after each slice, which is
+when it reads the stop flag. It used to sleep until the next message in one call. A capture with a
+ten-minute silence kept a stopped job `RUNNING` for the whole silence, with its heartbeat frozen.
+Each report stamps `playback_jobs.progress_reported_at`. A Stop on a `RUNNING` job whose last
+report is more than a minute old ends the job in the database as `CANCELLED`, with the count it had
+reported. So a worker that has hung no longer holds the Playback gateway until it restarts. A
+worker that comes back is told to stop by its next report, and its finish leaves the row alone.
+
+**The end of a job, and the startup sweep, are retried.** `playback_finish()` is retried with
+backoff (1, 2, 4 … 30 seconds) for five minutes (`PLAYBACK_FINISH_RETRY_SECONDS`). A finish that
+never gets through leaves the row `RUNNING`, which Stop then ends as above. The startup sweep
+(`playback_reconcile_jobs()`) is retried every poll until it runs, and nothing is claimed before
+it has: a sweep that ran after a claim would fail the job just claimed. The pod's initContainer
+waits for PostgREST itself, not only for the API gateway. Before this, one `PGRST002` at either
+point left the job `RUNNING` until a restart.
+
+**The worker's heartbeat runs on a timer.** `playback_report_credentials()` is called from its own
+thread every 30 seconds, while a job runs as well as between jobs. It used to run only between
+jobs, so any playback longer than two minutes made the dialog say the worker was not running.
 
 **Past the CONNACK there is nothing to observe, and that is a property of Sparkplug rather than of
 this worker.** A publish the broker refuses is dropped with no PUBACK at QoS 0, so a job whose
@@ -1125,6 +1222,9 @@ operation with more surface.
 | `MQTT_PLAYBACK_USER` / `MQTT_PLAYBACK_PASSWORD` | `play`, and the worker's single-target fallback | none |
 | `MQTT_PLAYBACK_CREDENTIALS` | `playback_worker.py` | empty — a JSON object keyed by `sparkplug_id` |
 | `SUPABASE_PLAYBACK_KEY` | `playback_worker.py` | none — it authenticates as `Service_Playback` |
+| `PRIMARY_HOST_ID` | `playback_worker.py`'s sessions, which `play` opens too | none — no wait for STATE; the chart passes `ingestion.primaryHostId` |
+| `PLAYBACK_PRIMARY_HOST_WAIT_SECONDS` | `playback_worker.py` | `60` — how long a session waits for the primary host to be online |
+| `PLAYBACK_FINISH_RETRY_SECONDS` | `playback_worker.py` | `300` — how long recording a job's end is retried |
 | `CAPTURE_BUCKET` | `storage-init`, the dashboard, both workers | `broker-captures` |
 | `CAPTURE_FILE_SIZE_LIMIT` | `storage-init` | `104857600` (100 MiB) |
 
