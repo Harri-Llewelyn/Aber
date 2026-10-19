@@ -265,27 +265,26 @@ describe('a stored capture', () => {
   })
 
   /**
-   * The one badge that changes a decision. A birthless capture drops metrics only when the
-   * recording depends on the alias table; both branches are pinned.
+   * The one badge that changes a decision. A replay opens with the edge node's NBIRTH, so a
+   * playback refuses a birthless capture whether or not its metrics use aliases.
    */
-  it('marks a birthless capture, and says only that devices go unannounced', async () => {
+  it('marks a birthless capture, and says a playback refuses it', async () => {
     api.listCaptures.mockResolvedValue([
       { ...CAPTURE, manifest: { ...CAPTURE.manifest, birth_captured: false, uses_aliases: false } }
     ])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     expect(within(row).getByText('NO BIRTH')).toBeInTheDocument()
-    expect(within(row).getByTitle(/carries its full name/)).toBeInTheDocument()
-    expect(within(row).queryByTitle(/dropped on ingest/)).toBeNull()
+    expect(within(row).getByTitle(/a playback refuses this capture/)).toBeInTheDocument()
   })
 
-  it('says a birthless capture WILL drop metrics when it uses aliases', async () => {
+  it('says the same of a birthless capture that uses aliases', async () => {
     api.listCaptures.mockResolvedValue([
       { ...CAPTURE, manifest: { ...CAPTURE.manifest, birth_captured: false, uses_aliases: true } }
     ])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    expect(within(row).getByTitle(/dropped on ingest/)).toBeInTheDocument()
+    expect(within(row).getByTitle(/a playback refuses this capture/)).toBeInTheDocument()
   })
 
   it('does not mark one that did', async () => {
@@ -815,27 +814,17 @@ describe('playing a capture back', () => {
     expect(after.value).toBe('')
   })
 
-  it('warns hard about a birthless capture that uses aliases', async () => {
+  /** A replay opens with an NBIRTH, so the worker refuses a birthless capture, aliases or not. */
+  it.each([true, false])('warns that a birthless capture is refused (uses_aliases %s)', async (usesAliases) => {
     api.listCaptures.mockResolvedValue([
-      { ...PLAYABLE, manifest: { ...PLAYABLE.manifest, birth_captured: false, uses_aliases: true } }
-    ])
-    renderTab()
-    const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    selectRow(row); fireEvent.click(panelAction(/Play back/))
-    expect(await screen.findByText(/dropped on ingest/)).toBeInTheDocument()
-  })
-
-  /** The case that was being warned about wrongly: no birth, but every metric named in full. */
-  it('does not claim a birthless capture writes nothing when its metrics are named', async () => {
-    api.listCaptures.mockResolvedValue([
-      { ...PLAYABLE, manifest: { ...PLAYABLE.manifest, birth_captured: false, uses_aliases: false } }
+      { ...PLAYABLE, manifest: { ...PLAYABLE.manifest, birth_captured: false, uses_aliases: usesAliases } }
     ])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Play back/))
     await screen.findByLabelText('Playback gateway')
-    expect(screen.queryByText(/dropped on ingest/)).toBeNull()
-    expect(screen.getByText(/will play back normally/)).toBeInTheDocument()
+    expect(screen.getByText(/so a playback\s+refuses it/)).toBeInTheDocument()
+    expect(screen.queryByText(/will play back normally|dropped on ingest/)).toBeNull()
   })
 
   it('shows the gate refusal in the dialog', async () => {

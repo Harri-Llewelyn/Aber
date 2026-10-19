@@ -94,8 +94,24 @@ def message(offset_ms, msg_type, device=CAPTURED_DEV, metrics=None, **payload):
     return {"offset_ms": offset_ms, "topic": topic, "payload": body}
 
 
-def capture_file(messages=None):
+def births(messages):
+    """
+    What a replay opens with: an NBIRTH, then a DBIRTH for each device the messages name, all at
+    offset 0 and carrying no metrics, so they change no count the tests below assert.
+    """
+    devices = []
+    for msg in messages:
+        parts = msg["topic"].split("/")
+        if len(parts) == 5 and parts[4] not in devices:
+            devices.append(parts[4])
+    return [message(0, "NBIRTH", device=None)] + [message(0, "DBIRTH", device=d) for d in devices]
+
+
+def capture_file(messages=None, born=True):
+    """A capture file. `born` opens it with births(), as a recording from the Capture page opens."""
     messages = messages if messages is not None else [message(0, "DDATA")]
+    if born:
+        messages = births(messages) + messages
     return {
         "aber_capture_version": capture.CAPTURE_VERSION,
         "recorded_at": "2026-08-27T12:00:00+00:00",
@@ -455,7 +471,7 @@ class PlanTests(unittest.TestCase):
 
     def test_a_plan_carries_delay_topic_and_encoded_bytes(self):
         plan = self._plan()
-        delay_ms, topic, payload_bytes, payload = plan[0]
+        delay_ms, topic, payload_bytes, payload = plan[-1]
         self.assertEqual(delay_ms, 0)
         self.assertIn(GW, topic)
         # Re-encoded protobuf is what goes on the wire, so a real gateway and a playback are the
@@ -469,7 +485,7 @@ class PlanTests(unittest.TestCase):
         plan = self._plan(
             capture=capture_file([message(0, "DDATA"), message(60_000, "DDATA")]), speed=60.0,
         )
-        self.assertEqual([d for d, _, _, _ in plan], [0, 1000])
+        self.assertEqual([d for d, _, _, _ in plan][-2:], [0, 1000])
 
     def test_an_unknown_capture_version_is_refused(self):
         bad = capture_file()
@@ -497,16 +513,16 @@ class PlanTests(unittest.TestCase):
 
     def test_a_group_override_applies_to_every_message(self):
         plan = self._plan(group="Replay-Lab")
-        self.assertTrue(plan[0][1].startswith("spBv1.0/Replay-Lab/"))
-        self.assertIn(DEV_A, plan[0][1])
+        self.assertTrue(all(topic.startswith("spBv1.0/Replay-Lab/") for _, topic, _, _ in plan))
+        self.assertIn(DEV_A, plan[-1][1])
 
     def test_two_devices_map_independently(self):
         msgs = [message(0, "DDATA", device=CAPTURED_DEV), message(10, "DDATA", device=DEV_B)]
         plan = self._plan(
             capture=capture_file(msgs), device_map={CAPTURED_DEV: DEV_A, DEV_B: DEV_B},
         )
-        self.assertIn(DEV_A, plan[0][1])
-        self.assertIn(DEV_B, plan[1][1])
+        self.assertIn(DEV_A, plan[-2][1])
+        self.assertIn(DEV_B, plan[-1][1])
 
 
 class SanityWindowTests(unittest.TestCase):
@@ -540,8 +556,8 @@ class SanityWindowTests(unittest.TestCase):
             )
 
     def _gap_capture(self, stamp_offset_ms, **metric):
-        """One DBIRTH at the capture epoch whose only metric is stamped `stamp_offset_ms` from it."""
-        return capture_file([message(0, "DBIRTH", metrics=[
+        """One DDATA at the capture epoch whose only metric is stamped `stamp_offset_ms` from it."""
+        return capture_file([message(0, "DDATA", metrics=[
             dict({"name": "Systems/TEMPERATURE", "timestamp": EPOCH + stamp_offset_ms,
                   "double_value": 20.0}, **metric),
         ])])
@@ -550,8 +566,8 @@ class SanityWindowTests(unittest.TestCase):
         plan = capture.plan_playback(document, GW, DEFAULT_MAP, NOW, speed=speed)
         return capture.window_outcome(plan, NOW)[2]
 
-    def test_a_slow_speed_stretches_how_old_a_reading_is_before_its_birth(self):
-        # A metric stamped 20 minutes before its birth message. The gap is divided by the
+    def test_a_slow_speed_stretches_how_old_a_reading_is_before_its_message(self):
+        # A metric stamped 20 minutes before its message. The gap is divided by the
         # speed, so it is 20 minutes at 1x, 200 minutes at 0.1x and 33 hours at 0.01x, which is
         # past the 24-hour bound. A faster speed shrinks it.
         document = self._gap_capture(-20 * 60 * 1000)
@@ -622,7 +638,7 @@ class SanityWindowTests(unittest.TestCase):
             {"name": "Systems/TEMPERATURE", "timestamp": 0, "double_value": 20.0},
         ])])
         plan = capture.plan_playback(zeroed, GW, DEFAULT_MAP, NOW)
-        self.assertEqual(plan[0][3]["metrics"][0]["timestamp"], 0, "rebasing moved a zero")
+        self.assertEqual(plan[-1][3]["metrics"][0]["timestamp"], 0, "rebasing moved a zero")
         self.assertEqual(capture.unsane_timestamps(plan, NOW), [])
 
     def test_a_payload_without_a_clock_is_stamped_on_arrival(self):
@@ -632,7 +648,7 @@ class SanityWindowTests(unittest.TestCase):
             {"name": "Systems/TEMPERATURE", "double_value": 20.0},
         ])])
         plan = capture.plan_playback(unstamped, GW, DEFAULT_MAP, NOW)
-        self.assertIsNone(plan[0][3]["timestamp"], "rebasing materialised a payload clock")
+        self.assertIsNone(plan[-1][3]["timestamp"], "rebasing materialised a payload clock")
         self.assertEqual(capture.unsane_timestamps(plan, NOW), [])
 
     def test_a_message_that_loses_one_metric_keeps_the_other(self):
@@ -755,7 +771,7 @@ class CaptureFileShapeTests(unittest.TestCase):
         reloaded = json.loads(json.dumps(original))
         self.assertEqual(reloaded, original)
         plan = capture.plan_playback(reloaded, GW, DEFAULT_MAP, NOW)
-        self.assertEqual(len(plan), 1)
+        self.assertEqual(len(plan), len(original["messages"]))
 
     def test_a_hand_edited_value_reaches_the_wire(self):
         # THE FEATURE'S WHOLE POINT: reproduce a fault by editing a number. If this stops being
@@ -764,7 +780,7 @@ class CaptureFileShapeTests(unittest.TestCase):
             {"name": "Systems/TEMPERATURE", "timestamp": EPOCH, "double_value": 999.9,
              "datatype": 10},
         ])])
-        _, _, payload_bytes, _ = capture.plan_playback(edited, GW, DEFAULT_MAP, NOW)[0]
+        _, _, payload_bytes, _ = capture.plan_playback(edited, GW, DEFAULT_MAP, NOW)[-1]
         decoded = sparkplug_b_pb2.Payload()
         decoded.ParseFromString(payload_bytes)
         self.assertEqual(decoded.metrics[0].double_value, 999.9)
@@ -868,10 +884,10 @@ class WorkerOutOfWindowTests(unittest.TestCase):
         self.assertIn("too old or too far in the future", error)
 
     def test_a_slow_speed_is_named_as_a_cause_and_1x_as_the_retry(self):
-        # Every metric is stamped 20 minutes before its birth: in window at 1x, 33 hours behind
+        # Every metric is stamped 20 minutes before its message: in window at 1x, 33 hours behind
         # at 0.01x. The refusal says the speed did it and what to try, and does not say the
         # opposite.
-        document = capture_file([message(0, "DBIRTH", metrics=[
+        document = capture_file([message(0, "DDATA", metrics=[
             {"name": "Systems/TEMPERATURE", "timestamp": EPOCH - 20 * 60 * 1000,
              "double_value": 20.0},
         ])])
@@ -903,7 +919,7 @@ class WorkerOutOfWindowTests(unittest.TestCase):
     def test_the_command_line_refusal_reads_the_same(self):
         import argparse
         import tempfile
-        document = capture_file([message(0, "DBIRTH", metrics=[
+        document = capture_file([message(0, "DDATA", metrics=[
             {"name": "Systems/TEMPERATURE", "timestamp": EPOCH - 20 * 60 * 1000,
              "double_value": 20.0},
         ])])

@@ -357,6 +357,37 @@ start unless `MQTT_PLAYBACK_USER` is the gateway named by `--as-gateway`.
 needs an explicit `--map` onto a 24-character `dev…` id. An unmapped device is refused rather than
 passed through.
 
+### A replay is its own Sparkplug session
+
+Every replay publishes as the same edge node, the Playback gateway, and the daemon keeps one alias
+table per edge node. So a replay has to be a proper Sparkplug session of its own, or it reads
+through what the previous replay declared. Before 1.5 a capture whose data came before its NBIRTH,
+or that had none, had its aliases resolved through the last replay's table: its readings were
+filed under another capture's metric names, and the job reported success.
+
+`plan_playback()` builds the plan as one session, as Sparkplug 3.0.0 defines one: *"A Sparkplug
+session begins with an MQTT CONNECT and then the NBIRTH message. A Sparkplug session ends with an
+NDEATH."*
+
+- **A capture with no NBIRTH is refused**, with a message saying so and that recording it again
+  fixes it. There is nothing to replay it as: the data after a birth is read through what the birth
+  declares (`tck-id-payloads-alias-birth-requirement`), and synthesising one would declare metrics
+  the edge node never declared. The Capture page's recorder asks the edge node to rebirth when it
+  starts, so a capture from the page holds one unless the edge node ignored the request.
+- **What a session cannot carry is left out**:
+  everything before the first NBIRTH (data already in flight when a recording armed, which a fast
+  edge node delivers ahead of the birth the recorder asked for); a device's messages before its
+  DBIRTH, and after its DDEATH until its next DBIRTH (`tck-id-payloads-dbirth-order`,
+  `-ddata-order`); and everything after a recorded NDEATH until the next NBIRTH. An NBIRTH also
+  needs the devices born again, because it resets every alias the node and its devices declared.
+  Each message keeps its recorded delay, so a replay that left out its first seconds waits them.
+- **A plan with no NDATA or DDATA left is refused** as holding only birth certificates: it would
+  publish, report COMPLETED, and write nothing.
+- **bdSeq is the session's**, carried by every replayed NBIRTH and NDEATH, so births within one
+  session repeat it (`tck-id-operational-behavior-data-commands-rebirth-action-3`) and a recorded
+  NDEATH ends it: the worker publishes that death, disconnects, and opens the next session
+  with the next bdSeq (`tck-id-topics-nbirth-bdseq-increment`).
+
 ### Rebasing, and why it is also the speed control
 
 `timestamp_refusal()` rejects any metric more than 24 hours behind now (7 days when it is flagged
@@ -390,6 +421,11 @@ help.
 and `TELEMETRY_MAX_HISTORICAL_AGE_SECONDS`, which it reads from the same environment variable, and
 the chart passes the same value to the playback worker), and `test_capture_worker.py` holds them to
 the daemon's. A capture of a gateway replaying its buffer after an outage therefore plays.
+
+**Only DDATA is judged.** `process_ddata()` is the only place the daemon applies the window, and a
+birth or a node message writes no reading. Every replay opens with an NBIRTH whose bdSeq metric is
+stamped at playback, so counting birth metrics as kept would let a plan whose every reading falls
+outside the window pass the worker's "would write nothing" refusal.
 
 **The capture's epoch is the first message's own clock**, or the time that message was received
 when its payload carries none. It is never the time the recording ended: the offsets count from the

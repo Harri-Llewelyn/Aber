@@ -544,9 +544,13 @@ class TheWindowIsTheDaemons(unittest.TestCase):
                     "offset_ms": offset, "topic": "spBv1.0/Aber/DDATA/%s/%s" % (gateway, device),
                     "payload": {"timestamp": epoch + offset, "metrics": [metric]},
                 })
+        # A replay opens with the node's birth and the device's (capture.plan_playback()).
+        births = [{"offset_ms": 0, "topic": "spBv1.0/Aber/%s/%s" % (kind, path),
+                   "payload": {"timestamp": epoch, "metrics": []}}
+                  for kind, path in (("NBIRTH", gateway), ("DBIRTH", gateway + "/" + device))]
         document = {
             "aber_capture_version": capture.CAPTURE_VERSION, "capture_epoch_ms": epoch,
-            "messages": sorted(messages, key=lambda m: m["offset_ms"]),
+            "messages": births + sorted(messages, key=lambda m: m["offset_ms"]),
         }
         for speed in (0.01, 0.1, 1.0, 10.0):
             for encoding in (capture.ENCODING_PROTOBUF, capture.ENCODING_JSON):

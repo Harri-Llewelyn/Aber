@@ -193,24 +193,17 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
         </div>
       )}
 
-      {/* Warned only when it is true: a missing birth costs metrics only when the recording uses
-          aliases, which `uses_aliases` records at capture time. */}
-      {capture.manifest?.birth_captured === false && capture.manifest?.uses_aliases && (
+      {/* A replay opens with the edge node's NBIRTH, so the worker refuses a capture without one
+          (capture.plan_playback()). */}
+      {capture.manifest?.birth_captured === false && (
         <div className="callout callout-warning">
           <IconShieldAlert size={14} className="callout-icon" />
           <div>
-            This capture contains no <code>NBIRTH</code> or <code>DBIRTH</code> and its metrics are
-            carried by <strong>alias</strong>. Nothing can resolve them, so every aliased metric is
-            dropped on ingest — the playback will report success and write nothing.
+            This capture contains no <code>NBIRTH</code> or <code>DBIRTH</code>, so a playback
+            refuses it: a replay opens with the edge node’s birth certificate. Record it again.
+            The recorder asks the edge node for its birth certificate when it starts.
           </div>
         </div>
-      )}
-      {capture.manifest?.birth_captured === false && !capture.manifest?.uses_aliases && (
-        <p className="form-hint">
-          This capture has no birth certificate. Its metrics carry full names, so they will play back
-          normally — but the Playback gateway's devices are not announced and stay OFFLINE until
-          they birth on their own.
-        </p>
       )}
 
       <div className="form-group">

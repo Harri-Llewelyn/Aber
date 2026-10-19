@@ -658,17 +658,16 @@ def node_death(bdseq, timestamp_ms):
 def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, group=None,
                   bdseq=None):
     """
-    Turn a capture into an ordered list of (delay_ms, topic, payload_bytes).
+    Turn a capture into an ordered list of (delay_ms, topic, payload_bytes, payload_dict), as one
+    Sparkplug session of `gateway_id`. Pure: every refusal is decided here, with no broker and no
+    clock, so the publishing loop cannot make a new decision.
 
-    PURE, AND THAT IS THE POINT. Everything that can be wrong about a playback -- an unmapped
-    device, a rebasing that lands outside the sanity window, a malformed topic -- is decided here,
-    with no broker and no clock, so the tests can assert it and `play --dry-run` can show it.
-    Publishing is then a loop that cannot make a new decision.
-
-    `bdseq` is the bdSeq of the MQTT session the plan starts in; None leaves recorded numbers as
-    they are. Every NBIRTH and NDEATH carries its session's bdSeq, so births within one session
-    repeat it (tck-id-operational-behavior-data-commands-rebirth-action-3), and a recorded NDEATH
-    ends its session: the messages after it are numbered as the next one, wrapping 255 to 0.
+    A session opens with an NBIRTH, so a capture without one is refused. Left out: what comes
+    before the first NBIRTH, after a recorded NDEATH until the next NBIRTH, and a device's messages
+    outside its DBIRTH..DDEATH. `bdseq` is the bdSeq of the MQTT session the plan starts in,
+    carried by every NBIRTH and NDEATH; a recorded NDEATH ends it and the next is one more,
+    wrapping 255 to 0. None keeps the recorded numbers. README.md -> "A replay is its own Sparkplug
+    session".
     """
     version = capture.get("aber_capture_version")
     if version != CAPTURE_VERSION:
@@ -700,24 +699,54 @@ def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, gro
 
     plan = []
     session = bdseq
+    born = False        # an NBIRTH has opened the session and no NDEATH has ended it
+    devices = set()     # devices whose DBIRTH this session has published
+    births = data = left_out = 0
     for msg in messages:
         topic, payload = rewrite_identity(msg["topic"], msg["payload"], gateway_id, device_map)
         _, msg_type, _, device = split_topic(topic)
+        if msg_type == "NBIRTH":
+            born, devices = True, set()
+            births += 1
+        elif not born or (msg_type in ("DDATA", "DDEATH") and device not in devices):
+            left_out += 1
+            continue
+        elif msg_type == "DBIRTH":
+            devices.add(device)
+        elif msg_type == "DDEATH":
+            devices.discard(device)
         if group:
             topic = "spBv1.0/%s/%s/%s" % (group, msg_type, gateway_id)
             if device:
                 topic = "%s/%s" % (topic, device)
         payload = rebase_payload(payload, capture_epoch_ms, play_epoch_ms, speed)
-        if session is not None and device is None and msg_type in ("NBIRTH", "NDEATH"):
+        if msg_type == "NDEATH":
+            born, devices = False, set()
+        if msg_type in ("NDATA", "DDATA"):
+            data += 1
+        if session is not None and msg_type in ("NBIRTH", "NDEATH"):
             payload = with_bdseq(payload, session)
             if msg_type == "NDEATH":
                 session = (session + 1) % 256
         delay_ms = int(msg["offset_ms"] / speed)
-        # Defaulting an absent encoding to protobuf is for captures written before the field
-        # existed, and for a hand-written one. It is the Sparkplug B default and the daemon's
-        # first branch, so it is the right thing to assume when nothing says otherwise.
+        # An absent encoding is protobuf: the Sparkplug B default and the daemon's first branch.
         encoding = msg.get("encoding", ENCODING_PROTOBUF)
         plan.append((delay_ms, topic, encode_wire_payload(payload, encoding), payload))
+
+    if not births:
+        raise CaptureError(
+            "this capture holds no NBIRTH, the edge node's birth certificate, so it cannot be "
+            "replayed as a Sparkplug session: a session opens with one, and the data after it is "
+            "read through what it declares. Record it again on the Capture page, which asks the "
+            "edge node for its birth certificate when the recording starts."
+        )
+    if not data:
+        raise CaptureError(
+            "this capture holds only birth certificates and no NDATA or DDATA%s: nothing to "
+            "replay." % (
+                ", once the %d message(s) recorded outside a Sparkplug session are left out "
+                "(a device's data replays only after its DBIRTH)" % left_out if left_out else "")
+        )
     return plan
 
 
@@ -725,46 +754,19 @@ def window_outcome(plan, now_ms):
     """
     How the daemon's sanity window will treat a plan: (lossy, metrics_kept, metrics_dropped).
 
-    `lossy` holds one (topic, timestamp, at_send_ms) per message that would lose at least one
-    metric, naming the first offending stamp. The two counts are METRICS, and they are what decides
-    whether a playback can write anything at all: a plan every message of which loses a metric is
-    not the same claim as a plan that writes nothing, and reading it as one refuses a playback the
-    daemon would have filed in full.
-
-    THE RULE IS process_ddata()'S, RESTATED HERE SO A CAPTURE CAN BE CHECKED BEFORE IT IS
-    PUBLISHED. A metric is judged on ITS OWN timestamp and falls back to the payload's only when it
-    has none -- where none means absent OR zero, because `HasField` plus `> 0` is the test the
-    daemon applies. The payload's clock is a verdict on NOTHING by itself: an absent or zero
-    payload timestamp becomes the arrival time there, which is in window by construction. So an
-    edge node with a skewed clock stamping payloads whose metrics each carry the device's own time
-    costs nothing, which is the case the daemon's per-metric rule exists for.
-
-    Reported BEFORE publishing rather than discovered afterwards, because the daemon's answer to
-    an out-of-window metric is a counter and not an error -- so without this a playback reports
-    success and writes nothing.
-
-    A metric flagged `is_historical` is judged by the historical bound, as the daemon does, and
-    the flag is read as the daemon reads it: only a true one counts.
-
-    THE SPEED IS ALREADY IN THE PLAN, so this judges what the daemon will see at the chosen speed.
-    A stamp is rebased to `play_epoch + (stamp - epoch) / speed` and its message is sent at
-    `now + offset / speed`, so the gap between the two is `(stamp - receipt) / speed`. Measuring at
-    `now_ms + delay_ms` rather than at plan time is what makes that true. A stamp at its message's
-    own receipt time has no gap, and stays in window at any speed. Any other gap is stretched by a
-    slow speed: a metric stamped 20 minutes before its birth message is 20 minutes behind at 1x
-    and 33 hours behind at 0.01x.
-
-    What fails is therefore a gap that the speed makes too wide, or one that was already wide:
-
-      * a metric carrying a genuinely old reading, which the daemon would have rejected live too;
-      * a device whose clock is skewed against the recorder's, which only becomes visible once
-        the capture is rebased onto a different absolute time;
-      * a hand-edited timestamp, which is a case this tool invites by design.
+    `lossy` holds (topic, first offending stamp, at_send_ms) for each message that would lose a
+    metric. The rule is process_ddata()'s, the only place the daemon applies the window, so only
+    DDATA is judged: a birth or a node message writes no reading. A metric is judged on its own
+    timestamp, or its payload's when it has none (absent or zero), or its arrival when neither has
+    one; a true `is_historical` takes the longer bound. Each message is judged when it is sent,
+    `now_ms + delay_ms`, so the speed the plan was made at is in the verdict. README.md ->
+    "Rebasing, and why it is also the speed control".
     """
     lossy = []
     kept = dropped = 0
     for delay_ms, topic, _, payload in plan:
-        # The clock at the moment this message is actually published, not at planning time.
+        if split_topic(topic)[1] != "DDATA":
+            continue
         at_send_ms = now_ms + delay_ms
         payload_ts = payload.get("timestamp")
         if payload_ts is None or payload_ts <= 0:
