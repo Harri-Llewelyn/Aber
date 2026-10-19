@@ -1461,9 +1461,9 @@ dashboard and a broker capture ask too, past the rate limit below, through
   next one too, and retrying per message is exactly the flood the limit exists to prevent.
 - The daemon ignores `NCMD`/`DCMD` on its own wildcard subscription, so its own request coming
   straight back is not read as edge-node traffic.
-- The ingestion role permits **exactly this and nothing more**: it holds read of `spBv1.0/#` plus
-  publish of `spBv1.0/+/NCMD/+`, so the daemon can ask for a rebirth and cannot publish DBIRTH or
-  DDATA at all. The shared `gateway` role (`spBv1.0/+/+/%u/#`, the username being the gateway's
+- The ingestion role permits **exactly this and nothing more** in the Sparkplug namespace: it holds
+  read of `spBv1.0/#`, and publish of `spBv1.0/+/NCMD/+` and of its own primary-host STATE. So the
+  daemon can ask for a rebirth and cannot publish DBIRTH or DDATA at all. The shared `gateway` role (`spBv1.0/+/+/%u/#`, the username being the gateway's
   `sparkplug_id`) covers each gateway receiving it.
   That split is the point: this credential cannot forge telemetry for a device that is correctly
   bound to its gateway — the one forgery `verify_gateway_binding()` cannot detect, because such a
