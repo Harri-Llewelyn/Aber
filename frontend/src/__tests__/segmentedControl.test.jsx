@@ -1,21 +1,32 @@
 import React, { useState } from 'react'
 import { render, screen, fireEvent, act, within } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
 import { SegmentedControl } from '../components/common/SegmentedControl'
 import { IconSun, IconMoon } from '../components/common/Icons'
+
+const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8').replace(/\r\n/g, '\n')
+/** The body of the rule whose selector starts a line and is exactly `selector`. */
+const rule = (selector) => {
+  const at = APP_CSS.indexOf(`\n${selector} {`)
+  if (at < 0) return undefined
+  const open = at + selector.length + 3
+  return APP_CSS.slice(open, APP_CSS.indexOf('}', open))
+}
 
 /**
  * The shared segmented control. What is pinned: on its own it is a WAI-ARIA radio group, one Tab
  * stop whose arrow keys move and choose, wrapping; inside a menu it is a group of menuitemradio
- * items, each a Tab stop, whose Left and Right move without choosing; an icon-only segment is named
- * by its label, which is also its tooltip; and the choice is marked by more than colour.
+ * items, each a Tab stop, whose Left and Right move without choosing; every segment shows its icon
+ * and its name, and its accessible name and tooltip start with that name, with the count after it;
+ * and the choice is marked by more than colour.
  */
 
 const OPTIONS = [
-  { id: 'all', label: 'All, 4' },
-  { id: 'info', label: 'Info, 2', tone: 'accent' },
-  { id: 'warning', label: 'Warnings, 1', tone: 'warning' },
-  { id: 'alert', label: 'Alerts, 1', tone: 'danger' }
+  { id: 'all', label: 'All', count: 4 },
+  { id: 'info', label: 'Info', count: 2, tone: 'accent' },
+  { id: 'warning', label: 'Warnings', count: 1, tone: 'warning' }
 ]
 
 function Controlled({ initial = 'all', menu = false, options = OPTIONS, onChange }) {
@@ -38,40 +49,40 @@ describe('SegmentedControl as a radio group', () => {
     render(<Controlled initial="info" />)
     const group = screen.getByRole('radiogroup', { name: 'Show' })
     const radios = within(group).getAllByRole('radio')
-    expect(radios.map(r => r.textContent)).toEqual(['All, 4', 'Info, 2', 'Warnings, 1', 'Alerts, 1'])
-    expect(radios.map(r => r.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false', 'false'])
+    expect(radios.map(r => r.textContent)).toEqual(['All', 'Info', 'Warnings'])
+    expect(radios.map(r => r.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false'])
   })
 
   it('is one Tab stop: the chosen segment', () => {
     render(<Controlled initial="warning" />)
     const stops = screen.getAllByRole('radio').map(r => r.tabIndex)
-    expect(stops).toEqual([-1, -1, 0, -1])
+    expect(stops).toEqual([-1, -1, 0])
   })
 
   it('moves to the next segment and chooses it with Right or Down, wrapping at the end', () => {
     const onChange = vi.fn()
-    render(<Controlled initial="warning" onChange={onChange} />)
-    act(() => { radio('Warnings, 1').focus() })
+    render(<Controlled initial="info" onChange={onChange} />)
+    act(() => { radio('Info, 2').focus() })
 
-    fireEvent.keyDown(radio('Warnings, 1'), { key: 'ArrowRight' })
-    expect(radio('Alerts, 1')).toHaveFocus()
-    expect(radio('Alerts, 1')).toHaveAttribute('aria-checked', 'true')
-    expect(radio('Alerts, 1').tabIndex).toBe(0)
+    fireEvent.keyDown(radio('Info, 2'), { key: 'ArrowRight' })
+    expect(radio('Warnings, 1')).toHaveFocus()
+    expect(radio('Warnings, 1')).toHaveAttribute('aria-checked', 'true')
+    expect(radio('Warnings, 1').tabIndex).toBe(0)
 
-    fireEvent.keyDown(radio('Alerts, 1'), { key: 'ArrowDown' })
+    fireEvent.keyDown(radio('Warnings, 1'), { key: 'ArrowDown' })
     expect(radio('All, 4')).toHaveFocus()
     expect(radio('All, 4')).toHaveAttribute('aria-checked', 'true')
-    expect(onChange.mock.calls).toEqual([['alert'], ['all']])
+    expect(onChange.mock.calls).toEqual([['warning'], ['all']])
   })
 
   it('moves back with Left or Up, wrapping at the start', () => {
     render(<Controlled initial="all" />)
     act(() => { radio('All, 4').focus() })
     fireEvent.keyDown(radio('All, 4'), { key: 'ArrowLeft' })
-    expect(radio('Alerts, 1')).toHaveFocus()
-    expect(radio('Alerts, 1')).toHaveAttribute('aria-checked', 'true')
-    fireEvent.keyDown(radio('Alerts, 1'), { key: 'ArrowUp' })
+    expect(radio('Warnings, 1')).toHaveFocus()
     expect(radio('Warnings, 1')).toHaveAttribute('aria-checked', 'true')
+    fireEvent.keyDown(radio('Warnings, 1'), { key: 'ArrowUp' })
+    expect(radio('Info, 2')).toHaveAttribute('aria-checked', 'true')
   })
 
   it('chooses on a click, and ignores keys that are not arrows', () => {
@@ -85,20 +96,35 @@ describe('SegmentedControl as a radio group', () => {
     expect(radio('Info, 2')).toHaveAttribute('aria-checked', 'true')
   })
 
-  it('names an icon-only segment by its label, and uses the same text as its tooltip', () => {
+  it('shows each segment\'s icon beside its name, and names it starting with that word', () => {
+    render(<Controlled options={[
+      { id: 'all', label: 'All', count: 4, icon: <IconSun size={14} /> },
+      { id: 'info', label: 'Info', count: 2, icon: <IconMoon size={14} /> }
+    ]} />)
+    const info = radio('Info, 2')
+    expect(info.querySelector('.segmented-icon svg')).toBeTruthy()
+    expect(info.querySelector('.segmented-icon')).toHaveAttribute('aria-hidden', 'true')
+    expect(info.querySelector('.segmented-label')).toHaveTextContent('Info')
+    // WCAG 2.5.3: the accessible name starts with the visible word, so "Info" chooses it by voice.
+    expect(info.getAttribute('aria-label').startsWith(info.textContent)).toBe(true)
+    expect(info).toHaveAttribute('title', 'Info, 2')
+  })
+
+  it('names a segment with no count by its visible name alone', () => {
     render(<Controlled options={[
       { id: 'light', label: 'Light', icon: <IconSun size={14} /> },
       { id: 'dark', label: 'Dark', icon: <IconMoon size={14} /> }
     ]} initial="dark" />)
     const dark = radio('Dark')
+    expect(dark.textContent).toBe('Dark')
+    expect(dark).not.toHaveAttribute('aria-label')
     expect(dark).toHaveAttribute('title', 'Dark')
-    expect(dark.textContent).toBe('')
     expect(dark.querySelector('.segmented-icon')).toHaveAttribute('aria-hidden', 'true')
   })
 
   it('marks the choice with a class that fills and borders it, and gives a segment its tone', () => {
-    render(<Controlled initial="alert" />)
-    expect(radio('Alerts, 1')).toHaveClass('segmented-option', 'segmented-option-checked', 'signal-tone-danger')
+    render(<Controlled initial="warning" />)
+    expect(radio('Warnings, 1')).toHaveClass('segmented-option', 'segmented-option-checked', 'signal-tone-warning')
     expect(radio('All, 4')).not.toHaveClass('segmented-option-checked')
     expect(radio('All, 4').className).not.toMatch(/signal-tone/)
   })
@@ -144,5 +170,23 @@ describe('SegmentedControl in a menu', () => {
     expect(onChange).toHaveBeenCalledWith('light')
     expect(item('Light')).toHaveAttribute('aria-checked', 'true')
     expect(item('Light').tagName).toBe('BUTTON')
+  })
+})
+
+/** Where it is drawn, asserted against App.css because jsdom does no layout. */
+describe('the stylesheet', () => {
+  it('spaces a segment\'s name from its icon', () => {
+    expect(rule('.segmented-option')).toMatch(/gap:\s*5px/)
+  })
+
+  it('stretches the filter and the theme switch across their rows, sharing them equally', () => {
+    for (const row of ['.notif-filter', '.user-popover-theme']) {
+      expect(rule(`${row} .segmented`)).toMatch(/display:\s*flex/)
+      expect(rule(`${row} .segmented-option`)).toMatch(/flex:\s*1/)
+    }
+  })
+
+  it('gives the theme row no indent for a label it no longer has', () => {
+    expect(rule('.user-popover-theme')).toMatch(/padding:\s*5px 12px;/)
   })
 })

@@ -602,18 +602,11 @@ html, body, #root {
 /* The item's own label grows to fill the row. */
 .user-popover-action > span { flex: 1; min-width: 0; }
 
-/* The Theme row: its label where the other rows' labels start (after their 14px icon and 8px gap),
-   and the Light/Dark switch, a SegmentedControl, at the right edge. */
-.user-popover-theme {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 5px 12px 5px 34px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-primary);
-}
+/* The Theme row: the Light/Dark switch, a SegmentedControl, across the whole row with its two
+   segments sharing it equally. Its group is named Theme, so the row needs no visible label. */
+.user-popover-theme { padding: 5px 12px; }
+.user-popover-theme .segmented { display: flex; }
+.user-popover-theme .segmented-option { flex: 1; }
 
 .user-popover-action:hover { background: var(--bg-glass); }
 .user-popover-action:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -2461,9 +2454,10 @@ td.row-actions, th.row-actions {
 }
 
 /* ===== Segmented control ===== */
-/* One outlined pill holding a few exclusive choices (common/SegmentedControl.jsx): the notification
-   filter and the account menu's theme switch. The chosen segment takes a sunken fill and a border,
-   so the choice does not rest on colour alone (WCAG 1.4.1). */
+/* One outlined pill holding a few exclusive choices, each an icon and its name
+   (common/SegmentedControl.jsx): the notification filter and the account menu's theme switch. The
+   chosen segment takes a sunken fill and a border, so the choice does not rest on colour alone
+   (WCAG 1.4.1). */
 .segmented {
   display: inline-flex;
   align-items: center;
@@ -2477,6 +2471,7 @@ td.row-actions, th.row-actions {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 5px;
   min-width: 34px;
   height: 24px;
   padding: 0 10px;
@@ -2501,6 +2496,7 @@ td.row-actions, th.row-actions {
 }
 
 .segmented-icon { display: inline-flex; }
+.segmented-label { white-space: nowrap; }
 
 /* The chosen icon takes its option's tone. An option with none leaves --signal-tone undefined,
    which makes this colour invalid at computed-value time, so the icon inherits --text-primary. */

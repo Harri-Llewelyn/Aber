@@ -18,9 +18,10 @@ export const POLL_INTERVAL_MS = 15000
  * table, because a view cannot be in a publication. The initial fetch primes the known set so a
  * page load does not toast everything already firing.
  *
- * A firing toast carries the alert name only; the notification history keeps the summary too. Both
+ * A firing toast carries the alert name only; the summary is in the alert counter's list. Both
  * toasts, firing and resolved, are in the Alert group, whatever the severity, and both link to the
- * rule in Grafana Alerting, where its thresholds, silences and history are.
+ * rule in Grafana Alerting, where its thresholds, silences and history are. Neither is recorded in
+ * the bell's history: the alert counter shows what is firing, and Grafana keeps what has fired.
  */
 export function usePlatformAlerts(showToast) {
   const [active, setActive] = useState([])
@@ -58,11 +59,7 @@ export function usePlatformAlerts(showToast) {
           showToastRef.current?.(
             row.alert_name,
             row.severity === 'critical' ? 'error' : 'warning',
-            {
-              detail: `${row.alert_name}${row.summary ? ` — ${row.summary}` : ''}`,
-              group: 'alert',
-              to: grafanaAlertUrl(row.alert_name)
-            }
+            { group: 'alert', to: grafanaAlertUrl(row.alert_name), record: false }
           )
         }
       }
@@ -70,7 +67,7 @@ export function usePlatformAlerts(showToast) {
       // learns to ignore, and "it recovered" is the half that tells them they can stop looking.
       for (const [fingerprint, row] of knownRef.current) {
         if (!next.has(fingerprint)) {
-          showToastRef.current?.(`Resolved — ${row.alert_name}`, 'success', { group: 'alert', to: grafanaAlertUrl(row.alert_name) })
+          showToastRef.current?.(`Resolved — ${row.alert_name}`, 'success', { group: 'alert', to: grafanaAlertUrl(row.alert_name), record: false })
         }
       }
     }

@@ -381,10 +381,8 @@ function UserMenu({ persona, userRole, onSignOut, theme, onChangeTheme, onReport
           </button>
 
           {/* The themes as a switch, the current one checked: the same setting as Profile >
-              Appearance. The group carries the name "Theme", so the visible label is not read
-              twice. */}
+              Appearance. */}
           <div className="user-popover-theme">
-            <span aria-hidden="true">Theme</span>
             <SegmentedControl menu label="Theme" value={theme} onChange={onChangeTheme} options={THEME_SEGMENTS} />
           </div>
 

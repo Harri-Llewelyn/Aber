@@ -200,6 +200,10 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['error bell badge',               '--danger-text',  on(paint('.notif-badge-error', 'background-image'), card),   AA_TEXT],
     // The notification list: the timestamp is the dimmest text in it.
     ['notification time',              '--text-dim',     card,                              AA_TEXT],
+    // A segment's name is text now, not only a tooltip: muted on the card, and the chosen one on
+    // its sunken fill. Both the filter and the account menu sit on --bg-card.
+    ['segment name',                   tokenIn(paint('.segmented-option', 'color')),            card, AA_TEXT],
+    ['chosen segment name',            tokenIn(paint('.segmented-option-checked', 'color')),    on(paint('.segmented-option-checked'), card), AA_TEXT],
   ]
 
   it.each(cases)('%s clears its threshold', (label, token, bg, threshold) => {

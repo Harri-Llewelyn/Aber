@@ -92,7 +92,7 @@ describe('the stored destination, read back', () => {
 
   it('keeps an in-app path and a Grafana URL', () => {
     store([
-      { id: 2, msg: 'Spindle Overtemperature', type: 'error', group: 'alert', to: grafanaAlertUrl('Spindle Overtemperature'), at: 2 },
+      { id: 2, msg: 'Spindle Overtemperature', type: 'error', group: 'warning', to: grafanaAlertUrl('Spindle Overtemperature'), at: 2 },
       { id: 1, msg: 'New device', type: 'info', to: '/devices/quarantine', at: 1 }
     ])
     expect(readStoredHistory().map(e => e.to)).toEqual([grafanaAlertUrl('Spindle Overtemperature'), '/devices/quarantine'])
@@ -140,7 +140,7 @@ describe('a toast with a destination', () => {
 
   it('opens Grafana in a new tab, marked as leaving the dashboard', () => {
     render(<Harness />)
-    act(() => { hook.showToast('Belt Slip', 'warning', { group: 'alert', to: grafanaAlertUrl('Belt Slip') }) })
+    act(() => { hook.showToast('Belt Slip', 'warning', { group: 'alert', to: grafanaAlertUrl('Belt Slip'), record: false }) })
     const link = screen.getByRole('link', { name: /Belt Slip/ })
     expect(link).toHaveAttribute('target', '_blank')
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
@@ -158,7 +158,7 @@ describe('a toast with a destination', () => {
 
 describe('a history row with a destination', () => {
   const rows = [
-    { id: 2, msg: 'Spindle Overtemperature', type: 'error', group: 'alert', to: grafanaAlertUrl('Spindle Overtemperature'), at: Date.now(), read: true, count: 1 },
+    { id: 2, msg: 'Spindle Overtemperature', type: 'error', group: 'warning', to: grafanaAlertUrl('Spindle Overtemperature'), at: Date.now(), read: true, count: 1 },
     { id: 1, msg: 'New device', type: 'info', group: 'info', to: '/devices/quarantine', at: Date.now(), read: true, count: 1 }
   ]
   const openList = () => {

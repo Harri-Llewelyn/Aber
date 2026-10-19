@@ -326,6 +326,20 @@ describe('Merged navigation shell', () => {
       expect(document.documentElement).toHaveAttribute('data-theme', 'light')
     })
 
+    it('shows Light and Dark beside the sun and the moon, with no separate Theme text in the menu', async () => {
+      await renderShell()
+      fireEvent.click(trigger())
+
+      const menu = screen.getByRole('menu')
+      const theme = within(menu).getByRole('group', { name: 'Theme' })
+      const segments = within(theme).getAllByRole('menuitemradio')
+      expect(segments.map(s => s.textContent)).toEqual(['Light', 'Dark'])
+      for (const s of segments) expect(s.querySelector('.segmented-icon svg')).toBeTruthy()
+      // The group's name says what the row is for; nothing visible repeats it.
+      expect(within(menu).queryByText(/^Theme$/)).toBeNull()
+      expect(theme.closest('.user-popover-theme').textContent).toBe('LightDark')
+    })
+
     it('closes on the items whose result is NOT visible behind it', async () => {
       await renderShell()
 
