@@ -167,7 +167,7 @@ export function ProfileTab({
               <ProfileRow
                 id="theme"
                 label="Theme"
-                description="Dark or light colours. The Theme item in the account menu switches the same setting."
+                description="Dark or light colours. The Theme switch in the account menu changes the same setting."
                 value={(
                   <select
                     id="profile-theme"

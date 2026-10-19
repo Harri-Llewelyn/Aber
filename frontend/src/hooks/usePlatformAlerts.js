@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import { REALTIME_ENABLED } from '../constants'
+import { REALTIME_ENABLED, grafanaAlertUrl } from '../constants'
 import { classifyRefreshError, FAILURE_SESSION } from '../lib/connectionState'
 
 /**
@@ -18,19 +18,17 @@ export const POLL_INTERVAL_MS = 15000
  * table, because a view cannot be in a publication. The initial fetch primes the known set so a
  * page load does not toast everything already firing.
  *
- * A firing toast carries the alert name only; the notification history keeps the summary too. When
- * `onOpenAlerts` is given the toast is clickable and calls it with the toast's id.
+ * A firing toast carries the alert name only; the notification history keeps the summary too. Both
+ * toasts, firing and resolved, are in the Alert group, whatever the severity, and both link to the
+ * rule in Grafana Alerting, where its thresholds, silences and history are.
  */
-export function usePlatformAlerts(showToast, onOpenAlerts) {
+export function usePlatformAlerts(showToast) {
   const [active, setActive] = useState([])
   const knownRef = useRef(new Map())
   const primedRef = useRef(false)
   const showToastRef = useRef(showToast)
 
-  const onOpenRef = useRef(onOpenAlerts)
-
   useEffect(() => { showToastRef.current = showToast }, [showToast])
-  useEffect(() => { onOpenRef.current = onOpenAlerts }, [onOpenAlerts])
 
   /**
    * Re-read the active view and announce the difference. Diffs two snapshots rather than trusting
@@ -56,14 +54,14 @@ export function usePlatformAlerts(showToast, onOpenAlerts) {
     if (primedRef.current) {
       for (const [fingerprint, row] of next) {
         if (!knownRef.current.has(fingerprint)) {
-          // No emoji prefix: Toast draws its own icon from `type`.
+          // No emoji prefix: Toast draws the Alert group's icon itself.
           showToastRef.current?.(
             row.alert_name,
             row.severity === 'critical' ? 'error' : 'warning',
             {
               detail: `${row.alert_name}${row.summary ? ` — ${row.summary}` : ''}`,
-              onOpen: onOpenRef.current ? (id) => onOpenRef.current?.(id) : undefined,
-              openTitle: 'Show the firing alerts'
+              group: 'alert',
+              to: grafanaAlertUrl(row.alert_name)
             }
           )
         }
@@ -72,7 +70,7 @@ export function usePlatformAlerts(showToast, onOpenAlerts) {
       // learns to ignore, and "it recovered" is the half that tells them they can stop looking.
       for (const [fingerprint, row] of knownRef.current) {
         if (!next.has(fingerprint)) {
-          showToastRef.current?.(`Resolved — ${row.alert_name}`, 'success')
+          showToastRef.current?.(`Resolved — ${row.alert_name}`, 'success', { group: 'alert', to: grafanaAlertUrl(row.alert_name) })
         }
       }
     }
