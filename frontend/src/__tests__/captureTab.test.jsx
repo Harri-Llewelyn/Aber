@@ -815,27 +815,17 @@ describe('playing a capture back', () => {
     expect(after.value).toBe('')
   })
 
-  it('warns hard about a birthless capture that uses aliases', async () => {
+  /** A replay opens with an NBIRTH, so the worker refuses a birthless capture, aliases or not. */
+  it.each([true, false])('warns that a birthless capture is refused (uses_aliases %s)', async (usesAliases) => {
     api.listCaptures.mockResolvedValue([
-      { ...PLAYABLE, manifest: { ...PLAYABLE.manifest, birth_captured: false, uses_aliases: true } }
-    ])
-    renderTab()
-    const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    selectRow(row); fireEvent.click(panelAction(/Play back/))
-    expect(await screen.findByText(/dropped on ingest/)).toBeInTheDocument()
-  })
-
-  /** The case that was being warned about wrongly: no birth, but every metric named in full. */
-  it('does not claim a birthless capture writes nothing when its metrics are named', async () => {
-    api.listCaptures.mockResolvedValue([
-      { ...PLAYABLE, manifest: { ...PLAYABLE.manifest, birth_captured: false, uses_aliases: false } }
+      { ...PLAYABLE, manifest: { ...PLAYABLE.manifest, birth_captured: false, uses_aliases: usesAliases } }
     ])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Play back/))
     await screen.findByLabelText('Playback gateway')
-    expect(screen.queryByText(/dropped on ingest/)).toBeNull()
-    expect(screen.getByText(/will play back normally/)).toBeInTheDocument()
+    expect(screen.getByText(/so a playback\s+refuses it/)).toBeInTheDocument()
+    expect(screen.queryByText(/will play back normally|dropped on ingest/)).toBeNull()
   })
 
   it('shows the gate refusal in the dialog', async () => {

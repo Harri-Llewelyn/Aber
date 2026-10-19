@@ -752,6 +752,17 @@ def register_birth_aliases(group_id, edge_node_id, payload, reset=False, device_
         )
     return stored
 
+def forget_birth_aliases(group_id, edge_node_id):
+    """
+    An applied NDEATH: the session that declared the node's aliases and datatypes has ended, so
+    none of them may resolve a later session's data (README.md -> "Metric Aliases").
+    """
+    key = alias_key(group_id, edge_node_id)
+    with _alias_lock:
+        _alias_map.pop(key, None)
+        _alias_datatypes.pop(key, None)
+        _name_datatypes.pop(key, None)
+
 def resolve_metric_name(group_id, edge_node_id, metric):
     """
     The metric's name, resolving an alias-only metric through its edge node's birth map.
@@ -2430,6 +2441,7 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
             )
             return
         close_session(group_id, edge_node_id)
+        forget_birth_aliases(group_id, edge_node_id)
 
     # An NBIRTH resets the edge node's whole alias table -- including its devices' -- because it
     # invalidates every binding the node previously declared. Registered before the client check
@@ -3347,7 +3359,8 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
             logger.warning(
                 "Dropped %d metric(s) for asset '%s': their aliases are not in edge "
                 "node '%s' alias table, so no birth certificate has been seen for it "
-                "since this daemon started. A rebirth has been requested.",
+                "since this daemon started or since its last NDEATH. A rebirth has been "
+                "requested.",
                 unresolved_aliases, asset_id, gateway_wire_id
             )
 

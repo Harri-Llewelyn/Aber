@@ -226,6 +226,27 @@ def reading(message, metric):
     return None
 
 
+def replayed(messages):
+    """
+    What capture.plan_playback() replays of a one-device recording: a session opens at an NBIRTH
+    and a device's data follows its DBIRTH, so DDATA the recording caught before the birth it
+    asked for is left out.
+    """
+    out, node_born, device_born = [], False, False
+    for message in messages:
+        kind = msg_type(message)
+        if kind == "NBIRTH":
+            node_born, device_born = True, False
+        elif not node_born or (kind in ("DDATA", "DDEATH") and not device_born):
+            continue
+        elif kind in ("DBIRTH", "DDEATH"):
+            device_born = kind == "DBIRTH"
+        elif kind == "NDEATH":
+            node_born = device_born = False
+        out.append(message)
+    return out
+
+
 class FixtureEdgeNode:
     """
     A Sparkplug 3.0.0 edge node with one device, publishing as the fixture gateway.
@@ -592,6 +613,9 @@ class RecordedCaptureReplays(unittest.TestCase):
         cls.messages = cls.document.get("messages") or []
         cls.recorded_values = [
             reading(m, cls.metric) for m in cls.messages if msg_type(m) == "DDATA"]
+        cls.replayed = replayed(cls.messages)
+        cls.replayed_values = [
+            reading(m, cls.metric) for m in cls.replayed if msg_type(m) == "DDATA"]
 
     # ------------------------------------------------------------------------------------------
     # Stage 4: the replay, as the playback dialog starts it
@@ -688,7 +712,7 @@ class RecordedCaptureReplays(unittest.TestCase):
                 # A dev-loop port-forward dies on a TLS disconnect; the next poll reconnects.
                 print(f"historian poll retrying: {err}")
                 return []
-        expected = len(cls.recorded_values)
+        expected = len(cls.replayed_values)
         poll(read, lambda rows: sum(1 for a, _ in rows if a == cls.lane) >= expected,
              HISTORIAN_TIMEOUT, 3)
         # Once more, so a replayed reading filed under another asset has had time to arrive too.
@@ -954,15 +978,15 @@ class RecordedCaptureReplays(unittest.TestCase):
         job = self.playback_job
         self.assertEqual(job["status"], "COMPLETED",
                          f"the playback did not complete: {job.get('error')}")
-        self.assertEqual(job["messages_sent"], len(self.messages))
+        self.assertEqual(job["messages_sent"], len(self.replayed))
 
     def test_the_recorded_readings_reached_the_historian_under_the_lane(self):
         self._needs("the replay")
         lane_values = [v for a, v in self.rows if a == self.lane]
         self.assertEqual(
-            lane_values, self.recorded_values,
-            f"the lane {self.lane} holds {lane_values}; the capture's DDATA carried "
-            f"{self.recorded_values}. The job reported {self.playback_job.get('messages_sent')} "
+            lane_values, self.replayed_values,
+            f"the lane {self.lane} holds {lane_values}; the capture's DDATA in session carried "
+            f"{self.replayed_values}. The job reported {self.playback_job.get('messages_sent')} "
             f"message(s) published, so the broker refused them or the daemon dropped them.")
 
     def test_no_replayed_reading_was_filed_under_anything_else(self):

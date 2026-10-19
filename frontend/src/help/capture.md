@@ -22,7 +22,7 @@ A recording is **Queued** until the ingestion service picks it up. Then it is **
 
 A capture holds only the window it ran for. It does not reach back before it was started. It stops at the duration, 100,000 messages or 50 MiB, whichever comes first. If a cap stopped it before the duration was up, the details panel says it was cut short.
 
-A capture with no birth certificate can still be played back. A metric sent by its full name plays back normally. But the devices are not announced, so they stay OFFLINE until they send a birth of their own. A metric sent by alias cannot be resolved without a birth certificate, so it is dropped. That is why **NO BIRTH** shows in warning colour on a capture that uses aliases.
+A capture with no birth certificate cannot be played back. A playback starts the way a gateway's own session does, with its birth certificate, so it refuses a capture without one. **NO BIRTH** marks such a capture in warning colour. Record it again to replace it: recording asks the gateway to send its birth certificate. A playback also leaves out anything recorded before that birth certificate, and a device's messages before its own.
 
 Playback needs the playback worker, which every install runs. If the playback dialog says the worker is not deployed, set `playback.enabled: true` in the site's Helm values and upgrade the release. Until then a playback cannot start.
 

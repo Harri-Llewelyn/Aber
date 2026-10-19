@@ -306,15 +306,39 @@ that was on site for two hours, reproduce a fault by editing a value by hand, an
 chosen multiple of real time against a fleet whose measured rate is 0.95 msg/s.
 
 Run it from `ingestion/` after `npm run proto`, which generates the Sparkplug binding it imports
-(`sparkplug_b_pb2`, not committed). On the dev cluster the broker is on `localhost:1883`. `record`
-authenticates as the ingestion principal, `MQTT_INGESTION_USER` / `MQTT_INGESTION_PASSWORD` from
-the `aber-secrets` Secret unless `MQTT_CAPTURE_*` is set; `play` as the gateway it replays,
-`MQTT_PLAYBACK_USER` / `MQTT_PLAYBACK_PASSWORD`.
+(`sparkplug_b_pb2`, not committed). On the dev cluster the broker is on `localhost:1883`.
+
+- **`record`** authenticates as the ingestion principal, `MQTT_INGESTION_USER` /
+  `MQTT_INGESTION_PASSWORD` from the `aber-secrets` Secret, unless `MQTT_CAPTURE_*` is set. It
+  keeps what the daemon's `on_message()` ingests and leaves out the rest: the primary host's
+  STATE (retained, so it arrives on every subscribe), NCMD, DCMD and empty payloads. It does not
+  ask the edge node for a birth certificate. Without an NBIRTH the file cannot be played back
+  ([A replay is its own Sparkplug session](#a-replay-is-its-own-sparkplug-session)), so press
+  **Request Rebirth** on the Gateways page while it records, or record on the Capture page, which
+  asks for one itself.
+- **`play`** publishes as the Playback gateway (`gwy160000000000400080000`), authenticating as it
+  with `MQTT_PLAYBACK_USER` / `MQTT_PLAYBACK_PASSWORD`. Issue the password from the gateway's
+  drawer on the Gateways page (**Generate Broker Credential**), which shows it once. On Kubernetes
+  the same password is delivered into the `mosquitto-passwords` Secret under the key
+  `playback_credentials.json`, as `{"<sparkplug_id>": "<password>"}`. Issuing a new password
+  replaces the one the dashboard's playback worker holds, and is delivered to it within about a
+  minute. Never provision this gateway with
+  `scripts/mosquitto-provision-gateway.mjs`: that break-glass script writes no platform record,
+  so `playback_stale_credentials()` cannot see the change and every dashboard playback is then
+  refused (CONNACK rc=5).
+- **`--map` targets are replay lanes**, which the Capture page's **Prepare replay lanes** makes
+  (`ensure_shadow_devices()`). Any other id is refused or held: see
+  [Playback meets quarantine first](#playback-meets-quarantine-first).
 
 ```bash
 python capture.py record --out morning-shift.json --seconds 300
 python capture.py inspect morning-shift.json
-python capture.py play morning-shift.json --as-gateway gwy… --map dev<recorded>=dev<target> --speed 10
+python capture.py play morning-shift.json --as-gateway gwy160000000000400080000 \
+    --map dev<recorded>=dev<replay lane> --speed 10
+
+# The Playback gateway's delivered password, on Kubernetes:
+kubectl -n <namespace> get secret mosquitto-passwords \
+    -o jsonpath='{.data.playback_credentials\.json}' | base64 -d
 ```
 
 ### A capture cannot be played back as itself
@@ -331,13 +355,13 @@ under a CORRECTLY BOUND device passes that check by construction"*.
 A playback tool that published captured topics verbatim would be that account, reintroduced, and
 would need write access to every edge node appearing in any capture anyone ever recorded.
 
-So `play` publishes as **one gateway**, under one credential provisioned the ordinary way, and
-rewrites every captured identity onto assets that gateway owns:
+So `play` publishes as **one gateway**, the Playback gateway, under the credential the Gateways
+page issues for it, and rewrites every captured identity onto assets that gateway owns:
 
 | | recorded | played back |
 | :--- | :--- | :--- |
 | edge-node segment | the machine's real gateway | `--as-gateway` |
-| device segment | the machine | its `--map` target |
+| device segment | the machine | its replay lane (`--map`) |
 | `Asset_ID` metric | the machine | rewritten with the topic |
 
 **The `Asset_ID` metric moves with the topic, and it has to.** A DBIRTH still claiming the captured
@@ -356,6 +380,57 @@ start unless `MQTT_PLAYBACK_USER` is the gateway named by `--as-gateway`.
 **There is no accidental playback into a real machine's history**, because every captured device
 needs an explicit `--map` onto a 24-character `dev…` id. An unmapped device is refused rather than
 passed through.
+
+### A replay is its own Sparkplug session
+
+Every replay publishes as the same edge node, the Playback gateway, and the daemon keeps one alias
+table per edge node. So a replay has to be a proper Sparkplug session of its own, or it reads
+through what the previous replay declared. Before 1.5 a capture whose data came before its NBIRTH,
+or that had none, had its aliases resolved through the last replay's table: its readings were
+filed under another capture's metric names, and the job reported success.
+
+`plan_playback()` builds the plan as one session, as Sparkplug 3.0.0 defines one: *"A Sparkplug
+session begins with an MQTT CONNECT and then the NBIRTH message. A Sparkplug session ends with an
+NDEATH."*
+
+- **A capture with no NBIRTH is refused**, with a message saying so and that recording it again
+  fixes it. There is nothing to replay it as: the data after a birth is read through what the birth
+  declares (`tck-id-payloads-alias-birth-requirement`), and synthesising one would declare metrics
+  the edge node never declared. The Capture page's recorder asks the edge node to rebirth when it
+  starts, so a capture from the page holds one unless the edge node ignored the request.
+- **What a session cannot carry is left out**, and the CLI says how many messages that was:
+  everything before the first NBIRTH (data already in flight when a recording armed, which a fast
+  edge node delivers ahead of the birth the recorder asked for); a device's messages before its
+  DBIRTH, and after its DDEATH until its next DBIRTH (`tck-id-payloads-dbirth-order`,
+  `-ddata-order`); and everything after a recorded NDEATH until the next NBIRTH. An NBIRTH also
+  needs the devices born again, because it resets every alias the node and its devices declared.
+  Each message keeps its recorded delay, so a replay that left out its first seconds waits them.
+- **A plan with no NDATA or DDATA left is refused** as holding only birth certificates: it would
+  publish, report COMPLETED, and write nothing.
+- **`seq` is numbered per session**: 0 on each NBIRTH (`tck-id-topics-nbirth-seq-num`), one more
+  on every later message, 255 wrapping to 0 (`tck-id-payloads-sequence-num-incrementing`,
+  `-ddata-seq-inc`, `-dbirth-seq-inc`), and none on an NDEATH (`tck-id-payloads-ndeath-seq`). A
+  device capture keeps one device of a node's several, so the recorded numbers skip every
+  sibling's message; replayed as recorded, the daemon counted a sequence gap and asked the
+  Playback gateway to rebirth on almost every message, and *Sparkplug Message Loss* fired. A gap
+  recorded live in a gateway capture is not replayed either: the replay is its own session.
+- **bdSeq is the session's**, carried by every replayed NBIRTH and NDEATH, so births within one
+  session repeat it (`tck-id-operational-behavior-data-commands-rebirth-action-3`) and a recorded
+  NDEATH ends it: the worker and `play` publish that death, disconnect, and open the next session
+  with the next bdSeq (`tck-id-topics-nbirth-bdseq-increment`).
+- **The daemon clears an edge node's alias table when it applies an NDEATH** of the open session
+  ([Metric Aliases](#metric-aliases)), for every edge node, so no session inherits another's
+  aliases.
+
+**`play` opens the same session the dashboard does.** It calls the playback worker's
+`_open_session()` and `_end_session()`: the CONNECT carries the session's NDEATH as its Will at
+QoS 1 (`tck-id-payloads-ndeath-will-message`,
+`tck-id-message-flow-edge-node-birth-publish-will-message`), the NBIRTH repeats that bdSeq
+(`tck-id-payloads-nbirth-bdseq-repeat`), and the run ends by publishing the NDEATH before DISCONNECT
+(`tck-id-operational-behavior-edge-node-intentional-disconnect-ndeath`). Before 1.5 it connected
+without a Will, kept the recording's bdSeq and disconnected without an NDEATH, so the Playback
+gateway stayed ONLINE and then went stale. A publish the client could not send stops the run with
+the number published, rather than reporting success.
 
 ### Rebasing, and why it is also the speed control
 
@@ -391,6 +466,11 @@ and `TELEMETRY_MAX_HISTORICAL_AGE_SECONDS`, which it reads from the same environ
 the chart passes the same value to the playback worker), and `test_capture_worker.py` holds them to
 the daemon's. A capture of a gateway replaying its buffer after an outage therefore plays.
 
+**Only DDATA is judged.** `process_ddata()` is the only place the daemon applies the window, and a
+birth or a node message writes no reading. Every replay opens with an NBIRTH whose bdSeq metric is
+stamped at playback, so counting birth metrics as kept would let a plan whose every reading falls
+outside the window pass the worker's "would write nothing" refusal.
+
 **The capture's epoch is the first message's own clock**, or the time that message was received
 when its payload carries none. It is never the time the recording ended: the offsets count from the
 first receipt, and a later fallback would file every stamped reading early by the length of the
@@ -404,8 +484,61 @@ fallback, so a hand-edit valid in the file is valid to the daemon. Recording and
 through the daemon's own reader, `json_payload()`, so a replayed message carries what the daemon
 stored from the original, metric for metric.
 
-**Playback re-encodes into the encoding each message arrived in.** Both are live traffic here — the
-gateway appliance's flow publishes JSON, a standard Sparkplug B edge node protobuf — and they enter the
+**The file is a faithful record of the payload.** A replay is the message that was received, apart
+from the identity rewrite, the timestamps and the session numbers (bdSeq and `seq`). Every field
+the proto defines is recorded when it is set, and only then: a metric's name, alias, timestamp and
+datatype; `is_historical`, `is_transient` and `is_null` (written only when true, as the daemon
+reads them); `metadata` and `properties`; and its value — one of the six scalar fields, or
+`bytes_value`, `dataset_value`, `template_value` or `extension_value`. The payload's
+`timestamp`, `seq`, `uuid` and `body` are recorded too. The sub-messages (`metadata`,
+`properties`, DataSets and Templates) are in protobuf's JSON mapping with the proto's field names,
+so a 64-bit integer inside one is a string; bytes and the body are base64; an extension value is its
+serialised bytes in base64, because its fields are ones the proto does not name. A file written
+before 1.5 has none of these and still reads.
+
+- **Why every field.** `is_null` is the one the daemon acts on: a recorded appliance NBIRTH
+  declares the metrics it does not know yet, and its outage report, as null
+  (`tck-id-topics-nbirth-metric-reqs`). Recorded without the flag, the replay logged "sent an
+  unusable outage report" and "unusable health metric" for reports the gateway never sent. A
+  Template definition kept neither `is_definition` nor its members, and an instance lost its
+  `template_ref` (`tck-id-payloads-template-definition-is-definition`, `-members`,
+  `-template-instance-ref`).
+- **The daemon's JSON reader reads them too**, because it is the same `json_payload()`: a JSON
+  publisher's `"is_null": true` is honoured. A field not in the file's form (a `properties`
+  that is not a PropertySet, bytes that are not base64) is ignored and the metric kept, as the
+  reader ignored every one of these keys before.
+- **What it costs.** Measured on 2026-10-19 by `len(json.dumps(entry))`, the count the capture
+  cap uses: the gateway appliance's NBIRTH (its metrics in
+  `forge/gateway-platform/appliance/flows.template.json`, with the five outage metrics null) grows
+  from 1,567 to 1,652 bytes, 1.054×; a freshly enrolled appliance's, with eleven nulls, from 1,342
+  to 1,529, 1.139×. A DDATA of 50 aliased integers, and one of 10 named doubles, do not grow at all
+  (1.000×): a data message rarely carries any of these fields. The indent=2 file grows by the same
+  ratios. Births are a few messages in a capture, so the caps are unaffected in practice.
+
+**A file is checked before anything is planned**, by `check_capture()`, and a fault is refused
+naming the message by its 0-based index (`message 17: …`) rather than escaping as a `KeyError` or
+`TypeError`. The page's upload check (`frontend/src/api.js`) states the same rules, because a file
+can reach the bucket by other routes:
+
+1. The document is an object; `aber_capture_version` is the version this code reads;
+   `capture_epoch_ms` is a number; `messages` is a non-empty array.
+2. Each message is an object with a string `topic`, an object `payload` and an `offset_ms` that
+   is a whole number (a JSON number with no fraction, so `1000.0` counts), at least 0, no earlier
+   than the message before it, and at most 86,400,000 (a capture runs at most 24 hours from its
+   first message, so an upload cannot plan a sleep of years). `payload.metrics`, when present, is
+   an array of objects; `encoding`, when present, is `protobuf` or `json`.
+3. The topic is `spBv1.0/<group>/<type>/<edge node>`, or `…/<device>` for the three device types,
+   and the type is one an edge node publishes: NBIRTH, NDATA, NDEATH, DBIRTH, DDATA, DDEATH. The
+   device segment is present on the D types and absent on the N types
+   (`tck-id-topic-structure-namespace-device-id-associated-message-types`,
+   `-non-associated-message-types`), so NCMD, DCMD and STATE are refused. Every segment is
+   non-empty valid UTF-8 without `+`, `/` or `#` (`tck-id-topic-structure-namespace-valid-group-id`,
+   `-valid-edge-node-id`, `-valid-device-id`) and without NUL, which MQTT forbids in a topic and
+   a broker answers by closing the connection. A `--group` override is held to the same rule.
+
+**Playback re-encodes into the encoding each message arrived in.** Both reach the daemon: a standard
+Sparkplug B edge node, the gateway appliance included, publishes protobuf, and a Node-RED flow or
+another publisher may send the JSON shape `parse_sparkplug_payload()` accepts. They enter the
 daemon down different branches of `parse_sparkplug_payload()`. Replaying a JSON fleet as protobuf
 would mean a fault reproduced through this tool could be one the playback introduced, or one it
 silently repaired.
@@ -424,11 +557,15 @@ until an `Administrator` approves it, and that is correct and stays correct.
 `ensure_shadow_devices()` mints each replay lane as a registered device bound to the playback
 gateway before the job is queued, so every id the replay publishes under is one this stack already
 knows and nothing is held. From the CLI you can, because `--map` takes any `dev…` id and does not
-check it against the directory — so mapping onto an id this deployment has never registered puts an
-approval step inside the playback, the first time that id is used.
+check it against the directory. An id this deployment has never registered is held in quarantine,
+and approving it cannot help: a device is never assigned to the Playback gateway by hand
+(`refuse_hand_assigning_a_replay_lane()`, `0083`), only minted there as a lane. A real device's
+id is worse: it is not bound to the Playback gateway, so the replayed DBIRTH fails
+[the binding check](#gateway-binding) and **quarantines that real device**
+(`GATEWAY_MISMATCH`), and its DDATA is dropped. Either way no reading reaches the historian.
 
-The way around it is not to weaken quarantine but to map onto devices that already exist, which is
-what the page does for you.
+So the only `--map` targets that work are replay lanes, which the Capture page's **Prepare replay
+lanes** makes. Prepare them there, then map each captured device onto its lane.
 
 ### Marking what was replayed
 
@@ -1163,6 +1300,17 @@ standards-compliant device.
   old ones behind to be matched — that would write real samples under the *wrong* metric name,
   which is worse than dropping them. A DBIRTH re-declares one device and must not discard its
   siblings'.
+- **An applied NDEATH clears the node's table**, with the datatypes beside it
+  (`forget_birth_aliases()`). Aliases are declared per session
+  (`tck-id-payloads-alias-birth-requirement`), and a death ends the session whose births declared
+  them
+  (`tck-id-operational-behavior-edge-node-termination-host-action-ndeath-node-tags-stale`,
+  `-devices-tags-stale`). Left in place, they resolved whatever the next session sent before its
+  own NBIRTH. That mattered most on the Playback gateway, which every replay publishes as: a
+  replay's aliased readings were filed under the metric names of the capture replayed before it.
+  A stale NDEATH, from an earlier session than the open one, clears nothing
+  ([A death from an earlier session](#a-death-from-an-earlier-session)). Until the next NBIRTH, an
+  aliased metric is unresolvable and asks for a rebirth, as after a restart.
 - **Aliases are registered before the registration check**, in both handlers. The table is
   in-memory and costs nothing, and a quarantined device's later DDATA still has to be *decodable*
   for an operator to be told what it is publishing.
@@ -1465,8 +1613,9 @@ marked OFFLINE, and none of the open session's state reset (its aliases, its dev
 run). It is counted in `aber_ingestion_stale_deaths_total{edge_node}` and logged at INFO as
 `STALE NDEATH`, naming both numbers. Every other NDEATH is applied as before: one whose bdSeq
 matches, one without a bdSeq, and one for a node with no NBIRTH seen since the daemon started or
-whose NBIRTH carried none. An applied NDEATH closes the session, so a later death is applied too
-until the next NBIRTH opens one.
+whose NBIRTH carried none. An applied NDEATH closes the session and clears its alias table
+([Metric Aliases](#metric-aliases)), so a later death is applied too until the next NBIRTH opens
+one.
 
 - **Any difference counts, not only an older number.** bdSeq advances by one on every CONNECT and
   wraps at 255, so a later session could be told by its number. But an edge node that starts again

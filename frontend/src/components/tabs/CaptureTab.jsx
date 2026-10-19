@@ -1003,8 +1003,7 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
         {!pending && !job.birth_captured && job.elapsed_seconds > 10 && (
           <div style={{ color: 'var(--warning-text)', fontSize: '12px', marginTop: '4px' }}>
             No <code>NBIRTH</code> or <code>DBIRTH</code> has arrived. A playback of a capture without
-            one loses every metric the gateway sends by alias; metrics sent by name still play back.
-            The finished capture will be marked <strong>no birth</strong>.
+            a birth certificate is refused. The finished capture will be marked <strong>no birth</strong>.
           </div>
         )}
       </div>
