@@ -201,6 +201,15 @@ silently discarding a misconfigured gateway makes it invisible instead of diagno
 Birth parameters and declared metrics are recorded **even for quarantined devices** — that is
 exactly what an administrator needs to inspect before approving. Only DDATA telemetry is gated.
 
+The declared metrics (`devices.last_birth_metrics`) leave out the identity metrics and
+Sparkplug's control metrics: `bdSeq`, `Node Control/*` and `Device Control/*`
+(`is_control_metric()`). A DBIRTH may declare `Device Control/*` (Sparkplug 3.0, *Payload
+(DBIRTH)*), and the gateway appliance declares `Device Control/Rebirth` for every device. It is a
+command, not a reading, and no schema can model it, so recording it tagged every appliance device
+Unmodelled. i3X applies the same rule (`is_plumbing_metric()`, held to this one by its mirrored
+constants test), and the `uncatalogued_metrics` view (0189) states it again for rows written
+before it.
+
 Approval goes through the [`approve-quarantine`](../supabase/functions/approve-quarantine) edge
 function, which calls the atomic `public.approve_quarantined_device()` RPC.
 

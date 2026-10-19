@@ -115,6 +115,25 @@ class TestExtractDeclaredMetrics(unittest.TestCase):
         )
         self.assertEqual(declared, ["vibration"])
 
+    def test_control_metrics_are_excluded(self):
+        """The gateway appliance's DBIRTH declares Device Control/Rebirth; no schema can model it."""
+        declared = ingestion.extract_declared_metrics(
+            FakePayload("Device Control/Rebirth", "Node Control/Rebirth",
+                        "Node Control/Next Server", "bdSeq", "vibration")
+        )
+        self.assertEqual(declared, ["vibration"])
+
+    def test_only_the_control_prefixes_are_excluded(self):
+        """A machine metric that merely mentions control, or a Properties/ metric, is declared."""
+        declared = ingestion.extract_declared_metrics(
+            FakePayload("Device Control", "Controller/EXECUTION", "Properties/Hardware Make",
+                        "bdSeqCount")
+        )
+        self.assertEqual(
+            declared,
+            ["Controller/EXECUTION", "Device Control", "Properties/Hardware Make", "bdSeqCount"],
+        )
+
     def test_valueless_metrics_are_still_declared(self):
         """
         The divergence from store_birth_parameters, which skips metrics carrying no value

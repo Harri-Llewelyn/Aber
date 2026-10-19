@@ -2761,7 +2761,7 @@ def _metric_rows() -> dict:
     """
     devices = [
         {"id": "d-one", "sparkplug_id": "dev-one", "name": "One", "gateway_id": "g1",
-         "last_birth_metrics": ["Axes/X/POSITION", "Asset_ID"]},
+         "last_birth_metrics": ["Axes/X/POSITION", "Asset_ID", "Device Control/Rebirth"]},
         {"id": "d-two", "sparkplug_id": "dev-two", "name": "Two", "gateway_id": "g1",
          "last_birth_metrics": ["Axes/X/POSITION", "OEE/AVAILABILITY"]},
         {"id": "d-three", "sparkplug_id": "dev-three", "name": "Three", "gateway_id": "g1"},
@@ -2868,6 +2868,7 @@ class TestMetricsAreComponentsOfTheirDevice(_MetricSpace):
                 for name in names:
                     self.assertIn(f"{sid}/{name}", objects)
         self.assertNotIn("dev-one/Asset_ID", objects, "identity metrics are wire plumbing")
+        self.assertNotIn("dev-one/Device Control/Rebirth", objects, "control metrics are plumbing")
         bare = objects["dev-bare"]
         self.assertFalse(bare["isComposition"], "no components, so not a composition")
         self.assertNotIn("HasComponent", bare["metadata"]["relationships"])
@@ -3111,7 +3112,8 @@ class TestDevicesAreTypedByEveryAttachedSchema(_MetricSpace):
                 device = objects[sid]
                 extensions = device["metadata"].get("schemaExtensions")
                 self.assertEqual(device["isExtended"], bool(extensions), extensions)
-        # dev-one's last birth declared Asset_ID, which is identity, not a metric beyond the model.
+        # dev-one's last birth declared Asset_ID and Device Control/Rebirth: plumbing, not metrics
+        # beyond the model.
         self.assertFalse(objects["dev-one"]["isExtended"])
 
     def test_every_device_carries_its_vendor_keys_in_system(self):
@@ -3551,10 +3553,11 @@ class TestQualityOnTheStagingPath(_QualityCase):
         i3x_service.on_message(None, None, _spb(
             "DBIRTH", device="dev-one", metrics=[{"name": "Axes/X/POSITION", "value": 14.0}]))
         self.assertEqual(self.last_staged()["dev-one"]["quality"], "Good")
-        # A birth with nothing but its identity still changes the device's status.
+        # A birth with nothing but its identity and a control metric still changes its status.
         i3x_service.on_message(None, None, _spb("DDEATH", device="dev-one"))
         i3x_service.on_message(None, None, _spb(
-            "DBIRTH", device="dev-one", metrics=[{"name": "Asset_ID", "string_value": "x"}]))
+            "DBIRTH", device="dev-one", metrics=[{"name": "Asset_ID", "string_value": "x"},
+                                               {"name": "Device Control/Rebirth", "value": False}]))
         self.assertEqual(set(self.last_staged()), {"dev-one"})
         self.assertEqual(self.last_staged()["dev-one"]["quality"], "Good")
 
@@ -4896,9 +4899,10 @@ class TestMirroredConstants(unittest.TestCase):
             quoted = re.findall(r'"([^"]*)"', m.group(1))
             if quoted:
                 out[name] = quoted[-1]
-        m = re.search(r"^IDENTITY_METRICS = \(([^)]*)\)", src, re.M)
-        if m:
-            out["IDENTITY_METRICS"] = tuple(sorted(re.findall(r'"([^"]+)"', m.group(1))))
+        for name in ("IDENTITY_METRICS", "CONTROL_METRIC_PREFIXES"):
+            m = re.search(rf"^{name} = \(([^)]*)\)", src, re.M)
+            if m:
+                out[name] = tuple(sorted(re.findall(r'"([^"]+)"', m.group(1))))
         return out
 
     def test_shared_constants_agree_with_ingestion(self):
@@ -4913,6 +4917,8 @@ class TestMirroredConstants(unittest.TestCase):
                     f"{key} has drifted between i3x_service.py and ingestion.py",
                 )
         self.assertIn("IDENTITY_METRICS", mine)
+        self.assertIn("CONTROL_METRIC_PREFIXES", mine)
+        self.assertIn("CONTROL_METRIC_PREFIXES", theirs)
         self.assertIn("MAX_ALIASES_PER_NODE", mine)
 
     def _integer_decoder(self, path):

@@ -4730,8 +4730,9 @@ components:
           description: >-
             Metric names declared in the most recent DBIRTH, written by the ingestion daemon and
             ONLY when the set changes (an unchanged rewrite would append an audit row per rebirth).
-            NULL means no birth observed; an empty array means a birth that declared no non-identity
-            metrics. Which of these fall outside the device's schemas is derived by the client,
+            NULL means no birth observed; an empty array means a birth that declared nothing beyond
+            the identity metrics and Sparkplug's control metrics (`bdSeq`, `Node Control/*`,
+            `Device Control/*`), which are never listed. Which of these fall outside the device's schemas is derived by the client,
             never stored, so editing a schema reclassifies devices without waiting for a rebirth.
         last_birth_metrics_at: { type: string, format: date-time, nullable: true, readOnly: true }
         is_archived: { type: boolean, default: false }
