@@ -607,8 +607,49 @@ that image.
 `read spBv1.0/#` and `write spBv1.0/+/NCMD/+` — rebirth requests and nothing else — and teaching it
 to publish asset data would widen it, while `verify_gateway_binding()` cannot tell a forged message
 under a correctly bound device from a real one. The `seq` objection that kept *capture* inside the
-daemon does not apply in reverse: a playback worker only publishes, holds no subscription, and takes
-nothing away from the daemon's view of the stream.
+daemon does not apply in reverse: the worker takes nothing away from the daemon's view of the
+stream. Its only subscriptions are its own node's NCMD and the primary host's STATE (below), which
+carry no telemetry.
+
+**The worker is a full Sparkplug edge node** (decided 2026-10-14). Until 1.5 it held no
+subscription, on the argument that a second subscriber would split the daemon's view of `seq`. That
+argument never applied to a node's own NCMD topic, and the shared `gateway` role already let the
+credential receive `spBv1.0/+/+/%u/#` and `spBv1.0/STATE/#`. Without the subscription a replay
+could not answer a rebirth: a daemon restarted mid-replay lost its alias table, asked the Playback
+node to rebirth every 300 seconds, and wrote nothing for the rest of the job, which still ended
+`COMPLETED`. Without STATE a replay ran to `COMPLETED` while ingestion was down. Each session now:
+
+- subscribes at QoS 1 to `spBv1.0/<group>/NCMD/<gateway>` before its NBIRTH
+  (`tck-id-message-flow-edge-node-ncmd-subscribe`), and to `spBv1.0/STATE/<PRIMARY_HOST_ID>` in the
+  same SUBSCRIBE, and waits for the SUBACK. A refused subscription fails the job before any birth.
+- waits for that STATE to say `online: true` before the NBIRTH
+  (`tck-id-message-flow-edge-node-birth-publish-phid-wait`, `-phid-wait-online`). Only the
+  configured host's topic is subscribed (`-phid-wait-id`), and a STATE stamped earlier than the last
+  one seen is ignored (`-phid-wait-timestamp`). That is how the old connection's Will, arriving after
+  a restarted daemon's new STATE, is told apart. The wait is `PLAYBACK_PRIMARY_HOST_WAIT_SECONDS`
+  (60). If the host does not come online in that time, the session ends with a plain DISCONNECT
+  and no birth, and the job fails saying ingestion is not consuming. Progress is reported during
+  the wait, so Stop works.
+- answers `Node Control/Rebirth = true` on its NCMD topic. It stops sending data, re-publishes the
+  session's NBIRTH and the DBIRTH of each device born in it and not since dead, then continues
+  (`tck-id-operational-behavior-data-commands-rebirth-action-1`, `-2`). The NBIRTH keeps the
+  session's bdSeq, because no new connection was made (`-rebirth-action-3`). The births restart
+  `seq` at 0, so every later message of that session carries the worker's own count, re-stamped on
+  the wire bytes in the encoding each was recorded in. A request is answered within a second, even
+  in a long gap. One that arrives before the session's NBIRTH is answered by that NBIRTH.
+- ends the job when a valid STATE says `online: false`: it publishes the NDEATH, disconnects, and
+  fails the job with how many messages went out (`-phid-offline`).
+
+**Failing, not pausing, when ingestion goes offline.** Pausing until it returns was the
+alternative. A paused job would
+hold the one-per-target index for as long as ingestion stayed down, which during a crash loop is
+unbounded. The messages due during the outage would also go out late, in a burst. A failed job
+says what happened and frees the gateway. The cost is that a replay started again begins from the
+start: the readings already published are written again, under the new run's timestamps.
+
+`PRIMARY_HOST_ID` is the daemon's own variable, set from `ingestion.primaryHostId` on both pods. A
+worker started without it (outside the chart) does not wait, as a node with no primary host
+configured does not.
 
 **Two identities, which is the arrangement to understand first.** `Service_Playback` is a Supabase
 principal — it reads the queue, reads the capture, writes status. The MQTT identity is **the target
@@ -850,8 +891,8 @@ answer is yes, on the real device, on the day the capture was taken.
 **The gateway offers no Archive, no Rebirth and no Edit.** Archiving the last one is refused by
 [`0067`](../supabase/migrations/archive/0067_the_playback_gateway_cannot_be_archived_away.sql) in the
 database, because `ensure_shadow_devices()` finds the gateway *by flag* and the failure would
-otherwise surface weeks later at job time. A rebirth is addressed to a node nobody is listening as —
-the playback worker only publishes and holds no subscription. And **editing is withdrawn because the
+otherwise surface weeks later at job time. A rebirth from the page would reach the worker only
+while a replay runs, and the daemon already asks for one whenever it needs it. And **editing is withdrawn because the
 form offers writes the database refuses**: `gateways_shadow_is_simulated` is `NOT is_shadow OR
 is_simulated`, so choosing Remote or Host in the Type control sets `is_simulated = false` and the
 save comes back a CHECK violation. Two of that control's three options are dead ends on this one
@@ -974,6 +1015,9 @@ operation with more surface.
 | `MQTT_PLAYBACK_USER` / `MQTT_PLAYBACK_PASSWORD` | `play`, and the worker's single-target fallback | none |
 | `MQTT_PLAYBACK_CREDENTIALS` | `playback_worker.py` | empty — a JSON object keyed by `sparkplug_id` |
 | `SUPABASE_PLAYBACK_KEY` | `playback_worker.py` | none — it authenticates as `Service_Playback` |
+| `PRIMARY_HOST_ID` | `playback_worker.py`'s sessions, which `play` opens too | none — no wait for STATE; the chart passes `ingestion.primaryHostId` |
+| `PLAYBACK_PRIMARY_HOST_WAIT_SECONDS` | `playback_worker.py` | `60` — how long a session waits for the primary host to be online |
+| `PLAYBACK_FINISH_RETRY_SECONDS` | `playback_worker.py` | `300` — how long recording a job's end is retried |
 | `CAPTURE_BUCKET` | `storage-init`, the dashboard, both workers | `broker-captures` |
 | `CAPTURE_FILE_SIZE_LIMIT` | `storage-init` | `104857600` (100 MiB) |
 

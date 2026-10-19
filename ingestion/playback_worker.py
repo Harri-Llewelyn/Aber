@@ -1,32 +1,15 @@
 """
-Publishing a stored capture back into the stack, as a simulated gateway.
+Publishing a stored capture back into the stack as the Playback gateway, a full Sparkplug edge node.
 
-TWO IDENTITIES, AND THAT SPLIT IS THE ARRANGEMENT TO UNDERSTAND FIRST.
+Two identities: Supabase as `Service_Playback` (the queue, the capture, the job's status), and
+MQTT as the target gateway itself, username its `sparkplug_id`, which the broker's %u rule confines
+to that edge node. `start_playback_job()` decides whether a playback is allowed; `capture.py`'s
+`plan_playback()` decides every topic, payload and delay. This carries the plan out as one or more
+Sparkplug sessions: it subscribes to the node's NCMD and answers a rebirth request, waits for the
+primary host's STATE before each NBIRTH and ends the job when it goes offline, counts only what paho
+accepted, and ends every session with its NDEATH.
 
-  SUPABASE     `Service_Playback` (0056). Reads the queue, reads the capture, writes status.
-               Fixed, and the same for every job.
-  MQTT         THE TARGET GATEWAY'S OWN ACCOUNT -- username equals its `sparkplug_id`. Per job,
-               and supplied as a secret the way `MQTT_VALIDATOR_USER` is.
-
-One says what this may do in the database; the other says what the broker will carry, which is what
-confines a playback to one edge node with no ACL change at all: a worker connected as `gwyAAA...`
-cannot publish under `gwyBBB...`, because the broker drops it before any subscriber sees it.
-
-A SEPARATE PROCESS, NOT THE INGESTION DAEMON, because that principal is the one the whole ACL is
-built around and publishing asset data would widen it. This process only PUBLISHES and holds no
-subscription, so it takes nothing from the daemon's view of the stream.
-
-THIS DECIDES NOTHING ABOUT WHETHER A PLAYBACK IS ALLOWED. `start_playback_job()` has already refused
-a target that is not `is_simulated`, one holding no broker credential, and a device map naming
-another gateway's devices. This refuses one further thing -- a target it holds no MQTT password for
--- and otherwise carries out what it is given. The publishing is `capture.py`'s `plan_playback()`,
-which decides every topic, payload and delay with no broker and no clock, so this file is a loop
-that cannot make a new decision.
-
-Related: supabase/migrations/archive/0056_playback_orchestration.sql (every gate called here),
-         capture.py (the plan, the identity rewrite, the rebasing),
-         README.md -> "Playback from the dashboard" (the three tiers of confinement, how one %u
-         rule confines every gateway, and what a failed playback looks like).
+README.md -> "Playback from the dashboard" and the sections after it hold the reasons.
 """
 
 import json
@@ -38,6 +21,7 @@ from datetime import datetime, timezone
 import paho.mqtt.client as mqtt
 
 import capture
+import sparkplug_b_pb2
 from logging_config import get_logger
 
 # `get_logger`, not `logging.getLogger(__name__)`: this stack configures NAMED loggers with
@@ -72,6 +56,14 @@ CONNACK_TIMEOUT_SECONDS = float(os.getenv("PLAYBACK_CONNACK_TIMEOUT_SECONDS", "5
 # How long a session's NDEATH may wait for its PUBACK before the connection is dropped instead, so
 # the broker delivers the Will.
 NDEATH_ACK_TIMEOUT_SECONDS = 5.0
+
+# The Sparkplug primary host application, the ingestion daemon, whose STATE every NBIRTH waits for;
+# the chart passes ingestion.primaryHostId. Empty: no wait, as for a node with no primary host.
+PRIMARY_HOST_ID = os.getenv("PRIMARY_HOST_ID", "").strip()
+# How long a session waits for that STATE to say online before the job fails.
+PRIMARY_HOST_WAIT_SECONDS = float(os.getenv("PLAYBACK_PRIMARY_HOST_WAIT_SECONDS", "60"))
+
+REBIRTH_METRIC = "Node Control/Rebirth"
 
 # The bdSeq the next CONNECT as each gateway carries: 0 for this process's first, then one more for
 # every CONNECT sent, wrapping 255 to 0 (tck-id-topics-nbirth-bdseq-increment).
@@ -241,14 +233,26 @@ def _storage():
 
 
 class _SessionState:
-    """What paho's network thread learns about one connection, read by the publishing loop."""
+    """
+    What paho's network thread learns about one connection: the CONNACK and SUBACK, a dropped
+    connection, a rebirth request on the node's NCMD topic, and the primary host's STATE.
+    """
 
-    def __init__(self):
+    def __init__(self, ncmd_topic=None, state_topic=None):
+        self.ncmd_topic = ncmd_topic
+        self.state_topic = state_topic
         # Every CONNACK return code, in order; empty until the broker answers.
         self.connack = []
+        self.subacks = {}
         # Set when the connection drops without this worker asking.
         self.lost = threading.Event()
         self.lost_rc = None
+        self.rebirth = threading.Event()
+        self._host_lock = threading.Lock()
+        self.host_online = None
+        self.host_timestamp = None
+        # Set by a valid offline STATE; cleared once the host has been seen online before a birth.
+        self.host_left = threading.Event()
 
     def on_connect(self, _client, _userdata, _flags, rc, *_args):
         self.connack.append(rc)
@@ -258,8 +262,71 @@ class _SessionState:
             self.lost_rc = rc
             self.lost.set()
 
+    def on_subscribe(self, _client, _userdata, mid, granted, *_args):
+        self.subacks[mid] = tuple(granted)
 
-def _connect(edge_node_id, password, will_topic, will_payload):
+    def on_message(self, _client, _userdata, message):
+        if self.state_topic and message.topic == self.state_topic:
+            self._on_state(message.payload)
+        elif message.topic == self.ncmd_topic and _asks_for_rebirth(message.payload):
+            self.rebirth.set()
+
+    def _on_state(self, raw):
+        # The topic is subscribed exactly, so its last token is the configured host id
+        # (tck-id-message-flow-edge-node-birth-publish-phid-wait-id). A STATE older than the last
+        # one seen is ignored (-phid-wait-timestamp); the first is taken as it is.
+        state = _host_state(raw)
+        if state is None:
+            return
+        online, stamp = state
+        with self._host_lock:
+            if self.host_timestamp is not None and stamp < self.host_timestamp:
+                return
+            self.host_timestamp = stamp
+            self.host_online = online
+        if not online:
+            self.host_left.set()
+
+
+def _host_state(raw):
+    """A STATE payload as (online, timestamp), or None when it is not one (JSON, both keys)."""
+    try:
+        data = json.loads(raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw)
+        online, stamp = data["online"], data["timestamp"]
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return None
+    if not isinstance(online, bool) or isinstance(stamp, bool) or not isinstance(stamp, (int, float)):
+        return None
+    return online, stamp
+
+
+def _asks_for_rebirth(raw):
+    """Whether an NCMD carries `Node Control/Rebirth` = true, read as the daemon reads a payload."""
+    try:
+        payload, _ = capture.decode_wire_payload(raw)
+    except Exception:
+        return False
+    return any(m.name == REBIRTH_METRIC and m.HasField("boolean_value") and m.boolean_value
+               for m in payload.metrics)
+
+
+def _with_seq(raw, seq):
+    """
+    The same wire payload with its `seq` replaced, in the encoding it is in: protobuf first, then
+    JSON, as capture.decode_wire_payload() reads it.
+    """
+    payload = sparkplug_b_pb2.Payload()
+    try:
+        payload.ParseFromString(raw)
+    except Exception:
+        data = json.loads(raw.decode("utf-8"))
+        data["seq"] = seq
+        return json.dumps(data, separators=(",", ":")).encode("utf-8")
+    payload.seq = seq
+    return payload.SerializeToString()
+
+
+def _connect(edge_node_id, password, will_topic, will_payload, ncmd_topic=None, state_topic=None):
     """
     Connect AS the target gateway: its `sparkplug_id` is the username. Returns at the TCP handshake;
     the CONNACK arrives later on paho's thread and is recorded on `client.aber`, never raised there.
@@ -269,9 +336,11 @@ def _connect(edge_node_id, password, will_topic, will_payload):
     # The session's NDEATH as the Will, QoS 1 and not retained, so a worker that dies mid-replay is
     # announced too (tck-id-payloads-ndeath-will-message, -will-message-qos, -will-message-retain).
     client.will_set(will_topic, will_payload, qos=1, retain=False)
-    client.aber = _SessionState()
+    client.aber = _SessionState(ncmd_topic, state_topic)
     client.on_connect = client.aber.on_connect
     client.on_disconnect = client.aber.on_disconnect
+    client.on_subscribe = client.aber.on_subscribe
+    client.on_message = client.aber.on_message
     if os.getenv("MQTT_TLS_ENABLED", "").strip().lower() in ("1", "true", "yes", "on"):
         import ssl
         ca = os.getenv("MQTT_TLS_CA_FILE", "").strip()
@@ -281,14 +350,48 @@ def _connect(edge_node_id, password, will_topic, will_payload):
     return client
 
 
-def _open_session(edge_node, password, will_topic, bdseq):
+def _close_unborn(client):
+    """End a session that published no NBIRTH: a plain DISCONNECT, so the broker discards the Will."""
+    client.loop_stop()
+    try:
+        client.disconnect()
+    except Exception:
+        pass
+
+
+def _await(condition, seconds, tick=None):
+    """Poll `condition` until true or `seconds` pass, calling `tick` between polls. Returns it."""
+    deadline = time.monotonic() + seconds
+    while not condition():
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+        if tick is not None:
+            tick()
+    return True
+
+
+def _open_session(edge_node, password, will_topic, bdseq, *, primary_host_id=None, tick=None):
     """
-    One Sparkplug session as the target gateway: CONNECT with the NDEATH for `bdseq` as its Will,
-    then wait for the CONNACK. Returns (client, None), or (None, the reason the job fails).
+    One Sparkplug session as the target gateway, ready for its NBIRTH. Returns (client, None), or
+    (None, the reason the job fails).
+
+    CONNECT with the NDEATH for `bdseq` as its Will, and wait for the CONNACK. Subscribe at QoS 1
+    to the node's own NCMD topic (tck-id-message-flow-edge-node-ncmd-subscribe) and, when a primary
+    host is configured, to its STATE topic, and wait for the SUBACK. Then wait for that host to say
+    it is online (tck-id-message-flow-edge-node-birth-publish-phid-wait, -online).
+
+    `primary_host_id` None means the PRIMARY_HOST_ID environment variable; "" means no wait. `tick`
+    is called while waiting and may raise to abandon the session, which is then closed.
     """
+    host = PRIMARY_HOST_ID if primary_host_id is None else primary_host_id
+    group = will_topic.split("/")[1]
+    ncmd_topic = "spBv1.0/%s/NCMD/%s" % (group, edge_node)
+    state_topic = "spBv1.0/STATE/%s" % host if host else None
     try:
         client = _connect(edge_node, password, will_topic,
-                          capture.node_death(bdseq, int(time.time() * 1000)))
+                          capture.node_death(bdseq, int(time.time() * 1000)),
+                          ncmd_topic=ncmd_topic, state_topic=state_topic)
     except Exception as err:
         return None, "could not connect to the broker as %s: %s" % (edge_node, err)
 
@@ -296,19 +399,10 @@ def _open_session(edge_node, password, will_topic, bdseq):
     _next_bdseq[edge_node] = (bdseq + 1) % 256
     client.loop_start()
 
-    # ------------------------------------------------------------------------------------------
-    # THE BROKER HAS TO ACCEPT US BEFORE A SINGLE MESSAGE IS COUNTED AS SENT. The credential check
-    # in _run_job refuses a MISSING password and cannot see a WRONG one, which is what a re-issued
-    # credential leaves behind until its delivery reaches this worker.
-    #
-    # rc 4 and 5 are the two that mean the password: 4 is bad username/password, 5 is not
-    # authorised. They are named rather than lumped in, because they are the ones an operator fixes
-    # by issuing a credential rather than by looking at the broker.
-    deadline = time.monotonic() + CONNACK_TIMEOUT_SECONDS
-    while not client.aber.connack and time.monotonic() < deadline:
-        time.sleep(0.05)
-
-    if not client.aber.connack:
+    # Nothing counts as sent until the broker accepts the CONNECT: a wrong password connects at the
+    # socket and is refused afterwards. rc 4 and 5 are the two an operator fixes by issuing a
+    # credential, so they are named.
+    if not _await(lambda: client.aber.connack, CONNACK_TIMEOUT_SECONDS):
         client.loop_stop()
         return None, (
             "the broker never answered the connection as %s within %ss. It is reachable at %s:%s "
@@ -319,18 +413,58 @@ def _open_session(edge_node, password, will_topic, bdseq):
     rc = client.aber.connack[0]
     if rc != 0:
         client.loop_stop()
-        detail = {
-            4: "the broker rejected the username or password",
-            5: "the broker refused this connection as not authorised",
-        }.get(rc, "the broker refused the connection")
-        return None, (
-            "%s for %s (CONNACK rc=%s), so the password this worker holds is not the one the "
-            "broker has. A credential issued for this gateway reaches the worker within about a "
-            "minute: if one was just issued, start the playback again then; otherwise issue a new "
-            "one from the gateway's drawer on the Gateways page (Generate Broker Credential)."
-            % (detail, edge_node, rc)
-        )
+        return None, _refused(edge_node, rc)
+
+    try:
+        topics = [(ncmd_topic, 1)] + ([(state_topic, 1)] if state_topic else [])
+        result, mid = client.subscribe(topics)
+        names = " and ".join(t for t, _ in topics)
+        if result != mqtt.MQTT_ERR_SUCCESS or not _await(lambda: mid in client.aber.subacks,
+                                                          CONNACK_TIMEOUT_SECONDS):
+            _close_unborn(client)
+            return None, ("the broker did not acknowledge this worker's subscription to %s within "
+                          "%ss" % (names, CONNACK_TIMEOUT_SECONDS))
+        if any(granted >= 0x80 for granted in client.aber.subacks[mid]):
+            _close_unborn(client)
+            return None, ("the broker refused this worker's subscription to %s as %s, so it could "
+                          "not hear a rebirth request or the primary host. The gateway role grants "
+                          "both; check the broker's roles." % (names, edge_node))
+
+        if host:
+            def host_online():
+                if client.aber.host_online is not True:
+                    return False
+                # Seen online: an offline from before this point no longer ends the session.
+                client.aber.host_left.clear()
+                return client.aber.host_online is True
+
+            if not _await(host_online, PRIMARY_HOST_WAIT_SECONDS, tick):
+                _close_unborn(client)
+                return None, (
+                    "the primary host '%s' did not say it is online on %s within %.0fs, so the "
+                    "ingestion daemon is not consuming and nothing replayed now would reach the "
+                    "historian. Start the playback again once ingestion is running."
+                    % (host, state_topic, PRIMARY_HOST_WAIT_SECONDS)
+                )
+    except BaseException:
+        _close_unborn(client)
+        raise
     return client, None
+
+
+def _refused(edge_node, rc):
+    """The job's error for a CONNACK that refused the connection."""
+    detail = {
+        4: "the broker rejected the username or password",
+        5: "the broker refused this connection as not authorised",
+    }.get(rc, "the broker refused the connection")
+    return (
+        "%s for %s (CONNACK rc=%s), so the password this worker holds is not the one the "
+        "broker has. A credential issued for this gateway reaches the worker within about a "
+        "minute: if one was just issued, start the playback again then; otherwise issue a new "
+        "one from the gateway's drawer on the Gateways page (Generate Broker Credential)."
+        % (detail, edge_node, rc)
+    )
 
 
 def _end_session(client, topic, death):
@@ -416,18 +550,97 @@ class _Progress:
             raise _Stopped()
 
 
-def _wait_until(target, progress, client):
+def _host_went_offline(host, sent):
+    """The job's error when the primary host's STATE says offline mid-replay."""
+    return (
+        "the primary host '%s' went offline after %d message(s), so the ingestion daemon stopped "
+        "consuming. The NDEATH was published and the playback stopped; start it again once "
+        "ingestion is back." % (host, sent)
+    )
+
+
+class _Session:
     """
-    Sleep until `target` (time.monotonic()) in slices of at most SLEEP_SLICE_SECONDS, reporting
-    progress after each, so Stop and a lost connection end a long gap within a slice.
+    One open session: its client, the births published in it, and its own `seq` once a rebirth
+    has been answered (from then on every message is re-stamped, NBIRTH restarting at 0).
+    """
+
+    def __init__(self, client, host):
+        self.client = client
+        self.host = host
+        self.node_birth = None
+        self.device_births = {}
+        self.seq = None
+
+    def publish(self, topic, raw, progress):
+        _, msg_type, _, device = capture.split_topic(topic)
+        out = raw
+        if self.seq is not None:
+            if msg_type == "NBIRTH":
+                self.seq = 0
+            out = _with_seq(raw, self.seq)
+            self.seq = (self.seq + 1) % 256
+        # QoS 0, as the fleet publishes: only paho's acceptance is observable, so a message counts
+        # once paho has accepted it on a connection that has not dropped.
+        info = self.client.publish(topic, out, qos=0, retain=False)
+        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            raise _JobFailed(_connection_lost(progress.sent))
+        if msg_type == "NBIRTH":
+            self.node_birth = (topic, raw)
+            self.device_births.clear()
+        elif msg_type == "DBIRTH":
+            self.device_births.pop(device, None)
+            self.device_births[device] = (topic, raw)
+        elif msg_type == "DDEATH":
+            self.device_births.pop(device, None)
+
+    def answer_rebirth(self, job_id, progress):
+        """
+        Re-publish this session's NBIRTH and the DBIRTHs of the devices born in it, seq 0 upward,
+        before any further data (tck-id-operational-behavior-data-commands-rebirth-action-1, -2).
+        The NBIRTH keeps the session's bdSeq (-rebirth-action-3).
+        """
+        self.client.aber.rebirth.clear()
+        if self.node_birth is None:
+            logger.info("Playback %s: a rebirth request arrived before this session's NBIRTH, "
+                        "which answers it.", job_id)
+            return
+        births = [self.node_birth] + list(self.device_births.values())
+        for seq, (topic, raw) in enumerate(births):
+            info = self.client.publish(topic, _with_seq(raw, seq % 256), qos=0, retain=False)
+            if info.rc != mqtt.MQTT_ERR_SUCCESS:
+                raise _JobFailed(_connection_lost(progress.sent))
+        self.seq = len(births) % 256
+        logger.info("Playback %s: answered a rebirth request with the NBIRTH and %d DBIRTH(s), "
+                    "after %d message(s).", job_id, len(births) - 1, progress.sent)
+
+    def check(self, job_id, progress):
+        """Between messages: a dropped connection or an offline primary host ends the job, and a
+        rebirth request is answered."""
+        aber = self.client.aber
+        if aber.lost.is_set():
+            raise _JobFailed(_connection_lost(progress.sent))
+        if aber.host_left.is_set():
+            # tck-id-message-flow-edge-node-birth-publish-phid-offline: the NDEATH, then DISCONNECT,
+            # which the caller's _end_session() does.
+            raise _JobFailed(_host_went_offline(self.host, progress.sent))
+        if aber.rebirth.is_set():
+            self.answer_rebirth(job_id, progress)
+
+
+def _wait_until(target, progress, session, job_id=None):
+    """
+    Sleep until `target` (time.monotonic()) in slices of at most SLEEP_SLICE_SECONDS, checking the
+    session and reporting progress after each, so Stop, a lost connection, an offline primary host
+    and a rebirth request are all dealt with within a slice.
     """
     while True:
         remaining = target - time.monotonic()
         if remaining <= 0:
             return
         time.sleep(min(SLEEP_SLICE_SECONDS, remaining))
-        if client is not None and client.aber.lost.is_set():
-            raise _JobFailed(_connection_lost(progress.sent))
+        if session is not None:
+            session.check(job_id, progress)
         progress.report(force=True)
 
 
@@ -534,39 +747,39 @@ def _run_job(supabase, storage, credentials, job, outcome=None):
     # ------------------------------------------------------------------------------------------
     # Every planned topic is under the job's group, so the first names the edge node's.
     will_topic = "spBv1.0/%s/NDEATH/%s" % (capture.split_topic(plan[0][1])[0], edge_node)
-    client, error = _open_session(edge_node, password, will_topic, bdseq)
-    if error:
-        return 0, out_of_window, error
-
+    host = PRIMARY_HOST_ID
     progress = _Progress(supabase, job_id, len(plan))
-    progress.started = time.monotonic()
+    session = None
+    error = None
+
+    def open_session():
+        client, failure = _open_session(edge_node, password, will_topic, bdseq,
+                                        primary_host_id=host, tick=progress.report)
+        if failure:
+            raise _JobFailed(failure if not progress.sent else
+                             "publishing stopped after %d message(s): %s" % (progress.sent, failure))
+        return _Session(client, host)
 
     try:
+        session = open_session()
+        progress.started = time.monotonic()
         for delay_ms, topic, payload_bytes, _ in plan:
             # An absolute schedule: per-message sleeps would drift by every publish and progress
             # call, and the rebased timestamps would drift out of window with them.
-            _wait_until(progress.started + delay_ms / 1000.0, progress, client)
+            _wait_until(progress.started + delay_ms / 1000.0, progress, session, job_id)
 
-            if client is None:
-                client, error = _open_session(edge_node, password, will_topic, bdseq)
-                if error:
-                    raise _JobFailed("publishing stopped after %d message(s): %s"
-                                     % (progress.sent, error))
+            if session is None:
+                session = open_session()
+            session.check(job_id, progress)
 
-            if client.aber.lost.is_set():
-                raise _JobFailed(_connection_lost(progress.sent))
             if capture.split_topic(topic)[1] == "NDEATH":
                 # A recorded death ends the session as it ended the recorded node's. The plan
                 # numbered the messages after it as the next session, which opens on the next one.
-                _end_session(client, topic, payload_bytes)
-                client = None
+                _end_session(session.client, topic, payload_bytes)
+                session = None
                 bdseq = (bdseq + 1) % 256
             else:
-                # QoS 0, as the fleet publishes: only paho's acceptance is observable, so a message
-                # counts once paho has accepted it on a connection that has not dropped.
-                info = client.publish(topic, payload_bytes, qos=0, retain=False)
-                if info.rc != mqtt.MQTT_ERR_SUCCESS:
-                    raise _JobFailed(_connection_lost(progress.sent))
+                session.publish(topic, payload_bytes, progress)
             progress.sent += 1
             progress.report()
     except _Stopped:
@@ -580,10 +793,13 @@ def _run_job(supabase, storage, credentials, job, outcome=None):
         error = "publishing stopped after %d message(s): %s" % (progress.sent, err)
     finally:
         # However it ended, an open session ends with its NDEATH, so the gateway reads OFFLINE.
-        if client is not None:
-            _end_session(client, will_topic, capture.node_death(bdseq, int(time.time() * 1000)))
+        if session is not None:
+            _end_session(session.client, will_topic,
+                         capture.node_death(bdseq, int(time.time() * 1000)))
 
     return progress.sent, out_of_window, error
+
+
 
 
 class _Holdings:

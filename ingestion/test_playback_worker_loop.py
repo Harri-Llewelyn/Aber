@@ -117,6 +117,8 @@ class FakeBroker:
         self.clients = []
         self.after_publish = None
         self.refuse_publish_from = None   # the 1-based publish from which paho answers NO_CONN
+        self.retained = {}                # topic -> payload, delivered on subscribe
+        self.refuse_subscribe = False
 
 
 class FakeClient:
@@ -154,6 +156,15 @@ class FakeClient:
     def loop_stop(self):
         self.events.append("loop_stop")
 
+    def subscribe(self, topics):
+        self.events.append(("subscribe", tuple(topics)))
+        granted = tuple(0x80 if FakeClient.broker.refuse_subscribe else qos for _, qos in topics)
+        self.on_subscribe(self, None, 7, granted)
+        for topic, _ in topics:
+            if topic in FakeClient.broker.retained:
+                self.deliver(topic, FakeClient.broker.retained[topic])
+        return 0, 7
+
     def publish(self, topic, payload, qos=0, retain=False):
         planned = msg_type_of(topic) != "NDEATH"
         if not self.connected:
@@ -180,6 +191,13 @@ class FakeClient:
         """The broker closes the connection, as Dynamic Security does when the password changes."""
         self.connected = False
         self.on_disconnect(self, None, rc)
+
+    def deliver(self, topic, payload):
+        """The broker hands this client a message on a topic it subscribed to."""
+        self.on_message(self, None, SimpleNamespace(topic=topic, payload=payload, retain=False))
+
+    def subscriptions(self):
+        return [e[1] for e in self.events if isinstance(e, tuple) and e[0] == "subscribe"]
 
     def published(self):
         return [e for e in self.events if isinstance(e, tuple) and e[0] == "publish"]
@@ -219,13 +237,16 @@ class FakeSupabase:
 
 class WorkerLoopCase(unittest.TestCase):
     def setUp(self):
-        self._saved = (playback_worker.mqtt.Client, playback_worker.PROGRESS_INTERVAL_SECONDS)
+        self._saved = (playback_worker.mqtt.Client, playback_worker.PROGRESS_INTERVAL_SECONDS,
+                       playback_worker.PRIMARY_HOST_ID)
         FakeClient.broker = self.broker = FakeBroker()
         playback_worker.mqtt.Client = FakeClient
+        playback_worker.PRIMARY_HOST_ID = ""
         playback_worker._next_bdseq.clear()
 
     def tearDown(self):
-        playback_worker.mqtt.Client, playback_worker.PROGRESS_INTERVAL_SECONDS = self._saved
+        (playback_worker.mqtt.Client, playback_worker.PROGRESS_INTERVAL_SECONDS,
+         playback_worker.PRIMARY_HOST_ID) = self._saved
         playback_worker._next_bdseq.clear()
 
     def job(self, **overrides):
@@ -487,6 +508,231 @@ class HeartbeatTests(unittest.TestCase):
         self.assertIn("rotated %s" % GW, "\n".join(logs.output))
         self.assertNotIn("a-new-password", "\n".join(logs.output))
         self.assertTrue(holdings._changed.is_set())
+
+
+# -------------------------------------------------------------------------------------------------
+# A full Sparkplug edge node: NCMD and the rebirth answer
+# -------------------------------------------------------------------------------------------------
+NCMD = "spBv1.0/%s/NCMD/%s" % (GROUP, GW)
+HOST = "Aber"
+STATE = "spBv1.0/STATE/%s" % HOST
+
+
+def rebirth_request(value=True, name="Node Control/Rebirth"):
+    """The NCMD the ingestion daemon publishes, protobuf-encoded."""
+    return capture.dict_to_payload_bytes({
+        "timestamp": EPOCH, "metrics": [{"name": name, "datatype": 11, "boolean_value": value}]})
+
+
+def seq_of(raw):
+    try:
+        return decode(raw).seq
+    except Exception:
+        return json.loads(raw)["seq"]
+
+
+def bdseq_in(raw):
+    payload = decode(raw)
+    return next(m.long_value for m in payload.metrics if m.name == "bdSeq")
+
+
+def state(online, timestamp):
+    return json.dumps({"online": online, "timestamp": timestamp}).encode("utf-8")
+
+
+class RebirthTests(WorkerLoopCase):
+    def published(self):
+        client, = self.broker.clients
+        return [(msg_type_of(e[1]), e[2]) for e in client.published()]
+
+    def test_it_subscribes_to_its_own_ncmd_at_qos_1_before_the_nbirth(self):
+        self.run_job(a_session())
+        client, = self.broker.clients
+        self.assertEqual(client.subscriptions(), [((NCMD, 1),)])
+        first_publish = next(i for i, e in enumerate(client.events)
+                             if isinstance(e, tuple) and e[0] == "publish")
+        first_subscribe = next(i for i, e in enumerate(client.events)
+                               if isinstance(e, tuple) and e[0] == "subscribe")
+        self.assertLess(first_subscribe, first_publish)
+
+    def test_a_rebirth_request_is_answered_with_the_births_and_seq_restarts(self):
+        def ask_after_the_first_reading(client, n):
+            if n == 3:
+                client.deliver(NCMD, rebirth_request())
+
+        self.broker.after_publish = ask_after_the_first_reading
+        sent, _, error = self.run_job(a_session(readings=3))
+        self.assertEqual((sent, error), (5, None), "the re-published births were counted as planned")
+        published = self.published()
+        self.assertEqual([t for t, _ in published],
+                         ["NBIRTH", "DBIRTH", "DDATA", "NBIRTH", "DBIRTH", "DDATA", "DDATA", "NDEATH"])
+        self.assertEqual([seq_of(raw) for _, raw in published[3:7]], [0, 1, 2, 3])
+        self.assertEqual(bdseq_in(published[3][1]), bdseq_in(published[0][1]),
+                         "a rebirth on the same connection keeps the bdSeq")
+        self.assertEqual(decode(published[4][1]).metrics[0].double_value, 0.0,
+                         "the DBIRTH re-published is the one the session published")
+
+    def test_a_json_session_is_re_stamped_as_json(self):
+        self.broker.after_publish = lambda client, n: n == 3 and client.deliver(NCMD, rebirth_request())
+        self.run_job(a_session(readings=2, encoding="json"))
+        published = self.published()
+        self.assertEqual([json.loads(raw)["seq"] for _, raw in published[3:6]], [0, 1, 2])
+
+    def test_a_request_that_is_not_a_rebirth_is_ignored(self):
+        def ask(client, n):
+            if n == 3:
+                client.deliver(NCMD, rebirth_request(value=False))
+                client.deliver(NCMD, rebirth_request(name="Node Control/Reboot"))
+                client.deliver(NCMD, b"not a payload at all")
+
+        self.broker.after_publish = ask
+        self.run_job(a_session(readings=2))
+        self.assertEqual([t for t, _ in self.published()], ["NBIRTH", "DBIRTH", "DDATA", "DDATA", "NDEATH"])
+
+    def test_a_request_before_the_nbirth_is_answered_by_the_nbirth(self):
+        self.broker.retained[NCMD] = rebirth_request()
+        self.run_job(a_session(readings=1))
+        self.assertEqual([t for t, _ in self.published()], ["NBIRTH", "DBIRTH", "DDATA", "NDEATH"])
+
+    def test_a_device_that_died_is_not_re_born(self):
+        messages = a_session(readings=1) + [recorded(40, "DDEATH", device=CAPTURED_DEV),
+                                            recorded(50, "NDATA", value=5.0)]
+        self.broker.after_publish = lambda client, n: n == 4 and client.deliver(NCMD, rebirth_request())
+        self.run_job(messages)
+        self.assertEqual([t for t, _ in self.published()],
+                         ["NBIRTH", "DBIRTH", "DDATA", "DDEATH", "NBIRTH", "NDATA", "NDEATH"])
+
+    def test_the_sessions_open_for_the_cli_keep_their_positional_shape(self):
+        """capture.py play calls _open_session(edge_node, password, will_topic, bdseq)."""
+        client, error = playback_worker._open_session(
+            GW, "a-password", "spBv1.0/%s/NDEATH/%s" % (GROUP, GW), 5)
+        self.assertIsNone(error)
+        self.assertEqual(client.subscriptions(), [((NCMD, 1),)])
+        self.assertEqual(bdseq_in(client.will[1]), 5)
+        playback_worker._end_session(client, client.will[0], client.will[1])
+        self.assertEqual(client.events[-1], "disconnect")
+
+
+class LongGapRebirthTests(ClockedCase):
+    def test_a_rebirth_in_a_long_gap_is_answered_within_a_second(self):
+        asked = []
+
+        def ask(client, n):
+            if n == 3:
+                asked.append(self.clock.now)
+                client.deliver(NCMD, rebirth_request())
+
+        self.broker.after_publish = ask
+        self.supabase = FakeSupabase()
+        playback_worker._run_job(self.supabase, FakeStorage(capture_file(with_a_long_gap(30_000))),
+                                 {GW: "a-password"}, self.job(speed=1.0))
+        client, = self.broker.clients
+        births = [i for i, e in enumerate(client.published()) if msg_type_of(e[1]) == "NBIRTH"]
+        self.assertEqual(len(births), 2)
+        self.assertLess(births[1], 4, "the answer waited for the next reading")
+
+
+# -------------------------------------------------------------------------------------------------
+# A full Sparkplug edge node: the primary host's STATE
+# -------------------------------------------------------------------------------------------------
+class PrimaryHostTests(ClockedCase):
+    def setUp(self):
+        super().setUp()
+        playback_worker.PRIMARY_HOST_ID = HOST
+
+    def published_types(self):
+        client, = self.broker.clients
+        return client.published_types()
+
+    def test_it_subscribes_to_the_hosts_state_and_births_once_it_is_online(self):
+        self.broker.retained[STATE] = state(True, 1000)
+        sent, _, error = self.run_job(a_session())
+        self.assertEqual((sent, error), (5, None))
+        client, = self.broker.clients
+        self.assertEqual(client.subscriptions(), [((NCMD, 1), (STATE, 1))])
+        self.assertEqual(self.published_types()[0], "NBIRTH")
+
+    def test_no_birth_while_the_host_never_says_online(self):
+        self.broker.retained[STATE] = state(False, 1000)
+        sent, _, error = self.run_job(a_session())
+        self.assertEqual(sent, 0)
+        self.assertIn("the primary host 'Aber' did not say it is online on %s" % STATE, error)
+        self.assertEqual(self.published_types(), [], "an NBIRTH or a death went out")
+        client, = self.broker.clients
+        self.assertEqual(client.events[-1], "disconnect", "the unborn session was not closed cleanly")
+        self.assertGreaterEqual(self.clock.now - 1000.0, playback_worker.PRIMARY_HOST_WAIT_SECONDS)
+
+    def test_it_waits_for_the_host_to_come_online(self):
+        self.broker.retained[STATE] = state(False, 1000)
+        start = self.clock.now
+
+        def come_online_after_ten_seconds(seconds, sleep=self.clock.sleep):
+            sleep(seconds)
+            client = self.broker.clients[0] if self.broker.clients else None
+            if client and self.clock.now - start >= 10 and client.aber.host_online is False:
+                client.deliver(STATE, state(True, 2000))
+
+        self.clock.sleep = come_online_after_ten_seconds
+        sent, _, error = self.run_job(a_session())
+        self.assertEqual((sent, error), (5, None))
+        self.assertGreaterEqual(self.clock.now - start, 10)
+
+    def test_progress_is_reported_and_stop_honoured_while_waiting(self):
+        start = self.clock.now
+        supabase = FakeSupabase(playback_progress=lambda _p: self.clock.now - start >= 5)
+        self.supabase = supabase
+        outcome = {}
+        sent, _, error = playback_worker._run_job(
+            supabase, FakeStorage(capture_file(a_session())), {GW: "a-password"}, self.job(),
+            outcome=outcome)
+        self.assertEqual((sent, error, outcome), (0, None, {"stopped": True}))
+        self.assertEqual(supabase.called("playback_progress")[0]["p_messages_total"], 5)
+        self.assertEqual(self.published_types(), [])
+        self.assertLess(self.clock.now - start, 7)
+
+    def test_the_host_going_offline_mid_replay_ends_the_session_and_fails_the_job(self):
+        self.broker.retained[STATE] = state(True, 1000)
+        self.broker.after_publish = lambda client, n: n == 3 and client.deliver(STATE, state(False, 1000))
+        sent, _, error = self.run_job(a_session(readings=3))
+        self.assertEqual(sent, 3)
+        self.assertIn("the primary host 'Aber' went offline after 3 message(s)", error)
+        client, = self.broker.clients
+        self.assertEqual(self.published_types(), ["NBIRTH", "DBIRTH", "DDATA", "NDEATH"])
+        self.assertEqual(client.published()[-1][3], 1, "the NDEATH is QoS 1")
+        self.assertEqual(client.events[-1], "disconnect")
+
+    def test_an_older_offline_is_a_previous_session_s_will_and_is_ignored(self):
+        """A daemon restart: the new STATE online, then the old connection's Will, stamped earlier."""
+        self.broker.retained[STATE] = state(True, 2000)
+        self.broker.after_publish = lambda client, n: n == 3 and client.deliver(STATE, state(False, 1000))
+        sent, _, error = self.run_job(a_session(readings=3))
+        self.assertEqual((sent, error), (5, None))
+
+    def test_a_refused_subscription_fails_the_job_before_any_birth(self):
+        self.broker.refuse_subscribe = True
+        sent, _, error = self.run_job(a_session())
+        self.assertEqual(sent, 0)
+        self.assertIn("refused this worker's subscription", error)
+        self.assertEqual(self.published_types(), [])
+
+
+class WireHelperTests(unittest.TestCase):
+    def test_seq_is_replaced_in_protobuf_without_touching_the_rest(self):
+        raw = capture.dict_to_payload_bytes({"timestamp": EPOCH, "seq": 9, "metrics": [
+            {"name": "bdSeq", "datatype": 4, "long_value": 3}]})
+        out = decode(playback_worker._with_seq(raw, 0))
+        self.assertEqual((out.seq, out.timestamp, out.metrics[0].long_value), (0, EPOCH, 3))
+
+    def test_seq_is_replaced_in_json(self):
+        raw = json.dumps({"timestamp": EPOCH, "seq": 9, "metrics": []}).encode()
+        self.assertEqual(json.loads(playback_worker._with_seq(raw, 4)),
+                         {"timestamp": EPOCH, "seq": 4, "metrics": []})
+
+    def test_a_state_payload_is_read_strictly(self):
+        self.assertEqual(playback_worker._host_state(state(True, 5)), (True, 5))
+        for bad in (b"{}", b'{"online": "true", "timestamp": 1}', b'{"online": true}',
+                    b'{"online": true, "timestamp": true}', b"nope"):
+            self.assertIsNone(playback_worker._host_state(bad), bad)
 
 
 if __name__ == "__main__":

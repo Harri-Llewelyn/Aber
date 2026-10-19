@@ -2864,9 +2864,10 @@ What it does not offer is the two acts that are wrong for it, for different reas
   moment somebody starts a job — possibly weeks later, on a page that says nothing about gateways —
   while the archive itself reports success and reads as housekeeping. `0067` refuses it in the
   database and the button is hidden; the UI is not the rule.
-- **Requesting a rebirth** is addressed to a node nobody is listening as. The playback worker only
-  publishes and holds no subscription at all, so the NCMD reaches nothing and `rebirth_requests`
-  would record something that can never be answered.
+- **Requesting a rebirth** is addressed to a node that is listening only while a replay runs. The
+  playback worker subscribes to the Playback gateway's NCMD for each replay and answers a rebirth
+  then, so between replays the NCMD reaches nothing and `rebirth_requests` would record something
+  that is never answered.
 
 **The rule is "not the last one", not "never".** `0067` refuses only the archive that would leave
 no unarchived `is_shadow` gateway. Since `0187` the Playback gateway is the only one a stack makes

@@ -1019,8 +1019,8 @@ export function GatewaysTab({ showToast, onViewTrail, onSelectCell, onSelectDevi
         ] : []}
         actions={selected ? [
           // Ask the node to republish its birth certificate (`Node Control/Rebirth`): the only command
-          // this dashboard sends. Not on an archived gateway, nor the Playback gateway, which holds
-          // no subscription.
+          // this dashboard sends. Not on an archived gateway, nor the Playback gateway, which hears an
+          // NCMD only while a replay runs.
           !selected.is_archived && !selected.is_shadow && canManage && {
             label: 'Request Rebirth',
             icon: <IconRefreshCw size={13} />,

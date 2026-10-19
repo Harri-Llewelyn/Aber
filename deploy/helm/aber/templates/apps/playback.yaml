@@ -120,6 +120,10 @@ spec:
                    check before a replay judges them as the daemon will. */}}
             - name: TELEMETRY_MAX_HISTORICAL_AGE_SECONDS
               value: {{ .Values.ingestion.historicalMaxAgeSeconds | int | quote }}
+            {{- /* The ingestion daemon's Sparkplug host id. Every replayed NBIRTH waits for its STATE
+                   to say online, and a replay ends when it says offline (ingestion/README.md). */}}
+            - name: PRIMARY_HOST_ID
+              value: {{ include "aber.primaryHostId" . | quote }}
             - name: PYTHONUNBUFFERED
               value: "1"
           securityContext:

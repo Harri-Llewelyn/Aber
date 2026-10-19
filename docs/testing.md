@@ -122,9 +122,12 @@ python ingestion/test_startup_healer.py
 # one. If the environment won, "issue a new credential" would be the one repair that could not fix
 # a refused playback.
 python ingestion/test_playback_credentials.py
-# The playback worker as a Sparkplug edge node, against a fake broker and PostgREST. A message
-# counts only once paho accepted it on a connection that has not dropped: a replay whose credential
-# was re-issued partway used to end COMPLETED with every message counted.
+# The playback worker as a Sparkplug edge node, against a fake broker and PostgREST: the NCMD
+# subscription and the rebirth answer, the wait for the primary host's STATE and the end of a job when
+# it goes offline, Stop and a dropped connection inside a long gap, the retried finish and startup
+# sweep, and the heartbeat thread. A message counts only once paho accepted it on a connection that
+# has not dropped: a replay whose credential was re-issued partway used to end COMPLETED with every
+# message counted.
 python ingestion/test_playback_worker_loop.py
 # The playback worker's Sparkplug session -- the NDEATH Will, the NDEATH that ends every job, and
 # the bdSeq the replayed NBIRTH shares with both, so the Playback gateway reads OFFLINE after a replay

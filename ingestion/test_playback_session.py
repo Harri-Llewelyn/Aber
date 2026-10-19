@@ -221,6 +221,10 @@ class FakeClient:
     def loop_stop(self):
         self.events.append("loop_stop")
 
+    def subscribe(self, topics):
+        self.on_subscribe(self, None, 1, tuple(qos for _, qos in topics))
+        return 0, 1
+
     def publish(self, topic, payload, qos=0, retain=False):
         if FakeClient.fail_on and msg_type_of(topic) == FakeClient.fail_on:
             raise OSError("connection reset")
