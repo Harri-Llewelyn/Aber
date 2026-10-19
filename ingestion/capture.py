@@ -633,8 +633,8 @@ def capture_identities(messages):
 # The file, a message at a time
 # ---------------------------------------------------------------------------------------------
 # Written with each message on a line of its own, after the document's other fields, so a recorder
-# keeps each message only as the bytes it writes. Read a message at a time from any layout of the
-# same JSON, so a reader never holds the document. README.md -> "The file is JSON".
+# keeps each message only as the bytes it writes. read_capture() reads one a message at a time, in
+# any layout of the same JSON, for the playback worker. README.md -> "The file is JSON".
 MESSAGE_INDENT = b"    "
 MESSAGE_SEPARATOR = b",\n" + MESSAGE_INDENT
 FILE_TAIL = b"\n  ]\n}\n"
@@ -784,7 +784,7 @@ def read_capture(chunks, fields):
     """
     reader = _JsonText(chunks)
     first = reader.peek()
-    if first == "﻿":
+    if first == "\ufeff":
         raise reader.error("Unexpected UTF-8 BOM (decode using utf-8-sig)")
     if first != "{":
         if first and (first in _FIRST_CHARACTER_KIND or first in "-0123456789NI"):

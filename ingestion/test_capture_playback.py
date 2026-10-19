@@ -913,7 +913,7 @@ class CaptureFileShapeTests(unittest.TestCase):
         self.assertEqual(decoded.metrics[0].double_value, 999.9)
 
     def test_the_written_file_is_one_message_per_line_and_reads_back_whole(self):
-        document = capture_file([message(0, "DDATA", metrics=[{"name": "Té", "double_value": 1.5}]),
+        document = capture_file([message(0, "DDATA", metrics=[{"name": "T\u00e9", "double_value": 1.5}]),
                                  message(5, "DDATA")])
         out = io.BytesIO()
         fields = {k: v for k, v in document.items() if k != "messages"}
@@ -953,7 +953,7 @@ class FilePlanTests(unittest.TestCase):
     """The worker reads the file a message at a time; what it plans is plan_playback()'s."""
 
     DOCUMENT = capture_file(
-        [message(10 + i, "DDATA", metrics=[{"name": "Température ☃", "alias": 1,
+        [message(10 + i, "DDATA", metrics=[{"name": "Temp\u00e9rature \u2603", "alias": 1,
                                             "timestamp": EPOCH + 10 + i, "double_value": i * 1.25}],
                  **({"encoding": "json"} if i % 3 else {})) for i in range(30)]
         + [message(50, "NDEATH", device=None, metrics=[{"name": "bdSeq", "long_value": 3}]),
@@ -1018,7 +1018,7 @@ class CaptureFileTextTests(unittest.TestCase):
     def test_the_place_is_the_files_at_every_chunk_size(self):
         for text in ('{"a" 1}', '{"messages": [1 2]}', "", '  {"a": tru', '{"a": "x\n', "{} x",
                      '{\n "aber_capture_version": 1,\n  "messages": [\n {"a": [1, 2,, 3]}]}',
-                     '{"messages": [{"a": 1}, {"b": "\\u12"}]}', '﻿{}'):
+                     '{"messages": [{"a": 1}, {"b": "\\u12"}]}', '\ufeff{}'):
             try:
                 json.loads(text)
             except ValueError as err:
