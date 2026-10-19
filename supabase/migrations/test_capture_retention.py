@@ -473,16 +473,16 @@ class TheBucketPolicies(Base):
 
     def setUp(self):
         super().setUp()
-        self.cur.execute(f"CREATE SCHEMA {PROBE};")
+        self.cur.execute("CREATE SCHEMA capture_retention_probe;")
         self.cur.execute(
-            f"CREATE TABLE {PROBE}.objects (bucket_id text NOT NULL, name text NOT NULL, metadata jsonb);")
+            "CREATE TABLE capture_retention_probe.objects (bucket_id text NOT NULL, name text NOT NULL, metadata jsonb);")
         self.cur.execute(
-            f"CREATE FUNCTION {PROBE}.foldername(name text) RETURNS text[] LANGUAGE plpgsql AS $f$ "
+            "CREATE FUNCTION capture_retention_probe.foldername(name text) RETURNS text[] LANGUAGE plpgsql AS $f$ "
             "DECLARE _parts text[]; BEGIN SELECT string_to_array(name, '/') INTO _parts; "
             "RETURN _parts[1:array_length(_parts, 1) - 1]; END $f$;")
-        self.cur.execute(f"ALTER TABLE {PROBE}.objects ENABLE ROW LEVEL SECURITY;")
-        self.cur.execute(f"GRANT USAGE ON SCHEMA {PROBE} TO authenticated;")
-        self.cur.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {PROBE}.objects TO authenticated;")
+        self.cur.execute("ALTER TABLE capture_retention_probe.objects ENABLE ROW LEVEL SECURITY;")
+        self.cur.execute("GRANT USAGE ON SCHEMA capture_retention_probe TO authenticated;")
+        self.cur.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON capture_retention_probe.objects TO authenticated;")
         with open(STORAGE_POLICIES, encoding="utf-8") as f:
             text = f.read()
         start = text.index("-- broker-captures:")
@@ -496,12 +496,12 @@ class TheBucketPolicies(Base):
         self._capture(path=self.stored)
         self.orphan = f"{self.gw_wire}/orphan.json"
         for name in (self.stored, self.orphan):
-            self.cur.execute(f"INSERT INTO {PROBE}.objects (bucket_id, name) VALUES ('broker-captures', %s);",
+            self.cur.execute("INSERT INTO capture_retention_probe.objects (bucket_id, name) VALUES ('broker-captures', %s);",
                              (name,))
 
     def _inserts(self, caller, name):
         try:
-            self._run(caller, f"INSERT INTO {PROBE}.objects (bucket_id, name) VALUES ('broker-captures', %s);",
+            self._run(caller, "INSERT INTO capture_retention_probe.objects (bucket_id, name) VALUES ('broker-captures', %s);",
                       (name,))
             return True
         except pg_errors.InsufficientPrivilege:
@@ -510,13 +510,13 @@ class TheBucketPolicies(Base):
     def _deletes(self, caller, name):
         self.cur.execute("SAVEPOINT del;")
         try:
-            return self._run(caller, f"DELETE FROM {PROBE}.objects WHERE bucket_id = 'broker-captures' "
+            return self._run(caller, "DELETE FROM capture_retention_probe.objects WHERE bucket_id = 'broker-captures' "
                                      "AND name = %s;", (name,)) == 1
         finally:
             self.cur.execute("ROLLBACK TO SAVEPOINT del;")
 
     def _sees(self, caller, name):
-        return self._run(caller, f"SELECT count(*) FROM {PROBE}.objects WHERE name = %s;", (name,))[0][0] == 1
+        return self._run(caller, "SELECT count(*) FROM capture_retention_probe.objects WHERE name = %s;", (name,))[0][0] == 1
 
     def test_a_person_writes_only_the_path_issued_to_them(self):
         issued = self.begin(replace=True)
@@ -536,7 +536,7 @@ class TheBucketPolicies(Base):
                          "VALUES ('broker-captures', %s, '{\"size\": 2048}');", (issued["storage_path"],))
         self.register(issued["storage_path"])
         self.assertFalse(self._inserts("Shopfloor_Manager", issued["storage_path"] + ".again"))
-        updated = self._run("Shopfloor_Manager", f"UPDATE {PROBE}.objects SET metadata = '{{}}' "
+        updated = self._run("Shopfloor_Manager", "UPDATE capture_retention_probe.objects SET metadata = '{}' "
                                                  "WHERE name = %s;", (issued["storage_path"],))
         self.assertEqual(updated, 0)
 
