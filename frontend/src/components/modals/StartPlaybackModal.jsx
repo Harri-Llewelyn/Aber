@@ -241,8 +241,9 @@ export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, 
           <div className="callout callout-warning">
             <IconShieldAlert size={14} className="callout-icon" />
             <div>
-              The <strong>Playback gateway</strong> is the only place a capture can be played back,
-              and it is missing or archived here. Restore it from Archived Entities.
+              The <strong>Playback gateway</strong> could not be found, and a capture can be played
+              back only there. Close this dialog and open it again. If it is still missing, upgrade
+              the release: the upgrade creates it again.
             </div>
           </div>
         )}
@@ -359,10 +360,8 @@ export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, 
         <div className="form-group">
           <label className="form-label">Device mapping</label>
           <p className="form-hint">
-            Every device in the capture has to become a device of {target.name}. An unmapped id
-            would publish under the Playback gateway's edge node carrying another gateway's device
-            segment, which quarantines that device — and reads as a fleet fault rather than a
-            mapping one.
+            Every device in the capture plays back as its replay lane, a device of {target.name}
+            that stands in for it. A playback with a device left unmapped is refused.
           </p>
           {/* The button writes: it creates one replay lane per captured device and returns the map
               the playback job needs. Reused on the next run. */}
@@ -391,12 +390,14 @@ export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, 
               </ActionButton>
             </div>
           )}
+          {/* Every captured device is mapped and the gateway lists no device: the lanes were made
+              and the re-read of the gateway's devices did not return them. */}
           {target.devices.length === 0 && unmapped.length === 0 && (
             <div className="callout callout-danger">
               <IconShieldAlert size={14} className="callout-icon" />
               <div>
-                {target.name} has no devices, so there is nothing to map onto. Add one on the
-                Devices page and bind it to this gateway.
+                {target.name}&apos;s replay lanes could not be read, so there is nothing to map
+                onto. Close this dialog and open it again.
               </div>
             </div>
           )}

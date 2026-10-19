@@ -124,13 +124,23 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
             <IconShieldAlert size={14} className="callout-icon" />
             <div>
               <strong>Issue a broker credential for this gateway?</strong>
-              <div>
-                The broker holds <strong>one password per gateway</strong>, so this{' '}
-                <strong>replaces any credential this gateway already has</strong> — including one a
-                running Node-RED is using. That connection is <strong>dropped immediately</strong>:
-                the gateway goes stale on the dashboard within 90 seconds and cannot reconnect until
-                the new password reaches it.
-              </div>
+              {isPlayback ? (
+                <div>
+                  The broker holds <strong>one password per gateway</strong>, so this{' '}
+                  <strong>replaces the one the playback worker uses</strong>. A playback running now
+                  is <strong>cut off at once</strong> and fails, counting what it published. The
+                  new password reaches the worker within about a minute; start the next playback
+                  after that.
+                </div>
+              ) : (
+                <div>
+                  The broker holds <strong>one password per gateway</strong>, so this{' '}
+                  <strong>replaces any credential this gateway already has</strong> — including one
+                  a running Node-RED is using. That connection is <strong>dropped
+                  immediately</strong>: the gateway goes stale on the dashboard within 90 seconds and
+                  cannot reconnect until the new password reaches it.
+                </div>
+              )}
               {gateway.is_shadow ? (
                 <div>
                   The password is shown <strong>once</strong> and cannot be recovered: the broker

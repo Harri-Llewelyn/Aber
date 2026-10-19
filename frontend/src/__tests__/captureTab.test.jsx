@@ -467,7 +467,8 @@ describe('a failed job', () => {
     api.recentCaptureJobs.mockResolvedValue([{
       id: 'job-9', status: 'FAILED', subject_sparkplug_id: 'gwy120000000000400080000',
       gateways: { name: 'Line 1 Gateway' },
-      error: 'recorded no messages from Aber/gwy120000000000400080000'
+      error: 'recorded no messages from edge node gwy120000000000400080000, in any Sparkplug group. ' +
+        "Either nothing published during the window, or the subject's ids do not match what is on the wire."
     }])
     renderTab()
     expect(await screen.findByText(/recorded no messages/)).toBeInTheDocument()
@@ -717,9 +718,11 @@ describe('playing a capture back', () => {
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Play back/))
-    expect(await screen.findByText(/only place a capture can be played back/)).toBeInTheDocument()
-    expect(screen.getByText(/Archived Entities/)).toBeInTheDocument()
-    expect(screen.getByText(/only place a capture can be played back/).textContent).not.toMatch(/simulated/i)
+    const missing = await screen.findByText(/could not be found/)
+    expect(missing.textContent).toMatch(/played\s+back only there/)
+    expect(missing.textContent).toMatch(/upgrade the release/)
+    expect(missing.textContent).not.toMatch(/simulated/i)
+    expect(document.body.textContent).not.toMatch(/Archived Entities/)
     expect(screen.getByRole('button', { name: 'Play back' })).toBeDisabled()
   })
 
