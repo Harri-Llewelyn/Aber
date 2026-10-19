@@ -239,6 +239,22 @@ class Caps(unittest.TestCase):
         self.assertIsNone(j.append(topic, wire(), "NDATA"))
         self.assertIn("message cap", j.append(topic, wire(), "NDATA"))
 
+    def test_nothing_is_recorded_past_a_cap(self):
+        """The tick that finishes the job can be a second away; the file stops at the cap."""
+        topic = "spBv1.0/%s/NDATA/%s" % (GROUP, GWY)
+        for caps, stop in (({"max_messages": 2}, "message cap"), ({"max_bytes": 200}, "size cap")):
+            with self.subTest(stop=stop):
+                j = job(**caps)
+                reason = None
+                while not reason:
+                    reason = j.append(topic, wire(), "NDATA")
+                self.assertIn(stop, reason)
+                at_cap = (j.count, j.bytes, len(j.lines))
+                for _ in range(5):
+                    self.assertIsNone(j.append(topic, wire(), "NDATA"))
+                self.assertEqual((j.count, j.bytes, len(j.lines)), at_cap)
+                self.assertEqual(len(j.drain()), at_cap[0], "what reached the cap is still uploaded")
+
     def test_the_size_cap_counts_the_serialised_form_not_the_wire(self):
         """
         THE CAP EXISTS TO KEEP THE FILE UNDER THE BUCKET'S LIMIT, so it has to measure the thing

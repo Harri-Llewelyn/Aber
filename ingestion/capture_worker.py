@@ -203,11 +203,15 @@ class _JobState:
             if msg_type in _BIRTH_TYPES:
                 self.birth_captured = True
 
+            # Closed at once: the tick that finishes the job is up to a second away, and a busy
+            # edge node would otherwise carry the file that far past its cap.
             if self.count >= self.max_messages:
                 self.cap_code = STOP_MESSAGES
+                self.closed = True
                 return "message cap reached (%d)" % self.max_messages
             if self.bytes >= self.max_bytes:
                 self.cap_code = STOP_SIZE
+                self.closed = True
                 return "size cap reached (%d bytes)" % self.max_bytes
         return None
 
