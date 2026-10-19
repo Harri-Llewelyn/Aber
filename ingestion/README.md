@@ -311,11 +311,19 @@ Run it from `ingestion/` after `npm run proto`, which generates the Sparkplug bi
 - **`record`** authenticates as the ingestion principal, `MQTT_INGESTION_USER` /
   `MQTT_INGESTION_PASSWORD` from the `aber-secrets` Secret, unless `MQTT_CAPTURE_*` is set. It
   keeps what the daemon's `on_message()` ingests and leaves out the rest: the primary host's
-  STATE (retained, so it arrives on every subscribe), NCMD, DCMD and empty payloads. It does not
-  ask the edge node for a birth certificate. Without an NBIRTH the file cannot be played back
-  ([A replay is its own Sparkplug session](#a-replay-is-its-own-sparkplug-session)), so press
-  **Request Rebirth** on the Gateways page while it records, or record on the Capture page, which
-  asks for one itself.
+  STATE (retained, so it arrives on every subscribe), NCMD, DCMD and empty payloads.
+- **`record` asks for the birth certificate** when `--topic` names one edge node, for example
+  `--topic spBv1.0/Aber/+/gwy…/#`. Once the broker confirms the subscription, it publishes the
+  same `Node Control/Rebirth` NCMD the daemon sends, so the answer is recorded. Without an NBIRTH
+  the file cannot be played back
+  ([A replay is its own Sparkplug session](#a-replay-is-its-own-sparkplug-session)).
+  - A filter that covers several edge nodes, such as the default `spBv1.0/#`, asks none, because
+    each one would republish every birth it holds. The recorder says so when it starts.
+  - `--no-rebirth` turns the request off.
+  - If no NBIRTH arrives, the edge node may ignore rebirth requests, or the account may not be
+    allowed to publish NCMD. The broker drops a refused QoS 0 publish without telling the
+    publisher, so the recorder names both causes. The ingestion principal may publish NCMD; a
+    `MQTT_CAPTURE_USER` without that grant may not.
 - **`play`** publishes as the Playback gateway (`gwy160000000000400080000`), authenticating as it
   with `MQTT_PLAYBACK_USER` / `MQTT_PLAYBACK_PASSWORD`. Issue the password from the gateway's
   drawer on the Gateways page (**Generate Broker Credential**), which shows it once. On Kubernetes
@@ -331,7 +339,8 @@ Run it from `ingestion/` after `npm run proto`, which generates the Sparkplug bi
   [Playback meets quarantine first](#playback-meets-quarantine-first).
 
 ```bash
-python capture.py record --out morning-shift.json --seconds 300
+python capture.py record --out morning-shift.json --seconds 300 \
+    --topic 'spBv1.0/Aber/+/gwy<recorded>/#'
 python capture.py inspect morning-shift.json
 python capture.py play morning-shift.json --as-gateway gwy160000000000400080000 \
     --map dev<recorded>=dev<replay lane> --speed 10
