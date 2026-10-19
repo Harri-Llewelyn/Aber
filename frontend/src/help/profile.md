@@ -12,7 +12,7 @@ The settings for the whole site are on the **Settings** page, not here.
 - **Change Password**, on the **Password** row, opens a dialog. Give your current password, then the new one twice. The new one needs at least 12 characters. Your other sessions are signed out. The session you are using stays open.
 - **Appearance** holds your **Theme** (dark or light) and your **Sidebar layout**. Choose a value, then select **Save** on its row. **Discard** puts back the value you had.
 - **Sidebar layout** has three choices. **Expand on hover** shows the page names while the pointer is over the sidebar. **Expanded** always shows them, and the page makes room. **Collapsed** shows icons only.
-- **The Theme item in the account menu** and **the control at the foot of the sidebar** change the same settings as this page. They apply at once, with nothing to save. Use whichever is nearest.
+- **The Theme switch in the account menu** and **the control at the foot of the sidebar** change the same settings as this page. They apply at once, with nothing to save. Use whichever is nearest. In the account menu, select the sun for light or the moon for dark.
 
 ## Where your choices are kept
 

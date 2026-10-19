@@ -71,10 +71,6 @@ export function useUserSettings(userId) {
     save('theme', next)
   }, [setTheme, save])
 
-  const toggleTheme = useCallback(() => {
-    chooseTheme(cached.current.theme === 'dark' ? 'light' : 'dark')
-  }, [chooseTheme])
-
   const chooseSidebarMode = useCallback((next) => {
     if (!SIDEBAR_MODES.some(m => m.id === next)) return
     setSidebarModeOnly(next)
@@ -84,7 +80,6 @@ export function useUserSettings(userId) {
   return {
     theme,
     setTheme: chooseTheme,
-    toggleTheme,
     sidebarMode,
     setSidebarMode: chooseSidebarMode,
     source,

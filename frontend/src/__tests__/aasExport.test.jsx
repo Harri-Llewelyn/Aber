@@ -151,8 +151,7 @@ describe('the Export… action', () => {
 
   it('leads the unmapped-metrics warning to the Metrics page when the page is given a way there', async () => {
     api.post.mockResolvedValue({ ...AAS_RESULT, stats: { ...AAS_RESULT.stats, unmapped_semantic_ids: 2 } })
-    const onShowUnmappedMetrics = vi.fn()
-    const showToast = renderDevices(vi.fn(), () => true, [DEVICE], { onShowUnmappedMetrics })
+    const showToast = renderDevices(vi.fn(), () => true, [DEVICE], { unmappedMetricsTo: '/metrics?unmapped=1' })
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
     chooseFormat('json')
@@ -161,8 +160,7 @@ describe('the Export… action', () => {
     const [message, type, options] = showToast.mock.calls[0]
     expect(message).toMatch(/2 metrics carried no semantic id\. Open them on the Metrics page/)
     expect(type).toBe('warning')
-    options.onOpen(3)
-    expect(onShowUnmappedMetrics).toHaveBeenCalledWith(3)
+    expect(options).toEqual({ to: '/metrics?unmapped=1' })
   })
 
   it('leaves the unmapped-metrics warning plain when the page has no way to the Metrics page', async () => {

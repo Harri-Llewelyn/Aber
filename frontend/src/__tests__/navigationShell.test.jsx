@@ -219,7 +219,7 @@ describe('Merged navigation shell', () => {
     })
   })
 
-  it('moves the theme toggle and Report Bug behind the account button, not out of the app', async () => {
+  it('moves the theme switch and Report Bug behind the account button, not out of the app', async () => {
     await renderShell()
 
     // Neither is in the bar any more...
@@ -231,12 +231,12 @@ describe('Merged navigation shell', () => {
     fireEvent.click(screen.getByRole('button', { name: /account menu/i }))
     const menu = screen.getByRole('menu')
     expect(within(menu).getByRole('menuitem', { name: /report bug/i })).toBeTruthy()
-    expect(within(menu).getByRole('menuitem', { name: /theme/i })).toBeTruthy()
+    expect(within(menu).getByRole('group', { name: 'Theme' })).toBeTruthy()
   })
 
   /**
    * The account menu, at the foot of the rail: a 28px avatar with the address beside it, whose menu
-   * holds Profile, the theme toggle and Report Bug alongside Sign Out. These pin reachability and
+   * holds Profile, the theme switch and Report Bug alongside Sign Out. These pin reachability and
    * the facts the button names.
    */
   describe('Account menu', () => {
@@ -275,10 +275,13 @@ describe('Merged navigation shell', () => {
       await renderShell()
 
       fireEvent.click(trigger())
-      const items = within(screen.getByRole('menu')).getAllByRole('menuitem')
-      expect(items.map(i => i.textContent.trim())).toEqual([
-        'Profile', expect.stringMatching(/^Theme:/), 'Report Bug', 'Sign Out'
+      const menu = screen.getByRole('menu')
+      // In order, the theme's two segments between Profile and Report Bug.
+      const rows = [...menu.querySelectorAll('[role="menuitem"], [role="menuitemradio"]')]
+      expect(rows.map(i => i.getAttribute('aria-label') || i.textContent.trim())).toEqual([
+        'Profile', 'Light', 'Dark', 'Report Bug', 'Sign Out'
       ])
+      const items = within(menu).getAllByRole('menuitem')
 
       fireEvent.click(items[0])
       expect(screen.queryByRole('menu')).toBeNull()
@@ -303,18 +306,24 @@ describe('Merged navigation shell', () => {
       expect(supabase.auth.signOut).toHaveBeenCalled()
     })
 
-    it('states the CURRENT theme rather than the destination, and stays open on toggle', async () => {
+    it('checks the CURRENT theme in a Light/Dark switch, and stays open when the other is chosen', async () => {
       await renderShell()
       fireEvent.click(trigger())
 
-      const item = () => screen.getByRole('menuitem', { name: /theme/i })
-      expect(item()).toHaveTextContent(/Theme:\s*Dark/)
+      const theme = within(screen.getByRole('menu')).getByRole('group', { name: 'Theme' })
+      const segment = (name) => within(theme).getByRole('menuitemradio', { name })
+      expect(segment('Dark')).toHaveAttribute('aria-checked', 'true')
+      expect(segment('Light')).toHaveAttribute('aria-checked', 'false')
+      // Each segment names its own theme: the sun is Light, the moon is Dark.
+      expect(segment('Light')).toHaveAttribute('title', 'Light')
 
-      fireEvent.click(item())
-      // STILL OPEN. Toggling is the one action here whose result is visible behind the menu, so
-      // closing would mean reopening to change your mind about a two-state choice.
+      fireEvent.click(segment('Light'))
+      // STILL OPEN. The theme is the one choice here whose result is visible behind the menu, so
+      // closing would mean reopening to change your mind about it.
       expect(screen.getByRole('menu')).toBeTruthy()
-      expect(item()).toHaveTextContent(/Theme:\s*Light/)
+      expect(segment('Light')).toHaveAttribute('aria-checked', 'true')
+      expect(segment('Dark')).toHaveAttribute('aria-checked', 'false')
+      expect(document.documentElement).toHaveAttribute('data-theme', 'light')
     })
 
     it('closes on the items whose result is NOT visible behind it', async () => {

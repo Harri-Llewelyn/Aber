@@ -279,7 +279,11 @@ row and all, so the two read alike.
 - **Profile is not in the page list.** Its `TABS` entry has no group, so `groupedNav()` leaves it
   out of the rail; the router, the help drawer, the tab title and the search still know it. The way
   in is the account menu, App.jsx's `UserMenu`, which `Sidebar` draws at the rail's pinned foot
-  above the behaviour control: Profile first, then the quick Theme toggle, Report Bug and Sign Out.
+  above the behaviour control: Profile first, then the Theme switch, Report Bug and Sign Out. The
+  switch is a `SegmentedControl` with `menu`: a `role="group"` named Theme holding a Light (sun)
+  and a Dark (moon) `menuitemradio`, the current theme checked, so the row names the theme that is
+  on and offers the other beside it. Choosing applies at once and the menu stays open, since the
+  result shows behind it. A third theme would be a third segment.
 - **Settings is every role's.** Every signed-in account may read a setting, so the page is in every
   rail and the search offers its rows to everyone. `SettingsTab`'s `readOnly`, which `App.jsx`
   passes for anyone but an Administrator, disables each field and puts "Only an Administrator can
@@ -290,8 +294,8 @@ row and all, so the two read alike.
   browser's copy in localStorage (`aber_theme`, `aber_sidebar_mode`), so the page paints at once and
   the sign-in screen shows the theme last used here; once the row loads it wins. A person with no
   row is seeded from that copy (`utils/userSettings.js`, ON CONFLICT DO NOTHING, then a second
-  read). Each change goes to the copy at once and to the row behind it, and the menu's toggle, the
-  rail's control and Appearance all write through the one hook. A choice made before the row
+  read). Each change goes to the copy at once and to the row behind it, and the menu's theme switch,
+  the rail's control and Appearance all write through the one hook's setters. A choice made before the row
   arrives is not undone by it.
 - **Without the row the page works as it did before.** A failed read or write leaves `source` at
   `browser`: Appearance says the choices are this browser's, and a change holds here only.
@@ -785,6 +789,25 @@ one exists (Launch UI, Open Dashboard); otherwise Restore when archived; otherwi
 `success` (the default), `info`, `warning` or `error`. Each call puts a toast in the bottom-right
 corner and records the same message in the history behind the bell in the top bar.
 
+- **Three groups, and the group is not the severity.** Every message is in one group: **Info**
+  (routine news, successes included), **Warning** (the dashboard's own failures and warnings) or
+  **Alert** (a Grafana alert, firing or resolved, whatever its severity). `success` and `info`
+  default to Info, `warning` and `error` to Warning, and a caller passes `{ group }` only to
+  override that: `usePlatformAlerts` passes `'alert'`. The group picks the icon (`GROUP_ICONS` in
+  `common/Toast.jsx`: `IconInfo`, `IconAlertTriangle`, `IconShieldAlert`, the firing partner of the
+  pill's resting shield) and the notification filter. The type is still the severity: it sets the
+  timer and the live region, so a critical alert (`error`) stays until dismissed and is read out
+  assertively, and within the group it picks the icon's colour (`toastTone`): Info is `--accent`;
+  Warning is `--danger` for a failure and `--warning` otherwise; Alert is `--danger` critical,
+  `--warning` warning and `--success` resolved. A success has no tick: its words say it worked.
+- **A calm card.** A toast is `--bg-card` with the plain `--border` and `--text-primary` text, like
+  the panels it floats beside. Only the signal is coloured: the icon, and a 3px stripe on the
+  leading edge (an inset `box-shadow`, as Carbon's low-contrast notifications draw it), both from a
+  `signal-tone-*` class whose icon colour the history's rows share. Each tone clears the 3:1 an icon
+  needs on the card (WCAG 1.4.11); the light theme's amber is the tightest at 3.19:1. The four types
+  used to tint the whole card and set the text in the signal colour, so a failure was red text on
+  red, and a critical alert looked like a failed save.
+
 - **Each toast owns its timer.** Up to three stack, each keyed by its id; a fourth pushes the oldest
   off. A message already on screen is replaced, restarting its timer, rather than shown twice. The
   single slot this replaced let a second toast inherit what was left of the first one's 3.2 s.
@@ -796,35 +819,61 @@ corner and records the same message in the history behind the bell in the top ba
   WCAG 2.2 SC 2.2.1 (Timing Adjustable) asks for.
 - **Announced.** `ToastStack` renders two live regions all the time, empty when idle, because a
   region inserted together with its first message is not announced: errors in `role="alert"`, the
-  rest in `role="status"`. A warning or an error is prefixed "Warning:" or "Error:" in text only a
-  screen reader reads.
+  rest in `role="status"`. Each message is prefixed with its group in text only a screen reader
+  reads ("Info:", "Warning:", "Alert:"), and a failure with "Error:" (`spokenPrefix`).
 - **The history** (`common/NotificationHistory.jsx`) keeps the latest 50 messages, newest first. A
   repeat of the newest entry is counted on it rather than filling the list. The bell's badge counts
   the unread entries, is not rendered at zero, and takes the tone of the worst unread entry; a
-  success leaves it neutral. Opening the list reads everything in it, dismissing a toast reads its
+  success leaves it neutral. Opening the list reads what it shows, dismissing a toast reads its
   entry, and a toast that times out stays unread. The list is a `role="dialog"` popover built like
   the alert pill's (`useEscapeKey`, `useClickOutside`): focus moves into it as it opens, and Escape
   or its close button hands focus back to the bell.
+- **The filter.** Under the heading, sticky with it, a `SegmentedControl` offers All and the three
+  groups as icons in one outlined pill, each segment named and titled with its count ("Alerts, 2").
+  It is back on All each time the panel opens, because opening reads what the list shows: a filter
+  left on would hide entries that opening then marked read. While a filter is on, only the entries
+  on show are read (`markRead(ids)` in `useToast`), so one that arrives in another group stays
+  unread until All is chosen. An empty group says so, and Clear still empties the whole list, which
+  its tooltip says while a filter is on. The alerts that have come and gone are only here, since the
+  pill shows what is firing now.
+- **`common/SegmentedControl.jsx`** is one choice from a few as a pill: on its own a
+  `role="radiogroup"` of `radio` segments, one Tab stop whose arrow keys move and choose (the WAI-ARIA
+  radio group pattern); with `menu`, a `role="group"` of `menuitemradio` segments for use inside a
+  `role="menu"`, where each is a Tab stop like the menu's other items and Left and Right move without
+  choosing. The chosen segment takes a sunken fill (`--bg-base`) and a border, so the choice is not
+  shown by colour alone (WCAG 1.4.1), and its icon takes the option's `tone`.
 - **Where it is kept.** In `sessionStorage` under `aber_notification_history`, so it survives a
-  reload and stays in that browser tab. It holds message text only, and every read and write is
-  wrapped so a blocked store degrades to memory. `App` clears it whenever the tab is left without a
+  reload and stays in that browser tab. It holds text only (the message, its group and its
+  destination), and every read and write is wrapped so a blocked store degrades to memory. `App` clears it whenever the tab is left without a
   session (Sign Out, a sign-out in another tab, a rejected stored session), so the next person to
   sign in there starts with an empty list. Nothing goes to the server: most entries never touched
   it, and an unread state that followed a user between browsers would need a per-user table with
   RLS. Supabase Queues (pgmq) does not fit that either, because a queue is single-consumer and
   cannot fan one event out to several signed-in users.
-- **A firing alert toasts its name only.** `showToast(msg, type, { detail, onOpen, openTitle })`:
-  `detail` is what the history records when it differs from the toast text, `onOpen` turns the
-  message into a button that is called with the toast's id, and `openTitle` is that button's hover
-  text. A platform alert passes its name as the text
+- **A firing alert toasts its name only.** `showToast(msg, type, { detail })`: `detail` is what the
+  history records when it differs from the toast text. A platform alert passes its name as the text
   and "name — summary" as the detail, because the summary can be several sentences with a SQL
-  statement, which stacked as tall red blocks, kept a warning up longer and was read aloud in full
-  by the `role="alert"` region. Clicking the toast opens the alert pill's list, where the summary
-  is, and dismisses the toast: `App` owns the pill's open state (`AlertPill` takes optional
-  `open` and `onOpenChange`, and keeps its own state without them). "Resolved — name" is unchanged.
-  The one other clickable toast is an AAS export's warning about metrics with no semantic id: it
-  opens the Metrics page with Unmapped on and dismisses itself. `App` passes that link only to a
-  reader who has the Metrics page. Other toasts are not clickable.
+  statement, which stacked as tall blocks, kept a warning up longer and was read aloud in full by
+  the `role="alert"` region.
+- **A message links to what it is about.** `showToast(msg, type, { to })` takes a destination as
+  text: a path from `routes.js` or a Grafana URL. It is stored with the history entry, so the toast's
+  message and the list's row are both links (`MessageLink` in `common/Toast.jsx`). A path is a
+  `RouteLink`: a plain click navigates in place, and Ctrl-click or a middle click opens a new tab.
+  Grafana opens in a new tab with the external-link icon, as the alert pill's platform-wide rows do,
+  and needs the browser to reach `VITE_GRAFANA_URL` as those rows already do. Following a toast's
+  link dismisses it; a plain click on a row's link (or any click on a Grafana one) closes the list.
+  The tooltip names the page and tab (`destinationTitle`). `isSafeDestination` checks `to` as the
+  message comes in and again as the history is read back: one leading `/` (never `//`), or the
+  configured `GRAFANA_URL` followed by `/`, `?` or `#`, and no space, control character or
+  backslash, which browsers strip or read as a slash. Anything else is dropped and the entry stays
+  plain text, so nothing stored can become a `javascript:` or off-site link. The links today: a
+  Grafana alert, firing or resolved, goes to its rule (`grafanaAlertUrl`); a device new to the
+  Quarantine queue goes to `tabUrl('devices', 'quarantine')` (the tab's address carries no search,
+  so not to the device itself); and an AAS export's warning about metrics with no semantic id goes
+  to `unmappedMetricsUrl()`, which `App` passes only to a reader who has the Metrics page. The rest
+  of the messages report something just done on the page in view, so they carry none. This replaced
+  `onOpen`/`openTitle`, a function the history could not store; a firing alert's toast used to open
+  the pill's list, and the pill no longer takes `open`/`onOpenChange` from `App`.
 - **It is not the alert pill.** The pill says what is firing now, and its count is a reason to act.
   The history says what the toasts said, resolved and routine messages included; merging the two
   would fill the pill's count with entries nobody needs to act on.
@@ -850,11 +899,11 @@ Three rules that were each learned from a real bug:
   in both themes.
 
 - **A floating surface needs an opaque background.** A toast floats over arbitrary content, so its
-  `rgba(…, 0.15)` tint composited against whatever table was underneath. Each of the four types
-  now paints its tint as a `background-image` over an opaque `background-color: var(--bg-card)`,
-  and the bell's unread badge does the same. **Never fold those into the `background:` shorthand** —
-  that resets `background-color` and brings the transparency straight back. `themeContrast.test.js`
-  asserts both halves for every toast type and badge tone.
+  `rgba(…, 0.15)` tint once composited against whatever table was underneath. A toast is now an
+  opaque `background-color: var(--bg-card)` with no tint at all, and the bell's unread badge paints
+  its tint as a `background-image` over that same opaque colour. **Never fold the badge's into the
+  `background:` shorthand** — that resets `background-color` and brings the transparency straight
+  back. `themeContrast.test.js` asserts the toast's opaque base and both halves for every badge tone.
 - **Do not give `var()` a hardcoded fallback.** The sign-in card rendered white-on-white in light
   mode because it referenced `--text-main` / `--bg-main`, neither of which exists; the fallbacks
   made the typo look correct in dark mode and fail silently in light mode.

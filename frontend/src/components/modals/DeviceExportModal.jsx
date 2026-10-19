@@ -40,12 +40,11 @@ const FORMATS = [
  *
  * @param {Function} showToast Reports what was exported.
  *
- * @param {Function} [onShowUnmappedMetrics] Opens the Metrics page with its Unmapped filter on, and
- * is called with the toast's id so it can dismiss the toast. Given one, the warning about metrics
- * with no semantic id is clickable and points there; without it the warning is plain text, as for a
- * reader who cannot open that page.
+ * @param {string} [unmappedMetricsTo] The address of the Metrics page with its Unmapped filter on.
+ * Given one, the warning about metrics with no semantic id links there; without it the warning is
+ * plain text, as for a reader who cannot open that page.
  */
-export function DeviceExportModal({ device, initialFormat = 'json', bundleDisabledReason = null, onClose, showToast, onShowUnmappedMetrics }) {
+export function DeviceExportModal({ device, initialFormat = 'json', bundleDisabledReason = null, onClose, showToast, unmappedMetricsTo }) {
   const uid = useId()
   const bundleAllowed = !bundleDisabledReason
   const [format, setFormat] = useState(() => {
@@ -91,12 +90,9 @@ export function DeviceExportModal({ device, initialFormat = 'json', bundleDisabl
       showToast?.(`${label} exported for '${name}' — ${result.warning}`, 'warning')
     } else if (unmapped > 0) {
       const unmappedWarning = `${label} exported for '${name}' (${summary}) — ${unmapped} metric${unmapped === 1 ? '' : 's'} carried no semantic id`
-      if (onShowUnmappedMetrics) {
+      if (unmappedMetricsTo) {
         const them = unmapped === 1 ? 'it' : 'them'
-        showToast?.(`${unmappedWarning}. Open ${them} on the Metrics page to map ${them}.`, 'warning', {
-          onOpen: onShowUnmappedMetrics,
-          openTitle: 'Open the Metrics page with the Unmapped filter on'
-        })
+        showToast?.(`${unmappedWarning}. Open ${them} on the Metrics page to map ${them}.`, 'warning', { to: unmappedMetricsTo })
       } else {
         showToast?.(unmappedWarning, 'warning')
       }

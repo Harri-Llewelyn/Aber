@@ -9,6 +9,7 @@ import {
   useToast, readStoredHistory, clearStoredHistory,
   HISTORY_LIMIT, HISTORY_STORAGE_KEY, MAX_VISIBLE_TOASTS
 } from '../hooks/useToast'
+import { grafanaAlertUrl } from '../constants'
 
 /**
  * The toast and the history behind it. What is pinned: each toast owns its timer, so a second one
@@ -186,23 +187,8 @@ describe('the stack', () => {
   it('keeps the showToast(msg, type) signature, with success as the default type', () => {
     renderStack()
     act(() => { hook.showToast('Saved') })
-    expect(toastFor('Saved')).toHaveClass('toast-success')
-  })
-
-  it.each(['success', 'info', 'warning', 'error'])('styles a %s toast by its own class', (type) => {
-    renderStack()
-    show(`A ${type} message`, type)
-    expect(toastFor(`A ${type} message`)).toHaveClass(`toast-${type}`)
-  })
-
-  it('draws a different glyph for each type, and the cross only on the close button', () => {
-    const types = ['success', 'info', 'warning', 'error']
-    render(<ToastStack toasts={types.map((type, id) => ({ id, msg: `${type} glyph`, type }))} />)
-    const glyphs = [...document.querySelectorAll('.toast .toast-icon svg')].map(svg => svg.innerHTML)
-    expect(glyphs).toHaveLength(4)
-    expect(new Set(glyphs).size).toBe(4)
-    const cross = document.querySelector('.toast-dismiss svg').innerHTML
-    expect(glyphs).not.toContain(cross)
+    expect(hook.toasts[0]).toMatchObject({ type: 'success', group: 'info' })
+    expect(toastFor('Saved')).toHaveClass('signal-tone-accent')
   })
 })
 
@@ -233,12 +219,14 @@ describe('announcement', () => {
     expect(within(status).queryByText('Save failed')).toBeNull()
   })
 
-  it('says the type of a warning or an error in words, not only by icon and colour', () => {
+  it('says the group of a message in words, and "Error" for a failure, not only by icon and colour', () => {
     renderStack()
     show('Keep the file', 'warning')
     show('Save failed', 'error')
+    show('Saved', 'success')
     expect(toastFor('Keep the file')).toHaveTextContent(/^Warning: Keep the file$/)
     expect(toastFor('Save failed')).toHaveTextContent(/^Error: Save failed$/)
+    expect(toastFor('Saved')).toHaveTextContent(/^Info: Saved$/)
     expect(toastFor('Keep the file').querySelector('.sr-only')).toHaveTextContent('Warning:')
   })
 
@@ -264,8 +252,8 @@ describe('the history useToast keeps', () => {
     act(() => { result.current.showToast('Save failed', 'error') })
 
     const [newest, older] = result.current.history
-    expect(newest).toMatchObject({ msg: 'Save failed', type: 'error', read: false, count: 1 })
-    expect(older).toMatchObject({ msg: 'Saved', type: 'success', read: false })
+    expect(newest).toMatchObject({ msg: 'Save failed', type: 'error', group: 'warning', read: false, count: 1 })
+    expect(older).toMatchObject({ msg: 'Saved', type: 'success', group: 'info', read: false })
     expect(typeof newest.id).toBe('number')
     expect(newest.id).not.toBe(older.id)
     expect(newest.at).toBe(Date.now())
@@ -309,12 +297,16 @@ describe('the history useToast keeps', () => {
     expect(result.current.history.find(e => e.id === saved.id).read).toBe(false)
   })
 
-  it('marks everything read, and clears', () => {
+  it('marks the entries it is given read, or everything, and clears', () => {
     const { result } = renderHook(() => useToast())
     act(() => { result.current.showToast('one', 'success') })
     act(() => { result.current.showToast('two', 'warning') })
-    act(() => { result.current.markAllRead() })
+    const [two, one] = result.current.history
+    act(() => { result.current.markRead([one.id]) })
+    expect(result.current.history.map(e => e.read)).toEqual([false, true])
+    act(() => { result.current.markRead() })
     expect(result.current.history.every(e => e.read)).toBe(true)
+    expect(two.id).not.toBe(one.id)
 
     act(() => { result.current.clearHistory() })
     expect(result.current.history).toEqual([])
@@ -338,7 +330,7 @@ describe('the history useToast keeps', () => {
     const stored = JSON.parse(window.sessionStorage.getItem(HISTORY_STORAGE_KEY))
     expect(stored.map(e => e.msg)).toEqual(['Cap reached', 'Saved'])
     // Message text and its bookkeeping, nothing else.
-    expect(Object.keys(stored[0]).sort()).toEqual(['at', 'count', 'id', 'msg', 'read', 'type'])
+    expect(Object.keys(stored[0]).sort()).toEqual(['at', 'count', 'group', 'id', 'msg', 'read', 'type'])
 
     const second = renderHook(() => useToast())
     expect(second.result.current.history.map(e => e.msg)).toEqual(['Cap reached', 'Saved'])
@@ -361,7 +353,7 @@ describe('the history useToast keeps', () => {
       { id: 3, msg: 'bad type', type: 'shout', at: 3 },
       null
     ]))
-    expect(readStoredHistory()).toEqual([{ id: 1, msg: 'kept', type: 'success', at: 1, read: false, count: 1 }])
+    expect(readStoredHistory()).toEqual([{ id: 1, msg: 'kept', type: 'success', group: 'info', at: 1, read: false, count: 1 }])
   })
 
   it('carries on in memory when storage throws', () => {
@@ -392,7 +384,7 @@ describe('a firing platform alert', () => {
   }
   const FULL = `${row.alert_name} — ${row.summary}`
 
-  async function mountAlerts(rows, onOpenAlerts) {
+  async function mountAlerts(rows) {
     let current = []
     const { supabase } = await import('../lib/supabaseClient')
     vi.spyOn(supabase.auth, 'getSession').mockResolvedValue({ data: { session: {} } })
@@ -404,8 +396,7 @@ describe('a firing platform alert', () => {
     const { usePlatformAlerts } = await import('../hooks/usePlatformAlerts')
     function AlertsHarness() {
       hook = useToast()
-      const open = React.useCallback((id) => { onOpenAlerts?.(id); hook.dismissToast(id) }, [])
-      usePlatformAlerts(hook.showToast, open)
+      usePlatformAlerts(hook.showToast)
       return <ToastStack toasts={hook.toasts} onDismiss={hook.dismissToast} onExpire={hook.expireToast} />
     }
     render(<AlertsHarness />)
@@ -421,57 +412,40 @@ describe('a firing platform alert', () => {
     expect(hook.history[0].msg).toBe(FULL)
   })
 
-  it('opens the alerts list on a click or Enter, and dismisses the toast', async () => {
-    const onOpen = vi.fn()
-    await mountAlerts([row], onOpen)
-    const button = screen.getByRole('button', { name: /Historian Backup Stale/ })
-    expect(button.tagName).toBe('BUTTON') // a native button answers Enter and Space with a click
-    fireEvent.click(button)
-    expect(onOpen).toHaveBeenCalledTimes(1)
-    expect(document.querySelector('.toast')).toBeNull()
+  it('puts the alert in the Alert group, at the severity Grafana gave it', async () => {
+    await mountAlerts([row, { ...row, fingerprint: 'f2', alert_name: 'Spindle Overtemperature', severity: 'critical', summary: '' }])
+    expect(hook.history.map(e => [e.msg, e.type, e.group])).toEqual([
+      ['Spindle Overtemperature', 'error', 'alert'],
+      [FULL, 'warning', 'alert']
+    ])
+    expect(screen.getByText('Spindle Overtemperature').closest('.toast')).toHaveClass('signal-tone-danger')
+    expect(screen.getByText('Historian Backup Stale').closest('.toast')).toHaveClass('signal-tone-warning')
+    expect(screen.getByText('Spindle Overtemperature').closest('.toast')).toHaveTextContent(/^Alert: /)
   })
 
-  it('does not open the list from the Dismiss button', async () => {
-    const onOpen = vi.fn()
-    await mountAlerts([row], onOpen)
+  it('links the toast to its rule in Grafana, in a new tab, and dismisses it when followed', async () => {
+    await mountAlerts([row])
+    const link = screen.getByRole('link', { name: /Historian Backup Stale/ })
+    expect(link).toHaveAttribute('href', grafanaAlertUrl('Historian Backup Stale'))
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(link).toHaveAttribute('title', 'Open in Grafana, in a new tab')
+    expect(hook.history[0].to).toBe(grafanaAlertUrl('Historian Backup Stale'))
+    fireEvent.click(link)
+    expect(document.querySelector('.toast')).toBeNull()
+    expect(hook.history[0].read).toBe(true)
+  })
+
+  it('dismisses from the Dismiss button without following the link', async () => {
+    await mountAlerts([row])
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
-    expect(onOpen).not.toHaveBeenCalled()
     expect(document.querySelector('.toast')).toBeNull()
   })
 
-  it('says on hover where the alert toast leads', async () => {
-    await mountAlerts([row], vi.fn())
-    expect(screen.getByRole('button', { name: /Historian Backup Stale/ })).toHaveAttribute('title', 'Show the firing alerts')
-  })
-
-  it('leaves other toasts unclickable', () => {
+  it('leaves a toast with no destination as plain text', () => {
     renderStack()
     show('Saved', 'success')
     expect(within(toastFor('Saved')).queryAllByRole('button').map(b => b.getAttribute('aria-label'))).toEqual(['Dismiss'])
-  })
-})
-
-describe('a clickable toast', () => {
-  it('carries the tooltip it was given on its message, and none otherwise', () => {
-    renderStack()
-    act(() => { hook.showToast('Exported', 'warning', { onOpen: vi.fn(), openTitle: 'Open the Metrics page' }) })
-    act(() => { hook.showToast('Elsewhere', 'warning', { onOpen: vi.fn() }) })
-
-    expect(within(toastFor('Exported')).getByRole('button', { name: /Exported/ })).toHaveAttribute('title', 'Open the Metrics page')
-    expect(within(toastFor('Elsewhere')).getByRole('button', { name: /Elsewhere/ })).not.toHaveAttribute('title')
-  })
-
-  it('calls onOpen with its id from the message, and not from Dismiss', () => {
-    renderStack()
-    const onOpen = vi.fn()
-    act(() => { hook.showToast('Exported', 'warning', { onOpen }) })
-
-    fireEvent.click(within(toastFor('Exported')).getByRole('button', { name: 'Dismiss' }))
-    expect(onOpen).not.toHaveBeenCalled()
-
-    act(() => { hook.showToast('Exported again', 'warning', { onOpen }) })
-    fireEvent.click(within(toastFor('Exported again')).getByRole('button', { name: /Exported again/ }))
-    expect(onOpen).toHaveBeenCalledTimes(1)
-    expect(onOpen).toHaveBeenCalledWith(hook.toasts[0].id)
+    expect(within(toastFor('Saved')).queryByRole('link')).toBeNull()
   })
 })
