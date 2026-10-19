@@ -1062,6 +1062,17 @@ export const SUITES = {
       'The read-only BI role. Four of its five checks skip without a historian; the point of it ' +
       'is that a reporting credential cannot write, which only means anything against a real one.',
   },
+  'ingestion/test_capture_lifecycle_stack.py': {
+    lanes: ['stack'],
+    why:
+      'WHAT THE OTHER TWO CAPTURE SUITES NEVER RUN, each of which the 1.4.0 audit could only try by ' +
+      'hand: a gateway capture of two devices replayed under both lanes; a duration cap ending a ' +
+      'job; an edge node that ignores the rebirth request, whose capture then holds no birth and ' +
+      'whose replay is refused having published nothing; Stop during a replay; and each worker ' +
+      'restarted during a job, with kubectl. A fixture Host gateway publishes live from the suite. ' +
+      'The two restarts skip, saying why, without kubectl and the k3d-aber context, and restarting ' +
+      'ingestion pauses it for the whole stack. Needs `playback.enabled`, which values-dev.yaml sets.',
+  },
   'ingestion/test_playback_replay.py': {
     lanes: ['stack'],
     why:

@@ -134,6 +134,16 @@ python ingestion/test_playback_worker_loop.py
 # the bdSeq the replayed NBIRTH shares with both, so the Playback gateway reads OFFLINE after a replay
 python ingestion/test_playback_session.py
 
+# WHAT THE TWO CAPTURE SUITES BELOW NEVER RUN, in the stack lane. A fixture Host gateway with two
+# devices publishes live from the suite. A gateway capture of both replays under both lanes; a
+# duration cap ends a job and the manifest says so; an edge node that ignores the rebirth request
+# is recorded with no birth, and its replay is refused having published nothing; Stop ends a replay
+# CANCELLED within seconds; and each worker is restarted mid-job with `kubectl rollout restart`: the
+# job fails, the Playback gateway's Will marks it OFFLINE, the stored capture is kept, and the next
+# capture records. The restarts skip, saying why, without kubectl and the k3d-aber context
+# (ABER_KUBE_CONTEXT names another); restarting ingestion pauses it for the whole stack.
+python ingestion/test_capture_lifecycle_stack.py
+
 # A STORED CAPTURE REACHES THE HISTORIAN, through the real worker, broker and daemon. Needs the
 # stack up and `playback.enabled` (values-dev.yaml sets it); runs in the stack lane. The two suites
 # above are properties of the source, and this feature has twice been broken by things neither can
