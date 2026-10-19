@@ -19,11 +19,16 @@ const APP_CSS = blankComments(fs.readFileSync(path.resolve(__dirname, '../App.cs
 const rulesFor = (selector) => [...APP_CSS.matchAll(/(?<=^|[{}])\s*([^{}@]+)\{([^{}]*)\}/g)]
   .map(m => [m[1].split(',').map(s => s.trim()), m[2]])
   .filter(([selectors]) => selectors.includes(selector))
+/** The value the last of those rules gives `prop`, as the cascade would for equal specificity. */
 const declared = (selector, prop) => {
-  const found = rulesFor(selector)
-    .map(([, body]) => body.match(new RegExp(`(?:^|[;\\s])${prop}\\s*:\\s*([^;]+);`)))
-    .filter(Boolean)
-  return found.length ? found.at(-1)[1].trim() : undefined
+  let value
+  for (const [, body] of rulesFor(selector)) {
+    for (const decl of body.split(';')) {
+      const i = decl.indexOf(':')
+      if (i > 0 && decl.slice(0, i).trim() === prop) value = decl.slice(i + 1).trim()
+    }
+  }
+  return value
 }
 
 const PANELS = [
