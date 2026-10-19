@@ -573,7 +573,16 @@ class TestBrokerCapturePolicies(GatewayEnrollmentBase):
         finally:
             conn.close()
 
-    def _insert_as(self, user, role, path):
+    def _insert_as(self, user, role, path, issue=True):
+        """Upload `path` as `user`. Under the gateway's folder, the path is first issued to them as
+        begin_capture_upload() issues one, since a person writes only an issued path (0190)."""
+        if issue and path.startswith(f"{self.sparkplug_id}/"):
+            self.cur.execute("RESET ROLE;")
+            self.cur.execute(
+                "INSERT INTO public.capture_uploads (subject_kind, gateway_id, subject_sparkplug_id, "
+                "storage_path, created_by) VALUES ('gateway', %s, %s, %s, %s);",
+                (REMOTE_GW, self.sparkplug_id, path, user),
+            )
         as_role(self.cur, user, role)
         self.cur.execute(
             "INSERT INTO storage.objects (bucket_id, name) VALUES ('broker-captures', %s);", (path,)
@@ -583,6 +592,14 @@ class TestBrokerCapturePolicies(GatewayEnrollmentBase):
         for user, role in ((ADMIN_USER, "Administrator"), (MANAGER_USER, "Shopfloor_Manager")):
             with self.subTest(role=role):
                 self._insert_as(user, role, f"{self.sparkplug_id}/{role}-capture.json")
+                self.conn.rollback()
+
+    def test_a_path_no_upload_was_begun_for_is_refused(self):
+        """Including the one each subject's capture lived at before 0190."""
+        for path in (f"{self.sparkplug_id}/capture.json", f"{self.sparkplug_id}/extra.json"):
+            with self.subTest(path=path):
+                with self.assertRaises(pg_errors.InsufficientPrivilege):
+                    self._insert_as(ADMIN_USER, "Administrator", path, issue=False)
                 self.conn.rollback()
 
     def test_path_is_confined_to_an_existing_subject(self):

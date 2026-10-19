@@ -20,6 +20,27 @@ const SPEEDS = [
   { value: 60, label: '60× — an hour a minute' }
 ]
 
+/** The password sources the playback worker reports, as a reader would name them. */
+const PASSWORD_SOURCES = {
+  delivered: 'the password delivered when this gateway’s credential was issued',
+  helm: 'the password in the Helm value secrets.mqttPlaybackCredentials',
+  environment: 'the password in MQTT_PLAYBACK_PASSWORD'
+}
+
+/**
+ * Which password the worker uses for a gateway, from the sources it holds one from in the order it
+ * tries them. Null when it reports none, as a worker from before 0191 does.
+ */
+function describeWorkerPassword(sources) {
+  const known = (Array.isArray(sources) ? sources : []).filter(s => PASSWORD_SOURCES[s])
+  if (known.length === 0) return null
+  const [inUse, ...fallbacks] = known
+  const then = fallbacks.length
+    ? ` If the broker refuses it, the worker tries ${fallbacks.map(s => PASSWORD_SOURCES[s]).join(', then ')}.`
+    : ''
+  return `The playback worker uses ${PASSWORD_SOURCES[inUse]}.${then}`
+}
+
 /**
  * Play back a stored capture through the Playback gateway. The device map is built from dropdowns
  * off the gateway's devices, only a shadow gateway is offered, and whether it holds a broker
@@ -28,7 +49,7 @@ const SPEEDS = [
  * captured ids come from the manifest; a capture recorded before the manifest carried them falls
  * back to reading the file.
  */
-export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
+export function StartPlaybackModal({ capture, knownDeviceIds = null, onConfirm, onCancel }) {
   const [targets, setTargets] = useState(null)
   const [worker, setWorker] = useState(undefined)   // undefined = not loaded, null = never reported
   // sparkplug_ids whose credential was re-issued after the worker last picked one up (#217).
@@ -91,8 +112,9 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
    * not read as a death.
    */
   // 90 seconds is the window `gateway_status` derives staleness from, so a heartbeat inside it is
-  // the same "currently live" this stack means everywhere else.
-  const isLive = (t) => !!t?.last_heartbeat
+  // the same "currently live" this stack means everywhere else. ONLINE too: the NDEATH that ends
+  // every playback stamps the heartbeat while setting the gateway OFFLINE.
+  const isLive = (t) => t?.status === 'ONLINE' && !!t?.last_heartbeat
     && (Date.now() - new Date(t.last_heartbeat).getTime()) < 90 * 1000
 
   const WORKER_STALE_MS = 2 * 60 * 1000
@@ -104,8 +126,14 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
      accept without changing which ids the worker reports, so this is the one that decides whether a
      playback would actually connect. */
   const workerHoldsCurrent = (t) => workerHolds(t) && !stale.includes(t.sparkplug_id)
+  const passwordInUse = target && workerHolds(target)
+    ? describeWorkerPassword(worker?.credential_sources?.[target.sparkplug_id])
+    : null
 
   const unmapped = (capturedDevices || []).filter(d => !deviceMap[d])
+  // A lane stands in for a device this site has; one recorded elsewhere has none to stand in for,
+  // and ensure_shadow_devices() refuses the whole capture.
+  const unknown = knownDeviceIds ? (capturedDevices || []).filter(d => !knownDeviceIds.has(d)) : []
 
   // playback.enabled off: no worker exists to run a job, so none is queued.
   const deployed = playbackWorkerDeployed()
@@ -193,24 +221,17 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
         </div>
       )}
 
-      {/* Warned only when it is true: a missing birth costs metrics only when the recording uses
-          aliases, which `uses_aliases` records at capture time. */}
-      {capture.manifest?.birth_captured === false && capture.manifest?.uses_aliases && (
+      {/* A replay opens with the edge node's NBIRTH, so the worker refuses a capture without one
+          (capture.plan_playback()). */}
+      {capture.manifest?.birth_captured === false && (
         <div className="callout callout-warning">
           <IconShieldAlert size={14} className="callout-icon" />
           <div>
-            This capture contains no <code>NBIRTH</code> or <code>DBIRTH</code> and its metrics are
-            carried by <strong>alias</strong>. Nothing can resolve them, so every aliased metric is
-            dropped on ingest — the playback will report success and write nothing.
+            This capture contains no <code>NBIRTH</code>, so a playback refuses it: a replay
+            opens with the edge node’s birth certificate. Record it again.
+            The recorder asks the edge node for its birth certificate when it starts.
           </div>
         </div>
-      )}
-      {capture.manifest?.birth_captured === false && !capture.manifest?.uses_aliases && (
-        <p className="form-hint">
-          This capture has no birth certificate. Its metrics carry full names, so they will play back
-          normally — but the Playback gateway's devices are not announced and stay OFFLINE until
-          they birth on their own.
-        </p>
       )}
 
       <div className="form-group">
@@ -249,6 +270,7 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
               Only the Playback gateway is listed: nothing else publishes as it, so a playback never
               shares a live publisher's sequence numbers.
             </p>
+            {passwordInUse && <p className="form-hint">{passwordInUse}</p>}
           </>
         )}
       </div>
@@ -344,7 +366,18 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
           </p>
           {/* The button writes: it creates one replay lane per captured device and returns the map
               the playback job needs. Reused on the next run. */}
-          {unmapped.length > 0 && (
+          {unknown.length > 0 && (
+            <div className="callout callout-danger">
+              <IconShieldAlert size={14} className="callout-icon" />
+              <div>
+                This capture records {plural(unknown.length, 'device')} this site does not have:{' '}
+                <span className="mono">{unknown.join(', ')}</span>. Every recorded device must exist
+                here to be played back, so this capture cannot be. It was recorded on another site,
+                or the device has since been deleted.
+              </div>
+            </div>
+          )}
+          {unmapped.length > 0 && unknown.length === 0 && (
             <div className="form-group">
               <ActionButton
                 className="btn btn-ghost btn-sm"

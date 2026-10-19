@@ -80,7 +80,7 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "i3x-service"        "to" $gw      "port" 8000 "why" "every metadata and history read, made as the CALLER so RLS applies")
   (dict "from" "node-red"           "to" "mosquitto"          "port" $brokerPort "why" "the broker node")
   (dict "from" "node-red"           "to" $gw      "port" 8000 "why" "OAuth token exchange and nodered-userinfo")
-  (dict "from" "playback"           "to" "mosquitto"          "port" $brokerPort "why" "publishes a capture as the target gateway; it holds no subscription")
+  (dict "from" "playback"           "to" "mosquitto"          "port" $brokerPort "why" "publishes a capture as the target gateway, and subscribes to that gateway's NCMD and the primary host's STATE")
   (dict "from" "playback"           "to" $gw      "port" 8000 "why" "the job queue through PostgREST and the capture through Storage, both behind the gateway; its wait-for-gateway initContainer probes the same port")
   (dict "from" "grafana"            "to" $gw      "port" 8000 "why" "OAuth token_url and grafana-userinfo")
 

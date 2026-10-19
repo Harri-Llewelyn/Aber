@@ -119,10 +119,13 @@ export function StartCaptureModal({ subject, existing, onConfirm, onCancel }) {
         Recording{' '}
         {subject.kind === 'gateway'
           ? <>everything published by <strong>{subject.name}</strong> and every device beneath it</>
-          : <>only <strong>{subject.name}</strong>, plus its gateway's birth certificate, which
-            carries the alias table. Without a birth certificate a playback loses every metric the
-            gateway sends by alias</>}
+          : <>only <strong>{subject.name}</strong>, plus its gateway's birth certificate</>}
         .
+      </p>
+      {/* capture_worker._begin() asks for the rebirth on every recording; nothing turns it off. */}
+      <p className="form-hint">
+        Recording starts by asking the gateway to rebirth. The gateway and its devices send their
+        birth certificates again, and the capture keeps them: a playback needs them.
       </p>
     </Modal>
   )

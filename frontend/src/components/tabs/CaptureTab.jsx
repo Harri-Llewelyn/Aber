@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { RouteLink } from '../common/RouteLink'
 import { schemaUrl } from '../../routes'
-import { api } from '../../api'
+import { api, isMachineMetric } from '../../api'
 import { playbackWorkerDeployed } from '../../config'
 import { REALTIME_ENABLED } from '../../constants'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
@@ -16,7 +16,8 @@ import { StartCaptureModal } from '../modals/StartCaptureModal'
 import { StartPlaybackModal } from '../modals/StartPlaybackModal'
 import { UploadCaptureModal } from '../modals/UploadCaptureModal'
 import {
-  IconCpu, IconDownload, IconPlay, IconRadio, IconRecord, IconShieldAlert, IconTrash, IconUpload, IconX
+  IconCpu, IconDownload, IconInfo, IconPlay, IconRadio, IconRecord, IconShieldAlert, IconTrash, IconUpload,
+  IconX
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 import { CardHeading } from '../common/CardHeading'
@@ -29,7 +30,7 @@ import { SortHeader } from '../common/SortHeader'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
-import { formatBytes, formatDateTime, plural } from '../../utils/format'
+import { formatBytes, formatDateTime, formatDuration, plural } from '../../utils/format'
 
 // Role checks, as the RLS makes them (`has_role`), not a permission; the title names the same list.
 const WRITE_ROLES = ['Administrator', 'Shopfloor_Manager']
@@ -78,6 +79,9 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   // the table to find it.
   const [playAfterUpload, setPlayAfterUpload] = useState(false)
   const [schemas, setSchemas] = useState([])
+  // Every device this site has that is not a replay lane, by wire id: what a playback can stand in
+  // for. Archived and unbound devices count, as ensure_shadow_devices() counts them.
+  const [knownDeviceIds, setKnownDeviceIds] = useState(() => new Set())
 
   const fileRef = useRef(null)
   const playFileRef = useRef(null)
@@ -99,11 +103,11 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     ])
     setSchemas(schemaList || [])
     // Not capture subjects, decided once here so the counts, the gateway filter and the upload
-    // dialog agree with the table: archived rows (`start_capture_job()` refuses them) and the
-    // Playback gateway with its replay lanes, since recording one records a recording. The RPC does
-    // not refuse a shadow subject, so this filter is what keeps one off the page.
+    // dialog agree with the table: archived rows and the Playback gateway with its replay lanes,
+    // since recording one records a recording. The capture gates refuse all of them too.
     setGateways((gws || []).filter(g => !g.is_archived && !g.is_shadow))
     setDevices((devs || []).filter(d => !d.is_archived && d.gateway_id && !d.shadow_of))
+    setKnownDeviceIds(new Set((devs || []).filter(d => !d.shadow_of).map(d => d.sparkplug_id)))
   }, [])
 
   const loadJobs = useCallback(async () => {
@@ -144,7 +148,10 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   /**
    * Progress arrives over Realtime: both job tables are in the publication with REPLICA IDENTITY
    * FULL. The timer covers a dropped socket, since Realtime has no replay, and runs only while a
-   * job is in flight.
+   * job is in flight. `captures` is not published: Realtime tells an unauthenticated subscriber
+   * when a published table changes (docs/security-model.md), and an Operator may not read it. The
+   * list is re-read on every job change and when the upload dialog opens, and the server decides
+   * any replace itself.
    */
   useRealtimeTable(['capture_jobs', 'playback_jobs'], refreshAll,
     { enabled: REALTIME_ENABLED, debounceMs: 400 })
@@ -154,6 +161,12 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     const timer = setInterval(refreshAll, REALTIME_ENABLED ? 10000 : 2000)
     return () => clearInterval(timer)
   }, [activeJob, activePlayback, refreshAll])
+
+  // The upload dialog shows what it replaces, so it opens on the list as it is now.
+  const uploading = !!uploadFile
+  useEffect(() => {
+    if (uploading) loadCaptures().catch(() => {})
+  }, [uploading, loadCaptures])
 
   // Refetch the stored captures when a capture job finishes: the row that replaces the old capture
   // is written by the daemon at finalise, and the job's own change payload does not carry it.
@@ -269,7 +282,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   const onStop = () => runStop(async () => {
     try {
       const stopped = await api.stopCapture(activeJob.id)
-      showToast(stopped ? 'Stopping — the daemon finishes on its next message.' : 'That capture had already finished.', 'success')
+      showToast(stopped ? 'Stopping. The recorder finishes within a second or two.' : 'That capture had already finished.', 'success')
       await refreshAll()
     } catch (err) {
       showToast(err.message, 'error')
@@ -358,15 +371,23 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     if (file) onPlayFileChosen(file)
   }
 
-  const onUpload = async ({ subject, replace }) => {
-    const { id, messages, manifest } = await api.uploadCapture({
-      subjectKind: subject.kind,
-      subjectId: subject.id,
-      sparkplugId: subject.sparkplugId,
-      file: uploadFile.file,
-      note: uploadFile.file.name,
-      replace
-    })
+  const onUpload = async ({ subject, replace, expectedCaptureId }) => {
+    let stored
+    try {
+      stored = await api.uploadCapture({
+        subjectKind: subject.kind,
+        subjectId: subject.id,
+        file: uploadFile.file,
+        note: uploadFile.file.name,
+        replace,
+        expectedCaptureId
+      })
+    } catch (err) {
+      // A refusal often means the stored captures changed; the dialog then shows them as they are.
+      loadCaptures().catch(() => {})
+      throw err
+    }
+    const { id, path, messages, manifest } = stored
     const chain = playAfterUpload
     setUploadFile(null)
     setPlayAfterUpload(false)
@@ -381,7 +402,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         subject_sparkplug_id: subject.sparkplugId,
         message_count: messages,
         note: uploadFile.file.name,
-        storage_path: `${subject.sparkplugId}/capture.json`,
+        storage_path: path,
         manifest
       })
     }
@@ -389,6 +410,11 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
 
   // ------------------------------------------------------------------------------------------
   const capture = selected?.capture || null
+  // The machine's metrics: a capture recorded before 1.5 also lists Sparkplug plumbing and identity.
+  const listedMetrics = capture?.manifest?.metric_names || []
+  const machineMetrics = listedMetrics.filter(isMachineMetric)
+  const machineMetricCount = (capture?.manifest?.metric_name_count ?? listedMetrics.length)
+    - (listedMetrics.length - machineMetrics.length)
 
   // Only a dragged file lights the card up; a drop is offered to the roles that can store one.
   const hasFiles = e => Array.from(e.dataTransfer?.types || []).includes('Files')
@@ -491,7 +517,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 permitted={canManage}
                 deniedTitle={DENIED_TITLE}
                 onClick={() => playFileRef.current?.click()}
-                title="Store a capture file and go straight to playing it back. Dropping the file on this card does the same."
+                title="Store a capture file and go straight to playing it back. Every device the file recorded must exist on this site. Dropping the file on this card does the same."
               >
                 <IconPlay size={13} /> Play a file…
               </ActionButton>
@@ -645,6 +671,23 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             { label: 'Recorded', value: formatDateTime(capture.recorded_at) },
             { label: 'Size', value: formatBytes(capture.size_bytes) },
             { label: 'Messages', value: String(capture.message_count) },
+            /* How long it ran against what was asked for, and why it stopped: a cap that cut a
+               recording short must not read as a full one. Absent from captures made before 1.5. */
+            ...(typeof capture.manifest?.duration_ms === 'number' ? [{
+              label: 'Duration',
+              value: capture.manifest.requested_seconds
+                ? `${formatDuration(capture.manifest.duration_ms / 1000)} of ${formatDuration(capture.manifest.requested_seconds)}`
+                : formatDuration(capture.manifest.duration_ms / 1000),
+              title: capture.source === 'uploaded'
+                ? 'How long the file spans, from its first message to its last.'
+                : 'How long the recording ran, against the length asked for.'
+            }] : []),
+            ...(STOP_REASONS[capture.manifest?.stop_reason] ? [{
+              label: 'Ended',
+              value: STOP_REASONS[capture.manifest.stop_reason].label,
+              title: STOP_REASONS[capture.manifest.stop_reason].title,
+              danger: !!STOP_REASONS[capture.manifest.stop_reason].cutShort
+            }] : []),
             /* The rate answers how long a replay will take, which the message count alone does not.
                Recorded rather than derived: an average over the window would flatten a burst
                followed by silence. */
@@ -660,16 +703,11 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             {
               label: 'Birth certificate',
               // The one field on this panel that changes what an operator does next.
-              value: capture.manifest?.birth_captured === false
-                ? (capture.manifest?.uses_aliases ? 'Not captured — aliases unresolvable' : 'Not captured')
-                : 'Captured',
-              // Danger only when it actually costs something. A birthless capture of a fleet that
-              // publishes full metric names replays fine, and colouring it red said otherwise.
-              danger: capture.manifest?.birth_captured === false && !!capture.manifest?.uses_aliases,
+              value: capture.manifest?.birth_captured === false ? 'Not captured' : 'Captured',
+              // A replay opens with the edge node's NBIRTH, so a playback refuses a capture without one.
+              danger: capture.manifest?.birth_captured === false,
               title: capture.manifest?.birth_captured === false
-                ? (capture.manifest?.uses_aliases
-                  ? 'No birth certificate, and this capture uses metric aliases — a playback cannot resolve them, so every aliased metric is dropped on ingest.'
-                  : 'No birth certificate. Every metric carries its full name, so a playback resolves them; it will not announce the devices, which stay OFFLINE until they birth on their own.')
+                ? 'No birth certificate, so a playback refuses this capture: a replay opens with the edge node’s birth certificate. Record it again; the recorder asks the edge node for one.'
                 /* Where the birth came from when the recorder had to ask for it: only a requested
                    rebirth interrupted the plant. */
                 : capture.manifest?.rebirth_requested
@@ -679,7 +717,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             }
           ] : [])
         ] : []}
-        beforeActions={(capture?.manifest?.metric_names?.length > 0
+        beforeActions={(machineMetrics.length > 0
           || capture?.manifest?.device_ids?.length > 0) && (
           <>
           {/* What a replay will create: `ensure_shadow_devices()` mints one lane per device this
@@ -711,28 +749,28 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               )}
             </div>
           )}
-          {capture?.manifest?.metric_names?.length > 0 && (
+          {machineMetrics.length > 0 && (
           <div>
             <div className="context-panel-section-label">
               Captured Metrics
               <span className="section-count capture-label-count">
-                {capture.manifest.metric_name_count ?? capture.manifest.metric_names.length}
+                {machineMetricCount}
               </span>
             </div>
             {/* Pills rather than a comma-separated run: a Sparkplug metric name is a path, and each
                 pill is one metric. */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-              {capture.manifest.metric_names.map(name => (
+              {machineMetrics.map(name => (
                 <Badge key={name} size="sm" title={name}>{name}</Badge>
               ))}
               {/* The cap is the database's, not this list's; said out loud so a short list is not read
                   as a short capture. */}
-              {capture.manifest.metric_name_count > capture.manifest.metric_names.length && (
+              {machineMetricCount > machineMetrics.length && (
                 <Badge
                   size="sm"
                   title="Only the first 50 metric names are listed; the capture holds them all"
                 >
-                  +{capture.manifest.metric_name_count - capture.manifest.metric_names.length} more
+                  +{machineMetricCount - machineMetrics.length} more
                 </Badge>
               )}
             </div>
@@ -811,7 +849,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                   if (dropped) setUploadFile({ file: dropped, preset: { kind: selected.kind, id: selected.id } })
                 }}
                 className={`capture-drop${dragging ? ' capture-drop-active' : ''}`}
-                title="Upload a capture recorded elsewhere, or by ingestion/capture.py record"
+                title="Upload a capture recorded elsewhere, or by ingestion/capture.py record. To play it back, every device it recorded must exist on this site."
               >
                 <IconUpload size={14} className="capture-drop-icon" />
                 Drop a capture file here, or click to choose one
@@ -848,6 +886,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
           presetSubject={uploadFile.preset
             ? allSubjects.find(s => s.kind === uploadFile.preset.kind && s.id === uploadFile.preset.id)
             : null}
+          forPlayback={playAfterUpload}
+          knownDeviceIds={knownDeviceIds}
           onConfirm={onUpload}
           onCancel={() => { setUploadFile(null); setPlayAfterUpload(false) }}
         />
@@ -865,6 +905,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
       {playFor && (
         <StartPlaybackModal
           capture={playFor}
+          knownDeviceIds={knownDeviceIds}
           onConfirm={onPlay}
           onCancel={() => setPlayFor(null)}
         />
@@ -885,6 +926,9 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   )
 }
 
+/** How long a recording may go unreported before Stop ends it outright (request_capture_stop()). */
+const STALE_RECORDING_SECONDS = 120
+
 /**
  * The one running capture. Counts up rather than down: the recording stops at whichever of three
  * caps binds first, so a countdown would be a promise the message or size cap can break.
@@ -893,6 +937,12 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
   if (!job) return null
   const subject = job.devices?.name || job.gateways?.name || job.subject_sparkplug_id
   const pending = job.status === 'PENDING'
+  // The daemon reports every second while recording, so started_at plus elapsed_seconds is its last
+  // report. Past two minutes request_capture_stop() ends the job rather than asking the daemon.
+  const silentFor = !pending && job.started_at
+    ? (Date.now() - new Date(job.started_at).getTime()) / 1000 - (job.elapsed_seconds || 0)
+    : 0
+  const stale = silentFor > STALE_RECORDING_SECONDS
 
   return (
     <div className="callout callout-info">
@@ -943,12 +993,18 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
             </div>
           </>
         )}
+        {stale && (
+          <div style={{ color: 'var(--warning-text)', fontSize: '12px', marginTop: '4px' }}>
+            The ingestion daemon has not reported on this recording for{' '}
+            {formatDuration(silentFor)}. Stop ends it here, and nothing from it is stored. Until
+            then no other capture can start.
+          </div>
+        )}
         {/* Settles into `birth_captured` on the finished record. */}
         {!pending && !job.birth_captured && job.elapsed_seconds > 10 && (
           <div style={{ color: 'var(--warning-text)', fontSize: '12px', marginTop: '4px' }}>
-            No <code>NBIRTH</code> or <code>DBIRTH</code> has arrived. A playback of a capture without
-            one loses every metric the gateway sends by alias; metrics sent by name still play back.
-            The finished capture will be marked <strong>no birth</strong>.
+            No <code>NBIRTH</code> has arrived. A playback of a capture without the edge node’s
+            birth certificate is refused. The finished capture will be marked <strong>no birth</strong>.
           </div>
         )}
       </div>
@@ -959,7 +1015,9 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
         pending={stopPending}
         pendingLabel="Stopping…"
         onClick={onStop}
-        title="Finish this capture now and keep what it has recorded"
+        title={stale
+          ? 'End this recording now. The daemon has stopped reporting on it, so nothing from it is stored.'
+          : 'Finish this capture now and keep what it has recorded'}
       >
         Stop
       </ActionButton>
@@ -1062,9 +1120,10 @@ function writeDismissed(ids) {
 }
 
 /**
- * A failure that has just happened, until it is read. The 15-minute window covers the operator who
- * never returns; the dismiss button covers the one looking now. Not a modal: failures arrive
- * asynchronously, and a dialog would block whatever the operator came to do.
+ * A failure, or a cancel, that has just happened, until it is read. A cancel is neutral, not red.
+ * The 15-minute window covers the operator who never returns; the dismiss button covers the one
+ * looking now. Not a modal: failures arrive asynchronously, and a dialog would block whatever the
+ * operator came to do.
  */
 function RecentFailures({ jobs, kind = 'capture' }) {
   const [dismissed, setDismissed] = useState(readDismissed)
@@ -1089,28 +1148,41 @@ function RecentFailures({ jobs, kind = 'capture' }) {
 
   return (
     <>
-      {failed.map(job => (
-        <div key={job.id} className="callout callout-danger">
-          <IconShieldAlert size={14} className="callout-icon" />
-          <div style={{ fontSize: '12px', flex: 1 }}>
-            <strong>
-              {job.devices?.name || job.gateways?.name
-                || job.subject_sparkplug_id || job.target_edge_node_id}
-            </strong>
-            {' — '}{kind === 'playback' ? 'playback ' : ''}
-            {job.status === 'CANCELLED' ? 'cancelled' : 'failed'}
-            {job.error ? `: ${job.error}` : '.'}
+      {failed.map(job => {
+        // An operator's own cancel is an outcome, not a fault: neutral, and a stopped playback
+        // says how far it got.
+        const cancelled = job.status === 'CANCELLED'
+        const outcome = !cancelled ? 'failed' : kind === 'playback' ? 'stopped' : 'cancelled'
+        const reached = job.messages_total
+          ? `${job.messages_sent || 0} of ${plural(job.messages_total, 'message')}`
+          : plural(job.messages_sent || 0, 'message')
+        const detail = job.error ? `: ${job.error}`
+          : cancelled && kind === 'playback' ? `: ${reached} published before it was stopped.` : '.'
+        return (
+          <div key={job.id} className={`callout ${cancelled ? 'callout-info' : 'callout-danger'}`}>
+            {cancelled
+              ? <IconInfo size={14} className="callout-icon" />
+              : <IconShieldAlert size={14} className="callout-icon" />}
+            <div style={{ fontSize: '12px', flex: 1 }}>
+              <strong>
+                {job.devices?.name || job.gateways?.name
+                  || job.subject_sparkplug_id || job.target_edge_node_id}
+              </strong>
+              {' — '}{kind === 'playback' ? 'playback ' : ''}
+              {outcome}
+              {detail}
+            </div>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => dismiss(job.id)}
+              title="Dismiss this notice. It will not come back, on this browser."
+              aria-label={`Dismiss the ${kind} ${cancelled ? 'outcome' : 'failure'} notice`}
+            >
+              <IconX size={13} />
+            </button>
           </div>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => dismiss(job.id)}
-            title="Dismiss this notice. It will not come back, on this browser."
-            aria-label={`Dismiss the ${kind} failure notice`}
-          >
-            <IconX size={13} />
-          </button>
-        </div>
-      ))}
+        )
+      })}
     </>
   )
 }
@@ -1174,6 +1246,25 @@ function RecentDiscards({ jobs }) {
   )
 }
 
+/**
+ * Why a recording stopped, from the manifest's `stop_reason`. A cap that ended it before the length
+ * asked for is `cutShort`: the rest of the window is not in the file.
+ */
+const STOP_REASONS = {
+  duration: { label: 'Ran its full length', title: 'The recording ran for the length asked for.' },
+  operator: { label: 'Stopped by an operator', title: 'Someone pressed Stop before the length asked for was up.' },
+  message_cap: {
+    label: 'Cut short by the message cap',
+    title: 'The recording reached its message cap before the length asked for was up, so the rest of that window is not in it.',
+    cutShort: true
+  },
+  size_cap: {
+    label: 'Cut short by the size cap',
+    title: 'The recording reached its size cap before the length asked for was up, so the rest of that window is not in it.',
+    cutShort: true
+  }
+}
+
 /** What a device row's Gateway column says when the device is bound to no gateway. */
 const UNBOUND = 'Unbound'
 
@@ -1225,16 +1316,14 @@ function SubjectRow({ row, selected, onSelect }) {
               {capture.source === 'uploaded' && (
                 <Badge size="sm" className="badge-follow">UPLOADED</Badge>
               )}
-              {/* The one badge here that changes a decision: whether the file will play back. A
-                  missing birth costs metrics only when `uses_aliases` is set. */}
+              {/* The one badge here that changes a decision: a capture with no birth certificate
+                  cannot be played back. */}
               {capture.manifest?.birth_captured === false && (
                 <Badge
-                  tone={capture.manifest?.uses_aliases ? 'warning' : 'neutral'}
+                  tone="warning"
                   size="sm"
                   className="badge-follow"
-                  title={capture.manifest?.uses_aliases
-                    ? 'No NBIRTH or DBIRTH was recorded and this capture uses metric aliases, so a playback cannot resolve them: every aliased metric is dropped on ingest.'
-                    : 'No NBIRTH or DBIRTH was recorded. Every metric here carries its full name, so a playback still resolves them — but it will not announce the devices, which stay OFFLINE until they birth on their own.'}
+                  title="No NBIRTH was recorded, so a playback refuses this capture: a replay opens with the edge node’s birth certificate. Record it again to replace it."
                 >
                   NO BIRTH
                 </Badge>

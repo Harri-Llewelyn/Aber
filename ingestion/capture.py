@@ -39,14 +39,20 @@ Related: README.md -> "Broker Capture and Playback" (what the feature is for, th
 """
 
 import argparse
+import base64
+import binascii
 import json
+import math
 import os
 import re
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
+from google.protobuf import json_format
+from google.protobuf.message import DecodeError
 
 import sparkplug_b_pb2
 
@@ -70,6 +76,8 @@ RECORD_USER = os.getenv("MQTT_CAPTURE_USER") or os.getenv("MQTT_INGESTION_USER")
     or "aber_ingestion"
 RECORD_PASSWORD = (os.getenv("MQTT_CAPTURE_PASSWORD") or os.getenv("MQTT_INGESTION_PASSWORD")
                    or os.getenv("MQTT_PASSWORD") or "")
+# How long `record` waits for the SUBACK before it would ask for a birth it could not record.
+SUBSCRIBE_TIMEOUT_SECONDS = 10
 
 # Playback authenticates as the gateway it publishes as -- username == sparkplug_id, which is what
 # makes the broker's %u rule constrain anything at all. No fallback and no default:
@@ -98,6 +106,14 @@ DEVICE_ID_RE = re.compile(r"^dev[0-9a-f]{21}$")
 ASSET_ID_METRIC = "Asset_ID"
 
 NODE_MESSAGE_TYPES = ("NBIRTH", "NDATA", "NDEATH")
+# The device segment is present on these three and absent on the node's three
+# (tck-id-topic-structure-namespace-device-id-associated-message-types, -non-associated-).
+DEVICE_MESSAGE_TYPES = ("DBIRTH", "DDATA", "DDEATH")
+# Everything an edge node publishes. NCMD, DCMD and STATE are a host's, and are never recorded.
+EDGE_NODE_MESSAGE_TYPES = NODE_MESSAGE_TYPES + DEVICE_MESSAGE_TYPES
+
+# The longest a capture may run from its first message, as its last `offset_ms`.
+MAX_OFFSET_MS = 24 * 60 * 60 * 1000
 
 # EVERY value field the proto defines for a scalar metric, and the list is exhaustive on purpose.
 # A field missing from here is a value the recorder reads and does not write down, which produces
@@ -108,6 +124,13 @@ VALUE_FIELDS = (
     "string_value", "double_value", "float_value",
     "boolean_value", "int_value", "long_value",
 )
+
+# The rest of a metric, so the file records every field the proto defines. Flags are written only
+# when true, as the daemon reads them. Sub-messages are in protobuf's JSON mapping with the proto's
+# field names; bytes are base64, and an extension value is its serialised bytes in base64.
+FLAG_FIELDS = ("is_historical", "is_transient", "is_null")
+MESSAGE_FIELDS = ("metadata", "properties")
+MESSAGE_VALUE_FIELDS = ("dataset_value", "template_value")
 
 
 class CaptureError(Exception):
@@ -208,7 +231,60 @@ def json_metric(m):
     # protobuf field does on the other path.
     if m.get("is_historical") is True:
         metric.is_historical = True
+    for flag in ("is_transient", "is_null"):
+        if m.get(flag) is True:
+            setattr(metric, flag, True)
+    for name in MESSAGE_FIELDS:
+        _merge_message(m.get(name), getattr(metric, name))
+    if field is None:
+        _non_scalar_value(metric, m)
     return metric
+
+
+def _base64(value):
+    """The bytes a base64 string holds, or None when `value` is not one."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+
+
+def _merge_message(value, target):
+    """
+    Fill the sub-message `target` from its JSON mapping. Anything not in that form leaves it unset,
+    and the metric keeps the rest: these fields carry no reading, so one cannot cost the metric.
+    """
+    if not isinstance(value, dict):
+        return
+    try:
+        parsed = json_format.ParseDict(value, type(target)())
+    except (json_format.Error, AttributeError, RecursionError, TypeError, ValueError):
+        return
+    target.SetInParent()
+    target.MergeFrom(parsed)
+
+
+def _non_scalar_value(metric, m):
+    """The bytes, DataSet, Template or extension value of a metric that has no scalar one."""
+    raw = _base64(m.get("bytes_value"))
+    if raw is not None:
+        metric.bytes_value = raw
+        return
+    for name in MESSAGE_VALUE_FIELDS:
+        _merge_message(m.get(name), getattr(metric, name))
+        if metric.HasField(name):
+            return
+    raw = _base64(m.get("extension_value"))
+    if raw is not None:
+        extension = type(metric.extension_value)()
+        try:
+            extension.ParseFromString(raw)
+        except DecodeError:
+            return
+        metric.extension_value.SetInParent()
+        metric.extension_value.MergeFrom(extension)
 
 
 def json_payload(data, refused=None):
@@ -230,6 +306,9 @@ def json_payload(data, refused=None):
     seq = data.get("seq")
     if isinstance(seq, (int, float)) and not isinstance(seq, bool):
         payload.seq = int(seq) % 256
+    body = _base64(data.get("body"))
+    if body is not None:
+        payload.body = body
     for m in data.get("metrics", []):
         try:
             metric = json_metric(m)
@@ -261,28 +340,44 @@ def payload_to_dict(payload):
         out["seq"] = int(payload.seq)
     if payload.HasField("uuid"):
         out["uuid"] = payload.uuid
-
-    metrics = []
-    for m in payload.metrics:
-        entry = {}
-        if m.HasField("name"):
-            entry["name"] = m.name
-        if m.HasField("alias"):
-            entry["alias"] = int(m.alias)
-        if m.HasField("timestamp"):
-            entry["timestamp"] = int(m.timestamp)
-        if m.HasField("datatype"):
-            entry["datatype"] = int(m.datatype)
-        if m.HasField("is_historical") and m.is_historical:
-            entry["is_historical"] = True
-        # Exactly one value field is set on a well-formed metric, but a capture must not assume
-        # that of traffic it did not generate: whatever is set is what gets written down.
-        for field in VALUE_FIELDS:
-            if m.HasField(field):
-                entry[field] = getattr(m, field)
-        metrics.append(entry)
-    out["metrics"] = metrics
+    if payload.HasField("body"):
+        out["body"] = base64.b64encode(payload.body).decode("ascii")
+    out["metrics"] = [metric_to_dict(m) for m in payload.metrics]
     return out
+
+
+def metric_to_dict(m):
+    """One metric as the file records it: every field that is set, and only those."""
+    entry = {}
+    if m.HasField("name"):
+        entry["name"] = m.name
+    if m.HasField("alias"):
+        entry["alias"] = int(m.alias)
+    if m.HasField("timestamp"):
+        entry["timestamp"] = int(m.timestamp)
+    if m.HasField("datatype"):
+        entry["datatype"] = int(m.datatype)
+    for flag in FLAG_FIELDS:
+        if m.HasField(flag) and getattr(m, flag):
+            entry[flag] = True
+    for name in MESSAGE_FIELDS:
+        if m.HasField(name):
+            entry[name] = json_format.MessageToDict(getattr(m, name),
+                                                    preserving_proto_field_name=True)
+    # The value is a oneof, so at most one of these is set.
+    for field in VALUE_FIELDS:
+        if m.HasField(field):
+            entry[field] = getattr(m, field)
+    if m.HasField("bytes_value"):
+        entry["bytes_value"] = base64.b64encode(m.bytes_value).decode("ascii")
+    for name in MESSAGE_VALUE_FIELDS:
+        if m.HasField(name):
+            entry[name] = json_format.MessageToDict(getattr(m, name),
+                                                    preserving_proto_field_name=True)
+    if m.HasField("extension_value"):
+        entry["extension_value"] = base64.b64encode(
+            m.extension_value.SerializeToString()).decode("ascii")
+    return entry
 
 
 def dict_to_payload(data):
@@ -372,6 +467,148 @@ def split_topic(topic):
     return group, msg_type, edge_node, device
 
 
+# ---------------------------------------------------------------------------------------------
+# What a capture file may hold
+# ---------------------------------------------------------------------------------------------
+# One rule set, restated in the page's upload check (frontend/src/api.js); see README.md -> "The
+# file is JSON". Errors name a message by its 0-based index.
+def _json_kind(value):
+    """The JSON name of a value's type, for a refusal."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "a boolean"
+    if isinstance(value, (int, float)):
+        return "a number"
+    if isinstance(value, str):
+        return "a string"
+    if isinstance(value, list):
+        return "an array"
+    return "an object" if isinstance(value, dict) else type(value).__name__
+
+
+def _is_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def segment_problem(segment):
+    """
+    What makes `segment` unfit to be a topic segment, or None. A group, edge node or device id is
+    valid UTF-8 without '+', '/' or '#' (tck-id-topic-structure-namespace-valid-group-id,
+    -valid-edge-node-id, -valid-device-id), and MQTT forbids NUL in a topic.
+    """
+    if not segment:
+        return "is empty"
+    for char, name in (("+", "'+'"), ("#", "'#'"), ("/", "'/'"), ("\x00", "a NUL character")):
+        if char in segment:
+            return "contains %s" % name
+    try:
+        segment.encode("utf-8")
+    except UnicodeEncodeError:
+        return "is not valid UTF-8"
+    return None
+
+
+def check_topic(topic):
+    """
+    (group, msg_type, edge_node, device) for a topic an edge node publishes; CaptureError for any
+    other, STATE and the two command types included.
+    """
+    if not isinstance(topic, str):
+        raise CaptureError("its topic is %s, not a string" % _json_kind(topic))
+    parts = topic.split("/")
+    if parts[0] != "spBv1.0" or len(parts) not in (4, 5):
+        raise CaptureError("topic %r is not spBv1.0/<group>/<type>/<edge node>[/<device>]"
+                           % (topic,))
+    msg_type = parts[2]
+    if msg_type not in EDGE_NODE_MESSAGE_TYPES:
+        raise CaptureError(
+            "topic %r: %s is not one of the six message types an edge node publishes (%s)"
+            % (topic, msg_type, ", ".join(EDGE_NODE_MESSAGE_TYPES)))
+    has_device = len(parts) == 5
+    if has_device != (msg_type in DEVICE_MESSAGE_TYPES):
+        raise CaptureError("topic %r: a %s %s a device segment" % (
+            topic, msg_type, "never has" if has_device else "always has"))
+    for name, segment in (("group", parts[1]), ("edge node", parts[3]),
+                          ("device", parts[4] if has_device else None)):
+        problem = segment is not None and segment_problem(segment)
+        if problem:
+            raise CaptureError("topic %r: the %s segment %s" % (topic, name, problem))
+    return parts[1], msg_type, parts[3], parts[4] if has_device else None
+
+
+def _check_message(msg, previous_offset):
+    """One message's shape. Returns its offset_ms."""
+    if not isinstance(msg, dict):
+        raise CaptureError("it is %s, not an object" % _json_kind(msg))
+    if "topic" not in msg:
+        raise CaptureError("it has no topic")
+    check_topic(msg["topic"])
+    payload = msg.get("payload")
+    if not isinstance(payload, dict):
+        raise CaptureError("its payload is %s, not an object" % _json_kind(payload))
+    if "metrics" in payload:
+        metrics = payload["metrics"]
+        if not isinstance(metrics, list):
+            raise CaptureError("its metrics are %s, not an array" % _json_kind(metrics))
+        for index, metric in enumerate(metrics):
+            if not isinstance(metric, dict):
+                raise CaptureError("its metric %d is %s, not an object"
+                                   % (index, _json_kind(metric)))
+    encoding = msg.get("encoding", ENCODING_PROTOBUF)
+    if encoding not in (ENCODING_PROTOBUF, ENCODING_JSON):
+        raise CaptureError("its encoding %r is neither %r nor %r"
+                           % (encoding, ENCODING_PROTOBUF, ENCODING_JSON))
+
+    if "offset_ms" not in msg:
+        raise CaptureError("it has no offset_ms")
+    offset = msg["offset_ms"]
+    if not _is_number(offset) or offset != int(offset):
+        raise CaptureError("its offset_ms is %r, not a whole number of milliseconds" % (offset,))
+    if offset < 0:
+        raise CaptureError("its offset_ms %d is negative" % offset)
+    if offset < previous_offset:
+        raise CaptureError("its offset_ms %d is earlier than the message before it (%d): the "
+                           "messages are out of order" % (offset, previous_offset))
+    if offset > MAX_OFFSET_MS:
+        raise CaptureError("its offset_ms %d is more than 24 hours after the first message, the "
+                           "longest a capture may run" % offset)
+    return int(offset)
+
+
+def check_capture(capture):
+    """
+    The capture file's shape, checked before anything is planned. Returns its messages; raises
+    CaptureError naming the first problem.
+    """
+    if not isinstance(capture, dict):
+        raise CaptureError("a capture file is a JSON object, and this one is %s"
+                           % _json_kind(capture))
+    version = capture.get("aber_capture_version")
+    if version != CAPTURE_VERSION:
+        raise CaptureError(
+            "capture file is version %r, this tool reads version %d. Refusing to guess at the "
+            "difference." % (version, CAPTURE_VERSION)
+        )
+    if "capture_epoch_ms" not in capture:
+        raise CaptureError("capture has no capture_epoch_ms; it cannot be rebased")
+    if not _is_number(capture["capture_epoch_ms"]):
+        raise CaptureError("capture_epoch_ms is %s, not a number; it cannot be rebased"
+                           % _json_kind(capture["capture_epoch_ms"]))
+    messages = capture.get("messages")
+    if not isinstance(messages, list):
+        raise CaptureError("the capture's messages are %s, not an array" % _json_kind(messages))
+    if not messages:
+        raise CaptureError("capture contains no messages")
+    previous = 0
+    for index, msg in enumerate(messages):
+        try:
+            previous = _check_message(msg, previous)
+        except CaptureError as err:
+            raise CaptureError("message %d: %s" % (index, err)) from None
+    return messages
+
+
 def capture_identities(messages):
     """
     Every edge node and device id the capture publishes under, in first-seen order.
@@ -456,18 +693,20 @@ def rebase_payload(payload_dict, capture_epoch_ms, play_epoch_ms, speed=1.0):
     if speed <= 0:
         raise CaptureError("speed must be greater than zero, got %r" % (speed,))
 
-    def move(ts):
+    def move(ts, what):
+        if not _is_number(ts):
+            raise CaptureError("%s %r is not a number" % (what, ts))
         return int(play_epoch_ms + (int(ts) - capture_epoch_ms) / speed)
 
     out = dict(payload_dict)
     if out.get("timestamp"):
-        out["timestamp"] = move(out["timestamp"])
+        out["timestamp"] = move(out["timestamp"], "its payload timestamp")
 
     metrics = []
-    for m in payload_dict.get("metrics", []):
+    for index, m in enumerate(payload_dict.get("metrics", [])):
         entry = dict(m)
         if entry.get("timestamp"):
-            entry["timestamp"] = move(entry["timestamp"])
+            entry["timestamp"] = move(entry["timestamp"], "its metric %d's timestamp" % index)
         metrics.append(entry)
     out["metrics"] = metrics
     return out
@@ -569,31 +808,52 @@ def node_death(bdseq, timestamp_ms):
     })
 
 
+REBIRTH_METRIC = "Node Control/Rebirth"
+# Sparkplug's Boolean.
+BOOLEAN = 11
+
+
+def rebirth_request(timestamp_ms):
+    """
+    An NCMD asking an edge node to rebirth: `Node Control/Rebirth` = true, a timestamp and no seq
+    (tck-id-operational-behavior-data-commands-ncmd-rebirth-name, -ncmd-rebirth-value,
+    tck-id-payloads-ncmd-timestamp, tck-id-payloads-ncmd-seq). The same request the daemon sends.
+    """
+    return dict_to_payload_bytes({
+        "timestamp": timestamp_ms,
+        "metrics": [{"name": REBIRTH_METRIC, "datatype": BOOLEAN, "boolean_value": True}],
+    })
+
+
+def rebirth_target(topic_filter):
+    """(group, edge node) when a `record --topic` filter names exactly one edge node, else None."""
+    parts = topic_filter.split("/")
+    if len(parts) < 4 or parts[0] != "spBv1.0":
+        return None
+    group, edge_node = parts[1], parts[3]
+    if segment_problem(group) or segment_problem(edge_node):
+        return None
+    return group, edge_node
+
+
 # ---------------------------------------------------------------------------------------------
 # The playback plan
 # ---------------------------------------------------------------------------------------------
 def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, group=None,
                   bdseq=None):
     """
-    Turn a capture into an ordered list of (delay_ms, topic, payload_bytes).
+    Turn a capture into an ordered list of (delay_ms, topic, payload_bytes, payload_dict), as one
+    Sparkplug session of `gateway_id`. Pure: every refusal is decided here, with no broker and no
+    clock, so the publishing loop cannot make a new decision.
 
-    PURE, AND THAT IS THE POINT. Everything that can be wrong about a playback -- an unmapped
-    device, a rebasing that lands outside the sanity window, a malformed topic -- is decided here,
-    with no broker and no clock, so the tests can assert it and `play --dry-run` can show it.
-    Publishing is then a loop that cannot make a new decision.
-
-    `bdseq` is the bdSeq of the MQTT session the plan starts in; None leaves recorded numbers as
-    they are. Every NBIRTH and NDEATH carries its session's bdSeq, so births within one session
-    repeat it (tck-id-operational-behavior-data-commands-rebirth-action-3), and a recorded NDEATH
-    ends its session: the messages after it are numbered as the next one, wrapping 255 to 0.
+    A session opens with an NBIRTH, so a capture without one is refused. Left out: what comes
+    before the first NBIRTH, after a recorded NDEATH until the next NBIRTH, and a device's messages
+    outside its DBIRTH..DDEATH. `seq` is numbered per session, 0 on each NBIRTH and none on an
+    NDEATH. `bdseq` is the bdSeq of the MQTT session the plan starts in, carried by every NBIRTH and
+    NDEATH; a recorded NDEATH ends it and the next is one more, wrapping 255 to 0. None keeps the
+    recorded numbers. README.md -> "A replay is its own Sparkplug session".
     """
-    version = capture.get("aber_capture_version")
-    if version != CAPTURE_VERSION:
-        raise CaptureError(
-            "capture file is version %r, this tool reads version %d. Refusing to guess at the "
-            "difference." % (version, CAPTURE_VERSION)
-        )
-
+    messages = check_capture(capture)
     if not GATEWAY_ID_RE.match(gateway_id or ""):
         raise CaptureError(
             "%r is not a gateway sparkplug_id ('gwy' followed by 21 lowercase hex characters). "
@@ -606,35 +866,72 @@ def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, gro
                 "%r maps to %r, which is not a device sparkplug_id ('dev' followed by 21 "
                 "lowercase hex characters)." % (captured, target)
             )
+    problem = group and segment_problem(group)
+    if problem:
+        raise CaptureError("the group %r %s" % (group, problem))
 
-    messages = capture.get("messages", [])
-    if not messages:
-        raise CaptureError("capture contains no messages")
-
-    capture_epoch_ms = capture.get("capture_epoch_ms")
-    if capture_epoch_ms is None:
-        raise CaptureError("capture has no capture_epoch_ms; it cannot be rebased")
-
+    capture_epoch_ms = capture["capture_epoch_ms"]
     plan = []
     session = bdseq
-    for msg in messages:
-        topic, payload = rewrite_identity(msg["topic"], msg["payload"], gateway_id, device_map)
-        _, msg_type, _, device = split_topic(topic)
-        if group:
-            topic = "spBv1.0/%s/%s/%s" % (group, msg_type, gateway_id)
-            if device:
-                topic = "%s/%s" % (topic, device)
-        payload = rebase_payload(payload, capture_epoch_ms, play_epoch_ms, speed)
-        if session is not None and device is None and msg_type in ("NBIRTH", "NDEATH"):
-            payload = with_bdseq(payload, session)
+    seq = 0
+    born = False        # an NBIRTH has opened the session and no NDEATH has ended it
+    devices = set()     # devices whose DBIRTH this session has published
+    births = data = left_out = 0
+    for index, msg in enumerate(messages):
+        try:
+            topic, payload = rewrite_identity(msg["topic"], msg["payload"], gateway_id, device_map)
+            _, msg_type, _, device = split_topic(topic)
+            if msg_type == "NBIRTH":
+                born, devices, seq = True, set(), 0
+                births += 1
+            elif not born or (msg_type in ("DDATA", "DDEATH") and device not in devices):
+                left_out += 1
+                continue
+            elif msg_type == "DBIRTH":
+                devices.add(device)
+            elif msg_type == "DDEATH":
+                devices.discard(device)
+            if group:
+                topic = "spBv1.0/%s/%s/%s" % (group, msg_type, gateway_id)
+                if device:
+                    topic = "%s/%s" % (topic, device)
+            payload = rebase_payload(payload, capture_epoch_ms, play_epoch_ms, speed)
             if msg_type == "NDEATH":
-                session = (session + 1) % 256
-        delay_ms = int(msg["offset_ms"] / speed)
-        # Defaulting an absent encoding to protobuf is for captures written before the field
-        # existed, and for a hand-written one. It is the Sparkplug B default and the daemon's
-        # first branch, so it is the right thing to assume when nothing says otherwise.
-        encoding = msg.get("encoding", ENCODING_PROTOBUF)
-        plan.append((delay_ms, topic, encode_wire_payload(payload, encoding), payload))
+                # tck-id-payloads-ndeath-seq: an NDEATH carries no seq.
+                payload.pop("seq", None)
+                born, devices = False, set()
+            else:
+                payload["seq"] = seq
+                seq = (seq + 1) % 256
+            if msg_type in ("NDATA", "DDATA"):
+                data += 1
+            if session is not None and msg_type in ("NBIRTH", "NDEATH"):
+                payload = with_bdseq(payload, session)
+                if msg_type == "NDEATH":
+                    session = (session + 1) % 256
+            delay_ms = int(msg["offset_ms"] / speed)
+            # An absent encoding is protobuf: the Sparkplug B default and the daemon's first branch.
+            encoding = msg.get("encoding", ENCODING_PROTOBUF)
+            plan.append((delay_ms, topic, encode_wire_payload(payload, encoding), payload))
+        except CaptureError as err:
+            raise CaptureError("message %d: %s" % (index, err)) from None
+        except (AttributeError, KeyError, OverflowError, TypeError, ValueError) as err:
+            raise CaptureError("message %d cannot be encoded: %s" % (index, err)) from None
+
+    if not births:
+        raise CaptureError(
+            "this capture holds no NBIRTH, the edge node's birth certificate, so it cannot be "
+            "replayed as a Sparkplug session: a session opens with one, and the data after it is "
+            "read through what it declares. Record it again on the Capture page, which asks the "
+            "edge node for its birth certificate when the recording starts."
+        )
+    if not data:
+        raise CaptureError(
+            "this capture holds only birth certificates and no NDATA or DDATA%s: nothing to "
+            "replay." % (
+                ", once the %d message(s) recorded outside a Sparkplug session are left out "
+                "(a device's data replays only after its DBIRTH)" % left_out if left_out else "")
+        )
     return plan
 
 
@@ -642,46 +939,19 @@ def window_outcome(plan, now_ms):
     """
     How the daemon's sanity window will treat a plan: (lossy, metrics_kept, metrics_dropped).
 
-    `lossy` holds one (topic, timestamp, at_send_ms) per message that would lose at least one
-    metric, naming the first offending stamp. The two counts are METRICS, and they are what decides
-    whether a playback can write anything at all: a plan every message of which loses a metric is
-    not the same claim as a plan that writes nothing, and reading it as one refuses a playback the
-    daemon would have filed in full.
-
-    THE RULE IS process_ddata()'S, RESTATED HERE SO A CAPTURE CAN BE CHECKED BEFORE IT IS
-    PUBLISHED. A metric is judged on ITS OWN timestamp and falls back to the payload's only when it
-    has none -- where none means absent OR zero, because `HasField` plus `> 0` is the test the
-    daemon applies. The payload's clock is a verdict on NOTHING by itself: an absent or zero
-    payload timestamp becomes the arrival time there, which is in window by construction. So an
-    edge node with a skewed clock stamping payloads whose metrics each carry the device's own time
-    costs nothing, which is the case the daemon's per-metric rule exists for.
-
-    Reported BEFORE publishing rather than discovered afterwards, because the daemon's answer to
-    an out-of-window metric is a counter and not an error -- so without this a playback reports
-    success and writes nothing.
-
-    A metric flagged `is_historical` is judged by the historical bound, as the daemon does, and
-    the flag is read as the daemon reads it: only a true one counts.
-
-    THE SPEED IS ALREADY IN THE PLAN, so this judges what the daemon will see at the chosen speed.
-    A stamp is rebased to `play_epoch + (stamp - epoch) / speed` and its message is sent at
-    `now + offset / speed`, so the gap between the two is `(stamp - receipt) / speed`. Measuring at
-    `now_ms + delay_ms` rather than at plan time is what makes that true. A stamp at its message's
-    own receipt time has no gap, and stays in window at any speed. Any other gap is stretched by a
-    slow speed: a metric stamped 20 minutes before its birth message is 20 minutes behind at 1x
-    and 33 hours behind at 0.01x.
-
-    What fails is therefore a gap that the speed makes too wide, or one that was already wide:
-
-      * a metric carrying a genuinely old reading, which the daemon would have rejected live too;
-      * a device whose clock is skewed against the recorder's, which only becomes visible once
-        the capture is rebased onto a different absolute time;
-      * a hand-edited timestamp, which is a case this tool invites by design.
+    `lossy` holds (topic, first offending stamp, at_send_ms) for each message that would lose a
+    metric. The rule is process_ddata()'s, the only place the daemon applies the window, so only
+    DDATA is judged: a birth or a node message writes no reading. A metric is judged on its own
+    timestamp, or its payload's when it has none (absent or zero), or its arrival when neither has
+    one; a true `is_historical` takes the longer bound. Each message is judged when it is sent,
+    `now_ms + delay_ms`, so the speed the plan was made at is in the verdict. README.md ->
+    "Rebasing, and why it is also the speed control".
     """
     lossy = []
     kept = dropped = 0
     for delay_ms, topic, _, payload in plan:
-        # The clock at the moment this message is actually published, not at planning time.
+        if split_topic(topic)[1] != "DDATA":
+            continue
         at_send_ms = now_ms + delay_ms
         payload_ts = payload.get("timestamp")
         if payload_ts is None or payload_ts <= 0:
@@ -759,10 +1029,21 @@ def _connect(username, password, client_id):
 def cmd_record(args):
     messages = []
     skipped = []
+    ignored = []
     started_ms = None
 
     def on_message(client, userdata, msg):
         nonlocal started_ms
+        # What the daemon's on_message() ingests and nothing else: STATE, NCMD, DCMD and an empty
+        # payload are left out, so the file holds only what a playback can publish.
+        try:
+            check_topic(msg.topic)
+        except CaptureError:
+            ignored.append(msg.topic)
+            return
+        if not msg.payload:
+            ignored.append(msg.topic)
+            return
         try:
             payload, encoding = decode_wire_payload(msg.payload)
         except Exception:
@@ -787,11 +1068,14 @@ def cmd_record(args):
 
     client = _connect(RECORD_USER, RECORD_PASSWORD, "aber-capture-record")
     client.on_message = on_message
+    subscribed = threading.Event()
+    client.on_subscribe = lambda *_args: subscribed.set()
     client.subscribe(args.topic, qos=0)
     client.loop_start()
 
     print("Recording %s from %s:%d for %ds (Ctrl-C to stop early)..."
           % (args.topic, MQTT_HOST, MQTT_PORT, args.seconds))
+    asked = _ask_for_rebirth(client, args, subscribed)
     try:
         time.sleep(args.seconds)
     except KeyboardInterrupt:
@@ -813,6 +1097,12 @@ def cmd_record(args):
                 "protobuf or as the JSON encoding parse_sparkplug_payload() accepts. This is a "
                 "payload format neither this tool nor the ingestion daemon reads, so the daemon "
                 "is not ingesting them either." % len(skipped)
+            )
+        if ignored:
+            raise CaptureError(
+                "recorded no messages: the %d that arrived were STATE, NCMD or DCMD, or empty, "
+                "and an edge node publishes none of those. No edge node published under %r."
+                % (len(ignored), args.topic)
             )
         raise CaptureError(
             "recorded no messages, and none arrived at all. The fleet may be idle, or %r may not "
@@ -842,7 +1132,43 @@ def cmd_record(args):
 
     print("\nWrote %s" % args.out)
     _print_summary(capture)
+    if ignored:
+        print("  left out:   %d STATE, NCMD, DCMD or empty message(s)" % len(ignored))
+    if asked and not any(split_topic(m["topic"])[1] == "NBIRTH" for m in messages):
+        # A refused QoS 0 publish is dropped without a word, so the broker can't say which.
+        print("\n  A rebirth was asked for and no NBIRTH arrived: the edge node may not answer")
+        print("  rebirth requests, or %r may not be allowed to publish NCMD." % RECORD_USER)
     return 0
+
+
+def _ask_for_rebirth(client, args, subscribed):
+    """
+    Ask the edge node `--topic` names for its birth certificate once the subscription is in place,
+    so its answer is recorded. True when asked. A filter covering several edge nodes asks none:
+    each would republish every birth it holds.
+    """
+    if args.no_rebirth:
+        return False
+    target = rebirth_target(args.topic)
+    if target is None:
+        print("  No rebirth asked for: %s names no single edge node. Without the edge node's NBIRTH"
+              % args.topic)
+        print("  the file cannot be played back; name one with --topic "
+              "spBv1.0/<group>/+/<edge node>/#.")
+        return False
+    if not subscribed.wait(SUBSCRIBE_TIMEOUT_SECONDS):
+        print("  No rebirth asked for: the broker did not confirm the subscription within %ds, so"
+              " the answer could not be recorded." % SUBSCRIBE_TIMEOUT_SECONDS)
+        return False
+    group, edge_node = target
+    sent = client.publish("spBv1.0/%s/NCMD/%s" % (group, edge_node),
+                          rebirth_request(int(time.time() * 1000)), qos=0, retain=False)
+    if sent.rc != mqtt.MQTT_ERR_SUCCESS:
+        print("  The rebirth request could not be sent (rc=%s)." % sent.rc)
+        return False
+    print("  Asked %s in group %s for its birth certificate (Node Control/Rebirth)."
+          % (edge_node, group))
+    return True
 
 
 def _print_summary(capture):
@@ -863,28 +1189,56 @@ def _print_summary(capture):
     print("  encodings:  %s" % ", ".join("%s=%d" % kv for kv in sorted(by_encoding.items())))
     print("  edge nodes: %s" % ", ".join(capture["identities"]["edge_nodes"]))
     print("  devices:    %s" % (", ".join(capture["identities"]["devices"]) or "(none)"))
+    if "NBIRTH" not in by_type:
+        print("\n  No NBIRTH was recorded, so this capture cannot be played back: a replay opens")
+        print("  with the edge node's birth certificate. Record again with --topic naming the edge")
+        print("  node, so the recorder asks it for one, or record on the Capture page, which asks")
+        print("  for one itself.")
     if capture["identities"]["devices"]:
-        print("\n  Playback needs a --map for each device above, onto devices bound to the")
-        print("  playback gateway. `capture.py play --help` explains why they cannot be reused.")
+        print("\n  Playback needs a --map for each device above, onto a replay lane of the")
+        print("  Playback gateway: the Capture page's Prepare replay lanes makes them.")
 
 
 # ---------------------------------------------------------------------------------------------
 # play
 # ---------------------------------------------------------------------------------------------
+# Where a command-line user gets the Playback gateway's password. The page issues it; the
+# break-glass provisioning script writes no platform record, and the worker would then hold a
+# password the broker no longer has.
+CREDENTIAL_ADVICE = (
+    "Set MQTT_PLAYBACK_USER to the Playback gateway's sparkplug_id and MQTT_PLAYBACK_PASSWORD to "
+    "its broker password. Issue the password from the gateway's drawer on the Gateways page "
+    "(Generate Broker Credential), which shows it once. On Kubernetes the same password is "
+    "delivered into the `mosquitto-passwords` Secret, key `playback_credentials.json`, as "
+    "{\"<sparkplug_id>\": \"<password>\"}. Issuing a new one replaces the one the dashboard's "
+    "playback worker holds; it reaches the worker within about a minute."
+)
+
+
 def cmd_play(args):
+    # Imported here: playback_worker imports this module.
+    import playback_worker
+
     with open(args.capture, encoding="utf-8") as fh:
         capture = json.load(fh)
 
     device_map = parse_device_map(args.map)
+    edge_node = args.as_gateway
+    bdseq = playback_worker._next_bdseq.get(edge_node, 0)
     now_ms = int(time.time() * 1000)
     plan = plan_playback(
         capture,
-        gateway_id=args.as_gateway,
+        gateway_id=edge_node,
         device_map=device_map,
         play_epoch_ms=now_ms,
         speed=args.speed,
         group=args.group,
+        bdseq=bdseq,
     )
+    left_out = len(capture["messages"]) - len(plan)
+    if left_out:
+        print("%d message(s) recorded outside a Sparkplug session are left out: before the first "
+              "NBIRTH, after an NDEATH, or a device's before its DBIRTH." % left_out)
 
     bad = unsane_timestamps(plan, now_ms)
     if bad:
@@ -906,54 +1260,72 @@ def cmd_play(args):
         print("WARNING: " + detail, file=sys.stderr)
 
     if args.dry_run:
-        print("Dry run -- nothing published. Plan for gateway %s:" % args.as_gateway)
+        print("Dry run -- nothing published. Plan for gateway %s:" % edge_node)
         for delay_ms, topic, _, _ in plan[: args.head]:
             print("  +%7dms  %s" % (delay_ms, topic))
         if len(plan) > args.head:
             print("  ... %d more" % (len(plan) - args.head))
         return 0
 
-    # THE REFUSAL THAT SAVES A SILENT RUN. The broker's roles pin the edge-node segment to the
-    # connecting username, and a mismatch is dropped with nothing logged at either end.
-    if PLAY_USER != args.as_gateway:
+    # The broker confines a client to its own edge-node segment and drops the rest at QoS 0 with
+    # nothing logged at either end, so a mismatch is refused before connecting.
+    if PLAY_USER != edge_node:
         raise CaptureError(
             "MQTT_PLAYBACK_USER is %r but --as-gateway is %r. The broker confines a client to "
             "`spBv1.0/+/+/<username>/#`, so every publish in this run would be discarded and the "
-            "playback would report success having moved nothing. Provision the credential with\n"
-            "  node scripts/mosquitto-provision-gateway.mjs %s"
-            % (PLAY_USER or "(unset)", args.as_gateway, args.as_gateway)
+            "playback would report success having moved nothing. %s"
+            % (PLAY_USER or "(unset)", edge_node, CREDENTIAL_ADVICE)
         )
     if not PLAY_PASSWORD:
-        raise CaptureError("MQTT_PLAYBACK_PASSWORD is not set; the broker runs allow_anonymous false")
+        raise CaptureError("MQTT_PLAYBACK_PASSWORD is not set; the broker runs allow_anonymous "
+                           "false. " + CREDENTIAL_ADVICE)
 
-    client = _connect(PLAY_USER, PLAY_PASSWORD, "aber-capture-play")
-    client.loop_start()
+    # The dashboard's session, opened and ended by the same functions: the NDEATH as the Will,
+    # the CONNACK awaited, and the NDEATH published before DISCONNECT.
+    playback_worker.MQTT_HOST, playback_worker.MQTT_PORT = MQTT_HOST, MQTT_PORT
+    will_topic = "spBv1.0/%s/NDEATH/%s" % (split_topic(plan[0][1])[0], edge_node)
+    client = None
+    sent = 0
 
-    print("Playing %d messages as %s at %.3fx..." % (len(plan), args.as_gateway, args.speed))
+    print("Playing %d messages as %s at %.3fx..." % (len(plan), edge_node, args.speed))
     started = time.time()
     try:
         for delay_ms, topic, payload_bytes, _ in plan:
-            # Scheduled against the START of the run, not slept between messages. Cumulative
-            # sleeps drift by however long each publish takes, so a long capture arrives
-            # progressively later than the intervals it recorded -- which is the one property
-            # playback exists to preserve.
-            due = started + delay_ms / 1000.0
-            remaining = due - time.time()
+            # Scheduled against the start of the run, so publishing time does not accumulate.
+            remaining = started + delay_ms / 1000.0 - time.time()
             if remaining > 0:
                 time.sleep(remaining)
-            # QoS 0, matching every other Sparkplug publisher on this stack. mosquitto/README.md
-            # records why raising it is not an option: Sparkplug B requires QoS 0 for these
-            # message types and delegates loss detection to `seq` and the rebirth request.
-            client.publish(topic, payload_bytes, qos=0)
+            if client is None:
+                client, error = playback_worker._open_session(edge_node, PLAY_PASSWORD,
+                                                              will_topic, bdseq)
+                if error and not sent:
+                    raise CaptureError("%s\n\n%s" % (error, CREDENTIAL_ADVICE))
+                if error:
+                    raise CaptureError("publishing stopped after %d message(s): %s" % (sent, error))
+            if split_topic(topic)[1] == "NDEATH":
+                # A recorded death ends the session; the plan numbered what follows as the next.
+                playback_worker._end_session(client, topic, payload_bytes)
+                client = None
+                bdseq = (bdseq + 1) % 256
+            else:
+                # QoS 0, as Sparkplug requires for these types. A publish the client could not
+                # send is a lost connection, and the run stops rather than reporting success.
+                info = client.publish(topic, payload_bytes, qos=0, retain=False)
+                if info.rc != mqtt.MQTT_ERR_SUCCESS:
+                    raise CaptureError(
+                        "publishing stopped after %d message(s): the broker connection was lost "
+                        "(%s)" % (sent, mqtt.error_string(info.rc)))
+            sent += 1
             if args.verbose:
                 print("  +%7dms  %s" % (delay_ms, topic))
     except KeyboardInterrupt:
         print("\nStopped early.")
     finally:
-        client.loop_stop()
-        client.disconnect()
+        if client is not None:
+            playback_worker._end_session(client, will_topic,
+                                         node_death(bdseq, int(time.time() * 1000)))
 
-    print("Done in %.1fs." % (time.time() - started))
+    print("Done in %.1fs: %d message(s) published." % (time.time() - started, sent))
     return 0
 
 
@@ -980,7 +1352,12 @@ def build_parser():
     rec = sub.add_parser("record", help="subscribe and write a capture file")
     rec.add_argument("--out", required=True, help="capture file to write")
     rec.add_argument("--seconds", type=int, default=60, help="how long to record (default 60)")
-    rec.add_argument("--topic", default="spBv1.0/#", help="topic filter (default spBv1.0/#)")
+    rec.add_argument("--topic", default="spBv1.0/#",
+                     help="topic filter (default spBv1.0/#). Name one edge node, "
+                          "spBv1.0/<group>/+/<edge node>/#, and the recorder asks it for its birth "
+                          "certificate when the recording starts")
+    rec.add_argument("--no-rebirth", action="store_true",
+                     help="don't ask the edge node --topic names for its birth certificate")
     rec.add_argument("--verbose", action="store_true")
     rec.set_defaults(func=cmd_record)
 
@@ -994,9 +1371,10 @@ def build_parser():
     )
     play.add_argument("capture", help="capture file to play")
     play.add_argument("--as-gateway", required=True, metavar="gwy...",
-                      help="the playback gateway's sparkplug_id; must equal MQTT_PLAYBACK_USER")
+                      help="the Playback gateway's sparkplug_id; must equal MQTT_PLAYBACK_USER")
     play.add_argument("--map", action="append", metavar="dev<captured>=dev<target>",
-                      help="map a captured device onto one bound to the playback gateway")
+                      help="map a captured device onto its replay lane, made by the Capture page's "
+                           "Prepare replay lanes; any other id stays in quarantine")
     play.add_argument("--speed", type=float, default=1.0,
                       help="playback rate multiplier (default 1.0)")
     play.add_argument("--group", help="override the Sparkplug group (default: as captured)")

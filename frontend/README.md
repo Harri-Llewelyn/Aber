@@ -310,6 +310,12 @@ row and all, so the two read alike.
 `supabase-realtime` publishes `cells`, `gateways`, `devices`, `areas`, `platform_alerts`,
 `capture_jobs` and `playback_jobs`, and deliberately not `audit_trail`. Tabs subscribe through `hooks/useRealtimeTable.js`.
 
+- **`captures` is not published either.** Realtime tells a subscriber that a published table
+  changed even when RLS hides the row ([`docs/security-model.md`](../docs/security-model.md)), and
+  an Operator may not read captures. The Capture page re-reads its list on every capture job change
+  and whenever the upload dialog opens, and `begin_capture_upload()` decides any replace on the
+  server, so a page that has not caught up cannot replace a capture it never showed.
+
 - **`telemetry` is unpublishable, not merely unpublished.** It is a `postgres_fdw` foreign table
   whose rows enter TimescaleDB's WAL, never Supabase's. Adding it to the publication does not
   error — it silently emits nothing, which is the worse failure. **Do not "fix" the telemetry
@@ -919,6 +925,22 @@ Three rules that were each learned from a real bug:
   made the typo look correct in dark mode and fail silently in light mode.
   `authScreenTheme.test.jsx` now asserts that every variable referenced in `App.jsx` is one the
   stylesheet defines.
+
+**A panel that opens from a button points at it.** The alert list, the notifications, the account
+menu, the sidebar behaviour menu and the Filters panel share one radius (`--radius-sm`), one shadow
+(`--shadow-popover`) and one arrow rule (App.css, *Popover arrows*): a 10px square turned 45°,
+centred on the panel's border on the side that faces the button, so the outline runs on into the
+point. It is pure CSS, as each panel's position is already known: a placement library such as
+Floating UI would add only what these panels have. The arrow is the wrapper's `::after`, shown with
+`:has(> panel)` while the panel is open, because the alert, notification and account panels clip or
+scroll their own overflow; the Filters panel clips nothing and draws its own `::before`. The top-bar
+arrows point up from `left: 50%` of the wrapper, so they follow the pill as its count widens it. The
+two rail menus are `position: fixed`, and so are their arrows: they point left from the panels' left
+border, 60px or 240px, at heights taken from the rail's foot (27px and 65px above the window's
+bottom). Change the foot's padding or its rows and those two numbers move with it. The Filters panel
+is shifted to stay inside the window, so `FiltersPopover` sets `--arrow-x`, the button's centre from
+the panel's left edge, and the arrow stays over the button. `popoverArrows.test.jsx` holds the rules
+to these numbers; jsdom lays nothing out, so screenshots are the check that they line up.
 
 ---
 

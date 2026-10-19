@@ -740,7 +740,9 @@ panel or an alert rule can read the same rows.
 - **Sparkplug's control metrics are left out**: `bdSeq`, `Node Control/*` and `Device Control/*`.
   They are commands to the edge node or device, not readings, and their names hold spaces the name
   format above refuses. A DBIRTH may carry `Device Control/*` (Sparkplug 3.0, *Payload (DBIRTH)*),
-  and the gateway appliance sends `Device Control/Rebirth`. `Properties/*` stays. It is the
+  and the gateway appliance sends `Device Control/Rebirth`. Since 1.5 ingestion leaves them out of
+  `last_birth_metrics` too; the view still excludes them for a row no birth has rewritten since.
+  `Properties/*` stays. It is the
   device's own data under a valid name, and catalogued with an OPC 40001 Machinery identification
   id such as `Manufacturer`'s, it fills that Digital Nameplate field in the AAS export.
 - **`last_declared_at`** is the latest `last_birth_metrics_at` among the devices. That stamp moves
@@ -973,10 +975,10 @@ with that stack's own JWT secret (`docs/upgrades.md`).
 `is_active_capture_object()`, `is_active_playback_capture()` and `playback_stale_credentials()` are
 `SECURITY DEFINER` and executable by `authenticated`, and until `0184` none of them looked at who
 was asking. An Operator, who can read no row of `capture_jobs`, `playback_jobs` or
-`playback_worker_status`, could call all three. A capture is stored at `<subject>/capture.json`,
-and every signed-in account can read every gateway's and device's `sparkplug_id`. So the first two
-told the Operator which machine was being recorded or replayed right now. The third told it when
-each playback credential was issued.
+`playback_worker_status`, could call all three. A capture was then stored at
+`<subject>/capture.json`, and every signed-in account can read every gateway's and device's
+`sparkplug_id`. So the first two told the Operator which machine was being recorded or replayed
+right now. The third told it when each playback credential was issued.
 
 Each now answers only a caller who could read the job row. That is the matching machine principal
 (the ingestion daemon for a recording, the playback worker for a replay), a role the tables' RLS
@@ -991,6 +993,74 @@ changed are ones no policy could act on. `test_capture_playback_gates.py` runs t
 from `storage-policies.sql` verbatim on a stand-in table and checks what each role and principal
 reaches. The Start Playback dialog opens only for Administrator and Shopfloor_Manager, and
 `start_playback_job()` asks for the stale credentials as that caller, so both still get the answer.
+
+### A stored capture is never lost or orphaned (0190)
+
+Until `0190` each subject had one object, `<subject>/capture.json`, and both ways of replacing it
+wrote the object first and the row second. A re-recording whose `ingest_finalise_capture()` failed
+left the old row (its note, its message count) describing the new recording. An upload the replace
+check then refused had already overwritten the stored file. Deleting a gateway or device, the
+nightly purge included, cascaded its `captures` row away and left the recording in the bucket for
+ever, readable by Auditors and copied into every storage backup.
+
+- **Every capture has a path of its own.** `start_capture_job()` records to
+  `<subject>/<job id>.json`, and `begin_capture_upload()` issues `<subject>/<upload id>.json`. The
+  row is repointed in one transaction (`ingest_finalise_capture()`, `register_uploaded_capture()`),
+  and only after that commits is the replaced file deleted. A failure at any step leaves the stored
+  capture's row and file as they were. Rows written before `0190` keep `<subject>/capture.json`.
+- **An upload begins on the server.** `begin_capture_upload()` decides `replace` before any byte is
+  written: it refuses a stored capture unless asked to replace it, and, given the id the page
+  showed, unless the stored capture is still that one. It refuses a subject being recorded, because
+  the recording's finalise would replace the upload unasked. It records the upload in
+  `capture_uploads`, open to its caller for an hour; a later upload of the same subject supersedes
+  it. The bucket admits a person's write only to an open path issued to them
+  (`is_open_capture_upload()`), so nobody writes a stored capture's file, or any other name under a
+  subject's folder.
+- **Registering checks the upload, not the browser.** `register_uploaded_capture()` accepts only an
+  open path issued to the caller for that subject, and refuses a subject being recorded and a
+  stored capture other than the one the upload began against. It reads the object's size from
+  `storage.objects` (`p_size_bytes` is not used), refuses a message count a file that size cannot
+  hold (50 bytes is the smallest message) and a manifest over 64 KiB, and answers a repeated call
+  with the capture it made.
+- **A file goes when nothing claims it.** An object is claimed by a `captures` row, a `PENDING` or
+  `RECORDING` capture job, an upload open within two hours, or a `PENDING` or `RUNNING` playback
+  (`is_unclaimed_capture_object()`). The bucket's DELETE policy admits Administrator,
+  Shopfloor_Manager and the ingestion daemon to an unclaimed object only, so a stored capture's file
+  cannot be deleted while its row stands. The daemon deletes the file a finalise replaced at once,
+  and sweeps the rest of the bucket hourly for files unclaimed and untouched for an hour
+  (`ingest_unclaimed_capture_objects()`). That sweep also clears what deleted subjects left before
+  `0190`. The page deletes the file an upload replaced.
+- **Only the Storage API removes the bytes.** storage-api keeps a file's bytes in its backend and
+  its metadata in `storage.objects`. Its `protect_objects_delete` trigger refuses a `DELETE` on the
+  table in SQL, and one let through (`storage.allow_delete_query`) removes the row and leaves the
+  bytes on the volume, listed nowhere. So no SQL here deletes from it: the daemon calls the Storage
+  API with the names the database gives it. Check 97 of `scripts/check-docs-drift.mjs` fails on SQL
+  that does.
+- **The Playback gateway and its replay lanes are not capture subjects.** `start_capture_job()`,
+  `begin_capture_upload()` and `register_uploaded_capture()` refuse them. A capture of one records a
+  replay, and the page could not show it.
+- **The daemon is told what happened.** `ingest_report_capture_progress()` answers `continue`,
+  `stop`, `ended` (the job is no longer `RECORDING`) or `gone` (no such job: its subject was
+  deleted). The daemon drops an ended or gone recording without uploading it, where it used to read
+  the old gate's `true` as Stop and fail its upload with a row-level security error.
+  `ingest_capture_progress()` keeps its answer for a daemon of the previous release.
+- **Stop ends a recording the daemon has stopped reporting on.** The daemon writes
+  `elapsed_seconds` every second while recording. When `started_at` plus that is more than two
+  minutes old, `request_capture_stop()` records the job `CANCELLED` with nothing stored, rather than
+  setting a flag nobody reads. The single-flight index would otherwise refuse every capture until
+  the daemon restarted.
+- **A swept job says whether it started.** `ingest_reconcile_capture_jobs()` says a `PENDING` job
+  never started, and a `RECORDING` one that its recording did not survive.
+- **The manifest says how a recording ended, and what a birth certificate is.** The recorder writes
+  `stop_reason`, `duration_ms` and `requested_seconds`, and leaves Sparkplug plumbing and identity out
+  of `metric_names`. `birth_captured` now means an `NBIRTH` was recorded, since playback refuses a
+  capture without one; a capture stored earlier keeps the flag it was given, when a `DBIRTH` alone
+  set it. The column comments say so.
+
+`capture_uploads` has RLS with no policy and nothing granted to an API role; the gates read and
+write it. `test_capture_retention.py` holds the paths, the upload gates, the claims and the bucket's
+policies (verbatim, on a stand-in table); `test_archiving_is_a_lifecycle.py` holds a purged
+subject's file being released.
 
 ### Only the seed makes a playback gateway (0187)
 
@@ -1047,6 +1117,35 @@ its lanes and the ability to archive it. Find one with
 `SELECT id, name FROM gateways WHERE is_shadow AND id <> '16000000-0000-4000-8000-000000000001'`.
 It cannot be unmarked through the API either; clearing the flag is a database owner's act.
 
+### A playback reports what really happened, and Stop ends a stalled one (0191)
+
+The playback worker reported progress only after a publish. A job waiting out a long gap in its
+capture, or a worker stuck before its first publish, left the row `RUNNING` with nothing to show it.
+`request_playback_stop()` only set a flag for the worker's next tick, so the one-per-target index
+refused every playback onto the Playback gateway until the worker restarted.
+
+- **`playback_progress()` stamps `playback_jobs.progress_reported_at`** on every call. The worker
+  now reports at least once a second while a job runs, including while it waits for a message.
+- **`request_playback_stop()` ends a stalled job.** On a `RUNNING` job whose last report, or its
+  claim when there is none, is more than a minute old, it sets `CANCELLED` and `finished_at` and
+  writes what the job had reported published into `error`. A fresh job still only gets
+  `stop_requested`, which the worker reads within a second. A worker that comes back is told to
+  stop by its next `playback_progress()`, which answers true for a row no longer `RUNNING`, and its
+  `playback_finish()` touches only `PENDING` and `RUNNING` rows.
+- **`playback_reconcile_jobs()` says what happened to each job it sweeps.** A `PENDING` job never
+  started, a `RUNNING` one that had reported nothing published nothing, and any other stopped after
+  the count it had reported. All three said *publishing stopped partway*. The wording names no
+  cause, because a restart and a kill for memory look the same from here.
+- **`playback_worker_status.credential_sources`** says which password the worker uses for each
+  gateway it holds: `delivered`, `helm` or `environment`, in the order it tries them. The worker
+  writes it through the new `playback_report_credential_sources()`, which the playback worker alone
+  may call and which keeps only held gateways and those three names. The Start Playback dialog
+  reads it. Names only: a password never leaves the worker.
+
+Both columns are additive. `progress_reported_at` is nullable: a job claimed before the upgrade has
+none, so its claim time is used. `credential_sources` defaults to `{}`, which the dialog reads as a
+worker from before this release. `test_playback_stop_and_sweep.py` holds all four functions.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
@@ -1085,8 +1184,8 @@ capture.
 
 **The RPCs are the only write path, which is what makes their checks gates.** `capture_jobs` and
 `playback_jobs` take no direct `INSERT` or `UPDATE` from any application role;
-`start_capture_job()`, `register_uploaded_capture()` and `start_playback_job()` are `SECURITY
-DEFINER` and hold the checks. Same shape as `0047`: a validation that lives in the client, or beside
+`start_capture_job()`, `begin_capture_upload()`, `register_uploaded_capture()` and
+`start_playback_job()` are `SECURITY DEFINER` and hold the checks. Same shape as `0047`: a validation that lives in the client, or beside
 a policy that also admits a direct write, is advice rather than a control — and the direct write is
 the door an API caller uses rather than the one the UI happens to.
 
@@ -2845,9 +2944,10 @@ What it does not offer is the two acts that are wrong for it, for different reas
   moment somebody starts a job — possibly weeks later, on a page that says nothing about gateways —
   while the archive itself reports success and reads as housekeeping. `0067` refuses it in the
   database and the button is hidden; the UI is not the rule.
-- **Requesting a rebirth** is addressed to a node nobody is listening as. The playback worker only
-  publishes and holds no subscription at all, so the NCMD reaches nothing and `rebirth_requests`
-  would record something that can never be answered.
+- **Requesting a rebirth** is addressed to a node that is listening only while a replay runs. The
+  playback worker subscribes to the Playback gateway's NCMD for each replay and answers a rebirth
+  then, so between replays the NCMD reaches nothing and `rebirth_requests` would record something
+  that is never answered.
 
 **The rule is "not the last one", not "never".** `0067` refuses only the archive that would leave
 no unarchived `is_shadow` gateway. Since `0187` the Playback gateway is the only one a stack makes
@@ -6310,11 +6410,13 @@ Every object must live under `<subject>/`, and that folder must name a gateway o
 exists (`is_capture_subject_prefix()`). Same idea as the broker's per-gateway rule
 (`spBv1.0/+/+/<sparkplug_id>/#`) one layer up: **the client does not get to assert where its data
 belongs.** A convention the frontend happens to follow is not a control — Storage's REST API is
-reachable with any authenticated session.
+reachable with any authenticated session. Since `0190` a person's write must also be to a path
+`begin_capture_upload()` issued them and still open (`is_open_capture_upload()`), so no write lands
+on a stored capture's file or on a name the capture gates never issued.
 
-`SELECT` is deliberately *not* path-confined: a reader may list the bucket to find captures, and
-requiring a valid prefix on read would hide the capture of a subject that had since been deleted —
-which is exactly when someone is looking for it.
+`SELECT` is deliberately *not* path-confined: a reader may list the bucket to find captures. A file
+whose subject was deleted is claimed by nothing, though, and the ingestion daemon deletes it within
+the hour (0190): a capture is deleted with its subject.
 
 The trap in writing that policy, and why its test asserts an *accepted* path as well as rejected
 ones, is recorded inline in `storage-policies.sql`, because it constrains the SQL on the very next
@@ -6328,19 +6430,20 @@ REST API, `storage.objects` is written by storage-api under the caller's own JWT
 function can carry a file into a bucket. So the daemon's access is a policy arm, and
 `is_ingestion_caller()` does resolve inside a storage request.
 
-**It cannot be write-only either**, which was the first design and is impossible rather than merely
-awkward. Each subject holds exactly one capture, so re-recording *overwrites* it; storage-js spells
-overwrite as `upsert: true`; storage-api serves that as `INSERT … ON CONFLICT DO UPDATE`; and
-Postgres evaluates the **SELECT** policy too, because the statement has to see the row it conflicts
-with. Probed directly, the first insert returned 200 and the upsert immediately after returned
+**It cannot be write-only either.** The daemon uploads with `upsert: true`, so a retried upload of
+the same path succeeds; storage-api serves that as `INSERT … ON CONFLICT DO UPDATE`; and Postgres
+evaluates the **SELECT** policy too, because the statement has to see the row it conflicts with.
+Probed directly, the first insert returned 200 and the upsert immediately after returned
 `new row violates row-level security policy`.
 
 **So the arm is scoped rather than narrowed**: `is_ingestion_caller() AND
 is_active_capture_object(name)`. The daemon may read, insert and overwrite exactly the one path
-named by the job it is currently running, can reach nothing at all in the bucket with no capture in
-flight, and never deletes — so nothing is destroyed before its replacement exists, and an orphan is
-impossible. Deleting a stale capture stays with the roles that own the bucket, and the browser's
-replace confirmation names what it is about to destroy.
+named by the job it is currently running, `<subject>/<job id>.json`, which is never a stored
+capture's file. Its other arm is `is_unclaimed_capture_object(name)` on SELECT and DELETE: it may
+read and delete a file nothing claims, which is how the file a finalise replaced and the file a
+deleted subject left leave the bucket (0190). Storage-api's delete returns the rows it deleted, so
+Postgres applies the SELECT policy to a DELETE too, and both arms are needed. A file a row, a
+recording, an open upload or a playback names is out of reach of every role.
 
 **The prefix is the subject recorded**, not the gateway a capture plays back as, so
 `is_capture_subject_prefix()` admits a `dev…` folder beside a `gwy…` one — a device is a capture
@@ -6386,9 +6489,9 @@ direction that matters least and loudest in the direction that matters most: a m
 denies, so the viewer simply shows nothing and nobody reads a log. The checks assert the set is
 complete by name rather than by count, so a policy another chart version left behind is reported
 without failing the boot; the capture bucket's check also asserts that Auditor never writes, that
-the ingestion daemon appears in exactly SELECT, INSERT and UPDATE with every arm confined to the
-object of its running job, that it never deletes, and that the playback worker appears in SELECT
-alone. Each exception says what the missing arm looks like from outside, which is a job that
+a person's write is confined to an issued upload path, that the ingestion daemon's every arm is
+confined to the object of its running job or to an unclaimed one, that every DELETE is confined to
+an unclaimed object, and that the playback worker appears in SELECT alone. Each exception says what the missing arm looks like from outside, which is a job that
 failed for no stated reason.
 
 **A retired policy needs an explicit DROP.** This file drops each policy it is about to create,

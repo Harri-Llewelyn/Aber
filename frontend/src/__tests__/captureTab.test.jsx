@@ -2,7 +2,7 @@ import React from 'react'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { CaptureTab } from '../components/tabs/CaptureTab'
-import { captureManifest, capturePath } from '../api'
+import { captureManifest } from '../api'
 import { tabIsVisible, TABS, groupedNav } from '../navigation'
 
 /**
@@ -244,7 +244,8 @@ describe('the playback lane', () => {
     await screen.findByText('Line 1 Gateway')
     const doc = {
       aber_capture_version: 1,
-      messages: [{ topic: 'spBv1.0/G/NDATA/gwy120000000000400080000', payload: {} }],
+      capture_epoch_ms: 1700000000000,
+      messages: [{ topic: 'spBv1.0/G/NDATA/gwy120000000000400080000', offset_ms: 0, payload: {} }],
       identities: { edge_nodes: ['gwy120000000000400080000'], devices: [] }
     }
     dropOnCard(new File([JSON.stringify(doc)], 'edited.json', { type: 'application/json' }))
@@ -265,27 +266,26 @@ describe('a stored capture', () => {
   })
 
   /**
-   * The one badge that changes a decision. A birthless capture drops metrics only when the
-   * recording depends on the alias table; both branches are pinned.
+   * The one badge that changes a decision. A replay opens with the edge node's NBIRTH, so a
+   * playback refuses a birthless capture whether or not its metrics use aliases.
    */
-  it('marks a birthless capture, and says only that devices go unannounced', async () => {
+  it('marks a birthless capture, and says a playback refuses it', async () => {
     api.listCaptures.mockResolvedValue([
       { ...CAPTURE, manifest: { ...CAPTURE.manifest, birth_captured: false, uses_aliases: false } }
     ])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     expect(within(row).getByText('NO BIRTH')).toBeInTheDocument()
-    expect(within(row).getByTitle(/carries its full name/)).toBeInTheDocument()
-    expect(within(row).queryByTitle(/dropped on ingest/)).toBeNull()
+    expect(within(row).getByTitle(/a playback refuses this capture/)).toBeInTheDocument()
   })
 
-  it('says a birthless capture WILL drop metrics when it uses aliases', async () => {
+  it('says the same of a birthless capture that uses aliases', async () => {
     api.listCaptures.mockResolvedValue([
       { ...CAPTURE, manifest: { ...CAPTURE.manifest, birth_captured: false, uses_aliases: true } }
     ])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    expect(within(row).getByTitle(/dropped on ingest/)).toBeInTheDocument()
+    expect(within(row).getByTitle(/a playback refuses this capture/)).toBeInTheDocument()
   })
 
   it('does not mark one that did', async () => {
@@ -336,6 +336,15 @@ describe('starting a capture', () => {
     expect(props.showToast).toHaveBeenCalled()
   })
 
+  /** A playback refuses a capture with no birth certificate, and every recording asks for one. */
+  it('says that recording starts by asking the gateway to rebirth', async () => {
+    renderTab()
+    const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
+    selectRow(row); fireEvent.click(panelAction(/Record/))
+    expect(await screen.findByText(/Recording starts by asking the gateway to rebirth/))
+      .toBeInTheDocument()
+  })
+
   /** The destroy-a-rare-fault guard, and the reason `captures.note` exists. */
   it('names the capture it is about to destroy, note included', async () => {
     api.listCaptures.mockResolvedValue([CAPTURE])
@@ -382,7 +391,7 @@ describe('starting a capture', () => {
     fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
     const row = (await screen.findByText('CNC Spindle')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Record/))
-    expect(await screen.findByText(/which carries the alias table/)).toBeInTheDocument()
+    expect(await screen.findByText(/plus its gateway's birth certificate/)).toBeInTheDocument()
   })
 })
 
@@ -815,27 +824,17 @@ describe('playing a capture back', () => {
     expect(after.value).toBe('')
   })
 
-  it('warns hard about a birthless capture that uses aliases', async () => {
+  /** A replay opens with an NBIRTH, so the worker refuses a birthless capture, aliases or not. */
+  it.each([true, false])('warns that a birthless capture is refused (uses_aliases %s)', async (usesAliases) => {
     api.listCaptures.mockResolvedValue([
-      { ...PLAYABLE, manifest: { ...PLAYABLE.manifest, birth_captured: false, uses_aliases: true } }
-    ])
-    renderTab()
-    const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    selectRow(row); fireEvent.click(panelAction(/Play back/))
-    expect(await screen.findByText(/dropped on ingest/)).toBeInTheDocument()
-  })
-
-  /** The case that was being warned about wrongly: no birth, but every metric named in full. */
-  it('does not claim a birthless capture writes nothing when its metrics are named', async () => {
-    api.listCaptures.mockResolvedValue([
-      { ...PLAYABLE, manifest: { ...PLAYABLE.manifest, birth_captured: false, uses_aliases: false } }
+      { ...PLAYABLE, manifest: { ...PLAYABLE.manifest, birth_captured: false, uses_aliases: usesAliases } }
     ])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Play back/))
     await screen.findByLabelText('Playback gateway')
-    expect(screen.queryByText(/dropped on ingest/)).toBeNull()
-    expect(screen.getByText(/will play back normally/)).toBeInTheDocument()
+    expect(screen.getByText(/so a playback\s+refuses it/)).toBeInTheDocument()
+    expect(screen.queryByText(/will play back normally|dropped on ingest/)).toBeNull()
   })
 
   it('shows the gate refusal in the dialog', async () => {
@@ -1398,7 +1397,8 @@ describe('the details panel', () => {
 describe('playing a file', () => {
   const EDITED = {
     aber_capture_version: 1,
-    messages: [{ topic: 'spBv1.0/G/NDATA/gwy120000000000400080000', payload: {} }],
+    capture_epoch_ms: 1700000000000,
+    messages: [{ topic: 'spBv1.0/G/NDATA/gwy120000000000400080000', offset_ms: 0, payload: {} }],
     identities: { edge_nodes: ['gwy120000000000400080000'], devices: [] }
   }
   const editedFile = () => new File([JSON.stringify(EDITED)], 'edited.json', { type: 'application/json' })
@@ -1498,7 +1498,8 @@ describe('playing a file', () => {
     await screen.findByText('Line 1 Gateway')
     const doc = {
       aber_capture_version: 1,
-      messages: [{ topic: 'spBv1.0/G/NDATA/gwy999999999999999999999', payload: {} }],
+      capture_epoch_ms: 1700000000000,
+      messages: [{ topic: 'spBv1.0/G/NDATA/gwy999999999999999999999', offset_ms: 0, payload: {} }],
       identities: { edge_nodes: ['gwy999999999999999999999'], devices: [] }
     }
     dropOnCard(new File([JSON.stringify(doc)], 'foreign.json', { type: 'application/json' }))
@@ -1585,19 +1586,6 @@ describe('the gateway filter', () => {
     expect(screen.queryByText('Other Device')).not.toBeInTheDocument()
   })
 })
-
-// =============================================================================================
-describe('the storage path', () => {
-  /**
-   * Deterministic: a timestamped path would leave the previous file behind on every re-record, and
-   * the gate derives this same string, so a path composed differently is refused by RLS.
-   */
-  it('is one file per subject, derived from the subject alone', () => {
-    expect(capturePath('gwy120000000000400080000')).toBe('gwy120000000000400080000/capture.json')
-    expect(capturePath('dev270000000000400080000')).toBe('dev270000000000400080000/capture.json')
-  })
-})
-
 
 // =============================================================================================
 /**

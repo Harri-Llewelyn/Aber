@@ -901,6 +901,9 @@ function edgeFunctionNames() {
    */
   const INTENDED_REDECLARATIONS = {
     'public.start_playback_job': '0187 refuses a device map that names anything but the replay lane of the device its key names, so a replay never publishes as a real device; the baseline checked only that the target belonged to the gateway',
+    'public.playback_progress': '0191 stamps progress_reported_at, which request_playback_stop() reads to tell a stalled job; the baseline kept no time of the last report',
+    'public.request_playback_stop': '0191 ends a RUNNING job whose worker has not reported for a minute as CANCELLED, so a stalled worker cannot hold the target; the baseline only set the flag',
+    'public.playback_reconcile_jobs': '0191 words each swept job by what happened (never started, nothing published, or the count reached); the baseline said "publishing stopped partway" of all three',
     'public.refuse_archiving_the_last_shadow_gateway': '0187 words the refusal for the one Playback gateway; the baseline told an operator to mark another gateway is_shadow, which the API now refuses (the logic is unchanged)',
     'public.gateway_is_playback_delivery_target': '0183 answers is_shadow on an unarchived gateway, the target a playback may have; the baseline answers is_simulated, which delivered every simulator\'s password to the playback worker',
     'public.audit_trail_page': '0168 probes device_submodels rows for deletion beside device_nameplate, both keyed by their device; the baseline drew a deleted device\'s schema rows as live',
@@ -909,6 +912,11 @@ function edgeFunctionNames() {
     'public.reject_archived_schema_assignment': '0168 declares it as the baseline does, in its final form, so neither names devices.schema_id (0175)',
     'public.platform_health_rows': '0182 puts back the shadow-gateway exclusion archived migration 0061 gave the gateway_stale arm and 0074 dropped, and 0185 gives it to the expected_publishers arm, so replay lanes do not count; the baseline carries neither (check 71)',
     'public.is_active_capture_object': '0184 answers false unless the caller could read the capture job: the ingestion daemon, a role capture_jobs\' RLS admits, or one RLS does not apply to; the baseline answered any signed-in account',
+    'public.start_capture_job': '0190 records to <subject>/<job id>.json, so a recording never writes over the capture it may replace, and refuses the Playback gateway and its replay lanes as subjects; the baseline wrote <subject>/capture.json and accepted them',
+    'public.register_uploaded_capture': '0190 registers only a path begin_capture_upload() issued the caller, refuses a subject being recorded, a shadow subject and a capture stored since the upload began, records the object\'s own size, bounds the message count by it and caps the manifest; the baseline took the browser\'s word for all of them, after the file had already overwritten the stored one',
+    'public.ingest_finalise_capture': '0190 answers a repeated call for a job it completed with that capture, so the daemon can retry it; the baseline refused it as not RECORDING',
+    'public.request_capture_stop': '0190 ends a RECORDING job its daemon has not reported on for two minutes, as CANCELLED with nothing stored; the baseline only set a flag nothing was reading',
+    'public.ingest_reconcile_capture_jobs': '0190 says a swept PENDING job never started; the baseline said its recording did not survive',
     'public.is_active_playback_capture': '0184 answers false unless the caller could read the playback job: the playback worker, a role playback_jobs\' RLS admits, or one RLS does not apply to; the baseline answered any signed-in account',
     'public.playback_stale_credentials': '0184 returns no rows to a caller playback_jobs\' RLS refuses; the baseline told any signed-in account when playback credentials were issued',
     // Empty just after a squash: the baseline is generated from a dump of the finished database,
@@ -919,7 +927,7 @@ function edgeFunctionNames() {
     'public.approve_proposal': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
     'public.approve_quarantined_device': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
     'public.discard_schema_draft': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
-    'public.ensure_shadow_devices': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500. 0187 words that message and the lookup comment for the one Playback gateway',
+    'public.ensure_shadow_devices': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500. 0187 words that message and the lookup comment for the one Playback gateway. 0190 words the 404 for a device capture holding none of its device\'s messages, and the refusal of a device from another site',
     'public.fork_schema': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
     'public.publish_schema_version': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
     'public.reject_proposal': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
@@ -1415,6 +1423,10 @@ function edgeFunctionNames() {
       "one row holding the backup volume's free and total bytes and the schedule, as the backup service " +
       'last reported them (0179). RLS on with no policy and nothing granted to an API role; written by ' +
       'the backup_report() gate and read through backup_summary(), Administrator-only',
+    capture_uploads:
+      'the capture uploads begun and not yet registered (0190). RLS on with no policy and nothing granted to an ' +
+      'API role: begin_capture_upload() writes it, register_uploaded_capture() closes it, and the broker-captures ' +
+      'policies read it through is_open_capture_upload() and is_unclaimed_capture_object()',
     roles: 'RBAC internals — managed by migrations and Studio, not an app-facing endpoint',
     permissions: 'RBAC internals',
     role_permissions: 'RBAC internals',
@@ -3389,6 +3401,41 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 97. A stored capture's file leaves the bucket through the Storage API, and the capture page agrees
+// with the database and the recorder about what it shows. A DELETE of storage.objects in SQL removes
+// the row and leaves the bytes in the storage backend, unlisted and in every backup, so no SQL this
+// repository runs deletes from it: the ingestion daemon deletes what nothing claims through the
+// API (0190). The Stop that ends a stale recording outright and the page's warning share a
+// threshold, and the page's Captured Metrics leave out the plumbing and identity metrics the
+// recorder leaves out.
+// -------------------------------------------------------------------------------------------------
+{
+  const sqlFiles = allFiles.filter((p) => /\.(sql)$/.test(p) && !gitignored(p) && !p.startsWith('deploy/helm/aber/files/'));
+  const deleting = sqlFiles.filter((p) => /DELETE\s+FROM\s+storage\.objects/i.test(read(p)));
+  const dir = 'supabase/migrations';
+  const lastStop = readdirSync(join(REPO, dir)).filter((n) => /^\d{4}_.*\.sql$/.test(n)).sort()
+    .filter((n) => /CREATE OR REPLACE FUNCTION public\.request_capture_stop\(/.test(read(`${dir}/${n}`))).pop();
+  const sqlStale = Number((read(`${dir}/${lastStop}`).match(/c_stale_seconds CONSTANT integer := (\d+)/) || [])[1]);
+  const pageStale = Number((read('frontend/src/components/tabs/CaptureTab.jsx').match(/STALE_RECORDING_SECONDS = (\d+)/) || [])[1]);
+  const listOf = (text, pattern) => ((text.match(pattern) || [])[1] || '').match(/[A-Za-z_]+/g) || [];
+  const workerText = read('ingestion/capture_worker.py');
+  const apiText = read('frontend/src/api.js');
+  const workerIdentity = listOf(workerText, /_IDENTITY_METRICS = \(([^)]*)\)/).sort().join();
+  const pageIdentity = listOf(apiText, /\[('Asset_ID'[^\]]*)\]\.includes\(name\)/).sort().join();
+  const prefixes = ['bdSeq', 'Node Control/', 'Device Control/'];
+  const plumbing = prefixes.every((p) => workerText.includes(`"${p}"`) && apiText.includes(`'${p}'`));
+  if (deleting.length) {
+    fail(`${deleting.join(', ')} delete(s) from storage.objects in SQL, which leaves the file's bytes in the storage backend: delete through the Storage API (0190)`);
+  } else if (!sqlStale || sqlStale !== pageStale) {
+    fail(`request_capture_stop() (${lastStop}) ends a recording silent for ${sqlStale}s, and CaptureTab.jsx warns after ${pageStale}s: the page would offer the wrong Stop`);
+  } else if (!workerIdentity || workerIdentity !== pageIdentity || !plumbing) {
+    fail(`capture_worker.py and api.js leave out different metrics from Captured Metrics (identity: ${workerIdentity} vs ${pageIdentity}; plumbing named in both: ${plumbing})`);
+  } else {
+    pass(`no SQL deletes from storage.objects (${sqlFiles.length} files); the stale-recording Stop is ${sqlStale}s in ${lastStop} and on the page; Captured Metrics leave out the same metrics in the recorder and the page`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 90. Only the seed makes a playback gateway, and only ensure_shadow_devices() makes a replay lane.
 // gateways.is_shadow decides which broker password the playback worker is given and which gateway a
 // replay may publish as, and devices.shadow_of decides which device a replay may publish as. So
@@ -4711,6 +4758,28 @@ function edgeFunctionNames() {
     } else {
       pass(`npm run setup ends with ${DOC} step 7's install, at the chart's version ${version}`);
     }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 98. The playback worker waits for the primary host the ingestion daemon announces. Every replayed
+// NBIRTH waits for spBv1.0/STATE/<PRIMARY_HOST_ID>, and a worker given no id does not wait, so a
+// playback pod without the variable would replay into a stopped historian again and report success,
+// with nothing failing. Both pods take it from the one helper.
+// -------------------------------------------------------------------------------------------------
+{
+  const T = 'deploy/helm/aber/templates/apps/';
+  const PASSED = /- name: PRIMARY_HOST_ID\n\s+value: \{\{ include "aber\.primaryHostId" \. \| quote \}\}/;
+  const missing = ['playback.yaml', 'ingestion.yaml'].filter((f) => !PASSED.test(read(T + f)));
+  const workerReads = /^PRIMARY_HOST_ID = os\.getenv\("PRIMARY_HOST_ID"/m.test(read('ingestion/playback_worker.py'));
+  for (const f of missing) {
+    fail(`${T}${f} does not pass PRIMARY_HOST_ID from aber.primaryHostId, so that pod does not know the primary host the other waits for or announces`);
+  }
+  if (!workerReads) {
+    fail('ingestion/playback_worker.py does not read PRIMARY_HOST_ID from its environment, so no replayed NBIRTH waits for the primary host');
+  }
+  if (!missing.length && workerReads) {
+    pass('the playback worker and the ingestion daemon take the same primary host id from aber.primaryHostId');
   }
 }
 
