@@ -341,17 +341,14 @@ def setUpModule():
                      f"stack up: npm run dev:up")
 
 
-class PlaybackReachesTheHistorian(unittest.TestCase):
-    """
-    One replay, walked end to end in setUpClass; each test asserts one step of the path.
+class _ReplayFixture(unittest.TestCase):
+    """The steps of a replay from the page, shared by the scenarios below; it holds no tests."""
 
-    The path is a pipeline, so it is performed once rather than per test: the steps are not
-    independent and repeating a credential mint per assertion would replace the broker account
-    three times.
-    """
+    # The capture the scenario stores; build_capture() unless a scenario says otherwise.
+    capture_builder = staticmethod(build_capture)
 
     @classmethod
-    def setUpClass(cls):
+    def _begin(cls):
         cls.session = Session(sign_in())
         cls.metric = "PLAYBACK/REPLAY_" + secrets.token_hex(8).upper()
         # Set before the first step that can fail: unittest skips tearDownClass when setUpClass
@@ -361,18 +358,6 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
         cls.storage_path = None
         cls.source = None
         cls.lane_map = None
-
-        cls.playback_gateway = cls._playback_gateway()
-        cls.source = cls._source_device()
-
-        cls.delivery = cls._mint_credential()
-        cls.reported_after = cls._await_worker_credential()
-
-        cls._store_capture()
-        cls.lane_map = cls._prepare_lanes()
-        cls.job = cls._run_playback()
-        cls.gateway_after = cls._await_gateway_offline()
-        cls.rows = cls._await_historian()
 
     @classmethod
     def tearDownClass(cls):
@@ -549,7 +534,7 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
     def _store_capture(cls):
         """Begin, upload and register the fixture, the three steps the browser performs in that order."""
         epoch_ms = int(time.time() * 1000)
-        document = build_capture(
+        document = cls.capture_builder(
             cls.source["gateways"]["sparkplug_id"], cls.source["sparkplug_id"],
             cls.metric, epoch_ms,
         )
@@ -593,7 +578,7 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
         return mapping
 
     @classmethod
-    def _run_playback(cls):
+    def _start_playback(cls):
         status, job_id = cls.session.rpc("start_playback_job", {
             "p_capture_id": cls.capture_id,
             "p_target_gateway_id": cls.playback_gateway["id"],
@@ -602,7 +587,10 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
         })
         if status not in (200, 201) or not job_id:
             raise AssertionError(f"start_playback_job refused the fixture: {status} {job_id}")
+        return job_id
 
+    @classmethod
+    def _await_job(cls, job_id, until=lambda job: job["status"] in ("COMPLETED", "FAILED", "CANCELLED")):
         deadline = time.monotonic() + JOB_TIMEOUT
         job = None
         while time.monotonic() < deadline:
@@ -610,13 +598,17 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
                 f"/playback_jobs?select=*&id=eq.{job_id}&limit=1")
             if got == 200 and rows:
                 job = rows[0]
-                if job["status"] in ("COMPLETED", "FAILED", "CANCELLED"):
+                if until(job):
                     return job
-            time.sleep(2)
+            time.sleep(1)
         raise AssertionError(
-            f"the playback did not finish within {JOB_TIMEOUT}s (last seen: {job}). A job left "
-            f"PENDING means no worker claimed it."
+            f"the playback did not reach the expected state within {JOB_TIMEOUT}s (last seen: "
+            f"{job}). A job left PENDING means no worker claimed it."
         )
+
+    @classmethod
+    def _run_playback(cls):
+        return cls._await_job(cls._start_playback())
 
     @classmethod
     def _await_gateway_offline(cls):
@@ -639,7 +631,7 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
         return row
 
     @classmethod
-    def _await_historian(cls):
+    def _await_historian(cls, at_least=EXPECTED_READINGS):
         """
         Which assets carry the sentinel metric, and what they were given.
 
@@ -663,10 +655,35 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
                 # A dev-loop port-forward dies on a TLS disconnect and the next one reconnects, so
                 # one refused poll is not a verdict on the replay.
                 print(f"historian poll retrying: {err}")
-            if len(rows) >= EXPECTED_READINGS:
+            if len(rows) >= at_least:
                 return rows
             time.sleep(3)
         return rows
+
+
+class PlaybackReachesTheHistorian(_ReplayFixture):
+    """
+    One replay, walked end to end in setUpClass; each test asserts one step of the path.
+
+    The path is a pipeline, so it is performed once rather than per test: the steps are not
+    independent and repeating a credential mint per assertion would replace the broker account
+    three times.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._begin()
+        cls.playback_gateway = cls._playback_gateway()
+        cls.source = cls._source_device()
+
+        cls.delivery = cls._mint_credential()
+        cls.reported_after = cls._await_worker_credential()
+
+        cls._store_capture()
+        cls.lane_map = cls._prepare_lanes()
+        cls.job = cls._run_playback()
+        cls.gateway_after = cls._await_gateway_offline()
+        cls.rows = cls._await_historian()
 
     # ------------------------------------------------------------------------------------------
     # The assertions, one per step
@@ -843,6 +860,82 @@ class PlaybackReachesTheHistorian(unittest.TestCase):
         self.assertEqual(rows[0]["storage_path"], self.storage_path)
         self.assertTrue(self.storage_path.startswith(f"{self.source['sparkplug_id']}/"))
         self.assertEqual(rows[0]["source"], "uploaded")
+
+
+# A replay long enough to re-issue the credential in the middle of: one reading a second.
+LONG_READINGS = 40
+# Re-issued once the job has reported this many messages published.
+REISSUE_AFTER = 4
+
+
+def build_long_capture(recorded_gateway, recorded_device, metric, epoch_ms):
+    """build_capture()'s birth, then LONG_READINGS readings one second apart."""
+    document = build_capture(recorded_gateway, recorded_device, metric, epoch_ms)
+    birth = [m for m in document["messages"] if "/DBIRTH/" in m["topic"] or "/NBIRTH/" in m["topic"]]
+    readings = []
+    for i in range(LONG_READINGS):
+        offset = 1000 * (i + 1)
+        stamp = epoch_ms + offset
+        readings.append({
+            "offset_ms": offset, "encoding": "json",
+            "topic": f"spBv1.0/Aber/DDATA/{recorded_gateway}/{recorded_device}",
+            "payload": {"timestamp": stamp, "metrics": [
+                {"name": metric, "datatype": 10, "double_value": float(i), "timestamp": stamp}]},
+        })
+    document["messages"] = birth + readings
+    document["duration_ms"] = readings[-1]["offset_ms"]
+    return document
+
+
+class PlaybackStopsWhenItsConnectionIsLost(_ReplayFixture):
+    """
+    The credential re-issued during a replay, through the route the Gateways page uses.
+
+    The broker's Dynamic Security plugin drops a client's session when its password changes, so the
+    worker loses its connection partway. The job must end FAILED, naming the lost connection and
+    counting only what went out, rather than COMPLETED with every message counted.
+    """
+
+    capture_builder = staticmethod(build_long_capture)
+
+    @classmethod
+    def setUpClass(cls):
+        cls._begin()
+        cls.playback_gateway = cls._playback_gateway()
+        cls.source = cls._source_device()
+        cls._mint_credential()
+        cls._await_worker_credential()
+        cls._store_capture()
+        cls.lane_map = cls._prepare_lanes()
+
+        job_id = cls._start_playback()
+        cls.running = cls._await_job(
+            job_id, until=lambda job: job["status"] != "PENDING"
+            and (job["messages_sent"] or 0) >= REISSUE_AFTER)
+        cls._mint_credential()
+        cls.job = cls._await_job(job_id)
+        # One more than could have been written, so this reads for the whole window.
+        cls.rows = cls._await_historian(at_least=(cls.job["messages_sent"] or 0) + 1)
+
+    def test_the_job_failed_naming_the_lost_connection(self):
+        self.assertEqual(self.running["status"], "RUNNING",
+                         f"the replay was not running when the credential was re-issued: {self.running}")
+        self.assertEqual(self.job["status"], "FAILED",
+                         f"the replay outlived its connection: {self.job['status']} -- {self.job.get('error')}")
+        self.assertIn("the broker connection was lost", self.job.get("error") or "")
+
+    def test_only_what_went_out_is_counted(self):
+        total = len(self.document["messages"])
+        self.assertLess(self.job["messages_sent"], total,
+                        "every message was counted as published after the connection was lost")
+        self.assertIn(f"after {self.job['messages_sent']} message(s)", self.job.get("error") or "")
+
+    def test_the_historian_holds_no_more_than_was_counted(self):
+        births = len(self.document["messages"]) - LONG_READINGS
+        readings_sent = max(self.job["messages_sent"] - births, 0)
+        self.assertLessEqual(len(self.rows), readings_sent,
+                             f"the historian holds {len(self.rows)} readings, more than the "
+                             f"{readings_sent} the job counted")
 
 
 def _epoch_seconds(stamp):

@@ -1,42 +1,27 @@
 """
-Publishing a stored capture back into the stack, as a simulated gateway.
+Publishing a stored capture back into the stack as the Playback gateway, a full Sparkplug edge node.
 
-TWO IDENTITIES, AND THAT SPLIT IS THE ARRANGEMENT TO UNDERSTAND FIRST.
+Two identities: Supabase as `Service_Playback` (the queue, the capture, the job's status), and
+MQTT as the target gateway itself, username its `sparkplug_id`, which the broker's %u rule confines
+to that edge node. `start_playback_job()` decides whether a playback is allowed; `capture.py`'s
+`plan_playback()` decides every topic, payload and delay. This carries the plan out as one or more
+Sparkplug sessions: it subscribes to the node's NCMD and answers a rebirth request, waits for the
+primary host's STATE before each NBIRTH and ends the job when it goes offline, counts only what paho
+accepted, and ends every session with its NDEATH.
 
-  SUPABASE     `Service_Playback` (0056). Reads the queue, reads the capture, writes status.
-               Fixed, and the same for every job.
-  MQTT         THE TARGET GATEWAY'S OWN ACCOUNT -- username equals its `sparkplug_id`. Per job,
-               and supplied as a secret the way `MQTT_VALIDATOR_USER` is.
-
-One says what this may do in the database; the other says what the broker will carry, which is what
-confines a playback to one edge node with no ACL change at all: a worker connected as `gwyAAA...`
-cannot publish under `gwyBBB...`, because the broker drops it before any subscriber sees it.
-
-A SEPARATE PROCESS, NOT THE INGESTION DAEMON, because that principal is the one the whole ACL is
-built around and publishing asset data would widen it. This process only PUBLISHES and holds no
-subscription, so it takes nothing from the daemon's view of the stream.
-
-THIS DECIDES NOTHING ABOUT WHETHER A PLAYBACK IS ALLOWED. `start_playback_job()` has already refused
-a target that is not `is_simulated`, one holding no broker credential, and a device map naming
-another gateway's devices. This refuses one further thing -- a target it holds no MQTT password for
--- and otherwise carries out what it is given. The publishing is `capture.py`'s `plan_playback()`,
-which decides every topic, payload and delay with no broker and no clock, so this file is a loop
-that cannot make a new decision.
-
-Related: supabase/migrations/archive/0056_playback_orchestration.sql (every gate called here),
-         capture.py (the plan, the identity rewrite, the rebasing),
-         README.md -> "Playback from the dashboard" (the three tiers of confinement, how one %u
-         rule confines every gateway, and what a failed playback looks like).
+README.md -> "Playback from the dashboard" and the sections after it hold the reasons.
 """
 
 import json
 import os
+import threading
 import time
 from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
 
 import capture
+import sparkplug_b_pb2
 from logging_config import get_logger
 
 # `get_logger`, not `logging.getLogger(__name__)`: this stack configures NAMED loggers with
@@ -53,6 +38,12 @@ SUPABASE_GATEWAY_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 BUCKET = os.getenv("CAPTURE_BUCKET", "broker-captures")
 POLL_INTERVAL_SECONDS = float(os.getenv("PLAYBACK_POLL_INTERVAL_SECONDS", "3"))
 PROGRESS_INTERVAL_SECONDS = float(os.getenv("PLAYBACK_PROGRESS_INTERVAL_SECONDS", "1"))
+# The longest single sleep while a job waits for its next message. request_playback_stop() treats a
+# job silent for a minute as stalled, so this stays far below that.
+SLEEP_SLICE_SECONDS = 1.0
+# How long playback_finish() is retried, with backoff, before the row is left RUNNING for Stop or
+# the next startup sweep to end.
+FINISH_RETRY_SECONDS = float(os.getenv("PLAYBACK_FINISH_RETRY_SECONDS", "300"))
 
 # How long to wait for the broker's CONNACK before failing the job.
 #
@@ -66,16 +57,21 @@ CONNACK_TIMEOUT_SECONDS = float(os.getenv("PLAYBACK_CONNACK_TIMEOUT_SECONDS", "5
 # the broker delivers the Will.
 NDEATH_ACK_TIMEOUT_SECONDS = 5.0
 
+# The Sparkplug primary host application, the ingestion daemon, whose STATE every NBIRTH waits for;
+# the chart passes ingestion.primaryHostId. Empty: no wait, as for a node with no primary host.
+PRIMARY_HOST_ID = os.getenv("PRIMARY_HOST_ID", "").strip()
+# How long a session waits for that STATE to say online before the job fails.
+PRIMARY_HOST_WAIT_SECONDS = float(os.getenv("PLAYBACK_PRIMARY_HOST_WAIT_SECONDS", "60"))
+
+REBIRTH_METRIC = "Node Control/Rebirth"
+
 # The bdSeq the next CONNECT as each gateway carries: 0 for this process's first, then one more for
 # every CONNECT sent, wrapping 255 to 0 (tck-id-topics-nbirth-bdseq-increment).
 _next_bdseq = {}
 
-# How often this worker restates which gateways it can publish as.
-#
-# IT IS A HEARTBEAT, NOT A CHANGE FEED, and that is why it repeats rather than reporting once. The
-# page has to tell "the worker holds no credentials" from "the worker is not running", and an empty
-# list reported once at startup looks identical to both. 30s against the page's own staleness
-# window means a worker that dies is visible as down well before anyone finishes reading a dialog.
+# The heartbeat: how often a timer thread restates which gateways this worker can publish as, while
+# idle and during a job. The playback dialog reads a report older than two minutes as a worker that
+# is not running.
 CREDENTIAL_REPORT_INTERVAL_SECONDS = float(
     os.getenv("PLAYBACK_CREDENTIAL_REPORT_INTERVAL_SECONDS", "30")
 )
@@ -152,31 +148,35 @@ def _file_credentials(path=None):
     return {str(k): str(v) for k, v in parsed.items()}
 
 
-def _credentials():
+DELIVERED, HELM, ENVIRONMENT = "delivered", "helm", "environment"
+
+# What each source is called in a job's error and the log. Never the password.
+SOURCE_NAMES = {
+    DELIVERED: "the delivered password",
+    HELM: "the password in secrets.mqttPlaybackCredentials",
+    ENVIRONMENT: "the password in MQTT_PLAYBACK_PASSWORD",
+}
+
+
+def _credential_sources():
     """
-    The broker passwords this worker holds, keyed by gateway `sparkplug_id`.
+    Every broker password this worker holds, as {gateway sparkplug_id: [(source, password), ...]}
+    in the order to try them: the delivered file, then the Helm value (MQTT_PLAYBACK_CREDENTIALS,
+    a JSON map), then the MQTT_PLAYBACK_USER / MQTT_PLAYBACK_PASSWORD pair. A password two sources
+    agree on is listed once. The worker cannot authenticate as a gateway it holds none for.
 
-    TIER TWO OF THREE, AND THE ONLY ONE THAT LIVES OUTSIDE THE DATABASE. The job gate refuses a
-    target that is not `is_simulated`; the broker ACL confines whatever connects to its own edge
-    node; and this is the middle one -- the worker simply cannot authenticate as a gateway whose
-    password it was not given, so a compromised queue cannot make it publish as a real machine.
-
-    THREE SOURCES, THE DELIVERED FILE WINNING. Issuing a credential for an `is_shadow` gateway
-    delivers its password to PLAYBACK_CREDENTIAL_FILE (archived migration 0078), re-read every pass.
-    MQTT_PLAYBACK_CREDENTIALS (the chart's `secrets.mqttPlaybackCredentials`) carries passwords
-    supplied by hand, as a JSON map because playback has as many identities as it has targets.
-    MQTT_PLAYBACK_USER / MQTT_PLAYBACK_PASSWORD, the pair `capture.py play` reads, is a
-    single-target fallback.
-
-    NOT LOGGED, EVER. The keys are gateway ids and are safe; the values are broker passwords.
+    Delivered first because issuing replaces the broker's one password per gateway, so a delivery
+    is normally the newest. The Helm value is the fallback the credential dialog gives when a
+    delivery failed, so the connect path tries it when the broker refuses the delivered one.
+    Passwords are never logged.
     """
+    helm = {}
     raw = os.getenv("MQTT_PLAYBACK_CREDENTIALS", "").strip()
-    credentials = {}
     if raw:
         try:
             parsed = json.loads(raw)
             if isinstance(parsed, dict):
-                credentials = {str(k): str(v) for k, v in parsed.items()}
+                helm = {str(k): str(v) for k, v in parsed.items()}
             else:
                 logger.error(
                     "MQTT_PLAYBACK_CREDENTIALS is not a JSON object, so no playback target has a "
@@ -187,20 +187,27 @@ def _credentials():
                 "MQTT_PLAYBACK_CREDENTIALS is not valid JSON (%s), so no playback target has a "
                 "credential.", err,
             )
-
+    pair = {}
     user = os.getenv("MQTT_PLAYBACK_USER", "").strip()
     password = os.getenv("MQTT_PLAYBACK_PASSWORD", "")
-    if user and password and user not in credentials:
-        credentials[user] = password
+    if user and password:
+        pair[user] = password
 
-    # THE DELIVERED FILE WINS, and the reason is the broker rather than a preference about
-    # configuration. Mosquitto holds ONE password per username, so issuing a credential REPLACES the
-    # one before it -- which means a value in the environment is not an alternative to the delivered
-    # one, it is an OLDER one, and after any re-issue it is simply wrong. Letting the environment
-    # override would make the documented repair for a refused playback ("issue a new credential")
-    # the one thing that could not fix it.
-    credentials.update(_file_credentials())
-    return credentials
+    sources = {}
+    for source, held in ((DELIVERED, _file_credentials()), (HELM, helm), (ENVIRONMENT, pair)):
+        for gateway, secret in held.items():
+            candidates = sources.setdefault(gateway, [])
+            if secret and all(secret != known for _, known in candidates):
+                candidates.append((source, secret))
+    return {gateway: candidates for gateway, candidates in sources.items() if candidates}
+
+
+def _credentials():
+    """
+    The password tried first for each gateway: {sparkplug_id: password}. Tier two of three: the
+    worker cannot authenticate as a gateway whose password it was not given (README.md).
+    """
+    return {gateway: candidates[0][1] for gateway, candidates in _credential_sources().items()}
 
 
 def _supabase():
@@ -236,29 +243,115 @@ def _storage():
     )
 
 
-def _connect(edge_node_id, password, will_topic, will_payload):
+class _SessionState:
     """
-    Connect AS the target gateway. Its `sparkplug_id` is the username, and that is the point.
+    What paho's network thread learns about one connection: the CONNACK and SUBACK, a dropped
+    connection, a rebirth request on the node's NCMD topic, and the primary host's STATE.
+    """
 
-    THE CONNACK IS CAPTURED, AND NOTHING MAY COUNT AS SENT UNTIL IT ARRIVES. `client.connect()`
-    completes the TCP handshake and returns; the CONNACK arrives later on the network loop, so a
-    WRONG password -- as opposed to a missing one -- connects at the socket level and is refused
-    afterwards, and every QoS 0 publish after that is dropped locally with no error anywhere.
-    (docs/incidents.md -- "A playback published an entire capture into a closed socket and reported
-    success")
+    def __init__(self, ncmd_topic=None, state_topic=None):
+        self.ncmd_topic = ncmd_topic
+        self.state_topic = state_topic
+        # Every CONNACK return code, in order; empty until the broker answers.
+        self.connack = []
+        self.subacks = {}
+        # Set when the connection drops without this worker asking.
+        self.lost = threading.Event()
+        self.lost_rc = None
+        self.rebirth = threading.Event()
+        self._host_lock = threading.Lock()
+        self.host_online = None
+        self.host_timestamp = None
+        # Set by a valid offline STATE; cleared once the host has been seen online before a birth.
+        self.host_left = threading.Event()
 
-    `rc` is recorded rather than raised from the callback: it arrives on paho's thread, where an
-    exception would be swallowed and logged by the library rather than reaching the caller.
+    def on_connect(self, _client, _userdata, _flags, rc, *_args):
+        self.connack.append(rc)
+
+    def on_disconnect(self, _client, _userdata, rc, *_args):
+        if rc != 0:
+            self.lost_rc = rc
+            self.lost.set()
+
+    def on_subscribe(self, _client, _userdata, mid, granted, *_args):
+        self.subacks[mid] = tuple(granted)
+
+    def on_message(self, _client, _userdata, message):
+        if self.state_topic and message.topic == self.state_topic:
+            self._on_state(message.payload)
+        elif message.topic == self.ncmd_topic and _asks_for_rebirth(message.payload):
+            self.rebirth.set()
+
+    def _on_state(self, raw):
+        # The topic is subscribed exactly, so its last token is the configured host id
+        # (tck-id-message-flow-edge-node-birth-publish-phid-wait-id). A STATE older than the last
+        # one seen is ignored (-phid-wait-timestamp); the first is taken as it is.
+        state = _host_state(raw)
+        if state is None:
+            return
+        online, stamp = state
+        with self._host_lock:
+            if self.host_timestamp is not None and stamp < self.host_timestamp:
+                return
+            self.host_timestamp = stamp
+            self.host_online = online
+        if not online:
+            self.host_left.set()
+
+
+def _host_state(raw):
+    """A STATE payload as (online, timestamp), or None when it is not one (JSON, both keys)."""
+    try:
+        data = json.loads(raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw)
+        online, stamp = data["online"], data["timestamp"]
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return None
+    if not isinstance(online, bool) or isinstance(stamp, bool) or not isinstance(stamp, (int, float)):
+        return None
+    return online, stamp
+
+
+def _asks_for_rebirth(raw):
+    """Whether an NCMD carries `Node Control/Rebirth` = true, read as the daemon reads a payload."""
+    try:
+        payload, _ = capture.decode_wire_payload(raw)
+    except Exception:
+        return False
+    return any(m.name == REBIRTH_METRIC and m.HasField("boolean_value") and m.boolean_value
+               for m in payload.metrics)
+
+
+def _with_seq(raw, seq):
+    """
+    The same wire payload with its `seq` replaced, in the encoding it is in: protobuf first, then
+    JSON, as capture.decode_wire_payload() reads it.
+    """
+    payload = sparkplug_b_pb2.Payload()
+    try:
+        payload.ParseFromString(raw)
+    except Exception:
+        data = json.loads(raw.decode("utf-8"))
+        data["seq"] = seq
+        return json.dumps(data, separators=(",", ":")).encode("utf-8")
+    payload.seq = seq
+    return payload.SerializeToString()
+
+
+def _connect(edge_node_id, password, will_topic, will_payload, ncmd_topic=None, state_topic=None):
+    """
+    Connect AS the target gateway: its `sparkplug_id` is the username. Returns at the TCP handshake;
+    the CONNACK arrives later on paho's thread and is recorded on `client.aber`, never raised there.
     """
     client = mqtt.Client(client_id="aber-playback-%s" % edge_node_id)
     client.username_pw_set(edge_node_id, password)
     # The session's NDEATH as the Will, QoS 1 and not retained, so a worker that dies mid-replay is
     # announced too (tck-id-payloads-ndeath-will-message, -will-message-qos, -will-message-retain).
     client.will_set(will_topic, will_payload, qos=1, retain=False)
-    # A list because the callback closes over it; `rc` stays None until the broker answers, which
-    # is itself the third outcome -- no answer at all.
-    client.aber_connack = []
-    client.on_connect = lambda _c, _u, _f, rc, *args: client.aber_connack.append(rc)
+    client.aber = _SessionState(ncmd_topic, state_topic)
+    client.on_connect = client.aber.on_connect
+    client.on_disconnect = client.aber.on_disconnect
+    client.on_subscribe = client.aber.on_subscribe
+    client.on_message = client.aber.on_message
     if os.getenv("MQTT_TLS_ENABLED", "").strip().lower() in ("1", "true", "yes", "on"):
         import ssl
         ca = os.getenv("MQTT_TLS_CA_FILE", "").strip()
@@ -268,56 +361,155 @@ def _connect(edge_node_id, password, will_topic, will_payload):
     return client
 
 
-def _open_session(edge_node, password, will_topic, bdseq):
-    """
-    One Sparkplug session as the target gateway: CONNECT with the NDEATH for `bdseq` as its Will,
-    then wait for the CONNACK. Returns (client, None), or (None, the reason the job fails).
-    """
+def _close_unborn(client):
+    """End a session that published no NBIRTH: a plain DISCONNECT, so the broker discards the Will."""
+    client.loop_stop()
+    try:
+        client.disconnect()
+    except Exception:
+        pass
+
+
+def _await(condition, seconds, tick=None):
+    """Poll `condition` until true or `seconds` pass, calling `tick` between polls. Returns it."""
+    deadline = time.monotonic() + seconds
+    while not condition():
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+        if tick is not None:
+            tick()
+    return True
+
+
+# The CONNACK return codes that mean the password, under MQTT 3.1.1 which this worker speaks: 4 bad
+# user name or password, 5 not authorised. Only these move on to the next password a worker holds.
+BAD_CREDENTIALS = (4, 5)
+
+
+def _connect_accepted(edge_node, password, will_topic, bdseq, ncmd_topic, state_topic):
+    """CONNECT with the NDEATH for `bdseq` as the Will and wait for the CONNACK.
+    Returns (client, None, 0), or (None, error, CONNACK rc or None)."""
     try:
         client = _connect(edge_node, password, will_topic,
-                          capture.node_death(bdseq, int(time.time() * 1000)))
+                          capture.node_death(bdseq, int(time.time() * 1000)),
+                          ncmd_topic=ncmd_topic, state_topic=state_topic)
     except Exception as err:
-        return None, "could not connect to the broker as %s: %s" % (edge_node, err)
+        return None, "could not connect to the broker as %s: %s" % (edge_node, err), None
 
     # The CONNECT carrying this bdSeq was sent, whatever the broker answers.
     _next_bdseq[edge_node] = (bdseq + 1) % 256
     client.loop_start()
 
-    # ------------------------------------------------------------------------------------------
-    # THE BROKER HAS TO ACCEPT US BEFORE A SINGLE MESSAGE IS COUNTED AS SENT. The credential check
-    # in _run_job refuses a MISSING password and cannot see a WRONG one, which is what a re-issued
-    # credential leaves behind until its delivery reaches this worker.
-    #
-    # rc 4 and 5 are the two that mean the password: 4 is bad username/password, 5 is not
-    # authorised. They are named rather than lumped in, because they are the ones an operator fixes
-    # by issuing a credential rather than by looking at the broker.
-    deadline = time.monotonic() + CONNACK_TIMEOUT_SECONDS
-    while not client.aber_connack and time.monotonic() < deadline:
-        time.sleep(0.05)
-
-    if not client.aber_connack:
+    # Nothing counts as sent until the broker accepts the CONNECT: a wrong password connects at the
+    # socket and is refused afterwards.
+    if not _await(lambda: client.aber.connack, CONNACK_TIMEOUT_SECONDS):
         client.loop_stop()
         return None, (
             "the broker never answered the connection as %s within %ss. It is reachable at %s:%s "
             "or this would have failed above, so it accepted the socket and said nothing."
             % (edge_node, CONNACK_TIMEOUT_SECONDS, MQTT_HOST, MQTT_PORT)
-        )
-
-    rc = client.aber_connack[0]
+        ), None
+    rc = client.aber.connack[0]
     if rc != 0:
         client.loop_stop()
-        detail = {
-            4: "the broker rejected the username or password",
-            5: "the broker refused this connection as not authorised",
-        }.get(rc, "the broker refused the connection")
-        return None, (
-            "%s for %s (CONNACK rc=%s), so the password this worker holds is not the one the "
-            "broker has. A credential issued for this gateway reaches the worker within about a "
-            "minute: if one was just issued, start the playback again then; otherwise issue a new "
-            "one from the gateway's drawer on the Gateways page (Generate Broker Credential)."
-            % (detail, edge_node, rc)
-        )
+        return None, _refused(edge_node, rc), rc
+    client.aber.bdseq = bdseq
+    return client, None, 0
+
+
+def _open_session(edge_node, password, will_topic, bdseq, *, primary_host_id=None, tick=None,
+                  source=None, fallbacks=(), confirm_subscription=False):
+    """
+    One Sparkplug session as the target gateway, ready for its NBIRTH. Returns (client, None), or
+    (None, the reason the job fails).
+
+    CONNECT with the NDEATH for `bdseq` as its Will, and wait for the CONNACK. A CONNACK refusing
+    the password moves on to the next of `fallbacks`, [(source, password), ...], with the next
+    bdSeq; `client.aber` records the bdSeq and the source accepted. Subscribe at QoS 1 to the node's
+    own NCMD topic (tck-id-message-flow-edge-node-ncmd-subscribe) and, when a primary host is
+    configured, to its STATE topic; with `confirm_subscription`, wait for the SUBACK and fail on a
+    refusal. Then wait for that host to say it is online (tck-id-message-flow-edge-node-birth-
+    publish-phid-wait, -online). The broker handles the SUBSCRIBE before the NBIRTH that follows it
+    either way; a one-shot caller such as `capture.py play` need not wait.
+
+    `primary_host_id` None means the PRIMARY_HOST_ID environment variable; "" means no wait. `tick`
+    is called while waiting and may raise to abandon the session, which is then closed.
+    """
+    host = PRIMARY_HOST_ID if primary_host_id is None else primary_host_id
+    group = will_topic.split("/")[1]
+    ncmd_topic = "spBv1.0/%s/NCMD/%s" % (group, edge_node)
+    state_topic = "spBv1.0/STATE/%s" % host if host else None
+
+    attempts = [(source, password)] + list(fallbacks)
+    refused = []
+    for index, (label, secret) in enumerate(attempts):
+        client, error, rc = _connect_accepted(edge_node, secret, will_topic, bdseq,
+                                              ncmd_topic, state_topic)
+        if client is not None:
+            client.aber.source = label
+            if refused:
+                logger.warning("The broker accepted %s for %s after refusing %s.",
+                               SOURCE_NAMES.get(label, "the next password"), edge_node,
+                               " and ".join(refused))
+            break
+        if rc not in BAD_CREDENTIALS or index + 1 == len(attempts):
+            if refused:
+                error += " Also refused: %s." % " and ".join(refused)
+            return None, error
+        refused.append("%s (CONNACK rc=%s)" % (SOURCE_NAMES.get(label, "a password"), rc))
+        bdseq = _next_bdseq[edge_node]
+
+    try:
+        topics = [(ncmd_topic, 1)] + ([(state_topic, 1)] if state_topic else [])
+        result, mid = client.subscribe(topics)
+        names = " and ".join(t for t, _ in topics)
+        if result != mqtt.MQTT_ERR_SUCCESS or (confirm_subscription and not _await(
+                lambda: mid in client.aber.subacks, CONNACK_TIMEOUT_SECONDS)):
+            _close_unborn(client)
+            return None, ("the broker did not acknowledge this worker's subscription to %s within "
+                          "%ss" % (names, CONNACK_TIMEOUT_SECONDS))
+        if any(granted >= 0x80 for granted in client.aber.subacks.get(mid, ())):
+            _close_unborn(client)
+            return None, ("the broker refused this worker's subscription to %s as %s, so it could "
+                          "not hear a rebirth request or the primary host. The gateway role grants "
+                          "both; check the broker's roles." % (names, edge_node))
+
+        if host:
+            def host_online():
+                if client.aber.host_online is not True:
+                    return False
+                # Seen online: an offline from before this point no longer ends the session.
+                client.aber.host_left.clear()
+                return client.aber.host_online is True
+
+            if not _await(host_online, PRIMARY_HOST_WAIT_SECONDS, tick):
+                _close_unborn(client)
+                return None, (
+                    "the primary host '%s' did not say it is online on %s within %.0fs, so the "
+                    "ingestion daemon is not consuming and nothing replayed now would reach the "
+                    "historian. Start the playback again once ingestion is running."
+                    % (host, state_topic, PRIMARY_HOST_WAIT_SECONDS)
+                )
+    except BaseException:
+        _close_unborn(client)
+        raise
     return client, None
+
+
+def _refused(edge_node, rc):
+    """The job's error for a CONNACK that refused the connection."""
+    detail = {
+        4: "the broker rejected the username or password",
+        5: "the broker refused this connection as not authorised",
+    }.get(rc, "the broker refused the connection")
+    return (
+        "%s for %s (CONNACK rc=%s), so the password this worker holds is not the one the "
+        "broker has. A credential issued for this gateway reaches the worker within about a "
+        "minute: if one was just issued, start the playback again then; otherwise issue a new "
+        "one from the gateway's drawer on the Gateways page (Generate Broker Credential)."
+        % (detail, edge_node, rc)
+    )
 
 
 def _end_session(client, topic, death):
@@ -349,17 +541,171 @@ def _end_session(client, topic, death):
         sock.close()
 
 
-def _run_job(supabase, storage, credentials, job):
-    """Publish one capture. Returns (messages_sent, messages_out_of_window, error or None)."""
+def _connection_lost(sent):
+    """The job's error when the broker connection drops mid-replay."""
+    return (
+        "publishing stopped after %d message(s): the broker connection was lost. Re-issuing this "
+        "gateway's credential or restarting the broker ends a playback's connection; start the "
+        "playback again." % sent
+    )
+
+
+class _Stopped(Exception):
+    """The operator asked to stop, or the job's row is no longer RUNNING."""
+
+
+class _JobFailed(Exception):
+    """The job ends FAILED with this message."""
+
+
+class _Progress:
+    """A job's count, reported to `playback_progress()`, whose answer may stop the job."""
+
+    def __init__(self, supabase, job_id, total):
+        self.supabase = supabase
+        self.job_id = job_id
+        self.total = total
+        self.sent = 0
+        self.started = None
+        self._last = None
+        self._warned = None
+
+    def report(self, force=False):
+        """Report now if forced, on the first call, or once PROGRESS_INTERVAL_SECONDS has passed.
+        Raises _Stopped when the answer says to stop."""
+        now = time.monotonic()
+        if not force and self._last is not None and now - self._last < PROGRESS_INTERVAL_SECONDS:
+            return
+        self._last = now
+        elapsed = int(now - self.started) if self.started is not None else 0
+        try:
+            stop = self.supabase.rpc("playback_progress", {
+                "p_job_id": self.job_id,
+                "p_messages_sent": self.sent,
+                "p_messages_total": self.total,
+                "p_elapsed_seconds": elapsed,
+            }).execute().data is True
+        except Exception as err:
+            # The card stops moving; the playback does not. Logged at most every 30 seconds.
+            if self._warned is None or now - self._warned >= 30:
+                self._warned = now
+                logger.warning("Playback %s: progress update failed: %s", self.job_id, err)
+            return
+        if stop:
+            raise _Stopped()
+
+
+def _host_went_offline(host, sent):
+    """The job's error when the primary host's STATE says offline mid-replay."""
+    return (
+        "the primary host '%s' went offline after %d message(s), so the ingestion daemon stopped "
+        "consuming. The NDEATH was published and the playback stopped; start it again once "
+        "ingestion is back." % (host, sent)
+    )
+
+
+class _Session:
+    """
+    One open session: its client, the births published in it, and its own `seq` once a rebirth
+    has been answered (from then on every message is re-stamped, NBIRTH restarting at 0).
+    """
+
+    def __init__(self, client, host):
+        self.client = client
+        self.host = host
+        self.node_birth = None
+        self.device_births = {}
+        self.seq = None
+
+    def publish(self, topic, raw, progress):
+        _, msg_type, _, device = capture.split_topic(topic)
+        out = raw
+        if self.seq is not None:
+            if msg_type == "NBIRTH":
+                self.seq = 0
+            out = _with_seq(raw, self.seq)
+            self.seq = (self.seq + 1) % 256
+        # QoS 0, as the fleet publishes: only paho's acceptance is observable, so a message counts
+        # once paho has accepted it on a connection that has not dropped.
+        info = self.client.publish(topic, out, qos=0, retain=False)
+        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            raise _JobFailed(_connection_lost(progress.sent))
+        if msg_type == "NBIRTH":
+            self.node_birth = (topic, raw)
+            self.device_births.clear()
+        elif msg_type == "DBIRTH":
+            self.device_births.pop(device, None)
+            self.device_births[device] = (topic, raw)
+        elif msg_type == "DDEATH":
+            self.device_births.pop(device, None)
+
+    def answer_rebirth(self, job_id, progress):
+        """
+        Re-publish this session's NBIRTH and the DBIRTHs of the devices born in it, seq 0 upward,
+        before any further data (tck-id-operational-behavior-data-commands-rebirth-action-1, -2).
+        The NBIRTH keeps the session's bdSeq (-rebirth-action-3).
+        """
+        self.client.aber.rebirth.clear()
+        if self.node_birth is None:
+            logger.info("Playback %s: a rebirth request arrived before this session's NBIRTH, "
+                        "which answers it.", job_id)
+            return
+        births = [self.node_birth] + list(self.device_births.values())
+        for seq, (topic, raw) in enumerate(births):
+            info = self.client.publish(topic, _with_seq(raw, seq % 256), qos=0, retain=False)
+            if info.rc != mqtt.MQTT_ERR_SUCCESS:
+                raise _JobFailed(_connection_lost(progress.sent))
+        self.seq = len(births) % 256
+        logger.info("Playback %s: answered a rebirth request with the NBIRTH and %d DBIRTH(s), "
+                    "after %d message(s).", job_id, len(births) - 1, progress.sent)
+
+    def check(self, job_id, progress):
+        """Between messages: a dropped connection or an offline primary host ends the job, and a
+        rebirth request is answered."""
+        aber = self.client.aber
+        if aber.lost.is_set():
+            raise _JobFailed(_connection_lost(progress.sent))
+        if aber.host_left.is_set():
+            # tck-id-message-flow-edge-node-birth-publish-phid-offline: the NDEATH, then DISCONNECT,
+            # which the caller's _end_session() does.
+            raise _JobFailed(_host_went_offline(self.host, progress.sent))
+        if aber.rebirth.is_set():
+            self.answer_rebirth(job_id, progress)
+
+
+def _wait_until(target, progress, session, job_id=None):
+    """
+    Sleep until `target` (time.monotonic()) in slices of at most SLEEP_SLICE_SECONDS, checking the
+    session and reporting progress after each, so Stop, a lost connection, an offline primary host
+    and a rebirth request are all dealt with within a slice.
+    """
+    while True:
+        remaining = target - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(SLEEP_SLICE_SECONDS, remaining))
+        if session is not None:
+            session.check(job_id, progress)
+        progress.report(force=True)
+
+
+def _run_job(supabase, storage, credentials, job, outcome=None):
+    """
+    Publish one capture. Returns (messages_sent, messages_out_of_window, error or None).
+
+    `credentials` maps a gateway to its password, or to [(source, password), ...] in the order to
+    try them. `outcome` gets "stopped" when the operator stopped the job, and "accepted", the
+    (source, password) the broker accepted.
+    """
     job_id = job["id"]
     edge_node = job["target_edge_node_id"]
-    password = credentials.get(edge_node)
+    held = credentials.get(edge_node)
+    candidates = [(None, held)] if isinstance(held, str) else list(held or [])
+    outcome = {} if outcome is None else outcome
 
-    if not password:
-        # REFUSED HERE RATHER THAN ATTEMPTED. Without a password the connect fails with a broker
-        # error that names neither the gateway nor the missing secret, and at QoS 0 a publish that
-        # the ACL refuses is dropped with no PUBACK -- so a wrong-credential playback would
-        # otherwise report success and move nothing.
+    if not candidates:
+        # Refused before connecting: a connect with no password fails naming neither the gateway
+        # nor the missing secret.
         return 0, 0, (
             "this worker holds no broker credential for %s, so it cannot authenticate as that "
             "gateway. Issue one from the gateway's drawer on the Gateways page (Generate Broker "
@@ -385,19 +731,22 @@ def _run_job(supabase, storage, credentials, job):
     # ------------------------------------------------------------------------------------------
     # The plan
     # ------------------------------------------------------------------------------------------
-    # EVERYTHING THAT CAN BE WRONG IS DECIDED HERE, with no broker and no clock -- an unmapped
-    # device, a rebasing that lands outside the daemon's sanity window, a malformed topic. The
-    # publishing loop below cannot make a new decision, which is what makes a dry run and a real
-    # run the same computation.
+    # Everything that can be wrong is decided here, with no broker; the loop below decides nothing.
+    # Planned with the bdSeq the next CONNECT carries, and planned again if a refused password
+    # moved the accepted CONNECT on to a later one.
     play_epoch_ms = int(time.time() * 1000)
     speed = float(job.get("speed") or 1.0)
     device_map = job.get("device_map") or {}
     bdseq = _next_bdseq.get(edge_node, 0)
-    try:
-        plan = capture.plan_playback(
+
+    def make_plan(session_bdseq):
+        return capture.plan_playback(
             document, edge_node, device_map, play_epoch_ms, speed=speed,
-            group=job.get("sparkplug_group"), bdseq=bdseq,
+            group=job.get("sparkplug_group"), bdseq=session_bdseq,
         )
+
+    try:
+        plan = make_plan(bdseq)
     except capture.CaptureError as err:
         return 0, 0, str(err)
 
@@ -449,72 +798,241 @@ def _run_job(supabase, storage, credentials, job):
     # ------------------------------------------------------------------------------------------
     # Every planned topic is under the job's group, so the first names the edge node's.
     will_topic = "spBv1.0/%s/NDEATH/%s" % (capture.split_topic(plan[0][1])[0], edge_node)
-    client, error = _open_session(edge_node, password, will_topic, bdseq)
-    if error:
-        return 0, out_of_window, error
+    host = PRIMARY_HOST_ID
+    progress = _Progress(supabase, job_id, len(plan))
+    session = None
+    error = None
 
-    sent = 0
-    started = time.monotonic()
-    last_report = 0.0
+    def open_session():
+        # The first session may fall back to a later password; the rest use the one accepted.
+        source, password = outcome.get("accepted") or candidates[0]
+        fallbacks = () if "accepted" in outcome else candidates[1:]
+        client, failure = _open_session(edge_node, password, will_topic, bdseq,
+                                        primary_host_id=host, tick=progress.report,
+                                        source=source, fallbacks=fallbacks,
+                                        confirm_subscription=True)
+        if failure:
+            raise _JobFailed(failure if not progress.sent else
+                             "publishing stopped after %d message(s): %s" % (progress.sent, failure))
+        if "accepted" not in outcome:
+            outcome["accepted"] = next(c for c in candidates if c[0] == client.aber.source)
+            if source is not None:
+                logger.info("Playback %s: connected as %s with %s.", job_id, edge_node,
+                            SOURCE_NAMES.get(client.aber.source, "its password"))
+        return _Session(client, host)
 
     try:
+        session = open_session()
+        if session.client.aber.bdseq != bdseq:
+            # A refused password spent a bdSeq. The first plan is let go before the second is built.
+            bdseq = session.client.aber.bdseq
+            plan = None
+            plan = make_plan(bdseq)
+        progress.started = time.monotonic()
         for delay_ms, topic, payload_bytes, _ in plan:
-            # THE SCHEDULE IS ABSOLUTE, not a sleep between messages. Accumulating per-message
-            # sleeps would drift by however long each publish and each progress call took, and an
-            # hour-long playback would finish measurably late with its timestamps -- rebased against
-            # the plan's clock, not the drifted one -- pulling further out of window as it went.
-            target = started + (delay_ms / 1000.0)
-            now = time.monotonic()
-            if target > now:
-                time.sleep(target - now)
+            # An absolute schedule: per-message sleeps would drift by every publish and progress
+            # call, and the rebased timestamps would drift out of window with them.
+            _wait_until(progress.started + delay_ms / 1000.0, progress, session, job_id)
 
-            if client is None:
-                client, error = _open_session(edge_node, password, will_topic, bdseq)
-                if error:
-                    error = "publishing stopped after %d message(s): %s" % (sent, error)
-                    break
+            if session is None:
+                session = open_session()
+            session.check(job_id, progress)
 
             if capture.split_topic(topic)[1] == "NDEATH":
                 # A recorded death ends the session as it ended the recorded node's. The plan
                 # numbered the messages after it as the next session, which opens on the next one.
-                _end_session(client, topic, payload_bytes)
-                client = None
+                _end_session(session.client, topic, payload_bytes)
+                session = None
                 bdseq = (bdseq + 1) % 256
             else:
-                # QoS 0, matching what the fleet publishes and what capture.py play uses. Worth
-                # knowing rather than assuming: a publish the ACL refuses is dropped WITHOUT a
-                # PUBACK, so the broker's refusal is invisible here. That is what the CONNACK check
-                # in _open_session is for.
-                client.publish(topic, payload_bytes, qos=0, retain=False)
-            sent += 1
-
-            elapsed = time.monotonic() - started
-            if elapsed - last_report >= PROGRESS_INTERVAL_SECONDS:
-                last_report = elapsed
-                try:
-                    stop = supabase.rpc("playback_progress", {
-                        "p_job_id": job_id,
-                        "p_messages_sent": sent,
-                        "p_messages_total": len(plan),
-                        "p_elapsed_seconds": int(elapsed),
-                    }).execute()
-                    if stop.data is True:
-                        logger.info("Playback %s: stopped by the operator after %d message(s).",
-                                    job_id, sent)
-                        break
-                except Exception as err:
-                    # Transient and survivable: a progress tick that cannot reach Supabase means the
-                    # card stops moving, not that the playback should be abandoned.
-                    logger.warning("Playback %s: progress update failed: %s", job_id, err)
+                session.publish(topic, payload_bytes, progress)
+            progress.sent += 1
+            progress.report()
+    except _Stopped:
+        logger.info("Playback %s: stopped by the operator after %d message(s).",
+                    job_id, progress.sent)
+        if outcome is not None:
+            outcome["stopped"] = True
+    except _JobFailed as err:
+        error = str(err)
     except Exception as err:
-        error = "publishing stopped after %d message(s): %s" % (sent, err)
+        error = "publishing stopped after %d message(s): %s" % (progress.sent, err)
     finally:
-        # Finished, stopped by the operator or failed: the open session ends with its NDEATH, so
-        # the gateway reads OFFLINE rather than going stale.
-        if client is not None:
-            _end_session(client, will_topic, capture.node_death(bdseq, int(time.time() * 1000)))
+        # However it ended, an open session ends with its NDEATH, so the gateway reads OFFLINE.
+        if session is not None:
+            _end_session(session.client, will_topic,
+                         capture.node_death(bdseq, int(time.time() * 1000)))
 
-    return sent, out_of_window, error
+    return progress.sent, out_of_window, error
+
+
+
+
+class _Holdings:
+    """
+    The broker passwords this worker holds, and the heartbeat that reports them.
+
+    The main loop re-reads the sources every pass (refresh()); a timer thread reports what is held
+    every CREDENTIAL_REPORT_INTERVAL_SECONDS and at once after a change, whether or not a job is
+    running, so a long playback does not read as a worker that stopped. Ids and source names only,
+    never passwords: `playback_worker_status` is readable by three roles.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._changed = threading.Event()
+        self.sources = _credential_sources()
+        # The (source, password) the broker last accepted for each gateway, tried first while held.
+        self._accepted = {}
+        # Gateways with a password picked up since the last report that got through. Everything
+        # counts at startup: the sources were just read.
+        self._rotated = set(self.sources)
+
+    @property
+    def credentials(self):
+        """{gateway: password tried first}."""
+        return {gateway: candidates[0][1] for gateway, candidates in self.for_jobs().items()}
+
+    def for_jobs(self):
+        """{gateway: [(source, password), ...]}, the one the broker last accepted first."""
+        with self._lock:
+            return self._ordered()
+
+    def _ordered(self):
+        ordered = {}
+        for gateway, candidates in self.sources.items():
+            accepted = self._accepted.get(gateway)
+            ordered[gateway] = ([accepted] + [c for c in candidates if c != accepted]
+                                if accepted in candidates else list(candidates))
+        return ordered
+
+    def accepted(self, gateway, choice):
+        """Remember which (source, password) the broker accepted; a change is reported at once."""
+        with self._lock:
+            if self._accepted.get(gateway) == choice:
+                return
+            self._accepted[gateway] = choice
+        logger.info("Playback credentials: %s is now used first for %s.",
+                    SOURCE_NAMES.get(choice[0], "the password the broker accepted"), gateway)
+        self._changed.set()
+
+    def refresh(self):
+        """Re-read the sources, log a change by gateway id, and wake the heartbeat for it."""
+        current = _credential_sources()
+        with self._lock:
+            previous, self.sources = self.sources, current
+            if current == previous:
+                return self._ordered()
+            gained = sorted(set(current) - set(previous))
+            lost = sorted(set(previous) - set(current))
+            # A re-issue keeps the id and changes a password, so the lists are compared.
+            rotated = sorted(k for k in set(current) & set(previous) if current[k] != previous[k])
+            self._rotated.update(gained)
+            self._rotated.update(rotated)
+            self._rotated.difference_update(lost)
+            # A new password anywhere puts the delivered one first again.
+            for gateway in rotated + lost:
+                self._accepted.pop(gateway, None)
+            ordered = self._ordered()
+        parts = []
+        if gained:
+            parts.append("gained %s" % ", ".join(gained))
+        if rotated:
+            parts.append("rotated %s" % ", ".join(rotated))
+        if lost:
+            parts.append("lost %s" % ", ".join(lost))
+        logger.info("Playback credentials changed: now holding %d gateway(s) -- %s.",
+                    len(current), "; ".join(parts) or "no change to which gateways are held")
+        self._changed.set()
+        return ordered
+
+    def report(self, supabase):
+        """One heartbeat. A rotation is cleared only once a report carrying it got through."""
+        with self._lock:
+            ordered = self._ordered()
+            rotated = sorted(self._rotated)
+        supabase.rpc("playback_report_credentials", {
+            "p_edge_nodes": sorted(ordered),
+            "p_rotated": rotated,
+        }).execute()
+        with self._lock:
+            self._rotated.difference_update(rotated)
+        supabase.rpc("playback_report_credential_sources", {
+            "p_sources": {gateway: [source for source, _ in candidates]
+                          for gateway, candidates in ordered.items()},
+        }).execute()
+
+    def run_heartbeat(self, supabase, stop=None):
+        """The timer thread's body. A failed report is logged and retried on the next beat."""
+        stop = stop or threading.Event()
+        while not stop.is_set():
+            self._changed.clear()
+            try:
+                self.report(supabase)
+            except Exception as err:
+                logger.warning("Could not report held credentials: %s", err)
+            self._changed.wait(CREDENTIAL_REPORT_INTERVAL_SECONDS)
+
+
+def _start_heartbeat(holdings):
+    """The heartbeat on its own thread and its own Supabase client."""
+    thread = threading.Thread(target=holdings.run_heartbeat, args=(_supabase(),),
+                              name="playback-heartbeat", daemon=True)
+    thread.start()
+    return thread
+
+
+def _sweep(supabase):
+    """
+    Fail the jobs a previous run left in flight. Returns whether the sweep ran. Nothing is claimed
+    until it has: a row left RUNNING blocks its target, and a sweep after a claim would fail the
+    job just claimed.
+    """
+    try:
+        swept = supabase.rpc("playback_reconcile_jobs", {}).execute().data or 0
+    except Exception as err:
+        logger.error("Startup reconciliation failed: %s. No playback is started until it succeeds; "
+                     "retrying every %.0fs.", err, POLL_INTERVAL_SECONDS)
+        return False
+    if swept:
+        logger.warning("%d playback job(s) were left in flight by a previous run and have been "
+                       "failed. Whatever they had published is already in the historian.", swept)
+    return True
+
+
+def _finish(supabase, job, sent, error, out_of_window):
+    """
+    Record the end of a job, retrying with backoff for FINISH_RETRY_SECONDS. Returns whether it was
+    recorded. A row left RUNNING is ended by Stop once its progress is a minute old, or by the next
+    startup sweep.
+    """
+    params = {
+        "p_job_id": job["id"], "p_messages_sent": sent, "p_error": error,
+        "p_messages_out_of_window": out_of_window,
+    }
+    deadline = time.monotonic() + FINISH_RETRY_SECONDS
+    delay = 1.0
+    attempt = 1
+    while True:
+        try:
+            supabase.rpc("playback_finish", params).execute()
+            if attempt > 1:
+                logger.info("Playback %s: its end was recorded at attempt %d.", job["id"], attempt)
+            return True
+        except Exception as err:
+            if time.monotonic() + delay > deadline:
+                logger.error(
+                    "Playback %s finished but could not be recorded after %d attempt(s) (%s). The "
+                    "row stays RUNNING and blocks playbacks onto %s until Stop is pressed on the "
+                    "Capture page or this worker restarts.",
+                    job["id"], attempt, err, job["target_edge_node_id"],
+                )
+                return False
+            logger.warning("Playback %s: could not record its end (%s); retrying in %.0fs.",
+                           job["id"], err, delay)
+        time.sleep(delay)
+        delay = min(delay * 2, 30.0)
+        attempt += 1
 
 
 def main():
@@ -530,13 +1048,10 @@ def main():
 
     supabase = _supabase()
     storage = _storage()
-    credentials = _credentials()
+    holdings = _Holdings()
 
-    if not credentials:
-        # NOT FATAL, deliberately, and the difference from the key above is worth stating. A worker
-        # with no Supabase key cannot do anything at all. A worker with no broker credentials is
-        # correctly configured for a stack that has not issued any playback targets yet -- it should
-        # come up, report the queue is unreachable to it, and start working the moment one is added.
+    if not holdings.credentials:
+        # Not fatal: a stack that has issued no playback credential yet is correctly configured.
         logger.warning(
             "This worker holds no playback credentials yet, so every job will be refused for want "
             "of an identity to publish as. Issuing a broker credential for a simulated gateway "
@@ -545,125 +1060,25 @@ def main():
         )
     else:
         logger.info("Playback worker holds credentials for %d gateway(s): %s",
-                    len(credentials), ", ".join(sorted(credentials)))
+                    len(holdings.credentials), ", ".join(sorted(holdings.credentials)))
 
-    # SWEEP FIRST. A row left at RUNNING keeps matching the per-target unique index, so every future
-    # playback onto that gateway is refused -- and `is_active_playback_capture()` keeps returning
-    # true for its capture, leaving this worker a standing read of one object in the bucket for as
-    # long as the row survives.
-    try:
-        swept = supabase.rpc("playback_reconcile_jobs", {}).execute().data or 0
-        if swept:
-            logger.warning(
-                "%d playback job(s) were left in flight by a previous run and have been failed. "
-                "Whatever they had published is already in the historian.", swept,
-            )
-    except Exception as err:
-        logger.error("Startup reconciliation failed: %s", err)
-
+    _start_heartbeat(holdings)
     logger.info(
         "Playback worker running: polling every %.0fs, publishing to %s:%d.",
         POLL_INTERVAL_SECONDS, MQTT_HOST, MQTT_PORT,
     )
 
-    last_report = 0.0
-
-    # EVERYTHING HELD COUNTS AS ROTATED AT STARTUP, and that is correct rather than optimistic: the
-    # file was genuinely just read, so what it holds now is what this worker observed now. A restart
-    # therefore re-stamps every observation, which is exactly what it is entitled to claim.
-    pending_rotation = set(credentials)
-
+    swept = False
     while True:
-        # ------------------------------------------------------------------------------------
-        # Re-resolve what this worker holds, every pass.
-        # ------------------------------------------------------------------------------------
-        # ONCE AT STARTUP WAS THE BUG. A credential issued from the Gateways page lands in the
-        # delivery file seconds later, and a worker holding a snapshot from boot would go on
-        # refusing every job with "this worker holds no broker credential for ..." until somebody
-        # recreated the container -- while the platform's own `gateway_has_broker_credential()`
-        # said the credential existed. Both statements were true, which is what made it hard to see.
-        #
-        # A SMALL FILE READ EVERY THREE SECONDS, deliberately not cached on mtime. The file is a few
-        # hundred bytes and this loop already makes a network round trip; a cache would add a
-        # staleness window to the one thing whose entire purpose is not having one.
-        previous = credentials
-        credentials = _credentials()
-        if credentials != previous:
-            gained = sorted(set(credentials) - set(previous))
-            lost = sorted(set(previous) - set(credentials))
-            # ROTATION IS A CHANGE, AND COMPARING KEY SETS MISSED IT. This was written as
-            # `set(credentials) != set(previous)` and was silent on the case it exists for: the
-            # FIRST delivery on this stack replaced a stale `.env` password for a gateway already
-            # in the map, so the ids were identical before and after and nothing was logged. The
-            # worker had picked the new credential up and was working; the operator had no way to
-            # know. Comparing the maps catches a re-issue, which is the ordinary case from here on
-            # -- every mint after the first one rotates a gateway already held.
-            rotated = sorted(
-                k for k in set(credentials) & set(previous) if credentials[k] != previous[k]
-            )
-            # IDS ONLY, NEVER VALUES, which is why `rotated` names gateways rather than saying what
-            # changed. A log line is the one place a delivered password could leak into somewhere
-            # persistent and world-readable.
-            parts = []
-            if gained:
-                parts.append(f"gained {', '.join(gained)}")
-            if rotated:
-                parts.append(f"rotated {', '.join(rotated)}")
-            if lost:
-                parts.append(f"lost {', '.join(lost)}")
-            logger.info(
-                "Playback credentials changed: now holding %d gateway(s) -- %s.",
-                len(credentials), "; ".join(parts) or "no change to which gateways are held",
-            )
-            # WHICH GATEWAYS THIS WORKER HAS A NEW PASSWORD FOR, accumulated until a report gets
-            # through. A rotation does not change the reported ids, so before 0129 the row said the
-            # same thing before and after one and the dialog went on offering a target whose
-            # password had already been replaced (#217).
-            #
-            # IDS, NOT A TIME. The database stamps these with its own `now()`, which is the clock
-            # the CREDENTIAL_ISSUED row they are compared against also uses -- a timestamp taken
-            # here would make the answer depend on the offset between two clocks. And ids, not a
-            # fingerprint of the password: `playback_worker_status` is readable by three roles.
-            pending_rotation.update(gained)
-            pending_rotation.update(rotated)
-            pending_rotation.difference_update(lost)
+        # Re-read every pass: a credential issued from the Gateways page arrives in the file while
+        # this runs, and a snapshot from boot would refuse every job until a restart.
+        credentials = holdings.refresh()
 
-            # A ROTATION NOW MOVES THE ROW, so it reports on the same terms as a gain or a loss.
-            # The playback dialog reads that row to decide whether a target is offerable, so waiting
-            # up to thirty seconds after an issue is thirty seconds of a page saying the opposite of
-            # what is true.
-            if gained or lost or rotated:
-                last_report = 0.0
-
-        # ------------------------------------------------------------------------------------
-        # Say what this worker can publish as.
-        # ------------------------------------------------------------------------------------
-        # THE ONLY THING THAT KNOWS. `gateway_has_broker_credential()` answers whether the PLATFORM
-        # issued a credential; nothing in the database can answer whether this process was given
-        # the password. Without this the playback dialog showed a target as ready and the job then
-        # failed with "this worker holds no broker credential for …" -- correct, and far too late
-        # to be useful, because issuing a credential and its delivery reaching this process are
-        # two separate events.
-        #
-        # IN THE LOOP RATHER THAN ONCE AT STARTUP, because the page has to distinguish "holds
-        # nothing" from "is not running", and only a repeating timestamp does that. Failure is
-        # logged and otherwise ignored: a worker that cannot report is still a worker that can
-        # play back, and refusing to work because the status row is unreachable would turn a
-        # cosmetic outage into a real one.
-        now = time.monotonic()
-        if now - last_report >= CREDENTIAL_REPORT_INTERVAL_SECONDS:
-            last_report = now
-            try:
-                supabase.rpc("playback_report_credentials", {
-                    "p_edge_nodes": sorted(credentials.keys()),
-                    "p_rotated": sorted(pending_rotation),
-                }).execute()
-                # CLEARED ONLY ON SUCCESS, so a rotation is not lost to a report that failed --
-                # which would leave the row claiming an observation older than the credential the
-                # worker actually holds, and the dialog refusing a target that works.
-                pending_rotation.clear()
-            except Exception as err:
-                logger.warning("Could not report held credentials: %s", err)
+        if not swept:
+            swept = _sweep(supabase)
+            if not swept:
+                time.sleep(POLL_INTERVAL_SECONDS)
+                continue
 
         try:
             job = supabase.rpc("playback_claim_job", {}).execute().data
@@ -681,31 +1096,24 @@ def main():
             job["id"], job["capture_storage_path"], job["target_edge_node_id"],
             job.get("speed"), len(job.get("device_map") or {}),
         )
+        outcome = {}
         try:
-            sent, out_of_window, error = _run_job(supabase, storage, credentials, job)
+            sent, out_of_window, error = _run_job(supabase, storage, credentials, job,
+                                                  outcome=outcome)
         except Exception as err:
             logger.error("Playback %s: unhandled error: %s", job["id"], err, exc_info=True)
             sent, out_of_window, error = 0, 0, "unhandled error: %s" % err
+        if outcome.get("accepted"):
+            holdings.accepted(job["target_edge_node_id"], outcome["accepted"])
 
-        try:
-            supabase.rpc("playback_finish", {
-                "p_job_id": job["id"], "p_messages_sent": sent, "p_error": error,
-                # 0109. Named, so the argument lands whatever order the function declares it in;
-                # recorded on every outcome, because a FAILED job's count is the diagnosis.
-                "p_messages_out_of_window": out_of_window,
-            }).execute()
-        except Exception as err:
-            # The job stays RUNNING, and the next restart's reconciliation is what clears it. Said
-            # loudly because until then this gateway accepts no further playback.
-            logger.error(
-                "Playback %s finished but could not be recorded (%s). The row stays RUNNING and "
-                "will block further playbacks onto %s until this worker restarts.",
-                job["id"], err, job["target_edge_node_id"],
-            )
+        if not _finish(supabase, job, sent, error, out_of_window):
             continue
 
         if error:
             logger.warning("Playback %s failed after %d message(s): %s", job["id"], sent, error)
+        elif outcome.get("stopped"):
+            logger.info("Playback %s stopped by the operator: %d message(s) published as %s.",
+                        job["id"], sent, job["target_edge_node_id"])
         else:
             logger.info("Playback %s complete: %d message(s) published as %s.",
                         job["id"], sent, job["target_edge_node_id"])

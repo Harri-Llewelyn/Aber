@@ -1115,6 +1115,35 @@ its lanes and the ability to archive it. Find one with
 `SELECT id, name FROM gateways WHERE is_shadow AND id <> '16000000-0000-4000-8000-000000000001'`.
 It cannot be unmarked through the API either; clearing the flag is a database owner's act.
 
+### A playback reports what really happened, and Stop ends a stalled one (0191)
+
+The playback worker reported progress only after a publish. A job waiting out a long gap in its
+capture, or a worker stuck before its first publish, left the row `RUNNING` with nothing to show it.
+`request_playback_stop()` only set a flag for the worker's next tick, so the one-per-target index
+refused every playback onto the Playback gateway until the worker restarted.
+
+- **`playback_progress()` stamps `playback_jobs.progress_reported_at`** on every call. The worker
+  now reports at least once a second while a job runs, including while it waits for a message.
+- **`request_playback_stop()` ends a stalled job.** On a `RUNNING` job whose last report, or its
+  claim when there is none, is more than a minute old, it sets `CANCELLED` and `finished_at` and
+  writes what the job had reported published into `error`. A fresh job still only gets
+  `stop_requested`, which the worker reads within a second. A worker that comes back is told to
+  stop by its next `playback_progress()`, which answers true for a row no longer `RUNNING`, and its
+  `playback_finish()` touches only `PENDING` and `RUNNING` rows.
+- **`playback_reconcile_jobs()` says what happened to each job it sweeps.** A `PENDING` job never
+  started, a `RUNNING` one that had reported nothing published nothing, and any other stopped after
+  the count it had reported. All three said *publishing stopped partway*. The wording names no
+  cause, because a restart and a kill for memory look the same from here.
+- **`playback_worker_status.credential_sources`** says which password the worker uses for each
+  gateway it holds: `delivered`, `helm` or `environment`, in the order it tries them. The worker
+  writes it through the new `playback_report_credential_sources()`, which the playback worker alone
+  may call and which keeps only held gateways and those three names. The Start Playback dialog
+  reads it. Names only: a password never leaves the worker.
+
+Both columns are additive. `progress_reported_at` is nullable: a job claimed before the upgrade has
+none, so its claim time is used. `credential_sources` defaults to `{}`, which the dialog reads as a
+worker from before this release. `test_playback_stop_and_sweep.py` holds all four functions.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
@@ -2913,9 +2942,10 @@ What it does not offer is the two acts that are wrong for it, for different reas
   moment somebody starts a job — possibly weeks later, on a page that says nothing about gateways —
   while the archive itself reports success and reads as housekeeping. `0067` refuses it in the
   database and the button is hidden; the UI is not the rule.
-- **Requesting a rebirth** is addressed to a node nobody is listening as. The playback worker only
-  publishes and holds no subscription at all, so the NCMD reaches nothing and `rebirth_requests`
-  would record something that can never be answered.
+- **Requesting a rebirth** is addressed to a node that is listening only while a replay runs. The
+  playback worker subscribes to the Playback gateway's NCMD for each replay and answers a rebirth
+  then, so between replays the NCMD reaches nothing and `rebirth_requests` would record something
+  that is never answered.
 
 **The rule is "not the last one", not "never".** `0067` refuses only the archive that would leave
 no unarchived `is_shadow` gateway. Since `0187` the Playback gateway is the only one a stack makes

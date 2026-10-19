@@ -1943,7 +1943,9 @@ paths:
         gateway can be made one.
 
         **Stopping one is `request_playback_stop()`**, which sets `stop_requested`; the worker
-        observes it on its next progress tick. Progress arrives over Realtime.
+        observes it within a second, because it reports progress at least once a second while a job
+        runs. A `RUNNING` job whose worker has not reported for over a minute is ended by the call
+        itself, as `CANCELLED` (0191). Progress arrives over Realtime.
 
         `speed` divides both the send schedule and the timestamp rebasing, so it is bounded to
         `(0, 60]`. Zero is refused rather than treated as "as fast as possible": the historian
@@ -5451,8 +5453,20 @@ components:
           type: string
           format: date-time
           description: |
-            Heartbeat, restated every 30 seconds. Stale means the worker is not running — which is a
-            different problem from an empty list, and is why the timestamp is here.
+            Heartbeat, restated every 30 seconds, during a playback as well as between them. Stale
+            means the worker is not running — which is a different problem from an empty list, and
+            is why the timestamp is here.
+        credential_sources:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string, enum: [delivered, helm, environment] }
+          description: |
+            For each held gateway, where the worker's passwords for it come from, in the order it
+            tries them; the first is the one in use. `delivered` is the password delivered when the
+            credential was issued, `helm` is `secrets.mqttPlaybackCredentials`, `environment` is
+            `MQTT_PLAYBACK_USER` / `MQTT_PLAYBACK_PASSWORD`. Names only, never a password (0191).
+          example: { gwy160000000000400080000: [delivered, helm] }
 
     PlaybackJob:
       type: object
@@ -5506,6 +5520,14 @@ components:
         stop_requested:
           type: boolean
           description: 'Set by request_playback_stop(); observed by the worker on its next tick.'
+        progress_reported_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            When the worker last reported this job's progress; null until its first report. Stop
+            ends a RUNNING job whose last report, or claim when there is none, is over a minute old
+            (0191).
         error: { type: string, nullable: true }
         requested_by: { type: string, format: uuid, nullable: true }
         created_at: { type: string, format: date-time }

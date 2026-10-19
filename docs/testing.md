@@ -118,11 +118,18 @@ python ingestion/test_stack_capture_cleanup.py
 # the race the loop opens by connecting with its lock released.
 python ingestion/test_startup_healer.py
 # How the playback worker resolves the broker passwords it holds (0078), and the precedence rule
-# that matters: a DELIVERED credential beats one in the environment. The broker keeps one password
-# per username, so a value in the environment is not an alternative to the delivered one -- it is an older
-# one. If the environment won, "issue a new credential" would be the one repair that could not fix
-# a refused playback.
+# that matters: a DELIVERED credential is tried before one in the environment. The broker keeps one
+# password per username, so a value in the environment is normally an older one. If the environment
+# came first, "issue a new credential" would be the one repair that could not fix a refused
+# playback. The environment value is tried only when the broker refuses the delivered one.
 python ingestion/test_playback_credentials.py
+# The playback worker as a Sparkplug edge node, against a fake broker and PostgREST: the NCMD
+# subscription and the rebirth answer, the wait for the primary host's STATE and the end of a job when
+# it goes offline, Stop and a dropped connection inside a long gap, the retried finish and startup
+# sweep, and the heartbeat thread. A message counts only once paho accepted it on a connection that
+# has not dropped: a replay whose credential was re-issued partway used to end COMPLETED with every
+# message counted.
+python ingestion/test_playback_worker_loop.py
 # The playback worker's Sparkplug session -- the NDEATH Will, the NDEATH that ends every job, and
 # the bdSeq the replayed NBIRTH shares with both, so the Playback gateway reads OFFLINE after a replay
 python ingestion/test_playback_session.py
@@ -137,7 +144,8 @@ python ingestion/test_playback_session.py
 # run can only have come from the replay, which is what makes "it landed under the replay lane and
 # under nothing else" checkable against a live historian. The fixture also holds the recorded
 # appliance's node heartbeat, with health and an outage report: the Playback gateway must record a
-# heartbeat and none of it.
+# heartbeat and none of it. A second replay has its credential re-issued partway, and must end
+# FAILED naming the lost connection and counting only what went out.
 python ingestion/test_playback_replay.py
 # A CAPTURE RECORDED FROM THE BROKER REACHES STORAGE AND REPLAYS. The suite above replays a file it
 # uploaded; this one records one the way the Capture page does. A fixture Host gateway, its broker
@@ -327,6 +335,10 @@ python supabase/migrations/test_audit_trail_guard.py
 # and produced stamp. Both matchers are gated on has_role(), so this suite asserts their shape
 # rather than their answers -- it connects as the owner, which holds no role.
 python supabase/migrations/test_audit_trail_paging.py
+# How a playback ends (0191). Stop on a job whose worker has been silent for a minute ends it as
+# CANCELLED, so a stalled worker cannot hold the Playback gateway until it restarts, and the worker
+# coming back is told to stop and changes nothing.
+python supabase/migrations/test_playback_stop_and_sweep.py
 # The delivery gate on broker-credential issuance (0078). NOT the happy path: the test that earns
 # its place is that a REAL gateway is not a delivery target, because a true there writes a real
 # machine's broker password into a file the replay worker reads -- and its broker role would then
