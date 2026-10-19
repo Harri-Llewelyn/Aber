@@ -2816,7 +2816,7 @@ on the gateway and devices inherit it through `gateway_id` rather than carrying 
 device-level flag would need two triggers to maintain an invariant the join gives for nothing, and
 `verify_gateway_binding()` already guarantees a device's data reaches storage only from the gateway
 it is bound to. **Only a consumer of this database can make that join.** The historian's rows carry
-an asset id and no gateway or flag, so a reader of the historian alone, the Power BI role among
+an asset id and no gateway or flag. So a reader of the historian alone, the Power BI role among
 them, cannot tell a simulated or replayed reading from the plant's
 ([#935](https://github.com/Harri-Llewelyn/Aber/issues/935)).
 

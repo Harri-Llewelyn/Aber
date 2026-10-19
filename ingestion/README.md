@@ -575,14 +575,13 @@ point: synthetic devices roll up exactly like real ones, which is the behaviour 
 question is "do the rollups work".
 
 **Only the Supabase database can tell a replayed reading apart.** A replay is written under a replay
-lane, a device of the Playback gateway that carries `devices.shadow_of`, and that gateway is
-`is_shadow` and `is_simulated` (`0052`, `0059`). Devices inherit the gateway's flags through
-`gateway_id` rather than carrying copies. The dashboard reads them: the Devices page badges a lane
-`REPLAY LANE`.
+lane: a device of the Playback gateway that carries `devices.shadow_of`. That gateway is `is_shadow`
+and `is_simulated` (`0052`, `0059`), and devices inherit its flags through `gateway_id` rather
+than carrying copies. The dashboard reads them: the Devices page badges a lane `REPLAY LANE`.
 
 **The historian cannot.** Its `telemetry` table holds an asset id, a metric and a value, with no
 gateway and no flag, and the rollups aggregate every asset alike. So a consumer that reads only the
-historian has nothing to join on: the Power BI reader sees a lane as one more device with a bare
+historian has nothing to join on. The Power BI reader sees a lane as one more device with a bare
 `dev…` id, and so does a Grafana panel a site writes. Nothing removes a lane's readings either: no
 application role may delete from the historian, so they stay until retention drops them. Marking
 them for every consumer, and a way to remove them, are

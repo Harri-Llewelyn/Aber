@@ -257,10 +257,10 @@ for every published table. Realtime redacts the payload to `{}` and attaches a 4
 arrives — so the **fact and timing** of a change leak, even though its contents do not. Seven tables
 are published because the dashboard needs them live: `cells`, `gateways`, `devices`, `areas`,
 `platform_alerts`, `capture_jobs` and `playback_jobs`. So an observer can infer when an asset or
-an area was created, edited, archived or changed state, when a platform alert fired or cleared, and
-when a broker capture or a replay was started, made progress and ended. In practice that is a
-timing side-channel on shift patterns, commissioning activity, the rate of configuration change and
-fault investigation. `captures` itself is not published (0190), so the list of stored captures does
+an area was created, edited, archived or changed state, and when a platform alert fired or cleared.
+They can also see when a broker capture or a replay started, made progress and ended. In practice
+that is a timing side-channel on shift patterns, commissioning activity, the rate of configuration
+change and fault investigation. `captures` itself is not published (0190), so the list of stored captures does
 not leak this way.
 
 **It cannot be fixed here** — it is upstream `supabase/realtime` behaviour. The gateway's `apikey`
