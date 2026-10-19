@@ -855,6 +855,22 @@ Three rules that were each learned from a real bug:
   `authScreenTheme.test.jsx` now asserts that every variable referenced in `App.jsx` is one the
   stylesheet defines.
 
+**A panel that opens from a button points at it.** The alert list, the notifications, the account
+menu, the sidebar behaviour menu and the Filters panel share one radius (`--radius-sm`), one shadow
+(`--shadow-popover`) and one arrow rule (App.css, *Popover arrows*): a 10px square turned 45°,
+centred on the panel's border on the side that faces the button, so the outline runs on into the
+point. It is pure CSS, as each panel's position is already known: a placement library such as
+Floating UI would add only what these panels have. The arrow is the wrapper's `::after`, shown with
+`:has(> panel)` while the panel is open, because the alert, notification and account panels clip or
+scroll their own overflow; the Filters panel clips nothing and draws its own `::before`. The top-bar
+arrows point up from `left: 50%` of the wrapper, so they follow the pill as its count widens it. The
+two rail menus are `position: fixed`, and so are their arrows: they point left from the panels' left
+border, 60px or 240px, at heights taken from the rail's foot (27px and 65px above the window's
+bottom). Change the foot's padding or its rows and those two numbers move with it. The Filters panel
+is shifted to stay inside the window, so `FiltersPopover` sets `--arrow-x`, the button's centre from
+the panel's left edge, and the arrow stays over the button. `popoverArrows.test.jsx` holds the rules
+to these numbers; jsdom lays nothing out, so screenshots are the check that they line up.
+
 ---
 
 ## Table and Row Conventions
