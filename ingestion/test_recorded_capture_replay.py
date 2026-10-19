@@ -418,7 +418,7 @@ class RecordedCaptureReplays(unittest.TestCase):
     def setUpClass(cls):
         cls.reached = []
         cls.broken = None
-        cls.session = cls.edge = cls.gateway = cls.device = None
+        cls.session = cls.edge = cls.silent_edge = cls.gateway = cls.device = None
         cls.capture_job_id = cls.capture_id = cls.storage_path = None
         cls.lane = cls.lane_id = None
         cls.password = cls.silent = cls.silent_job = cls.silent_capture_id = cls.silent_path = None
@@ -737,8 +737,9 @@ class RecordedCaptureReplays(unittest.TestCase):
         cls.silent_capture_id, cls.silent_path = capture_id, path
         cls.silent_stored = download(cls.session, path)[1]
 
-        cls.edge = cls._connect_edge_node(cls.password)
-        cls.edge.start()
+        # Its own edge node: the stage 2 tests read what `cls.edge` published.
+        cls.silent_edge = cls._connect_edge_node(cls.password)
+        cls.silent_edge.start()
         status, job_id = cls.session.rpc("start_capture_job", {
             "p_subject_kind": "device", "p_subject_id": SILENT_DEVICE_ID,
             "p_note": "silent device", "p_max_seconds": 5, "p_replace": True,
@@ -751,15 +752,16 @@ class RecordedCaptureReplays(unittest.TestCase):
             return rows[0] if got == 200 and rows else {}
         cls.silent_job = poll(read, lambda j: j.get("status") in TERMINAL,
                               CLAIM_TIMEOUT + 5 + FINISH_TIMEOUT, 1)
-        cls.edge.stop()
+        cls.silent_edge.stop()
 
     # ------------------------------------------------------------------------------------------
     # Cleanup, in the order the foreign keys want; also after a stage that broke
     # ------------------------------------------------------------------------------------------
     @classmethod
     def _clean_up(cls):
-        if cls.edge is not None:
-            cls.edge.stop()
+        for edge in (cls.edge, cls.silent_edge):
+            if edge is not None:
+                edge.stop()
         session = cls.session
         if session is None:
             return
