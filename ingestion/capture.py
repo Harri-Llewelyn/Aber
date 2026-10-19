@@ -998,10 +998,21 @@ def _connect(username, password, client_id):
 def cmd_record(args):
     messages = []
     skipped = []
+    ignored = []
     started_ms = None
 
     def on_message(client, userdata, msg):
         nonlocal started_ms
+        # What the daemon's on_message() ingests and nothing else: STATE, NCMD, DCMD and an empty
+        # payload are left out, so the file holds only what a playback can publish.
+        try:
+            check_topic(msg.topic)
+        except CaptureError:
+            ignored.append(msg.topic)
+            return
+        if not msg.payload:
+            ignored.append(msg.topic)
+            return
         try:
             payload, encoding = decode_wire_payload(msg.payload)
         except Exception:
@@ -1053,6 +1064,12 @@ def cmd_record(args):
                 "payload format neither this tool nor the ingestion daemon reads, so the daemon "
                 "is not ingesting them either." % len(skipped)
             )
+        if ignored:
+            raise CaptureError(
+                "recorded no messages: the %d that arrived were STATE, NCMD or DCMD, or empty, "
+                "and an edge node publishes none of those. No edge node published under %r."
+                % (len(ignored), args.topic)
+            )
         raise CaptureError(
             "recorded no messages, and none arrived at all. The fleet may be idle, or %r may not "
             "be granted `read %s`." % (RECORD_USER, args.topic)
@@ -1081,6 +1098,8 @@ def cmd_record(args):
 
     print("\nWrote %s" % args.out)
     _print_summary(capture)
+    if ignored:
+        print("  left out:   %d STATE, NCMD, DCMD or empty message(s)" % len(ignored))
     return 0
 
 
@@ -1102,28 +1121,56 @@ def _print_summary(capture):
     print("  encodings:  %s" % ", ".join("%s=%d" % kv for kv in sorted(by_encoding.items())))
     print("  edge nodes: %s" % ", ".join(capture["identities"]["edge_nodes"]))
     print("  devices:    %s" % (", ".join(capture["identities"]["devices"]) or "(none)"))
+    if "NBIRTH" not in by_type:
+        print("\n  No NBIRTH was recorded, so this capture cannot be played back: a replay opens")
+        print("  with the edge node's birth certificate. Record again and ask the edge node for")
+        print("  one meanwhile (Request Rebirth on the Gateways page), or record on the Capture")
+        print("  page, which asks for one itself.")
     if capture["identities"]["devices"]:
-        print("\n  Playback needs a --map for each device above, onto devices bound to the")
-        print("  playback gateway. `capture.py play --help` explains why they cannot be reused.")
+        print("\n  Playback needs a --map for each device above, onto a replay lane of the")
+        print("  Playback gateway: the Capture page's Prepare replay lanes makes them.")
 
 
 # ---------------------------------------------------------------------------------------------
 # play
 # ---------------------------------------------------------------------------------------------
+# Where a command-line user gets the Playback gateway's password. The page issues it; the
+# break-glass provisioning script writes no platform record, and the worker would then hold a
+# password the broker no longer has.
+CREDENTIAL_ADVICE = (
+    "Set MQTT_PLAYBACK_USER to the Playback gateway's sparkplug_id and MQTT_PLAYBACK_PASSWORD to "
+    "its broker password. Issue the password from the gateway's drawer on the Gateways page "
+    "(Generate Broker Credential), which shows it once. On Kubernetes the same password is "
+    "delivered into the `mosquitto-passwords` Secret, key `playback_credentials.json`, as "
+    "{\"<sparkplug_id>\": \"<password>\"}. Issuing a new one replaces the one the dashboard's "
+    "playback worker holds; it reaches the worker within about a minute."
+)
+
+
 def cmd_play(args):
+    # Imported here: playback_worker imports this module.
+    import playback_worker
+
     with open(args.capture, encoding="utf-8") as fh:
         capture = json.load(fh)
 
     device_map = parse_device_map(args.map)
+    edge_node = args.as_gateway
+    bdseq = playback_worker._next_bdseq.get(edge_node, 0)
     now_ms = int(time.time() * 1000)
     plan = plan_playback(
         capture,
-        gateway_id=args.as_gateway,
+        gateway_id=edge_node,
         device_map=device_map,
         play_epoch_ms=now_ms,
         speed=args.speed,
         group=args.group,
+        bdseq=bdseq,
     )
+    left_out = len(capture["messages"]) - len(plan)
+    if left_out:
+        print("%d message(s) recorded outside a Sparkplug session are left out: before the first "
+              "NBIRTH, after an NDEATH, or a device's before its DBIRTH." % left_out)
 
     bad = unsane_timestamps(plan, now_ms)
     if bad:
@@ -1145,54 +1192,72 @@ def cmd_play(args):
         print("WARNING: " + detail, file=sys.stderr)
 
     if args.dry_run:
-        print("Dry run -- nothing published. Plan for gateway %s:" % args.as_gateway)
+        print("Dry run -- nothing published. Plan for gateway %s:" % edge_node)
         for delay_ms, topic, _, _ in plan[: args.head]:
             print("  +%7dms  %s" % (delay_ms, topic))
         if len(plan) > args.head:
             print("  ... %d more" % (len(plan) - args.head))
         return 0
 
-    # THE REFUSAL THAT SAVES A SILENT RUN. The broker's roles pin the edge-node segment to the
-    # connecting username, and a mismatch is dropped with nothing logged at either end.
-    if PLAY_USER != args.as_gateway:
+    # The broker confines a client to its own edge-node segment and drops the rest at QoS 0 with
+    # nothing logged at either end, so a mismatch is refused before connecting.
+    if PLAY_USER != edge_node:
         raise CaptureError(
             "MQTT_PLAYBACK_USER is %r but --as-gateway is %r. The broker confines a client to "
             "`spBv1.0/+/+/<username>/#`, so every publish in this run would be discarded and the "
-            "playback would report success having moved nothing. Provision the credential with\n"
-            "  node scripts/mosquitto-provision-gateway.mjs %s"
-            % (PLAY_USER or "(unset)", args.as_gateway, args.as_gateway)
+            "playback would report success having moved nothing. %s"
+            % (PLAY_USER or "(unset)", edge_node, CREDENTIAL_ADVICE)
         )
     if not PLAY_PASSWORD:
-        raise CaptureError("MQTT_PLAYBACK_PASSWORD is not set; the broker runs allow_anonymous false")
+        raise CaptureError("MQTT_PLAYBACK_PASSWORD is not set; the broker runs allow_anonymous "
+                           "false. " + CREDENTIAL_ADVICE)
 
-    client = _connect(PLAY_USER, PLAY_PASSWORD, "aber-capture-play")
-    client.loop_start()
+    # The dashboard's session, opened and ended by the same functions: the NDEATH as the Will,
+    # the CONNACK awaited, and the NDEATH published before DISCONNECT.
+    playback_worker.MQTT_HOST, playback_worker.MQTT_PORT = MQTT_HOST, MQTT_PORT
+    will_topic = "spBv1.0/%s/NDEATH/%s" % (split_topic(plan[0][1])[0], edge_node)
+    client = None
+    sent = 0
 
-    print("Playing %d messages as %s at %.3fx..." % (len(plan), args.as_gateway, args.speed))
+    print("Playing %d messages as %s at %.3fx..." % (len(plan), edge_node, args.speed))
     started = time.time()
     try:
         for delay_ms, topic, payload_bytes, _ in plan:
-            # Scheduled against the START of the run, not slept between messages. Cumulative
-            # sleeps drift by however long each publish takes, so a long capture arrives
-            # progressively later than the intervals it recorded -- which is the one property
-            # playback exists to preserve.
-            due = started + delay_ms / 1000.0
-            remaining = due - time.time()
+            # Scheduled against the start of the run, so publishing time does not accumulate.
+            remaining = started + delay_ms / 1000.0 - time.time()
             if remaining > 0:
                 time.sleep(remaining)
-            # QoS 0, matching every other Sparkplug publisher on this stack. mosquitto/README.md
-            # records why raising it is not an option: Sparkplug B requires QoS 0 for these
-            # message types and delegates loss detection to `seq` and the rebirth request.
-            client.publish(topic, payload_bytes, qos=0)
+            if client is None:
+                client, error = playback_worker._open_session(edge_node, PLAY_PASSWORD,
+                                                              will_topic, bdseq)
+                if error and not sent:
+                    raise CaptureError("%s\n\n%s" % (error, CREDENTIAL_ADVICE))
+                if error:
+                    raise CaptureError("publishing stopped after %d message(s): %s" % (sent, error))
+            if split_topic(topic)[1] == "NDEATH":
+                # A recorded death ends the session; the plan numbered what follows as the next.
+                playback_worker._end_session(client, topic, payload_bytes)
+                client = None
+                bdseq = (bdseq + 1) % 256
+            else:
+                # QoS 0, as Sparkplug requires for these types. A publish the client could not
+                # send is a lost connection, and the run stops rather than reporting success.
+                info = client.publish(topic, payload_bytes, qos=0, retain=False)
+                if info.rc != mqtt.MQTT_ERR_SUCCESS:
+                    raise CaptureError(
+                        "publishing stopped after %d message(s): the broker connection was lost "
+                        "(%s)" % (sent, mqtt.error_string(info.rc)))
+            sent += 1
             if args.verbose:
                 print("  +%7dms  %s" % (delay_ms, topic))
     except KeyboardInterrupt:
         print("\nStopped early.")
     finally:
-        client.loop_stop()
-        client.disconnect()
+        if client is not None:
+            playback_worker._end_session(client, will_topic,
+                                         node_death(bdseq, int(time.time() * 1000)))
 
-    print("Done in %.1fs." % (time.time() - started))
+    print("Done in %.1fs: %d message(s) published." % (time.time() - started, sent))
     return 0
 
 
@@ -1233,9 +1298,10 @@ def build_parser():
     )
     play.add_argument("capture", help="capture file to play")
     play.add_argument("--as-gateway", required=True, metavar="gwy...",
-                      help="the playback gateway's sparkplug_id; must equal MQTT_PLAYBACK_USER")
+                      help="the Playback gateway's sparkplug_id; must equal MQTT_PLAYBACK_USER")
     play.add_argument("--map", action="append", metavar="dev<captured>=dev<target>",
-                      help="map a captured device onto one bound to the playback gateway")
+                      help="map a captured device onto its replay lane, made by the Capture page's "
+                           "Prepare replay lanes; any other id stays in quarantine")
     play.add_argument("--speed", type=float, default=1.0,
                       help="playback rate multiplier (default 1.0)")
     play.add_argument("--group", help="override the Sparkplug group (default: as captured)")

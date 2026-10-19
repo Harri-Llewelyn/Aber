@@ -306,15 +306,39 @@ that was on site for two hours, reproduce a fault by editing a value by hand, an
 chosen multiple of real time against a fleet whose measured rate is 0.95 msg/s.
 
 Run it from `ingestion/` after `npm run proto`, which generates the Sparkplug binding it imports
-(`sparkplug_b_pb2`, not committed). On the dev cluster the broker is on `localhost:1883`. `record`
-authenticates as the ingestion principal, `MQTT_INGESTION_USER` / `MQTT_INGESTION_PASSWORD` from
-the `aber-secrets` Secret unless `MQTT_CAPTURE_*` is set; `play` as the gateway it replays,
-`MQTT_PLAYBACK_USER` / `MQTT_PLAYBACK_PASSWORD`.
+(`sparkplug_b_pb2`, not committed). On the dev cluster the broker is on `localhost:1883`.
+
+- **`record`** authenticates as the ingestion principal, `MQTT_INGESTION_USER` /
+  `MQTT_INGESTION_PASSWORD` from the `aber-secrets` Secret, unless `MQTT_CAPTURE_*` is set. It
+  keeps what the daemon's `on_message()` ingests and leaves out the rest: the primary host's
+  STATE (retained, so it arrives on every subscribe), NCMD, DCMD and empty payloads. It does not
+  ask the edge node for a birth certificate. Without an NBIRTH the file cannot be played back
+  ([A replay is its own Sparkplug session](#a-replay-is-its-own-sparkplug-session)), so press
+  **Request Rebirth** on the Gateways page while it records, or record on the Capture page, which
+  asks for one itself.
+- **`play`** publishes as the Playback gateway (`gwy160000000000400080000`), authenticating as it
+  with `MQTT_PLAYBACK_USER` / `MQTT_PLAYBACK_PASSWORD`. Issue the password from the gateway's
+  drawer on the Gateways page (**Generate Broker Credential**), which shows it once. On Kubernetes
+  the same password is delivered into the `mosquitto-passwords` Secret under the key
+  `playback_credentials.json`, as `{"<sparkplug_id>": "<password>"}`. Issuing a new password
+  replaces the one the dashboard's playback worker holds, and is delivered to it within about a
+  minute. Never provision this gateway with
+  `scripts/mosquitto-provision-gateway.mjs`: that break-glass script writes no platform record,
+  so `playback_stale_credentials()` cannot see the change and every dashboard playback is then
+  refused (CONNACK rc=5).
+- **`--map` targets are replay lanes**, which the Capture page's **Prepare replay lanes** makes
+  (`ensure_shadow_devices()`). Any other id is refused or held: see
+  [Playback meets quarantine first](#playback-meets-quarantine-first).
 
 ```bash
 python capture.py record --out morning-shift.json --seconds 300
 python capture.py inspect morning-shift.json
-python capture.py play morning-shift.json --as-gateway gwy… --map dev<recorded>=dev<target> --speed 10
+python capture.py play morning-shift.json --as-gateway gwy160000000000400080000 \
+    --map dev<recorded>=dev<replay lane> --speed 10
+
+# The Playback gateway's delivered password, on Kubernetes:
+kubectl -n <namespace> get secret mosquitto-passwords \
+    -o jsonpath='{.data.playback_credentials\.json}' | base64 -d
 ```
 
 ### A capture cannot be played back as itself
@@ -331,13 +355,13 @@ under a CORRECTLY BOUND device passes that check by construction"*.
 A playback tool that published captured topics verbatim would be that account, reintroduced, and
 would need write access to every edge node appearing in any capture anyone ever recorded.
 
-So `play` publishes as **one gateway**, under one credential provisioned the ordinary way, and
-rewrites every captured identity onto assets that gateway owns:
+So `play` publishes as **one gateway**, the Playback gateway, under the credential the Gateways
+page issues for it, and rewrites every captured identity onto assets that gateway owns:
 
 | | recorded | played back |
 | :--- | :--- | :--- |
 | edge-node segment | the machine's real gateway | `--as-gateway` |
-| device segment | the machine | its `--map` target |
+| device segment | the machine | its replay lane (`--map`) |
 | `Asset_ID` metric | the machine | rewritten with the topic |
 
 **The `Asset_ID` metric moves with the topic, and it has to.** A DBIRTH still claiming the captured
@@ -374,7 +398,7 @@ NDEATH."*
   declares (`tck-id-payloads-alias-birth-requirement`), and synthesising one would declare metrics
   the edge node never declared. The Capture page's recorder asks the edge node to rebirth when it
   starts, so a capture from the page holds one unless the edge node ignored the request.
-- **What a session cannot carry is left out**:
+- **What a session cannot carry is left out**, and the CLI says how many messages that was:
   everything before the first NBIRTH (data already in flight when a recording armed, which a fast
   edge node delivers ahead of the birth the recorder asked for); a device's messages before its
   DBIRTH, and after its DDEATH until its next DBIRTH (`tck-id-payloads-dbirth-order`,
@@ -392,11 +416,21 @@ NDEATH."*
   recorded live in a gateway capture is not replayed either: the replay is its own session.
 - **bdSeq is the session's**, carried by every replayed NBIRTH and NDEATH, so births within one
   session repeat it (`tck-id-operational-behavior-data-commands-rebirth-action-3`) and a recorded
-  NDEATH ends it: the worker publishes that death, disconnects, and opens the next session
+  NDEATH ends it: the worker and `play` publish that death, disconnect, and open the next session
   with the next bdSeq (`tck-id-topics-nbirth-bdseq-increment`).
 - **The daemon clears an edge node's alias table when it applies an NDEATH** of the open session
   ([Metric Aliases](#metric-aliases)), for every edge node, so no session inherits another's
   aliases.
+
+**`play` opens the same session the dashboard does.** It calls the playback worker's
+`_open_session()` and `_end_session()`: the CONNECT carries the session's NDEATH as its Will at
+QoS 1 (`tck-id-payloads-ndeath-will-message`,
+`tck-id-message-flow-edge-node-birth-publish-will-message`), the NBIRTH repeats that bdSeq
+(`tck-id-payloads-nbirth-bdseq-repeat`), and the run ends by publishing the NDEATH before DISCONNECT
+(`tck-id-operational-behavior-edge-node-intentional-disconnect-ndeath`). Before 1.5 it connected
+without a Will, kept the recording's bdSeq and disconnected without an NDEATH, so the Playback
+gateway stayed ONLINE and then went stale. A publish the client could not send stops the run with
+the number published, rather than reporting success.
 
 ### Rebasing, and why it is also the speed control
 
@@ -523,11 +557,15 @@ until an `Administrator` approves it, and that is correct and stays correct.
 `ensure_shadow_devices()` mints each replay lane as a registered device bound to the playback
 gateway before the job is queued, so every id the replay publishes under is one this stack already
 knows and nothing is held. From the CLI you can, because `--map` takes any `dev…` id and does not
-check it against the directory — so mapping onto an id this deployment has never registered puts an
-approval step inside the playback, the first time that id is used.
+check it against the directory. An id this deployment has never registered is held in quarantine,
+and approving it cannot help: a device is never assigned to the Playback gateway by hand
+(`refuse_hand_assigning_a_replay_lane()`, `0083`), only minted there as a lane. A real device's
+id is worse: it is not bound to the Playback gateway, so the replayed DBIRTH fails
+[the binding check](#gateway-binding) and **quarantines that real device**
+(`GATEWAY_MISMATCH`), and its DDATA is dropped. Either way no reading reaches the historian.
 
-The way around it is not to weaken quarantine but to map onto devices that already exist, which is
-what the page does for you.
+So the only `--map` targets that work are replay lanes, which the Capture page's **Prepare replay
+lanes** makes. Prepare them there, then map each captured device onto its lane.
 
 ### Marking what was replayed
 

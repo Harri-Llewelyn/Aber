@@ -25,10 +25,15 @@ which is why they are asserted here rather than left to a live run to reveal.
 capture.py deliberately imports neither supabase nor psycopg, so unlike the other suites here this
 one needs no stubbing of its own -- but it does have to UNDO theirs, see below.
 """
+import argparse
+import contextlib
+import io
 import json
 import os
 import sys
+import tempfile
 import unittest
+from types import SimpleNamespace
 
 INGESTION_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, INGESTION_DIR)
@@ -1113,6 +1118,244 @@ class WorkerOutOfWindowTests(unittest.TestCase):
         )
         self.assertEqual((sent, out_of_window), (0, 0))
         self.assertIn("holds no broker credential", error)
+
+
+# =============================================================================================
+# THE COMMAND LINE: `record` keeps what the daemon ingests, `play` is the dashboard's session.
+# Against fake paho clients; no broker is reached.
+# =============================================================================================
+def wire_message(topic, payload=b"", retain=False):
+    return SimpleNamespace(topic=topic, payload=payload, retain=retain)
+
+
+def protobuf(seq=None, **metrics):
+    payload = sparkplug_b_pb2.Payload()
+    payload.timestamp = EPOCH
+    if seq is not None:
+        payload.seq = seq
+    for name, value in metrics.items():
+        m = payload.metrics.add()
+        m.name, m.datatype, m.double_value = name, 10, value
+    return payload.SerializeToString()
+
+
+class FakeRecorder:
+    """The subscription: delivers `arriving` when the loop starts, retained messages first."""
+
+    def __init__(self, arriving):
+        self.arriving = arriving
+        self.on_message = None
+
+    def subscribe(self, topic, qos=0):
+        self.topic = topic
+
+    def loop_start(self):
+        for msg in self.arriving:
+            self.on_message(self, None, msg)
+
+    def loop_stop(self):
+        pass
+
+    def disconnect(self):
+        pass
+
+
+class FakeBroker:
+    """A paho client for the playback session: CONNACK at once, every QoS 1 publish acknowledged."""
+    made = []
+    rc_after = None   # publishes after this many return MQTT_ERR_NO_CONN
+
+    def __init__(self, client_id=None, **_kwargs):
+        self.client_id = client_id
+        self.events = []
+        self.will = None
+        FakeBroker.made.append(self)
+
+    def username_pw_set(self, username, password):
+        self.username = username
+
+    def will_set(self, topic, payload, qos=0, retain=False):
+        self.will = (topic, payload, qos, retain)
+        self.events.append("will_set")
+
+    def tls_set(self, **_kwargs):
+        pass
+
+    def connect(self, host, port, keepalive):
+        self.events.append(("connect", host, port))
+        self.on_connect(self, None, {}, 0)
+
+    def loop_start(self):
+        self.events.append("loop_start")
+
+    def loop_stop(self):
+        self.events.append("loop_stop")
+
+    def subscribe(self, topic, qos=0):
+        self.events.append(("subscribe", topic, qos))
+        return 0, 1
+
+    def message_callback_add(self, sub, callback):
+        pass
+
+    def publish(self, topic, payload, qos=0, retain=False):
+        published = sum(1 for b in FakeBroker.made for e in b.events if e[0] == "publish")
+        lost = FakeBroker.rc_after is not None and published >= FakeBroker.rc_after
+        self.events.append(("publish", topic, payload, qos))
+        return SimpleNamespace(rc=4 if lost else 0, wait_for_publish=lambda timeout=None: None,
+                               is_published=lambda: not lost)
+
+    def disconnect(self):
+        self.events.append("disconnect")
+
+    def socket(self):
+        return None
+
+    def published(self):
+        return [e[1:] for e in self.events if e[0] == "publish"]
+
+
+def kind(topic):
+    return capture.split_topic(topic)[1]
+
+
+def bdseq_of(payload_bytes):
+    payload, _ = capture.decode_wire_payload(payload_bytes)
+    return next(m.long_value for m in payload.metrics if m.name == "bdSeq")
+
+
+class CommandLineTests(unittest.TestCase):
+
+    def setUp(self):
+        import playback_worker
+        self.worker = playback_worker
+        self.saved = (playback_worker.mqtt.Client, playback_worker.MQTT_HOST,
+                      playback_worker.MQTT_PORT, capture.PLAY_USER, capture.PLAY_PASSWORD,
+                      capture._connect)
+        playback_worker.mqtt.Client = FakeBroker
+        capture.PLAY_USER, capture.PLAY_PASSWORD = GW, "a-password"
+        FakeBroker.made, FakeBroker.rc_after = [], None
+        playback_worker._next_bdseq.clear()
+        self.folder = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        (self.worker.mqtt.Client, self.worker.MQTT_HOST, self.worker.MQTT_PORT, capture.PLAY_USER,
+         capture.PLAY_PASSWORD, capture._connect) = self.saved
+        self.worker._next_bdseq.clear()
+        self.folder.cleanup()
+
+    # -- record -----------------------------------------------------------------------------------
+    def record(self, arriving):
+        capture._connect = lambda *_args: FakeRecorder(arriving)
+        path = os.path.join(self.folder.name, "recorded.json")
+        args = argparse.Namespace(out=path, seconds=0, topic="spBv1.0/#", verbose=False)
+        with contextlib.redirect_stdout(io.StringIO()):
+            status = capture.cmd_record(args)
+        with open(path, encoding="utf-8") as fh:
+            return status, json.load(fh)
+
+    def test_record_leaves_out_state_and_commands(self):
+        """The primary host's STATE is retained, so it arrives on subscribe, every time."""
+        node = "spBv1.0/Aber/%s/" + CAPTURED_GW
+        status, document = self.record([
+            wire_message("spBv1.0/STATE/aber-ingestion", b'{"online":true,"timestamp":1}', True),
+            wire_message(node % "NCMD", protobuf(**{"Node Control/Rebirth": 1.0})),
+            wire_message(node % "DCMD" + "/" + CAPTURED_DEV, protobuf(Setpoint=1.0)),
+            wire_message(node % "NDATA", b""),
+            wire_message(node % "NBIRTH", protobuf(seq=0, Uptime_s=1.0)),
+            wire_message(node % "DBIRTH" + "/" + CAPTURED_DEV, protobuf(seq=1, Temperature=20.0)),
+            wire_message(node % "DDATA" + "/" + CAPTURED_DEV, protobuf(seq=2, Temperature=21.0)),
+        ])
+        self.assertEqual(status, 0)
+        self.assertEqual([kind(m["topic"]) for m in document["messages"]],
+                         ["NBIRTH", "DBIRTH", "DDATA"])
+        self.assertEqual(document["identities"], {"edge_nodes": [CAPTURED_GW],
+                                                  "devices": [CAPTURED_DEV]})
+        self.assertEqual(len(capture.plan_playback(document, GW, DEFAULT_MAP, NOW)), 3)
+
+    def test_a_recording_of_state_alone_says_so(self):
+        with self.assertRaises(capture.CaptureError) as caught:
+            self.record([wire_message("spBv1.0/STATE/aber-ingestion", b'{"online":true}', True)])
+        self.assertIn("were STATE, NCMD or DCMD", str(caught.exception))
+
+    # -- play -------------------------------------------------------------------------------------
+    def play(self, messages, **overrides):
+        path = os.path.join(self.folder.name, "capture.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(capture_file(messages, born=False), fh)
+        args = argparse.Namespace(
+            capture=path, map=["%s=%s" % (CAPTURED_DEV, DEV_A)], as_gateway=GW, speed=1000.0,
+            group=None, allow_unsane=False, dry_run=False, head=5, verbose=False)
+        for key, value in overrides.items():
+            setattr(args, key, value)
+        with contextlib.redirect_stdout(io.StringIO()):
+            return capture.cmd_play(args)
+
+    @staticmethod
+    def session(bdseq=9):
+        return [message(0, "NBIRTH", device=None, metrics=[
+                    {"name": "bdSeq", "datatype": 4, "long_value": bdseq}]),
+                message(10, "DBIRTH"), message(20, "DDATA")]
+
+    def assert_a_session(self, client, bdseq):
+        """The Will is the session's NDEATH; the NBIRTH repeats its bdSeq; the death ends it."""
+        will_topic, will_payload, will_qos, will_retain = client.will
+        self.assertEqual(will_topic, "spBv1.0/Aber/NDEATH/" + GW)
+        self.assertEqual((will_qos, will_retain), (1, False))
+        self.assertLess(client.events.index("will_set"), 1)
+        first, last = client.published()[0], client.published()[-1]
+        self.assertEqual(kind(first[0]), "NBIRTH")
+        self.assertEqual(bdseq_of(first[1]), bdseq)
+        self.assertEqual(bdseq_of(will_payload), bdseq)
+        self.assertEqual((kind(last[0]), last[2], bdseq_of(last[1])), ("NDEATH", 1, bdseq))
+        self.assertEqual(client.events[-2:], ["loop_stop", "disconnect"])
+
+    def test_play_opens_and_ends_the_dashboards_session(self):
+        """tck-id-payloads-ndeath-will-message, -nbirth-bdseq-repeat, -intentional-disconnect."""
+        self.assertEqual(self.play(self.session(bdseq=9)), 0)
+        client, = FakeBroker.made
+        self.assertEqual(client.username, GW)
+        self.assertEqual(client.events[1], ("connect", capture.MQTT_HOST, capture.MQTT_PORT))
+        self.assertEqual([kind(t) for t, _, _ in client.published()],
+                         ["NBIRTH", "DBIRTH", "DDATA", "NDEATH"])
+        self.assert_a_session(client, bdseq=0)
+
+    def test_a_recorded_ndeath_ends_one_session_and_the_next_opens_with_the_next_bdseq(self):
+        messages = self.session() + [message(30, "NDEATH", device=None),
+                                     message(40, "NBIRTH", device=None),
+                                     message(50, "NDATA", device=None)]
+        self.play(messages)
+        first, second = FakeBroker.made
+        self.assert_a_session(first, bdseq=0)
+        self.assert_a_session(second, bdseq=1)
+
+    def test_a_lost_connection_stops_the_run_instead_of_reporting_success(self):
+        FakeBroker.rc_after = 2
+        with self.assertRaises(capture.CaptureError) as caught:
+            self.play(self.session())
+        self.assertIn("publishing stopped after 2 message(s): the broker connection was lost",
+                      str(caught.exception))
+
+    def test_a_birthless_capture_is_refused_before_connecting(self):
+        with self.assertRaises(capture.CaptureError) as caught:
+            self.play([message(0, "DDATA")])
+        self.assertIn("holds no NBIRTH", str(caught.exception))
+        self.assertEqual(FakeBroker.made, [])
+
+    def test_the_credential_advice_is_the_gateways_page_and_the_delivered_secret(self):
+        capture.PLAY_USER = ""
+        with self.assertRaises(capture.CaptureError) as caught:
+            self.play(self.session())
+        text = str(caught.exception)
+        self.assertIn("Gateways page", text)
+        self.assertIn("mosquitto-passwords", text)
+        self.assertIn("playback_credentials.json", text)
+        self.assertNotIn("mosquitto-provision-gateway", text)
+        self.assertEqual(FakeBroker.made, [])
+
+    def test_the_map_help_names_the_replay_lanes(self):
+        text = capture.build_parser()._subparsers._group_actions[0].choices["play"].format_help()
+        self.assertIn("Prepare replay lanes", " ".join(text.split()))
 
 
 if __name__ == "__main__":
