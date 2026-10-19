@@ -1310,6 +1310,7 @@ class ACaptureAtTheCapFitsBothWorkers(unittest.TestCase):
             "p_device_map": mapping, "p_speed": CAP_SPEED})
         if status not in (200, 201) or not job_id:
             raise AssertionError(f"start_playback_job refused the capture at the cap: {status} {job_id}")
+        cls.playback_job_id = job_id
 
         def read():
             got, rows = cls.session.rest(f"/playback_jobs?select=*&id=eq.{job_id}&limit=1")
@@ -1329,9 +1330,21 @@ class ACaptureAtTheCapFitsBothWorkers(unittest.TestCase):
             except Exception as err:  # noqa: BLE001 -- cleanup must not mask a real failure
                 print(f"cleanup warning: {what}: {err}")
 
+        def settle(table, stop, job_id):
+            """A job left in flight blocks the next capture, or the next playback onto the gateway."""
+            def status():
+                got, rows = session.rest(f"/{table}?select=status&id=eq.{job_id}&limit=1")
+                return rows[0]["status"] if got == 200 and rows else None
+            if status() in ("PENDING", "RECORDING", "RUNNING"):
+                session.rpc(stop, {"p_job_id": job_id})
+                poll(status, lambda s: s not in ("PENDING", "RECORDING", "RUNNING"), FINISH_TIMEOUT, 1)
+
+        if getattr(cls, "playback_job_id", None):
+            attempt("stopping the playback", lambda: settle(
+                "playback_jobs", "request_playback_stop", cls.playback_job_id))
         if getattr(cls, "capture_job_id", None):
-            attempt("stopping the capture", lambda: session.rpc(
-                "request_capture_stop", {"p_job_id": cls.capture_job_id}))
+            attempt("stopping the capture", lambda: settle(
+                "capture_jobs", "request_capture_stop", cls.capture_job_id))
         if cls.lane:
             attempt("the lane", lambda: session.rest(f"/devices?sparkplug_id=eq.{cls.lane}",
                                                      method="DELETE"))
