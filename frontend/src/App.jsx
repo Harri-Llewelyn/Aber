@@ -466,7 +466,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   // One source for both: the person's user_settings row, cached in this browser. The account menu's
   // toggle, the rail's foot control and the Profile page all write through it.
   const { theme, setTheme, toggleTheme, sidebarMode, setSidebarMode, source: settingsSource } = useUserSettings(session?.user?.id)
-  const { toasts, showToast, expireToast, dismissToast, history, markAllRead, clearHistory } = useToast()
+  const { toasts, showToast, expireToast, dismissToast, history, markRead, clearHistory } = useToast()
 
   const { userRole, hasPermission, loadingPerms } = usePermissions(session)
 
@@ -618,7 +618,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
 
           {/* What the toasts said, beside what is wrong now and separate from it: the pill's count
               is a reason to act, and this list holds resolved and routine messages too. */}
-          <NotificationHistory entries={history} onMarkRead={markAllRead} onClear={clearHistory} />
+          <NotificationHistory entries={history} onMarkRead={markRead} onClear={clearHistory} />
 
           {/* A discovery aid rather than a preference, so it stays in the bar. */}
           <button

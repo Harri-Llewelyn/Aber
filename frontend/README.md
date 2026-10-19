@@ -814,10 +814,24 @@ corner and records the same message in the history behind the bell in the top ba
 - **The history** (`common/NotificationHistory.jsx`) keeps the latest 50 messages, newest first. A
   repeat of the newest entry is counted on it rather than filling the list. The bell's badge counts
   the unread entries, is not rendered at zero, and takes the tone of the worst unread entry; a
-  success leaves it neutral. Opening the list reads everything in it, dismissing a toast reads its
+  success leaves it neutral. Opening the list reads what it shows, dismissing a toast reads its
   entry, and a toast that times out stays unread. The list is a `role="dialog"` popover built like
   the alert pill's (`useEscapeKey`, `useClickOutside`): focus moves into it as it opens, and Escape
   or its close button hands focus back to the bell.
+- **The filter.** Under the heading, sticky with it, a `SegmentedControl` offers All and the three
+  groups as icons in one outlined pill, each segment named and titled with its count ("Alerts, 2").
+  It is back on All each time the panel opens, because opening reads what the list shows: a filter
+  left on would hide entries that opening then marked read. While a filter is on, only the entries
+  on show are read (`markRead(ids)` in `useToast`), so one that arrives in another group stays
+  unread until All is chosen. An empty group says so, and Clear still empties the whole list, which
+  its tooltip says while a filter is on. The alerts that have come and gone are only here, since the
+  pill shows what is firing now.
+- **`common/SegmentedControl.jsx`** is one choice from a few as a pill: on its own a
+  `role="radiogroup"` of `radio` segments, one Tab stop whose arrow keys move and choose (the WAI-ARIA
+  radio group pattern); with `menu`, a `role="group"` of `menuitemradio` segments for use inside a
+  `role="menu"`, where each is a Tab stop like the menu's other items and Left and Right move without
+  choosing. The chosen segment takes a sunken fill (`--bg-base`) and a border, so the choice is not
+  shown by colour alone (WCAG 1.4.1), and its icon takes the option's `tone`.
 - **Where it is kept.** In `sessionStorage` under `aber_notification_history`, so it survives a
   reload and stays in that browser tab. It holds message text only, and every read and write is
   wrapped so a blocked store degrades to memory. `App` clears it whenever the tab is left without a

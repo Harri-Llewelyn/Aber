@@ -123,6 +123,7 @@ describe('NotificationHistory', () => {
       expect(panel).toHaveFocus()
       expect(bell()).toHaveAttribute('aria-expanded', 'true')
       expect(onMarkRead).toHaveBeenCalledTimes(1)
+      expect(onMarkRead).toHaveBeenCalledWith([1])
     })
 
     it('does not mark anything read while it is closed, or when nothing is unread', () => {
@@ -225,7 +226,7 @@ describe('toasts feed the list', () => {
   let hook
   function Wired() {
     hook = useToast()
-    return <NotificationHistory entries={hook.history} onMarkRead={hook.markAllRead} onClear={hook.clearHistory} />
+    return <NotificationHistory entries={hook.history} onMarkRead={hook.markRead} onClear={hook.clearHistory} />
   }
 
   beforeEach(() => window.sessionStorage.clear())

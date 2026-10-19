@@ -116,11 +116,15 @@ export function useToast() {
       : prev)
   }, [])
 
-  const markAllRead = useCallback(() => {
-    setHistory(prev => prev.some(e => !e.read) ? prev.map(e => (e.read ? e : { ...e, read: true })) : prev)
+  /** Marks the entries with these ids read, or every entry when no list is given. */
+  const markRead = useCallback((ids) => {
+    const marks = Array.isArray(ids) ? (e) => ids.includes(e.id) : () => true
+    setHistory(prev => prev.some(e => !e.read && marks(e))
+      ? prev.map(e => (e.read || !marks(e) ? e : { ...e, read: true }))
+      : prev)
   }, [])
 
   const clearHistory = useCallback(() => setHistory([]), [])
 
-  return { toasts, showToast, expireToast, dismissToast, history, markAllRead, clearHistory }
+  return { toasts, showToast, expireToast, dismissToast, history, markRead, clearHistory }
 }

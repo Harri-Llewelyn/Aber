@@ -296,12 +296,16 @@ describe('the history useToast keeps', () => {
     expect(result.current.history.find(e => e.id === saved.id).read).toBe(false)
   })
 
-  it('marks everything read, and clears', () => {
+  it('marks the entries it is given read, or everything, and clears', () => {
     const { result } = renderHook(() => useToast())
     act(() => { result.current.showToast('one', 'success') })
     act(() => { result.current.showToast('two', 'warning') })
-    act(() => { result.current.markAllRead() })
+    const [two, one] = result.current.history
+    act(() => { result.current.markRead([one.id]) })
+    expect(result.current.history.map(e => e.read)).toEqual([false, true])
+    act(() => { result.current.markRead() })
     expect(result.current.history.every(e => e.read)).toBe(true)
+    expect(two.id).not.toBe(one.id)
 
     act(() => { result.current.clearHistory() })
     expect(result.current.history).toEqual([])
