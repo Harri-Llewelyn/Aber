@@ -296,6 +296,13 @@ class PublishAccountingTests(WorkerLoopCase):
         sent, _, error = self.run_job(a_session(readings=4))
         self.assertEqual((sent, error), (6, None))
 
+    def test_a_playback_shorter_than_a_progress_interval_still_reports_its_total(self):
+        """messages_total stayed 0 on the page for a job that finished within one interval."""
+        self.run_job(a_session(readings=1))
+        reports = self.supabase.called("playback_progress")
+        self.assertTrue(reports, "no progress was reported at all")
+        self.assertEqual(reports[0]["p_messages_total"], 3)
+
 
 # -------------------------------------------------------------------------------------------------
 # Waiting, stopping, and the end of a job
@@ -458,6 +465,17 @@ class MainLoopTests(ClockedCase):
         # Bounded, and then back to the queue.
         self.assertLessEqual(sum(self.clock.sleeps), playback_worker.FINISH_RETRY_SECONDS + 3 * 30)
         self.assertEqual(len(supabase.called("playback_claim_job")), 2)
+
+    def test_a_job_the_operator_stopped_is_logged_as_stopped_not_complete(self):
+        def stopped(supabase, storage, credentials, job, outcome=None):
+            outcome["stopped"] = True
+            return 2, 0, None
+        playback_worker._run_job = stopped
+        with self.assertLogs(playback_worker.logger, level="INFO") as logs:
+            self.main(playback_reconcile_jobs=lambda _p: 0)
+        log = "\n".join(logs.output)
+        self.assertIn("stopped by the operator: 2 message(s) published", log)
+        self.assertNotIn("complete", log)
 
     def test_the_heartbeat_is_started_before_any_job(self):
         self.main(playback_reconcile_jobs=lambda _p: 0)

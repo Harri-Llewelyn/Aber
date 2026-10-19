@@ -9,6 +9,9 @@ Requires the Supabase database (54322 by default) and the schema the chain decla
   * request_playback_stop() sets the flag on a job whose worker is reporting, and ends a job whose
     worker has been silent for over a minute as CANCELLED, saying how far it had got. The worker's
     playback_finish() then leaves that row alone.
+  * playback_reconcile_jobs() says whether a swept job never started, published nothing, or was cut
+    short, and how far.
+  * playback_report_credential_sources() keeps only held gateways and the three source names.
 
 The jobs are written as the owner onto the seeded Playback gateway, then each function is called as
 the caller it is meant for. Every test rolls back.
@@ -183,6 +186,35 @@ class StopTests(Base):
     def test_a_finished_job_is_not_stopped(self):
         job_id = self.job(status="COMPLETED", started_ago=None)
         self.assertIs(self.stop(job_id), False)
+
+
+class SweepTests(Base):
+    """playback_reconcile_jobs() words each job by what happened to it."""
+
+    def sweep(self):
+        self.as_caller(PLAYBACK_WORKER)
+        self.cur.execute("SELECT public.playback_reconcile_jobs()")
+        return self.cur.fetchone()[0]
+
+    def test_a_job_never_claimed_says_it_never_started(self):
+        job_id = self.job(status="PENDING", started_ago=None)
+        self.assertEqual(self.sweep(), 1)
+        status, _, error, finished, _ = self.row(job_id)
+        self.assertEqual((status, finished), ("FAILED", True))
+        self.assertIn("before this job started, so nothing was published", error)
+        self.assertNotIn("partway", error)
+
+    def test_a_running_job_that_published_nothing_says_so(self):
+        job_id = self.job(sent=0, total=40)
+        self.sweep()
+        error = self.row(job_id)[2]
+        self.assertIn("before it had published anything, so nothing was published", error)
+        self.assertNotIn("restarted", error, "a kill for memory is not a restart")
+
+    def test_a_job_cut_short_says_how_far_it_got(self):
+        job_id = self.job(sent=7, total=41)
+        self.sweep()
+        self.assertIn("after it had reported 7 message(s) published of 41", self.row(job_id)[2])
 
 
 PLAYBACK_GW = "gwy160000000000400080000"

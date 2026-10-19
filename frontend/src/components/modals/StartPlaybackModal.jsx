@@ -112,8 +112,9 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
    * not read as a death.
    */
   // 90 seconds is the window `gateway_status` derives staleness from, so a heartbeat inside it is
-  // the same "currently live" this stack means everywhere else.
-  const isLive = (t) => !!t?.last_heartbeat
+  // the same "currently live" this stack means everywhere else. ONLINE too: the NDEATH that ends
+  // every playback stamps the heartbeat while setting the gateway OFFLINE.
+  const isLive = (t) => t?.status === 'ONLINE' && !!t?.last_heartbeat
     && (Date.now() - new Date(t.last_heartbeat).getTime()) < 90 * 1000
 
   const WORKER_STALE_MS = 2 * 60 * 1000

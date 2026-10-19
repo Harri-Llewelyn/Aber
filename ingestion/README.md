@@ -938,6 +938,18 @@ error, so the end state used to be indistinguishable from a capture published in
 now reads the flag, and an error still outranks it: a job that was asked to stop *and* failed is a
 failure.
 
+**A stopped playback is an outcome, not a failure.** The Capture page shows a `CANCELLED` job as a
+neutral notice saying how many messages were published before it was stopped, and the worker logs
+it as stopped by the operator, not as complete. Only `FAILED` is red.
+
+**The startup sweep says what happened to each job it fails** (`0191`). A job still `PENDING`
+never started, so nothing was published. A `RUNNING` job whose last report was 0 published nothing.
+Any other gives the count from its last report. All three used to say *publishing stopped partway*,
+including a job killed for memory before its first message. The wording names no cause: the
+worker cannot tell a restart from a kill. The worker reports progress straight after its first
+publish, and while it waits for the primary host, so `messages_total` is on the row even for a
+playback that finishes within a second.
+
 **Stop takes effect within a second, even in a long gap** (`0191`). The worker waits for each
 message's due time in slices of at most a second, and reports progress after each slice, which is
 when it reads the stop flag. It used to sleep until the next message in one call. A capture with a

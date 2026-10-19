@@ -1062,9 +1062,19 @@ refused every playback onto the Playback gateway until the worker restarted.
   `stop_requested`, which the worker reads within a second. A worker that comes back is told to
   stop by its next `playback_progress()`, which answers true for a row no longer `RUNNING`, and its
   `playback_finish()` touches only `PENDING` and `RUNNING` rows.
+- **`playback_reconcile_jobs()` says what happened to each job it sweeps.** A `PENDING` job never
+  started, a `RUNNING` one that had reported nothing published nothing, and any other stopped after
+  the count it had reported. All three said *publishing stopped partway*. The wording names no
+  cause, because a restart and a kill for memory look the same from here.
+- **`playback_worker_status.credential_sources`** says which password the worker uses for each
+  gateway it holds: `delivered`, `helm` or `environment`, in the order it tries them. The worker
+  writes it through the new `playback_report_credential_sources()`, which the playback worker alone
+  may call and which keeps only held gateways and those three names. The Start Playback dialog
+  reads it. Names only: a password never leaves the worker.
 
-The column is additive and nullable: a job claimed before the upgrade has none, so its claim time
-is used. `test_playback_stop_and_sweep.py` holds both functions.
+Both columns are additive. `progress_reported_at` is nullable: a job claimed before the upgrade has
+none, so its claim time is used. `credential_sources` defaults to `{}`, which the dialog reads as a
+worker from before this release. `test_playback_stop_and_sweep.py` holds all four functions.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 

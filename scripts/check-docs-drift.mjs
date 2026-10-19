@@ -903,6 +903,7 @@ function edgeFunctionNames() {
     'public.start_playback_job': '0187 refuses a device map that names anything but the replay lane of the device its key names, so a replay never publishes as a real device; the baseline checked only that the target belonged to the gateway',
     'public.playback_progress': '0191 stamps progress_reported_at, which request_playback_stop() reads to tell a stalled job; the baseline kept no time of the last report',
     'public.request_playback_stop': '0191 ends a RUNNING job whose worker has not reported for a minute as CANCELLED, so a stalled worker cannot hold the target; the baseline only set the flag',
+    'public.playback_reconcile_jobs': '0191 words each swept job by what happened (never started, nothing published, or the count reached); the baseline said "publishing stopped partway" of all three',
     'public.refuse_archiving_the_last_shadow_gateway': '0187 words the refusal for the one Playback gateway; the baseline told an operator to mark another gateway is_shadow, which the API now refuses (the logic is unchanged)',
     'public.gateway_is_playback_delivery_target': '0183 answers is_shadow on an unarchived gateway, the target a playback may have; the baseline answers is_simulated, which delivered every simulator\'s password to the playback worker',
     'public.audit_trail_page': '0168 probes device_submodels rows for deletion beside device_nameplate, both keyed by their device; the baseline drew a deleted device\'s schema rows as live',

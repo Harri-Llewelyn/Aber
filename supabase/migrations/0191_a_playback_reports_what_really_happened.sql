@@ -12,6 +12,9 @@
 --     is more than a minute old ends the job here: CANCELLED, with what it had reported published.
 --     A worker that comes back is told to stop by its next playback_progress() call, which answers
 --     true for a row that is no longer RUNNING, and its playback_finish() leaves the row alone.
+--   * playback_reconcile_jobs(), the worker's startup sweep, says what happened to each job it
+--     fails: never started, nothing published, or stopped after the count it had reported. It said
+--     "publishing stopped partway" of all three.
 --   * playback_worker_status.credential_sources, written by the new
 --     playback_report_credential_sources(), says which password source the worker uses for each
 --     gateway: the delivered one, or the Helm value it falls back to when the broker refuses the
@@ -114,6 +117,47 @@ $$;
 COMMENT ON FUNCTION public.request_playback_stop(p_job_id uuid) IS 'Stop a playback. A PENDING job is cancelled outright. A RUNNING job gets stop_requested, which the worker reads within a second; one whose worker has not reported for more than a minute is ended here as CANCELLED, saying how much it had reported published, so a stalled worker cannot hold the target (0191). Returns false for a job already finished.';
 
 -- -------------------------------------------------------------------------------------------------
+-- The startup sweep says what happened to each job
+-- -------------------------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.playback_reconcile_jobs() RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_n integer;
+BEGIN
+    PERFORM public.require_playback_caller('playback_reconcile_jobs');
+
+    -- Worded by what happened, from the job's last progress report: a job never claimed, one that
+    -- had published nothing, and one cut short. Not why the worker stopped, which only its pod's
+    -- history knows (a restart, an upgrade, or a kill for memory).
+    WITH swept AS (
+        UPDATE public.playback_jobs
+           SET status = 'FAILED', finished_at = now(),
+               error = CASE
+                 WHEN status = 'PENDING' THEN
+                   'the playback worker restarted before this job started, so nothing was '
+                   'published. Start the playback again.'
+                 WHEN messages_sent = 0 THEN
+                   'the playback worker stopped while this job was running, before it had '
+                   'published anything, so nothing was published. Start the playback again.'
+                 ELSE format(
+                   'the playback worker stopped while this job was running, after it had reported '
+                   '%s message(s) published%s. The rest were not published.',
+                   messages_sent,
+                   CASE WHEN messages_total > 0 THEN format(' of %s', messages_total) ELSE '' END)
+               END
+         WHERE status IN ('PENDING', 'RUNNING')
+        RETURNING 1
+    )
+    SELECT count(*) INTO v_n FROM swept;
+    RETURN v_n;
+END;
+$$;
+
+COMMENT ON FUNCTION public.playback_reconcile_jobs() IS 'The playback worker''s startup sweep: fails every PENDING or RUNNING job a previous run left, saying whether it never started, published nothing, or stopped after the count it had reported (0191). The worker claims nothing until this has run.';
+
+-- -------------------------------------------------------------------------------------------------
 -- Which password the worker uses for each gateway
 -- -------------------------------------------------------------------------------------------------
 -- The worker holds up to three passwords per gateway: the one delivered when its credential was
@@ -183,6 +227,10 @@ BEGIN
     IF position('v_silent > 60' IN
                 (SELECT prosrc FROM pg_proc WHERE oid = 'public.request_playback_stop(uuid)'::regprocedure)) = 0 THEN
         RAISE EXCEPTION '0191 self-check: request_playback_stop() does not end a stalled job';
+    END IF;
+    IF position('before this job started' IN
+                (SELECT prosrc FROM pg_proc WHERE oid = 'public.playback_reconcile_jobs()'::regprocedure)) = 0 THEN
+        RAISE EXCEPTION '0191 self-check: playback_reconcile_jobs() still words every job the same';
     END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns
                     WHERE table_schema = 'public' AND table_name = 'playback_worker_status'

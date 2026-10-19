@@ -16,7 +16,8 @@ import { StartCaptureModal } from '../modals/StartCaptureModal'
 import { StartPlaybackModal } from '../modals/StartPlaybackModal'
 import { UploadCaptureModal } from '../modals/UploadCaptureModal'
 import {
-  IconCpu, IconDownload, IconPlay, IconRadio, IconRecord, IconShieldAlert, IconTrash, IconUpload, IconX
+  IconCpu, IconDownload, IconInfo, IconPlay, IconRadio, IconRecord, IconShieldAlert, IconTrash, IconUpload,
+  IconX
 } from '../common/Icons'
 import { HelpTip } from '../common/HelpTip'
 import { CardHeading } from '../common/CardHeading'
@@ -1062,9 +1063,10 @@ function writeDismissed(ids) {
 }
 
 /**
- * A failure that has just happened, until it is read. The 15-minute window covers the operator who
- * never returns; the dismiss button covers the one looking now. Not a modal: failures arrive
- * asynchronously, and a dialog would block whatever the operator came to do.
+ * A failure, or a cancel, that has just happened, until it is read. A cancel is neutral, not red.
+ * The 15-minute window covers the operator who never returns; the dismiss button covers the one
+ * looking now. Not a modal: failures arrive asynchronously, and a dialog would block whatever the
+ * operator came to do.
  */
 function RecentFailures({ jobs, kind = 'capture' }) {
   const [dismissed, setDismissed] = useState(readDismissed)
@@ -1089,28 +1091,41 @@ function RecentFailures({ jobs, kind = 'capture' }) {
 
   return (
     <>
-      {failed.map(job => (
-        <div key={job.id} className="callout callout-danger">
-          <IconShieldAlert size={14} className="callout-icon" />
-          <div style={{ fontSize: '12px', flex: 1 }}>
-            <strong>
-              {job.devices?.name || job.gateways?.name
-                || job.subject_sparkplug_id || job.target_edge_node_id}
-            </strong>
-            {' — '}{kind === 'playback' ? 'playback ' : ''}
-            {job.status === 'CANCELLED' ? 'cancelled' : 'failed'}
-            {job.error ? `: ${job.error}` : '.'}
+      {failed.map(job => {
+        // An operator's own cancel is an outcome, not a fault: neutral, and a stopped playback
+        // says how far it got.
+        const cancelled = job.status === 'CANCELLED'
+        const outcome = !cancelled ? 'failed' : kind === 'playback' ? 'stopped' : 'cancelled'
+        const reached = job.messages_total
+          ? `${job.messages_sent || 0} of ${plural(job.messages_total, 'message')}`
+          : plural(job.messages_sent || 0, 'message')
+        const detail = job.error ? `: ${job.error}`
+          : cancelled && kind === 'playback' ? `: ${reached} published before it was stopped.` : '.'
+        return (
+          <div key={job.id} className={`callout ${cancelled ? 'callout-info' : 'callout-danger'}`}>
+            {cancelled
+              ? <IconInfo size={14} className="callout-icon" />
+              : <IconShieldAlert size={14} className="callout-icon" />}
+            <div style={{ fontSize: '12px', flex: 1 }}>
+              <strong>
+                {job.devices?.name || job.gateways?.name
+                  || job.subject_sparkplug_id || job.target_edge_node_id}
+              </strong>
+              {' — '}{kind === 'playback' ? 'playback ' : ''}
+              {outcome}
+              {detail}
+            </div>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => dismiss(job.id)}
+              title="Dismiss this notice. It will not come back, on this browser."
+              aria-label={`Dismiss the ${kind} ${cancelled ? 'outcome' : 'failure'} notice`}
+            >
+              <IconX size={13} />
+            </button>
           </div>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => dismiss(job.id)}
-            title="Dismiss this notice. It will not come back, on this browser."
-            aria-label={`Dismiss the ${kind} failure notice`}
-          >
-            <IconX size={13} />
-          </button>
-        </div>
-      ))}
+        )
+      })}
     </>
   )
 }

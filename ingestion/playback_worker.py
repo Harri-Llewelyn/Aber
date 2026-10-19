@@ -1107,6 +1107,9 @@ def main():
 
         if error:
             logger.warning("Playback %s failed after %d message(s): %s", job["id"], sent, error)
+        elif outcome.get("stopped"):
+            logger.info("Playback %s stopped by the operator: %d message(s) published as %s.",
+                        job["id"], sent, job["target_edge_node_id"])
         else:
             logger.info("Playback %s complete: %d message(s) published as %s.",
                         job["id"], sent, job["target_edge_node_id"])
