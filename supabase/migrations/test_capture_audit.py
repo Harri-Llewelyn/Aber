@@ -7,7 +7,7 @@ Requires the Supabase database (54322 by default) with the chain applied, and su
 same password) for the upload tests, which need a stand-in for storage.objects: the db lane has no
 storage-api, so the table does not exist there. Those tests skip themselves where it does exist.
 
-Three things are held here:
+Four things are held here:
 
   * each capture and playback act writes one audit row, in the asset lane, naming who did it and
     what it acted on: starting and stopping a recording, storing an upload or a recording, issuing
@@ -15,6 +15,8 @@ Three things are held here:
     and stopping a playback. A refused act, a repeated call and a progress report write none;
   * a gateway a playback names cannot be deleted, nor can the last unarchived Playback gateway, for
     any role; such a gateway can still be archived, and the nightly purge skips it;
+  * ending a RUNNING playback sets the Playback gateway and its lanes OFFLINE, as an applied NDEATH
+    does, and a finish for a job that already ended changes nothing;
   * the rows are readable by the roles that read captures, and not by an Operator.
 
 Every test rolls back.
@@ -550,6 +552,77 @@ class APlaybackGatewayKeepsItsHistory(Base):
         self.cur.execute(self.cur.fetchone()["command"])
         self.cur.execute("SELECT id::text AS id FROM public.gateways WHERE id IN (%s, %s);", (kept, purged))
         self.assertEqual([r["id"] for r in self.cur.fetchall()], [kept])
+
+
+class APlaybackEndsItsSession(Base):
+    """playback_finish() makes the change an applied NDEATH makes, since the broker sent none."""
+
+    def setUp(self):
+        super().setUp()
+        self.lane, _ = self._device(PLAYBACK_GATEWAY, shadow_of=self.dev, status="ONLINE")
+        self.cur.execute("UPDATE public.gateways SET status = 'ONLINE', last_heartbeat = now() "
+                         "WHERE id = %s;", (PLAYBACK_GATEWAY,))
+
+    def _state(self):
+        self.cur.execute("SELECT (SELECT status FROM public.gateways WHERE id = %s) AS gateway, "
+                         "(SELECT status FROM public.devices WHERE id = %s) AS lane;",
+                         (PLAYBACK_GATEWAY, self.lane))
+        row = self.cur.fetchone()
+        return row["gateway"], row["lane"]
+
+    def _finish(self, job, error=None):
+        self._run("playback", "SELECT public.playback_finish(%s, 3, %s, 0);", (job, error))
+
+    def test_a_lost_connection_leaves_the_gateway_and_its_lanes_offline(self):
+        job = self._playback_job()
+        self._finish(job, "publishing stopped after 3 message(s): the broker connection was lost")
+        self.assertEqual(self._state(), ("OFFLINE", "OFFLINE"))
+
+    def test_every_terminal_state_does_it(self):
+        for stop_requested, error in ((False, None), (True, None)):
+            with self.subTest(stop_requested=stop_requested):
+                self.cur.execute("SAVEPOINT outcome;")
+                job = self._playback_job()
+                self.cur.execute("UPDATE public.playback_jobs SET stop_requested = %s WHERE id = %s;",
+                                 (stop_requested, job))
+                self._finish(job, error)
+                self.assertEqual(self._state(), ("OFFLINE", "OFFLINE"))
+                self.cur.execute("ROLLBACK TO SAVEPOINT outcome;")
+
+    def test_the_change_is_attributed_to_the_worker(self):
+        job = self._playback_job()
+        self._finish(job, "publishing stopped after 3 message(s): the broker connection was lost")
+        self.cur.execute("SELECT actor_source, changed_by::text AS changed_by FROM public.audit_trail "
+                         "WHERE entity_id = %s AND action = 'UPDATE' ORDER BY id DESC LIMIT 1;",
+                         (PLAYBACK_GATEWAY,))
+        self.assertEqual(dict(self.cur.fetchone()), {"actor_source": "service", "changed_by": PLAYBACK})
+
+    def test_a_job_that_already_ended_changes_nothing(self):
+        """
+        Stop ended this job while its worker was silent, so the target was free for the next
+        playback, whose NBIRTH has set the gateway ONLINE. The old worker's late finish must not
+        undo that.
+        """
+        old = self._playback_job(reported_ago="5 minutes")
+        self._run("Shopfloor_Manager", "SELECT public.request_playback_stop(%s);", (old,))
+        self._playback_job(status="RUNNING")
+        self._finish(old)
+        self.assertEqual(self._state(), ("ONLINE", "ONLINE"))
+
+    def test_a_job_never_claimed_opened_no_session_to_end(self):
+        job = self._playback_job(status="PENDING")
+        self._finish(job, "the capture could not be read")
+        self.assertEqual(self._state(), ("ONLINE", "ONLINE"))
+
+    def test_a_newer_playback_cannot_start_until_the_finish_commits(self):
+        """The one-per-target index, which is why the OFFLINE write cannot land after a newer NBIRTH."""
+        self._playback_job()
+        with self.assertRaises(pg_errors.UniqueViolation):
+            self.cur.execute("SAVEPOINT second;")
+            try:
+                self._playback_job(status="PENDING")
+            finally:
+                self.cur.execute("ROLLBACK TO SAVEPOINT second;")
 
 
 if __name__ == "__main__":

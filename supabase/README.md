@@ -1190,8 +1190,17 @@ Each carries the subject's `name` and `sparkplug_id`, which the Audit Trail name
 - **The nightly purge skips a gateway with replay history.** `purge_expired_archives` is one
   transaction, so one refused delete would keep every expired archive. `0193` states the job again
   with the skip; a later change to it goes in a later file.
+- **`playback_finish()` ends the session in the platform.** When the broker cuts the worker's
+  session, as Dynamic Security does when the gateway's credential is re-issued, it publishes no
+  Will, and the worker cannot send the NDEATH with a password that no longer works. So when
+  `playback_finish()` ends a `RUNNING` job, it makes the change an applied NDEATH makes: the shadow
+  target `OFFLINE` if it still reads `ONLINE`, and its non-archived lanes `OFFLINE`. Both writes are
+  ordinary audited updates, attributed to the playback worker. A newer playback's NBIRTH cannot be
+  overwritten: the one-per-target index admits no other `PENDING` or `RUNNING` job onto the gateway
+  until this transaction commits, and a finish for a job that already ended (a stalled job Stop
+  ended) changes nothing.
 
-`test_capture_audit.py` holds every act, the deletion guard and the purge.
+`test_capture_audit.py` holds every act, the deletion guard, the purge and the session's end.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 

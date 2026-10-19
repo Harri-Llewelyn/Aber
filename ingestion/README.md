@@ -1057,6 +1057,15 @@ daemon ignores a death that does not match the open session
 ([*A death from an earlier session*](#a-death-from-an-earlier-session)). A recorded NDEATH ends the
 session where it was recorded, and the next message opens the next one.
 
+**A session the broker cut is ended by the job's finish.** When the Playback gateway's credential
+is re-issued, Dynamic Security disconnects the worker as an administrative action and publishes no
+Will. The worker cannot send the NDEATH either: its password no longer works. So
+`playback_finish()`, which the worker calls once its session has ended, sets the gateway `OFFLINE`
+if it still reads `ONLINE`, and its replay lanes `OFFLINE`, as an applied NDEATH does (`0193`; the
+host's side of `tck-id-operational-behavior-edge-node-termination-host-action-ndeath-node-offline`
+and `-devices-offline`). Nothing is published. This cannot overwrite a newer playback's `NBIRTH`:
+no other job can be queued onto the gateway until the finish commits.
+
 **A re-issue reaches the worker within about a minute**, and until then the worker holds the
 previous password. That used to fail silently and is now caught: `connect()` returns after the
 TCP handshake and the CONNACK arrives later on the network loop, so a *wrong* password connected at

@@ -937,6 +937,7 @@ function edgeFunctionNames() {
   const INTENDED_REDECLARATIONS = {
     'public.start_playback_job': '0187 refuses a device map that names anything but the replay lane of the device its key names, so a replay never publishes as a real device; the baseline checked only that the target belonged to the gateway. 0193 writes a PLAYBACK_STARTED audit row naming the capture and the target',
     'public.playback_progress': '0191 stamps progress_reported_at, which request_playback_stop() reads to tell a stalled job; the baseline kept no time of the last report',
+    'public.playback_finish': '0193 sets the Playback gateway and its replay lanes OFFLINE when it ends a RUNNING job, as an applied NDEATH does, because a session the broker cut sends no Will; the baseline recorded only the outcome',
     'public.request_playback_stop': '0191 ends a RUNNING job whose worker has not reported for a minute as CANCELLED, so a stalled worker cannot hold the target; the baseline only set the flag. 0193 writes a PLAYBACK_STOPPED audit row for each stop that changes the job',
     'public.playback_reconcile_jobs': '0191 words each swept job by what happened (never started, nothing published, or the count reached); the baseline said "publishing stopped partway" of all three',
     'public.refuse_archiving_the_last_shadow_gateway': '0187 words the refusal for the one Playback gateway; the baseline told an operator to mark another gateway is_shadow, which the API now refuses (the logic is unchanged)',

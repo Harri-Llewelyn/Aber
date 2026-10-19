@@ -1982,7 +1982,9 @@ paths:
         **The record outlives the capture and the target (0193).** Starting and stopping a playback
         write `PLAYBACK_STARTED` and `PLAYBACK_STOPPED`, naming the capture and the target. Deleting
         the capture leaves `capture_id` null and the row standing, and a gateway these rows name
-        cannot be deleted (409): archive it instead.
+        cannot be deleted (409): archive it instead. When the worker records a `RUNNING` job's end,
+        the Playback gateway and its lanes are set `OFFLINE` if they still read `ONLINE`, because a
+        session the broker cut sends no Will.
 
         `speed` divides both the send schedule and the timestamp rebasing, so it is bounded to
         `(0, 60]`. Zero is refused rather than treated as "as fast as possible": the historian

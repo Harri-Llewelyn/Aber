@@ -16,6 +16,8 @@
 --     Playback gateway. A trigger refuses both, so the foreign key's CASCADE is never reached:
 --     0001's constraint guard puts back CASCADE on every boot, so a changed key would be dropped
 --     and added twice per boot. The nightly purge skips a gateway with replay history.
+--   * playback_finish() sets the target OFFLINE, with its replay lanes, when it ends a RUNNING
+--     job. The broker sends no Will when it cuts a session, and the worker cannot send the NDEATH.
 --
 -- Reasoning: supabase/README.md, "Captures and replays leave an audit trail (0193)". Idempotent.
 
@@ -1014,7 +1016,63 @@ ALTER FUNCTION public.request_playback_stop(p_job_id uuid) OWNER TO postgres;
 COMMENT ON FUNCTION public.request_playback_stop(p_job_id uuid) IS 'Stop a playback. A PENDING job is cancelled outright. A RUNNING job gets stop_requested, which the worker reads within a second; one whose worker has not reported for more than a minute is ended here as CANCELLED, saying how much it had reported published, so a stalled worker cannot hold the target (0191). Each stop that changes the job writes a PLAYBACK_STOPPED audit row (0193). Returns false for a job already finished.';
 
 -- -------------------------------------------------------------------------------------------------
--- 11. A playback's history outlives its target
+-- 11. A playback's end ends its session in the platform
+-- -------------------------------------------------------------------------------------------------
+-- When the broker cuts the worker's session (a re-issued credential, through Dynamic Security) it
+-- publishes no Will, and the worker cannot publish the NDEATH with a password that no longer works.
+-- So the end of a RUNNING job makes the change an applied NDEATH makes: the Playback gateway
+-- OFFLINE if it still reads ONLINE, and its lanes OFFLINE. The worker's session has ended before
+-- it calls this. A newer playback's NBIRTH cannot be overwritten: the one-per-target index admits
+-- no other PENDING or RUNNING job onto this gateway until this transaction commits, and a finish
+-- for a job that already ended changes nothing.
+CREATE OR REPLACE FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text DEFAULT NULL::text, p_messages_out_of_window integer DEFAULT 0) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public'
+    AS $$
+DECLARE
+    v_job public.playback_jobs;
+BEGIN
+    PERFORM public.require_playback_caller('playback_finish');
+
+    SELECT * INTO v_job FROM public.playback_jobs WHERE id = p_job_id FOR UPDATE;
+    IF NOT FOUND OR v_job.status NOT IN ('PENDING', 'RUNNING') THEN
+        RETURN;
+    END IF;
+
+    UPDATE public.playback_jobs
+       SET status = CASE
+                      WHEN p_error IS NOT NULL THEN 'FAILED'
+                      WHEN stop_requested THEN 'CANCELLED'
+                      ELSE 'COMPLETED'
+                    END,
+           finished_at = now(),
+           messages_sent = greatest(coalesce(p_messages_sent, messages_sent), 0),
+           messages_out_of_window = greatest(coalesce(p_messages_out_of_window, 0), 0),
+           error = left(nullif(btrim(coalesce(p_error, '')), ''), 2000)
+     WHERE id = p_job_id;
+
+    IF v_job.status = 'RUNNING' THEN
+        UPDATE public.gateways g
+           SET status = 'OFFLINE'
+         WHERE g.id = v_job.target_gateway_id AND g.is_shadow AND g.status = 'ONLINE';
+
+        UPDATE public.devices d
+           SET status = 'OFFLINE'
+          FROM public.gateways g
+         WHERE g.id = v_job.target_gateway_id AND g.is_shadow
+           AND d.gateway_id = g.id
+           AND d.is_archived IS NOT TRUE
+           AND d.status IS DISTINCT FROM 'OFFLINE';
+    END IF;
+END;
+$$;
+
+ALTER FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text, p_messages_out_of_window integer) OWNER TO postgres;
+
+COMMENT ON FUNCTION public.playback_finish(p_job_id uuid, p_messages_sent integer, p_error text, p_messages_out_of_window integer) IS 'The playback worker recording the end of a job. Three outcomes, in this order: an error is FAILED; a job whose stop_requested flag was raised while it ran is CANCELLED; anything else is COMPLETED. The error outranks the flag because it is the half an operator can act on. Only a PENDING or RUNNING row is touched, so a job already cancelled before it was claimed keeps the status request_playback_stop() gave it. p_messages_out_of_window is recorded and not judged: the worker holds the plan and decides there, and a job whose every message would be discarded is reported here as an error. Ending a RUNNING job also sets its shadow target OFFLINE if it still reads ONLINE, and the target''s replay lanes OFFLINE, as an applied NDEATH does: a session the broker cut sends no Will (0193).';
+
+-- -------------------------------------------------------------------------------------------------
+-- 12. A playback's history outlives its target
 -- -------------------------------------------------------------------------------------------------
 -- What playback_jobs_target_gateway_id_fkey would do as ON DELETE RESTRICT, and the delete half of
 -- 0067's archive rule. BEFORE DELETE, so it refuses before the key's CASCADE runs. No role is
@@ -1120,6 +1178,10 @@ BEGIN
     END IF;
   END LOOP;
 
+  IF position('''OFFLINE''' IN (SELECT prosrc FROM pg_proc
+                                  WHERE oid = 'public.playback_finish(uuid, integer, text, integer)'::regprocedure)) = 0 THEN
+    RAISE EXCEPTION '0193: playback_finish() does not end the target''s session';
+  END IF;
 
   IF public.live_trigger_statement('public.captures', 'trg_captures_audit_delete') IS NULL THEN
     RAISE EXCEPTION '0193: captures has no trg_captures_audit_delete';

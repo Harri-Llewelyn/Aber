@@ -357,8 +357,8 @@ python supabase/migrations/test_capture_retention.py
 # upload or a recording, issuing a download link, deleting a capture, and starting and stopping a
 # playback each write one row naming who did it; a refused act, a repeated call and a progress
 # report write none. A gateway a playback names cannot be deleted, nor can the last Playback
-# gateway, and the nightly purge skips one. Creates a stand-in storage.objects as supabase_admin for
-# the upload tests.
+# gateway, and the nightly purge skips one. The end of a RUNNING playback sets the Playback gateway
+# and its lanes OFFLINE. Creates a stand-in storage.objects as supabase_admin for the upload tests.
 python supabase/migrations/test_capture_audit.py
 # The capture and playback helpers answer only a caller who could read the job (0184). An Operator
 # gets false from is_active_capture_object() and is_active_playback_capture() and no rows from
