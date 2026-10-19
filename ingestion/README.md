@@ -404,8 +404,40 @@ fallback, so a hand-edit valid in the file is valid to the daemon. Recording and
 through the daemon's own reader, `json_payload()`, so a replayed message carries what the daemon
 stored from the original, metric for metric.
 
-**Playback re-encodes into the encoding each message arrived in.** Both are live traffic here — the
-gateway appliance's flow publishes JSON, a standard Sparkplug B edge node protobuf — and they enter the
+**The file is a faithful record of the payload.** A replay is the message that was received, apart
+from the identity rewrite, the timestamps and the session numbers (bdSeq and `seq`). Every field
+the proto defines is recorded when it is set, and only then: a metric's name, alias, timestamp and
+datatype; `is_historical`, `is_transient` and `is_null` (written only when true, as the daemon
+reads them); `metadata` and `properties`; and its value — one of the six scalar fields, or
+`bytes_value`, `dataset_value`, `template_value` or `extension_value`. The payload's
+`timestamp`, `seq`, `uuid` and `body` are recorded too. The sub-messages (`metadata`,
+`properties`, DataSets and Templates) are in protobuf's JSON mapping with the proto's field names,
+so a 64-bit integer inside one is a string; bytes and the body are base64; an extension value is its
+serialised bytes in base64, because its fields are ones the proto does not name. A file written
+before 1.5 has none of these and still reads.
+
+- **Why every field.** `is_null` is the one the daemon acts on: a recorded appliance NBIRTH
+  declares the metrics it does not know yet, and its outage report, as null
+  (`tck-id-topics-nbirth-metric-reqs`). Recorded without the flag, the replay logged "sent an
+  unusable outage report" and "unusable health metric" for reports the gateway never sent. A
+  Template definition kept neither `is_definition` nor its members, and an instance lost its
+  `template_ref` (`tck-id-payloads-template-definition-is-definition`, `-members`,
+  `-template-instance-ref`).
+- **The daemon's JSON reader reads them too**, because it is the same `json_payload()`: a JSON
+  publisher's `"is_null": true` is honoured. A field not in the file's form (a `properties`
+  that is not a PropertySet, bytes that are not base64) is ignored and the metric kept, as the
+  reader ignored every one of these keys before.
+- **What it costs.** Measured on 2026-10-19 by `len(json.dumps(entry))`, the count the capture
+  cap uses: the gateway appliance's NBIRTH (its metrics in
+  `forge/gateway-platform/appliance/flows.template.json`, with the five outage metrics null) grows
+  from 1,567 to 1,652 bytes, 1.054×; a freshly enrolled appliance's, with eleven nulls, from 1,342
+  to 1,529, 1.139×. A DDATA of 50 aliased integers, and one of 10 named doubles, do not grow at all
+  (1.000×): a data message rarely carries any of these fields. The indent=2 file grows by the same
+  ratios. Births are a few messages in a capture, so the caps are unaffected in practice.
+
+**Playback re-encodes into the encoding each message arrived in.** Both reach the daemon: a standard
+Sparkplug B edge node, the gateway appliance included, publishes protobuf, and a Node-RED flow or
+another publisher may send the JSON shape `parse_sparkplug_payload()` accepts. They enter the
 daemon down different branches of `parse_sparkplug_payload()`. Replaying a JSON fleet as protobuf
 would mean a fault reproduced through this tool could be one the playback introduced, or one it
 silently repaired.

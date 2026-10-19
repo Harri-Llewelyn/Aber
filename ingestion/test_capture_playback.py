@@ -144,6 +144,117 @@ class PayloadRoundTripTests(unittest.TestCase):
         self.assertEqual(by_name["i"].int_value, 7)
         self.assertEqual(by_name["l"].long_value, 2 ** 40)
 
+    @staticmethod
+    def _every_field():
+        """A payload using every field the proto defines beyond the six scalar values."""
+        payload = sparkplug_b_pb2.Payload()
+        payload.timestamp = EPOCH
+        payload.seq = 4
+        payload.uuid = "aber-test"
+        payload.body = b"\x00\x01raw"
+
+        declared = payload.metrics.add()
+        declared.name, declared.datatype, declared.timestamp = "Agent_Version", 12, EPOCH
+        declared.is_null = True
+        declared.is_transient = True
+        declared.metadata.content_type = "text/plain"
+        declared.metadata.size = 2 ** 40
+        declared.properties.keys.extend(["engUnit", "limits"])
+        unit = declared.properties.values.add()
+        unit.type, unit.string_value = 12, "°C"
+        limits = declared.properties.values.add()
+        limits.type = 20
+        limits.propertyset_value.keys.append("high")
+        high = limits.propertyset_value.values.add()
+        high.type, high.double_value = 10, 85.5
+
+        blob = payload.metrics.add()
+        blob.name, blob.datatype, blob.bytes_value = "Snapshot", 17, b"\xff\x00\x10"
+
+        table = payload.metrics.add()
+        table.name, table.datatype = "Recipe", 16
+        table.dataset_value.num_of_columns = 2
+        table.dataset_value.columns.extend(["step", "temp"])
+        table.dataset_value.types.extend([3, 10])
+        row = table.dataset_value.rows.add()
+        row.elements.add().int_value = 1
+        row.elements.add().double_value = 180.0
+
+        definition = payload.metrics.add()
+        definition.name, definition.datatype = "_types_/Motor", 19
+        definition.template_value.is_definition = True
+        definition.template_value.version = "1"
+        member = definition.template_value.metrics.add()
+        member.name, member.datatype, member.long_value = "Rpm", 8, 2 ** 63
+        parameter = definition.template_value.parameters.add()
+        parameter.name, parameter.type, parameter.string_value = "Rated", 12, "4kW"
+
+        instance = payload.metrics.add()
+        instance.name, instance.datatype, instance.alias = "Line/Motor1", 19, 9
+        instance.template_value.template_ref = "_types_/Motor"
+        instance.template_value.metrics.add().CopyFrom(member)
+
+        extended = payload.metrics.add()
+        extended.name = "Vendor"
+        # An extension's content is fields the proto does not name: kept as the bytes received.
+        extended.extension_value.MergeFromString(b"\x08\x96\x01")
+        return payload
+
+    def test_carries_every_metric_field_and_the_body(self):
+        """
+        The file is a faithful record: the replay is the message received
+        (tck-id-topics-nbirth-metrics, tck-id-payloads-template-definition-is-definition,
+        -members, -template-instance-ref).
+        """
+        payload = self._every_field()
+        data, restored = self._round_trip(payload)
+        self.assertEqual(restored.SerializeToString(), payload.SerializeToString())
+        declared = data["metrics"][0]
+        self.assertEqual((declared["is_null"], declared["is_transient"]), (True, True))
+        self.assertNotIn("string_value", declared)
+        self.assertTrue(restored.metrics[0].HasField("is_null"))
+        self.assertEqual(restored.metrics[3].template_value.is_definition, True)
+        self.assertEqual(restored.metrics[4].template_value.template_ref, "_types_/Motor")
+
+    def test_the_file_survives_json_and_a_json_replay_carries_the_same(self):
+        payload = self._every_field()
+        data = json.loads(json.dumps(capture.payload_to_dict(payload)))
+        self.assertEqual(capture.dict_to_payload_bytes(data), payload.SerializeToString())
+        wire = capture.encode_wire_payload(data, capture.ENCODING_JSON)
+        self.assertEqual(capture.json_payload(json.loads(wire)).SerializeToString(),
+                         payload.SerializeToString())
+
+    def test_a_flag_that_is_false_is_not_written(self):
+        payload = sparkplug_b_pb2.Payload()
+        m = payload.metrics.add()
+        m.name, m.double_value, m.is_null, m.is_transient = "t", 1.0, False, False
+        data = capture.payload_to_dict(payload)
+        self.assertEqual(data["metrics"][0], {"name": "t", "double_value": 1.0})
+
+    def test_a_file_without_the_new_fields_still_reads(self):
+        restored = capture.dict_to_payload({"timestamp": EPOCH, "metrics": [
+            {"name": "t", "datatype": 10, "double_value": 1.0}]})
+        metric = restored.metrics[0]
+        self.assertFalse(restored.HasField("body"))
+        for field in ("is_null", "is_transient", "metadata", "properties"):
+            self.assertFalse(metric.HasField(field), field)
+        self.assertEqual(metric.double_value, 1.0)
+
+    def test_a_field_not_in_the_files_form_costs_only_itself(self):
+        # The daemon reads JSON traffic with the same reader, and it ignored these keys before.
+        restored = capture.dict_to_payload({"body": "not base64!", "metrics": [
+            {"name": "a", "double_value": 1.0, "properties": {"engUnit": "C"}, "metadata": "x",
+             "is_null": "true"},
+            {"name": "b", "bytes_value": "%%%"},
+            {"name": "c", "dataset_value": {"rows": "many"}},
+        ]})
+        a, b, c = restored.metrics
+        self.assertFalse(restored.HasField("body"))
+        self.assertEqual(a.double_value, 1.0)
+        for field in ("properties", "metadata", "is_null"):
+            self.assertFalse(a.HasField(field), field)
+        self.assertEqual((b.WhichOneof("value"), c.WhichOneof("value")), (None, None))
+
     def test_an_absent_seq_stays_absent(self):
         # THE HasField TRAP. check_message_sequence() tests HasField('seq'); a materialised 0
         # reads as a legitimate wrap and hides a real gap.

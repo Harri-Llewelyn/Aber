@@ -39,6 +39,8 @@ Related: README.md -> "Broker Capture and Playback" (what the feature is for, th
 """
 
 import argparse
+import base64
+import binascii
 import json
 import os
 import re
@@ -47,6 +49,8 @@ import time
 from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
+from google.protobuf import json_format
+from google.protobuf.message import DecodeError
 
 import sparkplug_b_pb2
 
@@ -108,6 +112,13 @@ VALUE_FIELDS = (
     "string_value", "double_value", "float_value",
     "boolean_value", "int_value", "long_value",
 )
+
+# The rest of a metric, so the file records every field the proto defines. Flags are written only
+# when true, as the daemon reads them. Sub-messages are in protobuf's JSON mapping with the proto's
+# field names; bytes are base64, and an extension value is its serialised bytes in base64.
+FLAG_FIELDS = ("is_historical", "is_transient", "is_null")
+MESSAGE_FIELDS = ("metadata", "properties")
+MESSAGE_VALUE_FIELDS = ("dataset_value", "template_value")
 
 
 class CaptureError(Exception):
@@ -208,7 +219,60 @@ def json_metric(m):
     # protobuf field does on the other path.
     if m.get("is_historical") is True:
         metric.is_historical = True
+    for flag in ("is_transient", "is_null"):
+        if m.get(flag) is True:
+            setattr(metric, flag, True)
+    for name in MESSAGE_FIELDS:
+        _merge_message(m.get(name), getattr(metric, name))
+    if field is None:
+        _non_scalar_value(metric, m)
     return metric
+
+
+def _base64(value):
+    """The bytes a base64 string holds, or None when `value` is not one."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+
+
+def _merge_message(value, target):
+    """
+    Fill the sub-message `target` from its JSON mapping. Anything not in that form leaves it unset,
+    and the metric keeps the rest: these fields carry no reading, so one cannot cost the metric.
+    """
+    if not isinstance(value, dict):
+        return
+    try:
+        parsed = json_format.ParseDict(value, type(target)())
+    except (json_format.Error, AttributeError, RecursionError, TypeError, ValueError):
+        return
+    target.SetInParent()
+    target.MergeFrom(parsed)
+
+
+def _non_scalar_value(metric, m):
+    """The bytes, DataSet, Template or extension value of a metric that has no scalar one."""
+    raw = _base64(m.get("bytes_value"))
+    if raw is not None:
+        metric.bytes_value = raw
+        return
+    for name in MESSAGE_VALUE_FIELDS:
+        _merge_message(m.get(name), getattr(metric, name))
+        if metric.HasField(name):
+            return
+    raw = _base64(m.get("extension_value"))
+    if raw is not None:
+        extension = type(metric.extension_value)()
+        try:
+            extension.ParseFromString(raw)
+        except DecodeError:
+            return
+        metric.extension_value.SetInParent()
+        metric.extension_value.MergeFrom(extension)
 
 
 def json_payload(data, refused=None):
@@ -230,6 +294,9 @@ def json_payload(data, refused=None):
     seq = data.get("seq")
     if isinstance(seq, (int, float)) and not isinstance(seq, bool):
         payload.seq = int(seq) % 256
+    body = _base64(data.get("body"))
+    if body is not None:
+        payload.body = body
     for m in data.get("metrics", []):
         try:
             metric = json_metric(m)
@@ -261,28 +328,44 @@ def payload_to_dict(payload):
         out["seq"] = int(payload.seq)
     if payload.HasField("uuid"):
         out["uuid"] = payload.uuid
-
-    metrics = []
-    for m in payload.metrics:
-        entry = {}
-        if m.HasField("name"):
-            entry["name"] = m.name
-        if m.HasField("alias"):
-            entry["alias"] = int(m.alias)
-        if m.HasField("timestamp"):
-            entry["timestamp"] = int(m.timestamp)
-        if m.HasField("datatype"):
-            entry["datatype"] = int(m.datatype)
-        if m.HasField("is_historical") and m.is_historical:
-            entry["is_historical"] = True
-        # Exactly one value field is set on a well-formed metric, but a capture must not assume
-        # that of traffic it did not generate: whatever is set is what gets written down.
-        for field in VALUE_FIELDS:
-            if m.HasField(field):
-                entry[field] = getattr(m, field)
-        metrics.append(entry)
-    out["metrics"] = metrics
+    if payload.HasField("body"):
+        out["body"] = base64.b64encode(payload.body).decode("ascii")
+    out["metrics"] = [metric_to_dict(m) for m in payload.metrics]
     return out
+
+
+def metric_to_dict(m):
+    """One metric as the file records it: every field that is set, and only those."""
+    entry = {}
+    if m.HasField("name"):
+        entry["name"] = m.name
+    if m.HasField("alias"):
+        entry["alias"] = int(m.alias)
+    if m.HasField("timestamp"):
+        entry["timestamp"] = int(m.timestamp)
+    if m.HasField("datatype"):
+        entry["datatype"] = int(m.datatype)
+    for flag in FLAG_FIELDS:
+        if m.HasField(flag) and getattr(m, flag):
+            entry[flag] = True
+    for name in MESSAGE_FIELDS:
+        if m.HasField(name):
+            entry[name] = json_format.MessageToDict(getattr(m, name),
+                                                    preserving_proto_field_name=True)
+    # The value is a oneof, so at most one of these is set.
+    for field in VALUE_FIELDS:
+        if m.HasField(field):
+            entry[field] = getattr(m, field)
+    if m.HasField("bytes_value"):
+        entry["bytes_value"] = base64.b64encode(m.bytes_value).decode("ascii")
+    for name in MESSAGE_VALUE_FIELDS:
+        if m.HasField(name):
+            entry[name] = json_format.MessageToDict(getattr(m, name),
+                                                    preserving_proto_field_name=True)
+    if m.HasField("extension_value"):
+        entry["extension_value"] = base64.b64encode(
+            m.extension_value.SerializeToString()).decode("ascii")
+    return entry
 
 
 def dict_to_payload(data):
