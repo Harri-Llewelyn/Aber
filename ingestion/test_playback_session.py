@@ -588,6 +588,21 @@ class IngestionAppliesTheDeathTests(WorkerTestCase):
         self.assertIn("holds no NBIRTH", error)
         self.assertEqual(FakeClient.made, [])
 
+    def test_a_replay_leaves_no_alias_behind_for_the_next(self):
+        """
+        The NDEATH that ends a replay clears the aliases its NBIRTH declared, so the next replay
+        onto the same gateway resolves only what its own births declare.
+        """
+        self.run_job([recorded(0, "NBIRTH", bdseq=7, value=1.0, alias=1),
+                      recorded(10, "NDATA", value=2.0, alias=1)])
+        alias_only = sparkplug_b_pb2.Payload.Metric(alias=1)
+        delivered = FakeClient.made[0].published()
+        self.deliver(*delivered[0][1:3])
+        self.assertEqual(ingestion.resolve_metric_name(GROUP, GW, alias_only), "Temperature")
+        self.deliver(*delivered[-1][1:3])
+        self.assertEqual(self.statuses(), ["ONLINE", "OFFLINE"])
+        self.assertIsNone(ingestion.resolve_metric_name(GROUP, GW, alias_only))
+
     def test_a_will_from_an_earlier_job_is_ignored(self):
         """Job 1's Will, delivered after job 2's NBIRTH, names a different bdSeq and changes nothing."""
         self.run_job(a_session(birth_bdseq=7))

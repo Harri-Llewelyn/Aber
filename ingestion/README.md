@@ -394,6 +394,9 @@ NDEATH."*
   session repeat it (`tck-id-operational-behavior-data-commands-rebirth-action-3`) and a recorded
   NDEATH ends it: the worker publishes that death, disconnects, and opens the next session
   with the next bdSeq (`tck-id-topics-nbirth-bdseq-increment`).
+- **The daemon clears an edge node's alias table when it applies an NDEATH** of the open session
+  ([Metric Aliases](#metric-aliases)), for every edge node, so no session inherits another's
+  aliases.
 
 ### Rebasing, and why it is also the speed control
 
@@ -1205,6 +1208,17 @@ standards-compliant device.
   old ones behind to be matched — that would write real samples under the *wrong* metric name,
   which is worse than dropping them. A DBIRTH re-declares one device and must not discard its
   siblings'.
+- **An applied NDEATH clears the node's table**, with the datatypes beside it
+  (`forget_birth_aliases()`). Aliases are declared per session
+  (`tck-id-payloads-alias-birth-requirement`), and a death ends the session whose births declared
+  them
+  (`tck-id-operational-behavior-edge-node-termination-host-action-ndeath-node-tags-stale`,
+  `-devices-tags-stale`). Left in place, they resolved whatever the next session sent before its
+  own NBIRTH. That mattered most on the Playback gateway, which every replay publishes as: a
+  replay's aliased readings were filed under the metric names of the capture replayed before it.
+  A stale NDEATH, from an earlier session than the open one, clears nothing
+  ([A death from an earlier session](#a-death-from-an-earlier-session)). Until the next NBIRTH, an
+  aliased metric is unresolvable and asks for a rebirth, as after a restart.
 - **Aliases are registered before the registration check**, in both handlers. The table is
   in-memory and costs nothing, and a quarantined device's later DDATA still has to be *decodable*
   for an operator to be told what it is publishing.
@@ -1507,8 +1521,9 @@ marked OFFLINE, and none of the open session's state reset (its aliases, its dev
 run). It is counted in `aber_ingestion_stale_deaths_total{edge_node}` and logged at INFO as
 `STALE NDEATH`, naming both numbers. Every other NDEATH is applied as before: one whose bdSeq
 matches, one without a bdSeq, and one for a node with no NBIRTH seen since the daemon started or
-whose NBIRTH carried none. An applied NDEATH closes the session, so a later death is applied too
-until the next NBIRTH opens one.
+whose NBIRTH carried none. An applied NDEATH closes the session and clears its alias table
+([Metric Aliases](#metric-aliases)), so a later death is applied too until the next NBIRTH opens
+one.
 
 - **Any difference counts, not only an older number.** bdSeq advances by one on every CONNECT and
   wraps at 255, so a later session could be told by its number. But an edge node that starts again
