@@ -31,6 +31,7 @@ Related: supabase/migrations/archive/0056_playback_orchestration.sql (every gate
 
 import json
 import os
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -236,29 +237,38 @@ def _storage():
     )
 
 
+class _SessionState:
+    """What paho's network thread learns about one connection, read by the publishing loop."""
+
+    def __init__(self):
+        # Every CONNACK return code, in order; empty until the broker answers.
+        self.connack = []
+        # Set when the connection drops without this worker asking.
+        self.lost = threading.Event()
+        self.lost_rc = None
+
+    def on_connect(self, _client, _userdata, _flags, rc, *_args):
+        self.connack.append(rc)
+
+    def on_disconnect(self, _client, _userdata, rc, *_args):
+        if rc != 0:
+            self.lost_rc = rc
+            self.lost.set()
+
+
 def _connect(edge_node_id, password, will_topic, will_payload):
     """
-    Connect AS the target gateway. Its `sparkplug_id` is the username, and that is the point.
-
-    THE CONNACK IS CAPTURED, AND NOTHING MAY COUNT AS SENT UNTIL IT ARRIVES. `client.connect()`
-    completes the TCP handshake and returns; the CONNACK arrives later on the network loop, so a
-    WRONG password -- as opposed to a missing one -- connects at the socket level and is refused
-    afterwards, and every QoS 0 publish after that is dropped locally with no error anywhere.
-    (docs/incidents.md -- "A playback published an entire capture into a closed socket and reported
-    success")
-
-    `rc` is recorded rather than raised from the callback: it arrives on paho's thread, where an
-    exception would be swallowed and logged by the library rather than reaching the caller.
+    Connect AS the target gateway: its `sparkplug_id` is the username. Returns at the TCP handshake;
+    the CONNACK arrives later on paho's thread and is recorded on `client.aber`, never raised there.
     """
     client = mqtt.Client(client_id="aber-playback-%s" % edge_node_id)
     client.username_pw_set(edge_node_id, password)
     # The session's NDEATH as the Will, QoS 1 and not retained, so a worker that dies mid-replay is
     # announced too (tck-id-payloads-ndeath-will-message, -will-message-qos, -will-message-retain).
     client.will_set(will_topic, will_payload, qos=1, retain=False)
-    # A list because the callback closes over it; `rc` stays None until the broker answers, which
-    # is itself the third outcome -- no answer at all.
-    client.aber_connack = []
-    client.on_connect = lambda _c, _u, _f, rc, *args: client.aber_connack.append(rc)
+    client.aber = _SessionState()
+    client.on_connect = client.aber.on_connect
+    client.on_disconnect = client.aber.on_disconnect
     if os.getenv("MQTT_TLS_ENABLED", "").strip().lower() in ("1", "true", "yes", "on"):
         import ssl
         ca = os.getenv("MQTT_TLS_CA_FILE", "").strip()
@@ -292,10 +302,10 @@ def _open_session(edge_node, password, will_topic, bdseq):
     # authorised. They are named rather than lumped in, because they are the ones an operator fixes
     # by issuing a credential rather than by looking at the broker.
     deadline = time.monotonic() + CONNACK_TIMEOUT_SECONDS
-    while not client.aber_connack and time.monotonic() < deadline:
+    while not client.aber.connack and time.monotonic() < deadline:
         time.sleep(0.05)
 
-    if not client.aber_connack:
+    if not client.aber.connack:
         client.loop_stop()
         return None, (
             "the broker never answered the connection as %s within %ss. It is reachable at %s:%s "
@@ -303,7 +313,7 @@ def _open_session(edge_node, password, will_topic, bdseq):
             % (edge_node, CONNACK_TIMEOUT_SECONDS, MQTT_HOST, MQTT_PORT)
         )
 
-    rc = client.aber_connack[0]
+    rc = client.aber.connack[0]
     if rc != 0:
         client.loop_stop()
         detail = {
@@ -347,6 +357,15 @@ def _end_session(client, topic, death):
     sock = client.socket()
     if sock is not None:
         sock.close()
+
+
+def _connection_lost(sent):
+    """The job's error when the broker connection drops mid-replay."""
+    return (
+        "publishing stopped after %d message(s): the broker connection was lost. Re-issuing this "
+        "gateway's credential or restarting the broker ends a playback's connection; start the "
+        "playback again." % sent
+    )
 
 
 def _run_job(supabase, storage, credentials, job):
@@ -474,6 +493,9 @@ def _run_job(supabase, storage, credentials, job):
                     error = "publishing stopped after %d message(s): %s" % (sent, error)
                     break
 
+            if client.aber.lost.is_set():
+                error = _connection_lost(sent)
+                break
             if capture.split_topic(topic)[1] == "NDEATH":
                 # A recorded death ends the session as it ended the recorded node's. The plan
                 # numbered the messages after it as the next session, which opens on the next one.
@@ -481,11 +503,12 @@ def _run_job(supabase, storage, credentials, job):
                 client = None
                 bdseq = (bdseq + 1) % 256
             else:
-                # QoS 0, matching what the fleet publishes and what capture.py play uses. Worth
-                # knowing rather than assuming: a publish the ACL refuses is dropped WITHOUT a
-                # PUBACK, so the broker's refusal is invisible here. That is what the CONNACK check
-                # in _open_session is for.
-                client.publish(topic, payload_bytes, qos=0, retain=False)
+                # QoS 0, as the fleet publishes: only paho's acceptance is observable, so a message
+                # counts once paho has accepted it on a connection that has not dropped.
+                info = client.publish(topic, payload_bytes, qos=0, retain=False)
+                if info.rc != mqtt.MQTT_ERR_SUCCESS:
+                    error = _connection_lost(sent)
+                    break
             sent += 1
 
             elapsed = time.monotonic() - started

@@ -350,6 +350,14 @@ export const SUITES = {
       '-- it is an older one. If the environment won, "issue a new credential" would be the one ' +
       'repair that could not fix a refused playback (CONNACK rc=5).',
   },
+  'ingestion/test_playback_worker_loop.py': {
+    lanes: ['unit'],
+    why:
+      'The playback worker as a Sparkplug edge node, against a fake broker and PostgREST. A ' +
+      'message counts only once paho accepted it on a connection that has not dropped: before ' +
+      'this, a replay whose credential was re-issued at message 8 ended COMPLETED with all 41 ' +
+      'counted and 7 in the historian.',
+  },
   'ingestion/test_playback_session.py': {
     lanes: ['unit'],
     why:
@@ -1037,7 +1045,9 @@ export const SUITES = {
       'arrived. THE SENTINEL METRIC IS LOAD BEARING: the recorded device is a real device the ' +
       'seeded fleet is publishing as, so "nothing was written under the recorded id" cannot be ' +
       'asserted directly -- a metric name unique to the run can only have come from this replay, ' +
-      'which is what makes the identity rewrite checkable against a live historian. Needs ' +
+      'which is what makes the identity rewrite checkable against a live historian. A second ' +
+      'replay has its credential re-issued partway, as the Gateways page does, and must end ' +
+      'FAILED naming the lost connection and counting only what went out. Needs ' +
       '`playback.enabled`, which values-dev.yaml sets.',
   },
   'ingestion/test_recorded_capture_replay.py': {

@@ -868,6 +868,13 @@ reject, a broker that refused the socket — and, the one that used to be silent
 never came or came back non-zero. `rc=4` and `rc=5` are named apart from the rest, because they are
 the two an operator fixes by re-issuing the credential rather than by looking at the broker.
 
+**A connection lost mid-replay fails the job.** A message counts as published only once paho has
+accepted it on a connection that has not dropped. A refused publish (`MQTT_ERR_NO_CONN`) or a
+disconnect paho reports ends the job `FAILED`: *publishing stopped after N message(s): the broker
+connection was lost*. Re-issuing the Playback gateway's credential is the common cause, because the
+Dynamic Security plugin drops a client whose password changes. Before this, a replay re-issued at
+message 8 of 41 ended `COMPLETED` with all 41 counted, and the historian held 7 readings.
+
 **A playback the operator stops is `CANCELLED`, not `COMPLETED`** (`0107`). `request_playback_stop()`
 can only set the flag while a job is running, and the worker reports the count it reached with no
 error, so the end state used to be indistinguishable from a capture published in full. The status

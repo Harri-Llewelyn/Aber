@@ -122,6 +122,10 @@ python ingestion/test_startup_healer.py
 # one. If the environment won, "issue a new credential" would be the one repair that could not fix
 # a refused playback.
 python ingestion/test_playback_credentials.py
+# The playback worker as a Sparkplug edge node, against a fake broker and PostgREST. A message
+# counts only once paho accepted it on a connection that has not dropped: a replay whose credential
+# was re-issued partway used to end COMPLETED with every message counted.
+python ingestion/test_playback_worker_loop.py
 # The playback worker's Sparkplug session -- the NDEATH Will, the NDEATH that ends every job, and
 # the bdSeq the replayed NBIRTH shares with both, so the Playback gateway reads OFFLINE after a replay
 python ingestion/test_playback_session.py
@@ -136,7 +140,8 @@ python ingestion/test_playback_session.py
 # run can only have come from the replay, which is what makes "it landed under the replay lane and
 # under nothing else" checkable against a live historian. The fixture also holds the recorded
 # appliance's node heartbeat, with health and an outage report: the Playback gateway must record a
-# heartbeat and none of it.
+# heartbeat and none of it. A second replay has its credential re-issued partway, and must end
+# FAILED naming the lost connection and counting only what went out.
 python ingestion/test_playback_replay.py
 # A CAPTURE RECORDED FROM THE BROKER REACHES STORAGE AND REPLAYS. The suite above replays a file it
 # uploaded; this one records one the way the Capture page does. A fixture Host gateway, its broker

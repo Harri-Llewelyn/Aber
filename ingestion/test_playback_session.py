@@ -170,6 +170,7 @@ class FakeInfo:
     def __init__(self, acked):
         self.acked = acked
         self.timeout = None
+        self.rc = 0
 
     def wait_for_publish(self, timeout=None):
         self.timeout = timeout
