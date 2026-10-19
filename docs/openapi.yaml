@@ -1667,6 +1667,11 @@ paths:
         `Administrator` and `Shopfloor_Manager`. Delete the row first: the bucket refuses to delete
         a file a row still names, and once the row is gone the object is removed through the Storage
         API (the ingestion daemon deletes any left behind within the hour).
+
+        **Each act is in the Audit Trail (0193).** Storing a capture writes `CAPTURE_UPLOADED` or
+        `CAPTURE_RECORDED`, and every deletion writes `CAPTURE_DELETED`, with why: deleted, replaced
+        by an upload or a recording, or deleted with its gateway or device. A download goes through
+        `issue_capture_download()` first, which writes `CAPTURE_DOWNLOAD_ISSUED`.
       parameters:
         - { name: subject_kind, in: query, schema: { type: string, enum: [gateway, device] }, description: 'e.g. `eq.gateway`' }
         - { name: gateway_id, in: query, schema: { type: string, format: uuid } }
@@ -1717,6 +1722,33 @@ paths:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/CaptureJob' } }
         '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
+
+  /rest/v1/rpc/issue_capture_download:
+    post:
+      tags: [Storage]
+      summary: Record a capture download and answer the path to sign
+      description: |
+        Writes `CAPTURE_DOWNLOAD_ISSUED` to the Audit Trail, naming the caller and the capture, and
+        answers the capture's `storage_path`. The dashboard then signs a short-lived link for that
+        path with the Storage API, and signs nothing when this refuses. `Administrator`,
+        `Shopfloor_Manager` or `Auditor`, the roles the bucket admits to read (0193).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [p_storage_path]
+              properties:
+                p_storage_path: { type: string, description: 'The `storage_path` of a row in `captures`.' }
+      responses:
+        '200':
+          description: The path, for the caller to sign.
+          content:
+            application/json:
+              schema: { type: string }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 'No stored capture has that path: it was deleted or replaced.' }
 
   /rest/v1/backup_jobs:
     get:
@@ -1946,6 +1978,11 @@ paths:
         observes it within a second, because it reports progress at least once a second while a job
         runs. A `RUNNING` job whose worker has not reported for over a minute is ended by the call
         itself, as `CANCELLED` (0191). Progress arrives over Realtime.
+
+        **The record outlives the capture and the target (0193).** Starting and stopping a playback
+        write `PLAYBACK_STARTED` and `PLAYBACK_STOPPED`, naming the capture and the target. Deleting
+        the capture leaves `capture_id` null and the row standing, and a gateway these rows name
+        cannot be deleted (409): archive it instead.
 
         `speed` divides both the send schedule and the timestamp rebasing, so it is bounded to
         `(0, 60]`. Zero is refused rather than treated as "as fast as possible": the historian
@@ -4861,7 +4898,8 @@ components:
         entity_type:
           type: string
           enum: [areas, cells, gateways, devices, device_nameplate, device_submodels, schemas, metric_catalog,
-                 change_proposals, user_roles, service_principals, system_settings, backup_jobs, backups]
+                 change_proposals, user_roles, service_principals, system_settings, backup_jobs, backups,
+                 capture_jobs, captures, playback_jobs]
           description: >-
             The table the event is about: the types the trail records today. A trail older than
             their retirement also holds `area_floors`, `cell_links`, `gateway_links` and
@@ -4873,12 +4911,16 @@ components:
                  PRINCIPAL_REVOKED, PRINCIPAL_REINSTATED, PRINCIPAL_DESCRIBED, PROPOSAL_APPLIED, EXPORTED,
                  PROPOSAL_EXPIRED, ROLE_GRANTED, ROLE_REVOKED, PERSON_ADDED, ACCESS_REMOVED, ACCESS_RESTORED,
                  PASSWORD_SET, FLOW_DEPLOYED, BACKUP_REQUESTED,
-                 BACKUP_CANCELLED, BACKUP_RELEASED, BACKUP_TAKEN, BACKUP_FAILED, BACKUP_PRUNED]
+                 BACKUP_CANCELLED, BACKUP_RELEASED, BACKUP_TAKEN, BACKUP_FAILED, BACKUP_PRUNED,
+                 CAPTURE_STARTED, CAPTURE_STOPPED, CAPTURE_RECORDED, CAPTURE_UPLOADED,
+                 CAPTURE_DOWNLOAD_ISSUED, CAPTURE_DELETED, PLAYBACK_STARTED, PLAYBACK_STOPPED]
           description: >-
             What happened. The audit trigger on each audited table writes `INSERT`, `UPDATE` and
             `DELETE`; every other action is written by the function that performs the act, such as
             `TOKEN_REVOKED` by `revoke_service_token()`. A service principal's creation is an
-            `INSERT` written by `create_machine_principal()`.
+            `INSERT` written by `create_machine_principal()`. The capture and playback acts (0193)
+            are written by their gates, and `CAPTURE_DELETED` by a trigger on `captures`, so a
+            replacement and a deleted subject's cascade are recorded too.
         old_data: { type: object, nullable: true }
         new_data: { type: object, nullable: true }
         changed_by: { type: string, format: uuid, nullable: true, description: '`auth.users` id, or NULL for changes made by a service.' }

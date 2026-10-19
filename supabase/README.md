@@ -1144,6 +1144,55 @@ Both columns are additive. `progress_reported_at` is nullable: a job claimed bef
 none, so its claim time is used. `credential_sources` defaults to `{}`, which the dialog reads as a
 worker from before this release. `test_playback_stop_and_sweep.py` holds all four functions.
 
+### Captures and replays leave an audit trail (0193)
+
+A capture holds the plant's raw traffic, and a replay writes readings into the historian. Neither
+left a row in `audit_trail`. And `playback_jobs.target_gateway_id` is `ON DELETE CASCADE`, so
+deleting the Playback gateway erased the record of every replay published as it.
+
+**One row per act, written by the function that performs it.** Each lands in the asset lane, whose
+readers (Administrator, Shopfloor_Manager, Auditor) are the roles that may read the capture tables.
+Each carries the subject's `name` and `sparkplug_id`, which the Audit Trail names a lane by, and
+`new_data` alone.
+
+| Action | Entity | Written by | Carries |
+| :--- | :--- | :--- | :--- |
+| `CAPTURE_STARTED` | `capture_jobs` | `start_capture_job()` | note, length asked for, the capture it would replace |
+| `CAPTURE_STOPPED` | `capture_jobs` | `request_capture_stop()` | the status it had, how it stopped, what it had recorded |
+| `CAPTURE_RECORDED` | `captures` | `ingest_finalise_capture()`, as the ingestion daemon | the job, who requested it, the capture it replaced |
+| `CAPTURE_UPLOADED` | `captures` | `register_uploaded_capture()` | size, message count, note, the capture it replaced |
+| `CAPTURE_DOWNLOAD_ISSUED` | `captures` | `issue_capture_download()` | the path and size |
+| `CAPTURE_DELETED` | `captures` | `trg_captures_audit_delete` | the capture's final properties and `reason` |
+| `PLAYBACK_STARTED` | `playback_jobs` | `start_playback_job()` | the capture, its path, the target, the device map, the speed |
+| `PLAYBACK_STOPPED` | `playback_jobs` | `request_playback_stop()` | how it stopped, what it had published |
+
+- **A refused act, a repeated call and a progress report write nothing.** A second Stop on a job
+  already flagged changes nothing, and neither does a retried finalise or register. Progress is
+  still unaudited: the job tables take no audit trigger, for the reason given under *Capture and
+  playback orchestration*.
+- **Every deletion of a capture is recorded, by a trigger.** Its `reason` is `deleted` for a
+  person's delete, `replaced by an upload` or `replaced by a recording` for the swaps (which set
+  `aber.capture_replaced_by` for the one statement, naming the upload or the job), or
+  `deleted with its gateway` / `deleted with its device` for a cascade. A subject's deletion writes
+  one row per capture it takes. That is at most two per device: a subject holds one capture, and a
+  gateway's deletion also takes its devices' captures, whose rows name the gateway they were
+  recorded through. The subject's `name` is null in a cascade, because its row is already gone.
+- **A download goes through the database.** The Capture page calls `issue_capture_download()`
+  before it signs a link, and signs only the path it answers. The bucket's read policy is
+  unchanged, so a reader who signs a link through the Storage API directly is not recorded.
+- **A gateway a playback names cannot be deleted, and neither can the last unarchived Playback
+  gateway.** `trg_gateways_keep_playback_history` refuses both, for every role, before the key's
+  `CASCADE` runs. The second is `0067`'s archive rule applied to deletion. A Playback gateway with
+  history can still be archived when another remains, and its replays stay linked to it.
+- **A trigger, not `ON DELETE RESTRICT` on the key.** `0001`'s guard compares the key with the
+  `CASCADE` it states and puts that back on every boot, so a changed key would be dropped and added
+  twice per boot, locking `gateways` each time. The next squash can fold this into the key.
+- **The nightly purge skips a gateway with replay history.** `purge_expired_archives` is one
+  transaction, so one refused delete would keep every expired archive. `0193` states the job again
+  with the skip; a later change to it goes in a later file.
+
+`test_capture_audit.py` holds every act, the deletion guard and the purge.
+
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
@@ -1195,7 +1244,8 @@ page's single running card into a list — a deliberate change rather than a def
 **Neither job table gets an audit-trail trigger.** That trigger is opt-in per table, and both
 tables carry a progress column the workers update roughly once a second. Adding it would look like
 consistency while writing a row per tick into an append-only table no application role can prune,
-which is `0138`'s heartbeat problem. Both tables *are* in the `supabase_realtime` publication,
+which is `0138`'s heartbeat problem. The acts are recorded instead by the functions that perform
+them, one row each (`0193`). Both tables *are* in the `supabase_realtime` publication,
 which is how the page follows a running job at all. They are named in the baseline's `intended`
 list, because its absolute `SET TABLE` removes any table not on it, and a docs-drift check fails a
 subscription to a table that list omits.
@@ -2950,9 +3000,9 @@ What it does not offer is the two acts that are wrong for it, for different reas
 **The rule is "not the last one", not "never".** `0067` refuses only the archive that would leave
 no unarchived `is_shadow` gateway. Since `0187` the Playback gateway is the only one a stack makes
 and the API cannot mark another, so in practice it cannot be archived. A stack upgraded with an older
-second one can still archive either. The refusal no longer suggests marking another gateway. Deletion
-is not guarded, because `0060` re-seeds the row on the next boot; archiving is the act that survives
-one.
+second one can still archive either. The refusal no longer suggests marking another gateway. Since
+`0193` deleting the last one is refused as well, and so is deleting any gateway a playback names:
+the seed would bring the row back at the next boot, but not the record of the replays.
 
 **It is also not a capture subject.** Recording from a shadow gateway means capturing a capture, and
 its shadow devices exist to receive a replay rather than to report a machine, so both are filtered

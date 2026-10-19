@@ -27,6 +27,8 @@ Each entity has a lane on the timeline, and each change is a marker on that lane
 
 **The Audit Trail is deliberately not the logs.** Entries here are only ever added, each is linked to an actor, and none can be changed once written. Container and pod logs are none of those things. They are for diagnosing faults, and they are lost when the container is recreated. Anything that matters for audit is recorded here as a row.
 
+**Captures and playbacks have lanes of their own.** Recordings, Captures and Playbacks record who started or stopped a recording, stored, downloaded or deleted a capture, and started or stopped a playback. A capture's deletion says why it went: deleted, replaced, or deleted with its gateway or device. Each lane is named after the machine that was recorded, with a short ID beside the name. Their progress is not recorded.
+
 **Not every entry is visible to every role.** The trail has a security lane, for role assignments, machine identities, settings and backups. Only an Administrator or an Auditor can read it. Other roles see the plant's lanes, and the kind filter does not offer them the security kinds.
 
 Rows are kept until an owner retires a whole month. Nothing removes old rows on a timer. Whoever runs the database retires history on purpose, by detaching a month's partition. The steps are in [Trimming the Audit Trail](https://github.com/Harri-Llewelyn/Aber/blob/main/deploy/k8s/README.md#trimming-the-audit-trail).

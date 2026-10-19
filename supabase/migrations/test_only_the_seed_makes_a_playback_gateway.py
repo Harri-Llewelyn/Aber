@@ -299,12 +299,17 @@ class TheOwnerIsNotHeld(Base):
         self.assertEqual(self.cur.fetchone(), (True, True, "host"))
 
     def test_the_seed_creates_the_gateway_when_it_is_missing(self):
-        """The INSERT arm: a stack whose Playback gateway was deleted gets it back at the boot."""
+        """
+        The INSERT arm: a stack whose Playback gateway was deleted gets it back at the boot. Since
+        0193 the last one cannot be deleted, so the guard is set aside for the fixture: the arm
+        serves a stack that lost it before then.
+        """
         with open(SEED, encoding="utf-8") as f:
             text = f.read()
         start = text.index("INSERT INTO public.gateways (id, name, description, deployment, "
                            "is_simulated, is_shadow, location_scope)")
         statement = text[start:text.index("cell_id = NULL;", start) + len("cell_id = NULL;")]
+        self.cur.execute("ALTER TABLE public.gateways DISABLE TRIGGER trg_gateways_keep_playback_history;")
         self.cur.execute("DELETE FROM public.gateways WHERE id = %s;", (PLAYBACK_GATEWAY,))
         self.cur.execute(statement)
         self.assertTrue(self._flag(PLAYBACK_GATEWAY))

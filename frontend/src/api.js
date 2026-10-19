@@ -1807,8 +1807,20 @@ const apiMethods = {
   /**
    * A short-lived signed URL; the bucket is private. `download` names the saved file and forces
    * an attachment, so a 50 MiB JSON recording is saved rather than rendered in the tab.
+   *
+   * `issue_capture_download()` comes first: it records the download in the Audit Trail and answers
+   * the path, and only the path it answered is signed. A refusal there signs nothing.
    */
-  captureUrl: async (path) => {
+  captureUrl: async (requestedPath) => {
+    const { data: path, error: issueError } = await supabase.rpc('issue_capture_download', {
+      p_storage_path: requestedPath
+    });
+    if (issueError || !path) {
+      if (/insufficient_privilege|requires Administrator/i.test(issueError?.message || '')) {
+        throw new Error('Downloading a capture requires Administrator, Shopfloor Manager or Auditor.');
+      }
+      throw new Error(issueError?.message || 'Could not create a download link');
+    }
     const filename = `${(path.split('/')[0] || 'capture')}.capture.json`;
     const { data, error } = await supabase.storage
       .from(CAPTURE_BUCKET).createSignedUrl(path, 60, { download: filename });
@@ -1832,7 +1844,7 @@ const apiMethods = {
   /**
    * Remove a capture: the row and the object. The row goes first: the bucket lets nobody delete a
    * file a row still names, and a failed object delete leaves a file the ingestion daemon's sweep
-   * deletes.
+   * deletes. A trigger on the row writes the Audit Trail's CAPTURE_DELETED.
    */
   deleteCapture: async (capture) => {
     const { error } = await supabase.from('captures').delete().eq('id', capture.id);
