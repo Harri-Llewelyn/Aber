@@ -1,7 +1,39 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { GRAFANA_URL } from '../constants'
 
-/** The toast types. Anything else a caller passes is shown as `info`. */
+/**
+ * The toast types, which are severity: how long a toast stays and which live region reads it out
+ * (Toast.jsx). Anything else a caller passes is shown as `info`.
+ */
 const TOAST_TYPES = ['success', 'info', 'warning', 'error']
+
+/**
+ * The groups a message sorts into, which decide its icon and the notification list's filter. Info
+ * is routine news, successes included; Warning is the dashboard's own failures and warnings; Alert
+ * is a Grafana alert, firing or resolved.
+ */
+export const TOAST_GROUPS = ['info', 'warning', 'alert']
+const DEFAULT_GROUP = { success: 'info', info: 'info', warning: 'warning', error: 'warning' }
+
+/** A message's group: the one it was given, or its type's when it has none or an unknown one. */
+export const groupOf = ({ type, group } = {}) =>
+  (TOAST_GROUPS.includes(group) ? group : DEFAULT_GROUP[type] ?? 'info')
+
+/** Whether `to` holds what a browser strips from a URL or reads as a slash: a space, a control character or `\`. */
+const hasUnsafeChar = (to) => [...to].some(c => c <= ' ' || c === '\u007f' || c === '\\')
+
+/**
+ * Whether `to` may be a message's link: a path in this app (one leading slash, so never a
+ * protocol-relative `//host`) or an address under the configured Grafana. Checked as a message
+ * comes in and again as the history is read back, so nothing stored can become a `javascript:` or
+ * off-site link.
+ */
+export function isSafeDestination(to) {
+  if (typeof to !== 'string' || to.length > 2048 || hasUnsafeChar(to)) return false
+  if (/^\/(?!\/)/.test(to)) return true
+  if (!/^https?:\/\/[^/?#]+/.test(GRAFANA_URL)) return false
+  return to === GRAFANA_URL || ['/', '?', '#'].some(c => to.startsWith(GRAFANA_URL + c))
+}
 
 /** Toasts on screen at once. A fourth pushes the oldest off; it stays in the history. */
 export const MAX_VISIBLE_TOASTS = 3
@@ -11,7 +43,8 @@ export const HISTORY_LIMIT = 50
 
 /**
  * Where the history is kept: sessionStorage, so it survives a reload and stays in this browser tab.
- * It holds message text only. App.jsx clears it when the session ends.
+ * It holds text only: the message, its group and its destination. App.jsx clears it when the
+ * session ends.
  */
 export const HISTORY_STORAGE_KEY = 'aber_notification_history'
 
@@ -24,8 +57,11 @@ export function readStoredHistory() {
   try {
     const parsed = JSON.parse(window.sessionStorage.getItem(HISTORY_STORAGE_KEY) || '[]')
     if (!Array.isArray(parsed)) return []
-    return parsed.filter(isStoredEntry).slice(0, HISTORY_LIMIT).map(({ id, msg, type, at, read, count }) => ({
-      id, msg, type, at,
+    // An entry stored before groups existed takes its type's; a destination that fails the check
+    // is dropped and the entry kept as plain text.
+    return parsed.filter(isStoredEntry).slice(0, HISTORY_LIMIT).map(({ id, msg, type, group, to, at, read, count }) => ({
+      id, msg, type, group: groupOf({ type, group }), at,
+      ...(isSafeDestination(to) ? { to } : {}),
       read: read === true,
       count: Number.isInteger(count) && count > 1 ? count : 1
     }))
@@ -50,8 +86,10 @@ export function clearStoredHistory() {
  * The toasts on screen and the notification history behind the top bar's bell. `showToast(msg,
  * type, options)` is the only way in: each call shows a toast and records a message in the history,
  * the same one unless `options.detail` gives the history a longer text than the toast carries.
- * `options.onOpen` makes the toast clickable (see Toast), and `options.openTitle` is the tooltip
- * on its message. Every callback is stable, so passing them down re-renders nothing.
+ * `options.group` is needed only where the type's group is wrong: a Grafana alert passes 'alert'.
+ * `options.to` is where the message is about, as text: a path from routes.js or a Grafana URL,
+ * which makes the toast's message and its row in the history a link (see Toast). One that fails
+ * isSafeDestination is ignored. Every callback is stable, so passing them down re-renders nothing.
  */
 export function useToast() {
   const [toasts, setToasts] = useState([])
@@ -62,20 +100,23 @@ export function useToast() {
 
   useEffect(() => { writeStoredHistory(history) }, [history])
 
-  const showToast = useCallback((msg, type = 'success', { detail, onOpen, openTitle } = {}) => {
+  const showToast = useCallback((msg, type = 'success', { detail, group, to } = {}) => {
+    const known = TOAST_TYPES.includes(type) ? type : 'info'
     const entry = {
       id: nextId.current++,
       msg: msg == null ? '' : String(msg),
-      type: TOAST_TYPES.includes(type) ? type : 'info',
+      type: known,
+      group: groupOf({ type: known, group }),
+      ...(isSafeDestination(to) ? { to } : {}),
       at: Date.now()
     }
-    const toast = onOpen ? { ...entry, onOpen, openTitle } : entry
     const recordedMsg = detail == null ? entry.msg : String(detail)
-    const sameToast = (e) => e.msg === entry.msg && e.type === entry.type
-    const sameEntry = (e) => e.msg === recordedMsg && e.type === entry.type
+    const same = (e) => e.type === entry.type && e.group === entry.group && e.to === entry.to
+    const sameToast = (e) => e.msg === entry.msg && same(e)
+    const sameEntry = (e) => e.msg === recordedMsg && same(e)
     // A message already on screen is replaced rather than stacked, so it restarts its timer and a
     // failure repeated by a poll shows once.
-    setToasts(prev => [...prev.filter(t => !sameToast(t)), toast].slice(-MAX_VISIBLE_TOASTS))
+    setToasts(prev => [...prev.filter(t => !sameToast(t)), entry].slice(-MAX_VISIBLE_TOASTS))
     // A repeat of the newest entry is counted on it rather than filling the list.
     setHistory(prev => {
       const repeat = prev.length > 0 && sameEntry(prev[0])
@@ -97,11 +138,15 @@ export function useToast() {
       : prev)
   }, [])
 
-  const markAllRead = useCallback(() => {
-    setHistory(prev => prev.some(e => !e.read) ? prev.map(e => (e.read ? e : { ...e, read: true })) : prev)
+  /** Marks the entries with these ids read, or every entry when no list is given. */
+  const markRead = useCallback((ids) => {
+    const marks = Array.isArray(ids) ? (e) => ids.includes(e.id) : () => true
+    setHistory(prev => prev.some(e => !e.read && marks(e))
+      ? prev.map(e => (e.read || !marks(e) ? e : { ...e, read: true }))
+      : prev)
   }, [])
 
   const clearHistory = useCallback(() => setHistory([]), [])
 
-  return { toasts, showToast, expireToast, dismissToast, history, markAllRead, clearHistory }
+  return { toasts, showToast, expireToast, dismissToast, history, markRead, clearHistory }
 }

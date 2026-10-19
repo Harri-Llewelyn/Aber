@@ -87,11 +87,14 @@ VAL_SCHEMA_METRICS = ["Systems/TEMPERATURE", "Controller/EXECUTION", "Controller
 VAL_UNMODELLED_METRIC = "Environmental/HUMIDITY_RELATIVE"
 VAL_KPI_METRIC = "OEE/AVAILABILITY"
 VAL_KPI_SCHEMA_METRICS = [VAL_KPI_METRIC]
-# The registered device's birth certificate: its schema's metrics, the unmodelled one, and the KPI
-# only the second attached submodel models (check 6e). Sent by step 7, and again before check 12.
+# The registered device's birth certificate: its schema's metrics, the unmodelled one, the KPI
+# only the second attached submodel models (check 6e), and the control metric the gateway
+# appliance's DBIRTH declares, which must not be recorded (check 6a). Sent by step 7, and again
+# before check 12.
+VAL_CONTROL_METRIC = "Device Control/Rebirth"
 VAL_KNOWN_BIRTH = {"Systems/TEMPERATURE": 42.5, "Controller/EXECUTION": "ACTIVE",
                    "Controller/EMERGENCY_STOP": "ARMED", VAL_UNMODELLED_METRIC: 55.2,
-                   VAL_KPI_METRIC: 0.92}
+                   VAL_KPI_METRIC: 0.92, VAL_CONTROL_METRIC: False}
 
 # The plant check 12 compares with the Directory: an area with the cell filed in it, a gateway serving
 # the whole area, and two devices with two metrics each. A carries one schema, whose semantic id its
@@ -2775,12 +2778,14 @@ def verify_results():
                 print(f"❌ 6. BIRTH METRIC OBSERVATION FAIL: expected {expected}, got {declared}.")
                 passed = False
 
-            # 6a. Identity metrics are not something a schema should model, so they must not
-            # appear in the declared set even though every payload carries Asset_ID.
-            if declared and not ({"Asset_ID", "Asset_Name"} & set(declared)):
-                print("✅ 6a. IDENTITY EXCLUSION: Asset_ID/Asset_Name absent from the declared set.")
+            # 6a. Identity and control metrics are not something a schema should model, so they
+            # must not appear in the declared set even though the birth carries them.
+            if declared and not ({"Asset_ID", "Asset_Name", VAL_CONTROL_METRIC} & set(declared)):
+                print("✅ 6a. PLUMBING EXCLUSION: Asset_ID/Asset_Name and "
+                      f"{VAL_CONTROL_METRIC} absent from the declared set.")
             elif declared:
-                print("❌ 6a. IDENTITY EXCLUSION FAIL: identity metrics leaked into last_birth_metrics.")
+                print("❌ 6a. PLUMBING EXCLUSION FAIL: identity or control metrics leaked into "
+                      "last_birth_metrics.")
                 passed = False
 
             # 6b. The change-only write: an identical rebirth must not touch the row, or every

@@ -1,7 +1,13 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
-const GAP = 6
+/** The gap under the button, the same as the top bar's panels: room for the arrow. */
+const GAP = 8
+/** The panel's width and its margin from the window's edge (App.css). */
+const WIDTH = 320
+const MARGIN = 8
+/** How near the panel's corner the arrow may sit: its 8px radius and the arrow's half-width. */
+const ARROW_INSET = 16
 
 /**
  * A "Filters" button in a toolbar row that opens a panel holding the filters the row has no room
@@ -13,6 +19,7 @@ const GAP = 6
  * "Filters"; Escape and a click outside close it and return focus to the button. Its own Clear
  * button calls `onClear` and is disabled at 0. The panel is portalled to <body> and fixed under
  * the button, because the card that holds the row clips its overflow; scrolling or resizing closes it.
+ * Its arrow points at the button's centre through `--arrow-x` (App.css, Popover arrows).
  */
 export function FiltersPopover({ activeCount = 0, onClear, children }) {
   const id = useId()
@@ -29,7 +36,11 @@ export function FiltersPopover({ activeCount = 0, onClear, children }) {
   useLayoutEffect(() => {
     if (!open || !buttonRef.current) { setPos(null); return }
     const r = buttonRef.current.getBoundingClientRect()
-    setPos({ top: r.bottom + GAP, left: Math.max(8, Math.min(r.left, window.innerWidth - 328)) })
+    const left = Math.max(MARGIN, Math.min(r.left, window.innerWidth - WIDTH - MARGIN))
+    // The arrow stays over the button's centre when the panel is shifted to fit the window.
+    const width = Math.min(WIDTH, window.innerWidth - 2 * MARGIN)
+    const arrowX = Math.max(ARROW_INSET, Math.min(r.left + r.width / 2 - left, width - ARROW_INSET))
+    setPos({ top: r.bottom + GAP, left, arrowX })
   }, [open])
 
   useEffect(() => {
@@ -72,7 +83,7 @@ export function FiltersPopover({ activeCount = 0, onClear, children }) {
           role="dialog"
           aria-label="Filters"
           className="filters-popover"
-          style={pos ? { top: pos.top, left: pos.left } : { visibility: 'hidden' }}
+          style={pos ? { top: pos.top, left: pos.left, '--arrow-x': `${pos.arrowX}px` } : { visibility: 'hidden' }}
         >
           <div className="filters-popover-controls">{children}</div>
           <div className="filters-popover-foot">

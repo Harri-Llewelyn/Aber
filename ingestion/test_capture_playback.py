@@ -1303,14 +1303,26 @@ def protobuf(seq=None, **metrics):
 
 
 class FakeRecorder:
-    """The subscription: delivers `arriving` when the loop starts, retained messages first."""
+    """
+    The subscription: delivers `arriving` when the loop starts, retained messages first. Confirms
+    the subscription at once unless `suback` is False; records what is published.
+    """
 
-    def __init__(self, arriving):
+    def __init__(self, arriving, suback=True):
         self.arriving = arriving
-        self.on_message = None
+        self.suback = suback
+        self.on_message = self.on_subscribe = None
+        self.events = []
 
     def subscribe(self, topic, qos=0):
         self.topic = topic
+        self.events.append(("subscribe", topic))
+        if self.suback and self.on_subscribe:
+            self.on_subscribe(self, None, 1, (0,))
+
+    def publish(self, topic, payload, qos=0, retain=False):
+        self.events.append(("publish", topic, payload, qos, retain))
+        return SimpleNamespace(rc=0)
 
     def loop_start(self):
         for msg in self.arriving:
@@ -1408,14 +1420,73 @@ class CommandLineTests(unittest.TestCase):
         self.folder.cleanup()
 
     # -- record -----------------------------------------------------------------------------------
-    def record(self, arriving):
-        capture._connect = lambda *_args: FakeRecorder(arriving)
+    def record(self, arriving, topic="spBv1.0/#", no_rebirth=False, suback=True):
+        self.recorder = FakeRecorder(arriving, suback)
+        capture._connect = lambda *_args: self.recorder
         path = os.path.join(self.folder.name, "recorded.json")
-        args = argparse.Namespace(out=path, seconds=0, topic="spBv1.0/#", verbose=False)
-        with contextlib.redirect_stdout(io.StringIO()):
+        args = argparse.Namespace(out=path, seconds=0, topic=topic, verbose=False,
+                                  no_rebirth=no_rebirth)
+        self.output = io.StringIO()
+        with contextlib.redirect_stdout(self.output):
             status = capture.cmd_record(args)
         with open(path, encoding="utf-8") as fh:
             return status, json.load(fh)
+
+    def rebirth_requests(self):
+        return [e[1:] for e in self.recorder.events if e[0] == "publish"]
+
+    def birth_and_data(self):
+        node = "spBv1.0/Aber/%s/" + CAPTURED_GW
+        return [wire_message(node % "NBIRTH", protobuf(seq=0, Uptime_s=1.0)),
+                wire_message(node % "NDATA", protobuf(seq=1, Uptime_s=2.0))]
+
+    def test_record_asks_the_edge_node_its_topic_names_for_a_birth(self):
+        """The same request the daemon sends, on that node's NCMD, after the SUBACK."""
+        self.record(self.birth_and_data(), topic="spBv1.0/Aber/+/%s/#" % CAPTURED_GW)
+        requests = self.rebirth_requests()
+        self.assertEqual(len(requests), 1)
+        topic, payload_bytes, qos, retain = requests[0]
+        self.assertEqual(topic, "spBv1.0/Aber/NCMD/" + CAPTURED_GW)
+        self.assertEqual((qos, retain), (0, False), "tck-id-payloads-ncmd-qos, -ncmd-retain")
+        payload = sparkplug_b_pb2.Payload()
+        payload.ParseFromString(payload_bytes)
+        self.assertFalse(payload.HasField("seq"), "tck-id-payloads-ncmd-seq")
+        self.assertGreater(payload.timestamp, 0, "tck-id-payloads-ncmd-timestamp")
+        self.assertEqual([(m.name, m.datatype, m.boolean_value) for m in payload.metrics],
+                         [("Node Control/Rebirth", 11, True)])
+        kinds = [e[0] for e in self.recorder.events]
+        self.assertLess(kinds.index("subscribe"), kinds.index("publish"),
+                        "asked before the subscription that records the answer")
+
+    def test_record_asks_nobody_when_its_topic_covers_several_edge_nodes(self):
+        for topic in ("spBv1.0/#", "spBv1.0/Aber/#", "spBv1.0/+/+/%s/#" % CAPTURED_GW,
+                      "spBv1.0/Aber/+/+/#"):
+            with self.subTest(topic=topic):
+                self.record(self.birth_and_data(), topic=topic)
+                self.assertEqual(self.rebirth_requests(), [])
+                self.assertIn("No rebirth asked for", self.output.getvalue())
+
+    def test_no_rebirth_asks_nobody(self):
+        self.record(self.birth_and_data(), topic="spBv1.0/Aber/+/%s/#" % CAPTURED_GW,
+                    no_rebirth=True)
+        self.assertEqual(self.rebirth_requests(), [])
+
+    def test_record_asks_nobody_without_a_suback(self):
+        """An answer that arrived before the subscription would not be recorded."""
+        saved = capture.SUBSCRIBE_TIMEOUT_SECONDS
+        capture.SUBSCRIBE_TIMEOUT_SECONDS = 0
+        try:
+            self.record(self.birth_and_data(), topic="spBv1.0/Aber/+/%s/#" % CAPTURED_GW,
+                        suback=False)
+        finally:
+            capture.SUBSCRIBE_TIMEOUT_SECONDS = saved
+        self.assertEqual(self.rebirth_requests(), [])
+
+    def test_a_request_no_birth_answered_says_what_may_be_wrong(self):
+        node = "spBv1.0/Aber/%s/" + CAPTURED_GW
+        self.record([wire_message(node % "NDATA", protobuf(seq=5, Uptime_s=2.0))],
+                    topic="spBv1.0/Aber/+/%s/#" % CAPTURED_GW)
+        self.assertIn("A rebirth was asked for and no NBIRTH arrived", self.output.getvalue())
 
     def test_record_leaves_out_state_and_commands(self):
         """The primary host's STATE is retained, so it arrives on subscribe, every time."""

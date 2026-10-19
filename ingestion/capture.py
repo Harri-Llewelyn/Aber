@@ -47,6 +47,7 @@ import math
 import os
 import re
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -76,6 +77,8 @@ RECORD_USER = os.getenv("MQTT_CAPTURE_USER") or os.getenv("MQTT_INGESTION_USER")
     or "aber_ingestion"
 RECORD_PASSWORD = (os.getenv("MQTT_CAPTURE_PASSWORD") or os.getenv("MQTT_INGESTION_PASSWORD")
                    or os.getenv("MQTT_PASSWORD") or "")
+# How long `record` waits for the SUBACK before it would ask for a birth it could not record.
+SUBSCRIBE_TIMEOUT_SECONDS = 10
 
 # Playback authenticates as the gateway it publishes as -- username == sparkplug_id, which is what
 # makes the broker's %u rule constrain anything at all. No fallback and no default:
@@ -1043,6 +1046,34 @@ def node_death(bdseq, timestamp_ms):
     })
 
 
+REBIRTH_METRIC = "Node Control/Rebirth"
+# Sparkplug's Boolean.
+BOOLEAN = 11
+
+
+def rebirth_request(timestamp_ms):
+    """
+    An NCMD asking an edge node to rebirth: `Node Control/Rebirth` = true, a timestamp and no seq
+    (tck-id-operational-behavior-data-commands-ncmd-rebirth-name, -ncmd-rebirth-value,
+    tck-id-payloads-ncmd-timestamp, tck-id-payloads-ncmd-seq). The same request the daemon sends.
+    """
+    return dict_to_payload_bytes({
+        "timestamp": timestamp_ms,
+        "metrics": [{"name": REBIRTH_METRIC, "datatype": BOOLEAN, "boolean_value": True}],
+    })
+
+
+def rebirth_target(topic_filter):
+    """(group, edge node) when a `record --topic` filter names exactly one edge node, else None."""
+    parts = topic_filter.split("/")
+    if len(parts) < 4 or parts[0] != "spBv1.0":
+        return None
+    group, edge_node = parts[1], parts[3]
+    if segment_problem(group) or segment_problem(edge_node):
+        return None
+    return group, edge_node
+
+
 # ---------------------------------------------------------------------------------------------
 # The playback plan
 # ---------------------------------------------------------------------------------------------
@@ -1349,11 +1380,14 @@ def cmd_record(args):
 
     client = _connect(RECORD_USER, RECORD_PASSWORD, "aber-capture-record")
     client.on_message = on_message
+    subscribed = threading.Event()
+    client.on_subscribe = lambda *_args: subscribed.set()
     client.subscribe(args.topic, qos=0)
     client.loop_start()
 
     print("Recording %s from %s:%d for %ds (Ctrl-C to stop early)..."
           % (args.topic, MQTT_HOST, MQTT_PORT, args.seconds))
+    asked = _ask_for_rebirth(client, args, subscribed)
     try:
         time.sleep(args.seconds)
     except KeyboardInterrupt:
@@ -1411,7 +1445,41 @@ def cmd_record(args):
     _print_summary(capture)
     if ignored:
         print("  left out:   %d STATE, NCMD, DCMD or empty message(s)" % len(ignored))
+    if asked and not any(split_topic(m["topic"])[1] == "NBIRTH" for m in messages):
+        # A refused QoS 0 publish is dropped without a word, so the broker can't say which.
+        print("\n  A rebirth was asked for and no NBIRTH arrived: the edge node may not answer")
+        print("  rebirth requests, or %r may not be allowed to publish NCMD." % RECORD_USER)
     return 0
+
+
+def _ask_for_rebirth(client, args, subscribed):
+    """
+    Ask the edge node `--topic` names for its birth certificate once the subscription is in place,
+    so its answer is recorded. True when asked. A filter covering several edge nodes asks none:
+    each would republish every birth it holds.
+    """
+    if args.no_rebirth:
+        return False
+    target = rebirth_target(args.topic)
+    if target is None:
+        print("  No rebirth asked for: %s names no single edge node. Without the edge node's NBIRTH"
+              % args.topic)
+        print("  the file cannot be played back; name one with --topic "
+              "spBv1.0/<group>/+/<edge node>/#.")
+        return False
+    if not subscribed.wait(SUBSCRIBE_TIMEOUT_SECONDS):
+        print("  No rebirth asked for: the broker did not confirm the subscription within %ds, so"
+              " the answer could not be recorded." % SUBSCRIBE_TIMEOUT_SECONDS)
+        return False
+    group, edge_node = target
+    sent = client.publish("spBv1.0/%s/NCMD/%s" % (group, edge_node),
+                          rebirth_request(int(time.time() * 1000)), qos=0, retain=False)
+    if sent.rc != mqtt.MQTT_ERR_SUCCESS:
+        print("  The rebirth request could not be sent (rc=%s)." % sent.rc)
+        return False
+    print("  Asked %s in group %s for its birth certificate (Node Control/Rebirth)."
+          % (edge_node, group))
+    return True
 
 
 def _print_summary(capture):
@@ -1434,9 +1502,9 @@ def _print_summary(capture):
     print("  devices:    %s" % (", ".join(capture["identities"]["devices"]) or "(none)"))
     if "NBIRTH" not in by_type:
         print("\n  No NBIRTH was recorded, so this capture cannot be played back: a replay opens")
-        print("  with the edge node's birth certificate. Record again and ask the edge node for")
-        print("  one meanwhile (Request Rebirth on the Gateways page), or record on the Capture")
-        print("  page, which asks for one itself.")
+        print("  with the edge node's birth certificate. Record again with --topic naming the edge")
+        print("  node, so the recorder asks it for one, or record on the Capture page, which asks")
+        print("  for one itself.")
     if capture["identities"]["devices"]:
         print("\n  Playback needs a --map for each device above, onto a replay lane of the")
         print("  Playback gateway: the Capture page's Prepare replay lanes makes them.")
@@ -1595,7 +1663,12 @@ def build_parser():
     rec = sub.add_parser("record", help="subscribe and write a capture file")
     rec.add_argument("--out", required=True, help="capture file to write")
     rec.add_argument("--seconds", type=int, default=60, help="how long to record (default 60)")
-    rec.add_argument("--topic", default="spBv1.0/#", help="topic filter (default spBv1.0/#)")
+    rec.add_argument("--topic", default="spBv1.0/#",
+                     help="topic filter (default spBv1.0/#). Name one edge node, "
+                          "spBv1.0/<group>/+/<edge node>/#, and the recorder asks it for its birth "
+                          "certificate when the recording starts")
+    rec.add_argument("--no-rebirth", action="store_true",
+                     help="don't ask the edge node --topic names for its birth certificate")
     rec.add_argument("--verbose", action="store_true")
     rec.set_defaults(func=cmd_record)
 

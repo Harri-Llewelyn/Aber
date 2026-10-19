@@ -443,6 +443,7 @@ html, body, #root {
 .user-menu { position: relative; }
 
 .user-menu-button {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -486,10 +487,14 @@ html, body, #root {
 }
 
 /* The icon takes the accent on hover rather than the border alone: a 1px ring on a 28px circle is a
-   very small change to notice. Filled while the menu is open, and while Profile is the page. */
+   very small change to notice. Filled while the menu is open. */
 .user-menu-button:hover .user-avatar { border-color: var(--accent); color: var(--accent); }
-.user-menu-button-open .user-avatar,
-.user-menu-button.active .user-avatar { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+.user-menu-button-open .user-avatar { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+
+/* Profile is the current page: marked as a rail page is, the accent and the bar on the rail's left
+   edge (`.sidebar-item.active::before`), with no fill. */
+.user-menu-button.active { color: var(--accent-text); font-weight: 600; }
+.user-menu-button.active .user-avatar { border-color: var(--accent); color: var(--accent); }
 
 /* Opens upward beside the rail, as the behaviour menu does: `fixed`, so the panel's overflow
    never clips it, and readable while the rail is collapsed. */
@@ -502,7 +507,7 @@ html, body, #root {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-popover);
   overflow: hidden;
   z-index: 200;
 }
@@ -599,17 +604,20 @@ html, body, #root {
   transition: var(--transition);
 }
 
-/* The item's own label grows to fill, so the hint below is pushed to the right edge of the menu
-   rather than sitting against the label it belongs to. */
-.user-popover-action > span:not(.user-popover-hint) { flex: 1; min-width: 0; }
+/* The item's own label grows to fill the row. */
+.user-popover-action > span { flex: 1; min-width: 0; }
 
-/* The theme item's destination -- "Dark" / "Light" as a quiet right-aligned tail, so the row's
-   left-hand half stays a statement of the CURRENT value. */
-.user-popover-hint {
-  font-size: 11px;
-  color: var(--text-muted);
-  letter-spacing: 0.3px;
-  flex-shrink: 0;
+/* The Theme row: its label where the other rows' labels start (after their 14px icon and 8px gap),
+   and the Light/Dark switch, a SegmentedControl, at the right edge. */
+.user-popover-theme {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 12px 5px 34px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
 }
 
 .user-popover-action:hover { background: var(--bg-glass); }
@@ -675,19 +683,20 @@ html, body, #root {
 .sidebar-divider {
   height: 1px;
   background: var(--border);
-  margin: 8px 2px;
+  margin: 6px 2px;
   flex-shrink: 0;
 }
 
+/* 36px rows, so an Administrator's whole rail fits under the bar on a 1080p screen. */
 .sidebar-item {
   position: relative;
   display: flex;
   align-items: center;
   gap: 11px;
   width: 100%;
-  padding: 8px 9px;
-  /* A transparent border, not `none`: the active item adds a 1px accent border, and an item that
-     only grows one when selected would shift its neighbours by 2px on every navigation. */
+  padding: 6px 9px;
+  /* The transparent border is part of the row's height and of the icon's 18px inset (the panel's
+     8px, this 1px, the 9px padding), which centres the icon on the 52px rail. */
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: none;
@@ -715,19 +724,32 @@ html, body, #root {
 .sidebar-item-label { opacity: 0; transition: opacity 0.12s ease; }
 .sidebar-expanded .sidebar-item-label { opacity: 1; }
 
-.sidebar-item:hover { color: var(--text-primary); background: var(--bg-glass); }
+/* No fill: the scrollbar narrows the row from the right, so a filled row would sit off the rail's
+   centre while its icon stays on it. */
+.sidebar-item:hover { color: var(--text-primary); }
 
-/* Three signals carry the current page -- fill, border and weight -- so none is doing the job
-   alone. It has to survive the collapsed state, where the label is transparent and this is the
-   ONLY thing distinguishing the page you are on. */
+/* The current page: the accent icon, and a 3px bar on the rail's left edge, where the scrollbar
+   cannot move it. The bar is what marks it while the rail is collapsed and the label is
+   transparent, so it does not rest on colour alone. The label is the accent's text shade at 600.
+   After the hover rule, so pointing at the current page leaves it marked. */
 .sidebar-item.active {
-  color: var(--accent);
-  background: var(--accent-dim);
-  border-color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
 }
 
-.sidebar-item.active:hover { background: var(--accent-dim); color: var(--accent); }
+.sidebar-item.active .sidebar-item-icon { color: var(--accent); }
+
+/* -9px is the panel's 8px padding and the row's 1px border; -1px top and bottom spans the border.
+   Drawn as a border, not a fill, so it still shows in forced-colours mode, which drops backgrounds. */
+.sidebar-item.active::before,
+.user-menu-button.active::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: -9px;
+  border-left: 3px solid var(--accent);
+}
 
 .sidebar-item:focus-visible {
   outline: 2px solid var(--accent);
@@ -741,7 +763,7 @@ html, body, #root {
 .sidebar-item.sidebar-item-warning:not(.active):hover { color: var(--warning-text); }
 
 /* The number: a badge on the icon's top-right corner while the rail is collapsed, the end of the
-   label once it is expanded. Filled, so it reads on the active item's accent too. */
+   label once it is expanded. Filled, so it stands apart from the active item's accent icon too. */
 .sidebar-item-count {
   position: absolute;
   top: 0;
@@ -1170,7 +1192,7 @@ a.sidebar-item { text-decoration: none; }
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-popover);
 }
 .filters-popover-controls {
   display: flex;
@@ -2378,12 +2400,13 @@ td.row-actions, th.row-actions {
 
 .toast-region:not(:empty) + .toast-region:not(:empty) { margin-top: 8px; }
 
-/* The background must be opaque: a toast floats over arbitrary content, so the 0.15 tint is painted
-   as a background-image over an opaque background-color of --bg-card, which is the base the ratios
-   in themeContrast.test.js assume. Keep them as separate properties: the `background:` shorthand
-   resets background-color. */
+/* A plain card: the text is --text-primary, and the colour is on the signal only, the icon and a
+   3px stripe on the leading edge in its `signal-tone-*` (below), as Carbon's low-contrast
+   notifications draw it. The background must be opaque, because a toast floats over arbitrary
+   content; --bg-card is the base the ratios in themeContrast.test.js assume. */
 .toast {
   padding: 12px 10px 12px 16px;
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   font-size: 13px;
   font-weight: 500;
@@ -2392,31 +2415,34 @@ td.row-actions, th.row-actions {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  box-shadow: var(--shadow);
+  box-shadow: inset 3px 0 0 var(--signal-tone), var(--shadow);
   background-color: var(--bg-card);
+  color: var(--text-primary);
   pointer-events: auto;
 }
 
-.toast-icon { display: flex; flex-shrink: 0; margin-top: 2px; }
+.toast-icon { display: flex; flex-shrink: 0; margin-top: 2px; color: var(--signal-tone); }
 
 /* Wraps anywhere: an error can carry a long identifier with no spaces in it. */
 .toast-msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 
-/* A toast that opens something: the message is a button drawn as text, so only the cursor and the
-   focus ring say it is clickable. */
-.toast-open {
-  padding: 0;
-  border: none;
-  background: none;
+/* A message that links to what it is about (MessageLink in Toast.jsx): the toast's text and a
+   history row's. It keeps the text's colour, so the underline, the pointer and the focus ring say it
+   is a link; a link to Grafana adds the external-link icon. */
+.toast-link,
+.notif-item-link {
   color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--text-dim);
+  text-underline-offset: 3px;
 }
-.toast-open:hover { text-decoration: underline; }
-.toast-open:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.toast-link:hover,
+.notif-item-link:hover { text-decoration-color: currentColor; }
+.toast-link:focus-visible,
+.notif-item-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+.message-link-external { margin-left: 4px; vertical-align: -1px; color: var(--text-muted); }
 
-/* 24px, the WCAG 2.2 minimum target. Takes the toast's own ink, which each type measures on its tint. */
+/* 24px, the WCAG 2.2 minimum target. Muted until pointed at, so the message leads. */
 .toast-dismiss {
   display: inline-flex;
   align-items: center;
@@ -2429,40 +2455,20 @@ td.row-actions, th.row-actions {
   border: none;
   border-radius: 6px;
   background: none;
-  color: inherit;
+  color: var(--text-muted);
   cursor: pointer;
   transition: var(--transition);
 }
 
-.toast-dismiss:hover { background: var(--bg-glass); }
-.toast-dismiss:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
+.toast-dismiss:hover { background: var(--bg-glass); color: var(--text-primary); }
+.toast-dismiss:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-.toast-success {
-  background-image: linear-gradient(var(--success-tint), var(--success-tint));
-  border: 1px solid var(--success);
-  color: var(--success-text);
-}
-
-/* --accent-text, the accent's label ink on its own tint (the pending badge's pairing). */
-.toast-info {
-  background-image: linear-gradient(var(--accent-dim), var(--accent-dim));
-  border: 1px solid var(--accent);
-  color: var(--accent-text);
-}
-
-.toast-warning {
-  background-image: linear-gradient(var(--warning-tint), var(--warning-tint));
-  border: 1px solid var(--warning);
-  color: var(--warning-text);
-}
-
-/* --danger-text, not --danger: the bare signal colour is a border/icon tone and measures below
-   AA once the 0.15 rose fill lightens the surface beneath it. */
-.toast-error {
-  background-image: linear-gradient(var(--danger-tint), var(--danger-tint));
-  border: 1px solid var(--danger);
-  color: var(--danger-text);
-}
+/* The signal colour of a toast's or a history row's icon, from toastTone() in Toast.jsx. Each
+   clears 3:1 on --bg-card, the bar for an icon (WCAG 1.4.11); themeContrast.test.js measures them. */
+.signal-tone-accent  { --signal-tone: var(--accent); }
+.signal-tone-warning { --signal-tone: var(--warning); }
+.signal-tone-danger  { --signal-tone: var(--danger); }
+.signal-tone-success { --signal-tone: var(--success); }
 
 @keyframes slideInRight {
   from { opacity: 0; transform: translateX(20px); }
@@ -2472,6 +2478,52 @@ td.row-actions, th.row-actions {
 @media (prefers-reduced-motion: reduce) {
   .toast { animation: none; }
 }
+
+/* ===== Segmented control ===== */
+/* One outlined pill holding a few exclusive choices (common/SegmentedControl.jsx): the notification
+   filter and the account menu's theme switch. The chosen segment takes a sunken fill and a border,
+   so the choice does not rest on colour alone (WCAG 1.4.1). */
+.segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+}
+
+.segmented-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.segmented-option:hover { color: var(--text-primary); }
+.segmented-option:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.segmented-option-checked {
+  background: var(--bg-base);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+.segmented-icon { display: inline-flex; }
+
+/* The chosen icon takes its option's tone. An option with none leaves --signal-tone undefined,
+   which makes this colour invalid at computed-value time, so the icon inherits --text-primary. */
+.segmented-option-checked .segmented-icon { color: var(--signal-tone); }
 
 /* ===== Loading ===== */
 .spinner {
@@ -3280,7 +3332,7 @@ a.chip { text-decoration: none; }
   overscroll-behavior: contain;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   box-shadow: var(--shadow-popover);
 }
 
@@ -3404,8 +3456,8 @@ a.alert-pill-item-link[target='_blank'] .alert-pill-item-name { color: var(--acc
 .notif-button { position: relative; }
 
 /* The unread count on the bell's corner. Opaque, with each tone painted as a background-image
-   over --bg-card, so the ratios measured for the toasts hold here too. A routine success keeps the
-   neutral base: the tones are spent on what is worth opening the list for. */
+   over --bg-card, the base themeContrast.test.js measures each label on. A routine success keeps
+   the neutral base: the tones are spent on what is worth opening the list for. */
 .notif-badge {
   position: absolute;
   top: -7px;
@@ -3455,7 +3507,7 @@ a.alert-pill-item-link[target='_blank'] .alert-pill-item-name { color: var(--acc
   overscroll-behavior: contain;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   box-shadow: var(--shadow-popover);
 }
 
@@ -3463,21 +3515,31 @@ a.alert-pill-item-link[target='_blank'] .alert-pill-item-name { color: var(--acc
    outline the whole panel. */
 .notif-panel:focus { outline: none; }
 
-/* Sticky, so Clear and Close stay in reach at the bottom of fifty entries. */
-.notif-panel-head {
+/* The heading and the filter under it, sticky as one block, so Clear, Close and the filter stay in
+   reach at the bottom of fifty entries. */
+.notif-panel-top {
   position: sticky;
   top: 0;
   z-index: 1;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.notif-panel-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   padding: 8px 8px 8px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-card);
   font-size: 12px;
   font-weight: 600;
 }
+
+/* The group filter, a SegmentedControl stretched to the panel's width with its segments evenly
+   spaced. */
+.notif-filter { padding: 0 12px 10px; }
+.notif-filter .segmented { display: flex; }
+.notif-filter .segmented-option { flex: 1; }
 
 .notif-panel-actions { display: flex; align-items: center; gap: 4px; }
 
@@ -3542,12 +3604,8 @@ a.alert-pill-item-link[target='_blank'] .alert-pill-item-name { color: var(--acc
 
 .notif-item:last-child { border-bottom: none; }
 
-/* The type's glyph in its signal colour, the icon tone each of these clears 3:1 in. */
-.notif-item-icon { display: flex; flex-shrink: 0; margin-top: 2px; }
-.notif-item-success .notif-item-icon { color: var(--success); }
-.notif-item-info .notif-item-icon    { color: var(--accent); }
-.notif-item-warning .notif-item-icon { color: var(--warning); }
-.notif-item-error .notif-item-icon   { color: var(--danger); }
+/* The group's glyph in the row's signal colour, as the toast draws it. */
+.notif-item-icon { display: flex; flex-shrink: 0; margin-top: 2px; color: var(--signal-tone); }
 
 .notif-item-body { flex: 1; min-width: 0; }
 
@@ -3569,6 +3627,65 @@ a.alert-pill-item-link[target='_blank'] .alert-pill-item-name { color: var(--acc
   border-top: 1px solid var(--border);
   font-size: 11px;
   color: var(--text-muted);
+}
+
+/* ===== Popover arrows =====
+   The five panels that open from a button point at it: a square turned 45 degrees, centred on the
+   panel's border on the side facing the button. It is a pseudo-element of the panel's wrapper, not
+   of the panel, because the alert, notification and account panels clip or scroll their overflow;
+   the Filters panel clips nothing and carries its own. --bg-card is opaque in both themes, so the
+   half inside the panel hides the panel's border there and the two bordered sides carry the
+   outline on into the point. The rules below say where the centre goes and which way it turns. */
+.alert-pill-wrap:has(> .alert-pill-panel)::after,
+.notif-wrap:has(> .notif-panel)::after,
+.user-menu:has(> .user-popover)::after,
+.sidebar-mode:has(> .sidebar-mode-menu)::after,
+.filters-popover::before {
+  --arrow-size: 10px;
+  content: '';
+  position: absolute;
+  width: var(--arrow-size);
+  height: var(--arrow-size);
+  /* Centres the box on whichever offsets place it: top or bottom, and left. */
+  margin: calc(var(--arrow-size) / -2);
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  /* 45deg turns the bordered corner up, -45deg turns it left. */
+  transform: rotate(var(--arrow-turn, 45deg));
+  pointer-events: none;
+}
+
+/* Up, from the top bar: on the panel's top border (the panels open 8px below the wrapper), centred
+   on the button whatever its width, and above the panels' z-index 60. */
+.alert-pill-wrap:has(> .alert-pill-panel)::after,
+.notif-wrap:has(> .notif-panel)::after {
+  top: calc(100% + 8.5px);
+  left: 50%;
+  z-index: 61;
+}
+
+/* Left, from the foot of the rail: fixed like the two panels, on their left border, and level with
+   the centre of the button that opened each. The foot is 10px of padding, the 34px behaviour
+   button, a 2px gap, then the 38px account row, so the centres are 27px and 65px up. */
+.user-menu:has(> .user-popover)::after,
+.sidebar-mode:has(> .sidebar-mode-menu)::after {
+  --arrow-turn: -45deg;
+  position: fixed;
+  left: 60.5px;
+  z-index: 201;
+}
+.user-menu:has(> .user-popover)::after { bottom: 65px; }
+.sidebar-mode:has(> .sidebar-mode-menu)::after { bottom: 27px; }
+.sidebar-mode-expanded .user-menu:has(> .user-popover)::after,
+.sidebar-mode-expanded .sidebar-mode:has(> .sidebar-mode-menu)::after { left: 240.5px; }
+
+/* Up, from a toolbar's Filters button. The panel is kept inside the window, so FiltersPopover sets
+   --arrow-x, the button's centre from the panel's outer left edge; the 1px is the border the
+   containing block starts inside. */
+.filters-popover::before {
+  top: -0.5px;
+  left: calc(var(--arrow-x, 50%) - 1px);
 }
 
 /* The 3D model preview in the device drawer. One class on all three states (the element, the
@@ -5271,7 +5388,7 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   align-items: center;
   gap: 11px;
   width: 100%;
-  padding: 8px 9px;
+  padding: 6px 9px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: none;
@@ -5300,7 +5417,7 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-popover);
   z-index: 200;
 }
 
