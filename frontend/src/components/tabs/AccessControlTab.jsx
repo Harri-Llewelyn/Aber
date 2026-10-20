@@ -17,6 +17,7 @@ import { Badge, ArchivedBadge } from '../common/Badge'
 import { CardHeading } from '../common/CardHeading'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
+import { HelpLink } from '../common/HelpLink'
 import { LoadingState } from '../common/LoadingState'
 import { SearchInput } from '../common/SearchInput'
 import { TabStrip } from '../common/TabStrip'
@@ -479,7 +480,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
               filtered={rows.length > 0}
               message={<>
                 No gateways registered. Create one on the Gateways page —{' '}
-                <code>help/guides/tutorial.md</code> walks through it.
+                <HelpLink to="guides/tutorial">the tutorial</HelpLink> walks through it.
               </>}
               filteredMessage="No gateway matches these filters."
             />

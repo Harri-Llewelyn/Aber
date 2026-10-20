@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { modelViewerDecoders } from './modelViewerDecoders.js'
+import { helpCorpus } from './helpCorpus.js'
 
 /**
  * The version this bundle reports in the account menu (issue #57).
@@ -66,7 +67,7 @@ export default defineConfig(({ mode, command }) => {
   }
 
   return {
-    plugins: [react(), modelViewerDecoders()],
+    plugins: [react(), modelViewerDecoders(), helpCorpus()],
     build: {
       // @google/model-viewer is a 1 MB chunk, loaded only when a device with a model is opened.
       chunkSizeWarningLimit: 1100,
@@ -80,7 +81,7 @@ export default defineConfig(({ mode, command }) => {
     server: {
       host: '0.0.0.0',
       port: 3000,
-      // src/help/index.js bundles ../help/pages, which is outside this package: the dev server and
+      // src/help/index.js bundles ../help, which is outside this package: the dev server and
       // vitest refuse to load a file there unless it is allowed. `allow` replaces the default, so
       // the default (the workspace root) is named again beside it.
       fs: {

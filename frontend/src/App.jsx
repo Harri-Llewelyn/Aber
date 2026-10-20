@@ -423,6 +423,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   const [showChangePassword, setShowChangePassword] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
   const closeHelp = useCallback(() => setShowHelp(false), [])
+  const openHelp = useCallback(() => setShowHelp(true), [])
 
   const { tab, setTab, handleNavClick } = useAppRouting()
 
@@ -733,7 +734,7 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
 
         {/* Rendered beside the page so it survives tab switches (`tabId` follows `tab`) and is
             available on pages with no drawer of their own. See HelpPanel.jsx. */}
-        <HelpPanel open={showHelp} tabId={tab} onClose={closeHelp} />
+        <HelpPanel open={showHelp} tabId={tab} onClose={closeHelp} onOpen={openHelp} />
       </div>
 
       <ToastStack toasts={toasts} onDismiss={dismissToast} onExpire={expireToast} />
