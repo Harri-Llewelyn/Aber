@@ -23,6 +23,11 @@ AStoredCaptureIsNeverOverwritten holds the upload race against the real bucket: 
 caught up is refused before it writes, a refused register leaves the row and its file agreeing, and
 a deleted subject's capture file is claimed by nothing.
 
+ADownloadNeedsTheAuditedCall holds the download against the real bucket: without
+`issue_capture_download()` the Storage API neither signs a link to a stored capture nor serves it to
+a person's token; after it, the link serves the file, the Audit Trail names the person, and the
+grant closes after a minute.
+
 ACaptureAtTheCapFitsBothWorkers records a device to the 50 MiB size cap and replays it, reading
 each worker's memory from its container's cgroup with kubectl: each peak must stay under 60% of the
 container's limit.
@@ -91,6 +96,9 @@ UPLOAD_DEVICE_ID = "72000000-0000-4000-8000-000000000001"
 # The memory case's own subject, recorded to the size cap.
 CAP_GATEWAY_ID = "73000000-0000-4000-8000-000000000001"
 CAP_DEVICE_ID = "74000000-0000-4000-8000-000000000001"
+# The download grant's own subject, so no other case has signed a link for its capture.
+DOWNLOAD_GATEWAY_ID = "75000000-0000-4000-8000-000000000001"
+DOWNLOAD_DEVICE_ID = "76000000-0000-4000-8000-000000000001"
 
 # One DDATA a second; the capture runs until DATA_AFTER_BIRTH have followed the rebirth.
 DATA_INTERVAL = 1.0
@@ -192,15 +200,34 @@ def token_subject(token):
     return json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))["sub"]
 
 
-def download(session, path):
-    """(status, bytes) of a stored capture, read as the Capture page's Download reads it."""
-    request = urllib.request.Request(f"{SUPABASE_URL}/storage/v1/object/{BUCKET}/{path}",
-                                     headers=session._headers())
+def fetch(url, headers):
+    """(status, bytes) of a GET."""
+    request = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             return response.status, response.read()
     except urllib.error.HTTPError as err:
-        return err.code, err.read()
+        with err:
+            return err.code, err.read()
+
+
+def sign(session, path):
+    """(status, body) of a signed-link request for `path`, as storage-js createSignedUrl() sends it."""
+    return _request(f"{SUPABASE_URL}/storage/v1/object/sign/{BUCKET}/{path}", method="POST",
+                    body={"expiresIn": 60}, headers=session._headers())
+
+
+def download(session, path):
+    """(status, bytes) of a stored capture, read as the Capture page's Download reads it:
+    `issue_capture_download()` records it and answers the path, a link is signed for that path, and
+    the link is fetched with the gateway's key alone. The bucket admits a person by nothing else."""
+    status, issued = session.rpc("issue_capture_download", {"p_storage_path": path})
+    if status != 200:
+        return status, json.dumps(issued).encode()
+    status, signed = sign(session, issued)
+    if status != 200 or not (signed or {}).get("signedURL"):
+        return status, json.dumps(signed).encode()
+    return fetch(f"{SUPABASE_URL}/storage/v1{signed['signedURL']}", {"apikey": PUBLISHABLE_KEY})
 
 
 def owner_connection():
@@ -1150,6 +1177,102 @@ class AStoredCaptureIsNeverOverwritten(unittest.TestCase):
         self.session.rest(f"/devices?id=eq.{UPLOAD_DEVICE_ID}", method="DELETE")
         self.assertEqual(self.row(), [])
         self.assertEqual([o.get("name") for o in self.session.remove(newer_path)], [newer_path])
+
+
+class ADownloadNeedsTheAuditedCall(unittest.TestCase):
+    """
+    The bucket admits a person to a stored capture's file only for the minute after
+    `issue_capture_download()` recorded the download for them (0195), against the real
+    storage-api. Before, an Administrator, Shopfloor_Manager or Auditor could sign a link or read
+    the file with their own token, and the Audit Trail held nothing. The tests run in order, on one
+    subject no edge node publishes as and no other case downloads.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.session = Session(sign_in())
+        cls.path = None
+        cls.addClassCleanup(cls._clean_up)
+        gateway = cls.session.upsert("gateways", {
+            "id": DOWNLOAD_GATEWAY_ID, "name": "CAPTURE_DOWNLOAD_Grant_Gateway", "deployment": "host",
+            "description": "Fixture for ingestion/test_recorded_capture_replay.py. Safe to delete.",
+        })
+        device = cls.session.upsert("devices", {
+            "id": DOWNLOAD_DEVICE_ID, "name": "CAPTURE_DOWNLOAD_Grant_Device", "gateway_id": gateway["id"],
+            "description": "Fixture for ingestion/test_recorded_capture_replay.py. Safe to delete.",
+        })
+        cls.document = small_capture(gateway["sparkplug_id"], device["sparkplug_id"],
+                                     "CAPTURE/DOWNLOAD_GRANT", int(time.time() * 1000))
+        status, cls.capture_id, cls.path = store_upload(cls.session, "device", DOWNLOAD_DEVICE_ID,
+                                                        cls.document)
+        if status != 200:
+            raise AssertionError(f"could not store the capture: {status} {cls.capture_id}")
+
+    @classmethod
+    def _clean_up(cls):
+        session = cls.session
+        for action in (
+            lambda: session.rest(f"/captures?subject_kind=eq.device&device_id=eq.{DOWNLOAD_DEVICE_ID}",
+                                 method="DELETE"),
+            lambda: cls.path and session.remove(cls.path),
+            lambda: session.rest(f"/devices?id=eq.{DOWNLOAD_DEVICE_ID}", method="DELETE"),
+            lambda: session.rest(f"/gateways?id=eq.{DOWNLOAD_GATEWAY_ID}", method="DELETE"),
+        ):
+            try:
+                action()
+            except Exception as err:  # noqa: BLE001 -- cleanup must not mask a real failure
+                print(f"cleanup warning: {err}")
+        try:
+            conn = owner_connection()
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM public.audit_trail WHERE entity_id = ANY(%s::uuid[])",
+                            ([DOWNLOAD_GATEWAY_ID, DOWNLOAD_DEVICE_ID],))
+            conn.close()
+        except Exception as err:  # noqa: BLE001
+            print(f"cleanup warning: the audit rows: {err}")
+
+    def _refused(self):
+        """What the Storage API answers this person for the file without an open grant."""
+        status, body = sign(self.session, self.path)
+        self.assertNotEqual(status, 200, f"a link was signed with no download recorded: {body}")
+        self.assertFalse((body or {}).get("signedURL"))
+        for route in (f"object/{BUCKET}", f"object/authenticated/{BUCKET}"):
+            with self.subTest(route=route):
+                status, raw = fetch(f"{SUPABASE_URL}/storage/v1/{route}/{self.path}",
+                                    self.session._headers())
+                self.assertNotEqual(status, 200, f"the file was read with no download recorded: {raw[:200]!r}")
+
+    def test_1_a_link_or_a_read_without_the_call_is_refused(self):
+        self._refused()
+
+    def test_2_the_call_opens_a_link_that_serves_the_file_and_is_recorded(self):
+        status, raw = download(self.session, self.path)
+        self.assertEqual(status, 200, raw[:300])
+        self.assertEqual(json.loads(raw), self.document)
+        conn = owner_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT count(*) FROM public.audit_trail WHERE entity_type = 'captures' "
+                            "AND entity_id = %s AND action = 'CAPTURE_DOWNLOAD_ISSUED' "
+                            "AND changed_by = %s;", (self.capture_id, token_subject(self.session.token)))
+                self.assertEqual(cur.fetchone()[0], 1)
+        finally:
+            conn.close()
+
+    def test_3_the_grant_closes_after_a_minute(self):
+        """Aged rather than waited out: the window is the database's, and a minute of sleep tests
+        the clock rather than the policy."""
+        conn = owner_connection()
+        conn.autocommit = True
+        try:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE public.capture_downloads SET issued_at = now() - interval '61 seconds' "
+                            "WHERE storage_path = %s;", (self.path,))
+                self.assertEqual(cur.rowcount, 1, "the call opened no grant")
+        finally:
+            conn.close()
+        self._refused()
 
 
 # DDATA of fifty aliased integers that no birth declares: the shape that cost the daemon the most

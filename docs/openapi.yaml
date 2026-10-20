@@ -1671,7 +1671,8 @@ paths:
         **Each act is in the Audit Trail (0193).** Storing a capture writes `CAPTURE_UPLOADED` or
         `CAPTURE_RECORDED`, and every deletion writes `CAPTURE_DELETED`, with why: deleted, replaced
         by an upload or a recording, or deleted with its gateway or device. A download goes through
-        `issue_capture_download()` first, which writes `CAPTURE_DOWNLOAD_ISSUED`.
+        `issue_capture_download()` first, which writes `CAPTURE_DOWNLOAD_ISSUED`: the bucket admits a
+        person to a stored capture's file only in the minute after it (0195).
       parameters:
         - { name: subject_kind, in: query, schema: { type: string, enum: [gateway, device] }, description: 'e.g. `eq.gateway`' }
         - { name: gateway_id, in: query, schema: { type: string, format: uuid } }
@@ -1729,9 +1730,12 @@ paths:
       summary: Record a capture download and answer the path to sign
       description: |
         Writes `CAPTURE_DOWNLOAD_ISSUED` to the Audit Trail, naming the caller and the capture, and
-        answers the capture's `storage_path`. The dashboard then signs a short-lived link for that
-        path with the Storage API, and signs nothing when this refuses. `Administrator`,
-        `Shopfloor_Manager` or `Auditor`, the roles the bucket admits to read (0193).
+        answers the capture's `storage_path`. It also opens a 60-second grant for the caller to read
+        that file, and the `broker-captures` bucket admits a person to a stored capture's file by
+        nothing else (0195). So sign the link with the Storage API straight after this answers: a
+        link signed later, or without this call, is refused. The dashboard signs nothing when this
+        refuses. `Administrator`, `Shopfloor_Manager` or `Auditor`, the roles the bucket admits to
+        read (0193).
       requestBody:
         required: true
         content:

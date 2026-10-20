@@ -832,8 +832,10 @@ export const SUITES = {
       '0190 -- a stored capture is never lost, orphaned or taken on trust. Each failure here is ' +
       'silent: a row describing a file that was overwritten, a refused upload that already ' +
       'replaced the stored bytes, a browser-reported size of 900 TB, or a deleted subject whose ' +
-      'recording stays in the bucket and in every backup. Needs supabase_admin to stand in for ' +
-      'storage.objects, which only storage-api creates.',
+      'recording stays in the bucket and in every backup. And 0195 -- a person reads a stored ' +
+      "capture's file only through issue_capture_download(), whose Audit Trail row is otherwise " +
+      'missing without anything failing. Needs supabase_admin to stand in for storage.objects, ' +
+      'which only storage-api creates.',
   },
   'supabase/migrations/test_capture_audit.py': {
     lanes: ['db'],
@@ -1120,8 +1122,9 @@ export const SUITES = {
       'with start_capture_job() and stops it; the file and the row are checked against what was ' +
       'published; and that file is replayed into the historian under the replay lane and nowhere ' +
       'else. A second subject is recorded to the 50 MiB size cap and replayed, and the cgroup ' +
-      'memory.peak of each worker must stay under 60% of its limit. Needs `playback.enabled`, which ' +
-      'values-dev.yaml sets.',
+      'memory.peak of each worker must stay under 60% of its limit. A third is stored and must be ' +
+      'neither signed nor served to a person without issue_capture_download(), which only the ' +
+      'real storage-api can show. Needs `playback.enabled`, which values-dev.yaml sets.',
   },
   'test-harness/test_load_generator.py': {
     // UNIT, AND THAT IS THE POINT. The suite exists precisely because the run it guards cannot be
