@@ -4150,19 +4150,27 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   top: auto;
   max-height: none;
   align-self: stretch;
-  transition: width 0.25s ease, margin-right 0.25s ease, visibility 0s linear 0.25s;
+  transition: width 0.25s ease, visibility 0s linear 0.25s;
 }
 
-/* Open, it keeps the page's gutter from the window's edges. On the page side `.content`'s padding
-   is already the gap, so it adds none there. */
+/* Open, it docks to the window's right edge under the bar, the mirror of the rail: part of the
+   app's frame, where a page's drawer is a card beside its list. No margin on any side; on the page
+   side `.content`'s padding is the gap. */
 .context-panel-app.context-panel-open {
-  margin: var(--gutter) var(--gutter) var(--gutter) 0;
-  transition: width 0.25s ease, margin-right 0.25s ease, visibility 0s;
+  margin: 0;
+  transition: width 0.25s ease, visibility 0s;
 }
 
+/* The rail's surface and its one border, on the page side. No rounding and no shadow: those are
+   what mark a page's drawer as a card. */
 .context-panel-app .context-panel-inner {
   max-height: 100%;
   height: 100%;
+  background: var(--bg-surface);
+  border: none;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: none;
 }
 
 /* No rule above the prose. `.context-panel-extras` is separated from the fields and actions it
@@ -4243,8 +4251,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
     max-height: none;
     z-index: 90;
   }
-  /* The help drawer's docked margins would inset its overlay from the window's edges. */
-  .context-panel-app.context-panel-open { margin: 0; }
+  /* Over the page, the help drawer keeps the shadow, as the rail does when it opens over the page. */
+  .context-panel-app .context-panel-inner { box-shadow: var(--shadow); }
   .context-panel-inner {
     /* The desktop width would leave the overlay's extra width as an empty strip on the right. */
     width: 100%;
@@ -4255,10 +4263,11 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   }
 }
 
-/* One drawer at a time below 1440px, where two would leave the page under about 500px (the
-   derivation is in frontend/README.md). Open help hides a page's open drawer without closing it, so
-   closing help shows the same details again; `display: none` also takes it out of the tab order and
-   the accessibility tree. ONE_DRAWER_QUERY in ContextPanel.jsx must match this query. */
+/* One drawer at a time below 1440px, where two would squeeze the page (frontend/README.md has the
+   derivation, and why 1366px stays on this side). Open help hides a page's open drawer without
+   closing it, so closing help shows the same details again; `display: none` also takes it out of
+   the tab order and the accessibility tree. ONE_DRAWER_QUERY in ContextPanel.jsx must match this
+   query. */
 @media (max-width: 1439px) {
   .app-body:has(> .context-panel-app.context-panel-open) > .content .context-panel-open { display: none; }
 }
