@@ -343,6 +343,16 @@ export default async function handler(req: Request): Promise<Response> {
           "this gateway's Type to Remote, or create a Remote one.",
       });
     }
+    if (gateway.deployment === "third_party") {
+      // Refused by the RPC too. A bundle enrols Aber's gateway appliance, and a Third-party edge
+      // node runs software Aber does not manage.
+      return json(400, {
+        error: "That gateway is Third-party, not Remote",
+        details:
+          "Enrolment bundles are for Aber's gateway appliance. A Third-party gateway is issued " +
+          "its broker credential from its drawer instead.",
+      });
+    }
 
     // Neither form while there is no root an appliance could verify the platform with: the bundle
     // would carry none and the command no pin, so the first call would fail. Checked before minting.

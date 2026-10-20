@@ -2835,7 +2835,7 @@ paths:
           content:
             application/zip:
               schema: { type: string, format: binary }
-        '400': { description: '`gateway_id` missing, or the gateway is Host, not Remote.' }
+        '400': { description: '`gateway_id` missing, or the gateway is Host or Third-party, not Remote.' }
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Forbidden: requires Administrator or Shopfloor_Manager.' }
         '404': { description: No such gateway. }
@@ -2848,19 +2848,20 @@ paths:
   /functions/v1/gateway-credential:
     post:
       tags: [Edge Functions]
-      summary: Mint a host-run gateway's broker credential and reveal it
+      summary: Mint a Host or Third-party gateway's broker credential and reveal it
       description: |
-        Issues a Mosquitto account for a **Host** gateway and returns the password in the
-        response. The broker stores only a hash. For a Host or Simulated gateway (not the
-        Playback gateway) the function also keeps an encrypted copy in Vault
-        (`keep_gateway_credential()`, 0164), which an Administrator can show again through
+        Issues a Mosquitto account for a **Host** or **Third-party** gateway and returns the
+        password in the response. The broker stores only a hash. For a Host, Simulated or
+        Third-party gateway (not the Playback gateway) the function also keeps an encrypted copy
+        in Vault (`keep_gateway_credential()`, 0164), which an Administrator can show again through
         `/rest/v1/rpc/show_gateway_credential`; `credential_kept` says whether it did.
 
         **The mirror image of `/functions/v1/gateway-bundle`.** A remote gateway gets a bundle
         carrying a single-use claim, and the appliance mints its own credential at first boot —
-        the password never travels through a browser. A host-run gateway has no appliance, so both
-        halves of that path refuse it outright (`issue_gateway_enrollment_token()` raises on
-        `deployment = 'host'`), and this endpoint is what replaces them.
+        the password never travels through a browser. A Host gateway has no appliance, and a
+        Third-party one runs software Aber does not manage, so both halves of that path refuse them
+        outright (`issue_gateway_enrollment_token()` raises on `deployment` `host` and
+        `third_party`, 0196), and this endpoint is what replaces them.
 
         **A remote gateway is refused here for the same reason, in reverse.** Offering this
         beside a working bundle would be offering the worse of two options with nothing to say so.
@@ -2886,7 +2887,7 @@ paths:
                 gateway_id:
                   type: string
                   format: uuid
-                  description: The host-run gateway to mint a broker account for.
+                  description: The Host or Third-party gateway to mint a broker account for.
       responses:
         '200':
           description: >-
@@ -4664,7 +4665,7 @@ components:
           nullable: true
           readOnly: true
           description: Receipt time of the last node-level Sparkplug B message. NULL means none has ever arrived.
-        deployment: { type: string, enum: [host, remote], description: "Where this gateway's connector runs. Replaced is_virtual, which meant three different things." }
+        deployment: { type: string, enum: [host, remote, third_party], description: "Where this gateway's connector runs: host (inside Aber), remote (Aber's gateway appliance) or third_party (an edge node on its own machine, running software Aber does not manage; 0196). Replaced is_virtual, which meant three different things." }
         is_archived: { type: boolean, default: false }
         archived_at: { type: string, format: date-time, nullable: true }
         auto_delete_at: { type: string, format: date-time, nullable: true }
@@ -4694,7 +4695,7 @@ components:
         location_scope: { $ref: '#/components/schemas/LocationScope' }
         access_url: { type: string, nullable: true }
         status: { type: string, enum: [ONLINE, OFFLINE] }
-        deployment: { type: string, enum: [host, remote] }
+        deployment: { type: string, enum: [host, remote, third_party] }
         is_archived: { type: boolean }
 
     GatewayStatus:

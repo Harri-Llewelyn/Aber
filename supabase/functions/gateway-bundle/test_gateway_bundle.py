@@ -35,6 +35,7 @@ SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 REMOTE_GW = "2c000000-0000-4000-8000-000000000001"
 HOST_GW = "2b000000-0000-4000-8000-000000000001"
+THIRD_PARTY_GW = "2c300000-0000-4000-8000-000000000001"
 
 ACCOUNTS = {
     "Administrator": "admin@aber.local",
@@ -125,7 +126,7 @@ class BundleBase(unittest.TestCase):
         except Exception as err:  # noqa: BLE001
             raise unittest.SkipTest(f"PostgREST is unreachable at {SUPABASE_URL}: {err}")
 
-        for gid in (REMOTE_GW, HOST_GW):
+        for gid in (REMOTE_GW, HOST_GW, THIRD_PARTY_GW):
             rest(f"/gateways?id=eq.{gid}", method="DELETE")
 
         _, rows = rest(
@@ -135,6 +136,8 @@ class BundleBase(unittest.TestCase):
                  "deployment": "remote"},
                 {"id": HOST_GW, "name": "Test Bundle Host", "status": "OFFLINE",
                  "deployment": "host"},
+                {"id": THIRD_PARTY_GW, "name": "Test Bundle Third Party", "status": "OFFLINE",
+                 "deployment": "third_party"},
             ],
         )
         cls.sparkplug_id = next(r["sparkplug_id"] for r in rows if r["id"] == REMOTE_GW)
@@ -148,7 +151,7 @@ class BundleBase(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        for gid in (REMOTE_GW, HOST_GW):
+        for gid in (REMOTE_GW, HOST_GW, THIRD_PARTY_GW):
             rest(f"/gateways?id=eq.{gid}", method="DELETE")
 
 
@@ -284,6 +287,12 @@ class TestPermissions(BundleBase):
         status, body, _ = download(HOST_GW, self.tokens["Administrator"])
         self.assertEqual(status, 400, body)
         self.assertIn("host", body["error"].lower())
+
+    def test_a_third_party_gateway_is_refused(self):
+        # A bundle enrols Aber's gateway appliance; a Third-party node is issued its credential.
+        status, body, _ = download(THIRD_PARTY_GW, self.tokens["Administrator"])
+        self.assertEqual(status, 400, body)
+        self.assertIn("third-party", body["error"].lower())
 
     def test_unknown_gateway_is_404(self):
         status, body, _ = download("00000000-0000-4000-8000-00000000dead",

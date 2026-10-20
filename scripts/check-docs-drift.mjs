@@ -1001,6 +1001,10 @@ function edgeFunctionNames() {
     'public.set_backup_offsite_credential': '0178 writes through set_foreign_credential(), the one writer every foreign credential shares; the baseline carried its own copy',
     'public.backup_offsite_credential_is_set': '0178 asks foreign_credential_is_set(), the one probe every foreign credential shares; the baseline carried its own copy',
     'public.issue_capture_download': '0195 also opens the 60-second grant in capture_downloads that the broker-captures read policy admits a person by, so a capture file is read only through this audited call; 0193 recorded the download and the bucket admitted every reader role to every file',
+    'public.authorize_host_gateway_credential': '0196 mints for a Third-party gateway as for a Host one, since neither can enrol; the baseline refused every gateway but Host',
+    'public.keep_gateway_credential': '0196 keeps the copy of a Third-party gateway\'s password too, so an Administrator can show it again; 0164 kept a Host or Simulated gateway\'s alone',
+    'public.issue_gateway_enrollment_token': '0196 refuses a Third-party gateway as it refuses a Host one, because a bundle enrols Aber\'s gateway appliance; the baseline refused Host alone',
+    'public.gateway_has_broker_credential': '0196 counts a Third-party gateway\'s CREDENTIAL_ISSUED row as a Host gateway\'s, so archiving it disables its account; the baseline counted Host alone',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
