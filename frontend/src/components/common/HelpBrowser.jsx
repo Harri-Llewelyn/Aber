@@ -106,6 +106,8 @@ export function HelpBrowser({ history, tabId }) {
     go(next)
   }, [go, scrolled, view])
 
+  // The page's help follows the page, so a move to another page is a new view to scroll for.
+  const page = view.kind === 'page' ? tabId : null
   useLayoutEffect(() => {
     const root = viewRef.current
     const box = root?.closest(SCROLLER)
@@ -115,7 +117,7 @@ export function HelpBrowser({ history, tabId }) {
     else box.scrollTop = scrolled.get(view) ?? 0
     // The control that moved here can go with the old view, which drops focus to the page.
     if (!document.activeElement || document.activeElement === document.body) root.focus({ preventScroll: true })
-  }, [view, scrolled])
+  }, [view, scrolled, page])
 
   const onClick = (e) => {
     if (!plainClick(e)) return
