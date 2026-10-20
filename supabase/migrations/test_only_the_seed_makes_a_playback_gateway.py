@@ -299,12 +299,17 @@ class TheOwnerIsNotHeld(Base):
         self.assertEqual(self.cur.fetchone(), (True, True, "host"))
 
     def test_the_seed_creates_the_gateway_when_it_is_missing(self):
-        """The INSERT arm: a stack whose Playback gateway was deleted gets it back at the boot."""
+        """
+        The INSERT arm: a stack whose Playback gateway was deleted gets it back at the boot. Since
+        0193 the last one cannot be deleted, so the guard is set aside for the fixture: the arm
+        serves a stack that lost it before then.
+        """
         with open(SEED, encoding="utf-8") as f:
             text = f.read()
         start = text.index("INSERT INTO public.gateways (id, name, description, deployment, "
                            "is_simulated, is_shadow, location_scope)")
         statement = text[start:text.index("cell_id = NULL;", start) + len("cell_id = NULL;")]
+        self.cur.execute("ALTER TABLE public.gateways DISABLE TRIGGER trg_gateways_keep_playback_history;")
         self.cur.execute("DELETE FROM public.gateways WHERE id = %s;", (PLAYBACK_GATEWAY,))
         self.cur.execute(statement)
         self.assertTrue(self._flag(PLAYBACK_GATEWAY))
@@ -685,13 +690,18 @@ class TheRefusalsNoLongerPointAtAnotherGateway(Base):
                 self.assertIn("No other gateway can be made a playback target", message)
                 self.assertNotIn("Mark another", message)
 
-    def test_a_stack_with_no_playback_gateway_is_told_to_restore_it(self):
+    def test_a_stack_with_no_playback_gateway_is_told_the_upgrade_creates_it(self):
+        """
+        Not to restore it from Archived Entities: since 0193 the last one can be neither archived
+        nor deleted, so a stack without it lost it earlier, and the seed creates it again.
+        """
         self.cur.execute("UPDATE public.gateways SET is_shadow = false WHERE is_shadow;")
         capture = self._capture(self._gateway()[0], [])
         with self.assertRaises(psycopg2.Error) as ctx:
             self._call("Shopfloor_Manager", "SELECT public.ensure_shadow_devices(%s);", (capture,))
         message = str(ctx.exception)
-        self.assertIn("restore it from Archived Entities", message)
+        self.assertIn("the upgrade creates it again", message)
+        self.assertNotIn("Archived Entities", message)
         self.assertNotIn("another gateway", message)
 
 

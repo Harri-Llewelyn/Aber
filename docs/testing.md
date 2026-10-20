@@ -356,6 +356,13 @@ python supabase/migrations/test_playback_credential_delivery.py
 # one something claims. Creates a stand-in storage.objects as supabase_admin, since the db lane has
 # no storage-api.
 python supabase/migrations/test_capture_retention.py
+# Captures and replays leave an audit trail (0193). Starting and stopping a recording, storing an
+# upload or a recording, issuing a download link, deleting a capture, and starting and stopping a
+# playback each write one row naming who did it; a refused act, a repeated call and a progress
+# report write none. A gateway a playback names cannot be deleted, nor can the last Playback
+# gateway, and the nightly purge skips one. The end of a RUNNING playback sets the Playback gateway
+# and its lanes OFFLINE. Creates a stand-in storage.objects as supabase_admin for the upload tests.
+python supabase/migrations/test_capture_audit.py
 # The capture and playback helpers answer only a caller who could read the job (0184). An Operator
 # gets false from is_active_capture_object() and is_active_playback_capture() and no rows from
 # playback_stale_credentials(); the reader roles, the two machine principals and service_role get

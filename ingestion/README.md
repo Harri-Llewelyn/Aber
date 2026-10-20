@@ -764,7 +764,11 @@ fired-off POST would not.
 
 **`capture_jobs` deliberately has no audit-trail trigger.** That trigger is opt-in per table, and
 adding it here would look like consistency while writing a row per progress tick into an append-only
-table no application role can prune.
+table no application role can prune. The acts are in the Audit Trail all the same, one row each,
+written by the functions that perform them (`0193`): starting and stopping a recording, storing a
+recording or an upload, issuing a download link, deleting a capture, and starting and stopping a
+playback. `CAPTURE_RECORDED` is the daemon's own row, naming the person who asked for the
+recording. Deleting a gateway or device writes a `CAPTURE_DELETED` row for each capture it takes.
 
 **Anything left `RECORDING` when the daemon boots becomes `FAILED`.** Without that, a restart
 mid-capture leaves a row counting down forever and a card that never clears. A `PENDING` job swept
@@ -1102,6 +1106,15 @@ daemon ignores a death that does not match the open session
 ([*A death from an earlier session*](#a-death-from-an-earlier-session)). A recorded NDEATH ends the
 session where it was recorded, and the next message opens the next one.
 
+**A session the broker cut is ended by the job's finish.** When the Playback gateway's credential
+is re-issued, Dynamic Security disconnects the worker as an administrative action and publishes no
+Will. The worker cannot send the NDEATH either: its password no longer works. So
+`playback_finish()`, which the worker calls once its session has ended, sets the gateway `OFFLINE`
+if it still reads `ONLINE`, and its replay lanes `OFFLINE`, as an applied NDEATH does (`0193`; the
+host's side of `tck-id-operational-behavior-edge-node-termination-host-action-ndeath-node-offline`
+and `-devices-offline`). Nothing is published. This cannot overwrite a newer playback's `NBIRTH`:
+no other job can be queued onto the gateway until the finish commits.
+
 **A re-issue reaches the worker within about a minute**, and until then the worker holds the
 previous password. That used to fail silently and is now caught: `connect()` returns after the
 TCP handshake and the CONNACK arrives later on the network loop, so a *wrong* password connected at
@@ -1131,8 +1144,9 @@ while a replay runs, and the daemon already asks for one whenever it needs it. A
 form offers writes the database refuses**: `gateways_shadow_is_simulated` is `NOT is_shadow OR
 is_simulated`, so choosing Remote or Host in the Type control sets `is_simulated = false` and the
 save comes back a CHECK violation. Two of that control's three options are dead ends on this one
-row. Deletion is deliberately *not* guarded — `0060` re-seeds the row on the next boot, so a delete
-repairs itself where an archive survives one.
+row. **Deleting it is refused too** (`0193`), and so is deleting any gateway a playback was
+published as. The seed would bring the row back at the next boot, but not the record of who
+replayed what, because the `playback_jobs` rows would go with the gateway.
 
 ### What a failed playback looks like, and the one thing it cannot show
 

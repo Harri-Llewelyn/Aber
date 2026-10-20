@@ -87,6 +87,17 @@ export const AUDIT_TRAIL_ACTIONS = {
   BACKUP_TAKEN:      'Backup taken',
   BACKUP_FAILED:     'Backup failed',
   BACKUP_PRUNED:     'Backup pruned',
+  // The capture lane (0193), each written by the function that performs the act. A recording's
+  // progress writes none. CAPTURE_RECORDED is the ingestion daemon's, naming who asked for it.
+  CAPTURE_STARTED:         'Recording started',
+  CAPTURE_STOPPED:         'Recording stopped',
+  CAPTURE_RECORDED:        'Capture recorded',
+  CAPTURE_UPLOADED:        'Capture uploaded',
+  // Written when the page asks for a download link: the moment the plant's traffic can leave.
+  CAPTURE_DOWNLOAD_ISSUED: 'Capture download issued',
+  CAPTURE_DELETED:         'Capture deleted',
+  PLAYBACK_STARTED:        'Playback started',
+  PLAYBACK_STOPPED:        'Playback stopped',
 };
 
 /**
@@ -120,6 +131,11 @@ export const AUDIT_TRAIL_ENTITY_TYPES = [
   { kind: 'PROPOSAL',         table: 'change_proposals',   label: 'Change proposals',   domain: 'asset' },
   // A schema attached to or detached from a device; the entity id is the device's (0168).
   { kind: 'DEVICE SCHEMA',    table: 'device_submodels',   label: 'Device schemas',     domain: 'asset' },
+  // The capture lane (0193): the act of recording, the capture it stores, and its replays. Asset,
+  // because the roles that read the asset lane are the roles that read captures.
+  { kind: 'RECORDING',        table: 'capture_jobs',       label: 'Recordings',         domain: 'asset' },
+  { kind: 'CAPTURE',          table: 'captures',           label: 'Captures',           domain: 'asset' },
+  { kind: 'PLAYBACK',         table: 'playback_jobs',      label: 'Playbacks',          domain: 'asset' },
   // The backup lane: the act and the artefact, both filed under security by audit_domain_for()'s
   // fail-closed default, which is where an act on the whole database belongs.
   { kind: 'BACKUP JOB',       table: 'backup_jobs',        label: 'Backup jobs',        domain: 'security' },

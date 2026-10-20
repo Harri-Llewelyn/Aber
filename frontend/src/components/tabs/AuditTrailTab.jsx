@@ -6,7 +6,8 @@ import { KNOWN_PRINCIPALS } from '../../utils/serviceIdentities'
 import { ContextPanel } from '../common/ContextPanel'
 import {
   IconHistory, IconDownload, IconLayoutDashboard, IconFactory, IconRadio, IconCpu, IconTrash,
-  IconShieldCheck, IconLock, IconClipboardList, IconSettings, IconTag, IconChevronRight
+  IconShieldCheck, IconLock, IconClipboardList, IconSettings, IconTag, IconChevronRight,
+  IconRecord, IconFileText, IconRefreshCw
 } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { SearchInput } from '../common/SearchInput'
@@ -103,13 +104,24 @@ const GOVERNANCE_FIELDS = new Set([
    and it is provenance written by ingestion rather than operator configuration. `name` and `icon`
    are cosmetic, not governance. */
 
+/** The capture lane's named acts, by the marker each gets. CAPTURE_DELETED is Lifecycle. */
+const CAPTURE_CREATIONS = new Set(['CAPTURE_STARTED', 'CAPTURE_RECORDED', 'CAPTURE_UPLOADED', 'PLAYBACK_STARTED'])
+const CAPTURE_OPERATIONS = new Set(['CAPTURE_STOPPED', 'CAPTURE_DOWNLOAD_ISSUED', 'PLAYBACK_STOPPED'])
+
+/**
+ * The tables whose rows are acts or the files they made rather than named things: each recording,
+ * capture and playback is its own lane, and two of one machine would otherwise draw the same label.
+ * Their lanes carry the short id as the qualifier, as a backup job's does.
+ */
+const ACT_TABLES = new Set(['capture_jobs', 'captures', 'playback_jobs'])
+
 /**
  * The four marker classes. `kind` is a CSS suffix as well as a key -- see `.trail-node-*`. Each has
  * a shape as well as a colour, so the classes stay apart without colour vision.
  */
 export const MARKERS = {
-  creation:    { label: 'Created',       shape: 'square',   hint: 'Row created — provisioning, or a first DBIRTH admitting the device' },
-  operational: { label: 'Operational',   shape: 'circle',   hint: 'State change — status, cell, or another running-time property' },
+  creation:    { label: 'Created',       shape: 'square',   hint: 'Row created — provisioning, a first DBIRTH admitting the device, or a capture or playback begun' },
+  operational: { label: 'Operational',   shape: 'circle',   hint: 'State change — status, cell, another running-time property, or a capture stopped or downloaded' },
   governance:  { label: 'Configuration', shape: 'diamond',  hint: 'Governance change — schema binding or declared configuration' },
   critical:    { label: 'Lifecycle',     shape: 'triangle', hint: 'Lifecycle event — deleted, archived, deprecated, or quarantined' }
 }
@@ -211,6 +223,11 @@ export function classifyEvent(event, diff) {
   // The same argument, arriving from `user_roles`. A revocation is not `critical`: that
   // marker is for an entity's lifecycle, and nothing on the shopfloor ended here.
   if (action === 'ROLE_GRANTED' || action === 'ROLE_REVOKED') return 'governance'
+  // The capture lane's acts (0193). Each start makes the row its lane is about, so it is a
+  // creation; a deletion is the capture's lifecycle; a stop or a download link is operational.
+  if (CAPTURE_CREATIONS.has(action)) return 'creation'
+  if (action === 'CAPTURE_DELETED') return 'critical'
+  if (CAPTURE_OPERATIONS.has(action)) return 'operational'
   // A device_submodels row is a schema binding: attaching or detaching one is a governance act,
   // not a creation or a deletion of the device.
   if (String(event.entity_type || '').toLowerCase() === 'device_submodels') return 'governance'
@@ -401,7 +418,10 @@ const SECTION_ICONS = {
   'SERVICE IDENTITY': IconLock,
   SCHEMA:             IconClipboardList,
   METRIC:             IconTag,
-  SETTING:            IconSettings
+  SETTING:            IconSettings,
+  RECORDING:          IconRecord,
+  CAPTURE:            IconFileText,
+  PLAYBACK:           IconRefreshCw
 }
 
 /**
@@ -527,6 +547,11 @@ export function snapshotIdentity(event) {
     // either way -- ILIKE is case-blind, so what is drawn is close enough to what is typed.
     if (field === 'origin') {
       return { label: ORIGIN_LABELS[value] || String(value), field: 'origin' }
+    }
+
+    // A recording, capture or playback is named by its subject, and one machine has many.
+    if (ACT_TABLES.has(String(event?.entity_type || '').toLowerCase())) {
+      return { label: String(value), qualifier: shortId(event.entity_id), field }
     }
 
     return { label: String(value), field }
@@ -733,22 +758,39 @@ function CausationGroup({ event, siblings, entityNames, onSelect, onShowTransact
 }
 
 /**
+ * The capture lane's acts (0193): the drawer's section heading and value column for each. Every
+ * one carries `new_data` alone, the act as it was recorded.
+ */
+const CAPTURE_ACT_LABELS = {
+  CAPTURE_STARTED:         ['Recording asked for', 'Asked'],
+  CAPTURE_STOPPED:         ['Recording stopped', 'Stopped'],
+  CAPTURE_RECORDED:        ['Capture stored', 'Stored'],
+  CAPTURE_UPLOADED:        ['Capture stored', 'Stored'],
+  CAPTURE_DOWNLOAD_ISSUED: ['Download link issued', 'Issued'],
+  CAPTURE_DELETED:         ['Final properties', 'Deleted'],
+  PLAYBACK_STARTED:        ['Playback asked for', 'Asked'],
+  PLAYBACK_STOPPED:        ['Playback stopped', 'Stopped'],
+}
+
+/**
  * The property diff, passed to ContextPanel through `beforeActions`. ContextPanel is presentational
  * and knows nothing about audit payloads.
  */
 function EventDiff({ event, diff }) {
   const action = String(event.event_type || event.action || '').toUpperCase()
+  const captureAct = CAPTURE_ACT_LABELS[action]
   // These acts are one-sided (INSERT, DELETE, SCHEMA_REJECTION, TOKEN_MINTED, BACKUP_REQUESTED,
-  // BACKUP_TAKEN, PERSON_ADDED, PASSWORD_SET): `old_data` is NULL by construction, and a Previous
-  // column would invite a search for a prior state that does not exist.
+  // BACKUP_TAKEN, PERSON_ADDED, PASSWORD_SET, the capture lane's): `old_data` is NULL by
+  // construction, and a Previous column would invite a search for a prior state that does not exist.
   const oneSided = action === 'INSERT' || action === 'DELETE' || action === 'SCHEMA_REJECTION'
     || action === 'TOKEN_MINTED' || action === 'BACKUP_REQUESTED' || action === 'BACKUP_TAKEN'
-    || action === 'PERSON_ADDED' || action === 'PASSWORD_SET'
+    || action === 'PERSON_ADDED' || action === 'PASSWORD_SET' || Boolean(captureAct)
 
   return (
     <div className="trail-diff">
       <div className="context-panel-section-label">
-        {action === 'INSERT' ? 'Initial properties'
+        {captureAct ? captureAct[0]
+          : action === 'INSERT' ? 'Initial properties'
           : action === 'DELETE' ? 'Final properties'
             : action === 'SCHEMA_REJECTION' ? 'Rejected payload'
               : action === 'FLOW_DEPLOYED' ? 'Deployed flow'
@@ -776,7 +818,8 @@ function EventDiff({ event, diff }) {
             <tr>
               <th>Property</th>
               {!oneSided && <th>Previous</th>}
-              <th>{action === 'DELETE' ? 'Deleted'
+              <th>{captureAct ? captureAct[1]
+                : action === 'DELETE' ? 'Deleted'
                 : action === 'INSERT' ? 'Created'
                   : action === 'SCHEMA_REJECTION' ? 'Observed'
                     : action === 'FLOW_DEPLOYED' ? 'Reported'

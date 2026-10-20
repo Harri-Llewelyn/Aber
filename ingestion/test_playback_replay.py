@@ -893,7 +893,8 @@ class PlaybackStopsWhenItsConnectionIsLost(_ReplayFixture):
 
     The broker's Dynamic Security plugin drops a client's session when its password changes, so the
     worker loses its connection partway. The job must end FAILED, naming the lost connection and
-    counting only what went out, rather than COMPLETED with every message counted.
+    counting only what went out, rather than COMPLETED with every message counted. The Playback
+    gateway and its lane must then read OFFLINE, though the broker sent no Will.
     """
 
     capture_builder = staticmethod(build_long_capture)
@@ -914,6 +915,7 @@ class PlaybackStopsWhenItsConnectionIsLost(_ReplayFixture):
             and (job["messages_sent"] or 0) >= REISSUE_AFTER)
         cls._mint_credential()
         cls.job = cls._await_job(job_id)
+        cls.gateway_after = cls._await_gateway_offline()
         # One more than could have been written, so this reads for the whole window.
         cls.rows = cls._await_historian(at_least=(cls.job["messages_sent"] or 0) + 1)
 
@@ -936,6 +938,23 @@ class PlaybackStopsWhenItsConnectionIsLost(_ReplayFixture):
         self.assertLessEqual(len(self.rows), readings_sent,
                              f"the historian holds {len(self.rows)} readings, more than the "
                              f"{readings_sent} the job counted")
+
+    def test_the_gateway_and_its_lane_read_offline_after_the_cut(self):
+        """
+        The broker publishes no Will when Dynamic Security cuts a session, and the worker cannot
+        send the NDEATH with a password that no longer works. playback_finish() ends the session in
+        the platform instead, in the transaction that records FAILED (0193).
+        """
+        self.assertEqual(
+            (self.gateway_after.get("status"), self.gateway_after.get("live_status")),
+            ("OFFLINE", "OFFLINE"),
+            f"the Playback gateway reads {self.gateway_after} after the broker cut the replay",
+        )
+        lane = self.lane_map[self.source["sparkplug_id"]]
+        status, rows = self.session.rest(f"/devices?select=status&sparkplug_id=eq.{lane}&limit=1")
+        self.assertEqual(status, 200)
+        self.assertEqual(rows[0]["status"] if rows else None, "OFFLINE",
+                         f"the replay lane {lane} still reads ONLINE after the broker cut the replay")
 
 
 def _epoch_seconds(stamp):

@@ -424,6 +424,41 @@ const chartPins = new Map();
 }
 
 // -------------------------------------------------------------------------------------------------
+// 102. A capture download is in the Audit Trail, and a gateway's replay history never aborts the
+// nightly purge (0193). The page signs a broker-captures link only in api.js's captureUrl(), and only for
+// the path issue_capture_download() answered, which writes CAPTURE_DOWNLOAD_ISSUED: a second signer
+// would hand out links the trail never sees. trg_gateways_keep_playback_history refuses deleting a
+// gateway playback_jobs name, and purge_expired_archives is one transaction, so the purge's latest
+// statement skips such a gateway or one refusal would keep every expired archive.
+// -------------------------------------------------------------------------------------------------
+{
+  const api = read('frontend/src/api.js');
+  const signers = allFiles
+    .filter((f) => /^frontend\/src\/.*\.(js|jsx)$/.test(f) && !f.includes('__tests__'))
+    .flatMap((f) => [...read(f).matchAll(/from\(CAPTURE_BUCKET\)\s*\.createSignedUrl\(/g)].map(() => f));
+  const fnAt = api.indexOf('captureUrl: async');
+  const body = fnAt < 0 ? '' : api.slice(fnAt, api.indexOf('\n  },', fnAt));
+  const issued = body.indexOf("rpc('issue_capture_download'");
+  const signed = body.indexOf('.createSignedUrl(path,');
+
+  const dir = 'supabase/migrations';
+  const files = readdirSync(join(REPO, dir)).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
+  const lastPurge = files.filter((f) => /ensure_cron_job\(\s*'purge_expired_archives'/.test(read(`${dir}/${f}`))).pop();
+  const purge = lastPurge ? read(`${dir}/${lastPurge}`) : '';
+  const purgeAt = purge.search(/ensure_cron_job\(\s*'purge_expired_archives'/);
+  const command = purgeAt < 0 ? '' : purge.slice(purgeAt, purge.indexOf('$job$', purge.indexOf('$job$', purgeAt) + 5));
+  const guarded = files.some((f) => read(`${dir}/${f}`).includes("replay_trigger('public.gateways', 'trg_gateways_keep_playback_history'"));
+
+  if (signers.length !== 1 || signers[0] !== 'frontend/src/api.js' || issued < 0 || signed < issued) {
+    fail(`a broker-captures link is signed outside captureUrl() or before issue_capture_download() records it (signers: ${signers.join(', ') || 'none'}); every download must be in the Audit Trail (0193)`);
+  } else if (guarded && !/DELETE FROM public\.gateways[\s\S]*?playback_jobs[\s\S]*?;/.test(command)) {
+    fail(`purge_expired_archives, as ${lastPurge || 'no migration'} last states it, deletes a gateway a playback names; trg_gateways_keep_playback_history refuses that and the whole purge aborts (0193)`);
+  } else {
+    pass(`capture download links are signed only after issue_capture_download() records them; purge_expired_archives (${lastPurge}) skips a gateway with replay history`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 77. No psql-run SQL prints the value it hands a session setting. `SELECT set_config(name, :'var',
 // false);` returns the value as a one-row result and psql prints it, into db-init's and the
 // historian maintenance Job's logs and from there into Loki, and several of these values are role
@@ -900,22 +935,23 @@ function edgeFunctionNames() {
    * definition. The check fails on the first unlisted redeclaration.
    */
   const INTENDED_REDECLARATIONS = {
-    'public.start_playback_job': '0187 refuses a device map that names anything but the replay lane of the device its key names, so a replay never publishes as a real device; the baseline checked only that the target belonged to the gateway',
+    'public.start_playback_job': '0187 refuses a device map that names anything but the replay lane of the device its key names, so a replay never publishes as a real device; the baseline checked only that the target belonged to the gateway. 0193 writes a PLAYBACK_STARTED audit row naming the capture and the target, and no longer says a credential is issued to obtain the worker\'s password, which the platform delivers',
     'public.playback_progress': '0191 stamps progress_reported_at, which request_playback_stop() reads to tell a stalled job; the baseline kept no time of the last report',
-    'public.request_playback_stop': '0191 ends a RUNNING job whose worker has not reported for a minute as CANCELLED, so a stalled worker cannot hold the target; the baseline only set the flag',
+    'public.playback_finish': '0193 sets the Playback gateway and its replay lanes OFFLINE when it ends a RUNNING job, as an applied NDEATH does, because a session the broker cut sends no Will; the baseline recorded only the outcome',
+    'public.request_playback_stop': '0191 ends a RUNNING job whose worker has not reported for a minute as CANCELLED, so a stalled worker cannot hold the target; the baseline only set the flag. 0193 writes a PLAYBACK_STOPPED audit row for each stop that changes the job',
     'public.playback_reconcile_jobs': '0191 words each swept job by what happened (never started, nothing published, or the count reached); the baseline said "publishing stopped partway" of all three',
     'public.refuse_archiving_the_last_shadow_gateway': '0187 words the refusal for the one Playback gateway; the baseline told an operator to mark another gateway is_shadow, which the API now refuses (the logic is unchanged)',
     'public.gateway_is_playback_delivery_target': '0183 answers is_shadow on an unarchived gateway, the target a playback may have; the baseline answers is_simulated, which delivered every simulator\'s password to the playback worker',
     'public.audit_trail_page': '0168 probes device_submodels rows for deletion beside device_nameplate, both keyed by their device; the baseline drew a deleted device\'s schema rows as live',
-    'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited',
+    'public.audit_domain_for': '0168 files device_submodels in the asset lane, now that the Devices page writes it and the table is audited. 0193 files captures, capture_jobs and playback_jobs there too, read by the roles that read those tables',
     'public.record_ingestion_rejection': '0168 records every schema the device is judged against, read through device_schemas; the baseline records the first alone',
     'public.reject_archived_schema_assignment': '0168 declares it as the baseline does, in its final form, so neither names devices.schema_id (0175)',
     'public.platform_health_rows': '0182 puts back the shadow-gateway exclusion archived migration 0061 gave the gateway_stale arm and 0074 dropped, and 0185 gives it to the expected_publishers arm, so replay lanes do not count; the baseline carries neither (check 71)',
     'public.is_active_capture_object': '0184 answers false unless the caller could read the capture job: the ingestion daemon, a role capture_jobs\' RLS admits, or one RLS does not apply to; the baseline answered any signed-in account',
-    'public.start_capture_job': '0190 records to <subject>/<job id>.json, so a recording never writes over the capture it may replace, and refuses the Playback gateway and its replay lanes as subjects; the baseline wrote <subject>/capture.json and accepted them',
-    'public.register_uploaded_capture': '0190 registers only a path begin_capture_upload() issued the caller, refuses a subject being recorded, a shadow subject and a capture stored since the upload began, records the object\'s own size, bounds the message count by it and caps the manifest; the baseline took the browser\'s word for all of them, after the file had already overwritten the stored one',
-    'public.ingest_finalise_capture': '0190 answers a repeated call for a job it completed with that capture, so the daemon can retry it; the baseline refused it as not RECORDING',
-    'public.request_capture_stop': '0190 ends a RECORDING job its daemon has not reported on for two minutes, as CANCELLED with nothing stored; the baseline only set a flag nothing was reading',
+    'public.start_capture_job': '0190 records to <subject>/<job id>.json, so a recording never writes over the capture it may replace, and refuses the Playback gateway and its replay lanes as subjects; the baseline wrote <subject>/capture.json and accepted them. 0193 writes a CAPTURE_STARTED audit row',
+    'public.register_uploaded_capture': '0190 registers only a path begin_capture_upload() issued the caller, refuses a subject being recorded, a shadow subject and a capture stored since the upload began, records the object\'s own size, bounds the message count by it and caps the manifest; the baseline took the browser\'s word for all of them, after the file had already overwritten the stored one. 0193 writes a CAPTURE_UPLOADED audit row and tells the replaced capture\'s CAPTURE_DELETED what replaced it',
+    'public.ingest_finalise_capture': '0190 answers a repeated call for a job it completed with that capture, so the daemon can retry it; the baseline refused it as not RECORDING. 0193 writes a CAPTURE_RECORDED audit row and tells the replaced capture\'s CAPTURE_DELETED what replaced it',
+    'public.request_capture_stop': '0190 ends a RECORDING job its daemon has not reported on for two minutes, as CANCELLED with nothing stored; the baseline only set a flag nothing was reading. 0193 writes a CAPTURE_STOPPED audit row for each stop that changes the job',
     'public.ingest_reconcile_capture_jobs': '0190 says a swept PENDING job never started; the baseline said its recording did not survive',
     'public.is_active_playback_capture': '0184 answers false unless the caller could read the playback job: the playback worker, a role playback_jobs\' RLS admits, or one RLS does not apply to; the baseline answered any signed-in account',
     'public.playback_stale_credentials': '0184 returns no rows to a caller playback_jobs\' RLS refuses; the baseline told any signed-in account when playback credentials were issued',
@@ -927,7 +963,7 @@ function edgeFunctionNames() {
     'public.approve_proposal': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
     'public.approve_quarantined_device': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
     'public.discard_schema_draft': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
-    'public.ensure_shadow_devices': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500. 0187 words that message and the lookup comment for the one Playback gateway. 0190 words the 404 for a device capture holding none of its device\'s messages, and the refusal of a device from another site',
+    'public.ensure_shadow_devices': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500. 0187 words that message and the lookup comment for the one Playback gateway. 0190 words the 404 for a device capture holding none of its device\'s messages, and the refusal of a device from another site. 0193 no longer tells an operator to restore the Playback gateway from Archived Entities, since it can be neither archived nor deleted',
     'public.fork_schema': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
     'public.publish_schema_version': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
     'public.reject_proposal': '0165 answers 404 for not found through raise_not_found(); the baseline raises no_data_found, which PostgREST answers 500',
