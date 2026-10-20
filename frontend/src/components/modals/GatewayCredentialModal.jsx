@@ -8,6 +8,8 @@ import { typedNameMatches } from '../../utils/gatewayType'
 import { IconCheck, IconCopy, IconLock, IconShieldAlert } from '../common/Icons'
 
 const COPY_FEEDBACK_MS = 1600
+/** Said in the dialog and in a toast when the browser refuses a copy. */
+const COPY_REFUSED = 'Could not reach the clipboard — select the value and copy it.'
 
 /**
  * Issue a host-run gateway's broker credential and show it once. A remote gateway's appliance is
@@ -26,6 +28,7 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(null)
+  const [copyFailed, setCopyFailed] = useState(false)
 
   const copyTimer = useRef(null)
   useEffect(() => () => clearTimeout(copyTimer.current), [])
@@ -61,9 +64,10 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
   const copy = useCallback(async (label, value) => {
     const ok = await copyText(value)
     setCopied(ok ? label : null)
+    setCopyFailed(!ok)
     clearTimeout(copyTimer.current)
     copyTimer.current = setTimeout(() => setCopied(null), COPY_FEEDBACK_MS)
-    if (!ok) showToast?.('Could not reach the clipboard — select the value and copy it.', 'error')
+    if (!ok) showToast?.(COPY_REFUSED, 'error')
   }, [showToast])
 
   // Two destinations, decided by the gateway before anything the server said. A host-run gateway's
@@ -113,7 +117,9 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
       onClose={onClose}
       error={step === 'confirm'
         ? error
-        : auditMissing
+        : copyFailed
+          ? COPY_REFUSED
+          : auditMissing
           ? 'The credential was issued, but the Audit Trail entry could not be written. The account exists; the record of it does not.'
           : null}
       footer={footer}

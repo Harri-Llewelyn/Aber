@@ -8,10 +8,11 @@ export function BugReportModal({ onClose, showToast, persona, activeTab }) {
   const [category, setCategory] = useState('UI Dashboard')
   const [severity, setSeverity] = useState('Medium')
   const [desc, setDesc]         = useState('')
+  const [error, setError]       = useState(null)
 
   const submitToGithub = () => {
     if (!title.trim()) {
-      showToast('Please enter an issue title', 'error')
+      setError('Please enter an issue title')
       return
     }
 
@@ -47,6 +48,7 @@ ${desc || 'No detailed steps provided.'}
       title="Report platform bug / create GitHub issue"
       icon={<IconBug size={18} style={{ color: 'var(--danger)' }} />}
       onClose={onClose}
+      error={error}
       footer={
         <>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
@@ -58,7 +60,7 @@ ${desc || 'No detailed steps provided.'}
     >
       <div className="form-group">
         <label className="form-label">Issue Title</label>
-        <input className="form-control" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Telemetry metric display error on devices page" title="Short descriptive title" />
+        <input className="form-control" value={title} onChange={e => { setTitle(e.target.value); setError(null) }} placeholder="e.g. Telemetry metric display error on devices page" title="Short descriptive title" />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>

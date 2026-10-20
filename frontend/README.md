@@ -124,6 +124,41 @@ whose list should take the leftover height passes `fill` and marks that child `m
 schema builder's metric list does. A fixed `max-height` on a list inside a dialog is a guess at the
 window and is not needed any more.
 
+### A dialog takes focus
+
+`Modal` renders a native `<dialog>` and opens it with `showModal()`, following the WAI-ARIA dialog
+(modal) pattern. The browser draws it in the top layer, above every z-index, and makes the rest of
+the page inert: Tab and Shift+Tab stay inside it, and neither a pointer nor a screen reader reaches
+the page behind. `.modal-overlay` is the `<dialog>`, sized to the window; `.modal` is the box inside
+it; the dimmed page is `.modal-overlay::backdrop`. A click on the dialog outside the box is a click
+on the backdrop.
+
+- **Where focus starts.** On the dialog itself (`tabIndex={-1}`), named by its title and described
+  by its lead, so a screen reader reads both first. A dialog whose first field is the obvious start
+  passes a ref to that field as `initialFocus`: Add a Person, Change Password, Take a Backup, and
+  the machine identity's create and describe dialogs. A dialog that guards an act which revokes or
+  overwrites keeps the default, as ConfirmModal's typed gate does, so its warning is read before
+  its field. No dialog starts on a button. `autoFocus` does nothing inside a dialog, because React
+  focuses the control before the dialog is shown; `modalFocus.test.jsx` fails on a dialog that
+  uses it.
+- **Where focus goes back.** To what had it as the dialog opened. When that has gone (its row was
+  deleted), to the dialog still open beneath, or else to `main`, which is focusable for that moment
+  only. A dialog opened over another hands focus back to the control in the one beneath; when both
+  close in one update, focus goes to what opened the first.
+- **While it is open.** When the control holding focus is removed, as when a dialog moves on to its
+  next step, focus goes back to the dialog.
+- **Escape** stays on the `useEscapeKey` stack, which cancels the keypress, so the browser does not
+  close the `<dialog>` itself and a dialog opened over another answers first. A field that answers
+  Escape itself (the semantic ID search) cancels it too. Any other close request, such as Android's
+  back gesture, arrives as the dialog's `cancel` event and calls `onClose`.
+- **What must be inside.** The page under a dialog is inert and drawn beneath it, so anything that
+  must be used over a dialog goes into it: `overlayHost()` returns the open dialog, or `<body>`. The
+  clipboard fallback's scratch field (`copyText`) and the help tip's bubble go there. The toasts do
+  not, so a message a person must see while a dialog stays open is shown in the dialog: a failure in
+  its error slot, a refused copy beside the value.
+- jsdom has no `showModal()`. `src/test/setup.js` stubs it to set `open`, so the tests assert what
+  `Modal` does itself; the inert page and the top layer are checked in a real browser.
+
 ---
 
 ## Migrated design notes

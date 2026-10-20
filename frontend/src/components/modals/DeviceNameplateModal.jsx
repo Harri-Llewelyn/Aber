@@ -146,6 +146,7 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
       showToast?.('Proposed. An approver applies it, or says why not.', 'success')
       onClose(false)
     } catch (e) {
+      setError(e.message)
       showToast?.(e.message, 'error')
     } finally {
       setSaving(false)

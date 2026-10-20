@@ -8,6 +8,8 @@ import { describePrincipal } from '../../utils/serviceIdentities'
 import { formatDate } from '../../utils/format'
 
 const COPY_FEEDBACK_MS = 1600
+/** Said in the dialog and in a toast when the browser refuses a copy. */
+const COPY_REFUSED = 'Could not reach the clipboard — select the value and copy it.'
 
 /** Mirrors `service_token_max_days()`. The database refuses anything past it; this is the shortlist. */
 const TTL_CHOICES = [7, 30, 90]
@@ -32,6 +34,7 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(null)
+  const [copyFailed, setCopyFailed] = useState(false)
 
   const copyTimer = useRef(null)
   useEffect(() => () => clearTimeout(copyTimer.current), [])
@@ -57,9 +60,10 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
   const copy = useCallback(async (label, value) => {
     const ok = await copyText(value)
     setCopied(ok ? label : null)
+    setCopyFailed(!ok)
     clearTimeout(copyTimer.current)
     copyTimer.current = setTimeout(() => setCopied(null), COPY_FEEDBACK_MS)
-    if (!ok) showToast?.('Could not reach the clipboard — select the value and copy it.', 'error')
+    if (!ok) showToast?.(COPY_REFUSED, 'error')
   }, [showToast])
 
   const close = useCallback(() => onClose(), [onClose])
@@ -76,7 +80,7 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
       title={`Token for “${principalName}”`}
       size="lg"
       onClose={close}
-      error={confirming ? error : null}
+      error={confirming ? error : copyFailed ? COPY_REFUSED : null}
       footer={confirming ? (
         <>
           <button className="btn btn-ghost" onClick={close}>Cancel</button>
