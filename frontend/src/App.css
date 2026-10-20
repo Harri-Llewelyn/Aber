@@ -134,7 +134,7 @@
               opposite edges, so the tie never overlaps)
        100    the topbar
        200    a popover under the topbar: the user menu, global search, the sidebar mode menu
-       1200   the help-tip bubble
+       1200   the tooltip bubble (HelpTip and the tab bar)
        2000   the toast stack
      An open dialog is above every rung: showModal() draws it in the browser's top layer, and the
      confirm layer, a dialog opened over another, is above that one because it opened later. The
