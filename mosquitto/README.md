@@ -408,7 +408,8 @@ gateway:  publish and receive  spBv1.0/+/+/%u/#
 
 So a gateway provisioned with **username == its `sparkplug_id`** can publish only beneath its own
 segment and to no other. Verified by delivery in `scripts/check-broker-config.mjs`: a publish to
-another gateway's subtree is dropped by the broker.
+another gateway's subtree is dropped by the broker. An edge node an engineer brings is held to the
+same role ([Bringing your own edge node](../help/site/bring-your-own-edge-node.md)).
 
 The dashboard and the enrolment bundle are the ordinary ways to issue a credential. The break-glass
 one, for a stack whose credential service is down or whose Administrator cannot sign in:

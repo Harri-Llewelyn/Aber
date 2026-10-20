@@ -11,6 +11,7 @@ Everything here is written for someone new to Aber. Pages for people who change 
 
 - [Installing Aber](site/install.md): put the server on a Linux machine, sign in, and add your
   first gateway.
+- [Bringing your own edge node](site/bring-your-own-edge-node.md): what an edge node you chose must do to send data to Aber.
 
 ## Guides
 
