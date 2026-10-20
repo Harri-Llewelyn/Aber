@@ -38,7 +38,7 @@ src/
 │   ├── tabs/                one file per tab, lazy-loaded
 │   ├── modals/              detail and edit dialogs
 │   └── common/              TagList, Model3DUploader, VocabularyPanel
-├── help/                    one markdown file per page, bundled -- see Contextual help
+├── help/index.js            bundles the repository's help/pages/ -- see Contextual help
 ├── hooks/                   usePermissions, usePolling, useRealtimeTable, useToast, …
 ├── utils/                   pure, unit-tested derivations
 └── __tests__/               Vitest suites
@@ -814,21 +814,32 @@ A help page uses the words in [Words and rules](#words-and-rules), as the page i
 
 ### One file per page, resolved by filename
 
-`src/help/<tab id>.md`, bundled by an eager `import.meta.glob` in `src/help/index.js`. There is no
+[`help/pages/<tab id>.md`](../help/pages) at the top of the repository, bundled by an eager
+`import.meta.glob` in `src/help/index.js`, which keys each file by its name. There is no
 manifest: a second list is the one that goes stale. `scripts/check-docs-drift.mjs` asserts the
 correspondence **in both directions** — every page in `navigation.jsx` has a file, and every file
 names a page that exists. The second direction is the one that rots silently: a help file left
 behind by a renamed page is never resolved again, and the renamed page quietly has none.
 
-**Why `src/help/` and not `docs/help/`,** which is where the roadmap entry proposed it.
-`frontend/Dockerfile`'s build context is `./frontend` — in `release.yml` and in `npm run dev:up`
-alike — so `docs/` is not present at image build time at all, for the same reason `.git` is
-not. Bundling from there works on a developer's machine and fails in every container build. The
-properties that placement was chosen for are unaffected: these are markdown in the repository,
-reviewed in the pull request that changes the behaviour they describe, and checked by a guard. They
-are also still free in CI, which is not a `docs/` property either — `ci.yml` classifies a diff with
-`*.md|docs/*`, and a `case` glob's `*` spans directory separators, so a `.md` file anywhere skips
-the end-to-end stack (`k8s-validation`).
+**The folder is the list.** [`help/`](../help/README.md) holds every page written for newcomers:
+the install guide, the tutorial, the glossary and the page files. What the dashboard bundles comes
+from that folder and from nowhere else, so a contributor document under `docs/` cannot reach the
+bundle by accident. Today the glob reads `help/pages/` only.
+
+**How the image build sees it.** `frontend/Dockerfile`'s build context is `./frontend`, which
+holds neither `help/` nor `.git`. The build is handed `help/` as a BuildKit named context,
+`--build-context help=./help`: `release.yml` passes it in the image matrix's `build-contexts`,
+`scripts/dev-cluster.mjs` in its `docker build`, and the runbook's build command spells it out. The
+Dockerfile copies the context to `/app/help` and builds from `/app/frontend`, so `index.js`'s
+`../../../help/pages` resolves the same in the image as in a checkout. A build not handed the
+context stops at `COPY --from=help` with `pull access denied`: BuildKit reads `help` as an image
+name. In a checkout, `vite.config.js` adds `../help` to `server.fs.allow`, without which the dev
+server and vitest refuse to read a file outside this package. Drift check 105 holds the glob to
+`help/pages/`, and check 106 holds every build of the image to passing the context.
+
+The pages are still free in CI: `ci.yml` classifies a diff with `*.md|docs/*`, and a `case` glob's
+`*` spans directory separators, so a `.md` file anywhere skips the end-to-end stack
+(`k8s-validation`).
 
 ### A restricted renderer, on purpose
 

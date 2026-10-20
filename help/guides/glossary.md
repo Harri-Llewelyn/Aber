@@ -27,7 +27,7 @@ The computer that talks to your machines and sends their data to Aber's [broker]
 are four types:
 
 - **Remote:** runs on its own hardware beside the machines. It is the usual type
-  ([remote gateways](remote-gateways.md)).
+  ([remote gateways](../../docs/remote-gateways.md)).
 - **Host:** runs inside the server's own Node-RED.
 - **Simulated:** for synthetic data, such as a Node-RED flow that imitates a machine. It runs
   inside the server, and its devices are kept apart from real ones.
@@ -58,7 +58,7 @@ device a schema is what makes its data readable by queries, dashboards and other
 ### Vocabulary
 
 A published standard's list of metrics, such as MTConnect or OPC UA, that schemas are built from
-([vocabularies](vocabularies.md)).
+([vocabularies](../../docs/vocabularies.md)).
 
 ### Quarantine
 
@@ -130,7 +130,7 @@ makes the change.
 ### Machine identity
 
 An account held by software rather than a person, such as the ingestion service. It cannot sign
-in, and it holds only the permissions it needs ([security model](security-model.md#machine-identities)).
+in, and it holds only the permissions it needs ([security model](../../docs/security-model.md#machine-identities)).
 
 ## Standards
 
@@ -147,7 +147,7 @@ so any gateway that follows it can send data to Aber.
 ### Factory+
 
 A framework from the AMRC for connecting factory systems, built on Sparkplug B. Aber is compatible
-with parts of it ([relationship to ACS](architecture.md#relationship-to-acs)).
+with parts of it ([relationship to ACS](../../docs/architecture.md#relationship-to-acs)).
 
 ### ACS
 
@@ -172,7 +172,7 @@ files.
 ### i3X
 
 An open API standard from CESMII for reading industrial data. Aber runs an i3X server, so other
-software can browse and read its data ([`i3x/README.md`](../i3x/README.md)).
+software can browse and read its data ([`i3x/README.md`](../../i3x/README.md)).
 
 ## Software Aber is built from
 
@@ -221,7 +221,7 @@ cannot be changed afterwards.
 
 Aber issues its own certificates for HTTPS and the broker, from a certificate authority (CA) that
 runs inside the server. Browsers and gateways trust those certificates once the CA's *root
-certificate* is installed on them ([runbook, *TLS*](../deploy/k8s/README.md#tls)).
+certificate* is installed on them ([runbook, *TLS*](../../deploy/k8s/README.md#tls)).
 
 ### Edge function
 

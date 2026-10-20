@@ -1,6 +1,7 @@
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, searchForWorkspaceRoot } from 'vite'
 import react from '@vitejs/plugin-react'
 import { execFileSync } from 'node:child_process'
+import { resolve } from 'node:path'
 import { modelViewerDecoders } from './modelViewerDecoders.js'
 
 /**
@@ -79,6 +80,12 @@ export default defineConfig(({ mode, command }) => {
     server: {
       host: '0.0.0.0',
       port: 3000,
+      // src/help/index.js bundles ../help/pages, which is outside this package: the dev server and
+      // vitest refuse to load a file there unless it is allowed. `allow` replaces the default, so
+      // the default (the workspace root) is named again beside it.
+      fs: {
+        allow: [searchForWorkspaceRoot(import.meta.dirname), resolve(import.meta.dirname, '../help')],
+      },
     },
     preview: {
       host: '0.0.0.0',

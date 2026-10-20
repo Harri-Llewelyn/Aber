@@ -142,7 +142,7 @@ in-cluster ports on localhost: `5433` historian, `54322` Supabase Postgres, `543
 | **[`frontend/`](../frontend/README.md)** | React 18 architecture, Vite, Realtime integration, derived state, theming |
 | **[`supabase/`](../supabase/README.md)** | Migrations, RLS privilege matrix, triggers, audit immutability, edge functions, the gateway |
 | **[`ingestion/`](../ingestion/README.md)** | Sparkplug B parsing, identity resolution, gateway binding, TimescaleDB mapping, `validate.py` |
-| **[`tutorial/`](../tutorial/README.md)** | The walkthrough for a blank install: one cell, one gateway, its broker credential, a device, a schema, and the Node-RED flow that publishes as it |
+| **[`help/`](../help/README.md)** | The pages for newcomers: the install guide, the glossary, the dashboard's help for each page, and the [tutorial](../help/guides/tutorial.md), the walkthrough for a blank install (one cell, one gateway, its broker credential, a device, a schema, and the Node-RED flow that publishes as it) |
 | **[`i3x/`](../i3x/README.md)** | i3X 1.0 server: address-space mapping, subscriptions, connecting a client — including [an MCP host](../i3x/README.md#mcp) |
 | **[`deploy/k8s/README.md`](../deploy/k8s/README.md)** | Kubernetes runbook: install, the development loop, upgrade, teardown, hardening, releases |
 | [`deploy/helm/aber/`](../deploy/helm/aber) | The Helm chart; `values.yaml` documents every setting |

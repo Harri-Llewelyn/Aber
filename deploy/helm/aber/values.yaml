@@ -148,7 +148,7 @@ secrets:
   mqttDynsecAdminPassword: ""
   # No gateway accounts are declared here: a gateway's credential is issued once its row exists
   # (dashboard, or the enrolment bundle) and lives in the plugin's document on the broker's PVC.
-  # See tutorial/README.md.
+  # See help/guides/tutorial.md.
   # The bearer token supabase-functions presents to the gateway-credential sidecar. Its own
   # value, never shared: that service can issue a credential for any edge node. It refuses to
   # start below 32 characters.
@@ -1213,7 +1213,7 @@ frontend:
     # Built from frontend/Dockerfile with VITE_RUNTIME_CONFIG=true, so one image serves any
     # environment and reads its configuration from the /config.js ConfigMap:
     #   docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
-    #     -t <repo>:<tag> frontend
+    #     --build-context help=./help -t <repo>:<tag> frontend
     repository: ghcr.io/harri-llewelyn/aber/frontend
     tag: ""
     pullPolicy: IfNotPresent

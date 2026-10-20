@@ -4,18 +4,18 @@ Aber has two parts. **The server** runs on one Linux machine on your network, un
 **Gateways** connect your machines to it, and you add them from the dashboard once the server is
 running. This guide installs the server, signs you in, and points you at your first gateway.
 
-Every option, and the reason for each step, is in the [runbook](../deploy/k8s/README.md). The server
-is installed from the Helm chart in [`deploy/helm/aber`](../deploy/helm/aber), and why it is built that
-way is in [`kubernetes-architecture.md`](kubernetes-architecture.md). Words you may not know are in
-the [glossary](glossary.md).
+Every option, and the reason for each step, is in the [runbook](../../deploy/k8s/README.md). The server
+is installed from the Helm chart in [`deploy/helm/aber`](../../deploy/helm/aber), and why it is built that
+way is in [`docs/kubernetes-architecture.md`](../../docs/kubernetes-architecture.md). Words you may not know are in
+the [glossary](../guides/glossary.md).
 
 ## Choose a route
 
 | You want to | Route | What it builds |
 | :--- | :--- | :--- |
-| **Look at Aber** on your own computer | [*Try it*](#try-it): `npm run try`, the published release on [k3d](glossary.md#k3d) at `localhost` | nothing: the images are downloaded |
-| **Run Aber** for real, on a site | [*Run it on a site*](#run-it-on-a-site): the published release, installed on a [k3s](glossary.md#k3s) machine | nothing: the images are downloaded |
-| **Work on Aber's code** on a laptop | [*Develop on a laptop*](#develop-on-a-laptop): `npm run dev:up`, on [k3d](glossary.md#k3d) | all twelve images, from your checkout |
+| **Look at Aber** on your own computer | [*Try it*](#try-it): `npm run try`, the published release on [k3d](../guides/glossary.md#k3d) at `localhost` | nothing: the images are downloaded |
+| **Run Aber** for real, on a site | [*Run it on a site*](#run-it-on-a-site): the published release, installed on a [k3s](../guides/glossary.md#k3s) machine | nothing: the images are downloaded |
+| **Work on Aber's code** on a laptop | [*Develop on a laptop*](#develop-on-a-laptop): `npm run dev:up`, on [k3d](../guides/glossary.md#k3d) | all twelve images, from your checkout |
 
 **Never use the laptop route for a server other people can reach.** It installs `values-dev.yaml`,
 whose passwords and four demo accounts are published in git.
@@ -34,7 +34,7 @@ Look at Aber on one computer before you set up a site. A trial runs the publishe
 `localhost`, so you need no DNS record, no certificate and no build.
 
 **You need** an amd64 computer, because Aber's images are not built for ARM. Docker must be running,
-with at least 4 CPU cores and 8 GiB of memory for Aber. You also need [k3d](glossary.md#k3d),
+with at least 4 CPU cores and 8 GiB of memory for Aber. You also need [k3d](../guides/glossary.md#k3d),
 `kubectl`, Helm, Node.js and git. The command checks for each one first, and says where to get any
 that is missing.
 
@@ -50,7 +50,7 @@ an administrator's email and its password.
 
 Open http://app.localhost and sign in with them. To see data, add a Simulated gateway:
 **Gateways → New Gateway**. It runs inside Aber, so there is nothing to install. The
-[tutorial](../tutorial/README.md) builds a gateway the same way.
+[tutorial](../guides/tutorial.md) builds a gateway the same way.
 
 **If a port is taken, the command stops and names what holds it.** A trial needs ports 80, 1883 and
 8883. A developer's `aber` cluster (*Develop on a laptop*) uses the same ports: stop it first with
@@ -87,7 +87,7 @@ new ones.
 curl -sfL https://raw.githubusercontent.com/Harri-Llewelyn/Aber/v1.5.0/deploy/install.sh | sudo sh -
 ```
 
-The installer is [`deploy/install.sh`](../deploy/install.sh). To read it before it runs, download
+The installer is [`deploy/install.sh`](../../deploy/install.sh). To read it before it runs, download
 it first, then run `sudo sh install.sh`.
 
 It checks the machine first, and stops with a message if the machine is too small. Then it asks
@@ -99,7 +99,7 @@ five questions:
 | Administrator's email | The email the first administrator signs in with |
 | Site name | A short name for the site, such as `plant1`. Every gateway's settings carry it, so it can never change |
 | This machine's address | Its address on the site network, which gateways connect to. The installer suggests one |
-| Base IRI for asset ids | A web address under a domain your organisation controls. The installer suggests one. It cannot change once an [asset shell](glossary.md#asset-administration-shell-aas) has been exported |
+| Base IRI for asset ids | A web address under a domain your organisation controls. The installer suggests one. It cannot change once an [asset shell](../guides/glossary.md#asset-administration-shell-aas) has been exported |
 
 It shows your answers and asks before it changes anything. Then it installs k3s, Helm and Node.js
 where they are missing, and then Aber. The first install takes 5 to 20 minutes, most of it downloading. At the end it
@@ -132,7 +132,7 @@ part. Their commands assume Ubuntu too.
 ### 1. Move the machine's SSH off port 22
 
 **Skip this step if you create the site's passwords with `npm run setup` (step 5).** Setup puts
-the [forge](glossary.md#forge)'s SSH on port 2222, so port 22 stays with the machine's own SSH.
+the [forge](../guides/glossary.md#forge)'s SSH on port 2222, so port 22 stays with the machine's own SSH.
 Gateways use 2222 to fetch their flows from the forge.
 
 **If the machine's own SSH is already on 2222, move it back to 22 before you install.** k3s would
@@ -200,7 +200,7 @@ Run the rest on the machine, as your own user rather than root. The clone holds 
 script and two cluster files; the chart and Aber's images are downloaded from GHCR at 1.5.0.
 
 These steps are needed once per cluster. Traefik is told to keep each client's address, and
-cert-manager runs the [internal CA](glossary.md#internal-ca-and-root-certificate) that issues every
+cert-manager runs the [internal CA](../guides/glossary.md#internal-ca-and-root-certificate) that issues every
 certificate (runbook, *Install* and *TLS*).
 
 ```bash
@@ -256,7 +256,7 @@ EOF
 | Setting | What to put |
 | :--- | :--- |
 | `primaryHostId`, `sparkplugGroup` | A short name for the site. Every gateway's settings carry it, so it can never change |
-| `baseIri` | A web address under a domain your organisation controls. Every exported [asset shell](glossary.md#asset-administration-shell-aas) is identified by it, so it cannot change once one has been exported |
+| `baseIri` | A web address under a domain your organisation controls. Every exported [asset shell](../guides/glossary.md#asset-administration-shell-aas) is identified by it, so it cannot change once one has been exported |
 | `extraIpSans` | The machine's address. Gateways connect to the broker at it, and the broker's certificate has to name it |
 | The rest | Leave as written: they turn on HTTPS and the broker's TLS, using the internal CA from step 4 |
 
@@ -313,7 +313,7 @@ Open `https://app.<domain>` and sign in with the administrator's email and the p
 installer or `npm run setup` printed. That account is created once, as an `Administrator`. After that it belongs to the site:
 no install or upgrade changes it.
 
-Next, build your first machine with the [tutorial](../tutorial/README.md), or
+Next, build your first machine with the [tutorial](../guides/tutorial.md), or
 [add a gateway](#add-gateways).
 
 ---
@@ -357,11 +357,11 @@ A gateway connects a machine's devices to the server. Create each one in the das
   Either way, the gateway needs to reach the server's API, its broker on 8883, and the forge's SSH on
   2222 (22 on a site that kept it there), where it fetches its flow and its platform playbook. Its
   image is built on the gateway itself, which is how an arm64 Pi runs it.
-  [`docs/remote-gateways.md`](remote-gateways.md) covers it in
-  full, and [`forge/gateway-platform/appliance/`](../forge/gateway-platform/appliance) holds what the
+  [`docs/remote-gateways.md`](../../docs/remote-gateways.md) covers it in
+  full, and [`forge/gateway-platform/appliance/`](../../forge/gateway-platform/appliance) holds what the
   bundle contains.
 - **A Host or Simulated gateway** runs inside the server, in Aber's own Node-RED, and needs nothing
-  installed. The [tutorial](../tutorial/README.md) builds one.
+  installed. The [tutorial](../guides/tutorial.md) builds one.
 
 ---
 
@@ -399,7 +399,7 @@ push to that branch directly: a change is a pull request, merged with one approv
 has.
 
 **Demo accounts exist on a development laptop only.** `values-dev.yaml` turns them on
-(`supabaseAuth.demoAccounts`), and [`supabase/seed.sql`](../supabase/seed.sql) creates them. The
+(`supabaseAuth.demoAccounts`), and [`supabase/seed.sql`](../../supabase/seed.sql) creates them. The
 password for each is `aber123`.
 
 | Email | Role | Access |
@@ -437,7 +437,7 @@ dashboard shows the new password once. Give it to the person yourself.
 
 - **A new install is empty.** It has no cells, devices, schemas or metrics, one gateway (the
   Playback gateway, which replays recorded data), and an empty Node-RED editor. The
-  [tutorial](../tutorial/README.md) builds your first machine.
+  [tutorial](../guides/tutorial.md) builds your first machine.
 - **The playback worker runs from the start.** It publishes a recording when someone plays one
   back on the Capture page, and is idle otherwise. To leave it out, set `playback.enabled` to
   `false` in `site.yaml` and install again. The Capture page then says the worker is not deployed.

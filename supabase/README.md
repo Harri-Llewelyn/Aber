@@ -3,7 +3,7 @@
 **In short:** Aber's main database and API: the equipment register, people's accounts and roles, the
 Audit Trail, and the edge functions that do privileged work. Read this if you are changing the
 schema, a permission or an edge function. To install or run Aber, start with
-[`docs/install.md`](../docs/install.md).
+[`help/site/install.md`](../help/site/install.md).
 
 Schema, row-level security, triggers, and the eighteen edge functions. Supabase is the authoritative
 store for **asset metadata**; time-series telemetry lives in TimescaleDB and is reached through a

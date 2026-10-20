@@ -479,7 +479,7 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
               filtered={rows.length > 0}
               message={<>
                 No gateways registered. Create one on the Gateways page —{' '}
-                <code>tutorial/README.md</code> walks through it.
+                <code>help/guides/tutorial.md</code> walks through it.
               </>}
               filteredMessage="No gateway matches these filters."
             />

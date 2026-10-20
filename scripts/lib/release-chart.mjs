@@ -1,6 +1,6 @@
 /**
  * The published chart a checkout installs: its OCI reference, the version Chart.yaml gives it, how
- * two release versions compare, and the `helm install` of docs/install.md step 7. setup.mjs prints that command, try.mjs installs the
+ * two release versions compare, and the `helm install` of help/site/install.md step 7. setup.mjs prints that command, try.mjs installs the
  * same chart, and check-docs-drift holds the printed command to the docs. node: built-ins only, so
  * all three run before any `npm install`.
  */
@@ -36,7 +36,7 @@ export function readChartVersion(repoRoot) {
   return version;
 }
 
-/** docs/install.md step 7's install, as the lines a person copies, continued with `\`. */
+/** help/site/install.md step 7's install, as the lines a person copies, continued with `\`. */
 export function installCommand({ version, valuesFile }) {
   return [
     `helm install aber ${CHART_REF} --version ${version} \\`,

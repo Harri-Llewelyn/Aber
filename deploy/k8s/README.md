@@ -2,7 +2,7 @@
 
 **In short:** every step and setting for installing and running Aber's server on Kubernetes, with
 the reason for each. Installing for the first time? Start with
-[`docs/install.md`](../../docs/install.md), which walks through the usual path, and come here for
+[`help/site/install.md`](../../help/site/install.md), which walks through the usual path, and come here for
 anything it does not cover.
 
 The Helm chart is `deploy/helm/aber`, and this runbook is the operational half: how to install and
@@ -281,7 +281,7 @@ workload, choosing the release with `KUBE_NAMESPACE` and `HELM_RELEASE`.
 installs k3s, Helm and Node.js where they are missing, applies Traefik's change, cert-manager and the
 internal CA, and writes the credentials and `site.yaml` to `/etc/aber`. It then installs the
 published chart at the installer's own version, waits for each workload and runs `helm test`.
-[*Run it on a site*](../../docs/install.md#run-it-on-a-site) gives the command. What follows is
+[*Run it on a site*](../../help/site/install.md#run-it-on-a-site) gives the command. What follows is
 every step by hand, with the reason for each.
 
 There are two ways to install, for two different jobs:
@@ -451,7 +451,7 @@ given, and stops pulling if the port changes. So:
 
 - A new site configured from `values-prod.yaml.example` or an external Secret sets
   `gitea.ssh.external.port: 2222` (the example shows where), or moves the machine's sshd off 22
-  first ([`docs/install.md`](../../docs/install.md#1-move-the-machines-ssh-off-port-22), step 1).
+  first ([`help/site/install.md`](../../help/site/install.md#1-move-the-machines-ssh-off-port-22), step 1).
 - A site whose gateways are already enrolled keeps the port it has.
 
 **`site.yaml` is what the chart cannot choose for you**, and the render refuses without most of it:
@@ -1146,8 +1146,11 @@ docker build -f node-red/Dockerfile             -t $NS/node-red:$V node-red
 # environment. A default build also runs, but its baked URL masks a missing ConfigMap.
 # VITE_APP_VERSION must be passed: the context is frontend/, so the build has no .git to read and
 # the account menu reads "unknown" without it. $V, the tag this image is about to carry.
+# --build-context hands the build help/, the pages the dashboard's help panel shows; without it the
+# build stops with `pull access denied` for `help`.
 docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
                                     --build-arg VITE_APP_VERSION=$V \
+                                    --build-context help=./help \
                                                 -t $NS/frontend:$V frontend
 
 # i3X 1.0 server -- repository root again, because it compiles sparkplug_b.proto. Built
@@ -1216,7 +1219,7 @@ tag. It publishes the twelve images and then the chart, to GHCR over OCI.
 **Set the version first, in a pull request.** It sets `Chart.yaml`'s `version` and `appVersion` to
 the release, and every place that names the current release:
 
-- the clone and install commands in `docs/install.md` and this runbook;
+- the clone and install commands in `help/site/install.md` and this runbook;
 - the verification examples in `SECURITY.md`;
 - the test-runner's default base in `test-harness/Dockerfile`;
 - the platform examples in `forge/gateway-platform/`, then `node scripts/sync-gateway-platform.mjs`

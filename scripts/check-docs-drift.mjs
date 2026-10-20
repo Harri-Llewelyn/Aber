@@ -1084,6 +1084,130 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 105. The dashboard bundles the help pages in help/pages/, and nothing outside frontend/ but help/.
+// frontend/src/help/index.js's glob is the door: every page file in help/pages/ matches it, or the
+// panel never shows that page. No import in the bundle's source reaches outside frontend/ except
+// into help/, so a contributor document under docs/ cannot ship by accident.
+// -------------------------------------------------------------------------------------------------
+{
+  const INDEX = 'frontend/src/help/index.js';
+  const PAGES = 'help/pages';
+  const GLOB = /import\.meta\.glob\(\s*(\[[^\]]*\]|'[^']*'|"[^"]*")/g;
+  const quoted = (s) => [...s.matchAll(/['"]([^'"]+)['"]/g)].map((m) => m[1]);
+  const globs = [...read(INDEX).matchAll(GLOB)].flatMap((m) => quoted(m[1])).filter((g) => !g.startsWith('!'));
+  const resolved = globs.map((g) => posix.normalize(posix.join(posix.dirname(INDEX), g)));
+  const matcher = (glob) => new RegExp(`^${glob.split('**').map((part) => part.split('*')
+    .map((s) => s.replace(/[.*+?^$(){}|[\]\\]/g, '\\$&')).join('[^/]*')).join('.*')}$`);
+  const wrong = [];
+  if (!resolved.length) wrong.push(`${INDEX} has no import.meta.glob, so the help panel bundles no page`);
+  for (const r of resolved.filter((g) => !g.startsWith('help/'))) wrong.push(`${INDEX} globs ${r}, which is outside help/`);
+  const pages = readdirSync(join(REPO, PAGES)).filter((f) => f.endsWith('.md')).map((f) => `${PAGES}/${f}`);
+  for (const f of pages.filter((p) => !resolved.some((g) => matcher(g).test(p)))) {
+    wrong.push(`${f} is not matched by ${INDEX}'s glob, so the dashboard never shows it`);
+  }
+
+  const SOURCE = allFiles.filter((f) => f.startsWith('frontend/src/') && /\.(?:jsx?|mjs)$/.test(f)
+    && !/\/(?:__tests__|test)\//.test(f) && !/\.test\.[mc]?jsx?$/.test(f));
+  const SPECIFIER = /\b(?:from|import)\s*\(?\s*['"](\.{1,2}\/[^'"]+)['"]/g;
+  let specifiers = 0;
+  for (const file of SOURCE) {
+    const text = read(file);
+    const specs = [...text.matchAll(SPECIFIER)].map((m) => m[1]).concat([...text.matchAll(GLOB)].flatMap((m) => quoted(m[1])));
+    for (const spec of specs.filter((s) => /^!?\.{1,2}\//.test(s))) {
+      specifiers += 1;
+      const at = posix.normalize(posix.join(posix.dirname(file), spec.replace(/^!/, '').split('?')[0]));
+      if (!at.startsWith('frontend/') && !at.startsWith('help/')) wrong.push(`${file} imports ${spec}, which is outside frontend/ and help/`);
+    }
+  }
+  if (wrong.length) {
+    fail('the dashboard bundle does not take its help from help/pages/ alone:\n' + wrong.map((w) => `        ${w}`).join('\n'));
+  } else {
+    pass(`all ${pages.length} page file(s) in ${PAGES} are in the help glob, and none of ${specifiers} relative import(s) in frontend/src leaves frontend/ but for help/`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 106. Every build of the dashboard image hands it help/ as the `help` named context, and
+// frontend/Dockerfile copies that context to where src/help/index.js's glob looks. The build
+// context is ./frontend, which holds no help/. A build without the named context stops at
+// `COPY --from=help`; a copy put anywhere else bundles a help panel with no pages.
+// -------------------------------------------------------------------------------------------------
+{
+  const DOCKERFILE = 'frontend/Dockerfile';
+  const INDEX = 'frontend/src/help/index.js';
+  const NAMED = /\bhelp=(?:\.\/)?help\/?(?![\w./-])/;
+  const wrong = [];
+
+  // The build stage: the source is copied into WORKDIR, so the glob resolves from WORKDIR/src/help.
+  const builder = read(DOCKERFILE).split(/^(?=FROM\s)/m).find((s) => s.startsWith('FROM')) || '';
+  const workdir = [...builder.matchAll(/^WORKDIR\s+(\S+)/gm)].pop()?.[1];
+  const copied = /^COPY\s+--from=help\s+\.\s+(\S+?)\/?\s*$/m.exec(builder)?.[1];
+  const glob = /import\.meta\.glob\(\s*['"]([^'"]+)['"]/.exec(read(INDEX))?.[1];
+  if (!copied) wrong.push(`${DOCKERFILE}'s build stage has no \`COPY --from=help . <dir>\``);
+  else if (!workdir || !glob) wrong.push(`${DOCKERFILE} sets no WORKDIR in its build stage, or ${INDEX} has no glob`);
+  else {
+    const inImage = posix.normalize(posix.join(workdir, 'src/help', glob));
+    if (!inImage.startsWith(`${copied}/`)) wrong.push(`${INDEX}'s glob reads ${inImage} in the image, and ${DOCKERFILE} copies help/ to ${copied}`);
+  }
+
+  // The workflows: a build-push-action step names the context itself, or passes its matrix entry's.
+  let steps = 0;
+  for (const wf of allFiles.filter((f) => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(f))) {
+    const text = read(wf);
+    const chunks = text.split(/\n(?=\s*- name: )/);
+    const entry = chunks.find((c) => /^\s*- name: [\w-]+\n\s+dockerfile: frontend\/Dockerfile\s*$/m.test(c));
+    if (entry && !/^\s*build_contexts:.*$/m.test(entry)) wrong.push(`${wf}'s matrix entry for ${DOCKERFILE} has no build_contexts`);
+    else if (entry && !NAMED.test(/^\s*build_contexts:(.*)$/m.exec(entry)[1])) wrong.push(`${wf}'s matrix entry for ${DOCKERFILE} passes no help=./help in build_contexts`);
+    for (const step of chunks.filter((c) => /uses: docker\/build-push-action@/.test(c))) {
+      const file = /^\s*file:\s*(.+?)\s*$/m.exec(step)?.[1];
+      const contexts = /^\s*build-contexts:\s*(.+?)\s*$/m.exec(step)?.[1] || '';
+      if (file === DOCKERFILE || (file === '${{ matrix.dockerfile }}' && entry)) {
+        steps += 1;
+        if (!(file === DOCKERFILE ? NAMED.test(contexts) : contexts === '${{ matrix.build_contexts }}')) {
+          wrong.push(`${wf}: the build-push-action step "${/- name: (.*)/.exec(step)?.[1]}" builds ${DOCKERFILE} without the help context`);
+        }
+      }
+    }
+  }
+  if (!steps) wrong.push(`no workflow builds ${DOCKERFILE} with docker/build-push-action; the extraction no longer matches release.yml`);
+
+  // The dev loop and the rehearsals: one IMAGES entry, and buildImages() passes what it names.
+  const dev = read('scripts/dev-cluster.mjs');
+  const devEntry = /^\s*\{[^\n]*file: 'frontend\/Dockerfile'[^\n]*\}/m.exec(dev)?.[0] || '';
+  if (!NAMED.test(/contexts: \[([^\]]*)\]/.exec(devEntry)?.[1] || '')) wrong.push(`scripts/dev-cluster.mjs's IMAGES entry for ${DOCKERFILE} names no 'help=./help' in contexts`);
+  if (!/for \(const (\w+) of img\.contexts \|\| \[\]\) args\.push\('--build-context', \1\)/.test(dev)) {
+    wrong.push('scripts/dev-cluster.mjs buildImages() does not pass an image\'s contexts as --build-context');
+  }
+
+  // Every documented command, with `\` continuations joined and a comment's `#` dropped.
+  const commands = [];
+  for (const file of allFiles.filter((f) => !gitignored(f) && f !== 'scripts/check-docs-drift.mjs' && /\.(?:md|ya?ml|tpl|txt|sh|mjs|js|hcl)$/.test(f))) {
+    const lines = read(file).split('\n');
+    lines.forEach((line, i) => {
+      if (!/\bdocker (?:buildx )?build\b/.test(line)) return;
+      let command = line;
+      for (let j = i; j + 1 < lines.length && /\\\s*$/.test(lines[j]); j += 1) command += ` ${lines[j + 1].replace(/^\s*(?:#\s*)?/, '')}`;
+      if (command.includes(DOCKERFILE)) commands.push({ at: `${file}:${i + 1}`, command });
+    });
+  }
+  for (const c of commands.filter((x) => !/--build-context[ =]help=/.test(x.command) || !NAMED.test(x.command))) {
+    wrong.push(`${c.at} builds ${DOCKERFILE} without --build-context help=./help`);
+  }
+  if (!commands.some((c) => c.at.startsWith('deploy/k8s/README.md'))) {
+    wrong.push(`deploy/k8s/README.md has no \`docker build -f ${DOCKERFILE}\`; the extraction no longer matches`);
+  }
+  const bake = read('docker-bake.hcl');
+  if (bake.includes(DOCKERFILE) && !/contexts\s*=\s*\{[^}]*"help"\s*=/.test(bake)) wrong.push(`docker-bake.hcl builds ${DOCKERFILE} with no "help" context`);
+
+  if (wrong.length) {
+    fail('a build of the dashboard image is not handed help/, or the image puts it where the glob does not look:\n' +
+      wrong.map((w) => `        ${w}`).join('\n'));
+  } else {
+    pass(`${steps} workflow step(s), the dev loop and ${commands.length} documented docker build(s) hand the dashboard image help/, and ${DOCKERFILE} copies it to ${copied}`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 71. The Playback gateway is never reported stale, and its replay lanes are never expected to
 // publish. The last declaration of platform_health_rows() keeps `NOT g.is_shadow` in its
 // gateway_stale arm (archived migration 0061 added it, 0074 lost it in a redeclaration, 0182 put it
@@ -3162,7 +3286,7 @@ function edgeFunctionNames() {
   const STATE = 'frontend/src/lib/connectionState.js';
   const TITLE = 'frontend/src/hooks/useDocumentTitle.js';
   const CONSTANTS = 'frontend/src/constants.js';
-  const HELP = 'frontend/src/help/site-map.md';
+  const HELP = 'help/pages/site-map.md';
   const README = 'frontend/README.md';
 
   const threshold = /export const STALE_AFTER_MS = (\d+)\b/.exec(read(STATE));
@@ -3308,13 +3432,14 @@ function edgeFunctionNames() {
 // -------------------------------------------------------------------------------------------------
 // 16. Every navigable page has help, and every help file names a page that exists.
 //
-// The help corpus is resolved by filename at runtime (frontend/src/help/index.js) and a missing
-// file fails quietly. Both directions: a help file left behind by a renamed page is invisible.
+// The help corpus, help/pages/ as frontend/src/help/index.js globs it, is resolved by filename at
+// runtime and a missing file fails quietly. Both directions: a help file left behind by a renamed
+// page is invisible.
 // The markdown subset is checked too: HelpMarkdown.jsx renders headings, lists, paragraphs, bold,
 // inline code and absolute links, and an unsupported construct renders as itself.
 // -------------------------------------------------------------------------------------------------
 {
-  const HELP_DIR = 'frontend/src/help';
+  const HELP_DIR = 'help/pages';
   const nav = read('frontend/src/navigation.jsx');
 
   // The TABS array only. GROUPS above it carries `{ id: 'assets' }` entries that are not pages, and
@@ -4332,11 +4457,11 @@ function edgeFunctionNames() {
     if (defaults[column] !== value) problems101.push(`capture_worker.py defaults ${column} to ${defaults[column]}, the CHECK to ${value}`);
   }
   const modal = read('frontend/src/components/modals/StartCaptureModal.jsx');
-  const help = read('frontend/src/help/capture.md');
+  const help = read('help/pages/capture.md');
   const readme = read('ingestion/README.md');
   for (const [file, text, pieces] of [
     ['StartCaptureModal.jsx', modal.replace(/&nbsp;/g, ' '), [`${count} messages`, `${mib} MiB`]],
-    ['help/capture.md', help, [`${count} messages`, `${mib} MiB`]],
+    ['help/pages/capture.md', help, [`${count} messages`, `${mib} MiB`]],
     ['ingestion/README.md', readme, [`| duration | ${seconds / 3600} hours |`, `| messages | ${count} |`, `| size | ${mib} MiB |`]],
   ]) {
     for (const piece of pieces) if (!text.includes(piece)) problems101.push(`${file} does not say "${piece}"`);
@@ -4603,7 +4728,7 @@ function edgeFunctionNames() {
 // auth plugin are what a reader would act on. docs/gateway.md's History is where Kong's facts live.
 // -------------------------------------------------------------------------------------------------
 {
-  const CURRENT = ['docs/kubernetes-architecture.md', 'deploy/k8s/README.md', 'README.md', 'docs/install.md',
+  const CURRENT = ['docs/kubernetes-architecture.md', 'deploy/k8s/README.md', 'README.md', 'help/site/install.md',
     'docs/architecture.md', 'docs/security-model.md', 'supabase/README.md'];
   const ARTEFACTS = [/\bkong\.yml\b/, /\bKONG_[A-Z]/, /checksum\/kong-/, /\bkong_[a-z]/, /(?<![\w-])kong:\d/, /\bkey-auth\b/];
   const offences = [];
@@ -4890,7 +5015,7 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 37. The install `npm run setup` ends with is docs/install.md step 7's.
+// 37. The install `npm run setup` ends with is help/site/install.md step 7's.
 //
 // Someone who follows the screen rather than the page runs the printed line, so the two are one
 // instruction. setup.mjs prints installCommand() from scripts/lib/release-chart.mjs at Chart.yaml's
@@ -4899,7 +5024,7 @@ function edgeFunctionNames() {
 // -------------------------------------------------------------------------------------------------
 {
   const { installCommand, normaliseCommand, readChartVersion } = await import('./lib/release-chart.mjs');
-  const DOC = 'docs/install.md';
+  const DOC = 'help/site/install.md';
   const STEP = /^###\s+7\.\s+Install Aber\s*$/m;
   const doc = read(DOC);
   const setup = read('scripts/setup.mjs');
@@ -5466,7 +5591,7 @@ function edgeFunctionNames() {
 // 42. Nothing gives a self-registered account a role: no applied migration puts a trigger on
 // auth.users.
 //
-// docs/install.md (*Accounts*) and the sign-up entry in docs/openapi.yaml say an account made by
+// help/site/install.md (*Accounts*) and the sign-up entry in docs/openapi.yaml say an account made by
 // open sign-up (`supabaseAuth.disableSignup` false) has no role until an Administrator gives it one.
 // A trigger on auth.users runs for every such account, and one that writes user_roles hands a role
 // to anyone who can reach the endpoint.
@@ -5488,7 +5613,7 @@ function edgeFunctionNames() {
     fail('a migration puts a trigger on auth.users, which runs for every self-registered account:\n'
       + offences.map((o) => `        ${o}`).join('\n')
       + '\n      Remove it. If it must run at sign-up, first say what it gives a new account in '
-      + 'docs/install.md (Accounts) and the /auth/v1/signup entry in docs/openapi.yaml, then teach check 42 the exception.');
+      + 'help/site/install.md (Accounts) and the /auth/v1/signup entry in docs/openapi.yaml, then teach check 42 the exception.');
   } else {
     pass(`none of the ${files.length} applied migrations puts a trigger on auth.users, so sign-up gives no role`);
   }
@@ -6480,7 +6605,7 @@ function edgeFunctionNames() {
   // Where a person applies cert-manager by hand, and the version the dev loop (and so CI) applies.
   const CERT_MANAGER = /cert-manager\/releases\/download\/(v[\w.-]+)\/cert-manager\.yaml/g;
   const pins = [];
-  for (const file of ['docs/install.md', 'deploy/k8s/README.md']) {
+  for (const file of ['help/site/install.md', 'deploy/k8s/README.md']) {
     read(file).split('\n').forEach((line, i) => {
       for (const m of line.matchAll(CERT_MANAGER)) pins.push({ at: `${file}:${i + 1}`, version: m[1] });
     });
@@ -6503,8 +6628,8 @@ function edgeFunctionNames() {
   if (version && chart && version !== chart) {
     wrong.push(`${INSTALLER} installs ABER_VERSION=${version}, and Chart.yaml's version: is ${chart}. Change ABER_VERSION to ${chart}`);
   }
-  if (!pins.some((p) => p.at.startsWith('docs/install.md')) || !pins.some((p) => p.at.startsWith('deploy/k8s/README.md')) || !devLoop) {
-    wrong.push('docs/install.md, deploy/k8s/README.md or scripts/dev-cluster.mjs no longer names a cert-manager version; the extraction no longer matches');
+  if (!pins.some((p) => p.at.startsWith('help/site/install.md')) || !pins.some((p) => p.at.startsWith('deploy/k8s/README.md')) || !devLoop) {
+    wrong.push('help/site/install.md, deploy/k8s/README.md or scripts/dev-cluster.mjs no longer names a cert-manager version; the extraction no longer matches');
   }
   const stalePins = pins.filter((p) => certManager && p.version !== certManager);
   if (stalePins.length) {
@@ -6514,8 +6639,8 @@ function edgeFunctionNames() {
         '. They move together: change whichever side is stale'
     );
   }
-  if (!urls.some((u) => u.at.startsWith('docs/install.md'))) {
-    wrong.push('docs/install.md no longer gives the installer\'s URL (raw.githubusercontent.com/Harri-Llewelyn/Aber/<tag>/deploy/install.sh)');
+  if (!urls.some((u) => u.at.startsWith('help/site/install.md'))) {
+    wrong.push('help/site/install.md no longer gives the installer\'s URL (raw.githubusercontent.com/Harri-Llewelyn/Aber/<tag>/deploy/install.sh)');
   }
   for (const u of urls.filter((x) => chart && x.tag !== `v${chart}`)) {
     wrong.push(`${u.at} fetches the installer at ${u.tag}, and the release is ${chart} (Chart.yaml). Change the URL's tag to v${chart}`);

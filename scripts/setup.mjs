@@ -9,7 +9,7 @@
  *   npm run setup                        # asks two questions on a terminal
  *   npm run setup -- --domain=aber.example.com --admin-email=ops@example.com
  *
- * It ends with the next step docs/install.md gives: write site.yaml (step 6, "Describe your
+ * It ends with the next step help/site/install.md gives: write site.yaml (step 6, "Describe your
  * site"), then install the published chart at Chart.yaml's `version:` (step 7, "Install Aber"):
  *
  *   helm install aber oci://ghcr.io/harri-llewelyn/aber/aber --version <version> \
@@ -244,7 +244,7 @@ const yamlLines = [
   '# Every credential below was generated for this file and is shared with nothing;',
   '# the anon and service-role JWTs are signed by jwtSecret, so the three are a matching set.',
   '#',
-  '# Next, write site.yaml (docs/install.md, step 6 "Describe your site"), then install (step 7):',
+  '# Next, write site.yaml (help/site/install.md, step 6 "Describe your site"), then install (step 7):',
   '#',
   ...nextStep.map((line) => `#   ${line}`),
   '#',
@@ -303,7 +303,7 @@ if (adminEmail) {
   console.log('   and secrets.firstAdministratorPassword (12+ characters) in it.');
 }
 console.log('');
-console.log('🎉 Next, write site.yaml (docs/install.md, step 6 "Describe your site"). Then install');
+console.log('🎉 Next, write site.yaml (help/site/install.md, step 6 "Describe your site"). Then install');
 console.log('   the release (step 7):');
 console.log('');
 for (const line of nextStep) console.log(`   ${line}`);

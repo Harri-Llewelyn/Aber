@@ -4,7 +4,7 @@
 #   curl -sfL https://raw.githubusercontent.com/Harri-Llewelyn/Aber/v<version>/deploy/install.sh | sudo sh -
 #   ... | sudo sh -s -- --domain=aber.plant.example --admin-email=you@plant.example --site-name=plant1 --yes
 #
-# It does what docs/install.md *Run it on a site* does by hand (steps 2 and 4 to 8); `--help` lists
+# It does what help/site/install.md *Run it on a site* does by hand (steps 2 and 4 to 8); `--help` lists
 # the flags. Every step skips what an earlier run finished, so running it again resumes an
 # interrupted install or upgrades a finished one. Answers and credentials are kept in /etc/aber.
 #
@@ -13,7 +13,7 @@
 # POSIX sh (Ubuntu's dash): no `local`, no pipefail, so downloads land in a file before they run.
 
 # The release this file belongs to and installs, and the cert-manager it applies. check-docs-drift
-# holds them to Chart.yaml's `version:`, the installer URL in docs/install.md, and step 4's pin.
+# holds them to Chart.yaml's `version:`, the installer URL in help/site/install.md, and step 4's pin.
 ABER_VERSION=1.5.0
 CERT_MANAGER_VERSION=v1.16.2
 
@@ -26,19 +26,19 @@ CA_FILE=$ETC/aber-ca.crt
 K3S_CONFIG=/etc/rancher/k3s/k3s.yaml
 # The forge's SSH port, which `npm run setup` writes into the values file so the machine keeps 22.
 FORGE_SSH_PORT=2222
-# The minimum (docs/install.md) as a machine reports it: one sold with 8 GiB shows a little less
+# The minimum (help/site/install.md) as a machine reports it: one sold with 8 GiB shows a little less
 # in /proc/meminfo, and a 100 GiB disk a little less in df once partitioned and formatted.
 MIN_CPUS=4
 MIN_MEMORY_KIB=7864320   # 7.5 GiB
 MIN_DISK_KIB=94371840    # 90 GiB
 # The chart's kubeVersion floor and the oldest Helm that installs from an OCI registry. Node.js
-# older than MIN_NODE is replaced with NodeSource's 24, as docs/install.md step 2 installs.
+# older than MIN_NODE is replaced with NodeSource's 24, as help/site/install.md step 2 installs.
 MIN_K3S=1.25
 MIN_HELM=3.8
 MIN_NODE=20.0
 # The kubelet opens an inotify instance for every container log it follows, and the log collector
 # follows them all: about 140 on one node, past the kernel's default of 128 per user. Raised to
-# these floors, never lowered, and kept across reboots in INOTIFY_CONF (docs/install.md step 2).
+# these floors, never lowered, and kept across reboots in INOTIFY_CONF (help/site/install.md step 2).
 INOTIFY_CONF=/etc/sysctl.d/60-aber-inotify.conf
 INOTIFY_INSTANCES=1280
 INOTIFY_WATCHES=655360
@@ -117,7 +117,7 @@ Other flags:
   --skip-hardware-check  carry on below the minimum machine size; for testing only
   --help, -h             show this
 
-The guide: $REPO_URL/blob/v$ABER_VERSION/docs/install.md
+The guide: $REPO_URL/blob/v$ABER_VERSION/help/site/install.md
 EOF
 }
 
@@ -147,7 +147,7 @@ parse_args() {
 os_field() { sed -n "s/^$1=//p" /etc/os-release 2>/dev/null | tr -d '"' | head -n 1; }
 
 check_platform() {
-  [ "$(id -u)" -eq 0 ] || die "run this as root: pipe it to 'sudo sh -', as docs/install.md shows."
+  [ "$(id -u)" -eq 0 ] || die "run this as root: pipe it to 'sudo sh -', as help/site/install.md shows."
   cp_id=$(os_field ID)
   cp_version=$(os_field VERSION_ID)
   cp_name=$(os_field PRETTY_NAME)
@@ -156,7 +156,7 @@ check_platform() {
     "ubuntu 22.04 x86_64" | "ubuntu 24.04 x86_64") ;;
     *) die "this installer supports Ubuntu 22.04 and 24.04 on amd64 (x86_64).
 This machine runs ${cp_name:-an unknown system} on $cp_arch.
-On another Linux, follow the numbered steps in docs/install.md by hand." ;;
+On another Linux, follow the numbered steps in help/site/install.md by hand." ;;
   esac
   for tool in curl tar; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool is not installed. Install it with 'sudo apt-get install -y $tool', then run this again."
@@ -240,7 +240,7 @@ check_forge_port() {
 Aber's forge serves git over SSH to gateways on port $FORGE_SSH_PORT, and k3s gives it that port on
 this machine's address. Whatever listens there now would stop being reachable.
 Move it to another port, then run this again. If it is this machine's own SSH, moved there by an
-older version of docs/install.md, it can go back to port 22: Aber leaves that port alone."
+older version of help/site/install.md, it can go back to port 22: Aber leaves that port alone."
   fi
   say "  Port $FORGE_SSH_PORT  free for the forge"
 }
@@ -753,7 +753,7 @@ gitea:
     say "  would write $SITE"
   else
     cat >"$SITE.new" <<EOF
-# Written by Aber's installer: what only this site can say (docs/install.md, step 6).
+# Written by Aber's installer: what only this site can say (help/site/install.md, step 6).
 # The site name and the base IRI are permanent once in use. To change the address, edit it here
 # and run the installer again.
 global:
@@ -862,7 +862,7 @@ finish() {
   say ""
   say "Install the root certificate, $CA_FILE${CA_COPY:+ (copied to $CA_COPY)}, on every"
   say "browser and gateway that will use Aber. Until then every page shows a certificate warning:"
-  say "$REPO_URL/blob/v$ABER_VERSION/docs/install.md#8-install-the-root-certificate"
+  say "$REPO_URL/blob/v$ABER_VERSION/help/site/install.md#8-install-the-root-certificate"
 }
 
 aber_install() {

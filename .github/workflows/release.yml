@@ -104,7 +104,7 @@ jobs:
           echo "push=$PUSH"       >> "$GITHUB_OUTPUT"
           echo "Releasing $VERSION (push=$PUSH)"
 
-      # A checkout of the tag must be the release it names: docs/install.md's commands, the chart a
+      # A checkout of the tag must be the release it names: help/site/install.md's commands, the chart a
       # checkout renders, and the install `npm run setup` prints all read Chart.yaml's version. The
       # artefacts would carry the tag's version regardless, so a dry run only warns.
       - name: Verify Chart.yaml Names This Version
@@ -223,6 +223,9 @@ jobs:
             build_args: |
               VITE_RUNTIME_CONFIG=true
               VITE_APP_VERSION=${{ needs.prepare-release.outputs.version }}
+            # The help pages the dashboard bundles, as the named context frontend/Dockerfile copies
+            # from. An entry without this key passes no extra context.
+            build_contexts: help=./help
     steps:
       - name: Checkout Code
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -254,6 +257,7 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           build-args: ${{ matrix.build_args }}
+          build-contexts: ${{ matrix.build_contexts }}
           outputs: type=oci,dest=/tmp/oci/${{ matrix.name }}.tar
 
       - name: Install Trivy
@@ -289,6 +293,7 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           build-args: ${{ matrix.build_args }}
+          build-contexts: ${{ matrix.build_contexts }}
           push: ${{ needs.prepare-release.outputs.push == 'true' }}
           tags: ${{ env.IMAGE_NAMESPACE }}/${{ matrix.name }}:${{ needs.prepare-release.outputs.version }}
           # `image.source` is what makes GHCR attach the package to this repository, so the package

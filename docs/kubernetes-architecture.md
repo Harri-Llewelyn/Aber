@@ -1,7 +1,7 @@
 # Kubernetes Hosting — Design and Rationale
 
 **In short:** why Aber's Kubernetes deployment is built the way it is. Read this before changing the
-Helm chart. To install or run Aber, use [`install.md`](install.md) or the
+Helm chart. To install or run Aber, use [`help/site/install.md`](../help/site/install.md) or the
 [runbook](../deploy/k8s/README.md) instead.
 
 This document is the **why** behind the Helm chart in `deploy/helm/aber`: the decisions that

@@ -100,9 +100,10 @@ not see a bullet carrying a table. Test a check by breaking the thing it guards,
 
 Write for the person reading. There are two kinds of page:
 
-- **Pages for newcomers:** the [README](README.md), [`docs/install.md`](docs/install.md), the
-  [tutorial](tutorial/README.md), the [glossary](docs/glossary.md) and the help inside the
-  dashboard (`frontend/src/help/`). Assume the reader has never seen Aber or Kubernetes.
+- **Pages for newcomers:** the [README](README.md) and every page in [`help/`](help/README.md):
+  the [install guide](help/site/install.md), the [tutorial](help/guides/tutorial.md), the
+  [glossary](help/guides/glossary.md) and the help inside the dashboard (`help/pages/`). A page in
+  `help/` is a page for newcomers. Assume the reader has never seen Aber or Kubernetes.
 - **Reference pages:** the runbook, the component READMEs and the design documents. These can
   assume more, but each opens with a few plain sentences on what it covers and who it is for.
 
@@ -159,7 +160,7 @@ sees it.
 about the code is fixed; one that is not goes in the allow-list with a reason a reviewer can check.
 
 Getting started with the stack itself — prerequisites, `npm run setup`, and bringing it up on
-k3d or a cluster — is in [`docs/install.md`](docs/install.md).
+k3d or a cluster — is in [`help/site/install.md`](help/site/install.md).
 
 ## Related
 

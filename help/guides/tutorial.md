@@ -1,13 +1,13 @@
 # Build your first machine
 
 In about twenty minutes you connect one machine to Aber and watch its readings arrive. You create a
-[cell](../docs/glossary.md#cell), a [gateway](../docs/glossary.md#gateway), a
-[metric](../docs/glossary.md#metric), a [schema](../docs/glossary.md#schema) and a
-[device](../docs/glossary.md#device), then build a small
-[Node-RED](../docs/glossary.md#node-red) flow that sends the device's readings. Every step is one you
+[cell](glossary.md#cell), a [gateway](glossary.md#gateway), a
+[metric](glossary.md#metric), a [schema](glossary.md#schema) and a
+[device](glossary.md#device), then build a small
+[Node-RED](glossary.md#node-red) flow that sends the device's readings. Every step is one you
 would repeat for real hardware.
 
-**You need** Aber running ([`docs/install.md`](../docs/install.md)) and an account that is an
+**You need** Aber running ([`help/site/install.md`](../site/install.md)) and an account that is an
 `Administrator` or a `Shopfloor_Manager`. On a laptop, use the demo account `admin@aber.local` with
 the password `aber123`. On a site, use the first administrator that `npm run setup` created.
 
@@ -69,7 +69,7 @@ the gateway has to exist before its password can be issued.
 **A Remote gateway works differently.** It runs on its own computer beside the machines. Its drawer
 offers an install command to paste on a fresh Ubuntu machine, or a bundle for one that already has
 Docker. That computer then sets itself up and gets its own password, which never passes through a
-browser. [`docs/remote-gateways.md`](../docs/remote-gateways.md) covers it.
+browser. [`docs/remote-gateways.md`](../../docs/remote-gateways.md) covers it.
 
 ### 5. Register a metric
 
@@ -91,13 +91,13 @@ already lists `Systems/TEMPERATURE` among its example metrics, so you can skip t
 ### 6. Create a schema
 
 Open **Schemas** and choose **Build Schema from Catalog**. A schema says what a kind of device
-sends: which [metrics](../docs/glossary.md#metric), of which type, meaning what. Each metric comes
+sends: which [metrics](glossary.md#metric), of which type, meaning what. Each metric comes
 from the catalog, which gives it a datatype, a unit and a standard identifier.
 
 Create the schema before the device. Without one:
 
 - Aber cannot tell you when the device sends something its model does not include.
-- An [AAS](../docs/glossary.md#asset-administration-shell-aas) export of the device carries its
+- An [AAS](glossary.md#asset-administration-shell-aas) export of the device carries its
   nameplate and nothing else.
 - The device's **Configuration Parameters** panel has nothing to show.
 
@@ -111,13 +111,13 @@ the schema from step 6. **Copy the Sparkplug ID it shows**: `dev` followed by 21
 same way as the gateway's.
 
 You can skip this step too. Send messages under any well-formed `dev` id you make up, and the device
-waits in [quarantine](../docs/glossary.md#quarantine) for you to approve it. See
+waits in [quarantine](glossary.md#quarantine) for you to approve it. See
 [*Let a device arrive on its own*](#let-a-device-arrive-on-its-own), below.
 
 ### 8. Build the flow in Node-RED
 
 Open the Node-RED editor. It starts empty. You need one connection to the broker, and enough
-[Sparkplug B](../docs/glossary.md#sparkplug-b) messages for Aber to recognise the gateway and device:
+[Sparkplug B](glossary.md#sparkplug-b) messages for Aber to recognise the gateway and device:
 
 1. Add an **mqtt-broker** node with Server `mosquitto` and Port `1883`.
 2. On its **Security** tab, enter the username and password from step 4. Choose **Update**, then
@@ -131,7 +131,7 @@ Open the Node-RED editor. It starts empty. You need one connection to the broker
 
 If your site runs the broker with TLS, Node-RED moves the broker node onto TLS by itself the next time
 it starts, so leave the server and port as they are. The broker accepts a gateway's messages only on
-its own Sparkplug ID ([`mosquitto/README.md`](../mosquitto/README.md#broker-topic-authorisation)
+its own Sparkplug ID ([`mosquitto/README.md`](../../mosquitto/README.md#broker-topic-authorisation)
 says why).
 
 ### 9. Check that it worked
@@ -217,7 +217,7 @@ Use your own throughout.
 | 4 | `DDEATH` | `spBv1.0/Aber/DDEATH/gwy1200…/dev2200…` | Marks the device offline |
 | 5 | `NDATA` | `spBv1.0/Aber/NDATA/gwy1200…` | The gateway's heartbeat, at least every 30 s. A gateway silent for 90 s shows as STALE |
 
-`Aber` is the [Sparkplug group](../docs/glossary.md#sparkplug-group) the development stack is
+`Aber` is the [Sparkplug group](glossary.md#sparkplug-group) the development stack is
 installed with (`values-dev.yaml`). A site chooses its own at install, as `ingestion.sparkplugGroup`,
 and every topic above then carries that word instead.
 
@@ -240,11 +240,11 @@ that died quietly, and Aber marks a device OFFLINE after 300 s with no data
 (`DEVICE_OFFLINE_TIMEOUT_SECONDS`). So re-send every metric at its last value well inside that. The
 appliance's sample flow is the pattern to copy: its `publish by exception` node does all of the
 above and re-sends every 120 s
-([`appliance/README.md`](../forge/gateway-platform/appliance/README.md#the-sample-flow)).
+([`appliance/README.md`](../../forge/gateway-platform/appliance/README.md#the-sample-flow)).
 
 Because an unchanged metric sends nothing, **a gap in a chart means *unchanged*, not *unknown*.**
 Read these series through `telemetry_gapfill()` (see
-[`../timescaledb/aggregates.sql`](../timescaledb/aggregates.sql)), which carries the last value
+[`../../timescaledb/aggregates.sql`](../../timescaledb/aggregates.sql)), which carries the last value
 forward. Charting a rollup directly shows steady running as a hole.
 
 ### What a message carries
@@ -323,7 +323,7 @@ refuses it, Node-RED may not be able to decrypt what it stored: check `settings.
 at all is a network or DNS problem instead.
 
 **The editor signs in, then nothing works, or Deploy shows a padlock.** See
-[`node-red/README.md`](../node-red/README.md#authentication), which explains how Node-RED's sign-in
+[`node-red/README.md`](../../node-red/README.md#authentication), which explains how Node-RED's sign-in
 is put together and what each part needs.
 
 ---
@@ -333,7 +333,7 @@ is put together and what each part needs.
 | Item | What to do |
 | :--- | :--- |
 | Binary Sparkplug B encoding | Install `node-red-contrib-sparkplug-b` |
-| Broker passwords for gateways | Issued by the dashboard for a Host gateway (step 4), and by enrolment for a Remote one. `node scripts/mosquitto-provision-gateway.mjs <sparkplug_id>` only to reissue one by hand, for example when the credential service is down ([`mosquitto/README.md`](../mosquitto/README.md#broker-topic-authorisation)) |
+| Broker passwords for gateways | Issued by the dashboard for a Host gateway (step 4), and by enrolment for a Remote one. `node scripts/mosquitto-provision-gateway.mjs <sparkplug_id>` only to reissue one by hand, for example when the credential service is down ([`mosquitto/README.md`](../../mosquitto/README.md#broker-topic-authorisation)) |
 | Remote gateways' operating systems | They follow the platform playbook at the tag each gateway's `platform.yml` names. Move the tag by pull request in the gateway's repository, one gateway first |
 | Node-RED sign-in | Set up by default, through the dashboard's sign-in. Set `global.publicBaseDomain`, or `publicUrls.nodered`, to the address browsers actually use, or `/oauth/authorize` answers `invalid redirect_uri` |
 | Platform broker passwords | Rotate the `secrets.mqtt*Password` values. Ingestion refuses to start without `secrets.mqttIngestionPassword` |
@@ -343,9 +343,9 @@ is put together and what each part needs.
 
 ## Related
 
-- [`../docs/glossary.md`](../docs/glossary.md): the terms used here
-- [`../docs/remote-gateways.md`](../docs/remote-gateways.md): gateways on their own hardware (the install command, the bundle, the forge, the playbook)
-- [`../node-red/README.md`](../node-red/README.md): how Node-RED's editor and APIs are protected; [`../node-red/node-red-init.mjs`](../node-red/node-red-init.mjs) prepares it at every start
-- [`../mosquitto/README.md`](../mosquitto/README.md): the broker's policy, its configuration ([`mosquitto.conf`](../mosquitto/mosquitto.conf)) and roles ([`dynsec-roles.json`](../mosquitto/dynsec-roles.json)), and which topics each gateway may use
-- [`../ingestion/README.md`](../ingestion/README.md): how these messages are read and checked
-- [`../supabase/README.md`](../supabase/README.md): quarantine approval and the Audit Trail
+- [`glossary.md`](glossary.md): the terms used here
+- [`../../docs/remote-gateways.md`](../../docs/remote-gateways.md): gateways on their own hardware (the install command, the bundle, the forge, the playbook)
+- [`../../node-red/README.md`](../../node-red/README.md): how Node-RED's editor and APIs are protected; [`../../node-red/node-red-init.mjs`](../../node-red/node-red-init.mjs) prepares it at every start
+- [`../../mosquitto/README.md`](../../mosquitto/README.md): the broker's policy, its configuration ([`mosquitto.conf`](../../mosquitto/mosquitto.conf)) and roles ([`dynsec-roles.json`](../../mosquitto/dynsec-roles.json)), and which topics each gateway may use
+- [`../../ingestion/README.md`](../../ingestion/README.md): how these messages are read and checked
+- [`../../supabase/README.md`](../../supabase/README.md): quarantine approval and the Audit Trail

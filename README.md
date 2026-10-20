@@ -18,7 +18,7 @@ them on dashboards, and records who changed what and when. It runs on your own n
 ## What it does
 
 - **Collects live data.** Gateways send machine readings to Aber using
-  [Sparkplug B](docs/glossary.md#sparkplug-b), an open industrial standard. Aber stores every
+  [Sparkplug B](help/guides/glossary.md#sparkplug-b), an open industrial standard. Aber stores every
   reading and charts it in Grafana.
 - **Keeps a register of your equipment.** Gateways and devices are placed in cells, and cells in
   areas of your site, so you can find any machine and its data.
@@ -29,9 +29,9 @@ them on dashboards, and records who changed what and when. It runs on your own n
 - **Manages gateways from one place.** Each gateway runs Node-RED. Its flow is kept in Aber's own
   git server, and a change is approved before it reaches the gateway.
 - **Shares data in standard forms.** Export equipment as
-  [Asset Administration Shells](docs/glossary.md#asset-administration-shell-aas), let other software
-  read live data through the [i3X](docs/glossary.md#i3x) API, and optionally publish every reading
-  to an ISA-95 [Unified Namespace](docs/glossary.md#unified-namespace-uns).
+  [Asset Administration Shells](help/guides/glossary.md#asset-administration-shell-aas), let other software
+  read live data through the [i3X](help/guides/glossary.md#i3x) API, and optionally publish every reading
+  to an ISA-95 [Unified Namespace](help/guides/glossary.md#unified-namespace-uns).
 
 ## Get started
 
@@ -45,10 +45,10 @@ Aber has two parts:
 
 | You want to | Start here |
 | :--- | :--- |
-| Try Aber on your own computer | [Try it](docs/install.md#try-it) |
-| Install Aber on a site | [Installing Aber](docs/install.md#run-it-on-a-site) |
-| Work on Aber's code on a laptop | [Develop on a laptop](docs/install.md#develop-on-a-laptop) |
-| Connect your first machine | [The tutorial](tutorial/README.md) |
+| Try Aber on your own computer | [Try it](help/site/install.md#try-it) |
+| Install Aber on a site | [Installing Aber](help/site/install.md#run-it-on-a-site) |
+| Work on Aber's code on a laptop | [Develop on a laptop](help/site/install.md#develop-on-a-laptop) |
+| Connect your first machine | [The tutorial](help/guides/tutorial.md) |
 
 ## How it fits together
 
@@ -71,10 +71,11 @@ Mosquitto, Node-RED, Grafana and Gitea, running on Kubernetes (k3s).
 
 | To | Read |
 | :--- | :--- |
-| Install Aber and sign in | [Installing Aber](docs/install.md) |
-| Build your first machine | [The tutorial](tutorial/README.md) |
+| Install Aber and sign in | [Installing Aber](help/site/install.md) |
+| Build your first machine | [The tutorial](help/guides/tutorial.md) |
 | Set up gateways on their own hardware | [Remote gateways](docs/remote-gateways.md) |
-| Look up a term | [Glossary](docs/glossary.md) |
+| Look up a term | [Glossary](help/guides/glossary.md) |
+| See every page for newcomers, and the dashboard's help | [Help](help/README.md) |
 | See how it works | [How Aber fits together](docs/architecture.md) |
 | See how it is secured | [Security model](docs/security-model.md) |
 | Upgrade to a new release | [Upgrades](docs/upgrades.md) |

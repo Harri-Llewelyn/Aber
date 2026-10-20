@@ -208,7 +208,7 @@ ${bold('Aber is running on this computer.')}
   Password    ${password ?? '(none)'}
 
   For data, add a Simulated gateway (Gateways -> New Gateway). It runs in Aber's own Node-RED, so
-  there is nothing to install; tutorial/README.md builds a gateway the same way.
+  there is nothing to install; help/guides/tutorial.md builds a gateway the same way.
 
   Remove it   npm run try:down   (deletes the cluster and everything in it)`);
 }
