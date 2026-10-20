@@ -93,16 +93,15 @@ describe('the page gutter', () => {
     expect(rule('.content')).toMatch(/padding:\s*var\(--gutter\) calc\(var\(--gutter\) - var\(--scrollbar\)\) var\(--gutter\) var\(--gutter\);/)
   })
 
-  it('puts the open help drawer the same gutter from the window edge, and nothing on the page side', () => {
-    expect(rule('.context-panel-app.context-panel-open')).toMatch(/margin:\s*var\(--gutter\) var\(--gutter\) var\(--gutter\) 0;/)
+  it('docks the open help drawer to the window edge, with no margin on any side', () => {
+    // On the page side `.content`'s padding is the gap, as it is beside the rail.
+    expect(rule('.context-panel-app.context-panel-open')).toMatch(/margin:\s*0;/)
   })
 
   it('gives the closed help drawer no margin: it was an empty strip down the right of every page', () => {
-    // A margin declaration; the transition names margin-right as a value.
     expect(rule('.context-panel-app')).not.toMatch(/^\s*margin[\w-]*:/m)
-    // As an overlay it is flush with the window, as the details drawer's is.
-    const overlay = APP_CSS.match(/@media \(max-width: 800px\) \{([\s\S]*?)\n\}/)[1]
-    expect(overlay).toMatch(/\.context-panel-app\.context-panel-open \{ margin: 0; \}/)
+    // Nothing is left to animate but the width.
+    expect(rule('.context-panel-app')).not.toMatch(/margin-right/)
   })
 
   it('spaces a page drawer from its list as one card from the next', () => {

@@ -284,6 +284,31 @@ describe('Panel layout pushes rather than covers', () => {
     // The inner shell fills the overlay; the desktop width left an empty strip on the right.
     expect(overlay).toMatch(/\.context-panel-inner \{[^}]*width:\s*100%/)
   })
+
+  /* The help drawer is part of the app's frame and a page's drawer belongs to its list, and the
+     look is what tells the two apart when both are open. */
+  it('docks the help drawer like the rail, and leaves a page drawer a floating card', () => {
+    const helpInner = APP_CSS.match(/\n\.context-panel-app \.context-panel-inner \{([^}]*)\}/)[1]
+    const rail = APP_CSS.match(/\n\.sidebar-panel \{([^}]*)\}/)[1]
+    expect(helpInner).toMatch(/background:\s*var\(--bg-surface\)/)
+    expect(rail).toMatch(/background:\s*var\(--bg-surface\)/)
+    expect(helpInner).toMatch(/border:\s*none;\s*border-left:\s*1px solid var\(--border\)/)
+    expect(helpInner).toMatch(/border-radius:\s*0/)
+    expect(helpInner).toMatch(/box-shadow:\s*none/)
+
+    const pageInner = APP_CSS.match(/\n\.context-panel-inner \{([^}]*)\}/)[1]
+    expect(pageInner).toMatch(/border:\s*1px solid var\(--border\)/)
+    expect(pageInner).toMatch(/border-radius:\s*var\(--radius\)/)
+    expect(pageInner).toMatch(/box-shadow:\s*var\(--shadow\)/)
+  })
+
+  it('draws the help drawer with no margin and no inline style of its own', () => {
+    render(<HelpPanel open tabId="cells" onClose={vi.fn()} />)
+    const help = document.querySelector('.context-panel-app')
+    expect(help).toHaveClass('context-panel-open')
+    expect(help.getAttribute('style')).toBeNull()
+    expect(help.querySelector('.context-panel-inner').getAttribute('style')).toBeNull()
+  })
 })
 
 describe('On a narrow screen help replaces the details panel', () => {
