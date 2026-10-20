@@ -4328,6 +4328,13 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   white-space: nowrap;
 }
 
+/* The help panel's contents: the search bar, then whichever view it shows. */
+.help-browser { display: flex; flex-direction: column; }
+/* This page's link, then help/README.md: a gap between the two, each ending without one. */
+.help-contents > .help-prose + .help-prose { margin-top: 12px; }
+/* Room below the last result for its focus ring, which the scroller would clip. */
+.help-results { padding-bottom: 4px; }
+
 /* The help panel's search box, Back and Contents, kept in view over a long guide. */
 .help-toolbar {
   position: sticky;
