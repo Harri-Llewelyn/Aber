@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import { AccessControlTab } from '../components/tabs/AccessControlTab'
 import { api } from '../api'
+import { findTabLink, tabLink, tabLinks } from '../test/tabBar'
 
 vi.mock('../api', () => ({
   api: {
@@ -99,7 +100,7 @@ const card = () => document.querySelector('.page-main > .card')
 /** The page opens on Broker credentials; the other three lists are a tab each. */
 async function renderTab(label) {
   const result = render(<AccessControlTab showToast={vi.fn()} />)
-  fireEvent.click(await screen.findByRole('tab', { name: label }))
+  fireEvent.click(await findTabLink(label))
   return result
 }
 
@@ -125,7 +126,7 @@ describe('AccessControlTab', () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     render(<AccessControlTab showToast={vi.fn()} />)
 
-    const tab = await screen.findByRole('tab', { name: 'Broker credentials' })
+    const tab = await findTabLink('Broker credentials')
     expect(tab).toHaveAccessibleDescription(/what Aber issued and recorded, beside what the broker holds now/i)
     // The tooltip replaced the paragraph, so the sentence is not also in the body.
     expect(document.querySelector('.card-body p')).toBeNull()
@@ -203,8 +204,8 @@ describe('AccessControlTab', () => {
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(screen.getAllByText('No platform record').length).toBeGreaterThan(0))
-    expect(screen.getAllByRole('tab')).toHaveLength(4)
-    fireEvent.click(screen.getByRole('tab', { name: 'Broker accounts' }))
+    expect(tabLinks()).toHaveLength(4)
+    fireEvent.click(tabLink('Broker accounts'))
     await waitFor(() => expect(screen.getByText(/The broker holds no platform account/)).toBeTruthy())
     expect(screen.queryByText('No gateway')).toBeNull()
   })
@@ -287,7 +288,7 @@ describe('AccessControlTab', () => {
 
     await waitFor(() => expect(screen.getByRole('columnheader', { name: 'Actions' })).toBeTruthy())
     expect(screen.queryByRole('columnheader', { name: 'Issue' })).toBeNull()
-    fireEvent.click(screen.getByRole('tab', { name: 'Machine identities' }))
+    fireEvent.click(tabLink('Machine identities'))
     await waitFor(() => expect(screen.getByRole('columnheader', { name: 'Actions' })).toBeTruthy())
     expect(screen.queryByRole('columnheader', { name: 'Mint' })).toBeNull()
   })
@@ -303,7 +304,7 @@ describe('AccessControlTab', () => {
 
     await waitFor(() => expect(screen.getAllByText('No platform record').length).toBeGreaterThan(0))
     // The refusal is reported where the list would have been, on the Machine identities tab.
-    fireEvent.click(screen.getByRole('tab', { name: 'Machine identities' }))
+    fireEvent.click(tabLink('Machine identities'))
     await waitFor(() => expect(screen.getByText(/insufficient privileges/i)).toBeTruthy())
   })
 
@@ -313,21 +314,21 @@ describe('AccessControlTab', () => {
 
     await waitFor(() => expect(screen.getByText('Sim_Gateway_Cell1_Machining')).toBeTruthy())
     // No counts on the tabs: each accessible name is the label alone.
-    expect(screen.getAllByRole('tab').map(t => t.textContent))
+    expect(tabLinks().map(t => t.textContent))
       .toEqual(['Broker credentials', 'Machine identities', 'Broker accounts', 'Broker roles'])
-    expect(screen.getByRole('tab', { name: 'Broker credentials' }).getAttribute('aria-selected')).toBe('true')
+    expect(tabLink('Broker credentials').getAttribute('aria-current')).toBe('page')
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Machine identities' }))
+    fireEvent.click(tabLink('Machine identities'))
     await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
     expect(screen.queryByText('Sim_Gateway_Cell1_Machining')).toBeNull()
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Broker roles' }))
+    fireEvent.click(tabLink('Broker roles'))
     expect(screen.getByText('ingestion', { selector: 'td' })).toBeTruthy()
     expect(screen.queryByText('MCP read-only client')).toBeNull()
 
-    // The arrow keys move between tabs too, through the shared tab bar.
-    fireEvent.keyDown(screen.getByRole('tab', { name: 'Broker roles' }), { key: 'ArrowLeft' })
-    expect(screen.getByRole('tab', { name: 'Broker accounts' }).getAttribute('aria-selected')).toBe('true')
+    // The arrow keys move nothing: each tab is a link of its own, and `[` and `]` step between them.
+    fireEvent.keyDown(tabLink('Broker roles'), { key: 'ArrowLeft' })
+    expect(tabLink('Broker roles').getAttribute('aria-current')).toBe('page')
   })
 
   /** The tab is the path: a search-bar card links to it, and a reload or Back returns to it. */
@@ -336,7 +337,7 @@ describe('AccessControlTab', () => {
     window.history.replaceState(null, '', '/access-control/roles')
     render(<AccessControlTab showToast={vi.fn()} />)
 
-    await waitFor(() => expect(screen.getByRole('tab', { name: 'Broker roles' }).getAttribute('aria-selected')).toBe('true'))
+    await waitFor(() => expect(tabLink('Broker roles').getAttribute('aria-current')).toBe('page'))
   })
 
   it('opens the default tab for one it does not have, and tidies the address', async () => {
@@ -344,7 +345,7 @@ describe('AccessControlTab', () => {
     window.history.replaceState(null, '', '/access-control/services')
     render(<AccessControlTab showToast={vi.fn()} />)
 
-    expect(screen.getByRole('tab', { name: 'Broker credentials' }).getAttribute('aria-selected')).toBe('true')
+    expect(tabLink('Broker credentials').getAttribute('aria-current')).toBe('page')
     await waitFor(() => expect(window.location.pathname).toBe('/access-control'))
   })
 
@@ -353,13 +354,13 @@ describe('AccessControlTab', () => {
     window.history.replaceState(null, '', '/access-control')
     render(<AccessControlTab showToast={vi.fn()} />)
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Broker roles' }))
+    fireEvent.click(tabLink('Broker roles'))
     expect(window.location.pathname).toBe('/access-control/roles')
     act(() => {
       window.history.back()
     })
     await waitFor(() => expect(window.location.pathname).toBe('/access-control'))
-    await waitFor(() => expect(screen.getByRole('tab', { name: 'Broker credentials' }).getAttribute('aria-selected')).toBe('true'))
+    await waitFor(() => expect(tabLink('Broker credentials').getAttribute('aria-current')).toBe('page'))
   })
 
   /** A declared fixture is named rather than marked as a stray; anything undeclared is the stray. */
@@ -537,7 +538,7 @@ describe('AccessControlTab', () => {
     expect(screen.queryByRole('button', { name: /New Machine Identity/i })).toBeNull()
     // The row held only that button, so it goes too; the tab still explains itself.
     expect(card().querySelector('.filter-bar')).toBeNull()
-    expect(screen.getByRole('tab', { name: 'Machine identities' })).toHaveAccessibleDescription(/None can sign in/)
+    expect(tabLink('Machine identities')).toHaveAccessibleDescription(/None can sign in/)
   })
 
   /**
@@ -811,9 +812,9 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(roleRow('monitor').className).toContain('row-selectable'))
     fireEvent.click(roleRow('monitor'))
     await screen.findByRole('complementary', { name: 'monitor role' })
-    fireEvent.click(screen.getByRole('tab', { name: 'Broker accounts' }))
+    fireEvent.click(tabLink('Broker accounts'))
     await waitFor(() => expect(rolePanel().getAttribute('aria-hidden')).toBe('true'))
-    fireEvent.click(screen.getByRole('tab', { name: 'Broker roles' }))
+    fireEvent.click(tabLink('Broker roles'))
     expect(roleRow('monitor').className).not.toContain('row-selected')
   })
 
@@ -838,7 +839,7 @@ describe('AccessControlTab', () => {
     // CopyableId renders a button, which is what makes it keyboard-reachable and announced as an
     // action -- a clickable span would be neither.
     await waitFor(() => expect(screen.getByRole('button', { name: /gwy120000000000400080000/ })).toBeTruthy())
-    fireEvent.click(screen.getByRole('tab', { name: 'Machine identities' }))
+    fireEvent.click(tabLink('Machine identities'))
     // Exact, because the mint command in the next column also contains this id. CopyableId's
     // accessible name is `Copy <label> <value>`, so naming the label makes this exact.
     await waitFor(() => expect(screen.getByRole('button', { name: 'Copy principal id b0000000-0000-4000-8000-000000000001' })).toBeTruthy())
@@ -1053,11 +1054,11 @@ describe('AccessControlTab card composition', () => {
 
     await waitFor(() => expect(card().querySelector('tbody tr')).toBeTruthy())
     for (const label of ['Broker credentials', 'Machine identities', 'Broker accounts', 'Broker roles']) {
-      fireEvent.click(screen.getByRole('tab', { name: label }))
+      fireEvent.click(tabLink(label))
       expect(card().querySelector('.section-count')).toBeNull()
-      expect(screen.getByRole('tab', { name: label }).textContent).toBe(label)
+      expect(tabLink(label).textContent).toBe(label)
     }
-    fireEvent.click(screen.getByRole('tab', { name: 'Broker credentials' }))
+    fireEvent.click(tabLink('Broker credentials'))
     expect(within(screen.getByLabelText('Filter gateways by credential state')).getByText('Any state (1)')).toBeTruthy()
   })
 
@@ -1072,7 +1073,7 @@ describe('AccessControlTab card composition', () => {
       ['Broker accounts', /no gateway claims/],
       ['Broker roles', /publish, receive and subscribe/],
     ]) {
-      const tab = screen.getByRole('tab', { name: label })
+      const tab = tabLink(label)
       // Readable before the tab is opened: that is when it helps.
       expect(tab).toHaveAccessibleDescription(says)
       expect(tab).not.toHaveAttribute('title')
@@ -1093,7 +1094,7 @@ describe('AccessControlTab card composition', () => {
       ['Broker accounts', false],
       ['Broker roles', false],
     ]) {
-      fireEvent.click(screen.getByRole('tab', { name: label }))
+      fireEvent.click(tabLink(label))
       await waitFor(() => expect(Boolean(card().querySelector(':scope > .filter-bar'))).toBe(hasRow))
     }
   })
@@ -1133,7 +1134,7 @@ describe('AccessControlTab card composition', () => {
     expect(withdraw.className).toContain('btn-danger')
     expect(withdraw.className).toContain('btn-danger-reveal')
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Broker credentials' }))
+    fireEvent.click(tabLink('Broker credentials'))
     expect(within(card()).getByRole('columnheader', { name: 'Actions' }).className).toContain('row-actions')
     expect(within(card()).getByRole('button', { name: /Generate/ }).className).toContain('btn-sm')
   })
@@ -1167,7 +1168,7 @@ describe('AccessControlTab card composition', () => {
     await renderTab('Broker accounts')
 
     await waitFor(() => expect(screen.getByText('The broker was not read, so its accounts cannot be listed.')).toBeTruthy())
-    fireEvent.click(screen.getByRole('tab', { name: 'Broker roles' }))
+    fireEvent.click(tabLink('Broker roles'))
     expect(card().querySelector('.callout-warning')).toBeTruthy()
     expect(card().querySelectorAll('tbody tr')).toHaveLength(5)
   })

@@ -81,6 +81,7 @@ import {
 } from '../common/Icons'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { DEVICES_TABS } from '../../navigation'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { severityRank } from '../../utils/tableSort'
 
@@ -92,11 +93,8 @@ const CELL_FILTER_SITE_WIDE = '__site_wide__'
 /** Whether two lists of schema ids name the same schemas, in any order. */
 const sameSchemaSet = (a, b) => a.length === b.length && a.every(id => b.includes(id))
 
-/** The two tabs, in order. The description is the tab's tooltip; the help page has the rest. */
-export const VIEWS = [
-  { id: 'registered', label: 'Registered', description: 'Devices admitted to Aber. Their status says when one publishes what its schema does not include, or nothing yet.' },
-  { id: 'quarantine', label: 'Quarantine', description: 'Births from devices nobody has registered. Their readings are held until someone approves or rejects them.' },
-]
+/** The two tabs, in order (navigation.jsx). The description is the tab's tooltip; the help page has the rest. */
+export const VIEWS = DEVICES_TABS
 
 /** The Quarantine table's sortable columns. A birth with no gateway name shows "—" and goes last. */
 const QUARANTINE_SORT = {
@@ -156,7 +154,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [filterMode, setFilterMode] = useUrlState('lifecycle', 'active', { allowed: ['all', 'active', 'archived'] })
   // The card's tab, in the path: `/devices` or `/devices/quarantine`. A tab change drops the
   // query, so the Registered filters and the drawer, which belong to that tab, go with it.
-  const [view, setView] = useUrlTab('devices', VIEWS.map(v => v.id), 'registered')
+  const [view, setView, viewHref] = useUrlTab('devices', VIEWS.map(v => v.id), 'registered')
   // The device whose export dialog is open, or null.
   const [exportFor, setExportFor] = useState(null)
 
@@ -680,6 +678,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           ariaLabel="Devices"
           value={view}
           onChange={chooseView}
+          hrefFor={viewHref}
           tabs={VIEWS.map(v => (v.id === 'quarantine' ? { ...v, attention: quarantine.length } : v))}
         />
 

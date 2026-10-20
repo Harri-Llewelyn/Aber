@@ -8,6 +8,7 @@ import { DEFAULT_ROLE_PERMISSIONS_MAP } from '../hooks/usePermissions'
 import {
   PERSON_ROLES, administratorsWithAccess, passwordSetBlocked, removalBlocked, roleChangeBlocked,
 } from '../utils/people'
+import { findTabLink, queryTabLink, tabLinks } from '../test/tabBar'
 
 vi.mock('../api', () => ({
   api: {
@@ -85,17 +86,17 @@ async function showRemoved() {
 describe('the People tab', () => {
   it('is the first tab for an Administrator, and the page opens on it', async () => {
     renderPeople()
-    const tabs = screen.getAllByRole('tab')
+    const tabs = tabLinks()
     expect(tabs[0]).toHaveTextContent('People')
-    expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
+    expect(tabs[0]).toHaveAttribute('aria-current', 'page')
     expect(await screen.findByText('operator@site.test')).toBeInTheDocument()
   })
 
   it('is not offered to any other role, and the people are not read', async () => {
     for (const role of ['Shopfloor_Manager', 'Operator', 'Auditor', null]) {
       const { unmount } = render(<AccessControlTab showToast={vi.fn()} userRole={role} currentUserId={ME} />)
-      await screen.findByRole('tab', { name: 'Broker credentials' })
-      expect(screen.queryByRole('tab', { name: 'People' })).toBeNull()
+      await findTabLink('Broker credentials')
+      expect(queryTabLink('People')).toBeNull()
       unmount()
     }
     expect(api.listPeople).not.toHaveBeenCalled()

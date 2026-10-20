@@ -5,6 +5,7 @@ import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
 import { formatDateTime } from '../utils/format'
 import { deviceUrl, tabUrl } from '../routes'
+import { tabLink } from '../test/tabBar'
 
 /**
  * The Devices page is one card with two tabs: Registered, the roster, which opens on Active and
@@ -74,7 +75,7 @@ const show = async (rows, quarantine = [], hasPermission = () => true, props = {
 }
 
 const card = () => document.querySelector('.page-main > .card')
-const tab = (name) => screen.getByRole('tab', { name })
+const tab = (name) => tabLink(name)
 const openFilters = () => {
   fireEvent.click(screen.getByRole('button', { name: /^Filters/ }))
   return within(screen.getByRole('dialog', { name: 'Filters' }))
@@ -105,8 +106,8 @@ describe('the Devices card', () => {
 
     const strip = card().querySelector(':scope > .card-heading + .tab-strip')
     expect(strip).toBeTruthy()
-    expect(within(strip).getAllByRole('tab').map(t => t.textContent.replace(/\d+$/, ''))).toEqual(['Registered', 'Quarantine'])
-    expect(tab('Registered')).toHaveAttribute('aria-selected', 'true')
+    expect(within(strip).getAllByRole('link').map(t => t.textContent.replace(/\d+$/, ''))).toEqual(['Registered', 'Quarantine'])
+    expect(tab('Registered')).toHaveAttribute('aria-current', 'page')
     expect(card().querySelector('.section-count')).toBeNull()
   })
 
@@ -147,7 +148,7 @@ describe('the Quarantine tab', () => {
     expect(waiting.querySelector('.tab-strip-attention').textContent).toBe('1')
     // No border on any card, and the roster stays where it was.
     expect(document.querySelector('.card-attention')).toBeNull()
-    expect(tab('Registered')).toHaveAttribute('aria-selected', 'true')
+    expect(tab('Registered')).toHaveAttribute('aria-current', 'page')
   })
 
   it('lists the waiting device straight under the bar, explained by its tab and with no toolbar row', async () => {
@@ -186,7 +187,7 @@ describe('the Quarantine tab', () => {
     window.history.replaceState(null, '', tabUrl('devices', 'quarantine'))
     await show([device()], [queued], () => true)
 
-    expect(tab(/^Quarantine/)).toHaveAttribute('aria-selected', 'true')
+    expect(tab(/^Quarantine/)).toHaveAttribute('aria-current', 'page')
   })
 
   it('puts a tab change in the path, so Back returns to the tab before', async () => {
@@ -203,7 +204,7 @@ describe('the Quarantine tab', () => {
     window.history.replaceState(null, '', deviceUrl(queued.asset_id))
     await show([device(), held], [queued], () => true)
 
-    await waitFor(() => expect(tab(/^Quarantine/)).toHaveAttribute('aria-selected', 'true'))
+    await waitFor(() => expect(tab(/^Quarantine/)).toHaveAttribute('aria-current', 'page'))
     expect(panelOpen()).toBe(false)
     expect(within(card()).getByText('Unknown_Robot')).toBeInTheDocument()
   })

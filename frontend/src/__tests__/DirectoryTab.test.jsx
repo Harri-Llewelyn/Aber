@@ -15,6 +15,7 @@ import {
 } from '../components/tabs/DirectoryTab'
 import { api } from '../api'
 import { expectCardHeading } from '../test/cardHeading'
+import { queryTabLink, tabLink, tabLinks } from '../test/tabBar'
 
 vi.mock('../api', () => ({
   api: {
@@ -59,12 +60,12 @@ async function renderTab() {
   return { showToast }
 }
 
-const tab = (title) => screen.getByRole('tab', { name: title })
+const tab = (title) => tabLink(title)
 const openTab = (title) => fireEvent.click(tab(title))
 
 /** Runs `read` on every group's tab in turn, and returns what each call returned, flattened. */
 const acrossTabs = (read) =>
-  screen.getAllByRole('tab').map(t => t.textContent).flatMap(title => { openTab(title); return read() })
+  tabLinks().map(t => t.textContent).flatMap(title => { openTab(title); return read() })
 
 /**
  * The page must make no claim about what Node-RED is running: it has no way to observe the editor,
@@ -116,8 +117,8 @@ describe('DirectoryTab service groups', () => {
     await renderTab()
 
     expect(document.querySelectorAll('.card')).toHaveLength(1)
-    expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual([APPS, INGEST, DATA])
-    expect(tab(APPS)).toHaveAttribute('aria-selected', 'true')
+    expect(tabLinks().map(t => t.textContent)).toEqual([APPS, INGEST, DATA])
+    expect(tab(APPS)).toHaveAttribute('aria-current', 'page')
     expect(document.querySelectorAll('table')).toHaveLength(1)
     // The bar is straight inside the card under its heading, with the table straight under the bar.
     expect(document.querySelector('.card > .card-heading + .tab-strip')).toBeTruthy()
@@ -127,7 +128,7 @@ describe('DirectoryTab service groups', () => {
   it('opens the group the address names, as a search-bar card links to it', async () => {
     window.history.replaceState(null, '', '/directory/ingestion')
     render(<DirectoryTab showToast={vi.fn()} />)
-    await waitFor(() => expect(tab(INGEST)).toHaveAttribute('aria-selected', 'true'))
+    await waitFor(() => expect(tab(INGEST)).toHaveAttribute('aria-current', 'page'))
   })
 
   it('puts a chosen group in the path, the first group being the bare page', async () => {
@@ -177,9 +178,9 @@ describe('DirectoryTab service groups', () => {
     api.get.mockResolvedValue(SERVICES.filter(s => s.service_type === 'MQTT_BROKER'))
     await renderTab()
 
-    expect(screen.queryByRole('tab', { name: APPS })).not.toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: /Other Registered Services/ })).not.toBeInTheDocument()
-    expect(tab(INGEST)).toHaveAttribute('aria-selected', 'true')
+    expect(queryTabLink(APPS)).not.toBeInTheDocument()
+    expect(queryTabLink(/Other Registered Services/)).not.toBeInTheDocument()
+    expect(tab(INGEST)).toHaveAttribute('aria-current', 'page')
   })
 
   it('explains each group in its own tab\'s tooltip, with no "?" in the bar, and counts nothing', async () => {
@@ -195,15 +196,15 @@ describe('DirectoryTab service groups', () => {
       expect(document.querySelector('.tab-strip .help-tip')).toBeNull()
     }
     expect(document.querySelector('.section-count')).toBeNull()
-    for (const t of screen.getAllByRole('tab')) expect(t.textContent).not.toMatch(/\d/)
+    for (const t of tabLinks()) expect(t.textContent).not.toMatch(/\d/)
   })
 
   it('opens on the first tab, and shows another group on a click', async () => {
     await renderTab()
-    expect(tab(APPS)).toHaveAttribute('aria-selected', 'true')
+    expect(tab(APPS)).toHaveAttribute('aria-current', 'page')
     expect(namesIn(DATA)).toContain('Supabase PostgreSQL')
-    expect(tab(DATA)).toHaveAttribute('aria-selected', 'true')
-    expect(tab(APPS)).toHaveAttribute('aria-selected', 'false')
+    expect(tab(DATA)).toHaveAttribute('aria-current', 'page')
+    expect(tab(APPS)).not.toHaveAttribute('aria-current')
   })
 
   it('is one card with its heading, in a page that does not scroll', async () => {
@@ -486,15 +487,15 @@ describe('DirectoryTab refresh', () => {
     api.get.mockResolvedValue(SERVICES)
     await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
     await waitFor(() =>
-      expect(screen.queryByRole('tab', { name: 'Other Registered Services' })).not.toBeInTheDocument())
-    expect(tab('Applications & User Interfaces')).toHaveAttribute('aria-selected', 'true')
+      expect(queryTabLink('Other Registered Services')).not.toBeInTheDocument())
+    expect(tab('Applications & User Interfaces')).toHaveAttribute('aria-current', 'page')
     expect(screen.getByText('Grafana Dashboards')).toBeInTheDocument()
 
     // Its return does not take the selection back.
     api.get.mockResolvedValue([...SERVICES, stray])
     await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
     await waitFor(() => expect(tab('Other Registered Services')).toBeInTheDocument())
-    expect(tab('Applications & User Interfaces')).toHaveAttribute('aria-selected', 'true')
+    expect(tab('Applications & User Interfaces')).toHaveAttribute('aria-current', 'page')
   })
 
   // The poll is a setTimeout chain (see usePolling), so a fresh response only reaches the

@@ -6,6 +6,7 @@ import path from 'node:path'
 import { VocabularyTab } from '../components/tabs/VocabularyTab'
 import { HELP_CORPUS } from '../help'
 import { api } from '../api'
+import { tabBar, tabLink } from '../test/tabBar'
 
 /**
  * The Vocabulary page. Clicking an entry hands the selection to the Metrics page rather than
@@ -95,9 +96,9 @@ const renderTab = (props = {}) =>
 const card = () => within(document.querySelector('.card'))
 
 /** The standard tabs, inside the card under its heading. */
-const standardTab = (name) => screen.getByRole('tab', { name })
+const standardTab = (name) => tabLink(name)
 const ready = async () => {
-  await waitFor(() => expect(screen.getByRole('tablist')).toBeTruthy())
+  await waitFor(() => expect(tabBar()).toBeTruthy())
 }
 
 describe('Vocabulary page', () => {
@@ -124,8 +125,8 @@ describe('Vocabulary page', () => {
     renderTab()
     await ready()
 
-    expect(standardTab(/MTConnect/).getAttribute('aria-selected')).toBe('true')
-    expect(standardTab(/ISO 22400/).getAttribute('aria-selected')).toBe('false')
+    expect(standardTab(/MTConnect/).getAttribute('aria-current')).toBe('page')
+    expect(standardTab(/ISO 22400/).getAttribute('aria-current')).toBeNull()
   })
 
   it('swaps the rendered dataset when a tab is selected', async () => {
@@ -314,7 +315,7 @@ describe('Vocabulary page — one card: heading, tabs, toolbar, sections', () =>
     expect(document.querySelectorAll('.card')).toHaveLength(1)
     expect(document.querySelector('.page-heading')).toBeNull()
     expect(screen.getByRole('heading', { name: 'Vocabulary' }).closest('.card-heading')).toBeTruthy()
-    expect(screen.getByRole('tablist').closest('.tab-strip').parentElement).toBe(cardEl)
+    expect(tabBar().closest('.tab-strip').parentElement).toBe(cardEl)
     // The tab names the standard on show; no second heading repeats it.
     expect(screen.getAllByRole('heading')).toHaveLength(1)
   })

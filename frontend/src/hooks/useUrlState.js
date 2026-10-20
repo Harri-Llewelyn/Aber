@@ -156,11 +156,20 @@ export function useUrlState(key, defaultValue = '', { allowed } = {}) {
   return [value, setValue]
 }
 
+/** The address of tab `next` on `page`: the bare page for `home`, with the `kept` keys of `url`. */
+function tabAddress(page, next, home, kept, url) {
+  const carried = new URLSearchParams()
+  for (const [key, value] of queryOf(url)) if (kept.includes(key)) carried.append(key, value)
+  const q = carried.toString()
+  return `/${page}${next && next !== home ? `/${next}` : ''}${q ? `?${q}` : ''}`
+}
+
 /**
- * A page's tab strip held in the path: `/devices/quarantine`. Returns `[tab, setTab]`. A tab
- * change adds a history entry, so Back returns to the previous tab, and the default tab is the bare
- * page path. An unknown tab reads as the default, and the address is tidied to match, as is the
- * default tab spelled out. `setTab(id, { replace: true })` rewrites the entry instead.
+ * A page's tab strip held in the path: `/devices/quarantine`. Returns `[tab, setTab, hrefFor]`. A
+ * tab change adds a history entry, so Back returns to the previous tab, and the default tab is the
+ * bare page path. An unknown tab reads as the default, and the address is tidied to match, as is
+ * the default tab spelled out. `setTab(id, { replace: true })` rewrites the entry instead.
+ * `hrefFor(id)` is the address `setTab(id)` goes to, for the tab bar's links.
  *
  * A tab change drops the query string, so each tab opens on its own defaults, except the keys in
  * `keep`: filters the page shares across its tabs.
@@ -196,11 +205,10 @@ export function useUrlTab(page, ids, fallback, { keep = [], ready = true } = {})
   latest.current = { fallback, keep }
   const setTab = useCallback((next, { replace = false } = {}) => {
     const { fallback: home, keep: kept } = latest.current
-    const carried = new URLSearchParams()
-    for (const [key, value] of queryOf()) if (kept.includes(key)) carried.append(key, value)
-    const q = carried.toString()
-    navigate(`/${page}${next && next !== home ? `/${next}` : ''}${q ? `?${q}` : ''}`, { replace })
+    navigate(tabAddress(page, next, home, kept, currentUrl()), { replace })
   }, [page])
 
-  return [tab, setTab]
+  const hrefFor = (next) => tabAddress(page, next, fallback, keep, url)
+
+  return [tab, setTab, hrefFor]
 }

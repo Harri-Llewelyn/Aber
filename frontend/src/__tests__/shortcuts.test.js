@@ -98,11 +98,12 @@ describe('the single-key setting', () => {
 describe('stepPageTab', () => {
   const tabBar = (selected, { inMain = true, count = 3 } = {}) => {
     const tabs = Array.from({ length: count }, (_, i) =>
-      `<button role="tab" id="t${i}" aria-selected="${i === selected}">Tab ${i}</button>`).join('')
-    const bar = `<div role="tablist">${tabs}</div>`
+      `<a href="/page/t${i}" id="t${i}"${i === selected ? ' aria-current="page"' : ''}>Tab ${i}</a>`).join('')
+    const bar = `<nav class="tab-strip"><div class="tab-strip-tabs">${tabs}</div></nav>`
     document.body.innerHTML = inMain ? `<main>${bar}</main>` : `<header>${bar}</header><main></main>`
     const clicks = []
-    for (const t of document.querySelectorAll('[role="tab"]')) t.addEventListener('click', () => clicks.push(t.id))
+    // The page's own handler: a plain click stays in the page.
+    for (const t of document.querySelectorAll('.tab-strip a')) t.addEventListener('click', (e) => { e.preventDefault(); clicks.push(t.id) })
     return clicks
   }
 
@@ -134,8 +135,9 @@ describe('stepPageTab', () => {
   })
 
   it('skips a hidden tab bar for the one shown', () => {
-    document.body.innerHTML = '<main><div hidden><div role="tablist"><button role="tab" aria-selected="true">A</button><button role="tab" id="hiddenB" aria-selected="false">B</button></div></div>'
-      + '<div role="tablist"><button role="tab" aria-selected="true">C</button><button role="tab" id="shownD" aria-selected="false">D</button></div></main>'
+    document.body.innerHTML = '<main><div hidden><nav class="tab-strip"><a href="/a" aria-current="page">A</a><a href="/b" id="hiddenB">B</a></nav></div>'
+      + '<nav class="tab-strip"><a href="/c" aria-current="page">C</a><a href="/d" id="shownD">D</a></nav></main>'
+    for (const a of document.querySelectorAll('a')) a.addEventListener('click', e => e.preventDefault())
     expect(stepPageTab(1)).toBe(true)
     expect(document.activeElement.id).toBe('shownD')
   })

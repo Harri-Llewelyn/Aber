@@ -49,6 +49,7 @@ import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { ExpandAllToggle } from '../common/ExpandAllToggle'
 import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { METRICS_TABS } from '../../navigation'
 import { useSortableRows, useTableSort } from '../../hooks/useTableSort'
 
 // Sentinel for the "not in the list yet" option in the group picker. Not a valid group name --
@@ -107,14 +108,10 @@ const BLANK_METRIC = {
 const keepTypedSemanticId = (own) => (own && own.semanticId.trim() !== '' ? own : null)
 
 /**
- * The three tabs, in order. The description is the tab's tooltip; the help page has the rest.
- * Uncatalogued's label gains its count once the list loads.
+ * The three tabs, in order (navigation.jsx). The description is the tab's tooltip; the help page has
+ * the rest. Uncatalogued's label gains its count once the list loads.
  */
-export const VIEWS = [
-  { id: 'catalog', label: 'Metric Catalog', description: "The metrics schema authors build from, grouped by their name's first segment. A name cannot change once created." },
-  { id: 'deprecated', label: 'Deprecated Metrics', description: 'Metrics withheld from the schema builder, and what replaced each. Schemas that model one keep it, with its readings.' },
-  { id: 'uncatalogued', label: 'Uncatalogued', description: 'Metric names devices declare that no catalog row describes. Their readings are stored, but carry no unit or meaning.' },
-]
+export const VIEWS = METRICS_TABS
 
 // Device chips an Uncatalogued row shows before "more": a name a whole fleet declares would
 // otherwise fill the row with one chip per device.
@@ -198,7 +195,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   const [cataloguing, setCataloguing] = useState(null)
   const [editTarget, setEditTarget] = useState(null)
   // Which tab of the card is shown, one per VIEWS entry; the default is the catalog.
-  const [view, setView] = useUrlTab('metrics', VIEWS.map(v => v.id), 'catalog')
+  const [view, setView, viewHref] = useUrlTab('metrics', VIEWS.map(v => v.id), 'catalog')
   // Expansion state for the catalog's group sections, keyed by label; absent means collapsed.
   const [expandedGroups, setExpandedGroups] = useState({})
   // Filters the catalog by metric name. With groups collapsed by default it is how one metric is
@@ -843,8 +840,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
           {/* Every tab is always there, so a deprecation has a known place to be undone. Uncatalogued
               carries its count once read, so an empty list reads as good news from the tab bar. */}
           <TabStrip
-            ariaLabel="Metric list"
+            ariaLabel="Metrics"
             value={view}
+            hrefFor={viewHref}
             onChange={id => { if (id !== view) { setView(id); setSelectedId(null) } }}
             tabs={VIEWS.map(v => (v.id === 'uncatalogued' && uncatalogued
               ? { ...v, label: `${v.label} (${uncatalogued.length})` }

@@ -6,6 +6,7 @@ import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { DevicesTab } from '../components/tabs/DevicesTab'
 import { api } from '../api'
 import { devicesForSchemaUrl } from '../routes'
+import { tabLink } from '../test/tabBar'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -230,7 +231,7 @@ describe('DevicesTab filters', () => {
     expect(tableNames.some(t => t.includes('CNC_01'))).toBe(true)
 
     // ...and exactly once on the Quarantine tab.
-    fireEvent.click(screen.getByRole('tab', { name: /^Quarantine/ }))
+    fireEvent.click(tabLink(/^Quarantine/))
     expect(screen.getAllByText('Unknown_Thing')).toHaveLength(1)
   })
 

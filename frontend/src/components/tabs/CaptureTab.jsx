@@ -24,6 +24,7 @@ import { CardHeading } from '../common/CardHeading'
 import { Badge } from '../common/Badge'
 import { TabStrip } from '../common/TabStrip'
 import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { CAPTURE_TABS } from '../../navigation'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { SearchInput } from '../common/SearchInput'
 import { SortHeader } from '../common/SortHeader'
@@ -36,11 +37,8 @@ import { formatBytes, formatDateTime, formatDuration, plural } from '../../utils
 const WRITE_ROLES = ['Administrator', 'Shopfloor_Manager']
 const DENIED_TITLE = `Requires ${WRITE_ROLES.map(r => r.replace(/_/g, ' ')).join(' or ')}`
 
-/** What a capture records, one tab each. The description is the tab's tooltip. */
-export const SUBJECTS = [
-  { id: 'gateway', label: 'Gateways', description: 'Record everything one gateway publishes, every device beneath it included.' },
-  { id: 'device', label: 'Devices', description: "Record one device, plus its gateway's birth certificate." },
-]
+/** What a capture records, one tab each (navigation.jsx). The description is the tab's tooltip. */
+export const SUBJECTS = CAPTURE_TABS
 
 /**
  * Recording the broker, and playing a recording back.
@@ -56,7 +54,7 @@ export const SUBJECTS = [
 export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   // The tab, in the path: `/capture` (gateways) or `/capture/device`. The stored filter and the
   // search sit above both tabs, so they stay in the address across a tab change.
-  const [subjectKind, setSubjectKind] = useUrlTab('capture', SUBJECTS.map(s => s.id), 'gateway', { keep: ['stored', 'search'] })
+  const [subjectKind, setSubjectKind, subjectHref] = useUrlTab('capture', SUBJECTS.map(s => s.id), 'gateway', { keep: ['stored', 'search'] })
   const [gateways, setGateways] = useState([])
   const [devices, setDevices] = useState([])
   const [captures, setCaptures] = useState([])
@@ -459,9 +457,10 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
           />
 
           <TabStrip
-            ariaLabel="Capture subject"
+            ariaLabel="Capture"
             value={subjectKind}
             onChange={kind => { setSubjectKind(kind); setSelectedId(null) }}
+            hrefFor={subjectHref}
             tabs={SUBJECTS}
           />
 

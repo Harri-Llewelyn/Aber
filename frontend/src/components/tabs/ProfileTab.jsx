@@ -3,14 +3,12 @@ import { IconUser, IconLock, IconAlertTriangle, IconX } from '../common/Icons'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { useUrlTab } from '../../hooks/useUrlState'
+import { PROFILE_TABS } from '../../navigation'
 import { SIDEBAR_MODES } from '../../hooks/useSidebarMode'
 import { MIN_PASSWORD_LENGTH } from '../../utils/passwords'
 
-/** The page's tabs. The ids are the page's anchors: the search bar opens one by id. */
-export const PROFILE_SECTIONS = [
-  { id: 'account', label: 'Account', description: 'The address you sign in with, your role, and your password.' },
-  { id: 'appearance', label: 'Appearance', description: 'How the dashboard looks and behaves for you: theme, sidebar layout and single-key shortcuts.' },
-]
+/** The page's tabs (navigation.jsx). The ids are the page's anchors: the search bar opens one by id. */
+export const PROFILE_SECTIONS = PROFILE_TABS
 
 const THEME_OPTIONS = [
   { id: 'dark', label: 'Dark' },
@@ -86,7 +84,7 @@ export function ProfileTab({
   theme, onChangeTheme, sidebarMode, onChangeSidebarMode,
   singleKeyShortcuts = true, onChangeSingleKeyShortcuts, settingsSource = 'account',
 }) {
-  const [section, setSection] = useUrlTab('profile', PROFILE_SECTIONS.map(s => s.id), PROFILE_SECTIONS[0].id)
+  const [section, setSection, sectionHref] = useUrlTab('profile', PROFILE_SECTIONS.map(s => s.id), PROFILE_SECTIONS[0].id)
 
   // Appearance holds a choice until Save, as Settings does; null means the row shows what is saved.
   const [themeDraft, setThemeDraft] = useState(null)
@@ -111,9 +109,10 @@ export function ProfileTab({
           />
 
           <TabStrip
-            ariaLabel="Profile section"
+            ariaLabel="Profile"
             value={section}
             onChange={setSection}
+            hrefFor={sectionHref}
             tabs={PROFILE_SECTIONS}
           />
 

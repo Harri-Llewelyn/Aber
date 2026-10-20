@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MetricsTab } from '../components/tabs/MetricsTab'
 import { api } from '../api'
 import { PERMISSION_UUIDS } from '../constants'
+import { tabLink } from '../test/tabBar'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -62,7 +63,7 @@ const renderTab = (props = {}) => render(
   <MetricsTab showToast={vi.fn()} hasPermission={() => true} {...props} />
 )
 
-const uncataloguedTab = () => screen.getByRole('tab', { name: /^Uncatalogued/ })
+const uncataloguedTab = () => tabLink(/^Uncatalogued/)
 
 /** Opens the tab once the list is read, and returns its table, or null when it shows none. */
 const openTab = async () => {
@@ -308,7 +309,7 @@ describe('Uncatalogued tab: Catalogue', () => {
     fireEvent.click(catalogueButton('Spindle/2/LOAD'))
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Metric Catalog' }))
+    fireEvent.click(tabLink('Metric Catalog'))
     fireEvent.click(screen.getByRole('button', { name: /Add Metric/ }))
     expect(standardSelect().value).toBe('MTConnect')
     expect(screen.queryByText(/Its devices declare it/)).toBeNull()

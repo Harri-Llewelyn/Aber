@@ -7,6 +7,7 @@
  */
 import { COLD_STORAGE_DIALOG_KEYS } from './utils/coldStorage'
 import { BACKUP_OFFSITE_SETTING_KEYS } from './utils/backupOffsite'
+import { pageTabsOf } from './navigation'
 
 /** Settings a page's own destination dialog edits, with the page a search for one opens. */
 const EDITED_ON = new Map([
@@ -53,8 +54,11 @@ export const PAGE_KEYWORDS = {
  * The sections inside each page. One entry per section somebody would type, usually the heading the
  * page renders; the Site Map's lanes have entries of their own. 'floors', 'buildings' and 'zones'
  * below are what many sites call an area or a cell. A section that is one tab of its page carries
- * `section`, that tab's id, and the search opens the page on that tab.
+ * `section`, that tab's id, and the search opens the page on that tab; its label is the tab's own,
+ * from navigation.jsx, so a renamed tab is found by its new name.
  */
+const tabCard = (page, section) => ({ label: pageTabsOf(page).find(t => t.id === section).label, tab: page, section })
+
 export const CARDS = [
   { id: 'site-map',             label: 'Site Map',             tab: 'site-map',       keywords: ['floors', 'plan', 'pins', 'svg', 'layout', 'areas', 'lanes'] },
   { id: 'site-wide-lane',       label: 'Site-Wide',            tab: 'site-map',       keywords: ['no cell', 'bms', 'agv', 'unassigned lane'] },
@@ -65,34 +69,34 @@ export const CARDS = [
   { id: 'shopfloor-cells',      label: 'Cells',                tab: 'cells',          keywords: ['cell list', 'zones'] },
   { id: 'edge-gateways',        label: 'Gateways',             tab: 'gateways',       keywords: ['gateway list', 'nodes'] },
   { id: 'device-list',          label: 'Devices',              tab: 'devices',        keywords: ['device list', 'assets'] },
-  { id: 'quarantine-queue',     label: 'Quarantine',           tab: 'devices',        section: 'quarantine', keywords: ['quarantine queue', 'onboarding', 'approve device', 'unknown device'] },
+  { id: 'quarantine-queue',     ...tabCard('devices', 'quarantine'), keywords: ['quarantine queue', 'onboarding', 'approve device', 'unknown device'] },
   /* No 'Archived Entities' card: it would add no keyword the page entry does not have. */
 
   { id: 'registered-schemas',   label: 'Registered Schemas',   tab: 'schemas',        keywords: ['schema registry', 'versions', 'drafts', 'create version', 'fork'] },
   /* No "Metric Catalog" card: the catalogue is the Metrics page now, and its page entry answers
      every query this card did. */
-  { id: 'vocab-mtconnect',      label: 'MTConnect',            tab: 'vocabulary',     keywords: ['machine tool', 'data items', 'components'] },
-  { id: 'vocab-iso22400',       label: 'ISO 22400',            tab: 'vocabulary',     keywords: ['kpi', 'oee', 'availability', 'mtbf'] },
-  { id: 'vocab-opcua',          label: 'OPC UA',               tab: 'vocabulary',     keywords: ['companion', 'machinery', 'robotics'] },
-  { id: 'vocab-ashrae',         label: 'ASHRAE 223P',          tab: 'vocabulary',     keywords: ['bms', 'building', 'hvac'] },
-  { id: 'dir-applications',     label: 'Applications & User Interfaces', tab: 'directory', section: 'applications', keywords: ['grafana', 'node-red', 'studio', 'uis'] },
-  { id: 'dir-ingestion',        label: 'Ingestion & Messaging', tab: 'directory', section: 'ingestion', keywords: ['mosquitto', 'broker', 'daemon'] },
-  { id: 'dir-infrastructure',   label: 'Data & Backend Infrastructure', tab: 'directory', section: 'infrastructure', keywords: ['postgres', 'timescale', 'gateway', 'envoy', 'storage'] },
+  { id: 'vocab-mtconnect',      ...tabCard('vocabulary', 'mtconnect'), keywords: ['machine tool', 'data items', 'components'] },
+  { id: 'vocab-iso22400',       ...tabCard('vocabulary', 'iso-22400'), keywords: ['kpi', 'oee', 'availability', 'mtbf'] },
+  { id: 'vocab-opcua',          ...tabCard('vocabulary', 'opc-ua'), keywords: ['companion', 'machinery', 'robotics'] },
+  { id: 'vocab-ashrae',         ...tabCard('vocabulary', 'ashrae-223p'), keywords: ['bms', 'building', 'hvac'] },
+  { id: 'dir-applications',     ...tabCard('directory', 'applications'), keywords: ['grafana', 'node-red', 'studio', 'uis'] },
+  { id: 'dir-ingestion',        ...tabCard('directory', 'ingestion'), keywords: ['mosquitto', 'broker', 'daemon'] },
+  { id: 'dir-infrastructure',   ...tabCard('directory', 'infrastructure'), keywords: ['postgres', 'timescale', 'gateway', 'envoy', 'storage'] },
 
   { id: 'trail-timeline',       label: 'Audit Trail',          tab: 'audit-trail',    keywords: ['timeline', 'events'] },
   { id: 'capture-list',         label: 'Capture',              tab: 'capture',        keywords: ['recordings', 'record broker', 'upload capture'] },
   { id: 'playback',             label: 'Playback',             tab: 'capture',        keywords: ['replay', 'shadow devices', 'speed'] },
   { id: 'cold-telemetry',       label: 'Cold telemetry',       tab: 'cold-storage',   keywords: ['parquet', 'objects', 'tiered'] },
 
-  { id: 'people',               label: 'People',               tab: 'access-control', section: 'people', keywords: ['users', 'accounts', 'add person', 'invite', 'change role', 'remove access', 'restore access', 'set new password', 'lost password'] },
-  { id: 'broker-credentials',   label: 'Broker credentials',   tab: 'access-control', section: 'credentials', keywords: ['mqtt accounts', 'gateway passwords', 'revoke'] },
-  { id: 'machine-identities',   label: 'Machine identities',   tab: 'access-control', section: 'identities', keywords: ['machine accounts', 'non-human', 'service accounts', 'principals', 'tokens', 'withdraw', 'cannot sign in'] },
-  { id: 'broker-accounts',      label: 'Broker accounts',      tab: 'access-control', section: 'accounts', keywords: ['mqtt users', 'platform accounts', 'orphaned accounts', 'no gateway'] },
-  { id: 'broker-roles',         label: 'Broker roles',         tab: 'access-control', section: 'roles', keywords: ['dynamic security', 'mosquitto roles', 'topic access'] },
+  { id: 'people',               ...tabCard('access-control', 'people'), keywords: ['users', 'accounts', 'add person', 'invite', 'change role', 'remove access', 'restore access', 'set new password', 'lost password'] },
+  { id: 'broker-credentials',   ...tabCard('access-control', 'credentials'), keywords: ['mqtt accounts', 'gateway passwords', 'revoke'] },
+  { id: 'machine-identities',   ...tabCard('access-control', 'identities'), keywords: ['machine accounts', 'non-human', 'service accounts', 'principals', 'tokens', 'withdraw', 'cannot sign in'] },
+  { id: 'broker-accounts',      ...tabCard('access-control', 'accounts'), keywords: ['mqtt users', 'platform accounts', 'orphaned accounts', 'no gateway'] },
+  { id: 'broker-roles',         ...tabCard('access-control', 'roles'), keywords: ['dynamic security', 'mosquitto roles', 'topic access'] },
   { id: 'backup-list',          label: 'Backups',              tab: 'backups',        keywords: ['take a backup', 'stored backups', 'pinned', 'release'] },
 
-  { id: 'profile-account',      label: 'Account',              tab: 'profile',        section: 'account', keywords: ['email', 'role', 'password', 'change password', 'my role'] },
-  { id: 'profile-appearance',   label: 'Appearance',           tab: 'profile',        section: 'appearance', keywords: ['theme', 'dark mode', 'light mode', 'dark', 'light', 'sidebar layout', 'collapse sidebar', 'expand sidebar', 'keyboard shortcuts', 'single-key shortcuts', 'speech input'] }
+  { id: 'profile-account',      ...tabCard('profile', 'account'), keywords: ['email', 'role', 'password', 'change password', 'my role'] },
+  { id: 'profile-appearance',   ...tabCard('profile', 'appearance'), keywords: ['theme', 'dark mode', 'light mode', 'dark', 'light', 'sidebar layout', 'collapse sidebar', 'expand sidebar', 'keyboard shortcuts', 'single-key shortcuts', 'speech input'] }
 ]
 
 /**

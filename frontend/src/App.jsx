@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 
 import { supabase } from './lib/supabaseClient'
 import { usePermissions } from './hooks/usePermissions'
 import { useAppRouting } from './hooks/useAppRouting'
-import { navigate } from './hooks/useUrlState'
+import { navigate, useUrl } from './hooks/useUrlState'
 import {
   deviceUrl, gatewayUrl, cellUrl, areaUrl, schemaUrl, devicesForSchemaUrl, siteMapAreaUrl, trailUrl,
   approvalsForUrl, proposalSubjectUrl, settingUrl, unmappedMetricsUrl, tabUrl,
@@ -15,7 +15,7 @@ import { CONNECTION_OK } from './lib/connectionState'
 import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
 import { clearInvalidSession, isSessionRejected } from './utils/sessionError'
 import { signOutOfForge, signOutOfStudio } from './utils/studioSignOut'
-import { TABS, tabIsVisible } from './navigation'
+import { TABS, pageTitleOf, tabIsVisible } from './navigation'
 import { PERMISSION_UUIDS } from './constants'
 import { AuthShell } from './components/auth/AuthShell'
 import { HoldToReveal } from './components/common/HoldToReveal'
@@ -512,9 +512,11 @@ function Dashboard({ session, onSignOut, onSignInAgain }) {
   // under the bar and the tab title.
   const connection = useConnectionStatus()
 
-  // The page's rail label, and the pill's count, so the tab and the bar never disagree. The icon's
-  // red dot follows the same count, for a pinned tab that shows no title.
-  useDocumentTitle(TABS.find(t => t.id === tab)?.label, firingAlerts.length, connection.status !== CONNECTION_OK)
+  // The page's rail label with its tab's ("Devices › Quarantine"), so two history entries for one
+  // page differ, and the pill's count, so the tab and the bar never disagree. The icon's red dot
+  // follows the same count, for a pinned tab that shows no title.
+  const url = useUrl()
+  useDocumentTitle(pageTitleOf(tab, url), firingAlerts.length, connection.status !== CONNECTION_OK)
   useAlertFavicon(firingAlerts.length)
 
   // What the rail flags, with a number, to a viewer who can act on it: quarantine, offline gateways,

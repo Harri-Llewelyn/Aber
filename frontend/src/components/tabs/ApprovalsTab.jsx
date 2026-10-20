@@ -8,6 +8,7 @@ import { IconPencil, IconCheck, IconX, IconArchive, IconHistory, IconInbox } fro
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
+import { APPROVALS_TABS } from '../../navigation'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { severityRank } from '../../utils/tableSort'
 import { Badge } from '../common/Badge'
@@ -420,11 +421,8 @@ function ProposalFilters({ rows, kind, onKind, query, onQuery, placeholder, labe
   )
 }
 
-/** The two queues, in tab order. The description is the tab's tooltip; the help page has the rest. */
-export const QUEUES = [
-  { id: 'open', label: 'Awaiting a decision', description: 'Proposed changes nobody has decided yet, oldest first. Approving one makes the change.' },
-  { id: 'decided', label: 'Decided', description: 'Proposals applied, rejected, withdrawn or expired, newest decision first. Each is kept for a period an Administrator sets.' },
-]
+/** The two queues, in tab order (navigation.jsx). The description is the tab's tooltip; the help page has the rest. */
+export const QUEUES = APPROVALS_TABS
 
 export function ApprovalsTab({
   showToast, userRole, currentUserId, onViewTrail,
@@ -443,7 +441,7 @@ export function ApprovalsTab({
   // In the address as `?proposal=`.
   const [selectedId, setSelectedId] = useUrlState('proposal', '', { allowed: loading ? null : proposals.map(p => p.id) })
   // The tab, in the path: `/approvals` (Awaiting a decision) or `/approvals/decided`.
-  const [queue, setQueue] = useUrlTab('approvals', QUEUES.map(q => q.id), 'open')
+  const [queue, setQueue, queueHref] = useUrlTab('approvals', QUEUES.map(q => q.id), 'open')
   // The queue on show filters by one kind and one search, in the address. A queue change drops
   // them, so each queue opens unfiltered. A device drawer's hand-over arrives as `?search=<id>`.
   const [kindFilter, setKindFilter] = useUrlState('kind', 'all', { allowed: ['all', ...KINDS.map(k => k.id)] })
@@ -626,9 +624,10 @@ export function ApprovalsTab({
             description="Changes people have proposed but may not make themselves; nothing is written until someone who may make the change approves it."
           />
           <TabStrip
-            ariaLabel="Approvals queue"
+            ariaLabel="Approvals"
             value={queue}
             onChange={chooseQueue}
+            hrefFor={queueHref}
             tabs={QUEUES.map(q => (q.id === 'open' ? { ...q, attention: waiting } : q))}
           />
 
