@@ -164,3 +164,58 @@ describe('Appearance', () => {
     expect(screen.queryByRole('status')).toBeNull()
   })
 })
+
+/* WCAG 2.2 SC 2.1.4: a way to turn the one-character shortcuts off, saved with the account. */
+describe('Single-key shortcuts', () => {
+  const shortcutsSwitch = () => screen.getByRole('switch', { name: 'Single-key shortcuts' })
+
+  it('is a switch, on unless the person turned it off, naming the keys it covers', () => {
+    renderProfile({ onChangeSingleKeyShortcuts: vi.fn() })
+    fireEvent.click(tab('Appearance'))
+    expect(shortcutsSwitch()).toBeChecked()
+    expect(within(row('Single-key shortcuts')).getByText('On')).toBeInTheDocument()
+    expect(within(row('Single-key shortcuts')).getByText(/\? lists the shortcuts, \/ goes to the page's search box, and \[ and \] change tab/)).toBeInTheDocument()
+    expect(within(row('Single-key shortcuts')).queryByRole('button', { name: 'Save' })).toBeNull()
+  })
+
+  it('shows the saved choice when it is off', () => {
+    renderProfile({ singleKeyShortcuts: false, onChangeSingleKeyShortcuts: vi.fn() })
+    fireEvent.click(tab('Appearance'))
+    expect(shortcutsSwitch()).not.toBeChecked()
+    expect(within(row('Single-key shortcuts')).getByText('Off')).toBeInTheDocument()
+  })
+
+  it('applies a change only on Save, as the other rows do', () => {
+    const onChangeSingleKeyShortcuts = vi.fn()
+    renderProfile({ singleKeyShortcuts: true, onChangeSingleKeyShortcuts })
+    fireEvent.click(tab('Appearance'))
+
+    fireEvent.click(shortcutsSwitch())
+    expect(shortcutsSwitch()).not.toBeChecked()
+    expect(onChangeSingleKeyShortcuts).not.toHaveBeenCalled()
+    expect(within(row('Theme')).queryByRole('button', { name: 'Save' })).toBeNull()
+    fireEvent.click(within(row('Single-key shortcuts')).getByRole('button', { name: 'Save' }))
+    expect(onChangeSingleKeyShortcuts).toHaveBeenCalledWith(false)
+    expect(within(row('Single-key shortcuts')).queryByRole('button', { name: 'Save' })).toBeNull()
+  })
+
+  it('puts the saved value back on Discard, and saves nothing', () => {
+    const onChangeSingleKeyShortcuts = vi.fn()
+    renderProfile({ singleKeyShortcuts: false, onChangeSingleKeyShortcuts })
+    fireEvent.click(tab('Appearance'))
+
+    fireEvent.click(shortcutsSwitch())
+    expect(shortcutsSwitch()).toBeChecked()
+    fireEvent.click(within(row('Single-key shortcuts')).getByRole('button', { name: /Discard/ }))
+    expect(shortcutsSwitch()).not.toBeChecked()
+    expect(onChangeSingleKeyShortcuts).not.toHaveBeenCalled()
+  })
+
+  it('offers nothing to save when the switch goes back to the saved value', () => {
+    renderProfile({ onChangeSingleKeyShortcuts: vi.fn() })
+    fireEvent.click(tab('Appearance'))
+    fireEvent.click(shortcutsSwitch())
+    fireEvent.click(shortcutsSwitch())
+    expect(within(row('Single-key shortcuts')).queryByRole('button', { name: 'Save' })).toBeNull()
+  })
+})
