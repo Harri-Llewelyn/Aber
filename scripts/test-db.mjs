@@ -374,19 +374,21 @@ function captureHistory () {
   const shared = mine.stdout.trim().split('\n').map(s => s.trim()).filter(col => theirs.has(col))
   if (shared.length === 0) die('the two auth.users tables share no columns.')
 
-  // `public` in full, plus auth.users as a TSV through COPY TO STDOUT. GoTrue's migration
-  // bookkeeping is excluded explicitly: it is the one auth table pg_dump would otherwise reach.
-  const users = kubectl(['exec', HISTORY_POD, '-c', 'supabase-db', '--', 'bash', '-c',
-    'pg_dump -U supabase_admin -d postgres --data-only --schema=public ' +
-    '--exclude-table=auth.schema_migrations -f /tmp/aber-history.sql 2>/dev/null && ' +
-    'psql -U postgres -d postgres -Atc ' +
-    '"COPY (SELECT ' + shared.join(', ') + ' FROM auth.users) TO STDOUT"'],
+  // `public` in full, then auth.users as a TSV through COPY TO STDOUT, each read from the pod's
+  // stdout: the database pod runs on a read-only root filesystem, so nothing is written inside it.
+  // GoTrue's migration bookkeeping is excluded explicitly: it is the one auth table pg_dump would
+  // otherwise reach.
+  const body = kubectl(['exec', HISTORY_POD, '-c', 'supabase-db', '--',
+    'pg_dump', '-U', 'supabase_admin', '-d', 'postgres', '--data-only', '--schema=public',
+    '--exclude-table=auth.schema_migrations'],
     { maxBuffer: 512 * 1024 * 1024 })
-  if (users.status !== 0) die('pg_dump on the live stack failed.', users.stderr)
+  if (body.status !== 0) die('pg_dump on the live stack failed.', body.stderr)
 
-  const body = kubectl(['exec', HISTORY_POD, '-c', 'supabase-db', '--', 'cat', '/tmp/aber-history.sql'],
+  const users = kubectl(['exec', HISTORY_POD, '-c', 'supabase-db', '--',
+    'psql', '-U', 'postgres', '-d', 'postgres', '-Atc',
+    'COPY (SELECT ' + shared.join(', ') + ' FROM auth.users) TO STDOUT'],
     { maxBuffer: 512 * 1024 * 1024 })
-  if (body.status !== 0) die('could not read the dump back.', body.stderr)
+  if (users.status !== 0) die('could not read auth.users from the live stack.', users.stderr)
 
   return [
     // Triggers and FK checks off for the load. The audit stamp trigger would re-stamp every row
