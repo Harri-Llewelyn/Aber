@@ -121,6 +121,40 @@ Keyboard focus opens the rail at once, in every mode. Two kinds of focus are not
   focus (`relatedTarget` is null). The rail's blur notes whether the panel was open as the window
   lost focus (`document.hasFocus()` is already false then), and that return puts it back as it was.
 
+Tab moving from one of the rail's controls to another is not leaving it, so the blur in between
+does not shut the panel. Shutting it would hide a page's chevron and tabs, which show only on the
+wide rail, from under the focus arriving on them, and the browser would drop that focus.
+
+### The rail lists each page's tabs
+
+A page with tabs (`pageTabs` on its `TABS` entry) is a `SidebarPage`: its link, a chevron, and a
+list of its tabs' links beneath it. It is the WAI-ARIA disclosure navigation pattern, not a tree:
+the chevron is a `<button>` with `aria-expanded`, `aria-controls` and a name of its own ("Show the
+Devices tabs"), 28px square, and the list is a `<ul>` of `<a href>`s to each tab's address. Tab
+reaches the page's link, the chevron, then each tab; Enter or Space on the chevron toggles it.
+There are no arrow-key rules, which a tree would bring and nobody expects in a menu.
+
+- **Which pages are open.** Arriving on a page opens its tabs and marks the current one
+  `aria-current="page"` (its page's link then says `aria-current="true"`); a change of tab moves
+  the mark. A page opened by hand stays open until it is closed. Closing the current page lasts
+  until the next arrival on it.
+- **Counts.** A signal from `useNavSignals` belongs to a page, and `signalTab` names the tab it is
+  about: Devices' Quarantine and Approvals' Awaiting a decision. While the page's tabs are on
+  screen the number moves to that tab, named as the tab bar names it ("Quarantine, 3 waiting"), and
+  the page's link reads plain. Otherwise the page's link carries it, so no number shows twice.
+- **No tooltips** on the tab entries. A tooltip on every row would flash as the pointer moves down
+  the rail, and the tab bar's tabs already carry each tab's sentence.
+- **The modes.** The list shows only on the wide rail: as it opens in Hover mode, always in Expanded
+  mode, and on keyboard focus. Collapsed mode has no room for it, so a plain click (or Enter) on a
+  tabbed page's icon pops the list out beside the rail (`.sidebar-tabs-popout`, fixed, as the
+  account menu is); Escape, a click elsewhere, a scroll or choosing a tab closes it. A page without
+  tabs navigates as before.
+- **Settings' categories** come from the database, so the rail lists `SETTINGS_TABS`, the frontend's
+  copy in the database's order, before the page has read them. A category missing from it still
+  shows on the page. Directory lists its three groups; the page adds a tab for any service type
+  no group claims.
+- **Profile** is not in the rail, so its tabs are on its tab bar only.
+
 ### Tooltips on a tab
 
 A tab explains itself in a tooltip, its `description` in `TabStrip`'s `tabs`. It is there to help
@@ -578,14 +612,17 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
   page shares across its tabs: the Vocabulary search, and Capture's stored filter and search.
 - **`useUrlState` returns `[value, setValue]`**, as `useState` does. A setter reads the address when
   it runs, so several setters called in one handler compose.
-- **A new tab needs only its id in the page's list.** Most pages take the list from their tab list,
-  the one that also holds each tab's tooltip (`VIEWS.map(v => v.id)`).
+- **A new tab needs only an entry in its page's list**, in `navigation.jsx` (`DEVICES_TABS` and the
+  rest), which holds its id, its name and its tooltip; the page, the rail and the search all read
+  it. `useUrlTab` returns `[tab, setTab, hrefFor]`: `hrefFor(id)` is the address `setTab(id)` goes
+  to, kept filters included, and it is what the tab bar's links carry.
 - **A rail click goes to the bare page**, so nothing a drill-down set comes along. A drill-down goes
   to an address built in `routes.js` (`deviceUrl(id)` is `/devices?search=<id>`); the page reads its
   filters from it, and `useArrivalSelection` opens the drawer on an exact id.
 - **The rail's entries and the drill-downs are real links**, `common/RouteLink.jsx`: an `<a href>`
   that navigates in place on a plain click and leaves Ctrl, Cmd, Shift and middle clicks to the
-  browser, which opens a new tab. A `ContextPanel` action takes `to` for the same.
+  browser, which opens a new tab. A `ContextPanel` action takes `to` for the same, and the tab
+  bar's tabs follow the same rule ([Tabs](#tabs)).
 - **A hand-over that carries an object stays state.** The Vocabulary page's Use
   (`pendingVocabularyEntry`) opens Add Metric prefilled: an act to perform once, not a view.
 - **Nothing goes in the address that should not be in a log**: nginx writes query strings to its
@@ -629,12 +666,23 @@ no counts. A tab with work waiting takes `attention={n}`: the label turns
 the warning colour and gains an icon and the number, only while n is above 0. A row that outgrows one
 line keeps search, status and the key toggle and moves the rest into `common/FiltersPopover.jsx`.
 
+**The tabs are links, not the WAI-ARIA tabs pattern.** The bar is a `<nav>` named for the page,
+holding an `<a href>` per tab, the open one `aria-current="page"`. The tabs pattern is for panels
+within one page, and each tab here is an address of its own with a history entry
+([Routing](#routing)), so changing tab is navigation. As links, a tab opens in a
+new browser tab with Ctrl-click or middle-click, and "Copy link address" works; a plain click still
+changes tab in place, through the page's `onChange`, so any reset the page does still happens. Each
+tab is its own Tab-key stop and the arrow keys do nothing: `[` and `]` step between tabs from
+anywhere on the page ([The toolbar](#the-toolbar)). The tabs pattern was dropped because each tab
+gained an address; bringing `role="tab"` back would first need a case against the addresses.
+
 ```jsx
+const [view, setView, viewHref] = useUrlTab('devices', DEVICES_TABS.map(t => t.id), 'registered')
+
 <div className="card">
   <CardHeading title="Devices" description="…" />
-  <TabStrip ariaLabel="Devices view" value={tab} onChange={setTab}
-    tabs={[{ id: 'roster', label: 'Roster', description: 'Devices admitted to Aber.' },
-           { id: 'quarantine', label: 'Quarantine', description: '…', attention: waiting }]} />
+  <TabStrip ariaLabel="Devices" value={view} onChange={setView} hrefFor={viewHref}
+    tabs={DEVICES_TABS.map(t => (t.id === 'quarantine' ? { ...t, attention: waiting } : t))} />
   {/* Only a tab with filters or actions draws this row. */}
   <div className="filter-bar">
     <SearchInput … />
@@ -693,11 +741,10 @@ draws it only where `/` reaches.
 
 `[` and `]` move to the open page's previous and next tab (`stepPageTab` in `src/shortcuts.js`,
 bound beside `?`). They find the tab bar the way `/` finds the search box, the first shown
-`role="tablist"` inside `main`, so a page with a `TabStrip` needs no wiring. They click the tab, so
-the address, the history entry and the page's own reset follow as they do for a click, then focus
-it, so a screen reader reads its name. They stop at the first and last tab and do nothing on a page
-without tabs. A tab bar made of links would change only what `stepPageTab` looks for: the bar, its
-tabs and the open one.
+`nav.tab-strip` inside `main`, its links and the one marked `aria-current="page"`, so a page with a
+`TabStrip` needs no wiring. They click the tab, so the address, the history entry and the page's
+own reset follow as they do for a click, then focus it, so a screen reader reads its name. They stop
+at the first and last tab and do nothing on a page without tabs.
 
 **One check decides when a shortcut may act** (`shortcutAllowed` in `src/shortcuts.js`). It stands
 down in a text field, a select or a contenteditable, with Ctrl, Cmd or Alt held, and while a dialog
