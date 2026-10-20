@@ -5,6 +5,7 @@ import { Modal } from '../common/Modal'
 import { IconCheck, IconPlus, IconUser } from '../common/Icons'
 import { PERSON_ROLES, personRoleLabel } from '../../utils/people'
 import { PasswordShownOnce } from './PasswordShownOnce'
+import { personUrl } from '../../routes'
 
 /** ensure_first_administrator()'s and manage-people's test of an address. */
 const EMAIL = /^[^@\s]+@[^@\s]+$/
@@ -32,7 +33,7 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
       const result = await api.addPerson(email.trim(), role)
       setAdded(result)
       onAdded?.(result)
-      showToast?.(result.invited ? `Invitation sent to ${result.email}` : `${result.email} added`, 'success')
+      showToast?.(result.invited ? `Invitation sent to ${result.email}` : `${result.email} added`, 'success', { to: personUrl(result.email) })
     } catch (err) {
       setError(err.message)
     } finally {

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { schemaUrl } from '../../routes'
+import { captureSubjectUrl, schemaUrl, tabUrl } from '../../routes'
 import { api, isMachineMetric } from '../../api'
 import { playbackWorkerDeployed } from '../../config'
 import { REALTIME_ENABLED } from '../../constants'
@@ -53,6 +53,11 @@ export const SUBJECTS = [
  * gates mirror the RLS: SELECT for Administrator, Shopfloor_Manager and Auditor, writes for the
  * first two.
  */
+
+/** Where a capture or a recording job is about: its subject, with its captures open. */
+const subjectUrlOf = (record) =>
+  captureSubjectUrl(record.subject_kind, record.subject_kind === 'device' ? record.device_id : record.gateway_id)
+
 export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   // The tab, in the path: `/capture` (gateways) or `/capture/device`. The stored filter and the
   // search sit above both tabs, so they stay in the address across a tab change.
@@ -281,14 +286,15 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     const row = startFor
     await api.startCapture({ subjectKind: row.kind, subjectId: row.id, note, seconds, replace })
     setStartFor(null)
-    showToast(`Recording ${row.name}…`, 'success')
+    showToast(`Recording ${row.name}…`, 'success', { to: captureSubjectUrl(row.kind, row.id) })
     await refreshAll()
   }
 
   const onStop = () => runStop(async () => {
     try {
       const stopped = await api.stopCapture(activeJob.id)
-      showToast(stopped ? 'Stopping. The recorder finishes within a second or two.' : 'That capture had already finished.', 'success')
+      showToast(stopped ? 'Stopping. The recorder finishes within a second or two.' : 'That capture had already finished.', 'success',
+        { to: subjectUrlOf(activeJob) })
       await refreshAll()
     } catch (err) {
       showToast(err.message, 'error')
@@ -298,14 +304,15 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   const onPlay = async ({ targetGatewayId, deviceMap, speed }) => {
     await api.startPlayback({ captureId: playFor.id, targetGatewayId, deviceMap, speed })
     setPlayFor(null)
-    showToast('Playing back the capture…', 'success')
+    // A playback is started from a subject's drawer, so that subject is what it is about.
+    showToast('Playing back the capture…', 'success', { to: selected ? captureSubjectUrl(selected.kind, selected.id) : tabUrl('capture') })
     await refreshAll()
   }
 
   const onStopPlayback = () => runStopPlay(async () => {
     try {
       const stopped = await api.stopPlayback(activePlayback.id)
-      showToast(stopped ? 'Stopping the playback.' : 'That playback had already finished.', 'success')
+      showToast(stopped ? 'Stopping the playback.' : 'That playback had already finished.', 'success', { to: tabUrl('capture') })
       await refreshAll()
     } catch (err) {
       showToast(err.message, 'error')
@@ -397,7 +404,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     const chain = playAfterUpload
     setUploadFile(null)
     setPlayAfterUpload(false)
-    showToast(`Uploaded ${plural(messages, 'message')} for ${subject.name}.`, 'success')
+    showToast(`Uploaded ${plural(messages, 'message')} for ${subject.name}.`, 'success', { to: captureSubjectUrl(subject.kind, subject.id) })
     await refreshAll()
 
     // Straight into the playback dialog when the file came in to be played, built from what the

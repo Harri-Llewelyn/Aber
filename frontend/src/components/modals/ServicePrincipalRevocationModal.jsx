@@ -3,6 +3,7 @@ import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
 import { IconShieldAlert } from '../common/Icons'
+import { identityUrl } from '../../routes'
 
 /**
  * Withdraw a whole machine identity, or put one back. One dialog for both directions because what a
@@ -28,10 +29,10 @@ export function ServicePrincipalRevocationModal({
     try {
       if (reinstating) {
         await api.reinstateServicePrincipal(principal.principal_id)
-        showToast?.(`${principalName} reinstated — it can hold tokens again`, 'success')
+        showToast?.(`${principalName} reinstated — it can hold tokens again`, 'success', { to: identityUrl(principalName) })
       } else {
         await api.revokeServicePrincipal(principal.principal_id, reason)
-        showToast?.(`${principalName} withdrawn — every token naming it is refused`, 'success')
+        showToast?.(`${principalName} withdrawn — every token naming it is refused`, 'success', { to: identityUrl(principalName, true) })
       }
       onChanged?.()
       onClose()

@@ -1,6 +1,7 @@
 import React from 'react'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { backupUrl } from '../routes'
 import { BackupsTab, BACKUP_STALE_HOURS, physicalBackupState, keptBecause, backupWarnings } from '../components/tabs/BackupsTab'
 import { nextHistorianBackup } from '../utils/historianBackupSchedule'
 import { tabIsVisible, TABS, groupedNav } from '../navigation'
@@ -436,7 +437,7 @@ describe('the off-site copy', () => {
       access_key_id: 'backup-writer', recipient: DESTINATION.recipient, path_style: true
     }))
     expect(api.setBackupOffsiteCredential).toHaveBeenCalledWith('s3cret')
-    expect(props.showToast).toHaveBeenCalledWith(expect.stringMatching(/destination saved/i), 'success')
+    expect(props.showToast).toHaveBeenCalledWith(expect.stringMatching(/destination saved/i), 'success', { to: backupUrl() })
     await waitFor(() => expect(screen.queryByTestId('offsite-circularity')).toBeNull())
   })
 
@@ -786,7 +787,7 @@ describe('asking', () => {
     fireEvent.click(within(modal).getByRole('button', { name: /Take a backup/ }))
 
     await waitFor(() => expect(api.requestBackup).toHaveBeenCalledWith('pre-upgrade'))
-    expect(props.showToast).toHaveBeenCalledWith(expect.stringMatching(/queued/i), 'success')
+    expect(props.showToast).toHaveBeenCalledWith(expect.stringMatching(/queued/i), 'success', { to: backupUrl() })
     await waitFor(() => expect(screen.queryByLabelText('Note (optional)')).toBeNull())
   })
 
@@ -820,7 +821,7 @@ describe('asking', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^Cancel$/ }))
     await waitFor(() => expect(api.cancelBackupJob).toHaveBeenCalledWith('j-2'))
-    expect(props.showToast).toHaveBeenCalledWith('Backup cancelled.', 'success')
+    expect(props.showToast).toHaveBeenCalledWith('Backup cancelled.', 'success', { to: backupUrl() })
   })
 
   it('does not offer Cancel on a running backup', async () => {
@@ -1111,7 +1112,7 @@ describe('releasing', () => {
     fireEvent.click(within(modal).getByRole('button', { name: 'Release' }))
 
     await waitFor(() => expect(api.releaseBackup).toHaveBeenCalledWith('b-1'))
-    expect(props.showToast).toHaveBeenCalledWith(expect.stringMatching(/retention window now applies/), 'success')
+    expect(props.showToast).toHaveBeenCalledWith(expect.stringMatching(/retention window now applies/), 'success', { to: backupUrl('b-1') })
   })
 })
 

@@ -6,6 +6,7 @@ import { Modal } from '../common/Modal'
 import { IconCheck, IconCopy, IconLock, IconShieldAlert } from '../common/Icons'
 import { describePrincipal } from '../../utils/serviceIdentities'
 import { formatDate } from '../../utils/format'
+import { identityUrl } from '../../routes'
 
 const COPY_FEEDBACK_MS = 1600
 /** Said in the dialog and in a toast when the browser refuses a copy. */
@@ -46,7 +47,7 @@ export function ServiceTokenModal({ principal, principalName, onClose, showToast
       const result = await api.mintServiceToken(principal.principal_id, days)
       setMinted(result)
       setStep('reveal')
-      showToast?.(`Token issued for ${principalName}`, 'success')
+      showToast?.(`Token issued for ${principalName}`, 'success', { to: identityUrl(principalName) })
     } catch (err) {
       // The step is not advanced, matching GatewayCredentialModal: the edge function discards an
       // unrecorded token, so a failure here means no credential was created.

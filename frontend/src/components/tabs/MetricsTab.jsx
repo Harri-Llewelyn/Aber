@@ -36,7 +36,7 @@ import { Badge } from '../common/Badge'
 import { SearchInput } from '../common/SearchInput'
 import { SortHeader } from '../common/SortHeader'
 import { RouteLink } from '../common/RouteLink'
-import { deviceUrl } from '../../routes'
+import { deviceUrl, metricUrl } from '../../routes'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
@@ -482,7 +482,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
         await api.post('/api/v1/metric-groups', { name: effectiveGroup, standard: effectiveStandard })
       }
 
-      await api.post('/api/v1/metric-catalog', {
+      const added = await api.post('/api/v1/metric-catalog', {
         name: composed,
         datatype: newMetric.datatype,
         category: effectiveCategory,
@@ -499,7 +499,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       })
       closeAddMetric()
       load()
-      showToast(`Metric '${composed}' added to the catalog`, 'success')
+      showToast(`Metric '${composed}' added to the catalog`, 'success', { to: metricUrl(added?.metric_uuid) })
     } catch (e) {
       setAddError(e.message)
     }
@@ -516,7 +516,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       await api.post(`/api/v1/metric-catalog/${deprecateTarget.metric_uuid}/deprecate`, { superseded_by: supersededBy })
       setDeprecateTarget(null)
       load()
-      showToast(`Metric '${deprecateTarget.name}' deprecated. The Deprecated Metrics tab can restore it.`, 'success')
+      showToast(`Metric '${deprecateTarget.name}' deprecated. The Deprecated Metrics tab can restore it.`, 'success', { to: metricUrl(deprecateTarget.metric_uuid, true) })
     } catch (e) {
       showToast(e.message, 'error')
     }
@@ -527,7 +527,7 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
       await api.post(`/api/v1/metric-catalog/${restoreTarget.metric_uuid}/restore`)
       setRestoreTarget(null)
       load()
-      showToast(`Metric '${restoreTarget.name}' restored to the schema builder`, 'success')
+      showToast(`Metric '${restoreTarget.name}' restored to the schema builder`, 'success', { to: metricUrl(restoreTarget.metric_uuid) })
     } catch (e) {
       showToast(e.message, 'error')
     }
@@ -542,7 +542,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
         pair.semantic_id
           ? `Semantic id of '${editTarget.name}' saved`
           : `Semantic id of '${editTarget.name}' cleared; the metric is now unmapped`,
-        'success'
+        'success',
+        { to: metricUrl(editTarget.metric_uuid, !!editTarget.deprecated) }
       )
     } catch (e) {
       showToast(e.message, 'error')

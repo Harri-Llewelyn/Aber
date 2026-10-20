@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { api } from '../../api'
 import { usePolling } from '../../hooks/usePolling'
 import { useUrlState } from '../../hooks/useUrlState'
+import { backupUrl } from '../../routes'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { ConfirmModal } from '../modals/ConfirmModal'
@@ -160,14 +161,15 @@ export function BackupsTab({ showToast }) {
   const onRequest = async ({ note }) => {
     await api.requestBackup(note)
     setAsking(false)
-    showToast('Backup queued. The service will take it shortly.', 'success')
+    showToast('Backup queued. The service will take it shortly.', 'success', { to: backupUrl() })
     await refresh()
   }
 
   const onCancel = () => runCancel(async () => {
     try {
       const cancelled = await api.cancelBackupJob(activeJob.id)
-      showToast(cancelled ? 'Backup cancelled.' : 'The service had already claimed it; it will finish or fail.', cancelled ? 'success' : 'info')
+      showToast(cancelled ? 'Backup cancelled.' : 'The service had already claimed it; it will finish or fail.', cancelled ? 'success' : 'info',
+        { to: backupUrl() })
       await refresh()
     } catch (err) {
       showToast(err.message, 'error')
@@ -180,7 +182,8 @@ export function BackupsTab({ showToast }) {
     await runKeyed(backup.id, async () => {
       try {
         const released = await api.releaseBackup(backup.id)
-        showToast(released ? `Released the backup from ${formatDateTime(backup.taken_at)}. The retention window now applies.` : 'That backup was not pinned.', released ? 'success' : 'info')
+        showToast(released ? `Released the backup from ${formatDateTime(backup.taken_at)}. The retention window now applies.` : 'That backup was not pinned.', released ? 'success' : 'info',
+          { to: backupUrl(backup.id) })
         await refresh()
       } catch (err) {
         showToast(err.message, 'error')
@@ -194,14 +197,14 @@ export function BackupsTab({ showToast }) {
 
   const onDestinationSaved = async () => {
     setEditingDestination(false)
-    showToast('Off-site destination saved. The service copies each backup on its next polls.', 'success')
+    showToast('Off-site destination saved. The service copies each backup on its next polls.', 'success', { to: backupUrl() })
     await refresh()
   }
 
   const onRemoveDestination = async () => {
     await api.clearBackupOffsiteDestination()
     setEditingDestination(false)
-    showToast('Off-site destination removed. Copies already made stay in the bucket.', 'info')
+    showToast('Off-site destination removed. Copies already made stay in the bucket.', 'info', { to: backupUrl() })
     await refresh()
   }
 

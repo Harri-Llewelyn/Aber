@@ -367,6 +367,26 @@ describe('arriving with an identifier opens that entity\'s drawer', () => {
     expect(within(panel()).getByText('Machining_Cell_Schema')).toBeTruthy()
   })
 
+  // A notification about an archived device or gateway links here (#1019); the list hides
+  // archived rows by default, so the arrival shows them as well as opening the drawer.
+  it('Devices, an archived one: the list shows the archived as well', async () => {
+    api.get.mockImplementation(routeGet({ devices: [{ ...device, is_archived: true }] }))
+    window.history.replaceState(null, '', deviceUrl('dev-1'))
+    render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()} />)
+    await waitFor(() => expect(isOpen()).toBe(true))
+    expect(new URLSearchParams(window.location.search).get('lifecycle')).toBe('all')
+    await waitFor(() => expect(list().getByText('Sim_CNC_Mill_01')).toBeInTheDocument())
+  })
+
+  it('Gateways, an archived one: the list shows the archived as well', async () => {
+    api.get.mockImplementation(routeGet({ gateways: [{ ...gateway, is_archived: true }] }))
+    window.history.replaceState(null, '', gatewayUrl('gw-1'))
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()} />)
+    await waitFor(() => expect(isOpen()).toBe(true))
+    expect(new URLSearchParams(window.location.search).get('lifecycle')).toBe('all')
+    await waitFor(() => expect(list().getByText('Sim_Gateway_CNC')).toBeInTheDocument())
+  })
+
   it('opens nothing when the page is merely searched', async () => {
     window.history.replaceState(null, '', deviceUrl('Mill'))
     render(<DevicesTab showToast={vi.fn()} hasPermission={() => true} onViewTrail={vi.fn()} />)

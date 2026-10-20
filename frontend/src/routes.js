@@ -47,6 +47,30 @@ export const proposalSubjectUrl = (proposal) => {
   return deviceUrl(proposal.entity_id)
 }
 
+/** One record by its kind (`device`, `gateway`, `cell`, `area`, `schema`), or null for any other. */
+export const entityUrl = (type, id) => {
+  const url = { device: deviceUrl, gateway: gatewayUrl, cell: cellUrl, area: areaUrl, schema: schemaUrl }[type]
+  return url && id ? url(id) : null
+}
+
+/** One proposal with its drawer open, on the queue that holds it: Awaiting a decision or Decided. */
+export const proposalUrl = (id, decided = false) => pageUrl('approvals', { proposal: id }, decided ? 'decided' : '')
+
+/** One metric with its drawer open, in the catalog or on the Deprecated Metrics tab. */
+export const metricUrl = (uuid, deprecated = false) => pageUrl('metrics', { metric: uuid }, deprecated ? 'deprecated' : '')
+
+/** A gateway or a device on the Capture page, with its captures open. */
+export const captureSubjectUrl = (kind, id) => pageUrl('capture', { subject: id }, kind === 'device' ? 'device' : '')
+
+/** One backup run on the Backups page, or the page itself. */
+export const backupUrl = (runId = '') => pageUrl('backups', { run: runId })
+
+/** One person on Access Control › People, found by email; a removed person is shown with the removed. */
+export const personUrl = (email, removed = false) => pageUrl('access-control', { search: email, removed }, 'people')
+
+/** One machine identity on Access Control › Machine identities, found by name; likewise the withdrawn. */
+export const identityUrl = (name, withdrawn = false) => pageUrl('access-control', { search: name, withdrawn }, 'identities')
+
 /** One setting, by its key, on the category that holds it. */
 export const settingUrl = (key) => pageUrl('settings', { setting: key })
 

@@ -6,6 +6,7 @@ import { copyText } from '../common/CopyableId'
 import { Modal } from '../common/Modal'
 import { typedNameMatches } from '../../utils/gatewayType'
 import { IconCheck, IconCopy, IconLock, IconShieldAlert } from '../common/Icons'
+import { gatewayUrl } from '../../routes'
 
 const COPY_FEEDBACK_MS = 1600
 /** Said in the dialog and in a toast when the browser refuses a copy. */
@@ -50,7 +51,7 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
           'error'
         )
       } else {
-        showToast?.(`Broker credential issued for '${gateway.gateway_name}'`, 'success')
+        showToast?.(`Broker credential issued for '${gateway.gateway_name}'`, 'success', { to: gatewayUrl(gateway.gateway_id) })
       }
     } catch (err) {
       // The step is not advanced: nothing was issued, so the existing credential is still valid.

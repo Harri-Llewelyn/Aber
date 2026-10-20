@@ -1,7 +1,7 @@
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { RouteLink } from '../common/RouteLink'
-import { approvalsForUrl, areaUrl, cellUrl, gatewayUrl, schemaUrl, trailUrl } from '../../routes'
+import { approvalsForUrl, areaUrl, cellUrl, deviceUrl, gatewayUrl, schemaUrl, trailUrl } from '../../routes'
 import { supabase } from '../../lib/supabaseClient'
 import { api } from '../../api'
 import { trackRequest } from '../../lib/apiActivity'
@@ -56,7 +56,7 @@ import {
 } from '../../utils/deviceTags'
 import { assignableSchemas, isAssignableSchema, schemaStatus, statusLabel } from '../../utils/schemaVersion'
 import { suggestMatches } from '../../utils/quarantineMatching'
-import { patchFromForm, formFromPatch, submitProposal, nonProposableFields } from '../../utils/proposeFromForm'
+import { patchFromForm, formFromPatch, submitProposal, nonProposableFields, proposalNotice } from '../../utils/proposeFromForm'
 import { gatewayAcceptsDevices, noDeviceAssignmentReason } from '../../utils/gatewayType'
 import {
   IconInbox,
@@ -303,7 +303,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       if (proposeMode) {
         if (!editing) throw new Error(`${requiresRolesTitle(PERMISSION_UUIDS.DEVICE_MANAGE)} to register a device.`)
         const patch = patchFromForm('device', editFormFor(editing), form)
-        await submitProposal({
+        const filed = await submitProposal({
           kind: 'device',
           entityId: editing.asset_id,
           patch,
@@ -311,15 +311,15 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           proposalId: editingProposal?.id
         })
         setShowForm(false); setEditingProposal(null); loadAll()
-        showToast(editingProposal
-          ? 'Your proposal was updated. An approver decides from here.'
-          : 'Proposed. An approver applies it, or says why not.', 'success')
+        const { msg, to } = proposalNotice(editing.asset_name, filed?.id ?? editingProposal?.id, !!editingProposal)
+        showToast(msg, 'success', { to })
         return
       }
 
       // Schemas are written after the device, through set_device_schemas(), and only when the set
       // changed, so saving a rename writes no schema rows.
       const schemaIds = form.schema_ids || []
+      let deviceId = editing?.asset_id
       if (editing) {
         await api.put(`/api/v1/devices/${editing.asset_id}`, payload)
         if (!sameSchemaSet(schemaIds, schemaIdsForDevice(editing))) {
@@ -328,18 +328,20 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       } else {
         // No asset_id: the devices table generates the UUID (gen_random_uuid()).
         const created = await api.post('/api/v1/devices', payload)
+        deviceId = created.id
         if (schemaIds.length > 0) {
           try {
             await api.put(`/api/v1/devices/${created.id}/schemas`, { schema_ids: schemaIds })
           } catch (e) {
             // The device exists now, so the form closes: saving it again would create a second one.
             setShowForm(false); loadAll()
-            showToast(`Device created, but its schemas were not attached (${e.message}). Open Edit Details to attach them.`, 'error')
+            showToast(`Device '${payload.asset_name}' created, but its schemas were not attached (${e.message}). Open Edit Details to attach them.`, 'error', { to: deviceUrl(deviceId) })
             return
           }
         }
       }
-      setShowForm(false); loadAll(); showToast(editing ? 'Device saved successfully' : 'Device created successfully', 'success')
+      setShowForm(false); loadAll()
+      showToast(`Device '${payload.asset_name}' ${editing ? 'saved' : 'created'}`, 'success', { to: deviceUrl(deviceId) })
     } catch (e) { showToast(e.message, 'error') }
   }
 
@@ -398,7 +400,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
       setApproveItem(null)
       loadAll()
       // Report the friendly name, not the UUID the edge function is addressed by.
-      showToast(`Device '${approveItem?.asset_name || assetId}' approved and onboarded`, 'success')
+      showToast(`Device '${approveItem?.asset_name || assetId}' approved and onboarded`, 'success', { to: deviceUrl(assetId) })
     } catch (e) { showToast(e.message, 'error') }
   }
 
@@ -422,7 +424,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
 
       setApproveItem(null)
       loadAll()
-      showToast(`Device '${approveItem?.asset_name || assetId}' matched and merged into the provisioned device`, 'success')
+      showToast(`Device '${approveItem?.asset_name || assetId}' matched and merged into the provisioned device`, 'success', { to: deviceUrl(candidateId) })
     } catch (e) { showToast(e.message, 'error') }
   }
 
@@ -436,14 +438,15 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const archiveDevice = async (days) => {
     try {
       await api.post(`/api/v1/devices/${archiveTarget.asset_id}/archive`, { auto_delete_days: days })
-      setArchiveTarget(null); loadAll(); showToast(`Device '${archiveTarget.asset_name}' archived`, 'success')
+      setArchiveTarget(null); loadAll()
+      showToast(`Device '${archiveTarget.asset_name}' archived`, 'success', { to: deviceUrl(archiveTarget.asset_id) })
     } catch (e) { showToast(e.message, 'error') }
   }
 
   const restoreDevice = async (assetId, name) => {
     try {
       await api.post(`/api/v1/devices/${assetId}/restore`, {})
-      loadAll(); showToast(`Device '${name}' restored to active service`, 'success')
+      loadAll(); showToast(`Device '${name}' restored to active service`, 'success', { to: deviceUrl(assetId) })
     } catch (e) { showToast(e.message, 'error') }
   }
 
@@ -638,6 +641,8 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
     (a) => {
       // Replaced, not pushed: Back from here should leave the page, not land on the arrival again.
       if (a.is_quarantined) { setView('quarantine', { replace: true }); return }
+      // An archived device is off the default list, so the list shows it as well as the drawer.
+      if (a.is_archived && filterMode === 'active') setFilterMode('all')
       if (view !== 'registered') setView('registered', { replace: true })
       setSelectedId(a.asset_id)
     }

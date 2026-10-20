@@ -1,6 +1,7 @@
 import React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { identityUrl } from '../routes'
 
 import { ServicePrincipalCreateModal } from '../components/modals/ServicePrincipalCreateModal'
 import { GRANTABLE_PERMISSIONS, describePrincipal, permissionReach } from '../utils/serviceIdentities'
@@ -156,7 +157,7 @@ describe('ServicePrincipalCreateModal', () => {
     await waitFor(() => expect(props.onCreated).toHaveBeenCalledWith({ ...created, name: 'Line 4 OEE report' }))
     expect(props.onClose).toHaveBeenCalled()
     // No token was issued: the toast says so, because the next dialog is where one is.
-    expect(props.showToast).toHaveBeenCalledWith(expect.stringMatching(/holds no token yet/), 'success')
+    expect(props.showToast).toHaveBeenCalledWith(expect.stringMatching(/holds no token yet/), 'success', { to: identityUrl('Line 4 OEE report') })
   })
 
   it('sends a write it was given, in menu order', async () => {
