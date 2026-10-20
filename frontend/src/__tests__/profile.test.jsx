@@ -174,7 +174,8 @@ describe('Single-key shortcuts', () => {
     fireEvent.click(tab('Appearance'))
     expect(shortcutsSwitch()).toBeChecked()
     expect(within(row('Single-key shortcuts')).getByText('On')).toBeInTheDocument()
-    expect(within(row('Single-key shortcuts')).getByText(/\? lists the shortcuts, \/ goes to the page's search box, and \[ and \] change tab/)).toBeInTheDocument()
+    expect([...row('Single-key shortcuts').querySelectorAll('.setting-description kbd')].map(k => k.textContent)).toEqual(['?', '/', '[', ']'])
+    expect(row('Single-key shortcuts').querySelector('.setting-description')).toHaveTextContent(/Ctrl K and the arrow keys stay/)
     expect(within(row('Single-key shortcuts')).queryByRole('button', { name: 'Save' })).toBeNull()
   })
 

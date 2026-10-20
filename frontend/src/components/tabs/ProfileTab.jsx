@@ -210,7 +210,12 @@ export function ProfileTab({
               <ProfileRow
                 id="shortcuts"
                 label="Single-key shortcuts"
-                description="Keys that act on one press: ? lists the shortcuts, / goes to the page's search box, and [ and ] change tab. Speech input can type them by mistake, so they can be turned off. Ctrl K and the arrow keys stay."
+                description={(<>
+                  Keys that act on one press: <kbd className="shortcut-key">?</kbd> lists the shortcuts,{' '}
+                  <kbd className="shortcut-key">/</kbd> goes to the page&apos;s search box, and{' '}
+                  <kbd className="shortcut-key">[</kbd> and <kbd className="shortcut-key">]</kbd> change tab.
+                  Speech input can type them by mistake, so they can be turned off. Ctrl K and the arrow keys stay.
+                </>)}
                 value={(
                   <div className="profile-switch">
                     {/* Named by the Setting cell's label; the word beside it is for the eye. */}
