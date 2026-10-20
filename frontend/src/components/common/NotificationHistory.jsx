@@ -9,18 +9,15 @@ import { HISTORY_LIMIT, groupOf, isSafeDestination } from '../../hooks/useToast'
 import { formatRelative } from '../../utils/format'
 
 /**
- * The list's filter: All, then each group with its icon. `name` starts the segment's label,
- * `tone` colours its icon while chosen, `noun` names the group in the empty list and in Clear's
- * tooltip, and `empty` is the empty list's second line.
+ * The list's filter: All, then each group the list records, with its icon. `name` is the
+ * segment's visible word, `tone` colours its icon while chosen, and `noun` names the group in the
+ * empty list and in Clear's tooltip. The Alert group is not here: Grafana alerts are toasts only,
+ * and the alert counter keeps them.
  */
 export const HISTORY_FILTERS = [
   { id: 'all', name: 'All', Icon: IconBell },
   { id: 'info', name: 'Info', Icon: GROUP_ICONS.info, tone: 'accent', noun: 'info messages' },
-  { id: 'warning', name: 'Warnings', Icon: GROUP_ICONS.warning, tone: 'warning', noun: 'warnings' },
-  {
-    id: 'alert', name: 'Alerts', Icon: GROUP_ICONS.alert, tone: 'danger', noun: 'alerts',
-    empty: 'What is firing now is in the alert counter.'
-  }
+  { id: 'warning', name: 'Warnings', Icon: GROUP_ICONS.warning, tone: 'warning', noun: 'warnings' }
 ]
 
 /** Most severe first. The badge takes the tone of the worst unread entry. */
@@ -40,7 +37,8 @@ const TONE_WORD = { error: 'an error', warning: 'a warning' }
 /**
  * The top bar's notification history: a bell with an unread count, and the list of recent toasts
  * behind it. Separate from AlertPill on purpose. The pill says what is wrong now and its count is a
- * reason to act; this says what the toasts said, resolved and routine messages included.
+ * reason to act; this says what the dashboard said. Grafana alerts are not recorded here, so the
+ * two badges never count the same event.
  *
  * A filter under the heading narrows the list to one group (hooks/useToast). It starts at All each
  * time the panel opens, because opening reads what the list shows: a filter left on from last time
@@ -122,7 +120,7 @@ export function NotificationHistory({ entries = [], onMarkRead, onClear }) {
   const label = count ? `Notifications, ${count} unread` : 'Notifications'
   const title = count
     ? `${count} unread notification${count === 1 ? '' : 's'}${TONE_WORD[tone] ? `, including ${TONE_WORD[tone]}` : ''}. Click to read them.`
-    : 'Notifications: the recent messages shown in the corner of the screen, kept until you sign out.'
+    : 'Notifications: the recent messages shown in the corner of the screen, kept until you sign out. Grafana alerts are in the alert counter.'
 
   return (
     <div className="notif-wrap" ref={wrapRef} onBlur={onBlur}>
@@ -180,7 +178,7 @@ export function NotificationHistory({ entries = [], onMarkRead, onClear }) {
                   onChange={setFilter}
                   options={HISTORY_FILTERS.map(({ id, name, Icon, tone: segmentTone }) => {
                     const n = id === 'all' ? entries.length : entries.filter(e => groupOf(e) === id).length
-                    return { id, label: `${name}, ${n}`, icon: <Icon size={14} />, tone: segmentTone }
+                    return { id, label: name, count: n, icon: <Icon size={14} />, tone: segmentTone }
                   })}
                 />
               </div>
@@ -191,13 +189,12 @@ export function NotificationHistory({ entries = [], onMarkRead, onClear }) {
             <div className="notif-empty">
               <IconBell size={20} />
               <div className="notif-empty-title">No notifications</div>
-              <div>Messages shown in the corner of the screen are listed here.</div>
+              <div>Messages shown in the corner of the screen are listed here. Grafana alerts are in the alert counter.</div>
             </div>
           ) : shown.length === 0 ? (
             <div className="notif-empty">
               <chosen.Icon size={20} />
               <div className="notif-empty-title">No {chosen.noun} in this list.</div>
-              {chosen.empty && <div>{chosen.empty}</div>}
             </div>
           ) : (
             <ol className="notif-list">
@@ -227,8 +224,8 @@ export function NotificationHistory({ entries = [], onMarkRead, onClear }) {
           )}
 
           <div className="notif-foot">
-            The latest {HISTORY_LIMIT} messages, kept in this browser tab until you sign out. What is
-            firing now is in the alert counter.
+            The latest {HISTORY_LIMIT} messages, kept in this browser tab until you sign out. Grafana
+            alerts are not listed here: they are in the alert counter.
           </div>
         </div>
       )}

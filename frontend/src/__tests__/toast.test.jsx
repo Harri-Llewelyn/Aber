@@ -382,7 +382,6 @@ describe('a firing platform alert', () => {
     fingerprint: 'f1', alert_name: 'Historian Backup Stale', severity: 'warning',
     summary: 'The last backup is 3 days old; run SELECT 1 FROM backups', starts_at: '2026-10-01T00:00:00Z'
   }
-  const FULL = `${row.alert_name} — ${row.summary}`
 
   async function mountAlerts(rows) {
     let current = []
@@ -405,18 +404,18 @@ describe('a firing platform alert', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(60000) })
   }
 
-  it('toasts the alert name only, and the history keeps the summary', async () => {
+  it('toasts the alert name only, and records nothing in the history', async () => {
     await mountAlerts([row])
     expect(screen.getByText('Historian Backup Stale').closest('.toast')).toBeTruthy()
     expect(screen.queryByText(/SELECT 1/)).toBeNull()
-    expect(hook.history[0].msg).toBe(FULL)
+    expect(hook.history).toEqual([])
   })
 
   it('puts the alert in the Alert group, at the severity Grafana gave it', async () => {
     await mountAlerts([row, { ...row, fingerprint: 'f2', alert_name: 'Spindle Overtemperature', severity: 'critical', summary: '' }])
-    expect(hook.history.map(e => [e.msg, e.type, e.group])).toEqual([
-      ['Spindle Overtemperature', 'error', 'alert'],
-      [FULL, 'warning', 'alert']
+    expect(hook.toasts.map(t => [t.msg, t.type, t.group])).toEqual([
+      ['Historian Backup Stale', 'warning', 'alert'],
+      ['Spindle Overtemperature', 'error', 'alert']
     ])
     expect(screen.getByText('Spindle Overtemperature').closest('.toast')).toHaveClass('signal-tone-danger')
     expect(screen.getByText('Historian Backup Stale').closest('.toast')).toHaveClass('signal-tone-warning')
@@ -430,10 +429,10 @@ describe('a firing platform alert', () => {
     expect(link).toHaveAttribute('target', '_blank')
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
     expect(link).toHaveAttribute('title', 'Open in Grafana, in a new tab')
-    expect(hook.history[0].to).toBe(grafanaAlertUrl('Historian Backup Stale'))
+    expect(hook.toasts[0].to).toBe(grafanaAlertUrl('Historian Backup Stale'))
     fireEvent.click(link)
     expect(document.querySelector('.toast')).toBeNull()
-    expect(hook.history[0].read).toBe(true)
+    expect(hook.history).toEqual([])
   })
 
   it('dismisses from the Dismiss button without following the link', async () => {

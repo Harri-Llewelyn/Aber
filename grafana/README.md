@@ -244,6 +244,34 @@ multi-dimensional rule: grouping by alertname alone would batch six devices' ins
 group sharing one repeat timer, and a device that resolved would be indistinguishable from one
 that never fired.
 
+## Alert state history
+
+**Grafana keeps every rule's state changes in Loki.** `grafana.ini`'s
+`[unified_alerting.state_history]` sets `backend = loki`. The chart points `loki_remote_url` at the
+Loki the logs datasource reads (`aber.lokiUrl`: the chart's own, or `grafana.lokiUrl`), through
+`GF_UNIFIED_ALERTING_STATE_HISTORY_LOKI_REMOTE_URL`. Alerting > History (`/alerting/history`) reads
+it. The dashboard's alert counter links there from its footer, because the dashboard keeps no record
+of alerts that fired and cleared (`frontend/README.md`, *Toasts and the notification history*).
+
+**Why not the default.** Grafana 13.2.3 writes the history as annotations unless told otherwise.
+The annotations backend answers a query for one rule only ("ruleUID is required to query
+annotations"), and the History page asks for every rule, so it showed "Something went wrong loading
+the alert state history". A rule's own History tab now reads from Loki too. The `prometheus`
+backend writes `GRAFANA_ALERTS` series but cannot be queried, so it cannot serve the page either.
+
+**What changes with it.**
+
+- The history is kept for Loki's retention, 30 days (`loki/loki.yaml`). Annotations were kept in
+  Grafana's database with no limit. History written as annotations before the change stays there
+  but is no longer shown.
+- The streams are labelled `from="state-history"`, `orgID`, `group` and `folderUID`, with no
+  `service` label, so no log query this repository ships selects them.
+- If Loki cannot be reached when Grafana starts, Grafana logs "Failed to communicate with configured
+  remote Loki backend" and starts anyway. A write that fails later is logged as "Failed to save
+  alert state history batch". Either way only the history is lost: rules still evaluate and notify.
+- With `grafana.lokiUrl` set, Grafana writes to the site's Loki, with no credentials and no tenant.
+  That Loki must accept pushes from Grafana, or the History page stays empty.
+
 ## Platform Conditions
 
 The stack's own health, not the machines'. Every rule reads one row per condition from

@@ -11,7 +11,9 @@ import { useToast, groupOf, readStoredHistory, TOAST_GROUPS, HISTORY_STORAGE_KEY
  * What is pinned: each type's default group, and an explicit group winning over it; the group
  * stored with the history entry, and an entry stored before groups reading with its type's; the
  * group picking the icon and severity picking its colour; severity still deciding the timer and
- * the live region; and a Grafana alert, firing or resolved, landing in Alert.
+ * the live region; a toast shown with `record: false` leaving the history alone; and a Grafana
+ * alert, firing or resolved, toasting in Alert without touching the bell's history or badge, with
+ * any Alert entry stored before that dropped.
  */
 
 const markup = (Icon) => render(<Icon size={16} />).container.querySelector('svg').innerHTML
@@ -70,6 +72,20 @@ describe('showToast and the group', () => {
     expect(result.current.toasts.map(t => t.group)).toEqual(['info', 'warning', 'alert'])
   })
 
+  it('shows a toast it does not record when told not to', () => {
+    const { result } = renderHook(() => useToast())
+    act(() => { result.current.showToast('Saved', 'success') })
+    act(() => { result.current.showToast('Spindle Overtemperature', 'error', { group: 'alert', record: false }) })
+    expect(result.current.toasts.map(t => t.msg)).toEqual(['Saved', 'Spindle Overtemperature'])
+    expect(result.current.history.map(e => e.msg)).toEqual(['Saved'])
+
+    // Dismissing it has no entry to mark read, and leaves the others as they were.
+    const id = result.current.toasts[1].id
+    act(() => { result.current.dismissToast(id) })
+    expect(result.current.toasts.map(t => t.msg)).toEqual(['Saved'])
+    expect(result.current.history).toEqual([expect.objectContaining({ msg: 'Saved', read: false })])
+  })
+
   it('counts a repeat only within the same group', () => {
     const { result } = renderHook(() => useToast())
     act(() => { result.current.showToast('Line 1 down', 'error') })
@@ -92,10 +108,22 @@ describe('the stored history and the group', () => {
 
   it('keeps a stored group it knows and replaces one it does not', () => {
     store([
-      { id: 2, msg: 'Spindle Overtemperature', type: 'error', group: 'alert', at: 2 },
+      { id: 2, msg: 'Quota reached', type: 'warning', group: 'info', at: 2 },
       { id: 1, msg: 'Saved', type: 'success', group: '<img>', at: 1 }
     ])
-    expect(readStoredHistory().map(e => e.group)).toEqual(['alert', 'info'])
+    expect(readStoredHistory().map(e => e.group)).toEqual(['info', 'info'])
+  })
+
+  it('drops a Grafana alert stored before alerts stopped being recorded', () => {
+    store([
+      { id: 4, msg: 'Resolved — Spindle Overtemperature', type: 'success', group: 'alert', at: 4 },
+      { id: 3, msg: 'Saved', type: 'success', group: 'info', at: 3 },
+      { id: 2, msg: 'Spindle Overtemperature — CNC_01 at 92 C', type: 'error', group: 'alert', at: 2 },
+      { id: 1, msg: 'Save failed', type: 'error', at: 1 }
+    ])
+    expect(readStoredHistory().map(e => e.msg)).toEqual(['Saved', 'Save failed'])
+    const { result } = renderHook(() => useToast())
+    expect(result.current.history.map(e => e.msg)).toEqual(['Saved', 'Save failed'])
   })
 
   it('lists an entry stored before groups with its type\'s icon and colour', () => {
@@ -172,9 +200,16 @@ describe('severity, not the group, keeps the timer and the live region', () => {
   })
 })
 
-describe('a resolved platform alert', () => {
-  it('toasts in the Alert group with the success tone', async () => {
-    let current = []
+/**
+ * A Grafana alert through usePlatformAlerts, with the toasts and the bell rendered as App renders
+ * them. `current` is what the active view answers on the next poll.
+ */
+describe('a Grafana alert and the bell', () => {
+  const FIRING = { fingerprint: 'f1', alert_name: 'Spindle Overtemperature', severity: 'critical', summary: 'CNC_01 at 92 C', starts_at: '2026-10-01T00:00:00Z' }
+  let current
+
+  async function mountAlerts(initial) {
+    current = initial
     const { supabase } = await import('../lib/supabaseClient')
     vi.spyOn(supabase.auth, 'getSession').mockResolvedValue({ data: { session: {} } })
     vi.spyOn(supabase, 'from').mockImplementation(() => ({
@@ -186,15 +221,47 @@ describe('a resolved platform alert', () => {
     function AlertsHarness() {
       hook = useToast()
       usePlatformAlerts(hook.showToast)
-      return <ToastStack toasts={hook.toasts} onDismiss={hook.dismissToast} onExpire={hook.expireToast} />
+      return (
+        <>
+          <NotificationHistory entries={hook.history} onMarkRead={hook.markRead} onClear={hook.clearHistory} />
+          <ToastStack toasts={hook.toasts} onDismiss={hook.dismissToast} onExpire={hook.expireToast} />
+        </>
+      )
     }
-    current = [{ fingerprint: 'f1', alert_name: 'Spindle Overtemperature', severity: 'critical', summary: '', starts_at: '2026-10-01T00:00:00Z' }]
     render(<AlertsHarness />)
     await act(async () => { await vi.advanceTimersByTimeAsync(10) })
-    current = []
+  }
+  const poll = async (rows) => {
+    current = rows
     await act(async () => { await vi.advanceTimersByTimeAsync(60000) })
+  }
+  const bell = () => screen.getByRole('button', { name: /^notifications/i })
 
-    expect(hook.history[0]).toMatchObject({ msg: 'Resolved — Spindle Overtemperature', type: 'success', group: 'alert' })
+  it('toasts a firing alert and leaves the bell\'s badge at zero', async () => {
+    await mountAlerts([])
+    await poll([FIRING])
+
+    expect(screen.getByText('Spindle Overtemperature').closest('.toast')).toHaveClass('signal-tone-danger')
+    expect(hook.history).toEqual([])
+    expect(bell()).toHaveAccessibleName('Notifications')
+    expect(document.querySelector('.notif-badge')).toBeNull()
+  })
+
+  it('toasts the resolve in the Alert group with the success tone, and records neither', async () => {
+    await mountAlerts([FIRING])
+    await poll([])
+
     expect(screen.getByText('Resolved — Spindle Overtemperature').closest('.toast')).toHaveClass('signal-tone-success')
+    expect(hook.history).toEqual([])
+    expect(document.querySelector('.notif-badge')).toBeNull()
+  })
+
+  it('counts the dashboard\'s own messages beside it', async () => {
+    await mountAlerts([])
+    await poll([FIRING])
+    act(() => { hook.showToast('Save failed', 'error') })
+
+    expect(hook.history.map(e => e.msg)).toEqual(['Save failed'])
+    expect(document.querySelector('.notif-badge')).toHaveTextContent('1')
   })
 })

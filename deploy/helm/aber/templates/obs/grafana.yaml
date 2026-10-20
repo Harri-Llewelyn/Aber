@@ -415,6 +415,9 @@ spec:
             # own login lifetime (7 days idle, 30 in all).
             - name: GF_AUTH_GENERIC_OAUTH_USE_REFRESH_TOKEN
               value: "true"
+            # Alert state history (grafana.ini) goes to the Loki the logs datasource reads.
+            - name: GF_UNIFIED_ALERTING_STATE_HISTORY_LOKI_REMOTE_URL
+              value: {{ include "aber.lokiUrl" . | quote }}
             - name: GF_INSTALL_PLUGINS
               value: ""
             {{- if $keepPlugins }}

@@ -280,10 +280,11 @@ row and all, so the two read alike.
   out of the rail; the router, the help drawer, the tab title and the search still know it. The way
   in is the account menu, App.jsx's `UserMenu`, which `Sidebar` draws at the rail's pinned foot
   above the behaviour control: Profile first, then the Theme switch, Report Bug and Sign Out. The
-  switch is a `SegmentedControl` with `menu`: a `role="group"` named Theme holding a Light (sun)
-  and a Dark (moon) `menuitemradio`, the current theme checked, so the row names the theme that is
-  on and offers the other beside it. Choosing applies at once and the menu stays open, since the
-  result shows behind it. A third theme would be a third segment.
+  switch is a `SegmentedControl` with `menu` across the whole row: a `role="group"` named Theme
+  holding a Light and a Dark `menuitemradio`, each its icon (a sun, a moon) and its name, the
+  current theme checked. The row has no visible "Theme" label: the segments' names say what they
+  are, and the group's name tells a screen reader what the row is for. Choosing applies at once and
+  the menu stays open, since the result shows behind it. A third theme would be a third segment.
 - **Settings is every role's.** Every signed-in account may read a setting, so the page is in every
   rail and the search offers its rows to everyone. `SettingsTab`'s `readOnly`, which `App.jsx`
   passes for anyone but an Administrator, disables each field and puts "Only an Administrator can
@@ -787,7 +788,8 @@ one exists (Launch UI, Open Dashboard); otherwise Restore when archived; otherwi
 
 `showToast(msg, type)` (`hooks/useToast.js`) is the one call every page makes, with `type` one of
 `success` (the default), `info`, `warning` or `error`. Each call puts a toast in the bottom-right
-corner and records the same message in the history behind the bell in the top bar.
+corner and records the same message in the history behind the bell in the top bar, unless it
+passes `{ record: false }`, as a Grafana alert does.
 
 - **Three groups, and the group is not the severity.** Every message is in one group: **Info**
   (routine news, successes included), **Warning** (the dashboard's own failures and warnings) or
@@ -795,7 +797,8 @@ corner and records the same message in the history behind the bell in the top ba
   default to Info, `warning` and `error` to Warning, and a caller passes `{ group }` only to
   override that: `usePlatformAlerts` passes `'alert'`. The group picks the icon (`GROUP_ICONS` in
   `common/Toast.jsx`: `IconInfo`, `IconAlertTriangle`, `IconShieldAlert`, the firing partner of the
-  pill's resting shield) and the notification filter. The type is still the severity: it sets the
+  pill's resting shield), and Info and Warning are the notification filter's groups. Alert has no
+  filter, because alerts are not recorded (below). The type is still the severity: it sets the
   timer and the live region, so a critical alert (`error`) stays until dismissed and is read out
   assertively, and within the group it picks the icon's colour (`toastTone`): Info is `--accent`;
   Warning is `--danger` for a failure and `--warning` otherwise; Alert is `--danger` critical,
@@ -828,20 +831,24 @@ corner and records the same message in the history behind the bell in the top ba
   entry, and a toast that times out stays unread. The list is a `role="dialog"` popover built like
   the alert pill's (`useEscapeKey`, `useClickOutside`): focus moves into it as it opens, and Escape
   or its close button hands focus back to the bell.
-- **The filter.** Under the heading, sticky with it, a `SegmentedControl` offers All and the three
-  groups as icons in one outlined pill, each segment named and titled with its count ("Alerts, 2").
+- **The filter.** Under the heading, sticky with it, a `SegmentedControl` offers All, Info and
+  Warnings in one outlined pill, sharing the panel's width. Each segment shows its icon and its
+  name. Its count is in its tooltip and its accessible name ("Info, 3"), which starts with the
+  visible word, so someone using voice control can say "Info" (WCAG 2.5.3, Label in Name).
   It is back on All each time the panel opens, because opening reads what the list shows: a filter
   left on would hide entries that opening then marked read. While a filter is on, only the entries
   on show are read (`markRead(ids)` in `useToast`), so one that arrives in another group stays
   unread until All is chosen. An empty group says so, and Clear still empties the whole list, which
-  its tooltip says while a filter is on. The alerts that have come and gone are only here, since the
-  pill shows what is firing now.
+  its tooltip says while a filter is on. The list's footer, its empty state and the bell's tooltip
+  say that Grafana alerts are in the alert counter.
 - **`common/SegmentedControl.jsx`** is one choice from a few as a pill: on its own a
   `role="radiogroup"` of `radio` segments, one Tab stop whose arrow keys move and choose (the WAI-ARIA
   radio group pattern); with `menu`, a `role="group"` of `menuitemradio` segments for use inside a
   `role="menu"`, where each is a Tab stop like the menu's other items and Left and Right move without
-  choosing. The chosen segment takes a sunken fill (`--bg-base`) and a border, so the choice is not
-  shown by colour alone (WCAG 1.4.1), and its icon takes the option's `tone`.
+  choosing. Every segment draws its icon and its `label`; an option's `count` is said after the label
+  in the tooltip and the accessible name. The chosen segment takes a sunken fill (`--bg-base`) and a
+  border, so the choice is not shown by colour alone (WCAG 1.4.1), and its icon takes the option's
+  `tone`.
 - **Where it is kept.** In `sessionStorage` under `aber_notification_history`, so it survives a
   reload and stays in that browser tab. It holds text only (the message, its group and its
   destination), and every read and write is wrapped so a blocked store degrades to memory. `App` clears it whenever the tab is left without a
@@ -850,11 +857,17 @@ corner and records the same message in the history behind the bell in the top ba
   it, and an unread state that followed a user between browsers would need a per-user table with
   RLS. Supabase Queues (pgmq) does not fit that either, because a queue is single-consumer and
   cannot fan one event out to several signed-in users.
-- **A firing alert toasts its name only.** `showToast(msg, type, { detail })`: `detail` is what the
-  history records when it differs from the toast text. A platform alert passes its name as the text
-  and "name — summary" as the detail, because the summary can be several sentences with a SQL
+- **Grafana alerts are toasts only.** `usePlatformAlerts` passes `{ group: 'alert', record: false }`
+  for a firing and a resolved alert. The toast shows, with the Alert group's icon and colour and a
+  link to the rule, but nothing is recorded, so the bell's badge never counts what the alert
+  counter already counts. `readStoredHistory` drops any Alert entry a tab stored before this. The
+  counter shows what is firing now. Grafana's alert history (Alerting > History,
+  `GRAFANA_ALERT_HISTORY_URL`, linked from the counter's footer) is the record of what fired and
+  cleared, including an alert that came and went while nobody was looking. That page needs
+  Grafana's alert state history in Loki (`grafana/README.md`).
+- **A firing alert toasts its name only.** The summary can be several sentences with a SQL
   statement, which stacked as tall blocks, kept a warning up longer and was read aloud in full by
-  the `role="alert"` region.
+  the `role="alert"` region. The summary is in the alert counter's list.
 - **A message links to what it is about.** `showToast(msg, type, { to })` takes a destination as
   text: a path from `routes.js` or a Grafana URL. It is stored with the history entry, so the toast's
   message and the list's row are both links (`MessageLink` in `common/Toast.jsx`). A path is a
@@ -874,9 +887,12 @@ corner and records the same message in the history behind the bell in the top ba
   of the messages report something just done on the page in view, so they carry none. This replaced
   `onOpen`/`openTitle`, a function the history could not store; a firing alert's toast used to open
   the pill's list, and the pill no longer takes `open`/`onOpenChange` from `App`.
-- **It is not the alert pill.** The pill says what is firing now, and its count is a reason to act.
-  The history says what the toasts said, resolved and routine messages included; merging the two
-  would fill the pill's count with entries nobody needs to act on.
+- **It is not the alert pill.** The pill says what is firing now, and its count is a reason to act;
+  it drops only when Grafana resolves the alert. The history says what the dashboard said, and its
+  count drops when the list is opened. One badge cannot follow both: if opening the list cleared
+  it, a critical alert still firing would vanish from the bar, and if it did not, routine messages
+  would add to the alarm's number. So each counts its own, and an alert is counted once, by the
+  pill.
 
 ---
 

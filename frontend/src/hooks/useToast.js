@@ -8,9 +8,9 @@ import { GRAFANA_URL } from '../constants'
 const TOAST_TYPES = ['success', 'info', 'warning', 'error']
 
 /**
- * The groups a message sorts into, which decide its icon and the notification list's filter. Info
- * is routine news, successes included; Warning is the dashboard's own failures and warnings; Alert
- * is a Grafana alert, firing or resolved.
+ * The groups a message sorts into, which decide its icon. Info is routine news, successes included;
+ * Warning is the dashboard's own failures and warnings; both are the notification list's filters.
+ * Alert is a Grafana alert, firing or resolved: a toast only, since the alert counter keeps those.
  */
 export const TOAST_GROUPS = ['info', 'warning', 'alert']
 const DEFAULT_GROUP = { success: 'info', info: 'info', warning: 'warning', error: 'warning' }
@@ -58,8 +58,9 @@ export function readStoredHistory() {
     const parsed = JSON.parse(window.sessionStorage.getItem(HISTORY_STORAGE_KEY) || '[]')
     if (!Array.isArray(parsed)) return []
     // An entry stored before groups existed takes its type's; a destination that fails the check
-    // is dropped and the entry kept as plain text.
-    return parsed.filter(isStoredEntry).slice(0, HISTORY_LIMIT).map(({ id, msg, type, group, to, at, read, count }) => ({
+    // is dropped and the entry kept as plain text. A Grafana alert stored before alerts stopped
+    // being recorded is dropped: the list has no Alert filter to show it under.
+    return parsed.filter(e => isStoredEntry(e) && e.group !== 'alert').slice(0, HISTORY_LIMIT).map(({ id, msg, type, group, to, at, read, count }) => ({
       id, msg, type, group: groupOf({ type, group }), at,
       ...(isSafeDestination(to) ? { to } : {}),
       read: read === true,
@@ -84,12 +85,13 @@ export function clearStoredHistory() {
 
 /**
  * The toasts on screen and the notification history behind the top bar's bell. `showToast(msg,
- * type, options)` is the only way in: each call shows a toast and records a message in the history,
- * the same one unless `options.detail` gives the history a longer text than the toast carries.
- * `options.group` is needed only where the type's group is wrong: a Grafana alert passes 'alert'.
- * `options.to` is where the message is about, as text: a path from routes.js or a Grafana URL,
- * which makes the toast's message and its row in the history a link (see Toast). One that fails
- * isSafeDestination is ignored. Every callback is stable, so passing them down re-renders nothing.
+ * type, options)` is the only way in: each call shows a toast and records the same message in the
+ * history, unless `options.record` is false. A Grafana alert passes `{ group: 'alert', record:
+ * false }`: its toast shows, and the alert counter, not the history, keeps it. `options.group` is
+ * needed only where the type's group is wrong. `options.to` is where the message is about, as
+ * text: a path from routes.js or a Grafana URL, which makes the toast's message and its row in the
+ * history a link (see Toast). One that fails isSafeDestination is ignored. Every callback is
+ * stable, so passing them down re-renders nothing.
  */
 export function useToast() {
   const [toasts, setToasts] = useState([])
@@ -100,7 +102,7 @@ export function useToast() {
 
   useEffect(() => { writeStoredHistory(history) }, [history])
 
-  const showToast = useCallback((msg, type = 'success', { detail, group, to } = {}) => {
+  const showToast = useCallback((msg, type = 'success', { group, to, record = true } = {}) => {
     const known = TOAST_TYPES.includes(type) ? type : 'info'
     const entry = {
       id: nextId.current++,
@@ -110,17 +112,15 @@ export function useToast() {
       ...(isSafeDestination(to) ? { to } : {}),
       at: Date.now()
     }
-    const recordedMsg = detail == null ? entry.msg : String(detail)
-    const same = (e) => e.type === entry.type && e.group === entry.group && e.to === entry.to
-    const sameToast = (e) => e.msg === entry.msg && same(e)
-    const sameEntry = (e) => e.msg === recordedMsg && same(e)
+    const same = (e) => e.msg === entry.msg && e.type === entry.type && e.group === entry.group && e.to === entry.to
     // A message already on screen is replaced rather than stacked, so it restarts its timer and a
     // failure repeated by a poll shows once.
-    setToasts(prev => [...prev.filter(t => !sameToast(t)), entry].slice(-MAX_VISIBLE_TOASTS))
+    setToasts(prev => [...prev.filter(t => !same(t)), entry].slice(-MAX_VISIBLE_TOASTS))
+    if (record === false) return
     // A repeat of the newest entry is counted on it rather than filling the list.
     setHistory(prev => {
-      const repeat = prev.length > 0 && sameEntry(prev[0])
-      const recorded = { ...entry, msg: recordedMsg, read: false, count: repeat ? prev[0].count + 1 : 1 }
+      const repeat = prev.length > 0 && same(prev[0])
+      const recorded = { ...entry, read: false, count: repeat ? prev[0].count + 1 : 1 }
       return [recorded, ...(repeat ? prev.slice(1) : prev)].slice(0, HISTORY_LIMIT)
     })
   }, [])
@@ -130,7 +130,7 @@ export function useToast() {
     setToasts(prev => prev.filter(t => t.id !== id))
   }, [])
 
-  /** The user closed the toast, which counts as having read it. */
+  /** The user closed the toast, which counts as having read it. A toast not recorded has no entry. */
   const dismissToast = useCallback((id) => {
     setToasts(prev => prev.filter(t => t.id !== id))
     setHistory(prev => prev.some(e => e.id === id && !e.read)

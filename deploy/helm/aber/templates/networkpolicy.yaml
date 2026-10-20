@@ -120,7 +120,7 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "alloy"              "to" "prometheus"         "port" 9090 "why" "remote-write of every scraped series")
   (dict "from" "alloy"              "to" "loki"               "port" 3100 "why" "the log push")
   (dict "from" "grafana"            "to" "prometheus"         "port" 9090 "why" "the metrics datasource")
-  (dict "from" "grafana"            "to" "loki"               "port" 3100 "why" "the logs datasource")
+  (dict "from" "grafana"            "to" "loki"               "port" 3100 "why" "the logs datasource, and alert state history")
   (dict "from" "alloy"              "to" "ingestion"          "port" (int .Values.ingestion.metrics.port) "why" "scrape")
   (dict "from" "alloy"              "to" $gw                  "port" (int .Values.supabaseEnvoy.metrics.port) "why" "scrape: the admin listener's /stats/prometheus")
   (dict "from" "alloy"              "to" "supabase-rest"      "port" 3001 "why" "scrape: the admin listener")

@@ -174,6 +174,17 @@ describe('NotificationHistory', () => {
       expect(within(panel).getByRole('button', { name: 'Clear' })).toBeDisabled()
     })
 
+    it('says that Grafana alerts are in the alert counter, not in this list', () => {
+      render(<NotificationHistory entries={[]} />)
+      expect(bell().getAttribute('title')).toMatch(/Grafana alerts are in the alert counter\.$/)
+      fireEvent.click(bell())
+      const panel = screen.getByRole('dialog', { name: 'Notifications' })
+      expect(panel.querySelector('.notif-empty')).toHaveTextContent('Grafana alerts are in the alert counter.')
+      expect(panel.querySelector('.notif-foot')).toHaveTextContent(
+        'The latest 50 messages, kept in this browser tab until you sign out. Grafana alerts are not listed here: they are in the alert counter.'
+      )
+    })
+
     it('empties on Clear and keeps focus in the panel', () => {
       const onClear = vi.fn()
       render(<NotificationHistory entries={[entry()]} onClear={onClear} />)
