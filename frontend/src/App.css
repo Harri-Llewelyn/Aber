@@ -5674,7 +5674,10 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   column-gap: 12px;
+  margin-top: 14px;
 }
+
+.gateway-settings-help a { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
 
 @media (max-width: 640px) {
   .gateway-settings { grid-template-columns: minmax(0, 1fr); }

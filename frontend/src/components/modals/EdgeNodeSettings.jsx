@@ -154,7 +154,7 @@ export function EdgeNodeSettings({ gateway, credential, copy, copied }) {
           </div>
         </div>
       </div>
-      <p className="form-hint">
+      <p className="form-hint gateway-settings-help">
         What the node must do is on the help page{' '}
         <a
           data-help={BRING_YOUR_OWN_EDGE_NODE}
