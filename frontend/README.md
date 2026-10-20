@@ -102,6 +102,25 @@ id passes `truncate="start"` to keep its end (`…/iso22400/EFFECTIVENESS`); the
 carry the full value. A read-only or disabled `.form-control` takes the page background and muted
 text, and `.btn-warning` is the amber button for a risky action that is not destructive.
 
+### The rail opens when the pointer rests on it
+
+In the rail's Hover mode, `Sidebar` opens the panel only once the pointer has rested on the rail for
+150ms (`RAIL_OPEN_DELAY_MS`, through `hooks/useHoverIntent.js`). A pointer crossing the 52px strip
+on its way somewhere else takes less, so the panel no longer flicks open and shut. Chrome and Edge on
+Windows send hover events to a window that is not the active one, so a pointer passing to another
+app did exactly that. Leaving shuts the panel at once, and a click during the wait still navigates.
+
+Keyboard focus opens the rail at once, in every mode. Two kinds of focus are not keyboard focus:
+
+- **A click's focus.** A focus that arrives while the pointer is on the rail is a click, and is
+  ignored so the panel does not stay open over the page it opened. "On the rail" is a flag set the
+  moment the pointer enters, not the delayed open state: read against a panel still shut, a quick
+  click would look like a Tab and hold the panel open.
+- **The window coming back.** A link clicked with the mouse keeps focus. When the window is activated
+  again (Alt+Tab, a screenshot overlay closing), the browser focuses it again, with no previous
+  focus (`relatedTarget` is null). The rail's blur notes whether the panel was open as the window
+  lost focus (`document.hasFocus()` is already false then), and that return puts it back as it was.
+
 ### Derived lists in a tab are memoised, and the dependency list is the contract
 
 `DevicesTab` holds around thirty pieces of state, so *any* of them — opening a modal, a Realtime

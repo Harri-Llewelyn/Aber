@@ -1,10 +1,14 @@
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import { groupedNav } from '../../navigation'
 import { SIDEBAR_MODES } from '../../hooks/useSidebarMode'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { useHoverIntent } from '../../hooks/useHoverIntent'
 import { IconPanelLeft, IconCheck } from './Icons'
 import { RouteLink } from './RouteLink'
+
+/** How long the pointer rests on the rail before hover mode opens it. A pointer crossing takes less. */
+export const RAIL_OPEN_DELAY_MS = 150
 
 /**
  * The primary navigation: a 52px rail of icons with a labelled panel.
@@ -12,13 +16,17 @@ import { RouteLink } from './RouteLink'
  * Three behaviours, chosen from the control at the foot of the rail and saved with the person's
  * other preferences (useUserSettings.js):
  *
- *   hover      the panel paints OVER the page while the pointer is on the rail, and reflows nothing.
+ *   hover      the panel paints OVER the page once the pointer rests on the rail, and reflows
+ *              nothing. It shuts as soon as the pointer leaves.
  *   expanded   the rail is 232px wide and the page makes room for it.
  *   collapsed  icons only; the pointer does nothing.
  *
- * In every mode keyboard focus inside the rail shows the labels, because a Tab through a column of
- * transparent labels is not navigation. A focus that arrives while the pointer is already on the
+ * In every mode keyboard focus inside the rail shows the labels at once, because a Tab through a
+ * column of transparent labels is not navigation. A focus that arrives while the pointer is on the
  * rail is a click, and is ignored so the panel does not stay open over the page it navigated to.
+ * "On the rail" is set the moment the pointer enters, not when the panel opens, so a click during
+ * the wait is still a click. A focus the browser hands back as its window regains focus leaves the
+ * panel as it was when the window lost it.
  *
  * Each page is a link to `hrefFor(id)`, so Ctrl-click, middle-click and "Copy link address" work. A
  * plain click navigates in place, through `onNavigate(id)` when it is given.
@@ -27,23 +35,41 @@ import { RouteLink } from './RouteLink'
  * behaviour control.
  */
 export function Sidebar({ tabs, currentTab, onNavigate, hrefFor = id => `/${id}`, mode = 'hover', onChangeMode, signals = {}, account = null }) {
-  const [hovered, setHovered] = useState(false)
+  const hover = useHoverIntent(RAIL_OPEN_DELAY_MS)
+  const pointerOnRail = useRef(false)
   const [focused, setFocused] = useState(false)
+  // What `focused` was when the window lost focus from inside the rail; null otherwise.
+  const focusedAsWindowLeft = useRef(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useClickOutside(() => setMenuOpen(false), menuOpen)
   useEscapeKey(() => setMenuOpen(false), menuOpen)
 
-  const expanded = mode === 'expanded' || (mode === 'hover' && hovered) || focused
+  const expanded = mode === 'expanded' || (mode === 'hover' && hover.open) || focused
   const groups = groupedNav(tabs)
   const current = SIDEBAR_MODES.find(m => m.id === mode) || SIDEBAR_MODES[0]
+
+  const onFocus = (e) => {
+    const returning = focusedAsWindowLeft.current
+    focusedAsWindowLeft.current = null
+    // The window coming back refocuses the element it left with, with nothing as the previous
+    // focus: that is neither a click nor a Tab.
+    if (returning !== null && e.relatedTarget === null) setFocused(returning)
+    else if (!pointerOnRail.current) setFocused(true)
+  }
+
+  const onBlur = () => {
+    // `document.hasFocus()` is already false while the window's own loss of focus blurs the rail.
+    focusedAsWindowLeft.current = document.hasFocus() ? null : focused
+    setFocused(false)
+  }
 
   return (
     <aside
       className={`sidebar sidebar-mode-${mode}${expanded ? ' sidebar-expanded' : ''}`}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      onFocus={() => { if (!hovered) setFocused(true) }}
-      onBlur={() => setFocused(false)}
+      onMouseEnter={() => { pointerOnRail.current = true; hover.onMouseEnter() }}
+      onMouseLeave={() => { pointerOnRail.current = false; hover.onMouseLeave() }}
+      onFocus={onFocus}
+      onBlur={onBlur}
       data-expanded={expanded ? 'true' : 'false'}
       data-mode={mode}
     >
