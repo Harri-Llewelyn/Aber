@@ -10,12 +10,20 @@ const GAP = 6
 export const TOOLTIP_DELAY_MS = 300
 
 /**
+ * The element a trigger's bubble is portalled into: the open dialog the trigger sits in, else
+ * <body>. A dialog opened with showModal() is in the top layer, which draws everything outside it
+ * beneath its backdrop. Only the topmost dialog can be reached, so for any trigger a person can
+ * point at this is the element Modal's `overlayHost()` names; it is read from the trigger rather
+ * than from the first `dialog[open]`, which under a confirmation is the dialog beneath.
+ */
+export const tooltipHost = (trigger) => trigger?.closest?.('dialog[open]') ?? document.body
+
+/**
  * Where a tooltip's bubble goes while `visible`: below the trigger, or above it when the trigger is
- * low in the window, and never past the window's sides. Null while hidden. A scroll or a resize
- * calls `onDismiss` rather than tracking the trigger. Inside an open native dialog the bubble goes
- * into the dialog, which sits in the top layer above anything portalled to <body>.
+ * low in the window, and never past the window's sides, inside `tooltipHost(trigger)`. Null while
+ * hidden. A scroll or a resize calls `onDismiss` rather than tracking the trigger.
  *
- * @returns {{ pos: object|null, container: Element }}
+ * @returns {{ pos: object|null, container: Element|null }}
  */
 export function useTooltipPosition(triggerRef, visible, onDismiss) {
   const [placed, setPlaced] = useState({ pos: null, container: null })
@@ -30,7 +38,7 @@ export function useTooltipPosition(triggerRef, visible, onDismiss) {
     const left = Math.max(8, Math.min(r.left, window.innerWidth - TOOLTIP_WIDTH - 8))
     setPlaced({
       pos: flip ? { left, bottom: window.innerHeight - r.top + GAP } : { left, top: r.bottom + GAP },
-      container: trigger.closest('dialog[open]'),
+      container: tooltipHost(trigger),
     })
     const close = () => dismiss.current?.()
     window.addEventListener('scroll', close, true)
@@ -46,8 +54,9 @@ export function useTooltipPosition(triggerRef, visible, onDismiss) {
 
 /**
  * The one tooltip bubble, which HelpTip and the tab bar's tabs both draw, so the two always look
- * alike. Portalled with a fixed position, because most triggers sit inside a `.card`, whose overflow
- * is hidden. `role="tooltip"`; the trigger names it by `id` in `aria-describedby`.
+ * alike. Portalled with a fixed position into `container` (`tooltipHost`), because most triggers
+ * sit inside a `.card`, whose overflow is hidden, and an open dialog covers <body>. `role="tooltip"`;
+ * the trigger names it by `id` in `aria-describedby`.
  *
  * Drawn only while `pos` is set, unless `keepMounted`: then it is in the document, hidden, while
  * closed, so a trigger whose `aria-describedby` is always set names an element that exists.

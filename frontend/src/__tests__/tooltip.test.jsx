@@ -159,10 +159,42 @@ describe('one bubble for HelpTip and the tabs', () => {
     expect(APP_CSS.indexOf('.tooltip-bubble {')).toBeGreaterThan(APP_CSS.indexOf('.help-tip {'))
   })
 
-  /* A native dialog shown with showModal() is in the top layer, above anything else in <body>. */
-  it('opens inside an open native dialog, so the dialog cannot cover it', () => {
-    render(<dialog open><HelpTip label="About this" text="An explanation." /></dialog>)
-    fireEvent.mouseEnter(screen.getByRole('button', { name: 'About this' }))
+})
+
+/**
+ * An open dialog is drawn in the top layer and the page outside it is inert, so a bubble portalled
+ * to <body> would sit beneath the backdrop. Inside a dialog, the bubble goes into the dialog.
+ * (Adapted from the dialogs' own test: here a plain `<dialog open>` stands in for Modal.)
+ */
+describe('a tooltip inside a dialog', () => {
+  it('draws a help tip\'s bubble inside the open dialog', () => {
+    render(<dialog open aria-label="Digital Nameplate"><HelpTip text="The year it was built." /></dialog>)
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'More information' }))
+    expect(screen.getByRole('dialog')).toContainElement(tip())
     expect(tip().parentElement.tagName).toBe('DIALOG')
+  })
+
+  it('still draws it in <body> on a page with no dialog', () => {
+    render(<HelpTip text="The year it was built." />)
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'More information' }))
+    expect(tip().parentElement).toBe(document.body)
+  })
+
+  /* A confirmation opens over a form: the first open dialog in the document is the one beneath. */
+  it('draws it in the dialog its trigger sits in, not the first open one', () => {
+    render(<>
+      <dialog open aria-label="Edit Metric"><p>The form beneath.</p></dialog>
+      <dialog open aria-label="Confirm"><HelpTip text="What confirming does." /></dialog>
+    </>)
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'More information' }))
+    expect(screen.getByRole('dialog', { name: 'Confirm' })).toContainElement(tip())
+    expect(screen.getByRole('dialog', { name: 'Edit Metric' })).not.toContainElement(tip())
+  })
+
+  it('draws a tab\'s tooltip inside the dialog too', () => {
+    render(<dialog open aria-label="Pick"><Harness /></dialog>)
+    fireEvent.mouseEnter(tab('Registered'))
+    wait(TOOLTIP_DELAY_MS)
+    expect(screen.getByRole('dialog')).toContainElement(tip())
   })
 })
