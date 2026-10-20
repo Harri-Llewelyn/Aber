@@ -2665,11 +2665,13 @@ re-render).
 > **There is no shared broker account.** The roles in `mosquitto/dynsec-roles.json` confine each
 > account:
 >
-> - `aber_ingestion`: read plus NCMD only
+> - `aber_ingestion`: read, plus rebirth NCMDs, its own primary-host STATE, and the Directory and
+>   Unified Namespace topics
 > - `aber_i3x`: read only
 > - `aber_monitor`: `$SYS` only
 > - the plugin's admin: `$CONTROL` only
-> - every gateway: its own edge node, through a role generated for it
+> - every gateway: its own edge node, through the shared `gateway` role, whose rules name the
+>   connecting username (`%u`)
 >
 > One credential holding `readwrite spBv1.0/#` could forge `DBIRTH`/`DDATA` for any machine on the
 > site. `verify_gateway_binding()` cannot detect that for a correctly bound device.

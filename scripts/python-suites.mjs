@@ -815,6 +815,16 @@ export const SUITES = {
       'the only one the broker will accept, and getting this wrong shows up as CONNACK rc=5 with ' +
       'nothing naming the cause.',
   },
+  'supabase/migrations/test_capture_playback_behaviour.py': {
+    lanes: ['db'],
+    why:
+      'What the capture and playback gates do when called. ensure_shadow_devices() and ' +
+      "start_playback_job() refuse each case by SQLSTATE, not by a reading of their source; a lane " +
+      'is minted with its origin\'s contract and reused; the manifest is capped at 50 names with ' +
+      'the true count; both startup sweeps fail only what is in flight and answer only their own ' +
+      'worker; and RLS and grants on the five capture and playback tables admit each role, both ' +
+      'machine principals and anon to exactly what the README says.',
+  },
   'supabase/migrations/test_capture_retention.py': {
     lanes: ['db'],
     why:
@@ -1063,6 +1073,19 @@ export const SUITES = {
       'The read-only BI role. Four of its five checks skip without a historian; the point of it ' +
       'is that a reporting credential cannot write, which only means anything against a real one.',
   },
+  'ingestion/test_capture_lifecycle_stack.py': {
+    lanes: ['stack'],
+    why:
+      'WHAT THE OTHER TWO CAPTURE SUITES NEVER RUN, each of which the 1.4.0 audit could only try by ' +
+      'hand: a gateway capture of two devices replayed under both lanes; a duration cap ending a ' +
+      'job; an edge node that ignores the rebirth request, whose capture then holds no birth and ' +
+      'whose replay is refused having published nothing; Stop during a replay; and each worker ' +
+      'restarted during a job, with kubectl. A fixture Host gateway publishes live from the suite. ' +
+      'The two restarts skip, saying why, without kubectl and the k3d-aber context, and restarting ' +
+      'ingestion pauses it for the whole stack. Also runs the broker-captures policies on the real ' +
+      "storage.objects: the daemon's arm, the worker's arm and a device's folder, which the db lane " +
+      'can only run on a stand-in. Needs `playback.enabled`, which values-dev.yaml sets.',
+  },
   'ingestion/test_playback_replay.py': {
     lanes: ['stack'],
     why:
@@ -1074,10 +1097,11 @@ export const SUITES = {
       'because a refused MQTT connection is invisible past CONNECT and Sparkplug publishes at ' +
       'QoS 0. So this mints the credential (which is what exercises the DELIVERY path), waits for ' +
       'the worker to report that it holds the target, replays a fixture, and asserts the rows ' +
-      'arrived. THE SENTINEL METRIC IS LOAD BEARING: the recorded device is a real device the ' +
-      'seeded fleet is publishing as, so "nothing was written under the recorded id" cannot be ' +
-      'asserted directly -- a metric name unique to the run can only have come from this replay, ' +
-      'which is what makes the identity rewrite checkable against a live historian. A second ' +
+      'arrived. The recorded gateway and device are fixtures the suite makes, since a fresh ' +
+      'install has none (#731). THE SENTINEL METRIC IS LOAD BEARING: a historian holding live ' +
+      'traffic and earlier runs cannot say which rows one replay wrote, and a metric name unique to ' +
+      'the run can only have come from this replay, which is what makes the identity rewrite ' +
+      'checkable against a live historian. A second ' +
       'replay has its credential re-issued partway, as the Gateways page does, and must end ' +
       'FAILED naming the lost connection and counting only what went out. Needs ' +
       '`playback.enabled`, which values-dev.yaml sets.',

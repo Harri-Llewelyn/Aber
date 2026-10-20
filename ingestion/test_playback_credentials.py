@@ -25,6 +25,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -178,36 +179,96 @@ class ChangeDetection(unittest.TestCase):
     to know it. Every mint after the first one has that same shape, because it rotates a gateway
     already held.
 
-    The comparison the loop makes is asserted here directly rather than through the loop, which
-    needs a Supabase client and a broker.
+    `_Holdings.refresh()` is what the loop calls each pass. These drive it through a real delivery
+    file and read what it logs and what the next heartbeat reports, with a stand-in for Supabase.
     """
 
     GW = "gwy160000000000400080000"
+    OTHER = "gwy170000000000400080000"
+    ADDED = "gwy180000000000400080000"
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.path = os.path.join(tmp.name, "credentials.json")
+        # Only the delivered file is a source here.
+        env = patch.dict(os.environ, {})
+        env.start()
+        self.addCleanup(env.stop)
+        for key in ("MQTT_PLAYBACK_CREDENTIALS", "MQTT_PLAYBACK_USER", "MQTT_PLAYBACK_PASSWORD"):
+            os.environ.pop(key, None)
+        held_at = patch.object(playback_worker, "PLAYBACK_CREDENTIAL_FILE", self.path)
+        held_at.start()
+        self.addCleanup(held_at.stop)
+
+    def deliver(self, mapping):
+        with open(self.path, "w", encoding="utf-8") as handle:
+            json.dump(mapping, handle)
+
+    def holding(self, mapping):
+        """A worker holding `mapping`, whose startup report has gone out."""
+        self.deliver(mapping)
+        holdings = playback_worker._Holdings()
+        holdings.report(_Reports())
+        holdings._changed.clear()
+        return holdings
+
+    def refreshed(self, holdings, mapping):
+        """Deliver `mapping`, refresh, and return (the change logged, the next report)."""
+        self.deliver(mapping)
+        with self.assertLogs(playback_worker.logger, level="INFO") as logs:
+            holdings.refresh()
+        reports = _Reports()
+        holdings.report(reports)
+        return "\n".join(logs.output), reports.credentials[-1]
 
     def test_a_rotation_is_a_change_even_though_the_ids_are_identical(self):
-        previous = {self.GW: "stale-password-0000000000"}
-        current = {self.GW: "delivered-password-000000"}
-        self.assertEqual(set(previous), set(current), "the ids are the same -- that is the trap")
-        self.assertNotEqual(previous, current, "a rotation must compare as a change")
+        holdings = self.holding({self.GW: "stale-password-0000000000"})
+        logged, report = self.refreshed(holdings, {self.GW: "delivered-password-000000"})
+        self.assertIn("rotated %s" % self.GW, logged)
+        self.assertEqual(report["p_edge_nodes"], [self.GW], "the ids are the same -- that is the trap")
+        self.assertEqual(report["p_rotated"], [self.GW],
+                         "a re-issue was not reported, so the dialog would refuse the target for good")
+        self.assertTrue(holdings._changed.is_set(), "the heartbeat was not woken for the change")
+        self.assertNotIn("delivered-password", logged)
 
     def test_the_three_kinds_of_change_are_distinguishable(self):
-        other = "gwy170000000000400080000"
-        previous = {self.GW: "old-password-000000000000", other: "kept-password-00000000000"}
-        current = {self.GW: "new-password-000000000000", "gwy18" + "0" * 19: "added-password-0000000000"}
-
-        gained = sorted(set(current) - set(previous))
-        lost = sorted(set(previous) - set(current))
-        rotated = sorted(k for k in set(current) & set(previous) if current[k] != previous[k])
-
-        self.assertEqual(gained, ["gwy18" + "0" * 19])
-        self.assertEqual(lost, [other])
-        self.assertEqual(rotated, [self.GW])
+        holdings = self.holding({self.GW: "old-password-000000000000",
+                                 self.OTHER: "kept-password-00000000000"})
+        logged, report = self.refreshed(holdings, {self.GW: "new-password-000000000000",
+                                                   self.ADDED: "added-password-0000000000"})
+        self.assertIn("gained %s" % self.ADDED, logged)
+        self.assertIn("rotated %s" % self.GW, logged)
+        self.assertIn("lost %s" % self.OTHER, logged)
+        self.assertEqual(report["p_edge_nodes"], [self.GW, self.ADDED])
+        # A gained gateway is a new password picked up too; a lost one is no longer reported.
+        self.assertEqual(report["p_rotated"], [self.GW, self.ADDED])
 
     def test_an_unchanged_map_is_not_a_change(self):
         # The loop runs every three seconds. A comparison that reported a change each pass would
         # fill the log with the one line an operator is meant to look for after issuing.
-        held = {self.GW: "steady-password-000000000"}
-        self.assertEqual(held, dict(held))
+        holdings = self.holding({self.GW: "steady-password-000000000"})
+        with self.assertNoLogs(playback_worker.logger, level="INFO"):
+            holdings.refresh()
+        self.assertFalse(holdings._changed.is_set(), "an unchanged file woke the heartbeat")
+        reports = _Reports()
+        holdings.report(reports)
+        self.assertEqual(reports.credentials[-1]["p_rotated"], [])
+
+
+class _Reports:
+    """Supabase as the heartbeat calls it: rpc(name, params).execute(), recorded."""
+
+    def __init__(self):
+        self.credentials = []
+
+    def rpc(self, name, params):
+        if name == "playback_report_credentials":
+            self.credentials.append(params)
+        return self
+
+    def execute(self):
+        return None
 
 
 class DeliveryPath(unittest.TestCase):

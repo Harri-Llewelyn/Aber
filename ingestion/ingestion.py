@@ -51,9 +51,9 @@ DB_PASSWORD = os.getenv("DB_PASSWORD")
 # MQTT Broker configuration
 MQTT_HOST = os.getenv("MQTT_HOST", "mosquitto")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
-# The INGESTION principal, not a shared platform account. The broker's roles grant it `read
-# spBv1.0/#` plus `write spBv1.0/+/NCMD/+` and nothing else, which is exactly what this daemon
-# does: it is a consumer whose only publish() is the rebirth NCMD in request_rebirth().
+# The INGESTION principal, not a shared platform account. The broker's `ingestion` role grants it
+# `read spBv1.0/#` and publishes of the rebirth NCMD (request_node_rebirth()), its own primary-host
+# STATE, and the Directory and UNS subtrees: never an edge node's telemetry.
 MQTT_USER = os.getenv("MQTT_USER", "aber_ingestion")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 

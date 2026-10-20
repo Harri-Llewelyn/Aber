@@ -122,12 +122,9 @@ EXPECTED_VALUES = [2.0, 3.0]
 
 def capture_version():
     """
-    The capture format version, read out of capture.py as TEXT rather than imported.
-
-    `capture` imports the GENERATED protobuf module, which is gitignored and built by `protoc`
-    inside the ingestion image -- so importing it here would make this suite unrunnable on the
-    host, which is exactly where the stack lane runs it. validate.py is in-cluster for the same
-    reason.
+    The capture format version, read out of capture.py as text. Importing `capture` needs the
+    generated Sparkplug binding, which `npm run proto` makes (and `npm run dev:test` runs); reading
+    the text keeps this suite's import free of it.
     """
     source = (REPO / "ingestion" / "capture.py").read_text(encoding="utf-8")
     match = re.search(r"^CAPTURE_VERSION\s*=\s*(\d+)", source, re.M)
@@ -469,7 +466,7 @@ class _ReplayFixture(unittest.TestCase):
 
         This is the half that has broken twice, and it is why the suite mints rather than reading
         whatever the stack happens to hold: `gateway_is_playback_delivery_target()` answers
-        is_simulated, the edge function passes it as `deliver_to_playback`, and the credential
+        is_shadow (0183), the edge function passes it as `deliver_to_playback`, and the credential
         service writes the password where the worker reads. Nothing else exercises that chain.
         """
         status, body = _request(

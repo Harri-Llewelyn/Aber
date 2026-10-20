@@ -363,8 +363,9 @@ kubectl -n <namespace> get secret mosquitto-passwords \
 
 This is the constraint the whole design turns on, and it is not a limitation to be worked around.
 
-The broker confines every gateway to `spBv1.0/+/+/<its username>/#` through a role generated for
-it — the topic's edge-node segment must equal the connecting username — and the policy's rule
+The broker confines every gateway to `spBv1.0/+/+/<its username>/#` through the one shared `gateway`
+role, whose rules name the connecting username (`%u`) — the topic's edge-node segment must equal
+it — and the policy's rule
 behind that (`mosquitto/README.md`) is that **no principal holds wildcard write**. That replaced a
 shared account which could forge DBIRTH and DDATA for
 every machine on site, a forgery `verify_gateway_binding()` cannot detect *"since a forged message
@@ -595,20 +596,26 @@ lanes** makes. Prepare them there, then map each captured device onto its lane.
 ### Marking what was replayed
 
 Replayed telemetry is written to the historian exactly like observed telemetry, because that is the
-point. `gateways.is_simulated` (`0052`) is what says otherwise, and **devices inherit it through
-`gateway_id` rather than carrying a flag of their own** — see that migration's header for why a
-stored device-level copy would need two triggers to maintain an invariant the join gives for
-nothing.
+point: synthetic devices roll up exactly like real ones, which is the behaviour under test when the
+question is "do the rollups work".
 
-It is a label, not a filter: nothing on the ingestion path branches on it. Retention, dashboards and
-reports can tell replayed data apart through a join they already make, and synthetic devices roll up
-exactly like real ones — which is the behaviour under test when the question is "do the rollups
-work".
+**Only the Supabase database can tell a replayed reading apart.** A replay is written under a replay
+lane: a device of the Playback gateway that carries `devices.shadow_of`. That gateway is `is_shadow`
+and `is_simulated` (`0052`, `0059`), and devices inherit its flags through `gateway_id` rather
+than carrying copies. The dashboard reads them: the Devices page badges a lane `REPLAY LANE`.
 
-**A separate column from `deployment`**, which is about where the connector runs rather than
-whether the readings are real, but not an independent one: the table holds a simulated gateway to
-`deployment = 'host'` (`gateways_simulated_is_host`). A capture is replayed onto a simulated
-gateway, so never onto a remote one.
+**The historian cannot.** Its `telemetry` table holds an asset id, a metric and a value, with no
+gateway and no flag, and the rollups aggregate every asset alike. So a consumer that reads only the
+historian has nothing to join on. The Power BI reader sees a lane as one more device with a bare
+`dev…` id, and so does a Grafana panel a site writes. Nothing removes a lane's readings either: no
+application role may delete from the historian, so they stay until retention drops them. Marking
+them for every consumer, and a way to remove them, are
+[#935](https://github.com/Harri-Llewelyn/Aber/issues/935).
+
+**A separate flag from `deployment`**, which is about where the connector runs rather than whether
+the readings are real, but not an independent one: the table holds a simulated gateway to
+`deployment = 'host'` (`gateways_simulated_is_host`). The Playback gateway is one, so a capture is
+never replayed onto a remote gateway.
 
 ### Where captures are kept
 
@@ -749,8 +756,9 @@ recorded before them falls back to reading the file, which is slower and correct
 a manifest for uploads on the pass that already validates the file, so an uploaded capture does not
 read as broken beside a recorded one.
 
-**Single-flight, in the database**: a partial unique index on `status = 'RECORDING'` allows one
-capture at a time across the whole stack, where two browser tabs cannot race it. Widening the index
+**Single-flight, in the database**: a partial unique index on a status of `PENDING` or `RECORDING`
+allows one capture at a time across the whole stack, queued or running, where two browser tabs
+cannot race it. Widening the index
 to the subject would permit one per subject and turn the page's running card into a list; that is a
 deliberate change rather than a default.
 
@@ -900,8 +908,8 @@ that gateway's own subtree. `defaultACLAccess` denies both. So a worker holding 
 target's credential may issue `spBv1.0/#` and still be handed nothing outside that edge node — the
 confinement claim above holds, and it holds at delivery rather than at subscription.
 
-**The broker cannot say "simulated gateways", and does not need to.** A role is a list of topic
-patterns; `is_simulated` is a database predicate, and no role can consult Postgres. Per-gateway
+**The broker cannot say "the Playback gateway", and does not need to.** A role is a list of topic
+patterns; `is_shadow` is a database predicate, and no role can consult Postgres. Per-gateway
 confinement delivers the guarantee anyway — a worker connected as
 `gwyAAA…` cannot publish under `gwyBBB…`, and the broker drops the attempt at the network protocol
 layer before any subscriber sees it. A topic-shaped rule such as `spBv1.0/+/+/simulated_#` is not a
@@ -1208,9 +1216,11 @@ jobs, so any playback longer than two minutes made the dialog say the worker was
 this worker.** A publish the broker refuses is dropped with no PUBACK at QoS 0, so a job whose
 topics were wrong would count every message as sent and report success having moved nothing. The
 answer is not an instrument — there is none to build at QoS 0 — it is that the topics cannot be
-wrong: `plan_playback()` rewrites every one onto the edge node the worker authenticated as, and
-`test_playback_replay.py` replays a fixture on a live stack and asserts the rows arrived under the
-replay lane and under no other asset. That check is the observation the protocol will not give.
+wrong: `plan_playback()` rewrites every one onto the edge node the worker authenticated as. Three
+stack suites replay on a live stack and assert the rows arrived under the replay lane and under no
+other asset: `test_playback_replay.py` replays an uploaded file, `test_recorded_capture_replay.py`
+one the daemon recorded, and `test_capture_lifecycle_stack.py` a gateway's capture of two devices.
+That check is the observation the protocol will not give.
 
 **The sanity window is reported, and a total loss is refused** (`0109`). A capture carrying
 timestamps the daemon will drop — a stale reading, a device clock skewed against the recorder's, a
@@ -1248,11 +1258,12 @@ capture itself to show it in the dialog.
 
 ### What the page adds that the CLI cannot, and two things neither does
 
-- **The device map from dropdowns**, built from the devices actually bound to the target gateway,
+- **The device map from dropdowns**, built from the replay lanes of the Playback gateway,
   instead of typing 24-character ids.
-- **Refusal rather than warning** when a target is not `is_simulated`. The CLI can only warn, having
-  no view of the directory; the page has one, which turns `0052`'s marking from a label into a
-  precondition.
+- **A refusal for any target but the Playback gateway**, in the database: `start_playback_job()`
+  refuses a gateway that is not simulated, and the `playback_jobs` trigger one that is not
+  `is_shadow`. The CLI has no view of the directory, so it checks only that `--as-gateway` is the
+  account it connects as.
 - **The credential state shown before the click**, using the gate's own predicate as a computed
   field, so a job is not accepted and then failed a second later.
 
@@ -1513,9 +1524,10 @@ dashboard and a broker capture ask too, past the rate limit below, through
   next one too, and retrying per message is exactly the flood the limit exists to prevent.
 - The daemon ignores `NCMD`/`DCMD` on its own wildcard subscription, so its own request coming
   straight back is not read as edge-node traffic.
-- The ingestion role permits **exactly this and nothing more**: it holds read of `spBv1.0/#` plus
-  publish of `spBv1.0/+/NCMD/+`, so the daemon can ask for a rebirth and cannot publish DBIRTH or
-  DDATA at all. Each gateway's own role (`spBv1.0/+/+/<sparkplug_id>/#`) covers receiving it.
+- The ingestion role permits **exactly this and nothing more** in the Sparkplug namespace: it holds
+  read of `spBv1.0/#`, and publish of `spBv1.0/+/NCMD/+` and of its own primary-host STATE. So the
+  daemon can ask for a rebirth and cannot publish DBIRTH or DDATA at all. The shared `gateway` role (`spBv1.0/+/+/%u/#`, the username being the gateway's
+  `sparkplug_id`) covers each gateway receiving it.
   That split is the point: this credential cannot forge telemetry for a device that is correctly
   bound to its gateway — the one forgery `verify_gateway_binding()` cannot detect, because such a
   message satisfies it by construction.
