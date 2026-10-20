@@ -56,6 +56,15 @@ It applies from 1.0.0 onwards. An install older than that is reinstalled rather 
 - **Might you roll back to 1.3.x?** Read the rollback steps for
   [*the broker*](#from-140-the-broker-runs-mosquitto-21-and-refuses-a-message-over-16-mib) and
   [*the forge's account*](#from-140-the-forges-machine-account-is-a-bot-with-a-scoped-token) first.
+- **A Grafana datasource of your own, beyond the four Aber provisions?** Keep its plugin first: see
+  [*Grafana runs only the datasource plugins Aber provisions*](#from-150-grafana-runs-only-the-datasource-plugins-aber-provisions).
+- **A script that uploads captures, or marks a playback target or replay lane, through the API?**
+  Change it first: see [*a script that uploads captures must change*](#from-150-a-script-that-uploads-captures-or-marks-a-playback-target-must-change).
+- **No use for the playback worker?** Set `playback.enabled: false` first: see
+  [*every site runs the playback worker*](#from-150-every-site-runs-the-playback-worker).
+- **A recording of a deleted gateway or device you want to keep, or Grafana pointed at a Loki of
+  your own?** Check them first: see
+  [*The upgrade to 1.5.0*](#the-upgrade-to-150-deletes-orphaned-capture-files-and-moves-grafanas-alert-history-to-loki).
 - **Pinned `supabaseDb.image.tag` to run another server build?** Set `supabaseDb.serverImage`
   first: see [*the platform database runs Aber's own image*](#from-120-the-platform-database-runs-abers-own-image).
 - **An admission webhook that injects sidecars?** Check each tolerates the runtime's default seccomp
@@ -916,6 +925,141 @@ Every workload rolls once, for the read-only root filesystems. Beyond that:
   node's minimum size is too. `helm upgrade --reuse-values` keeps 768Mi.
 - **Node-RED** rewrites its generated `settings.js` once, keeping the previous file as
   `settings.js.bak`.
+
+### From 1.5.0, Grafana runs only the datasource plugins Aber provisions
+
+Up to 1.4.x, Grafana started a process for each of the thirteen datasource plugins in its image,
+though Aber provisions three types (#907). 1.5.0 turns the other ten off in `grafana.ini`, which
+frees about 300 MiB of Grafana's 1 GiB memory limit.
+
+**A datasource of your own of one of these types stops working.** It stays listed, with a generic
+icon, but its health check and every panel and alert rule that queries it answer 404 `Plugin not
+registered`. Nothing is logged when Grafana starts. The ten are Elasticsearch (`elasticsearch`),
+Google Cloud Monitoring (`stackdriver`), InfluxDB (`influxdb`), Jaeger (`jaeger`), Microsoft SQL
+Server (`mssql`), MySQL (`mysql`), OpenTSDB (`opentsdb`), Pyroscope (`grafana-pyroscope-datasource`),
+Tempo (`tempo`) and Zipkin (`zipkin`).
+
+1. Sign in to Grafana as an admin and open *Connections → Data sources*. Aber provisions four:
+   TimescaleDB, Supabase, Prometheus and Loki. Any other is yours.
+2. For each of yours of a type above, list its id in `grafana.enablePlugins` before upgrading:
+
+   ```yaml
+   grafana:
+     enablePlugins: [mysql]
+   ```
+
+Nothing is deleted. Setting the value after the upgrade brings the datasource back unchanged. An id
+that `grafana.ini` does not turn off fails the render ([`grafana/README.md`](../grafana/README.md#bundled-plugins)).
+
+### From 1.5.0, a script that uploads captures or marks a playback target must change
+
+The API now refuses some acts the dashboard never makes (#911, #918, #926, #933). The dashboard
+needs nothing. A script of your own that makes one gets an error:
+
+- **Uploading a capture.** Call `begin_capture_upload()` first. Upload the file to the path it
+  returns, then call `register_uploaded_capture()` with that path. An upload straight to
+  `<subject>/capture.json` is refused. `docs/openapi.yaml` has the steps, under `/rest/v1/captures`.
+- **Deleting a stored capture's file.** Storage refuses it while the capture's row exists. Delete
+  the row first, as the Capture page does. The ingestion daemon deletes a file left behind within
+  two hours: once it is an hour old, at its next hourly sweep.
+- **Marking a playback target or a replay lane.** Setting `gateways.is_shadow`, creating a device
+  with `devices.shadow_of`, or changing or clearing it, is refused for every API role. So is moving
+  a replay lane to another gateway. The seeded Playback gateway is the only target, and **Prepare
+  replay lanes** in the playback dialog makes the lanes.
+- **Deleting a gateway a playback was published as.** Refused, so the record of who replayed what
+  stays. Archive it instead.
+- **Asking what is being recorded or replayed as an Operator.** `is_active_capture_object()`,
+  `is_active_playback_capture()` and `playback_stale_credentials()` now answer `false` or nothing
+  to a role that cannot read capture and playback jobs.
+
+A gateway someone marked as a playback target on 1.4.x keeps its mark, and keeps working as one.
+To find one, run this on the platform database. No rows means the site has only the Playback
+gateway Aber seeds:
+
+```bash
+kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -c \
+  "SELECT id, name, is_archived FROM gateways WHERE is_shadow AND id <> '16000000-0000-4000-8000-000000000001';"
+```
+
+To take a row out of playback, look at its devices first: its replay lanes stay on it. Then clear
+the mark in the same way, with `UPDATE gateways SET is_shadow = false WHERE id = '<id>';`.
+
+### From 1.5.0, every site runs the playback worker
+
+`playback.enabled` now defaults to `true` (#929). Up to 1.4.x the chart deployed the worker only
+when a site set it, and the installer never did, so **Play back** on the Capture page queued a job
+that nothing ran. The upgrade starts the `playback` Deployment on a site that never set the key. A
+site that set `playback.enabled: false` keeps it off.
+
+- **It costs one pod**, from the ingestion image, requesting 25m CPU and 96Mi of memory, with a
+  256Mi limit (`playback.resources`). Between playbacks it checks the job queue every 3 seconds.
+  Its `/tmp` holds the capture it replays: `supabaseStorage.captureFileSizeLimit` plus 16Mi, so
+  116 MiB by default, on the node's disk.
+- **It can publish nothing** until someone issues the Playback gateway's broker credential, which
+  delivers the password to it. Under NetworkPolicies it reaches the broker and the API gateway, and
+  accepts no connections.
+- **A playback now needs ingestion running** (#930). One started while ingestion is down waits a
+  minute, then fails. One running when ingestion restarts fails too, saying how far it got. Start it
+  again: it replays from the start.
+
+To keep the worker off, set `playback.enabled: false` before upgrading. The Capture page then says
+the worker is not deployed, and names the setting.
+
+### From 1.5.0, a capture with no NBIRTH cannot be played back
+
+A replay is now a Sparkplug session of its own, which opens with the edge node's birth certificate,
+its NBIRTH (#910). Playback refuses a stored capture with none, and says why. Before, such a capture
+played, and its readings could be filed under the metric names of the capture replayed before it.
+
+Record such a capture again on the Capture page, which asks the edge node for its NBIRTH. Two kinds
+are refused:
+
+- A capture marked **NO BIRTH** on the Capture page.
+- A capture stored before 1.5.0 with a device's DBIRTH but no NBIRTH. It still reads *Birth
+  certificate: Captured*, and only its playback says otherwise.
+
+### The upgrade to 1.5.0 deletes orphaned capture files and moves Grafana's alert history to Loki
+
+Every workload rolls once, as at every release. Beyond that:
+
+- **Capture files nothing refers to are deleted, minutes after the upgrade** (#932). The ingestion
+  daemon now deletes each file in the `broker-captures` bucket that no stored capture, recording,
+  open upload or playback names, once it is an hour old. Its first pass runs as it starts. On an
+  existing site, that removes the recordings of gateways and devices deleted before 1.5.0, and files
+  left by failed uploads. To keep one, copy it out before upgrading: a backup with
+  `backup.includeStorage` on holds it. This lists them:
+
+  ```bash
+  kubectl -n aber exec -i statefulset/supabase-db -c supabase-db -- psql -U supabase_admin -d postgres -c \
+    "SELECT o.name, o.updated_at FROM storage.objects o WHERE o.bucket_id = 'broker-captures'
+       AND NOT EXISTS (SELECT 1 FROM public.captures c WHERE c.storage_path = o.name) ORDER BY 1;"
+  ```
+
+- **Grafana keeps its alert history in Loki from now on** (#992), so Alerting > History, which the
+  dashboard's alert counter links to, can list every rule. The history Grafana kept before stays in
+  its database, but that page and each rule's History tab no longer show it. Loki keeps the new
+  history for 30 days.
+  - **With `grafana.lokiUrl` set**, Grafana writes the history to that Loki, with no credentials and
+    no tenant header. If that Loki refuses, rules still evaluate and notify, but History stays empty.
+    Make sure it accepts pushes from Grafana. To check after the upgrade, this should print nothing:
+
+    ```bash
+    kubectl -n aber logs deploy/grafana -c grafana | grep -E 'alert state history|remote Loki backend'
+    ```
+
+- **The playback worker starts** on a site that never set `playback.enabled` (see
+  [*every site runs the playback worker*](#from-150-every-site-runs-the-playback-worker)). A
+  playback running during the upgrade fails when ingestion restarts. Start it again afterwards.
+- **What replays left on the Playback gateway is cleared** (#945). Migration `0186` empties the
+  health a replayed appliance reported as Playback's: uptime, load, memory, disk, CA expiry, agent
+  version and flow hash. A *Gateway CA Expiring* alert firing for Playback clears at its next
+  evaluation, and so does *Ingestion Consuming Nothing* on a stack whose only devices are replay
+  lanes (#916). The Audit Trail gains one row for the Playback gateway if it held a replayed CA date
+  or agent version. False `FLOW_DEPLOYED` rows earlier replays wrote for it stay.
+- **Passwords of Simulated gateways may still be in the playback worker's file** (#919). Up to
+  1.4.x, issuing any Simulated gateway's broker credential delivered it there too. They go at the
+  next delivery. To clear them now, issue the Playback gateway's broker credential again when no
+  playback is running: **Generate Broker Credential** in its drawer on the Gateways page.
 
 ---
 
