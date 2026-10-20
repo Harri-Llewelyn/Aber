@@ -961,7 +961,7 @@ needs nothing. A script of your own that makes one gets an error:
   `<subject>/capture.json` is refused. `docs/openapi.yaml` has the steps, under `/rest/v1/captures`.
 - **Deleting a stored capture's file.** Storage refuses it while the capture's row exists. Delete
   the row first, as the Capture page does. The ingestion daemon deletes a file left behind within
-  the hour.
+  two hours: once it is an hour old, at its next hourly sweep.
 - **Marking a playback target or a replay lane.** Setting `gateways.is_shadow`, creating a device
   with `devices.shadow_of`, or changing or clearing it, is refused for every API role. So is moving
   a replay lane to another gateway. The seeded Playback gateway is the only target, and **Prepare
