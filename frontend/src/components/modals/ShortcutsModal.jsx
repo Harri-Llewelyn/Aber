@@ -73,7 +73,6 @@ export function ShortcutsModal({ onClose, singleKeyShortcuts = true }) {
       title="Keyboard shortcuts"
       icon={<IconKeyboard size={18} />}
       size="md"
-      layer="confirm"
       closeOnOverlay
       onClose={onClose}
       lead={singleKeyShortcuts ? null : 'Single-key shortcuts are turned off, so the keys marked Off do nothing. Profile › Appearance turns them back on.'}

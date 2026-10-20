@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { IconCopy, IconCheck } from './Icons'
+import { overlayHost } from './Modal'
 
 const FEEDBACK_MS = 1600
 const TAIL_CHARS = 24
@@ -7,7 +8,8 @@ const TAIL_CHARS = 24
 /**
  * Copy the given text, returning true on success. `navigator.clipboard` exists only in a secure
  * context, and the dashboard is served over plain HTTP, so anyone reaching it by IP has none; the
- * execCommand fallback is what makes copy work there.
+ * execCommand fallback is what makes copy work there. Its field goes in the open dialog when there
+ * is one: outside it the page is inert, and an inert field cannot be selected.
  */
 export async function copyText(text) {
   if (navigator.clipboard?.writeText) {
@@ -26,10 +28,10 @@ export async function copyText(text) {
     el.setAttribute('readonly', '')
     el.style.position = 'fixed'
     el.style.top = '-9999px'
-    document.body.appendChild(el)
+    overlayHost().appendChild(el)
     el.select()
     const ok = document.execCommand('copy')
-    document.body.removeChild(el)
+    el.remove()
     return ok
   } catch {
     return false

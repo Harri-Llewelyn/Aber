@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
@@ -19,6 +19,7 @@ export function ServicePrincipalDescribeModal({ principal, onClose, onChanged, s
   const [purpose, setPurpose] = useState(principal.purpose || '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  const nameRef = useRef(null)
 
   const close = useCallback(() => onClose(), [onClose])
 
@@ -51,6 +52,7 @@ export function ServicePrincipalDescribeModal({ principal, onClose, onChanged, s
       size="lg"
       onClose={close}
       lead="The name and purpose only. What the identity holds is fixed at creation: a wider grant would reach every token already issued for it, so that is a new machine identity."
+      initialFocus={nameRef}
       error={error}
       footer={
         <>
@@ -73,7 +75,7 @@ export function ServicePrincipalDescribeModal({ principal, onClose, onChanged, s
         <input
           id="principal-describe-name"
           className="form-control"
-          autoFocus
+          ref={nameRef}
           autoComplete="off"
           maxLength={NAME_MAX}
           value={name}

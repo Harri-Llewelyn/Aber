@@ -12,9 +12,10 @@ const onKeyDown = (e) => {
   if (e.key !== 'Escape') return
   const top = stack[stack.length - 1]
   if (!top) return
-  // Stop the same keypress reaching anything below -- a native <dialog>, or a listener a
-  // library bound first.
+  // Stop the same keypress reaching anything below -- a listener a library bound first -- and
+  // cancel it, so the browser does not also take it as a close request for an open <dialog>.
   e.stopPropagation()
+  e.preventDefault()
   top.current?.()
 }
 

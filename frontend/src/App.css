@@ -134,10 +134,11 @@
               opposite edges, so the tie never overlaps)
        100    the topbar
        200    a popover under the topbar: the user menu, global search, the sidebar mode menu
-       1000   the modal overlay
-       above 1000, the dialog confirm layer: set in the .modal block, above the modal it confirms
-       1200   the help-tip bubble, above any dialog
-       2000   the toast stack, above everything */
+       1200   the tooltip bubble (HelpTip and the tab bar)
+       2000   the toast stack
+     An open dialog is above every rung: showModal() draws it in the browser's top layer, and the
+     confirm layer, a dialog opened over another, is above that one because it opened later. The
+     page under a dialog is inert, so whatever must be used over a dialog goes inside it. */
 }
 
 [data-theme="light"] {
@@ -2042,21 +2043,38 @@ td.row-actions, th.row-actions {
 .tag-overflow:hover { border-color: var(--border-hover); color: var(--text-primary); }
 
 /* ===== Form / Modal ===== */
+/* The <dialog> that `Modal` opens with showModal(). The browser's own box for it is undone, so it
+   fills the window and centres `.modal`, the visible box; a click on it outside the box is a click
+   on the backdrop. Focus rests on it while no control has it, with no ring: the box shows where. */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: var(--scrim);
-  backdrop-filter: blur(4px);
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  outline: none;
+}
+
+.modal-overlay:not([open]) { display: none; }
+
+/* The page behind an open dialog, dimmed. */
+.modal-overlay::backdrop {
+  background: var(--scrim);
+  backdrop-filter: blur(4px);
   animation: fadeIn 0.15s ease;
 }
 
-/* A dialog that opens over another one (a confirmation over a form, the shortcuts list over
-   anything). Above the ordinary layer at 1000. */
-.modal-overlay-confirm { z-index: 1100; }
+/* Where focus goes when the control that opened a dialog has gone. Programmatic, so no ring. */
+main:focus { outline: none; }
 
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 

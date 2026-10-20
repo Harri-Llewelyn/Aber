@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
@@ -15,6 +15,7 @@ export function TakeBackupModal({ holds, onConfirm, onCancel }) {
   const [note, setNote] = useState('')
   const [error, setError] = useState(null)
   const [pending, run] = usePendingAction()
+  const noteRef = useRef(null)
 
   const submit = () => run(async () => {
     setError(null)
@@ -35,6 +36,7 @@ export function TakeBackupModal({ holds, onConfirm, onCancel }) {
         Taken by the backup service onto its own volume: {holds}. A backup taken here
         is <strong>pinned</strong>: the retention window does not apply until you release it.
       </>}
+      initialFocus={noteRef}
       error={error}
       footer={
         <>
@@ -56,7 +58,7 @@ export function TakeBackupModal({ holds, onConfirm, onCancel }) {
           maxLength={200}
           placeholder="before the areas migration"
           autoComplete="off"
-          autoFocus
+          ref={noteRef}
         />
         <p className="form-hint">
           Kept with the backup and shown on the list. Say why it was taken: it is what the next

@@ -3,6 +3,8 @@ import { copyText } from '../common/CopyableId'
 import { IconCheck, IconCopy, IconShieldAlert } from '../common/Icons'
 
 const COPY_FEEDBACK_MS = 1600
+/** Said in the dialog and in a toast when the browser refuses a copy. */
+const COPY_REFUSED = 'Could not reach the clipboard — select the value and copy it.'
 
 /**
  * A password manage-people minted, shown once: the warning, the person's address, and the password
@@ -12,15 +14,17 @@ const COPY_FEEDBACK_MS = 1600
  */
 export function PasswordShownOnce({ email, password, hint, showToast, children }) {
   const [copied, setCopied] = useState(false)
+  const [copyFailed, setCopyFailed] = useState(false)
   const copyTimer = useRef(null)
   useEffect(() => () => clearTimeout(copyTimer.current), [])
 
   const copy = useCallback(async () => {
     const ok = await copyText(password)
     setCopied(ok)
+    setCopyFailed(!ok)
     clearTimeout(copyTimer.current)
     copyTimer.current = setTimeout(() => setCopied(false), COPY_FEEDBACK_MS)
-    if (!ok) showToast?.('Could not reach the clipboard — select the value and copy it.', 'error')
+    if (!ok) showToast?.(COPY_REFUSED, 'error')
   }, [password, showToast])
 
   return (
@@ -52,6 +56,7 @@ export function PasswordShownOnce({ email, password, hint, showToast, children }
           </button>
         </div>
         {hint && <div className="form-hint">{hint}</div>}
+        {copyFailed && <div className="form-hint hint-danger" role="alert">{COPY_REFUSED}</div>}
       </div>
     </>
   )

@@ -7,6 +7,8 @@ import { IconCheck, IconCopy, IconEye, IconShieldAlert } from '../common/Icons'
 import { NodeRedCredentialSteps } from './GatewayCredentialModal'
 
 const COPY_FEEDBACK_MS = 1600
+/** Said in the dialog and in a toast when the browser refuses a copy. */
+const COPY_REFUSED = 'Could not reach the clipboard — select the value and copy it.'
 
 /**
  * Show a Host or Simulated gateway's broker credential again, for an Administrator who has lost it
@@ -18,6 +20,7 @@ export function ShowGatewayCredentialModal({ gateway, onClose, showToast }) {
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(null)
+  const [copyFailed, setCopyFailed] = useState(false)
 
   const copyTimer = useRef(null)
   useEffect(() => () => clearTimeout(copyTimer.current), [])
@@ -37,9 +40,10 @@ export function ShowGatewayCredentialModal({ gateway, onClose, showToast }) {
   const copy = useCallback(async (label, value) => {
     const ok = await copyText(value)
     setCopied(ok ? label : null)
+    setCopyFailed(!ok)
     clearTimeout(copyTimer.current)
     copyTimer.current = setTimeout(() => setCopied(null), COPY_FEEDBACK_MS)
-    if (!ok) showToast?.('Could not reach the clipboard — select the value and copy it.', 'error')
+    if (!ok) showToast?.(COPY_REFUSED, 'error')
   }, [showToast])
 
   const footer = credential
@@ -58,7 +62,7 @@ export function ShowGatewayCredentialModal({ gateway, onClose, showToast }) {
       title={<>Broker credential for “{gateway.gateway_name}”</>}
       size="lg"
       onClose={onClose}
-      error={error}
+      error={error || (copyFailed ? COPY_REFUSED : null)}
       footer={footer}
     >
       {!credential ? (
