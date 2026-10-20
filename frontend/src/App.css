@@ -4662,6 +4662,15 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
 /* Shared by the marker and the badge: lifts the selected one above its neighbours. A badge draws
    its ring as a box-shadow, which follows the pill's radius; a marker draws its own, above. */
 .trail-node-selected { z-index: 4; }
+
+/* Where a step in the drawer scrolls the marker it opens (scrollIntoView, nearest): its whole lane
+   clear of the pinned axis row and section heading above (25px and 29px), and the marker clear of
+   the sticky label column and the track's 14px end padding beside it. */
+.trail-track > .trail-node,
+.trail-track > .trail-cluster {
+  scroll-margin: calc(var(--trail-axis-height) + 38px) 14px 14px
+    calc(var(--trail-label-width) + var(--trail-lane-gap) + 14px);
+}
 .trail-cluster.trail-node-selected {
   box-shadow: 0 0 0 2px var(--bg-card), 0 0 0 4px var(--accent), 0 0 10px var(--accent-glow);
 }
@@ -4753,16 +4762,18 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   overflow-wrap: break-word;
 }
 
-/* Equal halves rather than content width: the two labels are different lengths, and a Next
-   button that sits wherever Previous happens to end moves under the cursor as you step. */
+/* Two equal columns, along the lane on the first row and between lanes on the second, rather than
+   content width: the labels are different lengths, and a Next button that sits wherever Previous
+   happens to end moves under the cursor as you step. */
 .trail-drawer-nav-btns {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 6px;
 }
 
 .trail-nav-btn {
-  flex: 1 1 0;
   justify-content: center;
+  gap: 5px;
   font-size: 11px;
 }
 

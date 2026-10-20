@@ -86,7 +86,7 @@ const selectEvent = async (pattern) => {
 /** Steps the drawer to the ingestion status flip: its own transaction, one row. */
 const stepToSingleRowAct = () => {
   const nav = document.querySelector('.trail-drawer-nav-btns')
-  fireEvent.click(within(nav).getByRole('button', { name: /Next/ }))
+  fireEvent.click(within(nav).getByRole('button', { name: 'Next' }))
 }
 
 const group = () => document.querySelector('.trail-causation')

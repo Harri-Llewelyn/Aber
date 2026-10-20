@@ -131,6 +131,8 @@ screen, and screen readers read it unevenly.
 - **One bubble.** `common/Tooltip.jsx` draws the bubble for HelpTip and for every tab, so the two
   always look alike (`.tooltip-bubble`, beside `.help-tip` in `App.css`). Inside an open native
   dialog it goes into the dialog, which sits in the top layer above anything portalled to `<body>`.
+  The Audit Trail drawer's step buttons use `useTooltip` too, so a button at an end can say why on
+  keyboard focus.
 - **It points at its control.** The bubble carries an arrow on the border facing the control, drawn
   as the popovers' are (*Popover arrows* in `App.css`). `placeTooltip` puts the bubble below the
   control, or above a control low in the window, with the arrow hanging from the bottom border. It
@@ -283,6 +285,33 @@ mean of its members' positions, so the x-axis still tells the truth, and its hov
 members share a `causation_id` (one act) or merely a timestamp. Ordering inside a cluster falls
 back to `event_id`, the order the rows were written, which is also how `causationSiblings()` orders
 the rows of one transaction.
+
+### How the Audit Trail drawer steps
+
+The event drawer moves along a lane and between lanes, like a cursor in a grid:
+
+- **← and →, or ◀ Previous and Next ▶,** step through the open lane's events. A lane is a kind and
+  an id (`laneKeyOf`), so a device, its nameplate and its schemas are three lanes and "Event 3 of 7"
+  counts the one on screen. The order is `byTimeThenId`, the badge's order: oldest first, and the
+  rows of one transaction, which share a time, in the order they were written.
+- **↑ and ↓, or Previous Entity and Next Entity,** move to the lane drawn above or below, across
+  section headings, and open its event nearest in time to the one open (`nearestInTime`; the
+  earlier of two as near). The order is the one on screen when the key is pressed, so a poll that
+  re-ranks the lanes moves the next press with it. Neither pair wraps. While the drawer is open the
+  page keeps all four keys, so ↑ and ↓ do not scroll the timeline; Page Up and Page Down still do.
+- **They stand down** where `shortcutAllowed` (`shortcuts.js`) says, so a dialog in front, a field,
+  a select and Ctrl, Cmd or Alt all keep them, and for a key a control has already taken. They are
+  not character keys, so the Single-key shortcuts setting does not cover them.
+- **At an end** a button is `aria-disabled`, not `disabled`: it stays in the Tab order, a press does
+  nothing, and its tooltip (the shared one, which shows on focus) says why. Previous at the oldest
+  event says what is loaded: Show more may hold older ones.
+- **What a screen reader hears.** The drawer does not take focus, so a step would change it
+  silently. A visually hidden `role="status"` line says what each step opened ("Event 4 of 7:
+  Updated, 14:02, Press 4"). It is drawn with the drawer and speaks after a step only, by key or
+  button, so opening the drawer reads as it does on every page.
+- **The marker follows.** After every step the selected marker is scrolled into view (`nearest`).
+  Its `scroll-margin` keeps it clear of the pinned axis row, the section heading and the label
+  column.
 
 ### What the Access Control page claims, and how it says so
 
