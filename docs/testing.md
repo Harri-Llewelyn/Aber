@@ -170,8 +170,10 @@ python ingestion/test_playback_replay.py
 # and its manifest are checked against what was published, and the file the daemon wrote is replayed
 # through the playback worker into the historian, under the replay lane and nowhere else. A second
 # subject is recorded to the 50 MiB size cap and replayed, and each worker's cgroup memory.peak must
-# stay under 60% of its limit. Same needs and environment as the suite above, whose helpers it
-# reuses; kubectl removes the fixture's broker account afterwards and reads the cgroups.
+# stay under 60% of its limit. A download is read as the page reads it, through
+# issue_capture_download() and a signed link, and a third subject's capture can be neither signed nor
+# read without that call, nor a minute after it. Same needs and environment as the suite above, whose
+# helpers it reuses; kubectl removes the fixture's broker account afterwards and reads the cgroups.
 python ingestion/test_recorded_capture_replay.py
 # Cold telemetry archival -- the object LAYOUT and the Parquet round trip. Needs pytest and pyarrow.
 #
@@ -375,8 +377,10 @@ python supabase/migrations/test_capture_playback_behaviour.py
 # decided before anything is written, and it is refused while its subject records or when a capture
 # was stored since it began; the size is the object's, not the browser's. A file nothing claims is
 # listed for the ingestion daemon to delete, a deleted subject's included, and nobody may delete
-# one something claims. Creates a stand-in storage.objects as supabase_admin, since the db lane has
-# no storage-api.
+# one something claims. A person reads a stored capture's file only for the minute after
+# issue_capture_download() recorded the download for them (0195); the bucket's policies and their
+# self-check run verbatim on a stand-in table. Creates a stand-in storage.objects as supabase_admin,
+# since the db lane has no storage-api.
 python supabase/migrations/test_capture_retention.py
 # Captures and replays leave an audit trail (0193). Starting and stopping a recording, storing an
 # upload or a recording, issuing a download link, deleting a capture, and starting and stopping a
@@ -418,10 +422,11 @@ python supabase/migrations/test_directory_images.py
 # gate refuses a version, link or `newer` the account menu could not show, and only
 # Service_ReleaseCheck may call it; its key reaches nothing else.
 python supabase/migrations/test_release_check.py
-# A person's own preferences (0188). Each person reads, creates and changes their own
+# A person's own preferences (0188, 0194). Each person reads, creates and changes their own
 # user_settings row and nobody else's, an Administrator included; anon and service_role hold
-# nothing; the CHECKs refuse an unknown theme or sidebar mode; the first sign-in's seed never
-# overwrites a row; and deleting the account deletes the row, with nothing in the Audit Trail.
+# nothing; the CHECKs refuse an unknown theme or sidebar mode; single-key shortcuts start on and
+# are never null; the first sign-in's seed never overwrites a row; and deleting the account
+# deletes the row, with nothing in the Audit Trail.
 python supabase/migrations/test_user_settings.py
 # The Backup Stale rule's clock (0144). No row while no backup job exists; the first job recorded
 # until one succeeds, then the start of the last success, which a later failure does not move; and

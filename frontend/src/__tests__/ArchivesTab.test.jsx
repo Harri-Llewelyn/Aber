@@ -678,15 +678,15 @@ describe('ArchivesTab layout', () => {
     expect(strip.parentElement).toBe(cards[0])
     expect(within(strip).getAllByRole('tab').map(t => t.textContent)).toEqual(['Archived', 'Retired'])
     expect(document.querySelector('.section-count')).toBeNull()
-    // The selected tab's "?" sits in the bar after the tab names. Neither stage has filters or
-    // actions, so no toolbar row is drawn and the table follows the bar.
-    const help = strip.querySelector(':scope > .tab-strip-help')
-    expect(help).toContainElement(screen.getByRole('button', { name: 'About archived entities' }))
+    // Each stage explains itself in its tab's tooltip; the bar has no "?". Neither stage has
+    // filters or actions, so no toolbar row is drawn and the table follows the bar.
+    expect(screen.getByRole('tab', { name: 'Archived' })).toHaveAccessibleDescription(/Restore returns one intact/)
+    expect(screen.getByRole('tab', { name: 'Retired' })).toHaveAccessibleDescription(/Only a tombstone remains/)
+    expect(strip.querySelector('.help-tip')).toBeNull()
     expect(document.querySelector('.filter-bar')).toBeNull()
     expect(strip.nextElementSibling).toHaveClass('table-wrap')
     fireEvent.click(screen.getByRole('tab', { name: 'Retired' }))
-    expect(help).toContainElement(screen.getByRole('button', { name: 'About retired entities' }))
-    expect(screen.queryByRole('button', { name: 'About archived entities' })).toBeNull()
+    expect(strip.querySelector('.help-tip')).toBeNull()
     expect(document.querySelector('.filter-bar')).toBeNull()
     expect(strip.nextElementSibling).toHaveClass('table-wrap')
   })

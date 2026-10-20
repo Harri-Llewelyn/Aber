@@ -182,14 +182,17 @@ describe('DirectoryTab service groups', () => {
     expect(tab(INGEST)).toHaveAttribute('aria-selected', 'true')
   })
 
-  it('explains the selected group with the "?" after the tab names, and counts nothing', async () => {
+  it('explains each group in its own tab\'s tooltip, with no "?" in the bar, and counts nothing', async () => {
     await renderTab()
 
-    for (const title of [APPS, INGEST, DATA]) {
+    for (const [title, says] of [
+      [APPS, /front door/],
+      [INGEST, /from a machine to the historian/],
+      [DATA, /built on/],
+    ]) {
+      expect(tab(title)).toHaveAccessibleDescription(says)
       openTab(title)
-      const tips = document.querySelectorAll('.tab-strip-help > .help-tip')
-      expect(tips).toHaveLength(1)
-      expect(tips[0]).toHaveAttribute('aria-label', `About ${title}`)
+      expect(document.querySelector('.tab-strip .help-tip')).toBeNull()
     }
     expect(document.querySelector('.section-count')).toBeNull()
     for (const t of screen.getAllByRole('tab')) expect(t.textContent).not.toMatch(/\d/)

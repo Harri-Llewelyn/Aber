@@ -1671,7 +1671,8 @@ paths:
         **Each act is in the Audit Trail (0193).** Storing a capture writes `CAPTURE_UPLOADED` or
         `CAPTURE_RECORDED`, and every deletion writes `CAPTURE_DELETED`, with why: deleted, replaced
         by an upload or a recording, or deleted with its gateway or device. A download goes through
-        `issue_capture_download()` first, which writes `CAPTURE_DOWNLOAD_ISSUED`.
+        `issue_capture_download()` first, which writes `CAPTURE_DOWNLOAD_ISSUED`: the bucket admits a
+        person to a stored capture's file only in the minute after it (0195).
       parameters:
         - { name: subject_kind, in: query, schema: { type: string, enum: [gateway, device] }, description: 'e.g. `eq.gateway`' }
         - { name: gateway_id, in: query, schema: { type: string, format: uuid } }
@@ -1729,9 +1730,12 @@ paths:
       summary: Record a capture download and answer the path to sign
       description: |
         Writes `CAPTURE_DOWNLOAD_ISSUED` to the Audit Trail, naming the caller and the capture, and
-        answers the capture's `storage_path`. The dashboard then signs a short-lived link for that
-        path with the Storage API, and signs nothing when this refuses. `Administrator`,
-        `Shopfloor_Manager` or `Auditor`, the roles the bucket admits to read (0193).
+        answers the capture's `storage_path`. It also opens a 60-second grant for the caller to read
+        that file, and the `broker-captures` bucket admits a person to a stored capture's file by
+        nothing else (0195). So sign the link with the Storage API straight after this answers: a
+        link signed later, or without this call, is refused. The dashboard signs nothing when this
+        refuses. `Administrator`, `Shopfloor_Manager` or `Auditor`, the roles the bucket admits to
+        read (0193).
       requestBody:
         required: true
         content:
@@ -2144,8 +2148,9 @@ paths:
       tags: [Registry]
       summary: Read your own display preferences
       description: |
-        One row per person (`0188`): the theme and sidebar layout the dashboard's Profile page
-        and account menu set, so they follow the account rather than the browser. RLS returns the
+        One row per person (`0188`, `0194`): the theme, sidebar layout and single-key shortcuts
+        the dashboard's Profile page and account menu set, so they follow the account rather than
+        the browser. RLS returns the
         caller's own row and nobody else's, an `Administrator` included; an empty array means
         this person has chosen nothing yet, and the defaults apply. `anon` and `service_role` hold
         nothing on the table.
@@ -2182,6 +2187,7 @@ paths:
                 user_id: { type: string, format: uuid, description: "The caller's own id." }
                 theme: { type: string, enum: [dark, light] }
                 sidebar_mode: { type: string, enum: [hover, expanded, collapsed] }
+                single_key_shortcuts: { type: boolean }
       responses:
         '201': { description: 'Created or changed.' }
         '400': { description: 'A value outside the CHECK (`23514`).' }
@@ -5253,6 +5259,10 @@ components:
           enum: [hover, expanded, collapsed]
           default: hover
           description: 'How the sidebar shows the page names: on hover, always, or never (icons only).'
+        single_key_shortcuts:
+          type: boolean
+          default: true
+          description: 'Whether the shortcuts that are one character with no modifier (`?`, `/`, `[` and `]`) act for this person (`0194`). Ctrl K and the arrow keys are not covered.'
         updated_at: { type: string, format: date-time, readOnly: true }
 
     SystemSetting:

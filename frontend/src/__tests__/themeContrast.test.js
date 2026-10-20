@@ -209,6 +209,12 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['chosen segment name',            tokenIn(paint('.segmented-option-checked', 'color')),    on(paint('.segmented-option-checked'), card), AA_TEXT],
     // The alert counter's link to Grafana's alert history, 11px in its footer.
     ['alert history link',             tokenIn(paint('.alert-pill-history', 'color')),          card, AA_TEXT],
+    // A message that links somewhere, in a toast and in the bell's list, both on --bg-card.
+    ['message link',                   tokenIn(paint('.toast-link', 'color')),                  card, AA_TEXT],
+    ['notification link',              tokenIn(paint('.notif-item-link', 'color')),             card, AA_TEXT],
+    // An alert row that links somewhere names the alert in the accent, and the row hovers --bg-glass.
+    ['alert row link',                 tokenIn(paint('.alert-pill-item-link .alert-pill-item-name', 'color')), card, AA_TEXT],
+    ['alert row link on hover',        tokenIn(paint('.alert-pill-item-link .alert-pill-item-name', 'color')), glass(card), AA_TEXT],
   ]
 
   it.each(cases)('%s clears its threshold', (label, token, bg, threshold) => {
@@ -372,6 +378,24 @@ describe('accent badges', () => {
       expect(rule[1]).toMatch(/(^|[;{\s])color:\s*var\(--accent-text\)/)
     }
   )
+})
+
+/**
+ * A link in the top bar's popovers and the toasts is accent text, as every link in the dashboard is,
+ * with no underline until it is pointed at or focused.
+ */
+describe('links in the popovers and toasts', () => {
+  it.each(['.toast-link', '.notif-item-link', '.alert-pill-item-link .alert-pill-item-name'])(
+    '%s is --accent-text', (selector) => {
+      expect(declaration(APP_CSS, selector, 'color')).toBe('var(--accent-text)')
+    }
+  )
+
+  it.each(['.toast-link', '.notif-item-link'])('%s is underlined only on hover and focus', (selector) => {
+    expect(declaration(APP_CSS, selector, 'text-decoration')).toBe('none')
+    expect(declaration(APP_CSS, `${selector}:hover`, 'text-decoration')).toBe('underline')
+    expect(declaration(APP_CSS, `${selector}:focus-visible`, 'text-decoration')).toBe('underline')
+  })
 })
 
 /**

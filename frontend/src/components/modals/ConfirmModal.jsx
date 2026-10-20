@@ -4,7 +4,7 @@ import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
 
 /**
- * A question with two answers, in a `<Modal>` on the confirm layer (above the dialog that asked).
+ * A question with two answers, in a `<Modal>`. Opened over another dialog, it is drawn above it.
  * A dialog that needs more than a question, such as a field for one option, passes it as
  * `children`; one that needs a different frame uses `<Modal>` directly.
  *
@@ -67,7 +67,6 @@ export function ConfirmModal({
       title={title}
       icon={icon}
       size={size}
-      layer="confirm"
       lead={message}
       onClose={dismiss}
       footer={
@@ -108,8 +107,8 @@ export function ConfirmModal({
             disabled={pending}
             autoComplete="off"
             spellCheck={false}
-            // Not autoFocus: focusing the field would move a screen reader's cursor off the
-            // message that explains what is about to happen.
+            // Not the dialog's initialFocus: focusing the field would move a screen reader's cursor
+            // off the message that explains what is about to happen.
             placeholder={requireTyped}
             aria-describedby="confirm-typed-hint"
           />

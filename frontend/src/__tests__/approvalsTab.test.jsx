@@ -1017,16 +1017,16 @@ describe('one card, two tabs, no counts, and attention only on work this viewer 
     const strip = card.querySelector(':scope > .tab-strip')
     expect(strip).toBeTruthy()
     expect(strip.previousElementSibling).toHaveClass('card-heading')
-    // Both queues have filters, so both keep the row; the tab's HelpTip is in the bar, not the row.
+    // Both queues have filters, so both keep the row. Each tab explains itself; no "?" anywhere.
     const bar = strip.nextElementSibling
     expect(bar).toHaveClass('filter-bar')
-    expect(bar.querySelector('.help-tip')).toBeNull()
-    expect(within(strip).getByRole('button', { name: 'About the open queue' }).parentElement).toHaveClass('tab-strip-help')
+    expect(card.querySelector('.tab-strip .help-tip, .filter-bar .help-tip')).toBeNull()
+    expect(screen.getByRole('tab', { name: 'Awaiting a decision' })).toHaveAccessibleDescription(/nobody has decided yet, oldest first/)
+    expect(screen.getByRole('tab', { name: 'Decided' })).toHaveAccessibleDescription(/newest decision first/)
 
     fireEvent.click(screen.getByRole('tab', { name: 'Decided' }))
     expect(card.querySelector(':scope > .tab-strip + .filter-bar')).toBeTruthy()
-    expect(within(strip).queryByRole('button', { name: 'About the open queue' })).toBeNull()
-    expect(within(strip).getByRole('button', { name: 'About decided proposals' }).parentElement).toHaveClass('tab-strip-help')
+    expect(card.querySelector('.tab-strip .help-tip')).toBeNull()
   })
 
   it('starts each queue’s toolbar with the search box, then the kind, with Clear filters at the right', async () => {

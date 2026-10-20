@@ -5,7 +5,7 @@ This page holds reference vocabularies: the published sets of terms that industr
 ## What the controls do
 
 - **The four standard tabs**, MTConnect, ISO 22400, OPC UA and ASHRAE 223P, each show one standard's entries in the same card. Switching tab keeps the search text, so the same search can be tried on each standard in turn.
-- **The "?"** in the tab bar, after the last tab, says what the selected standard is and what to watch for in it.
+- **Point at a tab**, or move to it with the keyboard, to read what that standard covers. What each standard is, and what to watch for in it, is under **The four standards** below.
 - **Search** filters the selected standard by name and by the text shown on hover. For example, an ISO 22400 KPI is found by its formula. A search opens the sections that match.
 - **The sections** group each standard's entries. MTConnect has data item types, components, sub types and units. ISO 22400 has KPI families, OPC UA has companion specifications, and ASHRAE 223P has superclasses. Sections start collapsed.
 - A section header shows **N in use** when catalog metrics already use N of its entries. Where a section needs explaining, a **?** sits beside its title. A header stays at the top of the card while its entries scroll under it.
@@ -15,6 +15,37 @@ This page holds reference vocabularies: the published sets of terms that industr
 - Only some entries can be clicked. In MTConnect, these are data item types, not components, sub types or units. Every ISO 22400 KPI and every OPC UA data point can be clicked. In ASHRAE 223P, classes can be clicked, but relations cannot.
 - Entries already in use are ticked, and you can still click them. Clicking needs the Administrator role; without it the entries are read-only.
 - **ASHRAE 223P is a reference here.** Clicking a 223P class opens Add Metric in the BMS group, with the class as the type. It fills in no semantic identifier, datatype or units. Choose those yourself. A class names a piece of equipment, such as a temperature sensor, not the reading it takes. A 223P class is ticked when a 223P metric is named after it.
+
+## The four standards
+
+### MTConnect
+
+The words an MTConnect metric name is built from. They are generated from the `mtconnect/schema` repository.
+
+- **It is a list of words, not of metrics.** It is what the standard makes available, not what your devices publish.
+- **Names are composed.** A metric is a component path plus a data item type. So `ANGLE` here becomes `Axes/C/ANGLE` in the catalog.
+- **Its semantic ids are local.** MTConnect publishes no ids, so this deployment makes one for each entry. Point at an entry to see it.
+
+### ISO 22400
+
+The manufacturing KPIs that ISO 22400-2 defines. These are computed measures. MTConnect leaves them out on purpose, because it reports raw machine state and stops there.
+
+- **A KPI is picked whole.** It is not composed like an MTConnect name. `AVAILABILITY` becomes `OEE/AVAILABILITY` in the catalog, with the KPI's unit and semantic id. Point at a KPI to see its formula, in the standard's symbols.
+- **Beware the name clash.** MTConnect's own `AVAILABILITY` is a different thing. It is an event meaning the device is connected, not this ratio.
+
+### OPC UA
+
+Data points from the OPC UA companion specifications: `OPC 40001` (Machinery), `OPC 40010` (Robotics), `OPC 40501` (Machine Tools), `OPC 40540` (Additive Manufacturing), `OPC 30050` (PackML) and `OPC 40001-4` (Machinery Energy).
+
+- **Names are positional**, as in MTConnect. `ActualPosition` becomes `MotionDevice/J1/ActualPosition` once you say which axis. Choosing a point fills in its group too.
+- **Each point carries its NodeId**: a namespace and an id, written `nsu=…;i=…`. That is the ExpandedNodeId the specification's NodeSet publishes for the point. It is also the point's semantic id, and an OPC UA client finds the same node by it.
+
+### ASHRAE 223P
+
+The semantic concepts that ASHRAE 223P defines for building systems: HVAC, electrical, and the sensing around them. The sections follow the standard's own class hierarchy.
+
+- **It is a reference, not a source of ids.** `Fan` names a piece of equipment, not a reading. You choose the datatype, units and id yourself, such as a QUDT quantity kind.
+- **It is still in public review.** These concepts come from the open223 pre-publication ontology. They may change before ASHRAE 223 is published.
 
 ## Why this is a separate page from Metrics and Schemas
 

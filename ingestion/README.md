@@ -923,9 +923,10 @@ it, which is what makes "cannot target a production gateway" a property of the s
 the client.
 
 **The worker's read of Storage is an arm of that policy, scoped to one object.**
-`broker_captures_read_privileged` admits `Administrator`, `Shopfloor_Manager` and `Auditor` — and
-`Service_Playback` holds none of those, so without an arm of its own every job would fail at its
-first read with `42501`, visible only as a failed job. The arm is
+`broker_captures_read_privileged` admits `Administrator`, `Shopfloor_Manager` and `Auditor`, each to
+a stored capture only in the minute after `issue_capture_download()` recorded the download for them
+(`0195`) — and `Service_Playback` holds none of those, so without an arm of its own every job would
+fail at its first read with `42501`, visible only as a failed job. The arm is
 `is_playback_caller() AND is_active_playback_capture(name)`: the capture of a job that is `RUNNING`
 right now, and nothing else. With no playback in flight the worker can reach nothing at all in the
 bucket, and it appears on the `SELECT` policy alone — a process holding broker publish rights must

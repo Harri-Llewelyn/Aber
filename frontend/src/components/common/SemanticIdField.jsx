@@ -78,10 +78,12 @@ export function SemanticIdField({
   }
 
   // Escape closes the search, not the dialog around it: stopped here, before useEscapeKey's
-  // document listener, and focus goes back to the button that opened it.
+  // document listener, and cancelled, or the browser takes it as a close request for the <dialog>.
+  // Focus goes back to the button that opened the search.
   const onPickerKeyDown = (e) => {
     if (e.key !== 'Escape') return
     e.stopPropagation()
+    e.preventDefault()
     closePicker()
     toggleRef.current?.focus()
   }

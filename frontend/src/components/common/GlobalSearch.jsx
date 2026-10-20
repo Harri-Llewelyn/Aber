@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { api } from '../../api'
 import { isUuid } from '../../utils/isUuid'
 import { buildTargets, matchTargets } from '../../searchIndex'
+import { dialogIsOpen } from '../../shortcuts'
 import { IconSearch, IconCornerDownLeft, IconChevronRight, IconCpu, IconRadio, IconLayoutDashboard, IconClipboardList, IconFactory, IconHistory, IconX } from './Icons'
 
 /**
@@ -141,11 +142,13 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
   // list. Resetting to 0 on every change would fight a user who has arrowed down and then typed.
   useEffect(() => { setCursor(c => (results.length === 0 ? 0 : Math.min(c, results.length - 1))) }, [results.length])
 
-  /* Ctrl+K / Cmd+K from anywhere, and Escape from inside. */
+  /* Ctrl+K / Cmd+K from anywhere, and Escape from inside. Not while a dialog or popover is open:
+     focus stays in it rather than moving to this box behind it, and the key does nothing. */
   useEffect(() => {
     const onKey = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
+        if (dialogIsOpen()) return
         inputRef.current?.focus()
         inputRef.current?.select()
         setOpen(true)
@@ -245,6 +248,7 @@ export function GlobalSearch({ tabs, currentTab, onNavigate, onSelectDevice, onS
           aria-activedescendant={showPanel ? activeId : undefined}
           aria-autocomplete="list"
           aria-label="Search pages, cards, settings and assets by name or id"
+          aria-keyshortcuts={isMac() ? 'Meta+K' : 'Control+K'}
           autoComplete="off"
           spellCheck="false"
         />

@@ -131,6 +131,15 @@ Two consequences worth stating on the front page; both are detailed in
   listing is not: keys are `<device_uuid>/<file>`, so listing the bucket, like writing to it, is
   gated on `device:manage`, not merely `authenticated`.
 
+**A capture is read only through its audited download** (`0195`). A file in `broker-captures` holds
+the plant's raw traffic. Administrator, Shopfloor_Manager and Auditor read a stored capture's file
+only in the minute after `issue_capture_download()` wrote `CAPTURE_DOWNLOAD_ISSUED` for them. That
+call opens a grant the bucket's read policy checks, and the Capture page signs its link straight
+after it. A link signed without the call, or a read with a person's own token, is refused, so every
+download names its person in the Audit Trail. The ingestion daemon and the playback worker reach
+only the object of the job each is running, and the daemon a file nothing claims, as before
+([`supabase/README.md`](../supabase/README.md#a-capture-is-downloaded-only-through-the-audited-call-0195)).
+
 ## People
 
 **An Administrator adds people, sets their roles and passwords, and removes their access on the
@@ -188,7 +197,7 @@ people's accounts in GoTrue, and it is narrow by construction.
 - **Machine identities are never people.** `list_people()` leaves them out, every function refuses
   them, and `refuse_role_for_machine_principal()` still refuses a role at the table.
 - **A person's own preferences are theirs alone.** `user_settings` (`0188`) holds each person's
-  theme and sidebar layout. RLS admits the row's own person and nobody else, an Administrator
+  theme, sidebar layout and whether single-key shortcuts are on (`0194`). RLS admits the row's own person and nobody else, an Administrator
   included; `anon` and `service_role` hold nothing on it, and deleting the account deletes the row.
   It is not audited: a display choice is not platform state.
 - **Every role reads the site's settings.** The Settings page is shown to every signed-in account,

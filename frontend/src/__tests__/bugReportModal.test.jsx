@@ -112,7 +112,9 @@ describe('BugReportModal issue composition', () => {
 
     expect(open).not.toHaveBeenCalled()
     expect(onClose).not.toHaveBeenCalled()
-    expect(showToast).toHaveBeenCalledWith('Please enter an issue title', 'error')
+    // In the dialog, not a toast: the toasts are behind an open dialog.
+    expect(screen.getByRole('alert')).toHaveTextContent('Please enter an issue title')
+    expect(showToast).not.toHaveBeenCalled()
   })
 
   // window.open without noopener leaves the new tab holding a window.opener reference back to

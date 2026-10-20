@@ -5,7 +5,6 @@ import { POLL_INTERVAL_MS, ENTITY_KIND_BY_TABLE } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { IconPencil, IconCheck, IconX, IconArchive, IconHistory, IconInbox } from '../common/Icons'
-import { HelpTip } from '../common/HelpTip'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
@@ -421,17 +420,11 @@ function ProposalFilters({ rows, kind, onKind, query, onQuery, placeholder, labe
   )
 }
 
-/** Each queue's "?", drawn in the tab bar for the selected queue. */
-const QUEUE_HELP = {
-  open: {
-    label: 'About the open queue',
-    text: 'The working queue, oldest first. Select a row to see exactly what would change. Approving applies it in one transaction, so a proposal that breaks a rule fails here rather than later.',
-  },
-  decided: {
-    label: 'About decided proposals',
-    text: 'What was applied, rejected, withdrawn or left to expire, newest decision first, kept for the retention period an Administrator sets. Select a row to see what it changed or asked for.',
-  },
-}
+/** The two queues, in tab order. The description is the tab's tooltip; the help page has the rest. */
+export const QUEUES = [
+  { id: 'open', label: 'Awaiting a decision', description: 'Proposed changes nobody has decided yet, oldest first. Approving one makes the change.' },
+  { id: 'decided', label: 'Decided', description: 'Proposals applied, rejected, withdrawn or expired, newest decision first. Each is kept for a period an Administrator sets.' },
+]
 
 export function ApprovalsTab({
   showToast, userRole, currentUserId, onViewTrail,
@@ -450,7 +443,7 @@ export function ApprovalsTab({
   // In the address as `?proposal=`.
   const [selectedId, setSelectedId] = useUrlState('proposal', '', { allowed: loading ? null : proposals.map(p => p.id) })
   // The tab, in the path: `/approvals` (Awaiting a decision) or `/approvals/decided`.
-  const [queue, setQueue] = useUrlTab('approvals', Object.keys(QUEUE_HELP), 'open')
+  const [queue, setQueue] = useUrlTab('approvals', QUEUES.map(q => q.id), 'open')
   // The queue on show filters by one kind and one search, in the address. A queue change drops
   // them, so each queue opens unfiltered. A device drawer's hand-over arrives as `?search=<id>`.
   const [kindFilter, setKindFilter] = useUrlState('kind', 'all', { allowed: ['all', ...KINDS.map(k => k.id)] })
@@ -636,11 +629,7 @@ export function ApprovalsTab({
             ariaLabel="Approvals queue"
             value={queue}
             onChange={chooseQueue}
-            tabs={[
-              { id: 'open', label: 'Awaiting a decision', attention: waiting },
-              { id: 'decided', label: 'Decided' },
-            ]}
-            help={<HelpTip label={QUEUE_HELP[queue].label} text={QUEUE_HELP[queue].text} />}
+            tabs={QUEUES.map(q => (q.id === 'open' ? { ...q, attention: waiting } : q))}
           />
 
           {queue === 'open' ? (

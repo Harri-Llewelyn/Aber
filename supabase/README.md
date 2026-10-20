@@ -1146,6 +1146,22 @@ Both columns are additive. `progress_reported_at` is nullable: a job claimed bef
 none, so its claim time is used. `credential_sources` defaults to `{}`, which the dialog reads as a
 worker from before this release. `test_playback_stop_and_sweep.py` holds all four functions.
 
+### Single-key shortcuts can be turned off (0194)
+
+The dashboard has four shortcuts that are one character with no modifier: `?` opens the shortcuts
+list, `/` the page's search box, and `[` and `]` move between a page's tabs. Speech input can type
+them by mistake, and WCAG 2.2 SC 2.1.4 asks for a way to turn such shortcuts off.
+
+- **`user_settings.single_key_shortcuts`**, `boolean NOT NULL DEFAULT true`. Profile › Appearance
+  writes it, as a one-column upsert like the theme's. Ctrl K and the arrow keys are not covered.
+- **On by default**, so nothing changes for anyone until they choose, and a row written before
+  `0194` reads on. The first sign-in's seed leaves it to the default.
+- **No new grant or policy.** `0188` grants on the table and its policies match rows, so both cover
+  the new column. The file's self-check asserts that `anon` holds nothing on it.
+
+The dashboard reads it through `useUserSettings.js` and keeps a copy in `aber_single_key_shortcuts`.
+`test_user_settings.py` holds the default and the save.
+
 ### Captures and replays leave an audit trail (0193)
 
 A capture holds the plant's raw traffic, and a replay writes readings into the historian. Neither
@@ -1180,8 +1196,9 @@ Each carries the subject's `name` and `sparkplug_id`, which the Audit Trail name
   gateway's deletion also takes its devices' captures, whose rows name the gateway they were
   recorded through. The subject's `name` is null in a cascade, because its row is already gone.
 - **A download goes through the database.** The Capture page calls `issue_capture_download()`
-  before it signs a link, and signs only the path it answers. The bucket's read policy is
-  unchanged, so a reader who signs a link through the Storage API directly is not recorded.
+  before it signs a link, and signs only the path it answers. In `0193` the bucket's read policy
+  was unchanged, so a reader who signed a link through the Storage API directly was not recorded.
+  `0195` closes that (below).
 - **A gateway a playback names cannot be deleted, and neither can the last unarchived Playback
   gateway.** `trg_gateways_keep_playback_history` refuses both, for every role, before the key's
   `CASCADE` runs. The second is `0067`'s archive rule applied to deletion. A Playback gateway with
@@ -1208,6 +1225,44 @@ Each carries the subject's `name` and `sparkplug_id`, which the Audit Trail name
   archived nor deleted: the upgrade creates it again.
 
 `test_capture_audit.py` holds every act, the deletion guard, the purge and the session's end.
+
+### A capture is downloaded only through the audited call (0195)
+
+Since `0193` the Capture page calls `issue_capture_download()` before it signs a download link, and
+the call writes `CAPTURE_DOWNLOAD_ISSUED`. The bucket did not require it.
+`broker_captures_read_privileged` admitted Administrator, Shopfloor_Manager and Auditor to every
+object in `broker-captures`. So any of them could sign a link or fetch a capture through the Storage
+API with their own token, and the Audit Trail held nothing.
+
+- **The call opens a grant.** `issue_capture_download()` also writes a row in `capture_downloads`:
+  the caller, the path, the capture and `issued_at`. A second download of the same file within the
+  minute refreshes it. The same call deletes the caller's closed grants, so the table holds about a
+  minute of each person's downloads and needs no sweep. A grant goes with its capture.
+- **The bucket reads by the grant.** `is_open_capture_download()` answers whether the caller holds
+  a grant for the path, issued in the last 60 seconds. The read policy admits a reader role to a
+  stored capture's file by it alone. The page signs the link straight after the call, and
+  storage-api serves a signed link without asking the policy, so the link works for its own 60
+  seconds. A link signed without the call, or a read with a person's token, is refused.
+- **The writers keep two narrower arms.** storage-api reads a row back when it deletes or writes
+  one, and Postgres checks that read against the SELECT policy. So Administrator and
+  Shopfloor_Manager also read an object nothing claims, which is how the page deletes a replaced or
+  orphaned file, and a path issued to them for upload (`is_open_capture_upload()`). An Auditor does
+  neither, and holds neither arm.
+- **The machines are unchanged.** The ingestion daemon's and the playback worker's arms are as they
+  were. A grant widens neither: `issue_capture_download()` refuses both.
+- **Nothing replayed brings the old arm back.** The policy lives in `storage-policies.sql`, which
+  drops and creates it on every boot, after the migrations; no migration states a policy on
+  `storage.objects`. The file's self-check fails the boot if a role arm of the SELECT policy has no
+  predicate, or if Auditor's is not the grant. Check 107 of `scripts/check-docs-drift.mjs` holds the
+  same in the source, and that no migration states a storage policy.
+
+`capture_downloads` has RLS with no policy and nothing granted to an API role.
+`is_open_capture_download()` is `SECURITY DEFINER` and executable by `authenticated`, because the
+policy calls it as the caller; it answers only for the caller's own grants. A script that fetched
+capture files with a person's token must now call `issue_capture_download()` first, as the page
+does. `test_capture_retention.py` runs the policies and their self-check verbatim on a stand-in
+table, and `test_recorded_capture_replay.py` holds the refusal and the link against the real
+storage-api.
 
 ### Migrations that must run once, and the ledger that decides (archived migrations 0040 and 0053)
 
@@ -5658,6 +5713,7 @@ person's.
 | `user_id` | Primary key, `REFERENCES auth.users(id) ON DELETE CASCADE`: deleting the account deletes the row |
 | `theme` | `dark` (the default) or `light`, by CHECK |
 | `sidebar_mode` | `hover` (the default), `expanded` or `collapsed`, by CHECK |
+| `single_key_shortcuts` | `true` (the default) or `false`: whether `?`, `/`, `[` and `]` act (`0194`) |
 | `updated_at` | Stamped by `user_settings_stamp()` on every write; the caller cannot supply it |
 
 - **Typed columns, not key/value rows.** The database refuses a value the dashboard does not know,
@@ -5668,7 +5724,8 @@ person's.
   business. `authenticated` holds `SELECT`, `INSERT` and `UPDATE`, and no `DELETE`. `anon` and
   `service_role` hold nothing.
 - **Not audited.** A display choice is not platform state, so the table has no audit trigger.
-- **The browser keeps a copy** in localStorage (`aber_theme`, `aber_sidebar_mode`), so the page
+- **The browser keeps a copy** in localStorage (`aber_theme`, `aber_sidebar_mode`,
+  `aber_single_key_shortcuts`), so the page
   paints in the right theme before the row arrives, and the sign-in screen, which has no account
   yet, shows the theme last used on that PC. Once the row loads it wins, and the copy follows it.
 - **A first row keeps the browser's choice.** A person with no row gets one seeded from the
@@ -6349,9 +6406,9 @@ endpoint. See "Cold telemetry archival" above.
 | :--- | :--- | :--- | :--- | :--- |
 | Public read | **yes** | **no** | **no** | **no** |
 | Write | `device:manage` (Administrator, Shopfloor_Manager) | Administrator, Shopfloor_Manager, plus the ingestion daemon for one path | Administrator, Shopfloor_Manager, under an existing area's prefix | no browser role: the `aas-export` function writes as `service_role` |
-| Read | anyone, including `anon` | those two plus **Auditor** | every signed-in role | Administrator, Shopfloor_Manager, Auditor |
+| Read | anyone, including `anon` | those two plus **Auditor**, a stored capture only through `issue_capture_download()` | every signed-in role | Administrator, Shopfloor_Manager, Auditor |
 | Operator | read | nothing | read | nothing |
-| Reached by | a plain public URL | a signed URL, minted after a role check | an authenticated download, handed to an `<img>` as a blob URL | a signed URL, minted after a role check |
+| Reached by | a plain public URL | a signed URL, minted after `issue_capture_download()` records the download | an authenticated download, handed to an `<img>` as a blob URL | a signed URL, minted after a role check |
 
 `asset-exports` has no write policy at all, and that is the point: an object in it is evidence of
 an export that an `asset_exports` row records, so a hand-uploaded file would be a bundle with no
@@ -6481,9 +6538,13 @@ reachable with any authenticated session. Since `0190` a person's write must als
 `begin_capture_upload()` issued them and still open (`is_open_capture_upload()`), so no write lands
 on a stored capture's file or on a name the capture gates never issued.
 
-`SELECT` is deliberately *not* path-confined: a reader may list the bucket to find captures. A file
-whose subject was deleted is claimed by nothing, though, and the ingestion daemon deletes it within
-the hour (0190): a capture is deleted with its subject.
+`SELECT` is not confined to a subject's folder, but a person's read is confined by the database
+too (0195). A reader role reads a stored capture's file only for the minute after
+`issue_capture_download()` recorded the download for them; the writer roles also read an object
+nothing claims and a path issued to them for upload, because storage-api reads back what it deletes
+or writes. The list of captures is the `captures` table, not a listing of the bucket. A file whose
+subject was deleted is claimed by nothing, and the ingestion daemon deletes it within the hour
+(0190): a capture is deleted with its subject.
 
 The trap in writing that policy, and why its test asserts an *accepted* path as well as rejected
 ones, is recorded inline in `storage-policies.sql`, because it constrains the SQL on the very next
@@ -6556,7 +6617,8 @@ direction that matters least and loudest in the direction that matters most: a m
 denies, so the viewer simply shows nothing and nobody reads a log. The checks assert the set is
 complete by name rather than by count, so a policy another chart version left behind is reported
 without failing the boot; the capture bucket's check also asserts that Auditor never writes, that
-a person's write is confined to an issued upload path, that the ingestion daemon's every arm is
+a person reads a stored capture only through a download grant (0195), that a person's write is
+confined to an issued upload path, that the ingestion daemon's every arm is
 confined to the object of its running job or to an unclaimed one, that every DELETE is confined to
 an unclaimed object, and that the playback worker appears in SELECT alone. Each exception says what the missing arm looks like from outside, which is a job that
 failed for no stated reason.

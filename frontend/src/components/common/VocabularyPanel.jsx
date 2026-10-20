@@ -9,14 +9,14 @@ import { ExpandAllToggle } from './ExpandAllToggle'
 import { useUrlState, useUrlTab, pathSlug } from '../../hooks/useUrlState'
 
 /**
- * The standard vocabularies as the page's one card: its heading, a tab per standard with the selected
- * standard's "?" after the last tab, a toolbar row (the search, Expand all), then the selected
- * standard's sections, which scroll inside the card (`.card-fill`; the page supplies `.page-fill`).
- * What differs per standard arrives
- * as a tab descriptor (how sections are derived, what an entry's tooltip says, what counts as in
- * use); see common/MTConnectVocabularyPanel.jsx and its siblings. Sections start collapsed, and
- * searching opens only the sections that match. An entry is clickable when its tab has an `onUse`
- * and the viewer can add a metric.
+ * The standard vocabularies as the page's one card: its heading, a tab per standard whose tooltip
+ * is the standard's `hint`, a toolbar row (the search, Expand all), then the selected standard's
+ * sections, which scroll inside the card (`.card-fill`; the page supplies `.page-fill`). What a
+ * standard is, and what to watch for in it, is on the page's help page. What differs per standard
+ * arrives as a tab descriptor (how sections are derived, what an entry's tooltip says, what counts
+ * as in use); see common/MTConnectVocabularyPanel.jsx and its siblings. Sections start collapsed,
+ * and searching opens only the sections that match. An entry is clickable when its tab has an
+ * `onUse` and the viewer can add a metric.
  */
 export function VocabularyPanel({ title = 'Vocabulary', subtitle, tabs, canAddMetric }) {
   const available = (tabs || []).filter(Boolean)
@@ -64,21 +64,6 @@ export function VocabularyPanel({ title = 'Vocabulary', subtitle, tabs, canAddMe
     ...Object.fromEntries((active.sections || []).map(s => [s.key, open]))
   }))
 
-  /* The standard's own description and its caveats, read on demand rather than standing above every
-     entry: they say what the vocabulary is, which is a thing to check once, not a thing to re-read
-     on each visit. */
-  const standardTip = (
-    <>
-      {active.description}
-      {(active.notes || []).map((note, i) => (
-        <span key={i} className="vocab-note">
-          {note.label && <strong>{note.label}</strong>}
-          {note.body}
-        </span>
-      ))}
-    </>
-  )
-
   return (
     <div className="card card-fill">
       <CardHeading icon={<IconFileCode size={15} />} title={title} description={subtitle} />
@@ -92,9 +77,8 @@ export function VocabularyPanel({ title = 'Vocabulary', subtitle, tabs, canAddMe
         tabs={available.map(tab => ({
           id: tab.id,
           label: tab.label,
-          title: tab.hint || `Browse the ${tab.label} vocabulary`,
+          description: tab.hint || `Browse the ${tab.label} vocabulary.`,
         }))}
-        help={<HelpTip label={`About the ${active.label} vocabulary`} text={standardTip} />}
       />
 
       <div className="filter-bar">

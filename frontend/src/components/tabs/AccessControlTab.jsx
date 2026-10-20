@@ -17,7 +17,6 @@ import { Badge, ArchivedBadge } from '../common/Badge'
 import { CardHeading } from '../common/CardHeading'
 import { ClearFilters } from '../common/ClearFilters'
 import { EmptyState } from '../common/EmptyState'
-import { HelpTip } from '../common/HelpTip'
 import { LoadingState } from '../common/LoadingState'
 import { SearchInput } from '../common/SearchInput'
 import { TabStrip } from '../common/TabStrip'
@@ -93,39 +92,22 @@ const ROLE_ENTRIES = [
 ]
 
 /** People comes first, and only for an Administrator; see AccessControlTab. */
-const PEOPLE_SECTION = { id: 'people', label: 'People', title: 'Everyone who can sign in, and their role' }
-
-/** The page's lists, one per tab, in tab order. The id is the tab's path segment. */
-const SECTIONS = [
-  { id: 'credentials', label: 'Broker credentials', title: "Every gateway's broker credential, recorded and live" },
-  { id: 'identities', label: 'Machine identities', title: "The stack's own processes, on the database side" },
-  { id: 'accounts', label: 'Broker accounts', title: "The broker's own accounts, and any no gateway claims" },
-  { id: 'roles', label: 'Broker roles', title: 'What each broker role may publish, receive and subscribe to' },
-]
-
-/** Each tab's "?", drawn in the tab bar for the selected tab. */
-const SECTION_HELP = {
-  people: {
-    label: 'About people',
-    text: 'Everyone who signs in to the dashboard, with their role. Add a person, change a role, or remove access. Removing access blocks sign-in and removes the role at once; the account and its history stay. You cannot change your own role or access.',
-  },
-  credentials: {
-    label: 'About broker credentials',
-    text: 'Each gateway connects to the broker as its own Sparkplug ID, confined to its edge node. Credential is what the platform issued and recorded; Broker is what the broker holds now, read live from Dynamic Security.',
-  },
-  identities: {
-    label: 'About machine identities',
-    text: "Identities for the stack's own processes. None can sign in: each is named by a token and holds permissions of its own, not a person's role. They reach the database only, never the broker.",
-  },
-  accounts: {
-    label: 'About broker accounts',
-    text: "The broker's accounts, read live. mosquitto-init creates the stack's own at boot from each MQTT_<NAME>_USER and _PASSWORD pair. No gateway marks a gateway-shaped account no gateway claims; scripts/revoke-orphaned-broker-accounts.mjs disables those.",
-  },
-  roles: {
-    label: 'About broker roles',
-    text: 'What each role may publish, receive and subscribe to, read live from Dynamic Security. Open a role to read its rules. Purposes are declared in mosquitto/dynsec-roles.json and checked at build time.',
-  },
+export const PEOPLE_SECTION = {
+  id: 'people',
+  label: 'People',
+  description: 'Everyone who signs in to the dashboard, with their role. Add people, change roles, or remove access here.',
 }
+
+/**
+ * The page's lists, one per tab, in tab order. The id is the tab's path segment; the description
+ * is the tab's tooltip, and the detail is on the page's help page.
+ */
+export const SECTIONS = [
+  { id: 'credentials', label: 'Broker credentials', description: "Every gateway's broker credential: what Aber issued and recorded, beside what the broker holds now." },
+  { id: 'identities', label: 'Machine identities', description: "Aber's own processes on the database side. None can sign in: each holds a token and permissions of its own." },
+  { id: 'accounts', label: 'Broker accounts', description: "The broker's own accounts, read live, including any that look like a gateway's but that no gateway claims." },
+  { id: 'roles', label: 'Broker roles', description: 'What each broker role may publish, receive and subscribe to, read live. Open a role to read its rules.' },
+]
 
 /**
  * Access Control: people, broker credentials and machine identities, as tabs of one card.
@@ -417,7 +399,6 @@ export function AccessControlTab({ showToast, userRole = null, currentUserId = n
             value={section}
             onChange={selectSection}
             tabs={sections}
-            help={<HelpTip label={SECTION_HELP[section].label} text={SECTION_HELP[section].text} />}
           />
 
           {section === 'people' && showPeople && (

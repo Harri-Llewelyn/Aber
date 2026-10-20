@@ -391,7 +391,9 @@ describe('starting a capture', () => {
     fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
     const row = (await screen.findByText('CNC Spindle')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Record/))
-    expect(await screen.findByText(/plus its gateway's birth certificate/)).toBeInTheDocument()
+    // In the dialog: the Devices tab's tooltip says the same, hidden until the tab is pointed at.
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText(/plus its gateway's birth certificate/)).toBeInTheDocument()
   })
 })
 
@@ -1256,10 +1258,10 @@ describe('the filter bar', () => {
     const card = document.querySelector('.card.card-fill')
     expect(card.querySelector(':scope > .card-heading')).toHaveTextContent('Capture')
     expect(card.querySelector(':scope > .card-heading + .tab-strip')).not.toBeNull()
-    // The tab's "?" is in the bar after the tab names, and it is about the tab on show.
-    const help = card.querySelector(':scope > .tab-strip > .tab-strip-help')
-    expect(help.firstElementChild).toHaveClass('help-tip')
-    expect(help.firstElementChild).toHaveAttribute('aria-label', 'About capturing gateways')
+    // Each tab says what it records in its own tooltip; the bar has no "?".
+    expect(card.querySelector('.tab-strip .help-tip')).toBeNull()
+    expect(screen.getByRole('tab', { name: 'Gateways' })).toHaveAccessibleDescription(/every device beneath it included/)
+    expect(screen.getByRole('tab', { name: 'Devices' })).toHaveAccessibleDescription(/plus its gateway's birth certificate/)
     // Both tabs have filters, so each keeps its toolbar row, which starts with the search box and
     // then the stored filter; the Devices tab adds the gateway filter after them.
     const bar = card.querySelector(':scope > .tab-strip + .filter-bar')
@@ -1267,7 +1269,6 @@ describe('the filter bar', () => {
     expect(within(bar.firstElementChild).getByRole('searchbox')).toHaveAccessibleName('Search subjects')
     expect(bar.firstElementChild.nextElementSibling).toBe(screen.getByLabelText('Stored capture filter'))
     fireEvent.click(screen.getByRole('tab', { name: 'Devices' }))
-    expect(help.firstElementChild).toHaveAttribute('aria-label', 'About capturing devices')
     expect(card.querySelector(':scope > .tab-strip + .filter-bar')).toBe(bar)
     expect(within(bar.firstElementChild).getByRole('searchbox')).toHaveAccessibleName('Search subjects')
     expect(screen.getByLabelText('Stored capture filter').nextElementSibling).toBe(screen.getByLabelText('Gateway filter'))

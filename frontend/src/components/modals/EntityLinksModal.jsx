@@ -95,6 +95,7 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
   const [editingLink, setEditingLink] = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [form, setForm]               = useState({ display_name: '', url: '', link_tag: 'other' })
+  const [error, setError]             = useState(null)
 
   const canManage = hasPermission?.(PERMISSION_UUIDS.LINK_MANAGE) ?? false
 
@@ -120,12 +121,13 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
   }
 
   const save = async () => {
+    setError(null)
     if (!form.display_name.trim()) {
-      showToast('Link name is required', 'error')
+      setError('Link name is required')
       return
     }
     if (!form.url.trim() || (!form.url.startsWith('http://') && !form.url.startsWith('https://'))) {
-      showToast('Please enter a valid HTTP/HTTPS URL (e.g. https://...)', 'error')
+      setError('Please enter a valid HTTP/HTTPS URL (e.g. https://...)')
       return
     }
 
@@ -140,17 +142,22 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
       setShowForm(false)
       loadLinks()
     } catch (e) {
+      setError(e.message)
       showToast(e.message, 'error')
     }
   }
 
   const removeLink = async (id, name) => {
+    setError(null)
     try {
       await api.delete(`/api/v1/links/${id}`)
       setConfirmDelete(null)
       loadLinks()
       showToast(`Link '${name}' removed`, 'success')
     } catch (e) {
+      // Said in this dialog, beneath the confirmation, which closes so it can be read.
+      setConfirmDelete(null)
+      setError(e.message)
       showToast(e.message, 'error')
     }
   }
@@ -165,6 +172,7 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
       icon={<IconBookOpen size={18} />}
       size="lg"
       onClose={onClose}
+      error={error}
       footer={<button className="btn btn-ghost" onClick={onClose}>Close</button>}
       fill
     >

@@ -134,10 +134,11 @@
               opposite edges, so the tie never overlaps)
        100    the topbar
        200    a popover under the topbar: the user menu, global search, the sidebar mode menu
-       1000   the modal overlay
-       above 1000, the dialog confirm layer: set in the .modal block, above the modal it confirms
-       1200   the help-tip bubble, above any dialog
-       2000   the toast stack, above everything */
+       1200   the tooltip bubble (HelpTip and the tab bar)
+       2000   the toast stack
+     An open dialog is above every rung: showModal() draws it in the browser's top layer, and the
+     confirm layer, a dialog opened over another, is above that one because it opened later. The
+     page under a dialog is inert, so whatever must be used over a dialog goes inside it. */
 }
 
 [data-theme="light"] {
@@ -607,9 +608,10 @@ html, body, #root {
 /* The item's own label grows to fill the row. */
 .user-popover-action > span { flex: 1; min-width: 0; }
 
-/* The Theme row: the Light/Dark switch, a SegmentedControl, across the whole row with its two
-   segments sharing it equally. Its group is named Theme, so the row needs no visible label. */
-.user-popover-theme { padding: 5px 12px; }
+/* The Theme section, between the head and the actions and ruled off from both: the Light/Dark
+   switch, a SegmentedControl, across the whole row with its two segments sharing it equally. Its
+   group is named Theme, so the section needs no visible label. */
+.user-popover-theme { padding: 8px 12px; border-bottom: 1px solid var(--border); }
 .user-popover-theme .segmented { display: flex; }
 .user-popover-theme .segmented-option { flex: 1; }
 
@@ -1005,8 +1007,6 @@ a.sidebar-item { text-decoration: none; }
   border-bottom: 1px solid var(--border);
 }
 .tab-strip-tabs { display: flex; flex-wrap: wrap; gap: 0 4px; align-self: stretch; }
-/* The selected tab's "?", straight after the last tab. */
-.tab-strip-help { display: inline-flex; align-items: center; margin-left: 4px; }
 .card > .tab-strip { margin-bottom: 0; padding: 0 var(--inset); }
 /* In a card header the bar takes its own line and runs flush over the header's padding and rule. */
 .card-header > .tab-strip {
@@ -2043,21 +2043,38 @@ td.row-actions, th.row-actions {
 .tag-overflow:hover { border-color: var(--border-hover); color: var(--text-primary); }
 
 /* ===== Form / Modal ===== */
+/* The <dialog> that `Modal` opens with showModal(). The browser's own box for it is undone, so it
+   fills the window and centres `.modal`, the visible box; a click on it outside the box is a click
+   on the backdrop. Focus rests on it while no control has it, with no ring: the box shows where. */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: var(--scrim);
-  backdrop-filter: blur(4px);
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  outline: none;
+}
+
+.modal-overlay:not([open]) { display: none; }
+
+/* The page behind an open dialog, dimmed. */
+.modal-overlay::backdrop {
+  background: var(--scrim);
+  backdrop-filter: blur(4px);
   animation: fadeIn 0.15s ease;
 }
 
-/* A dialog that opens over another one (a confirmation over a form, the shortcuts list over
-   anything). Above the ordinary layer at 1000. */
-.modal-overlay-confirm { z-index: 1100; }
+/* Where focus goes when the control that opened a dialog has gone. Programmatic, so no ring. */
+main:focus { outline: none; }
 
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
@@ -2420,20 +2437,21 @@ td.row-actions, th.row-actions {
 .toast-msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 
 /* A message that links to what it is about (MessageLink in Toast.jsx): the toast's text and a
-   history row's. It keeps the text's colour, so the underline, the pointer and the focus ring say it
-   is a link; a link to Grafana adds the external-link icon. */
+   history row's. Accent text, as every link is, underlined on hover and focus; a link to Grafana
+   adds the external-link icon in the same colour. */
 .toast-link,
 .notif-item-link {
-  color: inherit;
-  text-decoration: underline;
-  text-decoration-color: var(--text-dim);
+  color: var(--accent-text);
+  text-decoration: none;
   text-underline-offset: 3px;
 }
 .toast-link:hover,
-.notif-item-link:hover { text-decoration-color: currentColor; }
+.toast-link:focus-visible,
+.notif-item-link:hover,
+.notif-item-link:focus-visible { text-decoration: underline; }
 .toast-link:focus-visible,
 .notif-item-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
-.message-link-external { margin-left: 4px; vertical-align: -1px; color: var(--text-muted); }
+.message-link-external { margin-left: 4px; vertical-align: -1px; }
 
 /* 24px, the WCAG 2.2 minimum target. Muted until pointed at, so the message leads. */
 .toast-dismiss {
@@ -3399,9 +3417,9 @@ a.chip { text-decoration: none; }
 .alert-pill-item-link:hover { background: var(--bg-glass); }
 .alert-pill-item-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* An <a> for a platform alert that opens Grafana: the title takes the accent, as .endpoint-open
-   does; the summary and meta keep their muted colours. */
-a.alert-pill-item-link[target='_blank'] .alert-pill-item-name { color: var(--accent); }
+/* A row that links somewhere, to its asset's page or to the rule in Grafana: the alert's name is the
+   link text, so it takes the accent as every link does. The summary and meta keep their colours. */
+.alert-pill-item-link .alert-pill-item-name { color: var(--accent-text); }
 
 /* A row with nowhere to navigate keeps the same geometry, so the list does not shift when one
    alert's sparkplug_id happens not to resolve to a device. */
@@ -4150,19 +4168,27 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   top: auto;
   max-height: none;
   align-self: stretch;
-  transition: width 0.25s ease, margin-right 0.25s ease, visibility 0s linear 0.25s;
+  transition: width 0.25s ease, visibility 0s linear 0.25s;
 }
 
-/* Open, it keeps the page's gutter from the window's edges. On the page side `.content`'s padding
-   is already the gap, so it adds none there. */
+/* Open, it docks to the window's right edge under the bar, the mirror of the rail: part of the
+   app's frame, where a page's drawer is a card beside its list. No margin on any side; on the page
+   side `.content`'s padding is the gap. */
 .context-panel-app.context-panel-open {
-  margin: var(--gutter) var(--gutter) var(--gutter) 0;
-  transition: width 0.25s ease, margin-right 0.25s ease, visibility 0s;
+  margin: 0;
+  transition: width 0.25s ease, visibility 0s;
 }
 
+/* The rail's surface and its one border, on the page side. No rounding and no shadow: those are
+   what mark a page's drawer as a card. */
 .context-panel-app .context-panel-inner {
   max-height: 100%;
   height: 100%;
+  background: var(--bg-surface);
+  border: none;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: none;
 }
 
 /* No rule above the prose. `.context-panel-extras` is separated from the fields and actions it
@@ -4243,8 +4269,8 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
     max-height: none;
     z-index: 90;
   }
-  /* The help drawer's docked margins would inset its overlay from the window's edges. */
-  .context-panel-app.context-panel-open { margin: 0; }
+  /* Over the page, the help drawer keeps the shadow, as the rail does when it opens over the page. */
+  .context-panel-app .context-panel-inner { box-shadow: var(--shadow); }
   .context-panel-inner {
     /* The desktop width would leave the overlay's extra width as an empty strip on the right. */
     width: 100%;
@@ -4255,10 +4281,11 @@ tr.row-selectable:focus-visible { outline: 2px solid var(--accent); outline-offs
   }
 }
 
-/* One drawer at a time below 1440px, where two would leave the page under about 500px (the
-   derivation is in frontend/README.md). Open help hides a page's open drawer without closing it, so
-   closing help shows the same details again; `display: none` also takes it out of the tab order and
-   the accessibility tree. ONE_DRAWER_QUERY in ContextPanel.jsx must match this query. */
+/* One drawer at a time below 1440px, where two would squeeze the page (frontend/README.md has the
+   derivation, and why 1366px stays on this side). Open help hides a page's open drawer without
+   closing it, so closing help shows the same details again; `display: none` also takes it out of
+   the tab order and the accessibility tree. ONE_DRAWER_QUERY in ContextPanel.jsx must match this
+   query. */
 @media (max-width: 1439px) {
   .app-body:has(> .context-panel-app.context-panel-open) > .content .context-panel-open { display: none; }
 }
@@ -5136,6 +5163,17 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 /* The chosen layout's own description, under its field. Wraps, unlike a setting's range. */
 .profile-detail { white-space: normal; line-height: 1.45; }
 
+/* An on/off setting: the switch, and the word for its state beside it, at a field's height. */
+.profile-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.profile-switch input { accent-color: var(--accent); }
+
 /* The note that the row could not be reached, above the table it explains. */
 .profile-source { flex-shrink: 0; padding-bottom: 0; }
 
@@ -5240,6 +5278,14 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   line-height: 1.45;
 }
 
+/* A single-key shortcut the person has turned off: its keys fade to dashed outlines, and the Off
+   tag beside the description says why in words. */
+.shortcut-row-off .shortcut-key {
+  border-style: dashed;
+  color: var(--text-dim);
+}
+.shortcut-off { margin-left: 8px; vertical-align: 1px; }
+
 /* The banner at the top of a dialog somebody may not save. Neutral, not a warning: nothing has gone
    wrong, so it takes the muted surface every other explanatory strip takes. The button is pushed to
    the far end by the span's own flex. */
@@ -5269,9 +5315,10 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 .readonly-notice > span { flex: 1; min-width: 0; }
 .readonly-notice > svg { flex-shrink: 0; }
 
-/* ===== Help tip =====
-   The "?" beside a label. The bubble is portalled to <body> and positioned by HelpTip.jsx, because
-   most triggers live inside a `.card`, whose overflow is hidden. */
+/* ===== Help tip and tooltip =====
+   The "?" beside a label, and the bubble it shares with the tab bar's tabs. The bubble is portalled
+   to <body> and positioned by Tooltip.jsx, because most triggers live inside a `.card`, whose
+   overflow is hidden. */
 .help-tip {
   display: inline-flex;
   align-items: center;
@@ -5293,7 +5340,9 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 .help-tip-pinned { color: var(--accent); }
 .help-tip:focus-visible { color: var(--accent); outline: 2px solid var(--accent); outline-offset: 1px; }
 
-.help-tip-bubble {
+/* The one tooltip bubble (Tooltip.jsx): HelpTip's, and every tab's in the tab bar, so they always
+   look alike. A tab's is in the document while closed, `hidden`, so no `display` here. */
+.tooltip-bubble {
   position: fixed;
   z-index: 1200;
   width: max-content;
@@ -5814,11 +5863,6 @@ ol.gateway-steps {
 .vocab-chip-plus { flex-shrink: 0; visibility: hidden; }
 .vocab-chip-action:hover .vocab-chip-plus,
 .vocab-chip-action:focus-visible .vocab-chip-plus { visibility: visible; }
-
-.vocab-note {
-  display: block;
-  margin-top: 6px;
-}
 
 /* STAT: one figure in a .stat-strip (common/Stat.jsx), on Cold Storage and Backups. */
 .stat { min-width: 120px; }

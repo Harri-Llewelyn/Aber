@@ -4,7 +4,6 @@ import { POLL_INTERVAL_MS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { IconExternalLink, IconBookOpen, IconAlertTriangle } from '../common/Icons'
 import { EmptyState } from '../common/EmptyState'
-import { HelpTip } from '../common/HelpTip'
 import { LoadingState } from '../common/LoadingState'
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
@@ -126,14 +125,13 @@ function EndpointCell({ url, exposure, viewerOnHost, onNotify }) {
  * The stack, one tab per group, in the order an operator looks for it: something to open, the path
  * telemetry arrives on, then the stores behind it. Keyed on service_type, not the editable name.
  * The order of `types` within a group is the row order; names break ties. Each group's description
- * is its tab's "?".
+ * is its tab's tooltip; the help page has the rest.
  */
-const SERVICE_GROUPS = [
+export const SERVICE_GROUPS = [
   {
     id: 'applications',
     title: 'Applications & User Interfaces',
-    description: 'The things with a front door. These are meant to be opened — a link here is where '
-      + 'you go to do something the dashboard does not do itself.',
+    description: 'The things with a front door: each link opens something the dashboard does not do itself.',
     // SOURCE_CONTROL is the forge: a place to review a change, which is a front door in exactly
     // this sense and a different kind of thing from a database console.
     types: ['MONITORING', 'EDGE_NODE', 'GRAPHICAL_UI', 'SOURCE_CONTROL', 'DOCUMENTATION']
@@ -141,18 +139,19 @@ const SERVICE_GROUPS = [
   {
     id: 'ingestion',
     title: 'Ingestion & Messaging',
-    description: 'The path a reading takes from a machine to the historian. If telemetry has stopped '
-      + 'arriving, the fault is almost always one of these.',
+    description: 'The path a reading takes from a machine to the historian. If telemetry stops, look here first.',
     types: ['MQTT_BROKER', 'INGESTION', 'API_GATEWAY']
   },
   {
     id: 'infrastructure',
     title: 'Data & Backend Infrastructure',
-    description: 'What the services on the other tabs are built on. Listed because a registry that '
-      + 'named only the parts with a URL would describe the stack as smaller than it is.',
+    description: 'What the services on the other tabs are built on: the databases, APIs and sign-in behind them.',
     types: ['REST_API', 'AUTHENTICATION', 'SERVERLESS', 'DATABASE', 'TIME_SERIES_DB', 'METRICS_EXPORTER']
   }
 ]
+
+/** The tooltip of the tab for services no group claims. */
+export const UNGROUPED_DESCRIPTION = 'Services registered with a type no other tab claims, listed here rather than dropped.'
 
 /**
  * Where a service whose type is in no group lands. Not dropped: anything can register into
@@ -173,8 +172,7 @@ function groupServices(services) {
   const ungrouped = {
     id: 'other',
     title: UNGROUPED_TITLE,
-    description: 'Registered with a type none of the other tabs claims. Anything can register a '
-      + 'service, so a type nobody anticipated lands here rather than being dropped.',
+    description: UNGROUPED_DESCRIPTION,
     rows: []
   }
 
@@ -531,8 +529,7 @@ export function DirectoryTab({ showToast }) {
               ariaLabel="Service group"
               value={active.id}
               onChange={setGroupId}
-              tabs={groups.map(g => ({ id: g.id, label: g.title }))}
-              help={<HelpTip label={`About ${active.title}`} text={active.description} />}
+              tabs={groups.map(g => ({ id: g.id, label: g.title, description: g.description }))}
             />
             {/* No toolbar row: a tab holds a dozen rows at most, so there is no search box or type
                 picker. */}

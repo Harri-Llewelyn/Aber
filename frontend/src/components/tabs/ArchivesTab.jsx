@@ -16,7 +16,6 @@ import { useUrlTab } from '../../hooks/useUrlState'
 import { useSortableRows } from '../../hooks/useTableSort'
 import { SortHeader } from '../common/SortHeader'
 import { IconArchive, IconRefreshCw, IconTrash, IconDownload, IconHistory, IconExternalLink, IconAlertTriangle } from '../common/Icons'
-import { HelpTip } from '../common/HelpTip'
 import { Badge } from '../common/Badge'
 import { EmptyState } from '../common/EmptyState'
 import { LoadingState } from '../common/LoadingState'
@@ -33,17 +32,11 @@ export function purgeIsSoon(at, now = Date.now()) {
   return new Date(at).getTime() - now <= PURGE_SOON_DAYS * 24 * 60 * 60 * 1000
 }
 
-/** Each stage tab's "?", drawn in the tab bar for the selected stage. */
-const STAGE_HELP = {
-  archived: {
-    label: 'About archived entities',
-    text: 'Out of commission but not gone: identity and history kept, hidden from the asset pages, a timer running to auto-purge. Restore returns it intact. Export a device as a bundle before it is purged.',
-  },
-  retired: {
-    label: 'About retired entities',
-    text: 'Archived and then deleted, by timer or by hand. Only this tombstone remains, linking to what survives: the audit trail, a forge repository, any exported bundle. Readings stay in the historian under its id.',
-  },
-}
+/** The two stages, in tab order. The description is the tab's tooltip; the help page has the rest. */
+export const STAGES = [
+  { id: 'archived', label: 'Archived', description: 'Out of commission but kept, with its history and identifiers. Restore returns one intact, until its auto-purge date.' },
+  { id: 'retired', label: 'Retired', description: 'Archived and then deleted. Only a tombstone remains, linking to what survives: the Audit Trail, a forge repository, a bundle.' },
+]
 
 /** The Archived table's sortable columns. An entity with no auto-purge timer goes last. */
 const ARCHIVED_SORT = {
@@ -80,7 +73,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
   const [exports, setExports]   = useState([])
   const [loading, setLoading]   = useState(true)
   // The tab, in the path: `/archives` or `/archives/retired`.
-  const [stage, setStage]       = useUrlTab('archives', Object.keys(STAGE_HELP), 'archived')
+  const [stage, setStage]       = useUrlTab('archives', STAGES.map(s => s.id), 'archived')
   const [archivedRows, archivedSort] = useSortableRows(archives, ARCHIVED_SORT, { active: stage === 'archived' })
   const [retiredRows, retiredSort] = useSortableRows(retired, RETIRED_SORT, { active: stage === 'retired' })
   const [confirmPurge, setConfirmPurge] = useState(null)
@@ -199,11 +192,7 @@ export function ArchivesTab({ showToast, hasPermission, onViewTrail, unmappedMet
           ariaLabel="Lifecycle stage"
           value={stage}
           onChange={setStage}
-          tabs={[
-            { id: 'archived', label: 'Archived', title: 'Out of commission, restorable, a timer running to auto-purge' },
-            { id: 'retired', label: 'Retired', title: 'Archived and then deleted: the tombstone and what survives it' },
-          ]}
-          help={<HelpTip label={STAGE_HELP[stage].label} text={STAGE_HELP[stage].text} />}
+          tabs={STAGES}
         />
 
         {stage === 'archived' && (<>

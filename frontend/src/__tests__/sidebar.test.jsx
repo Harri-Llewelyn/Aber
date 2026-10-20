@@ -1,8 +1,8 @@
 import React from 'react'
-import { render, screen, fireEvent, within } from '@testing-library/react'
-import { describe, it, expect, vi } from 'vitest'
+import { render, screen, fireEvent, within, act } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-import { Sidebar } from '../components/common/Sidebar'
+import { Sidebar, RAIL_OPEN_DELAY_MS } from '../components/common/Sidebar'
 import { ShortcutsModal, shortcutGroups } from '../components/modals/ShortcutsModal'
 import { TABS, tabIsVisible } from '../navigation'
 
@@ -20,31 +20,51 @@ const renderRail = (props = {}) => {
 
 // =================================================================================================
 describe('the rail expands and, crucially, collapses again', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
+
+  const wait = (ms) => act(() => { vi.advanceTimersByTime(ms) })
+  const link = (name) => screen.getByRole('link', { name })
 
   it('is collapsed at rest', () => {
     renderRail()
     expect(isExpanded()).toBe(false)
   })
 
-  it('expands under the pointer and collapses when it leaves', () => {
+  it('expands once the pointer rests on it, and collapses the moment it leaves', () => {
     renderRail()
     fireEvent.mouseEnter(rail())
+    wait(RAIL_OPEN_DELAY_MS - 1)
+    expect(isExpanded(), 'opened before the pointer had rested').toBe(false)
+    wait(1)
     expect(isExpanded()).toBe(true)
 
     fireEvent.mouseLeave(rail())
     expect(isExpanded()).toBe(false)
   })
 
+  /** A pointer passing over the strip to another window, or to the area of a screenshot. */
+  it('stays shut for a pointer that only crosses it', () => {
+    renderRail()
+    fireEvent.mouseEnter(rail())
+    wait(RAIL_OPEN_DELAY_MS / 2)
+    fireEvent.mouseLeave(rail())
+    wait(RAIL_OPEN_DELAY_MS * 10)
+    expect(isExpanded()).toBe(false)
+  })
+
   /**
    * The regression this file exists for: clicking a nav item focuses that button, and the rail
    * expanded on focus, so after a click it stayed open across the page it had navigated to. A focus
-   * event arriving while hovered is a click and does nothing; the pointer leaving closes the rail.
+   * event arriving while the pointer is on the rail is a click and does nothing; the pointer leaving
+   * closes the rail.
    */
   it('collapses after a click, once the pointer moves away', () => {
     const onNavigate = renderRail()
 
     fireEvent.mouseEnter(rail())
-    const devices = screen.getByRole('link', { name: 'Devices' })
+    wait(RAIL_OPEN_DELAY_MS)
+    const devices = link('Devices')
     // A real click focuses the link it lands on. fireEvent.click does not, so the focus that
     // caused the bug is raised explicitly -- otherwise this test passes against the broken code.
     fireEvent.focus(devices)
@@ -56,16 +76,78 @@ describe('the rail expands and, crucially, collapses again', () => {
   })
 
   /**
-   * The half that must survive the fix: Tab is the only way to reach the rail without a mouse, and
-   * the labels are transparent until it expands.
+   * The pointer is on the rail before the panel opens, so the click's focus must be read against
+   * the pointer, not against the panel: read against the shut panel it looks like a Tab.
    */
-  it('still expands on a keyboard focus, which arrives with no pointer over it', () => {
+  it('navigates on a click during the wait, and the click does not hold the panel open', () => {
+    const onNavigate = renderRail()
+
+    fireEvent.mouseEnter(rail())
+    wait(RAIL_OPEN_DELAY_MS / 3)
+    fireEvent.focus(link('Devices'))
+    fireEvent.click(link('Devices'))
+    expect(onNavigate).toHaveBeenCalledWith('devices')
+    expect(isExpanded(), 'the click opened the panel as a Tab would').toBe(false)
+
+    fireEvent.mouseLeave(rail())
+    wait(RAIL_OPEN_DELAY_MS * 10)
+    expect(isExpanded()).toBe(false)
+  })
+
+  /**
+   * The half that must survive the fix: Tab is the only way to reach the rail without a mouse, and
+   * the labels are transparent until it expands. No wait: there is no crossing to filter out.
+   */
+  it('still expands at once on a keyboard focus, which arrives with no pointer over it', () => {
     renderRail()
-    fireEvent.focus(screen.getByRole('link', { name: 'Devices' }))
+    fireEvent.focus(link('Devices'))
     expect(isExpanded()).toBe(true)
 
-    fireEvent.blur(screen.getByRole('link', { name: 'Devices' }))
+    fireEvent.blur(link('Devices'))
     expect(isExpanded()).toBe(false)
+  })
+
+  /**
+   * A rail link clicked with the mouse keeps focus after navigating. When the browser window is
+   * activated again (Alt+Tab, a screenshot overlay closing), the browser focuses that link again,
+   * with the pointer elsewhere and nothing as the previous focus. That is not a Tab.
+   */
+  it('stays shut when the window comes back to a link that was clicked', () => {
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    renderRail()
+    fireEvent.mouseEnter(rail())
+    wait(RAIL_OPEN_DELAY_MS)
+    fireEvent.focus(link('Devices'))
+    fireEvent.click(link('Devices'))
+    fireEvent.mouseLeave(rail())
+    expect(isExpanded()).toBe(false)
+
+    // The window loses focus: the link blurs while the document no longer has focus.
+    hasFocus.mockReturnValue(false)
+    fireEvent.blur(link('Devices'), { relatedTarget: null })
+    // It comes back: the same link is focused again, with no keydown and no pointer.
+    hasFocus.mockReturnValue(true)
+    fireEvent.focus(link('Devices'), { relatedTarget: null })
+    expect(isExpanded(), 'the window coming back opened the rail').toBe(false)
+
+    // A Tab from there is keyboard navigation again.
+    fireEvent.blur(link('Devices'), { relatedTarget: link('Cells') })
+    fireEvent.focus(link('Cells'), { relatedTarget: link('Devices') })
+    expect(isExpanded()).toBe(true)
+  })
+
+  it('comes back open when the window returns to a link reached with Tab', () => {
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    renderRail()
+    fireEvent.focus(link('Devices'))
+    expect(isExpanded()).toBe(true)
+
+    hasFocus.mockReturnValue(false)
+    fireEvent.blur(link('Devices'), { relatedTarget: null })
+    expect(isExpanded()).toBe(false)
+    hasFocus.mockReturnValue(true)
+    fireEvent.focus(link('Devices'), { relatedTarget: null })
+    expect(isExpanded()).toBe(true)
   })
 })
 

@@ -102,6 +102,53 @@ id passes `truncate="start"` to keep its end (`…/iso22400/EFFECTIVENESS`); the
 carry the full value. A read-only or disabled `.form-control` takes the page background and muted
 text, and `.btn-warning` is the amber button for a risky action that is not destructive.
 
+### The rail opens when the pointer rests on it
+
+In the rail's Hover mode, `Sidebar` opens the panel only once the pointer has rested on the rail for
+150ms (`RAIL_OPEN_DELAY_MS`, through `hooks/useHoverIntent.js`). A pointer crossing the 52px strip
+on its way somewhere else takes less, so the panel no longer flicks open and shut. Chrome and Edge on
+Windows send hover events to a window that is not the active one, so a pointer passing to another
+app did exactly that. Leaving shuts the panel at once, and a click during the wait still navigates.
+
+Keyboard focus opens the rail at once, in every mode. Two kinds of focus are not keyboard focus:
+
+- **A click's focus.** A focus that arrives while the pointer is on the rail is a click, and is
+  ignored so the panel does not stay open over the page it opened. "On the rail" is a flag set the
+  moment the pointer enters, not the delayed open state: read against a panel still shut, a quick
+  click would look like a Tab and hold the panel open.
+- **The window coming back.** A link clicked with the mouse keeps focus. When the window is activated
+  again (Alt+Tab, a screenshot overlay closing), the browser focuses it again, with no previous
+  focus (`relatedTarget` is null). The rail's blur notes whether the panel was open as the window
+  lost focus (`document.hasFocus()` is already false then), and that return puts it back as it was.
+
+### Tooltips on a tab
+
+A tab explains itself in a tooltip, its `description` in `TabStrip`'s `tabs`. It is there to help
+someone choose a tab, so it must be readable before the tab is opened. The browser's own tooltip
+(`title`) is not used: it shows after about a second, never to a keyboard and never on a touch
+screen, and screen readers read it unevenly.
+
+- **One bubble.** `common/Tooltip.jsx` draws the bubble for HelpTip and for every tab, so the two
+  always look alike (`.tooltip-bubble`, beside `.help-tip` in `App.css`). Inside an open native
+  dialog it goes into the dialog, which sits in the top layer above anything portalled to `<body>`.
+- **When it shows.** `useTooltip` shows it once the pointer has rested on the tab for 300ms
+  (`TOOLTIP_DELAY_MS`, through `useHoverIntent`, as the rail does), so bubbles do not flash as the
+  pointer crosses the bar. Keyboard focus shows it at once. A press, the pointer leaving, blur, a
+  scroll and a resize close it, and so does Escape, from the shared stack, before a drawer behind it.
+  A press's focus is not keyboard focus, and the focus a window hands back when it is activated
+  again is treated as the rail treats it.
+- **What a screen reader hears.** The tab's `aria-describedby` names the bubble, which is in the
+  document, hidden, while closed. So the sentence is read with the tab's name, "Quarantine,
+  3 waiting", whether or not the bubble shows.
+- **How long.** Plain sentences, 20 words at most, no code: the tooltip appears whenever the
+  pointer rests on the bar, which is more often than a `?` is opened. Anything longer goes on the
+  page's help page. `tabTooltips.test.jsx` holds each page's sentences to that.
+- **Where the sentences live.** Beside each page's tab list (`SECTIONS`, `QUEUES`, `VIEWS` and the
+  like). Settings' categories come from the database, which has no description for one, so their
+  sentences are `CATEGORY_DESCRIPTIONS` in `SettingsTab.jsx`; a category missing from it has no
+  tooltip. Vocabulary's are each standard's `hint`, and each standard's description and caveats
+  are on the Vocabulary page's help page. Directory's are its groups' descriptions.
+
 ### Derived lists in a tab are memoised, and the dependency list is the contract
 
 `DevicesTab` holds around thirty pieces of state, so *any* of them — opening a modal, a Realtime
@@ -123,6 +170,41 @@ never scrolls away and an error never pushes it down. `.modal` itself must not s
 whose list should take the leftover height passes `fill` and marks that child `modal-fill`; the
 schema builder's metric list does. A fixed `max-height` on a list inside a dialog is a guess at the
 window and is not needed any more.
+
+### A dialog takes focus
+
+`Modal` renders a native `<dialog>` and opens it with `showModal()`, following the WAI-ARIA dialog
+(modal) pattern. The browser draws it in the top layer, above every z-index, and makes the rest of
+the page inert: Tab and Shift+Tab stay inside it, and neither a pointer nor a screen reader reaches
+the page behind. `.modal-overlay` is the `<dialog>`, sized to the window; `.modal` is the box inside
+it; the dimmed page is `.modal-overlay::backdrop`. A click on the dialog outside the box is a click
+on the backdrop.
+
+- **Where focus starts.** On the dialog itself (`tabIndex={-1}`), named by its title and described
+  by its lead, so a screen reader reads both first. A dialog whose first field is the obvious start
+  passes a ref to that field as `initialFocus`: Add a Person, Change Password, Take a Backup, and
+  the machine identity's create and describe dialogs. A dialog that guards an act which revokes or
+  overwrites keeps the default, as ConfirmModal's typed gate does, so its warning is read before
+  its field. No dialog starts on a button. `autoFocus` does nothing inside a dialog, because React
+  focuses the control before the dialog is shown; `modalFocus.test.jsx` fails on a dialog that
+  uses it.
+- **Where focus goes back.** To what had it as the dialog opened. When that has gone (its row was
+  deleted), to the dialog still open beneath, or else to `main`, which is focusable for that moment
+  only. A dialog opened over another hands focus back to the control in the one beneath; when both
+  close in one update, focus goes to what opened the first.
+- **While it is open.** When the control holding focus is removed, as when a dialog moves on to its
+  next step, focus goes back to the dialog.
+- **Escape** stays on the `useEscapeKey` stack, which cancels the keypress, so the browser does not
+  close the `<dialog>` itself and a dialog opened over another answers first. A field that answers
+  Escape itself (the semantic ID search) cancels it too. Any other close request, such as Android's
+  back gesture, arrives as the dialog's `cancel` event and calls `onClose`.
+- **What must be inside.** The page under a dialog is inert and drawn beneath it, so anything that
+  must be used over a dialog goes into it: `overlayHost()` returns the open dialog, or `<body>`. The
+  clipboard fallback's scratch field (`copyText`) and the help tip's bubble go there. The toasts do
+  not, so a message a person must see while a dialog stays open is shown in the dialog: a failure in
+  its error slot, a refused copy beside the value.
+- jsdom has no `showModal()`. `src/test/setup.js` stubs it to set `open`, so the tests assert what
+  `Modal` does itself; the inert page and the top layer are checked in a real browser.
 
 ---
 
@@ -290,12 +372,13 @@ row and all, so the two read alike.
   passes for anyone but an Administrator, disables each field and puts "Only an Administrator can
   change this" in Actions. RLS already withholds the rows marked `sensitive`; a row another page's
   dialog edits is offered by the search only while that page is in the rail.
-- **Theme and sidebar layout are the person's `user_settings` row** (`supabase/README.md`,
-  `0188`), read and written by `hooks/useUserSettings.js`. `useTheme` and `useSidebarMode` keep the
-  browser's copy in localStorage (`aber_theme`, `aber_sidebar_mode`), so the page paints at once and
+- **Theme, sidebar layout and single-key shortcuts are the person's `user_settings` row**
+  (`supabase/README.md`, `0188`, `0194`), read and written by `hooks/useUserSettings.js`. `useTheme`,
+  `useSidebarMode` and `useSingleKeyShortcuts` keep the browser's copy in localStorage
+  (`aber_theme`, `aber_sidebar_mode`, `aber_single_key_shortcuts`), so the page paints at once and
   the sign-in screen shows the theme last used here; once the row loads it wins. A person with no
-  row is seeded from that copy (`utils/userSettings.js`, ON CONFLICT DO NOTHING, then a second
-  read). Each change goes to the copy at once and to the row behind it, and the menu's theme switch,
+  row is seeded from that copy's theme and layout (`utils/userSettings.js`, ON CONFLICT DO NOTHING,
+  then a second read); the shortcuts take the column's default, on. Each change goes to the copy at once and to the row behind it, and the menu's theme switch,
   the rail's control and Appearance all write through the one hook's setters. A choice made before the row
   arrives is not undone by it.
 - **Without the row the page works as it did before.** A failed read or write leaves `source` at
@@ -495,8 +578,8 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
   page shares across its tabs: the Vocabulary search, and Capture's stored filter and search.
 - **`useUrlState` returns `[value, setValue]`**, as `useState` does. A setter reads the address when
   it runs, so several setters called in one handler compose.
-- **A new tab needs only its id in the page's list.** Most pages take the list from their tab help
-  (`Object.keys(VIEW_HELP)`).
+- **A new tab needs only its id in the page's list.** Most pages take the list from their tab list,
+  the one that also holds each tab's tooltip (`VIEWS.map(v => v.id)`).
 - **A rail click goes to the bare page**, so nothing a drill-down set comes along. A drill-down goes
   to an address built in `routes.js` (`deviceUrl(id)` is `/devices?search=<id>`); the page reads its
   filters from it, and `useArrivalSelection` opens the drawer on an exact id.
@@ -538,9 +621,9 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 
 **A page has one card.** Its title and description are the card's `CardHeading`. The seamless tab bar
 (`common/TabStrip.jsx`, one underline style, no pills) sits under the heading and shows one tab's
-content at a time; the card scrolls, the page does not. The selected tab's "?" `HelpTip` sits in the
-bar straight after the last tab (`TabStrip`'s `help`), so a tab needs no row of its own to explain
-itself. Under the bar is a toolbar row, the existing `.filter-bar`, drawn only when the tab has
+content at a time; the card scrolls, the page does not. Each tab explains itself in a tooltip, its
+`description` ([Tooltips](#tooltips-on-a-tab)), so the bar holds the tabs and nothing after them.
+Under the bar is a toolbar row, the existing `.filter-bar`, drawn only when the tab has
 filters or actions: its filters first, its actions in `.filter-bar-actions` at the right. Tabs carry
 no counts. A tab with work waiting takes `attention={n}`: the label turns
 the warning colour and gains an icon and the number, only while n is above 0. A row that outgrows one
@@ -550,8 +633,8 @@ line keeps search, status and the key toggle and moves the rest into `common/Fil
 <div className="card">
   <CardHeading title="Devices" description="…" />
   <TabStrip ariaLabel="Devices view" value={tab} onChange={setTab}
-    tabs={[{ id: 'roster', label: 'Roster' }, { id: 'quarantine', label: 'Quarantine', attention: waiting }]}
-    help={<HelpTip label={`About ${selectedLabel}`} text={TAB_HELP[tab]} />} />
+    tabs={[{ id: 'roster', label: 'Roster', description: 'Devices admitted to Aber.' },
+           { id: 'quarantine', label: 'Quarantine', description: '…', attention: waiting }]} />
   {/* Only a tab with filters or actions draws this row. */}
   <div className="filter-bar">
     <SearchInput … />
@@ -605,10 +688,33 @@ page that passes one. So a page's main button is in the same place whether or no
 `/` focuses the open page's search box (`focusPageSearch` in `common/SearchInput.jsx`, bound in
 `App.jsx` beside `?`). It finds the first shown `SearchInput` in a `.filter-bar` inside `main`, so a
 search box added to a toolbar is reached with no wiring of its own. The top bar's search is outside
-`main`, and Ctrl K owns it. `/` does nothing in a text field, a select or a contenteditable, with
-Ctrl, Cmd or Alt held, while any `role="dialog"` (a modal or a popover) is open, or on a page with no
-box. The box shows a `/` hint while it is empty and unfocused, and App.css draws it only where `/`
-reaches.
+`main`, and Ctrl K owns it. The box shows a `/` hint while it is empty and unfocused, and App.css
+draws it only where `/` reaches.
+
+`[` and `]` move to the open page's previous and next tab (`stepPageTab` in `src/shortcuts.js`,
+bound beside `?`). They find the tab bar the way `/` finds the search box, the first shown
+`role="tablist"` inside `main`, so a page with a `TabStrip` needs no wiring. They click the tab, so
+the address, the history entry and the page's own reset follow as they do for a click, then focus
+it, so a screen reader reads its name. They stop at the first and last tab and do nothing on a page
+without tabs. A tab bar made of links would change only what `stepPageTab` looks for: the bar, its
+tabs and the open one.
+
+**One check decides when a shortcut may act** (`shortcutAllowed` in `src/shortcuts.js`). It stands
+down in a text field, a select or a contenteditable, with Ctrl, Cmd or Alt held, and while a dialog
+or popover is open: `role="dialog"`, `aria-modal="true"` or a native `dialog[open]`. AltGr passes,
+though Windows reports it as Ctrl+Alt, because German, French and Nordic layouts type `[` and `]`
+with it. Every shortcut is read from `e.key`, the character, never the key code. Ctrl K uses the
+dialog part alone: with a dialog open it does nothing, rather than moving focus behind it.
+
+**Single-key shortcuts can be turned off** (WCAG 2.2 SC 2.1.4, Character Key Shortcuts). `?`, `/`,
+`[` and `]` are one character with no modifier, which speech input can type by mistake. Profile ›
+Appearance has a Single-key shortcuts switch, on by default and saved in `user_settings`
+(`singleKeyShortcutAllowed`). Ctrl K and the arrow keys are not character keys, so it leaves them
+alone. While it is off, the shortcuts list stays one click away on the top bar's Keyboard shortcuts
+button, and marks the four rows Off. `aria-keyshortcuts` names `?` on that button, `/` on the page's
+search box (read from `SingleKeyShortcutsContext`) and Control+K or Meta+K on the top bar's search.
+The first two, and the `/` hint, go while the switch is off. `[` and `]` are named on no element,
+because the tab they open changes; the shortcuts list covers them.
 
 ---
 
@@ -638,6 +744,7 @@ them. Nothing checks this list, because a word that is allowed cannot be policed
 | A group of cells | area | building, floor |
 | A cell | cell | cell zone, zone, work center |
 | Any audited row | entity | asset, unless it is the shopfloor class |
+| A filter's no-constraint option | Any … (Any gateway, Any status) | All … (All gateways) |
 
 **Site and campus.** "Site" is the term: the page, the setting, the Site-Wide scope and the ISA-95
 level all say it. "Campus" may gloss it in running text and tooltips, as in "the site is this
@@ -646,8 +753,8 @@ in "building management system".
 
 - **Page identity.** A page has one card. Its icon, title and one-sentence description are the
   card's `CardHeading`, stated once; there is no `PageHeading` above it. A tabbed page puts its tab
-  bar inside that card, and the tab's "?" and the toolbar row follow [Tabs](#tabs). Buttons go in
-  the toolbar, never the heading ([The toolbar](#the-toolbar)).
+  bar inside that card, and the tabs' tooltips and the toolbar row follow [Tabs](#tabs). Buttons go
+  in the toolbar, never the heading ([The toolbar](#the-toolbar)).
 - **Scroll.** Every page scrolls inside its card, Access Control, Directory and Approvals included.
 - **Counts.** None on card headings, section headings or tabs. A count stays where it states what is
   loaded ("30 of 55" beside Show more), what a filter option or toggle holds ("Active (4)", "Show
@@ -679,7 +786,7 @@ in "building management system".
 - **Sizes** use binary units labelled KiB and MiB. There is one relative-time style and one absolute
   date-time format (`utils/format.js`).
 - **Help pages** state nothing wrong and name the page's main controls; they are not full manuals.
-  A `HelpTip` is about 35 words or fewer.
+  A `HelpTip` is about 35 words or fewer, and a tab's tooltip 20 words at most.
 - **Comments** state the current state only. An archived migration is cited as "archived migration
   NNNN", never as a bare number, which a live migration will reach; where that is ambiguous (the
   archive has two numbering schemes, and two files numbered 0074), cite the file name.
@@ -752,8 +859,8 @@ The same component the entity pages use, with `subject="help"` for its region la
 control. It is a sibling of `.content` rather than of a page's list, so it survives a tab switch,
 works on pages that have no drawer of their own, and cannot be unmounted by the page it describes —
 `tabId` follows the active tab, so it re-reads as you navigate. Every drawer, this one included,
-stays docked beside the page down to 800px wide; narrower, it slides over the page as a
-dismissible overlay.
+stays beside the page down to 800px wide; narrower, it slides over the page as a dismissible
+overlay.
 
 **One drawer at a time below 1440px.** From 1440px wide, help opens beside a page's drawer and the
 flex row narrows the page between them. Narrower, help replaces the page's drawer:
@@ -769,16 +876,28 @@ flex row narrows the page between them. Narrower, help replaces the page's drawe
   outside that provider. The query and the media query must agree; `contextPanel.test.jsx` checks
   that they do.
 
+**The help drawer docks; a page's drawer floats.** Help belongs to the app's frame, like the rail,
+so it is drawn as the rail's mirror: flush with the window's right edge under the bar, on the rail's
+`--bg-surface`, with one border on the page side and no margin, rounding or shadow. A page's drawer
+belongs to the list beside it and stays a card, with its border, rounding and shadow. With both
+open, the look is what tells them apart. Below 800px help is an overlay and keeps the shadow, as
+the rail does when it opens over the page.
+
 **Where 1440px comes from.** A drawer is `--context-panel-width`, `clamp(320px, 28vw, 560px)`. With
 the rail collapsed (52px), the page's column is the window less the rail, the 12px gutter either
-side of the page, the page's drawer with its 16px gap, and the help drawer with its 12px right
-margin: `W − 104 − 2 × clamp(320, 0.28W, 560)`. Between 1143px and 2000px that is `0.44W − 104`,
-which reaches 500px at 1373px. A card in the column loses another 48px to its border and padding
-(the Site Map card body measured 552, 411, 168 and 108px at 1600, 1280, 960 and 900px wide with
-both drawers open), so its body is about 480px at 1440px, the first common window width past
-1373px. A laptop at 1366px gets one drawer: two would leave its column 497px and a card's body
-about 450px. The expanded rail (240px) takes 188px more at every width; the threshold does not
-move with it.
+side of the page, and the page's drawer with its 16px gap. The docked help drawer adds no margin:
+`W − 92 − 2 × clamp(320, 0.28W, 560)`. Between 1143px and 2000px that is `0.44W − 92`, which
+reaches 500px at 1346px. A card in the column loses another 48px to its border and padding. The
+Site Map card body measured 552, 411, 168 and 108px at 1600, 1280, 960 and 900px wide with both
+drawers open, while help still had a 12px margin; docked, each is 12px wider. At 1440px the
+column is 542px (Gateways, measured docked) and a card's body about 494px.
+
+**The threshold stays at 1440px, though 1366px now clears 500px.** Two drawers on a 1366px laptop
+would leave a 509px column and a card body of about 461px. That is 9px over the line, and a body
+narrower than the 480px that 1440px was first chosen for. Moving the threshold would change what
+the commonest laptop width does today, where help replaces the page's drawer, for those 9px. So
+`ONE_DRAWER_QUERY` stays `(max-width: 1439px)`. The expanded rail (232px) takes 180px more at
+every width; the threshold does not move with it.
 
 **Its contents are mounted only while it is open**, which the per-page drawers do not need to do.
 The panel stays in the DOM so its width can transition, but a page of prose whose first line is the

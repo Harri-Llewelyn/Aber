@@ -150,15 +150,17 @@ describe('the Quarantine tab', () => {
     expect(tab('Registered')).toHaveAttribute('aria-selected', 'true')
   })
 
-  it('lists the waiting device straight under the bar, its HelpTip in the bar and no toolbar row', async () => {
+  it('lists the waiting device straight under the bar, explained by its tab and with no toolbar row', async () => {
     await show([device()], [queued])
     fireEvent.click(tab(/^Quarantine/))
 
-    // The tab has no filters or actions, so it draws no row; its "?" follows the tab names.
+    // The tab has no filters or actions, so it draws no row. It explains itself in its tooltip,
+    // which keeps the waiting count in the tab's name and adds the sentence beside it.
     expect(card().querySelector('.filter-bar')).toBeNull()
     expect(card().querySelector(':scope > .tab-strip + .table-wrap')).toBeTruthy()
-    expect(card().querySelector('.tab-strip-help .help-tip')).toHaveAccessibleName('About the Quarantine queue')
-    expect(screen.queryByRole('button', { name: 'About registered devices' })).toBeNull()
+    expect(card().querySelector('.tab-strip .help-tip')).toBeNull()
+    expect(tab(/^Quarantine/)).toHaveAccessibleName('Quarantine, 1 waiting')
+    expect(tab(/^Quarantine/)).toHaveAccessibleDescription('Births from devices nobody has registered. Their readings are held until someone approves or rejects them.')
     const row = within(card()).getByText('Unknown_Robot').closest('tr')
     // Relative time, with the exact time on hover; a plain dash for the missing gateway name.
     const when = within(row).getByText('3h ago')
@@ -216,8 +218,8 @@ describe('the Registered tab', () => {
     await show([device()])
 
     const bar = within(card().querySelector(':scope > .tab-strip + .filter-bar'))
-    expect(card().querySelector('.filter-bar .help-tip')).toBeNull()
-    expect(card().querySelector('.tab-strip-help .help-tip')).toHaveAccessibleName('About registered devices')
+    expect(card().querySelector('.filter-bar .help-tip, .tab-strip .help-tip')).toBeNull()
+    expect(tab('Registered')).toHaveAccessibleDescription(/Devices admitted to Aber/)
     expect(bar.getByRole('searchbox', { name: 'Search devices' })).toBeInTheDocument()
     expect(bar.getByTitle('Filter by operational state')).toBeInTheDocument()
     expect(bar.getByRole('button', { name: /Needs attention/ })).toBeInTheDocument()

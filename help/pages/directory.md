@@ -4,9 +4,9 @@ This page lists every service Aber runs, what each one is for, and how to reach 
 
 ## What the controls do
 
-- **The tabs** group the services by what they are for. **Applications & User Interfaces** holds the things with a front door. **Ingestion & Messaging** is the path a reading takes from a machine to the historian. **Data & Backend Infrastructure** is what the other two are built on.
+- **The tabs** group the services by what they are for. **Applications & User Interfaces** holds the things with a front door: a link there is where you go to do something the dashboard does not do itself. **Ingestion & Messaging** is the path a reading takes from a machine to the historian. If telemetry has stopped arriving, the fault is almost always one of these. **Data & Backend Infrastructure** is what the other two are built on. It is listed so that the directory does not make the stack look smaller than it is.
 - **Other Registered Services** holds any service whose type fits none of those three. It appears only while something is in it, because that is the sign of a type nobody expected. Any group with nothing in it has no tab.
-- The `?` just after the tab names says what the open group is.
+- Point at a tab, or move to it with the keyboard, to read what its group holds.
 - **Service Name** and **Service Type** say what the service is. The type is a category in words, such as Edge node or REST API. Hover it to see the type the service was registered with.
 - **Endpoint URL** is where the service answers, for the deployment you are actually running.
 - **A column's heading sorts the table** by that column, on every tab. Click it again to reverse the order, and a third time to go back to the usual order. A status sorts the most serious first, and an empty cell always sorts last. The page's address keeps the order, so a link or a reload shows the table the same way.

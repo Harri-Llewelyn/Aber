@@ -5,7 +5,7 @@
  * value is coerced to its declared type before it is sent.
  */
 import React from 'react'
-import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SettingsTab, coerceValue, displayValue, fallbackCopy, groupByCategory } from '../components/tabs/SettingsTab'
 import { api } from '../api'
@@ -133,17 +133,22 @@ describe('the page', () => {
     expect(description.closest('tr')).toBe(document.querySelector('[data-setting="ui.audit_trail_poll_seconds"]'))
     expect(screen.queryByRole('tooltip')).toBeNull()
     expect(screen.queryByRole('button', { name: 'About Refresh interval (seconds)' })).toBeNull()
-    // The one ? left is the one beside the tabs.
-    expect(screen.getAllByRole('button', { name: /^About / }).map(b => b.getAttribute('aria-label')))
-      .toEqual(['About Audit Trail settings'])
+    // No ? anywhere on the page: beside a setting or beside the tabs.
+    expect(screen.queryAllByRole('button', { name: /^About / })).toHaveLength(0)
   })
 
-  it('does not tell the reader that a ? beside a setting says what it controls', async () => {
+  /* A category has no description in the database, so its sentence is the frontend's. One the
+     list does not know shows no tooltip rather than an empty one. */
+  it('describes each category it knows in its tab\'s tooltip, and leaves an unknown one plain', async () => {
     await show()
-    fireEvent.mouseEnter(screen.getByRole('button', { name: 'About Audit Trail settings' }))
-    const tip = screen.getByRole('tooltip')
-    expect(tip).toHaveTextContent(/without a restart/)
-    expect(tip).not.toHaveTextContent(/beside a setting/)
+    expect(screen.getByRole('tab', { name: 'Audit Trail' })).toHaveAccessibleDescription(/How often the Audit Trail page reads/)
+    expect(screen.getByRole('tab', { name: 'Retention' })).toHaveAccessibleDescription(/How long Aber keeps records/)
+    expect(screen.getByRole('tab', { name: 'Audit Trail' })).not.toHaveAccessibleDescription(/beside a setting/)
+
+    api.get.mockResolvedValue([{ ...SETTINGS[0], key: 'z.one', category: 'Zulu' }])
+    cleanup()
+    await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
+    expect(screen.getByRole('tab', { name: 'Zulu' })).not.toHaveAttribute('aria-describedby')
   })
 
   it('names what applies when a setting has never been changed', async () => {
@@ -519,10 +524,9 @@ describe('the page frame', () => {
     expect(document.querySelectorAll('.card')).toHaveLength(1)
   })
 
-  it('puts the selected tab\'s tip in the tab bar, draws no toolbar row, and counts nothing', async () => {
+  it('draws no "?" after the tabs, no toolbar row, and counts nothing', async () => {
     await act(async () => { render(<SettingsTab showToast={vi.fn()} />) })
-    const help = document.querySelector('.card > .tab-strip > .tab-strip-help')
-    expect(help).toContainElement(screen.getByRole('button', { name: 'About Audit Trail settings' }))
+    expect(document.querySelector('.card > .tab-strip').children).toHaveLength(1)
     // A category has no filters or actions, so nothing sits between the bar and its rows.
     expect(document.querySelector('.filter-bar')).toBeNull()
     expect(document.querySelector('.card > .tab-strip').nextElementSibling).toHaveClass('table-wrap')
@@ -530,8 +534,7 @@ describe('the page frame', () => {
     for (const tab of screen.getAllByRole('tab')) expect(tab).not.toHaveAttribute('title')
 
     fireEvent.click(screen.getByRole('tab', { name: /^Retention/ }))
-    expect(help).toContainElement(screen.getByRole('button', { name: 'About Retention settings' }))
-    expect(screen.queryByRole('button', { name: 'About Audit Trail settings' })).toBeNull()
+    expect(document.querySelector('.card .tab-strip .help-tip')).toBeNull()
   })
 
   it('shows a load error as a danger callout inside the card', async () => {

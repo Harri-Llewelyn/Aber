@@ -1,6 +1,6 @@
 """
-A person's own preferences (0188): `user_settings`, one row per person, read and written by that
-person alone.
+A person's own preferences (0188, 0194): `user_settings`, one row per person, read and written by
+that person alone.
 
 What would fail quietly without these:
 
@@ -9,7 +9,7 @@ What would fail quietly without these:
 - An Administrator reads nobody else's row either: nothing in it is anyone else's business.
 - `anon` and `service_role` hold nothing on the table.
 - The CHECKs refuse a value the dashboard does not know, and a row with no choice made carries
-  the dashboard's defaults.
+  the dashboard's defaults, single-key shortcuts on among them.
 - The dashboard's first-sign-in seed (INSERT ... ON CONFLICT DO NOTHING) never overwrites a row
   another tab created, and its one-column save (PostgREST's upsert) leaves the other column alone.
 - Deleting the account deletes the row; a person cannot delete it themselves.
@@ -168,6 +168,24 @@ class TestTheValues(UserSettingsBase):
         self.as_person(ALICE)
         self.cur.execute("INSERT INTO public.user_settings (user_id) VALUES (%s)", (ALICE,))
         self.assertEqual(self.rows(), [(ALICE, "dark", "hover")])
+
+    def test_single_key_shortcuts_are_on_until_turned_off(self):
+        """0194: a one-column save turns them off and on again, and nothing turns them to null."""
+        self.as_person(ALICE)
+        self.cur.execute("INSERT INTO public.user_settings (user_id) VALUES (%s)", (ALICE,))
+        read = "SELECT single_key_shortcuts FROM public.user_settings WHERE user_id = %s"
+        self.cur.execute(read, (ALICE,))
+        self.assertIs(self.cur.fetchone()[0], True)
+        save = ("INSERT INTO public.user_settings (user_id, single_key_shortcuts) VALUES (%s, %s)"
+                " ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id,"
+                " single_key_shortcuts = EXCLUDED.single_key_shortcuts")
+        for value in (False, True):
+            self.cur.execute(save, (ALICE, value))
+            self.cur.execute(read, (ALICE,))
+            self.assertIs(self.cur.fetchone()[0], value)
+        self.assertEqual(self.rows(), [(ALICE, "dark", "hover")])
+        with self.assertRaises(psycopg2.errors.NotNullViolation):
+            self.cur.execute(save, (ALICE, None))
 
     def test_an_unknown_theme_is_refused(self):
         self.as_person(ALICE)

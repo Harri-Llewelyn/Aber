@@ -1,10 +1,10 @@
 import React from 'react'
 import { render, screen, fireEvent, act, renderHook } from '@testing-library/react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { Sidebar } from '../components/common/Sidebar'
+import { Sidebar, RAIL_OPEN_DELAY_MS } from '../components/common/Sidebar'
 import { useSidebarMode, SIDEBAR_MODES, SIDEBAR_MODE_KEY } from '../hooks/useSidebarMode'
 import { TABS, tabIsVisible } from '../navigation'
 
@@ -24,10 +24,16 @@ const renderRail = (props = {}) => {
 beforeEach(() => localStorage.clear())
 
 describe('the three behaviours', () => {
-  it('hover: collapsed at rest, open under the pointer', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+  const rest = () => act(() => { vi.advanceTimersByTime(RAIL_OPEN_DELAY_MS) })
+
+  it('hover: collapsed at rest, open once the pointer rests on it', () => {
     renderRail({ mode: 'hover' })
     expect(isExpanded()).toBe(false)
     fireEvent.mouseEnter(rail())
+    expect(isExpanded()).toBe(false)
+    rest()
     expect(isExpanded()).toBe(true)
     fireEvent.mouseLeave(rail())
     expect(isExpanded()).toBe(false)
@@ -42,9 +48,10 @@ describe('the three behaviours', () => {
     expect(isExpanded()).toBe(true)
   })
 
-  it('collapsed: the pointer does nothing', () => {
+  it('collapsed: the pointer does nothing, however long it rests', () => {
     renderRail({ mode: 'collapsed' })
     fireEvent.mouseEnter(rail())
+    rest()
     expect(isExpanded()).toBe(false)
   })
 

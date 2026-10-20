@@ -1,0 +1,380 @@
+import React, { useRef, useState } from 'react'
+import fs from 'node:fs'
+import path from 'node:path'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { Modal } from '../components/common/Modal'
+import { copyText } from '../components/common/CopyableId'
+import { SearchInput, focusPageSearch } from '../components/common/SearchInput'
+import { ConfirmModal } from '../components/modals/ConfirmModal'
+import { AddPersonModal } from '../components/modals/AddPersonModal'
+import { ChangePasswordModal } from '../components/modals/ChangePasswordModal'
+import { TakeBackupModal } from '../components/modals/TakeBackupModal'
+import { ServicePrincipalCreateModal } from '../components/modals/ServicePrincipalCreateModal'
+import { ServicePrincipalDescribeModal } from '../components/modals/ServicePrincipalDescribeModal'
+import { ServicePrincipalRevocationModal } from '../components/modals/ServicePrincipalRevocationModal'
+import { GatewayBundleModal } from '../components/modals/GatewayBundleModal'
+import { GatewayCredentialModal } from '../components/modals/GatewayCredentialModal'
+
+/**
+ * Focus in the shared dialog frame: where it starts, that it stays in the dialog, and where it goes
+ * back to. jsdom has no showModal(), so the browser's own parts (the inert page, the top layer) are
+ * not tested here; the parts `Modal` does itself are.
+ */
+
+vi.mock('../lib/supabaseClient', () => ({ supabase: { auth: {}, from: vi.fn(), rpc: vi.fn() } }))
+vi.mock('../api', () => ({ api: new Proxy({}, { get: () => vi.fn() }) }))
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
+
+const esc = () => fireEvent.keyDown(document, { key: 'Escape' })
+
+/** A page whose button opens `dialog(close)`. */
+function Page({ dialog, label = 'Open' }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <main>
+      <button type="button" onClick={() => setOpen(true)}>{label}</button>
+      {open && dialog(() => setOpen(false))}
+    </main>
+  )
+}
+
+/** Focuses a button and presses it, as a keyboard user would. */
+const activate = (button) => {
+  button.focus()
+  fireEvent.click(button)
+}
+
+describe('opening a dialog', () => {
+  it('moves focus to the dialog itself, named by its title and described by its lead', () => {
+    render(<Page dialog={close => <Modal title="Rename area" lead="Shown on the Site Map." onClose={close}><input aria-label="Name" /></Modal>} />)
+    activate(screen.getByRole('button', { name: 'Open' }))
+
+    const dialog = screen.getByRole('dialog', { name: 'Rename area' })
+    expect(dialog).toHaveFocus()
+    expect(dialog).toHaveAttribute('tabindex', '-1')
+    expect(document.getElementById(dialog.getAttribute('aria-describedby'))).toHaveTextContent('Shown on the Site Map.')
+  })
+
+  it('has no description when there is no lead', () => {
+    render(<Modal title="T" onClose={vi.fn()} />)
+    expect(screen.getByRole('dialog')).not.toHaveAttribute('aria-describedby')
+  })
+
+  it('starts on the control initialFocus names', () => {
+    function Named({ onClose }) {
+      const nameRef = useRef(null)
+      return (
+        <Modal title="Rename area" onClose={onClose} initialFocus={nameRef}>
+          <button type="button">Help</button>
+          <input aria-label="Name" ref={nameRef} />
+        </Modal>
+      )
+    }
+    render(<Page dialog={close => <Named onClose={close} />} />)
+    activate(screen.getByRole('button', { name: 'Open' }))
+    expect(screen.getByLabelText('Name')).toHaveFocus()
+  })
+
+  it('starts on the dialog when the named control cannot take focus', () => {
+    function Disabled() {
+      const nameRef = useRef(null)
+      return (
+        <Modal title="T" onClose={vi.fn()} initialFocus={nameRef}>
+          <input aria-label="Name" ref={nameRef} disabled />
+        </Modal>
+      )
+    }
+    render(<Disabled />)
+    expect(screen.getByRole('dialog')).toHaveFocus()
+  })
+
+  it('opens the <dialog> with showModal(), not the open attribute', () => {
+    const showModal = vi.spyOn(HTMLDialogElement.prototype, 'showModal')
+    render(<Modal title="T" onClose={vi.fn()} />)
+    expect(showModal).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('dialog').open).toBe(true)
+  })
+})
+
+describe('while a dialog is open', () => {
+  it('moves focus back to the dialog when the control holding it is removed', () => {
+    function Steps() {
+      const [step, setStep] = useState(1)
+      return (
+        <Modal title="Set up" onClose={vi.fn()}>
+          {step === 1 ? <button type="button" onClick={() => setStep(2)}>Next</button> : <p>Done</p>}
+        </Modal>
+      )
+    }
+    render(<Steps />)
+    activate(screen.getByRole('button', { name: 'Next' }))
+    expect(screen.getByText('Done')).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toHaveFocus()
+  })
+
+  it('cancels the Escape keypress it answers, so the browser does not also close the <dialog>', () => {
+    const onClose = vi.fn()
+    render(<Modal title="T" onClose={onClose} />)
+    expect(esc()).toBe(false)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes through onClose on a close request the Escape stack did not take', () => {
+    const onClose = vi.fn()
+    render(<Modal title="T" onClose={onClose} />)
+    const request = new Event('cancel', { cancelable: true })
+    screen.getByRole('dialog').dispatchEvent(request)
+
+    expect(request.defaultPrevented).toBe(true)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('stays open on a close request while its onClose is a no-op', () => {
+    render(<Modal title="T" onClose={() => {}} />)
+    const request = new Event('cancel', { cancelable: true })
+    screen.getByRole('dialog').dispatchEvent(request)
+
+    expect(request.defaultPrevented).toBe(true)
+    expect(screen.getByRole('dialog').open).toBe(true)
+  })
+
+  it('opens again if the browser closes it while it is still rendered', () => {
+    render(<Modal title="T" onClose={() => {}} />)
+    const dialog = screen.getByRole('dialog')
+    dialog.close()
+    dialog.dispatchEvent(new Event('close'))
+
+    expect(dialog.open).toBe(true)
+    expect(dialog).toHaveFocus()
+  })
+
+  // The frame's <dialog> keeps role="dialog", which is what the check looks for; a bare <dialog> is
+  // not something the dashboard renders.
+  it("stops `/` reaching the page's search box behind the frame's <dialog>", () => {
+    const { rerender } = render(
+      <main>
+        <div className="filter-bar"><SearchInput value="" onChange={() => {}} ariaLabel="Search devices" /></div>
+        <Modal title="Opened elsewhere" onClose={() => {}}><p>Opened elsewhere</p></Modal>
+      </main>
+    )
+    expect(focusPageSearch()).toBe(false)
+
+    rerender(
+      <main>
+        <div className="filter-bar"><SearchInput value="" onChange={() => {}} ariaLabel="Search devices" /></div>
+      </main>
+    )
+    expect(focusPageSearch()).toBe(true)
+  })
+
+  it("puts the clipboard's scratch field in the dialog, where it can be selected", async () => {
+    render(<Modal title="T" onClose={vi.fn()} />)
+    vi.stubGlobal('navigator', {})
+    let parent = null
+    const original = document.execCommand
+    document.execCommand = vi.fn(() => {
+      parent = document.querySelector('textarea')?.parentElement ?? null
+      return true
+    })
+    try {
+      expect(await copyText('secret-value')).toBe(true)
+    } finally {
+      document.execCommand = original
+    }
+    expect(parent).toBe(screen.getByRole('dialog'))
+    expect(document.querySelector('textarea')).toBeNull()
+  })
+})
+
+describe('closing a dialog', () => {
+  it('hands focus back to the button that opened it, by Escape or by the close button', () => {
+    render(<Page dialog={close => <Modal title="T" onClose={close} />} />)
+    const opener = screen.getByRole('button', { name: 'Open' })
+
+    activate(opener)
+    esc()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(opener).toHaveFocus()
+
+    activate(opener)
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(opener).toHaveFocus()
+  })
+
+  it('moves focus to the main region when the opener was removed in the same update', async () => {
+    function Rows() {
+      const [rows, setRows] = useState(['press_1', 'press_2'])
+      const [deleting, setDeleting] = useState(null)
+      return (
+        <main>
+          {rows.map(r => <button type="button" key={r} onClick={() => setDeleting(r)}>Delete {r}</button>)}
+          {deleting && (
+            <ConfirmModal
+              title={`Delete ${deleting}`} message="Gone for good." confirmLabel="Delete"
+              onCancel={() => setDeleting(null)}
+              onConfirm={() => { setRows(rs => rs.filter(x => x !== deleting)); setDeleting(null) }}
+            />
+          )}
+        </main>
+      )
+    }
+    render(<Rows />)
+    activate(screen.getByRole('button', { name: 'Delete press_1' }))
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Delete' })) })
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Delete press_1' })).toBeNull()
+    const main = document.querySelector('main')
+    expect(main).toHaveFocus()
+
+    // Focusable only for the hand-over: once focus moves on, main leaves the Tab order's reach.
+    screen.getByRole('button', { name: 'Delete press_2' }).focus()
+    expect(main).not.toHaveAttribute('tabindex')
+  })
+
+  it('moves focus to the main region when the opener went while the dialog was open', () => {
+    function Gone() {
+      const [shown, setShown] = useState(true)
+      const [open, setOpen] = useState(false)
+      return (
+        <main>
+          {shown && <button type="button" onClick={() => setOpen(true)}>Open</button>}
+          {open && (
+            <Modal title="T" onClose={() => setOpen(false)}>
+              <button type="button" onClick={() => setShown(false)}>Remove the opener</button>
+            </Modal>
+          )}
+        </main>
+      )
+    }
+    render(<Gone />)
+    activate(screen.getByRole('button', { name: 'Open' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove the opener' }))
+    esc()
+    expect(document.querySelector('main')).toHaveFocus()
+  })
+
+  it('leaves focus alone when nothing had it as the dialog opened', () => {
+    const { rerender } = render(<main><p>page</p></main>)
+    rerender(<main><p>page</p><Modal title="T" onClose={vi.fn()} /></main>)
+    expect(screen.getByRole('dialog')).toHaveFocus()
+    rerender(<main><p>page</p></main>)
+    expect(document.body).toHaveFocus()
+  })
+})
+
+describe('a dialog over a dialog', () => {
+  function Form() {
+    const [form, setForm] = useState(false)
+    const [confirming, setConfirming] = useState(false)
+    return (
+      <main>
+        <button type="button" onClick={() => setForm(true)}>Edit</button>
+        {form && (
+          <Modal title="Edit area" onClose={() => setForm(false)}>
+            <button type="button" onClick={() => setConfirming(true)}>Discard Changes</button>
+            {confirming && (
+              <ConfirmModal
+                title="Discard changes" message="What you typed is lost." confirmLabel="Discard"
+                onCancel={() => setConfirming(false)}
+                onConfirm={() => { setConfirming(false); setForm(false) }}
+              />
+            )}
+          </Modal>
+        )}
+      </main>
+    )
+  }
+
+  it('takes focus, and gives it back to the dialog beneath on Escape', () => {
+    render(<Form />)
+    activate(screen.getByRole('button', { name: 'Edit' }))
+    activate(screen.getByRole('button', { name: 'Discard Changes' }))
+
+    const top = screen.getByRole('dialog', { name: 'Discard changes' })
+    expect(top).toHaveFocus()
+
+    esc()
+    expect(screen.queryByRole('dialog', { name: 'Discard changes' })).toBeNull()
+    expect(screen.getByRole('dialog', { name: 'Edit area' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Discard Changes' })).toHaveFocus()
+
+    esc()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Edit' })).toHaveFocus()
+  })
+
+  it('gives focus to what opened the first when both close in one update', async () => {
+    render(<Form />)
+    activate(screen.getByRole('button', { name: 'Edit' }))
+    activate(screen.getByRole('button', { name: 'Discard Changes' }))
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Discard' })) })
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Edit' })).toHaveFocus()
+  })
+})
+
+/**
+ * The dialogs that started on a field before the frame moved focus. A field is the start where it
+ * is the obvious first move; the dialog is, where a warning above the field says what the act
+ * revokes or overwrites and a screen reader should read it first (ConfirmModal's typed gate is the
+ * same). None starts on a button.
+ */
+describe('where each dialog starts', () => {
+  const GATEWAY = { gateway_id: 'g-1', gateway_name: 'Press Hall Gateway', sparkplug_id: 'gwy1', status: 'ONLINE' }
+  const PRINCIPAL = { principal_id: 'p-1', name: 'Line 4 OEE report', purpose: '' }
+
+  const cases = [
+    ['AddPersonModal', <AddPersonModal key="a" onClose={vi.fn()} />, () => screen.getByLabelText('Email')],
+    ['ChangePasswordModal', <ChangePasswordModal key="b" email="admin@aber.local" onClose={vi.fn()} />, () => screen.getByLabelText('Current password')],
+    ['TakeBackupModal', <TakeBackupModal key="c" holds="the platform database" onConfirm={vi.fn()} onCancel={vi.fn()} />, () => screen.getByLabelText('Note (optional)')],
+    ['ServicePrincipalCreateModal', <ServicePrincipalCreateModal key="d" onClose={vi.fn()} />, () => screen.getByLabelText('Name')],
+    ['ServicePrincipalDescribeModal', <ServicePrincipalDescribeModal key="e" principal={PRINCIPAL} onClose={vi.fn()} />, () => screen.getByLabelText('Name')],
+    ['ServicePrincipalRevocationModal (withdraw)', <ServicePrincipalRevocationModal key="f" principal={PRINCIPAL} principalName={PRINCIPAL.name} onClose={vi.fn()} />, () => screen.getByRole('dialog')],
+    ['ServicePrincipalRevocationModal (reinstate)', <ServicePrincipalRevocationModal key="g" principal={PRINCIPAL} principalName={PRINCIPAL.name} revocation={{ reason: 'decommissioned' }} onClose={vi.fn()} />, () => screen.getByRole('dialog')],
+    ['GatewayBundleModal (re-issue)', <GatewayBundleModal key="h" gateway={GATEWAY} confirmFirst onClose={vi.fn()} />, () => screen.getByRole('dialog')],
+    ['GatewayCredentialModal', <GatewayCredentialModal key="i" gateway={GATEWAY} onClose={vi.fn()} />, () => screen.getByRole('dialog')],
+    ['ConfirmModal (typed gate)', <ConfirmModal key="j" title="Delete schema" message="Gone for good." confirmLabel="Delete" requireTyped="press_line_1" onConfirm={vi.fn()} onCancel={vi.fn()} />, () => screen.getByRole('dialog')],
+  ]
+
+  it.each(cases)('%s', (_name, element, start) => {
+    render(element)
+    expect(start()).toHaveFocus()
+    const focused = document.activeElement
+    expect(focused.tagName).not.toBe('BUTTON')
+    expect(focused).not.toHaveClass('btn-danger')
+  })
+})
+
+/**
+ * `autoFocus` inside a dialog runs before showModal(), on a control the browser has not drawn yet,
+ * so it does nothing there. A dialog names its start with `initialFocus` instead.
+ */
+describe('no dialog uses autoFocus', () => {
+  const SRC = path.resolve(__dirname, '..')
+  const jsxFiles = (dir) =>
+    fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => {
+      const p = path.join(dir, e.name)
+      if (e.isDirectory()) return e.name === '__tests__' ? [] : jsxFiles(p)
+      return e.name.endsWith('.jsx') ? [p] : []
+    })
+  const dialogs = jsxFiles(SRC)
+    .map(p => [path.relative(SRC, p), fs.readFileSync(p, 'utf8')])
+    .filter(([, s]) => /from '\.\.?\/(common\/)?(Modal|ConfirmModal)'/.test(s))
+
+  it('finds the dialogs to check', () => {
+    expect(dialogs.length).toBeGreaterThanOrEqual(30)
+  })
+
+  it.each(dialogs.map(([rel]) => rel))('%s', (rel) => {
+    const source = dialogs.find(([r]) => r === rel)[1]
+    expect(source).not.toMatch(/\bautoFocus\b/)
+  })
+})
