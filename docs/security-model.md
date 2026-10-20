@@ -131,6 +131,15 @@ Two consequences worth stating on the front page; both are detailed in
   listing is not: keys are `<device_uuid>/<file>`, so listing the bucket, like writing to it, is
   gated on `device:manage`, not merely `authenticated`.
 
+**A capture is read only through its audited download** (`0195`). A file in `broker-captures` holds
+the plant's raw traffic. Administrator, Shopfloor_Manager and Auditor read a stored capture's file
+only in the minute after `issue_capture_download()` wrote `CAPTURE_DOWNLOAD_ISSUED` for them. That
+call opens a grant the bucket's read policy checks, and the Capture page signs its link straight
+after it. A link signed without the call, or a read with a person's own token, is refused, so every
+download names its person in the Audit Trail. The ingestion daemon and the playback worker reach
+only the object of the job each is running, and the daemon a file nothing claims, as before
+([`supabase/README.md`](../supabase/README.md#a-capture-is-downloaded-only-through-the-audited-call-0195)).
+
 ## People
 
 **An Administrator adds people, sets their roles and passwords, and removes their access on the

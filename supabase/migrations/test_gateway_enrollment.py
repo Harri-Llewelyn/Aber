@@ -631,12 +631,20 @@ class TestBrokerCapturePolicies(GatewayEnrollmentBase):
         path = f"{self.sparkplug_id}/auditor-read.json"
         self._insert_as(ADMIN_USER, "Administrator", path)
         self.cur.execute("RESET ROLE;")
-
-        as_role(self.cur, AUDITOR_USER, "Auditor")
         self.cur.execute(
-            "SELECT count(*) FROM storage.objects WHERE bucket_id = 'broker-captures' AND name = %s;",
-            (path,),
+            "INSERT INTO public.captures (subject_kind, gateway_id, subject_sparkplug_id, storage_path, "
+            "size_bytes, message_count) VALUES ('gateway', %s, %s, %s, 1, 1);",
+            (REMOTE_GW, self.sparkplug_id, path),
         )
+
+        # A stored capture is read through the audited download alone (0195).
+        as_role(self.cur, AUDITOR_USER, "Auditor")
+        read = ("SELECT count(*) FROM storage.objects WHERE bucket_id = 'broker-captures' "
+                "AND name = %s;")
+        self.cur.execute(read, (path,))
+        self.assertEqual(self.cur.fetchone()[0], 0, "Auditor read a capture without downloading it")
+        self.cur.execute("SELECT public.issue_capture_download(%s);", (path,))
+        self.cur.execute(read, (path,))
         self.assertEqual(self.cur.fetchone()[0], 1, "Auditor cannot read a capture")
 
         with self.assertRaises(pg_errors.InsufficientPrivilege, msg="Auditor could upload a capture"):

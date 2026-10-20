@@ -1,5 +1,6 @@
 """
-A stored capture is never lost, never orphaned, and never taken on trust (0190).
+A stored capture is never lost, never orphaned, and never taken on trust (0190), and is read only
+through the audited download (0195).
 
     python supabase/migrations/test_capture_retention.py
 
@@ -7,7 +8,7 @@ Requires the Supabase database (54322 by default) with the chain applied, and su
 same password) to create a stand-in for storage.objects: the db lane has no storage-api, so the
 table does not exist there. The suite skips itself where it does exist.
 
-Five things are held here:
+Six things are held here:
 
   * a recording and an upload each write a path of their own, and the row is repointed in one
     transaction, so a failure at any step leaves the stored capture whole;
@@ -20,7 +21,10 @@ Five things are held here:
     ingestion daemon to delete, a deleted subject's included, and the bucket's DELETE policy admits
     nobody to an object something does claim;
   * the daemon is told a job is gone rather than to stop, Stop ends a recording whose progress went
-    stale, and a swept job says whether it ever started.
+    stale, and a swept job says whether it ever started;
+  * a person reads a stored capture's file only for the minute after issue_capture_download()
+    recorded the download for them, and a writer also reads what it may delete or upload. The
+    bucket's policies and their self-check run verbatim on a stand-in table.
 
 Every test rolls back.
 """
@@ -555,6 +559,117 @@ class TheBucketPolicies(Base):
     def test_the_daemon_sees_an_orphan_but_not_a_stored_capture(self):
         self.assertTrue(self._sees("ingestion", self.orphan))
         self.assertFalse(self._sees("ingestion", self.stored))
+
+    # -- a person reads a stored capture through the audited download alone (0195) ------------
+
+    def _download(self, caller, path):
+        return self._run(caller, "SELECT public.issue_capture_download(%s);", (path,))[0][0]
+
+    def _age_grants(self, seconds):
+        self.cur.execute("UPDATE public.capture_downloads SET issued_at = now() - make_interval(secs => %s);",
+                         (seconds,))
+
+    def test_a_reader_sees_a_stored_capture_only_after_the_audited_call(self):
+        """THE ONE #994 FOUND: each reader role signed a link or read the file with its own token,
+        and the Audit Trail held nothing."""
+        for caller in ("Administrator", "Shopfloor_Manager", "Auditor"):
+            with self.subTest(caller=caller):
+                self.assertFalse(self._sees(caller, self.stored), "read without the audited call")
+                self.assertEqual(self._download(caller, self.stored), self.stored)
+                self.assertTrue(self._sees(caller, self.stored))
+        self.assertFalse(self._sees("other", self.stored), "one person's download admits another")
+        self.assertFalse(self._sees("Operator", self.stored))
+        self.assertEqual(self._row("SELECT count(*) FROM public.audit_trail WHERE entity_type = 'captures' "
+                                   "AND action = 'CAPTURE_DOWNLOAD_ISSUED' AND new_data ->> 'storage_path' = %s;",
+                                   (self.stored,))[0], 3)
+
+    def test_a_grant_is_open_for_a_minute(self):
+        self._download("Auditor", self.stored)
+        self._age_grants(59)
+        self.assertTrue(self._sees("Auditor", self.stored))
+        self._age_grants(61)
+        self.assertFalse(self._sees("Auditor", self.stored), "a grant outside the minute still admits")
+
+    def test_the_next_download_clears_the_callers_closed_grants_only(self):
+        device_capture = f"{self.dev_wire}/capture.json"
+        self._capture(kind="device", path=device_capture)
+        self._download("Auditor", self.stored)
+        self._download("Shopfloor_Manager", self.stored)
+        self._age_grants(61)
+        self._download("Auditor", device_capture)
+        self.cur.execute("SELECT created_by::text, storage_path FROM public.capture_downloads ORDER BY 1, 2;")
+        self.assertEqual(self.cur.fetchall(), [(PEOPLE["Shopfloor_Manager"], self.stored),
+                                               (PEOPLE["Auditor"], device_capture)])
+
+    def test_a_deleted_capture_takes_its_grants_and_its_file_is_the_writers_to_delete(self):
+        self._download("Auditor", self.stored)
+        self.cur.execute("DELETE FROM public.captures WHERE storage_path = %s;", (self.stored,))
+        self.assertEqual(self._row("SELECT count(*) FROM public.capture_downloads;")[0], 0)
+        self.assertFalse(self._sees("Auditor", self.stored))
+        self.assertTrue(self._sees("Shopfloor_Manager", self.stored))
+        self.assertTrue(self._deletes("Shopfloor_Manager", self.stored))
+
+    def test_a_writer_sees_what_it_may_delete_or_write_and_nothing_else(self):
+        """DELETE ... RETURNING and INSERT ... RETURNING are checked against SELECT, so the page's
+        delete of a replaced file and its upload need these two arms. An Auditor does neither."""
+        issued = self.begin(replace=True)["storage_path"]
+        self.cur.execute("INSERT INTO capture_retention_probe.objects (bucket_id, name) VALUES ('broker-captures', %s);",
+                         (issued,))
+        expected = {
+            ("Administrator", self.orphan): True, ("Shopfloor_Manager", self.orphan): True,
+            ("Auditor", self.orphan): False, ("Operator", self.orphan): False,
+            ("Shopfloor_Manager", issued): True, ("Administrator", issued): False,
+            ("other", issued): False, ("Auditor", issued): False,
+        }
+        for (caller, name), allowed in expected.items():
+            with self.subTest(caller=caller, name=name):
+                self.assertEqual(self._sees(caller, name), allowed)
+
+    def test_a_download_widens_neither_machine(self):
+        self._download("Administrator", self.stored)
+        self.assertFalse(self._sees("ingestion", self.stored))
+        self.assertFalse(self._sees("playback", self.stored))
+        for machine in ("ingestion", "playback"):
+            with self.subTest(machine=machine):
+                with self.assertRaises(pg_errors.InsufficientPrivilege):
+                    self._download(machine, self.stored)
+
+    def test_nobody_writes_or_reads_a_grant_but_the_call(self):
+        for caller in ("Administrator", "Shopfloor_Manager", "Auditor", "Operator", "anon"):
+            with self.subTest(caller=caller):
+                with self.assertRaises(pg_errors.InsufficientPrivilege):
+                    self._run(caller, "INSERT INTO public.capture_downloads (created_by, storage_path, capture_id) "
+                                      "VALUES (%s, %s, gen_random_uuid());", (PEOPLE["Auditor"], self.stored))
+                with self.assertRaises(pg_errors.InsufficientPrivilege):
+                    self._run(caller, "SELECT count(*) FROM public.capture_downloads;")
+
+    READER_ARM = ("(public.has_role(ARRAY['Administrator', 'Shopfloor_Manager', 'Auditor'])\n"
+                  "       AND public.is_open_capture_download(storage.objects.name))")
+
+    def _section(self, edit=lambda text: text):
+        """The bucket's policies and the DO block that checks them, pointed at the stand-in."""
+        with open(STORAGE_POLICIES, encoding="utf-8") as f:
+            text = edit(f.read())
+        start = text.index("-- broker-captures:")
+        block = text[start:text.index("-- asset-exports:", start)]
+        block = (block.replace("storage.objects", PROBE + ".objects")
+                      .replace("storage.foldername", PROBE + ".foldername")
+                      .replace("schemaname = 'storage'", f"schemaname = '{PROBE}'"))
+        self.assertNotIn("storage.", block)
+        self.assertNotIn("'storage'", block)
+        return block
+
+    def test_the_files_own_self_check_passes_on_what_it_states(self):
+        """A reader arm the self-check misreads would fail the storage-policies Job on every boot."""
+        self.cur.execute(self._section())
+
+    def test_the_self_check_refuses_a_reader_arm_without_the_grant(self):
+        def widen(text):
+            self.assertIn(self.READER_ARM, text, "the reader arm moved; update READER_ARM")
+            return text.replace(self.READER_ARM,
+                                "public.has_role(ARRAY['Administrator', 'Shopfloor_Manager', 'Auditor'])")
+        with self.assertRaisesRegex(pg_errors.RaiseException, "without a download"):
+            self.cur.execute(self._section(widen))
 
 
 class TheDaemonIsToldWhatHappened(Base):

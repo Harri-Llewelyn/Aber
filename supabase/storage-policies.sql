@@ -104,23 +104,30 @@ BEGIN
   RAISE NOTICE 'storage policies reconciled (4 asset-3d-models policies on storage.objects).';
 END $$;
 
--- broker-captures: private. Administrator and Shopfloor_Manager read everything, write only a path
--- begin_capture_upload() issued them and still open, and delete only an object nothing claims (no
--- capture row, recording, open upload or playback names it); Auditor reads; Operator nothing. The
--- ingestion daemon reads, inserts and overwrites the object of the capture job it is recording
--- (SELECT included, because an upsert is checked against the SELECT policy), and reads and deletes
--- an unclaimed object, which is how a replaced capture's file and an orphan leave the bucket. The
--- playback worker reads the capture of the job it is running. A write is also confined to
--- <subject>/ naming a gateway or device that exists; SELECT is not, so a reader can find an object
--- whose subject is gone. storage.objects.name is qualified in every policy and must be:
--- public.gateways has a name column of its own, and an unqualified reference binds to it.
+-- broker-captures: private. Administrator, Shopfloor_Manager and Auditor read a stored capture's
+-- file only for the minute after issue_capture_download() recorded the download for them. The two
+-- writer roles also read an object nothing claims (no capture row, recording, open upload or
+-- playback names it) and a path issued to them for upload, because storage-api reads a deleted or
+-- written row back; they write only a path begin_capture_upload() issued them and still open, and
+-- delete only an unclaimed object. Auditor never writes; Operator nothing. The ingestion daemon
+-- reads, inserts and overwrites the object of the capture job it is recording (SELECT included,
+-- because an upsert is checked against the SELECT policy), and reads and deletes an unclaimed
+-- object, which is how a replaced capture's file and an orphan leave the bucket. The playback
+-- worker reads the capture of the job it is running. A write is also confined to <subject>/ naming
+-- a gateway or device that exists; SELECT is not, so a writer can delete an object whose subject is
+-- gone. storage.objects.name is qualified in every policy and must be: public.gateways has a name
+-- column of its own, and an unqualified reference binds to it.
 DROP POLICY IF EXISTS "broker_captures_read_privileged" ON storage.objects;
 CREATE POLICY "broker_captures_read_privileged" ON storage.objects
   FOR SELECT TO authenticated
   USING (
     bucket_id = 'broker-captures'
     AND (
-      public.has_role(ARRAY['Administrator', 'Shopfloor_Manager', 'Auditor'])
+      (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager', 'Auditor'])
+       AND public.is_open_capture_download(storage.objects.name))
+      OR (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+          AND (public.is_unclaimed_capture_object(storage.objects.name)
+               OR public.is_open_capture_upload(storage.objects.name)))
       OR (public.is_ingestion_caller()
           AND (public.is_active_capture_object(storage.objects.name)
                OR public.is_unclaimed_capture_object(storage.objects.name)))
@@ -184,11 +191,13 @@ DECLARE
   v_auditor_writes integer;
   v_daemon_reads   integer;
   v_daemon_writes  integer;
+  v_read           text;
 BEGIN
-  -- Reconcile: four policies; Auditor never writes; a person's write confined to an issued path;
-  -- the daemon in all four, SELECT, INSERT and UPDATE confined to the active job's object and
-  -- SELECT and DELETE to an unclaimed one; every DELETE confined to an unclaimed object; the worker
-  -- in SELECT alone. Each exception says what a missing arm looks like from outside.
+  -- Reconcile: four policies; Auditor never writes; a person's read confined to a recorded
+  -- download, or for a writer to what they may delete or write; a person's write confined to an
+  -- issued path; the daemon in all four, SELECT, INSERT and UPDATE confined to the active job's
+  -- object and SELECT and DELETE to an unclaimed one; every DELETE confined to an unclaimed object;
+  -- the worker in SELECT alone. Each exception says what a missing arm looks like from outside.
   SELECT count(*) INTO v_policies FROM pg_policies
    WHERE schemaname = 'storage' AND tablename = 'objects'
      AND policyname LIKE 'broker_captures_%';
@@ -209,6 +218,20 @@ BEGIN
     RAISE EXCEPTION
       '% broker_captures_* write policy/policies name Auditor. Auditor is READ ONLY on this '
       'bucket -- write authority is Administrator and Shopfloor_Manager only.', v_auditor_writes;
+  END IF;
+
+  -- Every role arm of the SELECT policy is ANDed with a predicate, and Auditor's is the grant.
+  SELECT coalesce(qual, '') INTO v_read FROM pg_policies
+   WHERE schemaname = 'storage' AND tablename = 'objects'
+     AND policyname = 'broker_captures_read_privileged';
+  IF v_read NOT LIKE '%is_open_capture_download%'
+     OR regexp_count(v_read, 'has_role\(') <> regexp_count(v_read, 'has_role\(ARRAY\[[^]]*\]\) AND ')
+     OR regexp_count(v_read, 'Auditor') <> regexp_count(v_read, 'Auditor''::text\]\) AND (public\.)?is_open_capture_download\(')
+  THEN
+    RAISE EXCEPTION
+      'broker-captures: the SELECT policy admits a person to a capture''s file without a download '
+      'issue_capture_download() recorded. Any reader role could then sign a link or read the file '
+      'through the Storage API, and the Audit Trail would hold nothing (0195).';
   END IF;
 
   IF EXISTS (
@@ -303,9 +326,10 @@ BEGIN
   END IF;
 
   RAISE NOTICE
-    'broker-captures policies reconciled (4 policies; Auditor read-only; a person writes only an '
-    'issued upload path; the ingestion daemon confined to the object of its running job, and '
-    'deleting, like a person, only an object nothing claims).';
+    'broker-captures policies reconciled (4 policies; Auditor read-only; a person reads a stored '
+    'capture only through a recorded download and writes only an issued upload path; the ingestion '
+    'daemon confined to the object of its running job, and deleting, like a person, only an object '
+    'nothing claims).';
 END $$;
 
 -- asset-exports: written by the aas-export function as service_role, so no browser role writes,
