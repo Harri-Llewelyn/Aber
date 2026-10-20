@@ -153,11 +153,13 @@ describe('while a dialog is open', () => {
     expect(dialog).toHaveFocus()
   })
 
-  it("stops `/` reaching the page's search box behind a native <dialog>", () => {
+  // The frame's <dialog> keeps role="dialog", which is what the check looks for; a bare <dialog> is
+  // not something the dashboard renders.
+  it("stops `/` reaching the page's search box behind the frame's <dialog>", () => {
     const { rerender } = render(
       <main>
         <div className="filter-bar"><SearchInput value="" onChange={() => {}} ariaLabel="Search devices" /></div>
-        <dialog open><p>Opened elsewhere</p></dialog>
+        <Modal title="Opened elsewhere" onClose={() => {}}><p>Opened elsewhere</p></Modal>
       </main>
     )
     expect(focusPageSearch()).toBe(false)
