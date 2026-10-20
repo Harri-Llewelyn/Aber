@@ -121,6 +121,34 @@ Keyboard focus opens the rail at once, in every mode. Two kinds of focus are not
   focus (`relatedTarget` is null). The rail's blur notes whether the panel was open as the window
   lost focus (`document.hasFocus()` is already false then), and that return puts it back as it was.
 
+### Tooltips on a tab
+
+A tab explains itself in a tooltip, its `description` in `TabStrip`'s `tabs`. It is there to help
+someone choose a tab, so it must be readable before the tab is opened. The browser's own tooltip
+(`title`) is not used: it shows after about a second, never to a keyboard and never on a touch
+screen, and screen readers read it unevenly.
+
+- **One bubble.** `common/Tooltip.jsx` draws the bubble for HelpTip and for every tab, so the two
+  always look alike (`.tooltip-bubble`, beside `.help-tip` in `App.css`). Inside an open native
+  dialog it goes into the dialog, which sits in the top layer above anything portalled to `<body>`.
+- **When it shows.** `useTooltip` shows it once the pointer has rested on the tab for 300ms
+  (`TOOLTIP_DELAY_MS`, through `useHoverIntent`, as the rail does), so bubbles do not flash as the
+  pointer crosses the bar. Keyboard focus shows it at once. A press, the pointer leaving, blur, a
+  scroll and a resize close it, and so does Escape, from the shared stack, before a drawer behind it.
+  A press's focus is not keyboard focus, and the focus a window hands back when it is activated
+  again is treated as the rail treats it.
+- **What a screen reader hears.** The tab's `aria-describedby` names the bubble, which is in the
+  document, hidden, while closed. So the sentence is read with the tab's name, "Quarantine,
+  3 waiting", whether or not the bubble shows.
+- **How long.** Plain sentences, 20 words at most, no code: the tooltip appears whenever the
+  pointer rests on the bar, which is more often than a `?` is opened. Anything longer goes on the
+  page's help page. `tabTooltips.test.jsx` holds each page's sentences to that.
+- **Where the sentences live.** Beside each page's tab list (`SECTIONS`, `QUEUES`, `VIEWS` and the
+  like). Settings' categories come from the database, which has no description for one, so their
+  sentences are `CATEGORY_DESCRIPTIONS` in `SettingsTab.jsx`; a category missing from it has no
+  tooltip. Vocabulary's are each standard's `hint`, and each standard's description and caveats
+  are on the Vocabulary page's help page. Directory's are its groups' descriptions.
+
 ### Derived lists in a tab are memoised, and the dependency list is the contract
 
 `DevicesTab` holds around thirty pieces of state, so *any* of them — opening a modal, a Realtime
@@ -514,8 +542,8 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
   page shares across its tabs: the Vocabulary search, and Capture's stored filter and search.
 - **`useUrlState` returns `[value, setValue]`**, as `useState` does. A setter reads the address when
   it runs, so several setters called in one handler compose.
-- **A new tab needs only its id in the page's list.** Most pages take the list from their tab help
-  (`Object.keys(VIEW_HELP)`).
+- **A new tab needs only its id in the page's list.** Most pages take the list from their tab list,
+  the one that also holds each tab's tooltip (`VIEWS.map(v => v.id)`).
 - **A rail click goes to the bare page**, so nothing a drill-down set comes along. A drill-down goes
   to an address built in `routes.js` (`deviceUrl(id)` is `/devices?search=<id>`); the page reads its
   filters from it, and `useArrivalSelection` opens the drawer on an exact id.
@@ -557,9 +585,9 @@ path segment, and `hooks/useUrlState.js` holds everything below it.
 
 **A page has one card.** Its title and description are the card's `CardHeading`. The seamless tab bar
 (`common/TabStrip.jsx`, one underline style, no pills) sits under the heading and shows one tab's
-content at a time; the card scrolls, the page does not. The selected tab's "?" `HelpTip` sits in the
-bar straight after the last tab (`TabStrip`'s `help`), so a tab needs no row of its own to explain
-itself. Under the bar is a toolbar row, the existing `.filter-bar`, drawn only when the tab has
+content at a time; the card scrolls, the page does not. Each tab explains itself in a tooltip, its
+`description` ([Tooltips](#tooltips-on-a-tab)), so the bar holds the tabs and nothing after them.
+Under the bar is a toolbar row, the existing `.filter-bar`, drawn only when the tab has
 filters or actions: its filters first, its actions in `.filter-bar-actions` at the right. Tabs carry
 no counts. A tab with work waiting takes `attention={n}`: the label turns
 the warning colour and gains an icon and the number, only while n is above 0. A row that outgrows one
@@ -569,8 +597,8 @@ line keeps search, status and the key toggle and moves the rest into `common/Fil
 <div className="card">
   <CardHeading title="Devices" description="…" />
   <TabStrip ariaLabel="Devices view" value={tab} onChange={setTab}
-    tabs={[{ id: 'roster', label: 'Roster' }, { id: 'quarantine', label: 'Quarantine', attention: waiting }]}
-    help={<HelpTip label={`About ${selectedLabel}`} text={TAB_HELP[tab]} />} />
+    tabs={[{ id: 'roster', label: 'Roster', description: 'Devices admitted to Aber.' },
+           { id: 'quarantine', label: 'Quarantine', description: '…', attention: waiting }]} />
   {/* Only a tab with filters or actions draws this row. */}
   <div className="filter-bar">
     <SearchInput … />
@@ -665,8 +693,8 @@ in "building management system".
 
 - **Page identity.** A page has one card. Its icon, title and one-sentence description are the
   card's `CardHeading`, stated once; there is no `PageHeading` above it. A tabbed page puts its tab
-  bar inside that card, and the tab's "?" and the toolbar row follow [Tabs](#tabs). Buttons go in
-  the toolbar, never the heading ([The toolbar](#the-toolbar)).
+  bar inside that card, and the tabs' tooltips and the toolbar row follow [Tabs](#tabs). Buttons go
+  in the toolbar, never the heading ([The toolbar](#the-toolbar)).
 - **Scroll.** Every page scrolls inside its card, Access Control, Directory and Approvals included.
 - **Counts.** None on card headings, section headings or tabs. A count stays where it states what is
   loaded ("30 of 55" beside Show more), what a filter option or toggle holds ("Active (4)", "Show
@@ -698,7 +726,7 @@ in "building management system".
 - **Sizes** use binary units labelled KiB and MiB. There is one relative-time style and one absolute
   date-time format (`utils/format.js`).
 - **Help pages** state nothing wrong and name the page's main controls; they are not full manuals.
-  A `HelpTip` is about 35 words or fewer.
+  A `HelpTip` is about 35 words or fewer, and a tab's tooltip 20 words at most.
 - **Comments** state the current state only. An archived migration is cited as "archived migration
   NNNN", never as a bare number, which a live migration will reach; where that is ambiguous (the
   archive has two numbering schemes, and two files numbered 0074), cite the file name.

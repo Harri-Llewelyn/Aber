@@ -1,4 +1,3 @@
-import React from 'react'
 import { vocabularySections, adoptedVocabulary } from '../../utils/mtconnect'
 import { STANDARDS } from '../../utils/standards'
 
@@ -28,32 +27,6 @@ export function mtconnectVocabularyTab({ vocabulary, catalog, onUseType }) {
     label: 'MTConnect',
     hint: 'Machine tool observations — data item types, components, subtypes and units.',
     searchPlaceholder: 'Search the vocabulary…',
-    description: (
-      <>
-        The controlled vocabularies an MTConnect metric name is built from, generated from the{' '}
-        <span className="mono">mtconnect/schema</span> repository.
-      </>
-    ),
-    notes: [
-      {
-        label: 'Reference only.',
-        body: " The standard's list of available words, not a list of metrics your devices publish."
-      },
-      {
-        label: 'Names are composed.',
-        body: (
-          <>
-            {' '}A metric is a component path plus a data item type, so{' '}
-            <span className="mono">ANGLE</span> here becomes <span className="mono">Axes/C/ANGLE</span>{' '}
-            in the catalog.
-          </>
-        )
-      },
-      {
-        label: 'Semantic ids are local.',
-        body: ' Each entry carries one, shown on hover — minted by this deployment, not issued by MTConnect, which publishes none. Entries already used by a catalog metric are ticked.'
-      }
-    ],
     sections,
     isUsed: item => adopted.has(item.name),
     tooltipFor: item => {

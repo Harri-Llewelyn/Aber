@@ -5,7 +5,7 @@
  * rather than offering a Save the database will refuse.
  */
 import React from 'react'
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { SettingsTab } from '../components/tabs/SettingsTab'
@@ -60,12 +60,14 @@ describe('for anyone but an Administrator', () => {
     expect(screen.queryByRole('button', { name: 'Save' })).toBeNull()
   })
 
-  it("explains the tab's settings in those terms, not as Save and Discard", async () => {
+  /* Who may change a setting is said on each row, so the tab's tooltip is the same for every role:
+     it says what the category holds, never how to Save. */
+  it("describes the tab by what it holds, not by Save and Discard", async () => {
     await show({ readOnly: true })
-    fireEvent.click(screen.getByRole('button', { name: /About Retention settings/ }))
-    const tip = screen.getByRole('tooltip')
-    expect(tip).toHaveTextContent('Only an Administrator can change these.')
-    expect(tip).not.toHaveTextContent(/Save/)
+    const retention = screen.getByRole('tab', { name: 'Retention' })
+    expect(retention).toHaveAccessibleDescription(/How long Aber keeps records/)
+    expect(retention).not.toHaveAccessibleDescription(/Save|Discard/)
+    expect(screen.queryByRole('button', { name: /About Retention settings/ })).toBeNull()
   })
 })
 

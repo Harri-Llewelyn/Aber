@@ -6,8 +6,8 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { TabStrip } from '../components/common/TabStrip'
 
 const TABS = [
-  { id: 'a', label: 'Alpha', title: 'First', attention: 3 },
-  { id: 'b', label: 'Beta', attention: 0 },
+  { id: 'a', label: 'Alpha', description: 'The first letter.', attention: 3 },
+  { id: 'b', label: 'Beta', description: 'The second letter.', attention: 0 },
   { id: 'c', label: 'Gamma' },
 ]
 
@@ -24,7 +24,25 @@ describe('TabStrip', () => {
     expect(tabs).toHaveLength(3)
     expect(tabs.map(t => t.getAttribute('aria-selected'))).toEqual(['true', 'false', 'false'])
     expect(tabs.map(t => t.tabIndex)).toEqual([0, -1, -1])
-    expect(tabs[0].title).toBe('First')
+  })
+
+  it('describes each tab with its own tooltip, and no tab has a browser tooltip', () => {
+    render(<Harness />)
+    const [alpha, beta, gamma] = screen.getAllByRole('tab')
+    expect(alpha).toHaveAccessibleDescription('The first letter.')
+    expect(beta).toHaveAccessibleDescription('The second letter.')
+    // The waiting count stays in the name; the description adds to it.
+    expect(alpha).toHaveAccessibleName('Alpha, 3 waiting')
+    for (const tab of [alpha, beta, gamma]) expect(tab).not.toHaveAttribute('title')
+    // A tab with no description has none, rather than an empty one.
+    expect(gamma).not.toHaveAttribute('aria-describedby')
+    // A tooltip is closed until the tab is pointed at or reached by keyboard.
+    expect(screen.queryByRole('tooltip')).toBeNull()
+  })
+
+  it('ignores a `title` handed to it, so no tab shows two tooltips', () => {
+    render(<TabStrip ariaLabel="Letters" value="a" onChange={() => {}} tabs={[{ id: 'a', label: 'Alpha', title: 'Old', description: 'New.' }]} />)
+    expect(screen.getByRole('tab')).not.toHaveAttribute('title')
   })
 
   it('shows attention only above 0, with an icon, the number and a name that carries it', () => {
@@ -81,17 +99,15 @@ describe('TabStrip', () => {
     expect(screen.getByRole('tab', { name: 'Beta' }).className).not.toContain('tab-strip-tab-selected')
   })
 
-  it('draws the selected tab\'s help after the tabs, beside the tablist rather than inside it', () => {
+  /* Each tab explains itself, before it is opened, so the bar holds the tablist and nothing else,
+     whatever a caller passes. */
+  it('draws nothing after the tabs: no trailing "?"', () => {
     render(<TabStrip ariaLabel="Sections" value="a" onChange={() => {}} tabs={TABS} help={<button>About Alpha</button>} />)
-    const help = screen.getByRole('button', { name: 'About Alpha' })
-    expect(screen.getByRole('tablist')).not.toContainElement(help)
-    expect(help.parentElement).toHaveClass('tab-strip-help')
-    expect(help.parentElement.previousElementSibling).toBe(screen.getByRole('tablist'))
-  })
-
-  it('draws nothing after the tabs without help', () => {
-    render(<TabStrip ariaLabel="Sections" value="a" onChange={() => {}} tabs={TABS} />)
-    expect(document.querySelector('.tab-strip-help')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'About Alpha' })).toBeNull()
+    const strip = screen.getByRole('tablist').parentElement
+    expect([...strip.children]).toEqual([screen.getByRole('tablist')])
+    // The tooltips are portalled out of the card, so the tablist holds only tabs.
+    expect([...screen.getByRole('tablist').children].every(c => c.getAttribute('role') === 'tab')).toBe(true)
   })
 
   it('declares the wrapping in CSS', () => {

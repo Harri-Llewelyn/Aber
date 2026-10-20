@@ -1,4 +1,3 @@
-import React from 'react'
 import { ashrae223Sections, conceptTooltip, isMetricConcept } from '../../utils/ashrae223'
 import { STANDARDS } from '../../utils/standards'
 
@@ -37,29 +36,6 @@ export function ashrae223VocabularyTab({ vocabulary, catalog, onUseConcept }) {
     label: 'ASHRAE 223P',
     hint: 'Building systems — the things a BMS point is attached to.',
     searchPlaceholder: 'Search concepts…',
-    description: (
-      <>
-        The semantic concepts defined by <span className="mono">ASHRAE 223P</span> for building
-        systems — HVAC, electrical, and the sensing around them. Sections follow the standard's own
-        class hierarchy.
-      </>
-    ),
-    notes: [
-      {
-        label: 'A reference, not a source of ids.',
-        body: (
-          <>
-            {' '}<span className="mono">Fan</span> names equipment, not a reading. Clicking a class
-            starts a metric in the BMS group, named after it, with no semantic id. You choose the
-            datatype, units and id, such as a QUDT quantity kind.
-          </>
-        )
-      },
-      {
-        label: 'Still in public review.',
-        body: ' These concepts come from the open223 pre-publication ontology and may change before ASHRAE 223 is published.'
-      }
-    ],
     sections,
     isUsed: item =>
       (!!item.concept.semantic_id && semanticIds.has(item.concept.semantic_id)) || nameTokens.has(item.concept.name),

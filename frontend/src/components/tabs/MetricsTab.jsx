@@ -48,7 +48,6 @@ import {
 import { CardHeading } from '../common/CardHeading'
 import { TabStrip } from '../common/TabStrip'
 import { ExpandAllToggle } from '../common/ExpandAllToggle'
-import { HelpTip } from '../common/HelpTip'
 import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
 import { useSortableRows, useTableSort } from '../../hooks/useTableSort'
 
@@ -107,21 +106,15 @@ const BLANK_METRIC = {
  */
 const keepTypedSemanticId = (own) => (own && own.semanticId.trim() !== '' ? own : null)
 
-// The selected tab's "?", drawn in the tab bar after the tab names.
-const VIEW_HELP = {
-  catalog: {
-    label: 'About the metric catalog',
-    text: 'The metrics every schema is built from, grouped by the first segment of their name. A name is what a device publishes and cannot change afterwards, so an unwanted metric is deprecated, not removed.',
-  },
-  deprecated: {
-    label: 'About deprecated metrics',
-    text: 'Withheld from the schema builder, not deleted: schemas that model one keep it, and its readings stay. Restore offers it to schema authors again and clears the replacement it names.',
-  },
-  uncatalogued: {
-    label: 'About uncatalogued metrics',
-    text: 'Names devices declared in their last birth certificate that no catalog row describes. Their readings are stored, but carry no unit or semantic id, and no schema can model them until Catalogue adds one.',
-  },
-}
+/**
+ * The three tabs, in order. The description is the tab's tooltip; the help page has the rest.
+ * Uncatalogued's label gains its count once the list loads.
+ */
+export const VIEWS = [
+  { id: 'catalog', label: 'Metric Catalog', description: "The metrics schema authors build from, grouped by their name's first segment. A name cannot change once created." },
+  { id: 'deprecated', label: 'Deprecated Metrics', description: 'Metrics withheld from the schema builder, and what replaced each. Schemas that model one keep it, with its readings.' },
+  { id: 'uncatalogued', label: 'Uncatalogued', description: 'Metric names devices declare that no catalog row describes. Their readings are stored, but carry no unit or meaning.' },
+]
 
 // Device chips an Uncatalogued row shows before "more": a name a whole fleet declares would
 // otherwise fill the row with one chip per device.
@@ -204,8 +197,8 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
   // The Uncatalogued row Add Metric was opened from by Catalogue; null for any other opening.
   const [cataloguing, setCataloguing] = useState(null)
   const [editTarget, setEditTarget] = useState(null)
-  // Which tab of the card is shown, one per VIEW_HELP entry; the default is the catalog.
-  const [view, setView] = useUrlTab('metrics', Object.keys(VIEW_HELP), 'catalog')
+  // Which tab of the card is shown, one per VIEWS entry; the default is the catalog.
+  const [view, setView] = useUrlTab('metrics', VIEWS.map(v => v.id), 'catalog')
   // Expansion state for the catalog's group sections, keyed by label; absent means collapsed.
   const [expandedGroups, setExpandedGroups] = useState({})
   // Filters the catalog by metric name. With groups collapsed by default it is how one metric is
@@ -853,16 +846,9 @@ export function MetricsTab({ showToast, hasPermission, pendingVocabularyEntry, o
             ariaLabel="Metric list"
             value={view}
             onChange={id => { if (id !== view) { setView(id); setSelectedId(null) } }}
-            tabs={[
-              { id: 'catalog', label: 'Metric Catalog', title: 'The metrics schema authors can build from' },
-              { id: 'deprecated', label: 'Deprecated Metrics', title: 'Metrics withheld from the schema builder, and what replaced each' },
-              {
-                id: 'uncatalogued',
-                label: uncatalogued ? `Uncatalogued (${uncatalogued.length})` : 'Uncatalogued',
-                title: 'Metric names devices declare that no catalog row describes'
-              },
-            ]}
-            help={<HelpTip {...VIEW_HELP[view]} />}
+            tabs={VIEWS.map(v => (v.id === 'uncatalogued' && uncatalogued
+              ? { ...v, label: `${v.label} (${uncatalogued.length})` }
+              : v))}
           />
 
           {view === 'catalog' && (
