@@ -772,13 +772,13 @@ side of the page, and the page's drawer with its 16px gap. The docked help drawe
 reaches 500px at 1346px. A card in the column loses another 48px to its border and padding. The
 Site Map card body measured 552, 411, 168 and 108px at 1600, 1280, 960 and 900px wide with both
 drawers open, while help still had a 12px margin; docked, each is 12px wider. At 1440px the
-column is 542px and a card's body about 494px.
+column is 542px (Gateways, measured docked) and a card's body about 494px.
 
 **The threshold stays at 1440px, though 1366px now clears 500px.** Two drawers on a 1366px laptop
 would leave a 509px column and a card body of about 461px. That is 9px over the line, and a body
 narrower than the 480px that 1440px was first chosen for. Moving the threshold would change what
 the commonest laptop width does today, where help replaces the page's drawer, for those 9px. So
-`ONE_DRAWER_QUERY` stays `(max-width: 1439px)`. The expanded rail (240px) takes 188px more at
+`ONE_DRAWER_QUERY` stays `(max-width: 1439px)`. The expanded rail (232px) takes 180px more at
 every width; the threshold does not move with it.
 
 **Its contents are mounted only while it is open**, which the per-page drawers do not need to do.
