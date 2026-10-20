@@ -783,6 +783,104 @@ html, body, #root {
    of the rail's other controls. */
 a.sidebar-item { text-decoration: none; }
 
+/* A page with tabs (SidebarPage in Sidebar.jsx): its link and the chevron that shows its tabs share
+   a row. The chevron and the list need the wide rail; the collapsed rail pops the list out. */
+.sidebar-page-row { display: flex; align-items: center; gap: 2px; }
+.sidebar-page-row > .sidebar-item { flex: 1 1 auto; min-width: 0; }
+
+/* 28px square, above WCAG 2.2's 24px minimum target. */
+.sidebar-disclosure {
+  display: none;
+  flex: 0 0 28px;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.sidebar-expanded .sidebar-disclosure { display: inline-flex; }
+.sidebar-disclosure:hover { color: var(--text-primary); }
+.sidebar-disclosure:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* The tabs, on a guide line under the page's icon, their labels in line with the page's. No display
+   here, so `hidden` takes the list away. */
+.sidebar-tabs {
+  list-style: none;
+  margin: 0 0 4px 17px;
+  padding: 0 0 0 10px;
+  border-left: 1px solid var(--border);
+}
+
+/* 30px rows, lighter than a page's: no icon, the smaller step. */
+.sidebar-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.sidebar-tab-label { overflow: hidden; text-overflow: ellipsis; }
+.sidebar-tab:hover { color: var(--text-primary); }
+.sidebar-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sidebar-tab.sidebar-tab-warning:not(.active) { color: var(--warning-text); }
+
+/* The current tab: the accent at 600, and a 2px accent stroke over the guide line, a border so it
+   is not colour alone and survives forced-colours mode. -11px is the list's 10px padding and the
+   tab's 1px border. */
+.sidebar-tab.active { color: var(--accent-text); font-weight: 600; }
+.sidebar-tab.active::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: -11px;
+  border-left: 2px solid var(--accent);
+}
+
+/* The waiting count, at the end of the tab's row, as the page's count sits on the wide rail. */
+.sidebar-tab-count {
+  margin-left: auto;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--warning);
+  color: var(--warning-contrast);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  letter-spacing: 0;
+}
+
+/* The collapsed rail's pop-out, beside the rail as the account menu opens: fixed, so the panel's
+   overflow never clips it. Sidebar.jsx sets its top from the page's row. */
+.sidebar-tabs-popout {
+  position: fixed;
+  left: 60px;
+  z-index: 200;
+  min-width: 200px;
+  margin: 0;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-popover);
+}
+.sidebar-tabs-popout .sidebar-tab.active::before { left: -1px; }
+
 /* Global search, the centre of the top bar. `flex: 0 1 480px` against two `flex: 1 1 0` flanks, so
    it sits on the bar's true centre and shrinks before the brand does. */
 .global-search {
