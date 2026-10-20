@@ -2144,8 +2144,9 @@ paths:
       tags: [Registry]
       summary: Read your own display preferences
       description: |
-        One row per person (`0188`): the theme and sidebar layout the dashboard's Profile page
-        and account menu set, so they follow the account rather than the browser. RLS returns the
+        One row per person (`0188`, `0194`): the theme, sidebar layout and single-key shortcuts
+        the dashboard's Profile page and account menu set, so they follow the account rather than
+        the browser. RLS returns the
         caller's own row and nobody else's, an `Administrator` included; an empty array means
         this person has chosen nothing yet, and the defaults apply. `anon` and `service_role` hold
         nothing on the table.
@@ -2182,6 +2183,7 @@ paths:
                 user_id: { type: string, format: uuid, description: "The caller's own id." }
                 theme: { type: string, enum: [dark, light] }
                 sidebar_mode: { type: string, enum: [hover, expanded, collapsed] }
+                single_key_shortcuts: { type: boolean }
       responses:
         '201': { description: 'Created or changed.' }
         '400': { description: 'A value outside the CHECK (`23514`).' }
@@ -5253,6 +5255,10 @@ components:
           enum: [hover, expanded, collapsed]
           default: hover
           description: 'How the sidebar shows the page names: on hover, always, or never (icons only).'
+        single_key_shortcuts:
+          type: boolean
+          default: true
+          description: 'Whether the shortcuts that are one character with no modifier (`?`, `/`, `[` and `]`) act for this person (`0194`). Ctrl K and the arrow keys are not covered.'
         updated_at: { type: string, format: date-time, readOnly: true }
 
     SystemSetting:
