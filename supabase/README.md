@@ -1146,22 +1146,6 @@ Both columns are additive. `progress_reported_at` is nullable: a job claimed bef
 none, so its claim time is used. `credential_sources` defaults to `{}`, which the dialog reads as a
 worker from before this release. `test_playback_stop_and_sweep.py` holds all four functions.
 
-### Single-key shortcuts can be turned off (0194)
-
-The dashboard has four shortcuts that are one character with no modifier: `?` opens the shortcuts
-list, `/` the page's search box, and `[` and `]` move between a page's tabs. Speech input can type
-them by mistake, and WCAG 2.2 SC 2.1.4 asks for a way to turn such shortcuts off.
-
-- **`user_settings.single_key_shortcuts`**, `boolean NOT NULL DEFAULT true`. Profile › Appearance
-  writes it, as a one-column upsert like the theme's. Ctrl K and the arrow keys are not covered.
-- **On by default**, so nothing changes for anyone until they choose, and a row written before
-  `0194` reads on. The first sign-in's seed leaves it to the default.
-- **No new grant or policy.** `0188` grants on the table and its policies match rows, so both cover
-  the new column. The file's self-check asserts that `anon` holds nothing on it.
-
-The dashboard reads it through `useUserSettings.js` and keeps a copy in `aber_single_key_shortcuts`.
-`test_user_settings.py` holds the default and the save.
-
 ### Captures and replays leave an audit trail (0193)
 
 A capture holds the plant's raw traffic, and a replay writes readings into the historian. Neither
@@ -1225,6 +1209,22 @@ Each carries the subject's `name` and `sparkplug_id`, which the Audit Trail name
   archived nor deleted: the upgrade creates it again.
 
 `test_capture_audit.py` holds every act, the deletion guard, the purge and the session's end.
+
+### Single-key shortcuts can be turned off (0194)
+
+The dashboard has four shortcuts that are one character with no modifier: `?` opens the shortcuts
+list, `/` the page's search box, and `[` and `]` move between a page's tabs. Speech input can type
+them by mistake, and WCAG 2.2 SC 2.1.4 asks for a way to turn such shortcuts off.
+
+- **`user_settings.single_key_shortcuts`**, `boolean NOT NULL DEFAULT true`. Profile › Appearance
+  writes it, as a one-column upsert like the theme's. Ctrl K and the arrow keys are not covered.
+- **On by default**, so nothing changes for anyone until they choose, and a row written before
+  `0194` reads on. The first sign-in's seed leaves it to the default.
+- **No new grant or policy.** `0188` grants on the table and its policies match rows, so both cover
+  the new column. The file's self-check asserts that `anon` holds nothing on it.
+
+The dashboard reads it through `useUserSettings.js` and keeps a copy in `aber_single_key_shortcuts`.
+`test_user_settings.py` holds the default and the save.
 
 ### A capture is downloaded only through the audited call (0195)
 
