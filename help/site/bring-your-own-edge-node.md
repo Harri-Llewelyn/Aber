@@ -10,7 +10,8 @@ it. This page lists what it must do, as a checklist. Each item says what happens
 and links to the reference page with the detail.
 
 The requirements are stated against Sparkplug B 3.0.0 and Aber's own behaviour. Each Sparkplug rule
-names its `tck-id`, the identifier the specification gives the statement and its test kit tests.
+gives its `tck-id`: the name the specification gives that statement, which its test kit (the TCK)
+checks.
 
 ## Words on this page
 
