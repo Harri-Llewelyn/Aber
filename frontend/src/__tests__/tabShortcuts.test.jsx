@@ -105,7 +105,9 @@ beforeEach(() => {
   supabase.auth.signOut.mockResolvedValue({ error: null })
   supabase.auth.onAuthStateChange.mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } })
 })
-afterEach(() => { document.querySelectorAll('dialog').forEach(d => d.remove()) })
+// The native <dialog> fixtures above are appended to <body> itself; a dialog React renders sits in
+// its container and is unmounted by the test library, so it must not be pulled out from under it.
+afterEach(() => { document.querySelectorAll('body > dialog').forEach(d => d.remove()) })
 
 describe('`[` and `]`', () => {
   it('move to the next and the previous tab, as a click does', async () => {
