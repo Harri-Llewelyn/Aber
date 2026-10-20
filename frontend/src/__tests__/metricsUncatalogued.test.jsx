@@ -123,10 +123,13 @@ describe('Uncatalogued tab: the label', () => {
     await waitFor(() => expect(screen.getByText(/The uncatalogued metrics could not be read: permission denied/)).toBeTruthy())
   })
 
-  it('has its own "?" in the tab bar', async () => {
+  it('explains itself in its own tooltip, before it is opened', async () => {
     renderTab()
+    await waitFor(() => expect(uncataloguedTab().textContent).toMatch(/^Uncatalogued \(\d+\)$/))
+    // The count joins the label; the sentence stays the same.
+    expect(uncataloguedTab()).toHaveAccessibleDescription(/no catalog row describes/)
     await openTab()
-    expect(screen.getByRole('button', { name: 'About uncatalogued metrics' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'About uncatalogued metrics' })).toBeNull()
   })
 })
 

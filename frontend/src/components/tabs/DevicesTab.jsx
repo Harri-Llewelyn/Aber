@@ -79,7 +79,6 @@ import {
   IconRadio,
   IconLayoutDashboard
 } from '../common/Icons'
-import { HelpTip } from '../common/HelpTip'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 import { useUrlState, useUrlTab } from '../../hooks/useUrlState'
 import { useSortableRows } from '../../hooks/useTableSort'
@@ -93,17 +92,11 @@ const CELL_FILTER_SITE_WIDE = '__site_wide__'
 /** Whether two lists of schema ids name the same schemas, in any order. */
 const sameSchemaSet = (a, b) => a.length === b.length && a.every(id => b.includes(id))
 
-/** Each tab's "?", drawn in the tab bar for the selected tab. */
-const VIEW_HELP = {
-  registered: {
-    label: 'About registered devices',
-    text: 'An asset that publishes telemetry through a gateway. Its schema says what it should publish; the historian records what it does. This page shows where the two disagree: unmodelled metrics, or no birth yet.',
-  },
-  quarantine: {
-    label: 'About the Quarantine queue',
-    text: 'A birth arrived that matches no registered device on its gateway, so its readings are held, not recorded. Approve & Onboard admits it, or accept a suggested match. Reject discards it.',
-  },
-}
+/** The two tabs, in order. The description is the tab's tooltip; the help page has the rest. */
+export const VIEWS = [
+  { id: 'registered', label: 'Registered', description: 'Devices admitted to Aber. Their status says when one publishes what its schema does not include, or nothing yet.' },
+  { id: 'quarantine', label: 'Quarantine', description: 'Births from devices nobody has registered. Their readings are held until someone approves or rejects them.' },
+]
 
 /** The Quarantine table's sortable columns. A birth with no gateway name shows "—" and goes last. */
 const QUARANTINE_SORT = {
@@ -163,7 +156,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
   const [filterMode, setFilterMode] = useUrlState('lifecycle', 'active', { allowed: ['all', 'active', 'archived'] })
   // The card's tab, in the path: `/devices` or `/devices/quarantine`. A tab change drops the
   // query, so the Registered filters and the drawer, which belong to that tab, go with it.
-  const [view, setView] = useUrlTab('devices', Object.keys(VIEW_HELP), 'registered')
+  const [view, setView] = useUrlTab('devices', VIEWS.map(v => v.id), 'registered')
   // The device whose export dialog is open, or null.
   const [exportFor, setExportFor] = useState(null)
 
@@ -687,11 +680,7 @@ export function DevicesTab({ showToast, onSelectGateway, onSelectCell, onSelectA
           ariaLabel="Devices"
           value={view}
           onChange={chooseView}
-          tabs={[
-            { id: 'registered', label: 'Registered', title: 'Devices admitted to the platform' },
-            { id: 'quarantine', label: 'Quarantine', title: 'Births from devices nobody has registered, held until approved', attention: quarantine.length }
-          ]}
-          help={<HelpTip label={VIEW_HELP[view].label} text={VIEW_HELP[view].text} />}
+          tabs={VIEWS.map(v => (v.id === 'quarantine' ? { ...v, attention: quarantine.length } : v))}
         />
 
       {view === 'quarantine' && (<>

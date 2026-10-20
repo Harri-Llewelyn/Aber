@@ -210,18 +210,18 @@ describe('Metrics page: one card with three tabs', () => {
     }
   })
 
-  it('puts the selected tab’s "?" in the tab bar, after the last tab', async () => {
+  it('explains each tab in its own tooltip, with no "?" after the last tab', async () => {
     renderTab()
     await waitFor(() => expect(catalogTable()).toBeTruthy())
 
-    const help = () => document.querySelector('.card > .tab-strip > .tab-strip-help')
-    expect(help().previousElementSibling).toBe(screen.getByRole('tablist'))
-    expect(within(help()).getByRole('button', { name: 'About the metric catalog' })).toBeTruthy()
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs[0]).toHaveAccessibleDescription(/schema authors build from/)
+    expect(tabs[1]).toHaveAccessibleDescription(/withheld from the schema builder/)
+    expect(tabs[2]).toHaveAccessibleDescription(/no catalog row describes/)
+    expect(document.querySelector('.card > .tab-strip').children).toHaveLength(1)
 
     deprecatedTableOf()
-    expect(within(help()).getByRole('button', { name: 'About deprecated metrics' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'About the metric catalog' })).toBeNull()
-    expect(document.querySelectorAll('.card .help-tip')).toHaveLength(1)
+    expect(document.querySelector('.card .tab-strip .help-tip')).toBeNull()
   })
 
   it('keeps the catalog’s toolbar row, with Add Metric at its right-hand end, and draws none for Deprecated', async () => {

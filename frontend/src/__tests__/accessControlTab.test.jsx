@@ -119,17 +119,15 @@ describe('AccessControlTab', () => {
     expect(screen.queryByText(/^No credential$/i)).toBeNull()
   })
 
-  /** The card's tip names the two columns, so a reader knows the recorded state and the live one
-   *  are different things before reading a row. */
-  it('states the two sources in the card tip', async () => {
+  /** The tab's tooltip names the two sources, so a reader knows the recorded state and the live one
+   *  are different things before opening the tab. */
+  it('states the two sources in the Broker credentials tab\'s tooltip', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     render(<AccessControlTab showToast={vi.fn()} />)
 
-    fireEvent.mouseEnter(await screen.findByRole('button', { name: 'About broker credentials' }))
-    const tip = screen.getByRole('tooltip').textContent
-    expect(tip).toMatch(/what the platform issued and recorded/i)
-    expect(tip).toMatch(/read live from Dynamic Security/i)
-    // The tip replaced the paragraph, so the sentence is not also in the body.
+    const tab = await screen.findByRole('tab', { name: 'Broker credentials' })
+    expect(tab).toHaveAccessibleDescription(/what Aber issued and recorded, beside what the broker holds now/i)
+    // The tooltip replaced the paragraph, so the sentence is not also in the body.
     expect(document.querySelector('.card-body p')).toBeNull()
   })
 
@@ -537,9 +535,9 @@ describe('AccessControlTab', () => {
     await renderTab('Machine identities')
     await waitFor(() => expect(screen.getByText(/insufficient privileges/)).toBeTruthy())
     expect(screen.queryByRole('button', { name: /New Machine Identity/i })).toBeNull()
-    // The row held only that button, so it goes too; the tab's tip stays in the bar.
+    // The row held only that button, so it goes too; the tab still explains itself.
     expect(card().querySelector('.filter-bar')).toBeNull()
-    expect(screen.getByRole('button', { name: 'About machine identities' }).parentElement).toHaveClass('tab-strip-help')
+    expect(screen.getByRole('tab', { name: 'Machine identities' })).toHaveAccessibleDescription(/None can sign in/)
   })
 
   /**
@@ -1063,22 +1061,23 @@ describe('AccessControlTab card composition', () => {
     expect(within(screen.getByLabelText('Filter gateways by credential state')).getByText('Any state (1)')).toBeTruthy()
   })
 
-  it('explains the selected tab with one tip in the tab bar, and none as a paragraph', async () => {
+  it('explains each tab in a tooltip of its own, with no "?" in the bar and no paragraph', async () => {
     api.listGatewayCredentials.mockResolvedValue([provisioned])
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(card().querySelector('tbody tr')).toBeTruthy())
-    for (const [label, tip] of [
-      ['Broker credentials', 'About broker credentials'],
-      ['Machine identities', 'About machine identities'],
-      ['Broker accounts', 'About broker accounts'],
-      ['Broker roles', 'About broker roles'],
+    for (const [label, says] of [
+      ['Broker credentials', /broker credential/],
+      ['Machine identities', /database side/],
+      ['Broker accounts', /no gateway claims/],
+      ['Broker roles', /publish, receive and subscribe/],
     ]) {
-      fireEvent.click(screen.getByRole('tab', { name: label }))
-      const tips = card().querySelectorAll('.help-tip')
-      expect(tips).toHaveLength(1)
-      expect(tips[0].parentElement).toHaveClass('tab-strip-help')
-      expect(tips[0]).toHaveAccessibleName(tip)
+      const tab = screen.getByRole('tab', { name: label })
+      // Readable before the tab is opened: that is when it helps.
+      expect(tab).toHaveAccessibleDescription(says)
+      expect(tab).not.toHaveAttribute('title')
+      fireEvent.click(tab)
+      expect(card().querySelector('.tab-strip .help-tip')).toBeNull()
     }
     expect(document.querySelector('.page-main .card p:not(.card-heading-description)')).toBeNull()
   })

@@ -1006,8 +1006,6 @@ a.sidebar-item { text-decoration: none; }
   border-bottom: 1px solid var(--border);
 }
 .tab-strip-tabs { display: flex; flex-wrap: wrap; gap: 0 4px; align-self: stretch; }
-/* The selected tab's "?", straight after the last tab. */
-.tab-strip-help { display: inline-flex; align-items: center; margin-left: 4px; }
 .card > .tab-strip { margin-bottom: 0; padding: 0 var(--inset); }
 /* In a card header the bar takes its own line and runs flush over the header's padding and rule. */
 .card-header > .tab-strip {
@@ -5299,9 +5297,10 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 .readonly-notice > span { flex: 1; min-width: 0; }
 .readonly-notice > svg { flex-shrink: 0; }
 
-/* ===== Help tip =====
-   The "?" beside a label. The bubble is portalled to <body> and positioned by HelpTip.jsx, because
-   most triggers live inside a `.card`, whose overflow is hidden. */
+/* ===== Help tip and tooltip =====
+   The "?" beside a label, and the bubble it shares with the tab bar's tabs. The bubble is portalled
+   to <body> and positioned by Tooltip.jsx, because most triggers live inside a `.card`, whose
+   overflow is hidden. */
 .help-tip {
   display: inline-flex;
   align-items: center;
@@ -5323,7 +5322,9 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
 .help-tip-pinned { color: var(--accent); }
 .help-tip:focus-visible { color: var(--accent); outline: 2px solid var(--accent); outline-offset: 1px; }
 
-.help-tip-bubble {
+/* The one tooltip bubble (Tooltip.jsx): HelpTip's, and every tab's in the tab bar, so they always
+   look alike. A tab's is in the document while closed, `hidden`, so no `display` here. */
+.tooltip-bubble {
   position: fixed;
   z-index: 1200;
   width: max-content;
@@ -5844,11 +5845,6 @@ ol.gateway-steps {
 .vocab-chip-plus { flex-shrink: 0; visibility: hidden; }
 .vocab-chip-action:hover .vocab-chip-plus,
 .vocab-chip-action:focus-visible .vocab-chip-plus { visibility: visible; }
-
-.vocab-note {
-  display: block;
-  margin-top: 6px;
-}
 
 /* STAT: one figure in a .stat-strip (common/Stat.jsx), on Cold Storage and Backups. */
 .stat { min-width: 120px; }

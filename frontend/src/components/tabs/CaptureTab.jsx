@@ -36,6 +36,12 @@ import { formatBytes, formatDateTime, formatDuration, plural } from '../../utils
 const WRITE_ROLES = ['Administrator', 'Shopfloor_Manager']
 const DENIED_TITLE = `Requires ${WRITE_ROLES.map(r => r.replace(/_/g, ' ')).join(' or ')}`
 
+/** What a capture records, one tab each. The description is the tab's tooltip. */
+export const SUBJECTS = [
+  { id: 'gateway', label: 'Gateways', description: 'Record everything one gateway publishes, every device beneath it included.' },
+  { id: 'device', label: 'Devices', description: "Record one device, plus its gateway's birth certificate." },
+]
+
 /**
  * Recording the broker, and playing a recording back.
  *
@@ -50,7 +56,7 @@ const DENIED_TITLE = `Requires ${WRITE_ROLES.map(r => r.replace(/_/g, ' ')).join
 export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   // The tab, in the path: `/capture` (gateways) or `/capture/device`. The stored filter and the
   // search sit above both tabs, so they stay in the address across a tab change.
-  const [subjectKind, setSubjectKind] = useUrlTab('capture', ['gateway', 'device'], 'gateway', { keep: ['stored', 'search'] })
+  const [subjectKind, setSubjectKind] = useUrlTab('capture', SUBJECTS.map(s => s.id), 'gateway', { keep: ['stored', 'search'] })
   const [gateways, setGateways] = useState([])
   const [devices, setDevices] = useState([])
   const [captures, setCaptures] = useState([])
@@ -456,18 +462,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             ariaLabel="Capture subject"
             value={subjectKind}
             onChange={kind => { setSubjectKind(kind); setSelectedId(null) }}
-            tabs={[
-              { id: 'gateway', label: 'Gateways', title: 'Record everything one gateway publishes, every device beneath it included' },
-              { id: 'device', label: 'Devices', title: "Record one device, plus its gateway's birth certificate" },
-            ]}
-            help={(
-              <HelpTip
-                label={subjectKind === 'gateway' ? 'About capturing gateways' : 'About capturing devices'}
-                text={`${subjectKind === 'gateway'
-                  ? 'Record everything one gateway publishes, every device beneath it included.'
-                  : "Record one device, plus its gateway's birth certificate."} One capture per subject; recording again replaces it. Select a row to inspect, upload or play back.`}
-              />
-            )}
+            tabs={SUBJECTS}
           />
 
           <div className="filter-bar">

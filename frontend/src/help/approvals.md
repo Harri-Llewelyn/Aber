@@ -22,7 +22,7 @@ A machine identity can propose too, if an Administrator gave it that permission.
 
 ## What the states mean
 
-**Awaiting a decision** is the working queue, oldest first, because a queue is worked from the front. **Decided** is the record, newest decision first.
+**Awaiting a decision** is the working queue, oldest first, because a queue is worked from the front. **Decided** is the record, newest decision first. A decided proposal is kept for as long as an Administrator sets on the Settings page, then the nightly prune removes it. What an approval changed stays in the Audit Trail.
 
 - **applied**: approved, and the change was made. The Audit Trail has a row naming both the person who asked and the person who authorised it.
 - **View in Audit Trail**, on an applied proposal, opens the Audit Trail filtered to that entity's kind and searching for its id. If the target is gone, deleted entities are shown too. It does not select the row. Only an applied proposal has this button, because the other three outcomes changed nothing.

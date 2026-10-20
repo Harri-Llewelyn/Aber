@@ -2,7 +2,7 @@
 
 This page shows who and what may reach Aber. Its first tab, **People**, lists everyone who signs in to the dashboard, with their role. The other four tabs cover the things that do not sign in: gateways, and Aber's own processes. Only Administrators can open it.
 
-The page is one card with five tabs: **People**, **Broker credentials**, **Machine identities**, **Broker accounts** and **Broker roles**. The page opens on People. Each tab has its own address, so a reload, a bookmark or **Back** returns to the same tab, with its filters. The list inside the card scrolls, and the page stays put. The **?** just after the tab names explains the selected tab.
+The page is one card with five tabs: **People**, **Broker credentials**, **Machine identities**, **Broker accounts** and **Broker roles**. The page opens on People. Each tab has its own address, so a reload, a bookmark or **Back** returns to the same tab, with its filters. The list inside the card scrolls, and the page stays put. Point at a tab, or move to it with the keyboard, to read what it holds.
 
 People, Broker credentials and Machine identities each have a row of controls under the tabs. The search box and filters are on the left, and the buttons at the right-hand end: **Add Person** on People, **New Machine Identity** on Machine identities. Broker accounts and Broker roles have no controls, so their lists start straight under the tabs.
 
@@ -55,6 +55,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - **Machine identities** lists Aber's own non-human identities on the database side. **Broker accounts** lists the broker's own accounts, read live. **Broker roles** lists what each role may publish, receive and subscribe to. Search for one of the five tab names in the search bar to open the page on that tab.
 - On **Machine identities**, the search box matches an identity's name. Withdrawn identities are hidden. Select **Show withdrawn** to list them.
 - **No gateway** marks a broker account that looks like a gateway's, but that no gateway claims and nothing declares. It is listed under **Broker accounts**, after Aber's own accounts. It is usually the account of a gateway that was deleted before deleting a gateway also disabled its broker account. `scripts/revoke-orphaned-broker-accounts.mjs` lists such accounts and disables them. It never deletes one.
+- Aber's own broker accounts are made each time the broker starts, by `mosquitto-init`. There is one for each `MQTT_…_USER` and `MQTT_…_PASSWORD` pair in the deployment's environment.
 - **New Machine Identity** creates an identity for a process that uses Aber through the API. You give a name, a purpose and permissions from a fixed menu, then issue its first token.
 - Machines propose, and people decide. The menu's two writes are filing change proposals and versioning schemas. Nothing on it lets a machine write a device, decide a proposal or a quarantine, or change who has access.
 - A machine identity reaches the database only. A process that speaks MQTT is issued a broker account instead.
@@ -66,6 +67,7 @@ There is no Refresh button. Every change you make here reads the list again. To 
 - A dash under **Tokens** means no token is on record. That is not the same as none existing: hover over it for why.
 - **Withdraw** takes a whole machine identity out of use, with an optional reason. **Reinstate** puts it back. **New Machine Identity**, **Issue Token**, **Withdraw** and **Reinstate** are each recorded in the Audit Trail.
 - **Rules** on a broker role is the number of rules the broker reports for it. To see the rules exactly as the broker holds them, click the role's row, or press Enter or Space on it. They open in a side panel. A row ending in a chevron opens a panel. Leaving the **Broker roles** tab closes the panel.
+- Each role's purpose is declared in `mosquitto/dynsec-roles.json`, and checked when Aber is built.
 - Every gateway account holds the one **gateway** role. In its rules, **%u** stands for the account's own username, which is the gateway's Sparkplug ID. So each gateway can publish and receive only under its own edge node.
 
 ## What the states mean

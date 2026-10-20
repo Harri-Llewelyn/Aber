@@ -1,4 +1,3 @@
-import React from 'react'
 import { opcuaSections, dataPointTooltip } from '../../utils/opcua'
 import { STANDARDS } from '../../utils/standards'
 
@@ -33,37 +32,6 @@ export function opcuaVocabularyTab({ vocabulary, catalog, onUsePoint }) {
     label: 'OPC UA',
     hint: 'Companion specification data points — machinery, robotics, machine tools, additive, PackML and energy.',
     searchPlaceholder: 'Search data points…',
-    description: (
-      <>
-        Data points defined by the OPC UA companion specifications — <span className="mono">OPC 40001</span>{' '}
-        (Machinery), <span className="mono">OPC 40010</span> (Robotics), <span className="mono">OPC 40501</span>{' '}
-        (Machine Tools), <span className="mono">OPC 40540</span> (Additive Manufacturing),{' '}
-        <span className="mono">OPC 30050</span> (PackML) and{' '}
-        <span className="mono">OPC 40001-4</span> (Machinery Energy).
-      </>
-    ),
-    notes: [
-      {
-        label: 'Names are positional.',
-        body: (
-          <>
-            {' '}As in MTConnect: <span className="mono">ActualPosition</span> becomes{' '}
-            <span className="mono">MotionDevice/J1/ActualPosition</span> once you say which axis.
-            Choosing a point fills in its group too.
-          </>
-        )
-      },
-      {
-        label: 'Each point carries its NodeId.',
-        body: (
-          <>
-            {' '}<span className="mono">nsu=&lt;namespace&gt;;i=&lt;id&gt;</span> is the ExpandedNodeId
-            the specification's NodeSet publishes for the point. It is the point's semantic id too,
-            and an OPC UA client finds the same node by it.
-          </>
-        )
-      }
-    ],
     sections,
     isUsed: item =>
       (item.point.semantic_id && semanticIds.has(item.point.semantic_id)) || nameSegments.has(item.name),

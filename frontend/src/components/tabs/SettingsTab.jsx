@@ -4,7 +4,6 @@ import { IconSettings, IconX, IconAlertTriangle } from '../common/Icons'
 import CopyableId from '../common/CopyableId'
 import { CardHeading } from '../common/CardHeading'
 import { EmptyState } from '../common/EmptyState'
-import { HelpTip } from '../common/HelpTip'
 import { LoadingState } from '../common/LoadingState'
 import { TabStrip } from '../common/TabStrip'
 import { useUrlState, useUrlTab, pathSlug } from '../../hooks/useUrlState'
@@ -13,6 +12,19 @@ import { BACKUP_OFFSITE_SETTING_KEYS } from '../../utils/backupOffsite'
 
 // Settings another page's destination dialog edits, so each value has one editor.
 const EDITED_ELSEWHERE = new Set([...COLD_STORAGE_DIALOG_KEYS, ...BACKUP_OFFSITE_SETTING_KEYS])
+
+/**
+ * Each category's tab tooltip, by the category's name. The categories come from the database,
+ * which holds no description for one, so the sentences live here; a category missing from this
+ * list shows no tooltip.
+ */
+export const CATEGORY_DESCRIPTIONS = {
+  'Audit Trail': 'How often the Audit Trail page reads the audit log again while it is open.',
+  'Retention': 'How long Aber keeps records, such as resolved alerts, before the nightly prune removes them.',
+  'Approvals': 'How many proposals one person may hold open, when an open one expires, and how long decided ones are kept.',
+  'Site': "The site's name, the Sparkplug group its gateways publish under, and how close cells may sit on a plan.",
+  'Cold Storage': "When readings move out to the cold archive, and the key that names this site's archive.",
+}
 
 /**
  * The runtime configuration plane as a page. It cannot add or delete a setting: the key set is
@@ -316,15 +328,7 @@ export function SettingsTab({ showToast, readOnly = false }) {
               value={activeCategory}
               // Choosing a category by hand ends the search's highlight: it has been seen.
               onChange={category => { setCategory(category); setFoundKey('') }}
-              tabs={groups.map(group => ({ id: group.category, label: group.category }))}
-              help={(
-                <HelpTip
-                  label={`About ${activeCategory} settings`}
-                  text={readOnly
-                    ? 'Only an Administrator can change these. A change takes effect without a restart. The grey line under a description names the default it overrides.'
-                    : 'A change takes effect without a restart. Edit a value and Save, or Discard to go back. The grey line under a description names the default it overrides.'}
-                />
-              )}
+              tabs={groups.map(group => ({ id: group.category, label: group.category, description: CATEGORY_DESCRIPTIONS[group.category] }))}
             />
 
             {activeGroup && (

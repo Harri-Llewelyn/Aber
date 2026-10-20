@@ -8,8 +8,8 @@ import { MIN_PASSWORD_LENGTH } from '../../utils/passwords'
 
 /** The page's tabs. The ids are the page's anchors: the search bar opens one by id. */
 export const PROFILE_SECTIONS = [
-  { id: 'account', label: 'Account' },
-  { id: 'appearance', label: 'Appearance' },
+  { id: 'account', label: 'Account', description: 'The address you sign in with, your role, and your password.' },
+  { id: 'appearance', label: 'Appearance', description: 'How the dashboard looks and behaves for you: theme, sidebar layout and single-key shortcuts.' },
 ]
 
 const THEME_OPTIONS = [

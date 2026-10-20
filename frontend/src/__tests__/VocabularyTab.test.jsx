@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { VocabularyTab } from '../components/tabs/VocabularyTab'
+import { HELP_CORPUS } from '../help'
 import { api } from '../api'
 
 /**
@@ -224,15 +225,11 @@ describe('Vocabulary page — a click hands off to the Metrics page', () => {
     expect(onUseEntry).not.toHaveBeenCalled()
   })
 
-  it('says 223P is a reference: a class starts a metric and is not its semantic id', async () => {
-    renderTab()
-    await ready()
-
-    fireEvent.click(standardTab(/ASHRAE 223P/))
-    fireEvent.mouseEnter(screen.getByRole('button', { name: 'About the ASHRAE 223P vocabulary' }))
-    const tip = screen.getByRole('tooltip')
-    expect(within(tip).getByText('A reference, not a source of ids.')).toBeTruthy()
-    expect(tip.textContent).toMatch(/starts a metric in the BMS group, named after it, with no semantic id/)
+  it('says 223P is a reference: a class starts a metric and is not its semantic id', () => {
+    // On the help page, which is where a standard's caveats live now.
+    const ashrae = HELP_CORPUS.vocabulary.split('### ASHRAE 223P')[1]
+    expect(ashrae).toMatch(/It is a reference, not a source of ids\./)
+    expect(HELP_CORPUS.vocabulary).toMatch(/Clicking a 223P class opens Add Metric in the BMS group, with the class as the type\. It fills in no semantic identifier/)
   })
 
   it('ticks a 223P class that a 223P metric is named after, and not a local metric using the word', async () => {
@@ -322,17 +319,23 @@ describe('Vocabulary page — one card: heading, tabs, toolbar, sections', () =>
     expect(screen.getAllByRole('heading')).toHaveLength(1)
   })
 
-  it('puts the selected standard’s "?" in the tab bar, after the last tab', async () => {
+  it('gives each standard’s tab its hint as a tooltip, with no "?" after the last tab', async () => {
     renderTab()
     await ready()
 
-    const help = () => document.querySelector('.card > .tab-strip > .tab-strip-help')
-    expect(help().previousElementSibling).toBe(screen.getByRole('tablist'))
-    expect(within(help()).getByRole('button', { name: 'About the MTConnect vocabulary' })).toBeTruthy()
-
-    fireEvent.click(standardTab(/ISO 22400/))
-    expect(within(help()).getByRole('button', { name: 'About the ISO 22400 vocabulary' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'About the MTConnect vocabulary' })).toBeNull()
+    expect(document.querySelector('.card > .tab-strip').children).toHaveLength(1)
+    for (const [name, hint] of [
+      [/MTConnect/, /^Machine tool observations/],
+      [/ISO 22400/, /^Computed manufacturing KPIs/],
+      [/OPC UA/, /^Companion specification data points/],
+      [/ASHRAE 223P/, /^Building systems/],
+    ]) {
+      const tab = standardTab(name)
+      expect(tab).toHaveAccessibleDescription(hint)
+      // The tooltip appears whenever the pointer crosses the bar, so it is kept to 20 words.
+      expect(document.getElementById(tab.getAttribute('aria-describedby')).textContent.split(/\s+/).length).toBeLessThanOrEqual(20)
+    }
+    expect(screen.queryByRole('button', { name: /^About the .* vocabulary$/ })).toBeNull()
   })
 
   it('keeps the toolbar row under the tabs for the search and Expand all, with no "?" in it', async () => {
@@ -360,28 +363,25 @@ describe('Vocabulary page — one card: heading, tabs, toolbar, sections', () =>
     expect(APP_CSS).toMatch(/\n\.vocab-sections \{ padding: 0 0 4px; \}/)
   })
 
-  it('reads a standard’s explanation on demand rather than above every entry', async () => {
+  it('reads a standard’s explanation on the help page rather than above every entry', async () => {
     /* It was a lead paragraph and three labelled notes standing above the list on every visit --
-       what the vocabulary IS, which is checked once. The tip carries it, per standard. */
+       what the vocabulary IS, which is checked once. The help page carries it, per standard. */
     renderTab()
     await ready()
-    expect(document.querySelector('.vocab-description')).toBeNull()
+    expect(document.querySelector('.vocab-description, .vocab-note')).toBeNull()
 
-    fireEvent.mouseEnter(screen.getByRole('button', { name: 'About the MTConnect vocabulary' }))
-    const tip = screen.getByRole('tooltip')
+    const mtconnect = HELP_CORPUS.vocabulary.split('### MTConnect')[1].split('###')[0]
     // The two load-bearing MTConnect caveats survive the move.
-    expect(within(tip).getByText('Reference only.')).toBeTruthy()
-    expect(within(tip).getByText('Names are composed.')).toBeTruthy()
+    expect(mtconnect).toMatch(/It is a list of words, not of metrics\./)
+    expect(mtconnect).toMatch(/Names are composed\./)
   })
 
-  it('gives every standard its own tip, not just the default tab', async () => {
-    renderTab()
-    await ready()
-
-    fireEvent.click(standardTab(/ISO 22400/))
-    fireEvent.mouseEnter(screen.getByRole('button', { name: 'About the ISO 22400 vocabulary' }))
-    // The AVAILABILITY name clash is the one thing on this tab that causes a real mistake.
-    expect(within(screen.getByRole('tooltip')).getByText('Beware the name clash.')).toBeTruthy()
+  it('gives every standard its own section on the help page, not just the default tab', () => {
+    for (const standard of ['MTConnect', 'ISO 22400', 'OPC UA', 'ASHRAE 223P']) {
+      expect(HELP_CORPUS.vocabulary).toContain(`### ${standard}\n`)
+    }
+    // The AVAILABILITY name clash is the one thing on the ISO tab that causes a real mistake.
+    expect(HELP_CORPUS.vocabulary.split('### ISO 22400')[1]).toMatch(/Beware the name clash\./)
   })
 })
 
