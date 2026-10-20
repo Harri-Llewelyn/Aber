@@ -6,6 +6,7 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { cellUrl, siteMapAreaUrl } from '../routes'
 import { AreasTab } from '../components/tabs/AreasTab'
 import { SiteMapTab } from '../components/tabs/SiteMapTab'
 import { api } from '../api'
@@ -675,7 +676,7 @@ describe('AreasTab files cells into areas', () => {
     expect(api.put).toHaveBeenCalledTimes(1)
     expect(api.put.mock.calls[0][0]).toBe('/api/v1/cells/cell-4')
     expect(api.put.mock.calls[0][1]).toMatchObject({ area_id: 'area-b' })
-    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/Loose End.*Press Hall/), 'success')
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/Loose End.*Press Hall/), 'success', { to: cellUrl('cell-4') })
   })
 
   it('un-files a cell dropped back onto the queue', async () => {
@@ -862,6 +863,17 @@ describe('AreasTab manages an area\'s plan from its panel', () => {
     expect(api.uploadAreaPlan).toHaveBeenCalledTimes(1)
     expect(api.uploadAreaPlan.mock.calls[0][0]).toMatchObject({ area_id: 'area-b' })
     expect(api.uploadAreaPlan.mock.calls[0][1]).toBe(file)
+  })
+
+  it('says the plan is attached, as a link to the area on the Site Map', async () => {
+    api.uploadAreaPlan.mockResolvedValue({})
+    const showToast = vi.fn()
+    await openArea('Press Hall', { showToast })
+    const file = new File(['<svg viewBox="0 0 4 3"/>'], 'annexe.svg', { type: 'image/svg+xml' })
+    const input = within(planRow()).getByLabelText('Plan file for Press Hall')
+    await act(async () => { fireEvent.change(input, { target: { files: [file] } }) })
+    expect(showToast).toHaveBeenCalledWith('Plan attached to Press Hall', 'success', { to: siteMapAreaUrl('area-b') })
+    expect(siteMapAreaUrl('area-b')).toBe('/site-map?area=area-b')
   })
 
   it('removes a plan once the dialog is confirmed', async () => {

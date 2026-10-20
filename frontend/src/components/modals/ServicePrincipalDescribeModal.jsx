@@ -2,6 +2,7 @@ import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
+import { identityUrl } from '../../routes'
 
 const NAME_MAX = 80
 const PURPOSE_MAX = 500
@@ -33,7 +34,7 @@ export function ServicePrincipalDescribeModal({ principal, onClose, onChanged, s
     setError(null)
     try {
       await api.describeServicePrincipal(principal.principal_id, trimmedName, purpose.trim())
-      showToast?.(`${trimmedName} updated`, 'success')
+      showToast?.(`${trimmedName} updated`, 'success', { to: identityUrl(trimmedName) })
       onChanged?.()
       onClose()
     } catch (err) {

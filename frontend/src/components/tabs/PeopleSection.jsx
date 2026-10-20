@@ -16,7 +16,7 @@ import { AddPersonModal } from '../modals/AddPersonModal'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { NewPasswordModal } from '../modals/NewPasswordModal'
 import { formatDateTime } from '../../utils/format'
-import { tabUrl } from '../../routes'
+import { personUrl, tabUrl } from '../../routes'
 import {
   NO_ROLE,
   PERSON_ROLES,
@@ -106,7 +106,7 @@ export function PeopleSection({ showToast, currentUserId }) {
     setSavingRole(person.user_id)
     try {
       await api.setPersonRole(person.user_id, role)
-      showToast?.(`${person.email} is now ${personRoleLabel(role)}`, 'success')
+      showToast?.(`${person.email} is now ${personRoleLabel(role)}`, 'success', { to: personUrl(person.email) })
     } catch (err) {
       showToast?.(err.message, 'error')
     } finally {
@@ -120,16 +120,17 @@ export function PeopleSection({ showToast, currentUserId }) {
     try {
       if (act === 'remove') {
         await api.removePersonAccess(person.user_id)
-        showToast?.(`${person.email} can no longer sign in`, 'success')
+        showToast?.(`${person.email} can no longer sign in`, 'success', { to: personUrl(person.email, true) })
       } else if (act === 'password') {
         const result = await api.managePeople({ action: 'set-password', user_id: person.user_id })
         setNewPassword({ email: person.email, password: result.password })
-        showToast?.(`${person.email} has a new password`, 'success')
+        showToast?.(`${person.email} has a new password`, 'success', { to: personUrl(person.email) })
       } else {
         const result = await api.restorePersonAccess(person.user_id)
         showToast?.(
           `${person.email} can sign in again${result?.role ? ` as ${personRoleLabel(result.role)}` : ''}`,
-          'success'
+          'success',
+          { to: personUrl(person.email) }
         )
       }
     } catch (err) {

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { settingUrl } from '../../routes'
 import { api } from '../../api'
 import { IconSettings, IconX, IconAlertTriangle } from '../common/Icons'
 import CopyableId from '../common/CopyableId'
@@ -123,7 +124,7 @@ function SettingRow({ setting, onSaved, showToast, highlighted = false, readOnly
     setSaving(true)
     try {
       await api.patchSetting(setting.key, coerced)
-      showToast?.(`${setting.label} saved`, 'success')
+      showToast?.(`${setting.label} saved`, 'success', { to: settingUrl(setting.key) })
       onSaved?.()
     } catch (e) {
       // The database's own message, not a rewrite of it. A CHECK violation names the constraint

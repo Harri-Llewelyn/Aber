@@ -7,7 +7,8 @@ import { Modal } from '../common/Modal'
 import { LoadingState } from '../common/LoadingState'
 import { requiresRolesTitle } from '../../hooks/usePermissions'
 import { PERMISSION_UUIDS } from '../../constants'
-import { patchFromForm, submitProposal } from '../../utils/proposeFromForm'
+import { patchFromForm, submitProposal, proposalNotice } from '../../utils/proposeFromForm'
+import { deviceUrl } from '../../routes'
 
 /**
  * Edit a device's IDTA 02006 Digital Nameplate. On the device rather than the Schemas page, because
@@ -140,10 +141,11 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
     setSaving(true)
     try {
       const patch = patchFromForm('device_nameplate', stored, form)
-      await submitProposal({
+      const filed = await submitProposal({
         kind: 'device_nameplate', entityId: asset.asset_id, patch, rationale
       })
-      showToast?.('Proposed. An approver applies it, or says why not.', 'success')
+      const { msg, to } = proposalNotice(`${asset.asset_name}'s nameplate`, filed?.id)
+      showToast?.(msg, 'success', { to })
       onClose(false)
     } catch (e) {
       setError(e.message)
@@ -159,7 +161,7 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage, can
       await api.put(`/api/v1/devices/${asset.asset_id}/nameplate`, form)
       // Clearing every field deletes the row.
       const cleared = FIELDS.every(f => !form[f.column]?.trim())
-      showToast?.(cleared ? 'Nameplate cleared' : 'Nameplate saved', 'success')
+      showToast?.(`Nameplate of '${asset.asset_name}' ${cleared ? 'cleared' : 'saved'}`, 'success', { to: deviceUrl(asset.asset_id) })
       onClose(true)
     } catch (e) {
       setError(e.message)

@@ -5,6 +5,7 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { cellUrl } from '../routes'
 import { CellsTab } from '../components/tabs/CellsTab'
 import { CellPlacementPicker } from '../components/common/CellPlacementPicker'
 import { AreaPlanPreview } from '../components/common/AreaPlanPreview'
@@ -44,8 +45,8 @@ const sizePlan = () => {
   return plan
 }
 
-const renderCells = async () => {
-  render(<CellsTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
+const renderCells = async (showToast = vi.fn()) => {
+  render(<CellsTab showToast={showToast} onSelectDevice={vi.fn()} hasPermission={() => true} />)
   await waitFor(() => expect(screen.getByText('Bay 1')).toBeInTheDocument())
 }
 
@@ -132,6 +133,17 @@ describe('CellsTab places a cell on its area plan', () => {
     expect(api.post).toHaveBeenCalledWith('/api/v1/cells', expect.objectContaining({
       cell_name: 'Bay 3', area_id: 'area-1', plan_x: 0.25, plan_y: 0.75
     }))
+  })
+
+  it('says which cell was created, as a link to it', async () => {
+    api.post.mockResolvedValue({ id: 'cell-new', name: 'Bay 3' })
+    const showToast = vi.fn()
+    await renderCells(showToast)
+    fireEvent.click(screen.getByRole('button', { name: /New Cell/ }))
+    fireEvent.change(screen.getByPlaceholderText(/Assembly Line 1/), { target: { value: 'Bay 3' } })
+
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Save' })) })
+    expect(showToast).toHaveBeenCalledWith("Cell 'Bay 3' created", 'success', { to: cellUrl('cell-new') })
   })
 
   it('refuses a place too close to a cell already in the area, naming it', async () => {
