@@ -4,7 +4,7 @@
 //
 // The parts that need no cluster: which tools are missing and what the message says, who holds a
 // port, the arguments, the version read, the install the trial runs, and the values file setup
-// writes for it. The cluster half is run by hand (`npm run try`, docs/install.md, Try it).
+// writes for it. The cluster half is run by hand (`npm run try`, help/site/install.md, Try it).
 // =================================================================================================
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

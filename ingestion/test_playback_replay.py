@@ -78,7 +78,7 @@ SUPABASE_DB_PASS = os.getenv("POSTGRES_PASSWORD", "postgres")
 # block generate the SAME wire identity and collide on the unique index.
 #
 # A FIXTURE RATHER THAN A SEEDED DEVICE, because a fresh stack has neither devices nor gateways:
-# the demonstration floor was removed and `tutorial/README.md` builds one machine by hand. A suite
+# the demonstration floor was removed and `help/guides/tutorial.md` builds one machine by hand. A suite
 # that picked a real device would run on a developer's stack and skip on an empty one.
 SOURCE_GATEWAY_ID = "3a000000-0000-4000-8000-000000000001"
 SOURCE_DEVICE_ID = "3b000000-0000-4000-8000-000000000001"

@@ -2539,5 +2539,5 @@ heartbeat — which correctly reports unhealthy — rather than crash a daemon t
 ## Related
 
 - [`../supabase/README.md`](../supabase/README.md) — schema, RLS, triggers, edge functions
-- [`../tutorial/README.md`](../tutorial/README.md) — building a gateway, a device and the flow that publishes as it
+- [`../help/guides/tutorial.md`](../help/guides/tutorial.md) — building a gateway, a device and the flow that publishes as it
 - [`../mosquitto/README.md`](../mosquitto/README.md) — the broker's roles and per-gateway topic confinement

@@ -4662,7 +4662,7 @@ function edgeFunctionNames() {
 // auth plugin are what a reader would act on. docs/gateway.md's History is where Kong's facts live.
 // -------------------------------------------------------------------------------------------------
 {
-  const CURRENT = ['docs/kubernetes-architecture.md', 'deploy/k8s/README.md', 'README.md', 'docs/install.md',
+  const CURRENT = ['docs/kubernetes-architecture.md', 'deploy/k8s/README.md', 'README.md', 'help/site/install.md',
     'docs/architecture.md', 'docs/security-model.md', 'supabase/README.md'];
   const ARTEFACTS = [/\bkong\.yml\b/, /\bKONG_[A-Z]/, /checksum\/kong-/, /\bkong_[a-z]/, /(?<![\w-])kong:\d/, /\bkey-auth\b/];
   const offences = [];
@@ -4949,7 +4949,7 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 37. The install `npm run setup` ends with is docs/install.md step 7's.
+// 37. The install `npm run setup` ends with is help/site/install.md step 7's.
 //
 // Someone who follows the screen rather than the page runs the printed line, so the two are one
 // instruction. setup.mjs prints installCommand() from scripts/lib/release-chart.mjs at Chart.yaml's
@@ -4958,7 +4958,7 @@ function edgeFunctionNames() {
 // -------------------------------------------------------------------------------------------------
 {
   const { installCommand, normaliseCommand, readChartVersion } = await import('./lib/release-chart.mjs');
-  const DOC = 'docs/install.md';
+  const DOC = 'help/site/install.md';
   const STEP = /^###\s+7\.\s+Install Aber\s*$/m;
   const doc = read(DOC);
   const setup = read('scripts/setup.mjs');
@@ -5525,7 +5525,7 @@ function edgeFunctionNames() {
 // 42. Nothing gives a self-registered account a role: no applied migration puts a trigger on
 // auth.users.
 //
-// docs/install.md (*Accounts*) and the sign-up entry in docs/openapi.yaml say an account made by
+// help/site/install.md (*Accounts*) and the sign-up entry in docs/openapi.yaml say an account made by
 // open sign-up (`supabaseAuth.disableSignup` false) has no role until an Administrator gives it one.
 // A trigger on auth.users runs for every such account, and one that writes user_roles hands a role
 // to anyone who can reach the endpoint.
@@ -5547,7 +5547,7 @@ function edgeFunctionNames() {
     fail('a migration puts a trigger on auth.users, which runs for every self-registered account:\n'
       + offences.map((o) => `        ${o}`).join('\n')
       + '\n      Remove it. If it must run at sign-up, first say what it gives a new account in '
-      + 'docs/install.md (Accounts) and the /auth/v1/signup entry in docs/openapi.yaml, then teach check 42 the exception.');
+      + 'help/site/install.md (Accounts) and the /auth/v1/signup entry in docs/openapi.yaml, then teach check 42 the exception.');
   } else {
     pass(`none of the ${files.length} applied migrations puts a trigger on auth.users, so sign-up gives no role`);
   }
@@ -6539,7 +6539,7 @@ function edgeFunctionNames() {
   // Where a person applies cert-manager by hand, and the version the dev loop (and so CI) applies.
   const CERT_MANAGER = /cert-manager\/releases\/download\/(v[\w.-]+)\/cert-manager\.yaml/g;
   const pins = [];
-  for (const file of ['docs/install.md', 'deploy/k8s/README.md']) {
+  for (const file of ['help/site/install.md', 'deploy/k8s/README.md']) {
     read(file).split('\n').forEach((line, i) => {
       for (const m of line.matchAll(CERT_MANAGER)) pins.push({ at: `${file}:${i + 1}`, version: m[1] });
     });
@@ -6562,8 +6562,8 @@ function edgeFunctionNames() {
   if (version && chart && version !== chart) {
     wrong.push(`${INSTALLER} installs ABER_VERSION=${version}, and Chart.yaml's version: is ${chart}. Change ABER_VERSION to ${chart}`);
   }
-  if (!pins.some((p) => p.at.startsWith('docs/install.md')) || !pins.some((p) => p.at.startsWith('deploy/k8s/README.md')) || !devLoop) {
-    wrong.push('docs/install.md, deploy/k8s/README.md or scripts/dev-cluster.mjs no longer names a cert-manager version; the extraction no longer matches');
+  if (!pins.some((p) => p.at.startsWith('help/site/install.md')) || !pins.some((p) => p.at.startsWith('deploy/k8s/README.md')) || !devLoop) {
+    wrong.push('help/site/install.md, deploy/k8s/README.md or scripts/dev-cluster.mjs no longer names a cert-manager version; the extraction no longer matches');
   }
   const stalePins = pins.filter((p) => certManager && p.version !== certManager);
   if (stalePins.length) {
@@ -6573,8 +6573,8 @@ function edgeFunctionNames() {
         '. They move together: change whichever side is stale'
     );
   }
-  if (!urls.some((u) => u.at.startsWith('docs/install.md'))) {
-    wrong.push('docs/install.md no longer gives the installer\'s URL (raw.githubusercontent.com/Harri-Llewelyn/Aber/<tag>/deploy/install.sh)');
+  if (!urls.some((u) => u.at.startsWith('help/site/install.md'))) {
+    wrong.push('help/site/install.md no longer gives the installer\'s URL (raw.githubusercontent.com/Harri-Llewelyn/Aber/<tag>/deploy/install.sh)');
   }
   for (const u of urls.filter((x) => chart && x.tag !== `v${chart}`)) {
     wrong.push(`${u.at} fetches the installer at ${u.tag}, and the release is ${chart} (Chart.yaml). Change the URL's tag to v${chart}`);

@@ -26,7 +26,7 @@ runs:
     # The runner image puts these floors in /etc/sysctl.conf; this applies them whatever its boot
     # did, and prints what was in force. Below them the kubelet cannot follow every container's log
     # for the collector and injects "failed to create fsnotify watcher" into the stream
-    # (docs/install.md step 2).
+    # (help/site/install.md step 2).
     - name: Raise The Runner's inotify Limits
       shell: bash
       run: |

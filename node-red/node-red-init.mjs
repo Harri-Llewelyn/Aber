@@ -11,7 +11,7 @@
  *   - the CREDENTIALS are stack config -> but only while there are none to lose
  *
  * No flow is seeded: the editor opens empty, and the marker file records that this script wrote
- * a blank flow and when. tutorial/README.md holds the walkthrough, and node-red/README.md the
+ * a blank flow and when. help/guides/tutorial.md holds the walkthrough, and node-red/README.md the
  * failure modes behind each authentication guard.
  *
  * Verified against Node-RED 5.0.7.
@@ -130,7 +130,7 @@ if (seededFlow) {
   );
   console.log(
     `[node-red-init] blank flow ${forceSeed ? 're-seeded (forced)' : 'seeded'} to ${flowsPath}. ` +
-      'The editor opens empty; tutorial/README.md walks through building the first flow.'
+      'The editor opens empty; help/guides/tutorial.md walks through building the first flow.'
   );
 } else {
   console.log(

@@ -3,7 +3,7 @@
 Aber runs one Node-RED inside the server, for Host and Simulated gateways, and every Remote gateway
 runs its own. This page covers the server's: how its editor and APIs are protected, and why each
 guard is shaped the way it is. [`node-red-init.mjs`](node-red-init.mjs) prepares it every time it
-starts, and the [tutorial](../tutorial/README.md) walks through building a first flow in it.
+starts, and the [tutorial](../help/guides/tutorial.md) walks through building a first flow in it.
 
 ## Authentication
 
