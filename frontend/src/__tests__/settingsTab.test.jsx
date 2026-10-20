@@ -286,7 +286,7 @@ describe('the page', () => {
   })
 
   it('leaves the rule about secrets to the help page rather than a permanent callout', async () => {
-    // help/settings.md says it in full; a warning on every visit stops being read.
+    // help/pages/settings.md says it in full; a warning on every visit stops being read.
     await show()
     expect(screen.queryByText(/Nothing secret is stored here/i)).toBeNull()
     expect(document.querySelector('.callout-warning')).toBeNull()

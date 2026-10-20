@@ -1146,8 +1146,11 @@ docker build -f node-red/Dockerfile             -t $NS/node-red:$V node-red
 # environment. A default build also runs, but its baked URL masks a missing ConfigMap.
 # VITE_APP_VERSION must be passed: the context is frontend/, so the build has no .git to read and
 # the account menu reads "unknown" without it. $V, the tag this image is about to carry.
+# --build-context hands the build help/, the pages the dashboard's help panel shows; without it the
+# build stops with `pull access denied` for `help`.
 docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
                                     --build-arg VITE_APP_VERSION=$V \
+                                    --build-context help=./help \
                                                 -t $NS/frontend:$V frontend
 
 # i3X 1.0 server -- repository root again, because it compiles sparkplug_b.proto. Built

@@ -77,8 +77,9 @@ export const IMAGES = [
   { name: 'node-red', file: 'node-red/Dockerfile', context: 'node-red' },
   // VITE_APP_VERSION must be passed: the context is `frontend`, so vite.config.js has no .git to
   // read and the account menu reads "unknown". DESCRIBE, not VERSION -- the tag is Chart.appVersion,
-  // which on a tree ahead of it would claim a release this bundle is not.
-  { name: 'frontend', file: 'frontend/Dockerfile', context: 'frontend', args: ['VITE_RUNTIME_CONFIG=true', 'VITE_APP_VERSION=DESCRIBE'] },
+  // which on a tree ahead of it would claim a release this bundle is not. `contexts` are named build
+  // contexts: help/ holds the pages the bundle's help panel shows, and a help edit needs this rebuild.
+  { name: 'frontend', file: 'frontend/Dockerfile', context: 'frontend', contexts: ['help=./help'], args: ['VITE_RUNTIME_CONFIG=true', 'VITE_APP_VERSION=DESCRIBE'] },
   { name: 'i3x-service', file: 'i3x/Dockerfile', context: '.' },
   // Both carry their scripts from scripts/, so a script edit needs this rebuild.
   { name: 'gateway-credential', file: 'gateway-credential/Dockerfile', context: '.' },
@@ -283,6 +284,7 @@ export function buildImages (version, only) {
       const value = a.slice(eq + 1).replace('VERSION', version).replace('DESCRIBE', describe)
       args.push('--build-arg', `${a.slice(0, eq)}=${value}`)
     }
+    for (const named of img.contexts || []) args.push('--build-context', named)
     args.push(img.context)
     console.log(`  ${c.dim(`docker ${args.join(' ')}`)}`)
     must('docker', args, `the ${img.name} image did not build`)

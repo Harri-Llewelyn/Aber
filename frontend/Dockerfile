@@ -15,11 +15,17 @@ FROM node:24-alpine AS builder
 # either stage's filesystem. The stage's document lists devDependencies too, which overstates
 # rather than omits. Not a VITE_ variable, so it reaches no bundle.
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
-WORKDIR /app
+# The stage mirrors the repository: this context at /app/frontend and the help pages at /app/help,
+# so src/help/index.js's `../../../help/pages` resolves here as it does in a checkout.
+WORKDIR /app/frontend
 
 COPY package*.json ./
 RUN npm ci
 
+# `help` is a named build context, the repository's help/ folder: pass `--build-context help=./help`
+# (release.yml `build-contexts`, scripts/dev-cluster.mjs, the runbook). Without it BuildKit reads
+# `help` as an image name and the build stops at this line with `pull access denied`.
+COPY --from=help . /app/help
 COPY . .
 
 # TWO WAYS TO CONFIGURE THIS IMAGE, and the build arg below picks between them.
@@ -51,9 +57,9 @@ COPY . .
 #
 # Verified, so the skip rests on facts rather than on the argument above:
 #   - `docker inspect` on the FINAL image shows no `VITE_*` variable in `Config.Env`, on either
-#     build path. Stage 2 is a fresh `FROM nginx:alpine` that copies only `/app/dist`, so nothing
-#     from this stage's environment survives the stage boundary -- which is precisely the leak the
-#     rule guards against, already closed by the structure.
+#     build path. Stage 2 is a fresh `FROM nginx:alpine` that copies only `/app/frontend/dist`, so
+#     nothing from this stage's environment survives the stage boundary -- which is precisely the
+#     leak the rule guards against, already closed by the structure.
 #   - The PUBLISHED image passes no key at all. release.yml builds with `VITE_RUNTIME_CONFIG=true`
 #     and nothing else, and a JWT-shaped grep over the served bundle finds nothing.
 #   - On the baked path the value does reach the bundle. That is what baking means, and it is the
@@ -112,7 +118,7 @@ RUN rm -f /etc/nginx/conf.d/default.conf
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 # Read by nginx as it is, not rendered: the chart mounts its rendered policy over it.
 COPY content-security-policy.conf /etc/nginx/aber/content-security-policy.conf
-COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --from=builder /app/frontend/dist /usr/share/nginx/html
 
 # NON-ROOT: nginx starts as its own user (101) rather than starting as root and dropping to it. The
 # master writes its pid to /tmp, creates its temp directories in /var/cache/nginx, and the entrypoint

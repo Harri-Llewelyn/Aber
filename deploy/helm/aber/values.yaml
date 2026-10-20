@@ -1213,7 +1213,7 @@ frontend:
     # Built from frontend/Dockerfile with VITE_RUNTIME_CONFIG=true, so one image serves any
     # environment and reads its configuration from the /config.js ConfigMap:
     #   docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
-    #     -t <repo>:<tag> frontend
+    #     --build-context help=./help -t <repo>:<tag> frontend
     repository: ghcr.io/harri-llewelyn/aber/frontend
     tag: ""
     pullPolicy: IfNotPresent

@@ -221,7 +221,7 @@ spec:
         - name: frontend
           # BUILT WITH VITE_RUNTIME_CONFIG=true:
           #   docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
-          #     -t <repo>:<tag> frontend
+          #     --build-context help=./help -t <repo>:<tag> frontend
           #
           # A default-built (baked) image also works here -- src/config.js prefers the runtime value
           # and falls through to the baked one -- but it carries whatever URL it was built with as a
