@@ -49,7 +49,8 @@ the values file you already have.
 
 New capability. New values keys, each with a default that preserves current behaviour. Additive
 schema. A capability that a site has to opt into rather than one that changes underneath it. A
-minor release is also where a **deprecation** is announced, never where one takes effect.
+minor release is also where a **deprecation** is announced. It takes effect no sooner than the next
+minor, under [Deprecation](#deprecation).
 
 ### Major — `1.x` → `2.0.0`
 
@@ -87,8 +88,10 @@ mechanism.
 by reinstalling, and no data is carried across; [`upgrades.md`](upgrades.md#the-floor-100) says
 why.
 
-**Skipping minors is supported. Rolling back is not.** The images can be rolled back and the schema
-cannot — there are no down-migrations. Take a backup before upgrading if a rollback is a real
+**Skipping minors is supported. Rolling back is not.** A site that skips a minor reads the notes of
+every release it skips: a deprecation announced in one minor and taking effect in the next reaches
+it in a single upgrade. The images can be rolled back and the schema cannot — there are no
+down-migrations. Take a backup before upgrading if a rollback is a real
 possibility for you; [`upgrades.md`](upgrades.md#migrations-are-forward-only) says how, and the
 Backups page is the way with no shell.
 

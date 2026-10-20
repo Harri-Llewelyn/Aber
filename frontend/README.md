@@ -681,6 +681,7 @@ them. Nothing checks this list, because a word that is allowed cannot be policed
 | A group of cells | area | building, floor |
 | A cell | cell | cell zone, zone, work center |
 | Any audited row | entity | asset, unless it is the shopfloor class |
+| A filter's no-constraint option | Any … (Any gateway, Any status) | All … (All gateways) |
 
 **Site and campus.** "Site" is the term: the page, the setting, the Site-Wide scope and the ISA-95
 level all say it. "Campus" may gloss it in running text and tooltips, as in "the site is this
