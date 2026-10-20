@@ -5669,6 +5669,17 @@ tr.setting-row-found > td:first-child { box-shadow: inset 3px 0 0 var(--accent);
   gap: 6px;
 }
 
+/* A Third-party gateway's settings, two to a row in the order a node's own settings ask for them. */
+.gateway-settings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .gateway-settings { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* A block of commands or values to copy. `pre` keeps it ahead of .mono's colour and size. */
 pre.gateway-code {
   margin: 6px 0 0;

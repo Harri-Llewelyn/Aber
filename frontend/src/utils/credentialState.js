@@ -1,11 +1,12 @@
 /**
  * What the platform recorded about a gateway's broker credential, and what the broker says. The
  * platform's record is `enrolled_at` (an appliance enrolled), `credential_revoked_at` (archive or
- * delete disabled the account) or a CREDENTIAL_ISSUED row (issued to a host-run gateway through the
- * UI). The broker's state is read live from its Dynamic Security plugin
+ * delete disabled the account) or a CREDENTIAL_ISSUED row (issued to a Host or Third-party gateway
+ * through the UI). The broker's state is read live from its Dynamic Security plugin
  * (api.listBrokerInventory). The two can disagree and both are shown: an account issued by script
  * is `unrecorded` here and Active at the broker.
  */
+import { credentialIssuedHere } from './gatewayType';
 
 /** The states, in the order a reader should think about them: `revoked` outranks everything. */
 export const CREDENTIAL_STATES = {
@@ -38,8 +39,8 @@ export function credentialState(gateway, issuedAt = null) {
   // Ordered deliberately: a gateway carrying both a revocation and an issue record was issued first.
   if (gateway.credential_revoked_at) return CREDENTIAL_STATES.REVOKED;
 
-  // A host-run gateway's only record is the audit row: enroll-gateway refuses it, so `enrolled_at`
-  // is NULL by construction.
+  // A Host or Third-party gateway's only record is the audit row: enroll-gateway refuses it, so
+  // `enrolled_at` is NULL by construction.
   if (issuedAt) return CREDENTIAL_STATES.ISSUED;
 
   if (gateway.enrolled_at) return CREDENTIAL_STATES.ISSUED;
@@ -69,7 +70,7 @@ export function credentialStateExplanation(state, gateway) {
       return 'Disabled at the broker when this gateway was archived or deleted: its session was '
         + 'dropped and its next connection is refused. Issuing a new credential re-enables it.';
     case CREDENTIAL_STATES.ISSUED:
-      return gateway?.deployment === 'host'
+      return credentialIssuedHere(gateway)
         ? 'Issued through the dashboard. An Administrator can show the password again from the '
           + 'gateway’s drawer.'
         : 'Issued to the appliance when it enrolled. The password never passes through a browser.';
@@ -144,10 +145,10 @@ export function brokerStateExplanation(state) {
 }
 
 /**
- * Which credential action, if any, the Access Control page offers this gateway: a remote gateway
- * gets setup, a host-run one gets a credential, an archived one neither.
+ * Which credential action, if any, the Access Control page offers this gateway: a Remote gateway
+ * gets setup, a Host or Third-party one gets a credential, an archived one neither.
  */
 export function credentialAction(gateway) {
   if (!gateway || gateway.is_archived) return null;
-  return gateway.deployment === 'host' ? 'mint' : 'bundle';
+  return credentialIssuedHere(gateway) ? 'mint' : 'bundle';
 }

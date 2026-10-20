@@ -52,4 +52,6 @@ window.__ABER_CONFIG__ = window.__ABER_CONFIG__ || {
   VITE_PLATFORM_PHYSICAL_BACKUP: '',
   // playback.enabled. Blank: the Capture page treats the playback worker as deployed.
   VITE_PLAYBACK_ENABLED: '',
+  // ingestion.primaryHostId. Blank: a Third-party gateway's credential dialog says where it is set.
+  VITE_PRIMARY_HOST_ID: '',
 };

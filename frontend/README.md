@@ -316,6 +316,34 @@ by `PasswordShownOnce` and lives in its dialog's state until it closes, as a min
 (`docs/security-model.md`, *People*). The button is disabled for a session with no email address,
 a machine identity, which has no password.
 
+### A Third-party gateway's dialog gives every setting its edge node needs
+
+A Third-party gateway (`deployment = 'third_party'`, migration `0196`) is an edge node on its own
+machine, running software Aber does not manage. `credentialIssuedHere()` in `utils/gatewayType.js`
+is true for it and for a Host gateway, and every page that decides whether to offer a credential or
+a bundle asks it. Placement follows Remote: `cellResolution.js` and the Site Map's host flag test
+`deployment === 'host'` only, so a Third-party gateway holds a cell and carries no flag.
+
+Its credential dialog shows `EdgeNodeSettings` (`components/modals/EdgeNodeSettings.jsx`) in place
+of the Node-RED steps, and so does Show Broker Credential. Each value comes from where the dashboard
+already learns it (`utils/edgeNodeSettings.js`):
+
+- **The broker address and port** from the Directory's broker row, which db-init keeps to the
+  chart's public broker address, the one an appliance is handed. A row still naming an in-stack
+  host is shown with a warning, and an unreadable Directory is said rather than guessed.
+- **The primary host id** from `VITE_PRIMARY_HOST_ID`, which the chart renders from
+  `ingestion.primaryHostId`. Absent, the dialog says where it is set.
+- **The root certificate** from `/.well-known/aber/ca.pem` on the dashboard's own host, which
+  `nginx.conf` serves when ingress TLS is on. It is offered as a download and an address to copy.
+
+The link to *Bringing your own edge node* is an `a[data-help]` naming `site/bring-your-own-edge-node`,
+whose `href` is the page on GitHub at the running release's tag, or `main` for a development build
+(`sourceRef()`). The help panel takes over such a click; without it, the link opens GitHub.
+
+Saving a new Third-party gateway opens the dialog with `confirmFirst={false}`, which issues on open
+once, as the setup dialog does for a new Remote gateway: there is nothing yet to replace. The drawer
+says what the gateway does not get (**Not Provided**), and shows no appliance health rows for it.
+
 ### Why the cold-archive destination is one dialog
 
 `ColdStorageDestinationModal` holds the whole destination, the write-only secret key and the

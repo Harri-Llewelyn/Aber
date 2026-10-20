@@ -576,7 +576,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                   <SortHeader sort={sort} column="sparkplug_id" title="The wire identity. A capture is filed under this, and playback rewrites it onto the target's own assets">
                     Sparkplug ID
                   </SortHeader>
-                  <SortHeader sort={sort} column="type" title="The kind of gateway this subject publishes through: Remote (an appliance on the plant network), Host (inside this stack) or Simulated (readings generated)">
+                  <SortHeader sort={sort} column="type" title="The kind of gateway this subject publishes through: Remote (an appliance on the plant network), Third-party (an edge node Aber does not manage), Host (inside this stack) or Simulated (readings generated)">
                     Type
                   </SortHeader>
                   <SortHeader sort={sort} column="stored" title="The one capture stored for this subject. Recording again replaces it">

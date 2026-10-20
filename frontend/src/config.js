@@ -51,6 +51,9 @@ export const RUNTIME_SETTING_NAMES = [
   // playback.enabled. 'false' means the playback worker is not deployed, so the Capture page says
   // so instead of queueing a playback nothing runs. Absent reads as deployed.
   'VITE_PLAYBACK_ENABLED',
+  // ingestion.primaryHostId, the site's Sparkplug primary host: one of the settings the credential
+  // dialog gives the engineer of a Third-party gateway. Absent, the dialog says where it is set.
+  'VITE_PRIMARY_HOST_ID',
 ];
 
 /**
@@ -73,6 +76,7 @@ const BUILD_TIME_SETTINGS = {
   VITE_HISTORIAN_PHYSICAL_BACKUP: import.meta.env.VITE_HISTORIAN_PHYSICAL_BACKUP,
   VITE_PLATFORM_PHYSICAL_BACKUP: import.meta.env.VITE_PLATFORM_PHYSICAL_BACKUP,
   VITE_PLAYBACK_ENABLED: import.meta.env.VITE_PLAYBACK_ENABLED,
+  VITE_PRIMARY_HOST_ID: import.meta.env.VITE_PRIMARY_HOST_ID,
 };
 
 /**

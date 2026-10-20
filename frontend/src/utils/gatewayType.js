@@ -1,9 +1,9 @@
 /**
  * What kind of gateway this is, as one word: the Type column, the drawer badge and the form's
- * select all read it from here. `gateways` carries `deployment` ('host' | 'remote') and
- * `is_simulated`; a simulated gateway is always host-run, which leaves three legal combinations.
- * Playback is a fourth value that is never selectable: only the seeded Playback gateway (`is_shadow`)
- * is one.
+ * select all read it from here. `gateways` carries `deployment` ('host' | 'remote' |
+ * 'third_party') and `is_simulated`; a simulated gateway is always host-run, which leaves four
+ * legal combinations. Playback is a fifth value that is never selectable: only the seeded Playback
+ * gateway (`is_shadow`) is one.
  *
  * Precedence is most-specific-first, as in `device_locations` and utils/cellResolution.js: playback,
  * then simulated, then deployment.
@@ -12,6 +12,7 @@
 export const GATEWAY_TYPES = {
   HOST: 'host',
   REMOTE: 'remote',
+  THIRD_PARTY: 'third_party',
   SIMULATED: 'simulated',
   PLAYBACK: 'playback',
 }
@@ -19,16 +20,18 @@ export const GATEWAY_TYPES = {
 /** What the create/edit form may choose. */
 export const SELECTABLE_TYPES = [
   GATEWAY_TYPES.REMOTE,
+  GATEWAY_TYPES.THIRD_PARTY,
   GATEWAY_TYPES.HOST,
   GATEWAY_TYPES.SIMULATED,
 ]
 
-/** What the list's Type filter offers: every type, the form's three first. */
+/** What the list's Type filter offers: every type, the form's four first. */
 export const LISTED_TYPES = [...SELECTABLE_TYPES, GATEWAY_TYPES.PLAYBACK]
 
 const LABELS = {
   [GATEWAY_TYPES.HOST]: 'Host',
   [GATEWAY_TYPES.REMOTE]: 'Remote',
+  [GATEWAY_TYPES.THIRD_PARTY]: 'Third-party',
   [GATEWAY_TYPES.SIMULATED]: 'Simulated',
   [GATEWAY_TYPES.PLAYBACK]: 'Playback',
 }
@@ -38,6 +41,9 @@ const DESCRIPTIONS = {
   [GATEWAY_TYPES.REMOTE]:
     'Runs on its own hardware out on the plant network. Set up with an install command or a bundle; '
     + 'its credential is issued to the appliance when it enrols and never passes through a browser.',
+  [GATEWAY_TYPES.THIRD_PARTY]:
+    'An edge node on its own machine, running software Aber does not manage. Its credential is '
+    + 'issued here, and an engineer configures the node with it.',
   [GATEWAY_TYPES.HOST]:
     'A connector running inside this stack. Nothing to install, and no appliance to enrol — its '
     + 'credential is issued here, and an Administrator can show it again.',
@@ -54,6 +60,7 @@ const DESCRIPTIONS = {
 const TONES = {
   [GATEWAY_TYPES.HOST]: 'neutral',
   [GATEWAY_TYPES.REMOTE]: 'neutral',
+  [GATEWAY_TYPES.THIRD_PARTY]: 'neutral',
   [GATEWAY_TYPES.SIMULATED]: 'warning',
   [GATEWAY_TYPES.PLAYBACK]: 'warning',
 }
@@ -66,8 +73,17 @@ export function gatewayType(gateway) {
   if (!gateway) return GATEWAY_TYPES.REMOTE
   if (gateway.is_shadow) return GATEWAY_TYPES.PLAYBACK
   if (gateway.is_simulated) return GATEWAY_TYPES.SIMULATED
+  if (gateway.deployment === 'third_party') return GATEWAY_TYPES.THIRD_PARTY
   // Remote when `deployment` is absent: claiming host wrongly would hide the kind that needs setup.
   return gateway.deployment === 'host' ? GATEWAY_TYPES.HOST : GATEWAY_TYPES.REMOTE
+}
+
+/**
+ * Whether the dashboard issues this gateway's broker credential: a Host gateway has no appliance to
+ * enrol, and a Third-party one runs software Aber does not manage. A Remote appliance mints its own.
+ */
+export function credentialIssuedHere(gateway) {
+  return gateway?.deployment === 'host' || gateway?.deployment === 'third_party'
 }
 
 export function gatewayTypeLabel(type) {
@@ -88,9 +104,10 @@ export function gatewayTypeTone(type) {
  */
 export function gatewayTypeFields(type) {
   switch (type) {
-    case GATEWAY_TYPES.HOST:      return { deployment: 'host',   is_simulated: false }
-    case GATEWAY_TYPES.SIMULATED: return { deployment: 'host',   is_simulated: true }
-    default:                      return { deployment: 'remote', is_simulated: false }
+    case GATEWAY_TYPES.HOST:        return { deployment: 'host',        is_simulated: false }
+    case GATEWAY_TYPES.THIRD_PARTY: return { deployment: 'third_party', is_simulated: false }
+    case GATEWAY_TYPES.SIMULATED:   return { deployment: 'host',        is_simulated: true }
+    default:                        return { deployment: 'remote',      is_simulated: false }
   }
 }
 
