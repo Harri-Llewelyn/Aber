@@ -283,9 +283,10 @@ const THEME_SEGMENTS = [
 
 /**
  * The account control at the foot of the rail: the avatar, with the address beside it whenever the
- * rail shows labels. Its menu's head states the address, role and version; its rows are Profile, the
- * Light/Dark theme switch, Report Bug and Sign Out. Click, not hover: a hover menu holding Sign Out
- * puts an irreversible action one stray movement away. The menu opens beside the rail (App.css).
+ * rail shows labels. Its menu's head states the address, role and version; the Light/Dark theme
+ * switch has a section of its own under it; then come Profile, Report Bug and Sign Out. Click, not
+ * hover: a hover menu holding Sign Out puts an irreversible action one stray movement away. The
+ * menu opens beside the rail (App.css).
  */
 function UserMenu({ persona, userRole, onSignOut, theme, onChangeTheme, onReportBug, onOpenProfile, profileOpen = false }) {
   const [open, setOpen] = useState(false)
@@ -370,7 +371,14 @@ function UserMenu({ persona, userRole, onSignOut, theme, onChangeTheme, onReport
             )}
           </div>
 
-          {/* First: the whole of the person's own page, two clicks from anywhere. */}
+          {/* The themes as a switch in a section of its own, the current one checked: the same
+              setting as Profile > Appearance. The menu stays open on it, since its result is
+              visible behind the menu, and closes on the actions below. */}
+          <div className="user-popover-theme">
+            <SegmentedControl menu label="Theme" value={theme} onChange={onChangeTheme} options={THEME_SEGMENTS} />
+          </div>
+
+          {/* The first action: the whole of the person's own page, two clicks from anywhere. */}
           <button
             className="user-popover-action"
             role="menuitem"
@@ -380,14 +388,6 @@ function UserMenu({ persona, userRole, onSignOut, theme, onChangeTheme, onReport
             <IconUser size={14} /> <span>Profile</span>
           </button>
 
-          {/* The themes as a switch, the current one checked: the same setting as Profile >
-              Appearance. */}
-          <div className="user-popover-theme">
-            <SegmentedControl menu label="Theme" value={theme} onChange={onChangeTheme} options={THEME_SEGMENTS} />
-          </div>
-
-          {/* The menu stays open on the theme switch, whose result is visible behind it, and closes
-              on the others. */}
           <button
             className="user-popover-action"
             role="menuitem"

@@ -607,9 +607,10 @@ html, body, #root {
 /* The item's own label grows to fill the row. */
 .user-popover-action > span { flex: 1; min-width: 0; }
 
-/* The Theme row: the Light/Dark switch, a SegmentedControl, across the whole row with its two
-   segments sharing it equally. Its group is named Theme, so the row needs no visible label. */
-.user-popover-theme { padding: 5px 12px; }
+/* The Theme section, between the head and the actions and ruled off from both: the Light/Dark
+   switch, a SegmentedControl, across the whole row with its two segments sharing it equally. Its
+   group is named Theme, so the section needs no visible label. */
+.user-popover-theme { padding: 8px 12px; border-bottom: 1px solid var(--border); }
 .user-popover-theme .segmented { display: flex; }
 .user-popover-theme .segmented-option { flex: 1; }
 

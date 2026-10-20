@@ -186,7 +186,11 @@ describe('the stylesheet', () => {
     }
   })
 
-  it('gives the theme row no indent for a label it no longer has', () => {
-    expect(rule('.user-popover-theme')).toMatch(/padding:\s*5px 12px;/)
+  it('gives the theme section no indent for a label it no longer has', () => {
+    expect(rule('.user-popover-theme')).toMatch(/padding:\s*8px 12px;/)
+  })
+
+  it('rules the theme section off from the actions under it', () => {
+    expect(rule('.user-popover-theme')).toMatch(/border-bottom:\s*1px solid var\(--border\)/)
   })
 })

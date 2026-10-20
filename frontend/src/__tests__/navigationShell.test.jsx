@@ -271,15 +271,15 @@ describe('Merged navigation shell', () => {
       expect(within(sidebar()).queryByRole('button', { name: /^Profile$/ })).toBeNull()
     })
 
-    it('leads with Profile, which opens the Profile page', async () => {
+    it('leads its actions with Profile, which opens the Profile page', async () => {
       await renderShell()
 
       fireEvent.click(trigger())
       const menu = screen.getByRole('menu')
-      // In order, the theme's two segments between Profile and Report Bug.
+      // In order, the theme's two segments first, then the actions.
       const rows = [...menu.querySelectorAll('[role="menuitem"], [role="menuitemradio"]')]
       expect(rows.map(i => i.getAttribute('aria-label') || i.textContent.trim())).toEqual([
-        'Profile', 'Light', 'Dark', 'Report Bug', 'Sign Out'
+        'Light', 'Dark', 'Profile', 'Report Bug', 'Sign Out'
       ])
       const items = within(menu).getAllByRole('menuitem')
 
@@ -338,6 +338,21 @@ describe('Merged navigation shell', () => {
       // The group's name says what the row is for; nothing visible repeats it.
       expect(within(menu).queryByText(/^Theme$/)).toBeNull()
       expect(theme.closest('.user-popover-theme').textContent).toBe('LightDark')
+    })
+
+    it('puts the theme switch in its own section above Profile', async () => {
+      await renderShell()
+      fireEvent.click(trigger())
+
+      const menu = screen.getByRole('menu')
+      const section = within(menu).getByRole('group', { name: 'Theme' }).closest('.user-popover-theme')
+      const profile = within(menu).getByRole('menuitem', { name: /^profile$/i })
+      // A section of its own: a direct child of the menu, holding nothing but the switch.
+      expect(section.parentElement).toBe(menu)
+      expect(section.contains(profile)).toBe(false)
+      expect(section.compareDocumentPosition(profile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      // Straight after the head, so nothing else sits between the session's facts and the switch.
+      expect(section.previousElementSibling).toHaveClass('user-popover-head')
     })
 
     it('closes on the items whose result is NOT visible behind it', async () => {
