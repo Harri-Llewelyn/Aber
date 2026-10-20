@@ -66,13 +66,15 @@ describe('Modal', () => {
       expect(onClose).not.toHaveBeenCalled()
     })
 
-    it('closes a dialog that opts in, and not a click inside it', () => {
+    it('closes a dialog that opts in, and not a click inside the box', () => {
       const onClose = vi.fn()
-      render(<Modal title="T" onClose={onClose} closeOnOverlay>body</Modal>)
+      render(<Modal title="T" onClose={onClose} closeOnOverlay><p>body</p></Modal>)
 
-      fireEvent.click(screen.getByRole('dialog'))
+      fireEvent.click(document.querySelector('.modal'))
+      fireEvent.click(screen.getByText('body'))
       expect(onClose).not.toHaveBeenCalled()
-      fireEvent.click(document.querySelector('.modal-overlay'))
+      // The backdrop, and the dialog around the box, are a click on the <dialog> itself.
+      fireEvent.click(screen.getByRole('dialog'))
       expect(onClose).toHaveBeenCalledTimes(1)
     })
   })
@@ -91,22 +93,32 @@ describe('Modal', () => {
     ['sm', 'modal-sm'], ['md', 'modal-md'], ['lg', 'modal-lg'], ['xl', 'modal-xl'], ['wide', 'modal-wide']
   ])('maps size %s onto the width scale', (size, cls) => {
     render(<Modal title="T" size={size} onClose={vi.fn()} />)
-    expect(screen.getByRole('dialog')).toHaveClass('modal', cls)
+    expect(screen.getByRole('dialog').firstElementChild).toHaveClass('modal', cls)
   })
 
   it('is the default 480px step when no size is given', () => {
     render(<Modal title="T" onClose={vi.fn()} />)
-    expect(screen.getByRole('dialog').className.trim()).toBe('modal')
+    expect(screen.getByRole('dialog').firstElementChild.className.trim()).toBe('modal')
   })
 
-  it('raises the overlay above the ordinary layer for the confirm layer, in CSS not inline', () => {
-    render(<Modal title="T" layer="confirm" onClose={vi.fn()} />)
-    const overlay = document.querySelector('.modal-overlay')
-    expect(overlay).toHaveClass('modal-overlay-confirm')
-    expect(overlay.getAttribute('style')).toBeNull()
+  it('is a native <dialog>, opened modally, with its look in CSS and no z-index of its own', () => {
+    render(<Modal title="T" onClose={vi.fn()} />)
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.tagName).toBe('DIALOG')
+    expect(dialog).toHaveClass('modal-overlay')
+    expect(dialog.open).toBe(true)
+    expect(dialog.getAttribute('style')).toBeNull()
 
+    // The top layer is above every z-index; the dimmed page is the dialog's ::backdrop.
     const css = fs.readFileSync(path.resolve(__dirname, '..', 'App.css'), 'utf8')
-    expect(css).toMatch(/\.modal-overlay-confirm \{ z-index: 1100; \}/)
+    const rule = selector => {
+      const at = css.indexOf(`\n${selector} {`)
+      return at < 0 ? '' : css.slice(at, css.indexOf('}', at))
+    }
+    expect(rule('.modal-overlay')).toMatch(/inset:\s*0/)
+    expect(rule('.modal-overlay')).not.toMatch(/z-index/)
+    expect(rule('.modal-overlay::backdrop')).toMatch(/background:\s*var\(--scrim\)/)
+    expect(css).not.toMatch(/modal-overlay-confirm/)
   })
 
   describe('keeps the header and the footer in view', () => {
@@ -122,11 +134,11 @@ describe('Modal', () => {
           <p>Body text</p>
         </Modal>
       )
-      const dialog = screen.getByRole('dialog')
-      expect([...dialog.children].map(c => c.className)).toEqual([
+      const box = screen.getByRole('dialog').firstElementChild
+      expect([...box.children].map(c => c.className)).toEqual([
         'modal-header-row', 'modal-body', 'modal-error', 'modal-actions'
       ])
-      const body = dialog.querySelector('.modal-body')
+      const body = box.querySelector('.modal-body')
       expect(body).toHaveTextContent('Lead text')
       expect(body).toHaveTextContent('Body text')
       expect(body).not.toHaveTextContent('It broke')
@@ -172,9 +184,8 @@ describe('ConfirmModal on the shell', () => {
     expect(screen.getByRole('dialog', { name: 'Confirm action' })).toBeTruthy()
   })
 
-  it('sits on the confirm layer, with the dismiss button on the left of the act', () => {
+  it('puts the dismiss button on the left of the act', () => {
     render(<ConfirmModal message="Sure?" confirmLabel="Delete" onConfirm={vi.fn()} onCancel={vi.fn()} />)
-    expect(document.querySelector('.modal-overlay')).toHaveClass('modal-overlay-confirm')
 
     const [dismiss, act] = [...document.querySelectorAll('.modal-actions button')]
     expect(dismiss).toHaveTextContent('Cancel')

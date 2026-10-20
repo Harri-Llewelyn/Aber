@@ -60,6 +60,20 @@ if (typeof Blob !== 'undefined' && typeof Blob.prototype.text !== 'function') {
   }
 }
 
+/**
+ * jsdom has `<dialog>` but not `showModal()` or `close()`. The stubs only set and clear `open`:
+ * the inert page, the top layer and the browser's own focus moves cannot be tested here, so
+ * nothing is faked for them. `Modal` moves focus itself, and that is what the tests assert.
+ */
+if (typeof HTMLDialogElement !== 'undefined') {
+  if (typeof HTMLDialogElement.prototype.showModal !== 'function') {
+    HTMLDialogElement.prototype.showModal = function showModal() { this.setAttribute('open', '') }
+  }
+  if (typeof HTMLDialogElement.prototype.close !== 'function') {
+    HTMLDialogElement.prototype.close = function close() { this.removeAttribute('open') }
+  }
+}
+
 if (!import.meta.env.VITE_SUPABASE_URL) {
   import.meta.env.VITE_SUPABASE_URL = 'http://127.0.0.1:54321'
 }

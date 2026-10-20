@@ -67,7 +67,7 @@ const isShown = (el) => (typeof el.checkVisibility === 'function'
  * or popover is open, so the key never reaches past it to the page behind.
  */
 export function focusPageSearch(doc = document) {
-  if (doc.querySelector('[role="dialog"], [aria-modal="true"]')) return false
+  if (doc.querySelector('[role="dialog"], [aria-modal="true"], dialog[open]')) return false
   const field = [...doc.querySelectorAll(PAGE_SEARCH_SELECTOR)].find(el => !el.disabled && isShown(el))
   if (!field) return false
   field.focus()

@@ -68,7 +68,6 @@ export function ShortcutsModal({ onClose }) {
       title="Keyboard shortcuts"
       icon={<IconKeyboard size={18} />}
       size="md"
-      layer="confirm"
       closeOnOverlay
       onClose={onClose}
     >
