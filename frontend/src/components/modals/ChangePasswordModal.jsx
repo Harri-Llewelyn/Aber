@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useRef, useState } from 'react'
 import { ActionButton } from '../common/ActionButton'
 import { HoldToReveal } from '../common/HoldToReveal'
 import { Modal } from '../common/Modal'
@@ -17,6 +17,7 @@ export function ChangePasswordModal({ email, onClose, showToast }) {
   const [revealed, setRevealed] = useState(false)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
+  const currentRef = useRef(null)
 
   const problem = newPasswordProblem(current, next, again)
   // Said under the form once a new password is being typed, so the disabled button is explained.
@@ -45,6 +46,7 @@ export function ChangePasswordModal({ email, onClose, showToast }) {
       size="md"
       onClose={busy ? () => {} : onClose}
       lead="This browser stays signed in. Other browsers signed in as you are signed out within the hour."
+      initialFocus={currentRef}
       error={error}
       footer={(
         <>
@@ -77,7 +79,7 @@ export function ChangePasswordModal({ email, onClose, showToast }) {
             onChange={e => { setCurrent(e.target.value); setError(null) }}
             autoComplete="current-password"
             disabled={busy}
-            autoFocus
+            ref={currentRef}
           />
         </div>
 

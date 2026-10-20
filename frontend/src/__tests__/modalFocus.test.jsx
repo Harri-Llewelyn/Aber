@@ -1,16 +1,29 @@
 import React, { useRef, useState } from 'react'
+import fs from 'node:fs'
+import path from 'node:path'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Modal } from '../components/common/Modal'
 import { copyText } from '../components/common/CopyableId'
 import { SearchInput, focusPageSearch } from '../components/common/SearchInput'
 import { ConfirmModal } from '../components/modals/ConfirmModal'
+import { AddPersonModal } from '../components/modals/AddPersonModal'
+import { ChangePasswordModal } from '../components/modals/ChangePasswordModal'
+import { TakeBackupModal } from '../components/modals/TakeBackupModal'
+import { ServicePrincipalCreateModal } from '../components/modals/ServicePrincipalCreateModal'
+import { ServicePrincipalDescribeModal } from '../components/modals/ServicePrincipalDescribeModal'
+import { ServicePrincipalRevocationModal } from '../components/modals/ServicePrincipalRevocationModal'
+import { GatewayBundleModal } from '../components/modals/GatewayBundleModal'
+import { GatewayCredentialModal } from '../components/modals/GatewayCredentialModal'
 
 /**
  * Focus in the shared dialog frame: where it starts, that it stays in the dialog, and where it goes
  * back to. jsdom has no showModal(), so the browser's own parts (the inert page, the top layer) are
  * not tested here; the parts `Modal` does itself are.
  */
+
+vi.mock('../lib/supabaseClient', () => ({ supabase: { auth: {}, from: vi.fn(), rpc: vi.fn() } }))
+vi.mock('../api', () => ({ api: new Proxy({}, { get: () => vi.fn() }) }))
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -303,5 +316,63 @@ describe('a dialog over a dialog', () => {
 
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(screen.getByRole('button', { name: 'Edit' })).toHaveFocus()
+  })
+})
+
+/**
+ * The dialogs that started on a field before the frame moved focus. A field is the start where it
+ * is the obvious first move; the dialog is, where a warning above the field says what the act
+ * revokes or overwrites and a screen reader should read it first (ConfirmModal's typed gate is the
+ * same). None starts on a button.
+ */
+describe('where each dialog starts', () => {
+  const GATEWAY = { gateway_id: 'g-1', gateway_name: 'Press Hall Gateway', sparkplug_id: 'gwy1', status: 'ONLINE' }
+  const PRINCIPAL = { principal_id: 'p-1', name: 'Line 4 OEE report', purpose: '' }
+
+  const cases = [
+    ['AddPersonModal', <AddPersonModal key="a" onClose={vi.fn()} />, () => screen.getByLabelText('Email')],
+    ['ChangePasswordModal', <ChangePasswordModal key="b" email="admin@aber.local" onClose={vi.fn()} />, () => screen.getByLabelText('Current password')],
+    ['TakeBackupModal', <TakeBackupModal key="c" holds="the platform database" onConfirm={vi.fn()} onCancel={vi.fn()} />, () => screen.getByLabelText('Note (optional)')],
+    ['ServicePrincipalCreateModal', <ServicePrincipalCreateModal key="d" onClose={vi.fn()} />, () => screen.getByLabelText('Name')],
+    ['ServicePrincipalDescribeModal', <ServicePrincipalDescribeModal key="e" principal={PRINCIPAL} onClose={vi.fn()} />, () => screen.getByLabelText('Name')],
+    ['ServicePrincipalRevocationModal (withdraw)', <ServicePrincipalRevocationModal key="f" principal={PRINCIPAL} principalName={PRINCIPAL.name} onClose={vi.fn()} />, () => screen.getByRole('dialog')],
+    ['ServicePrincipalRevocationModal (reinstate)', <ServicePrincipalRevocationModal key="g" principal={PRINCIPAL} principalName={PRINCIPAL.name} revocation={{ reason: 'decommissioned' }} onClose={vi.fn()} />, () => screen.getByRole('dialog')],
+    ['GatewayBundleModal (re-issue)', <GatewayBundleModal key="h" gateway={GATEWAY} confirmFirst onClose={vi.fn()} />, () => screen.getByRole('dialog')],
+    ['GatewayCredentialModal', <GatewayCredentialModal key="i" gateway={GATEWAY} onClose={vi.fn()} />, () => screen.getByRole('dialog')],
+    ['ConfirmModal (typed gate)', <ConfirmModal key="j" title="Delete schema" message="Gone for good." confirmLabel="Delete" requireTyped="press_line_1" onConfirm={vi.fn()} onCancel={vi.fn()} />, () => screen.getByRole('dialog')],
+  ]
+
+  it.each(cases)('%s', (_name, element, start) => {
+    render(element)
+    expect(start()).toHaveFocus()
+    const focused = document.activeElement
+    expect(focused.tagName).not.toBe('BUTTON')
+    expect(focused).not.toHaveClass('btn-danger')
+  })
+})
+
+/**
+ * `autoFocus` inside a dialog runs before showModal(), on a control the browser has not drawn yet,
+ * so it does nothing there. A dialog names its start with `initialFocus` instead.
+ */
+describe('no dialog uses autoFocus', () => {
+  const SRC = path.resolve(__dirname, '..')
+  const jsxFiles = (dir) =>
+    fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => {
+      const p = path.join(dir, e.name)
+      if (e.isDirectory()) return e.name === '__tests__' ? [] : jsxFiles(p)
+      return e.name.endsWith('.jsx') ? [p] : []
+    })
+  const dialogs = jsxFiles(SRC)
+    .map(p => [path.relative(SRC, p), fs.readFileSync(p, 'utf8')])
+    .filter(([, s]) => /from '\.\.?\/(common\/)?(Modal|ConfirmModal)'/.test(s))
+
+  it('finds the dialogs to check', () => {
+    expect(dialogs.length).toBeGreaterThanOrEqual(30)
+  })
+
+  it.each(dialogs.map(([rel]) => rel))('%s', (rel) => {
+    const source = dialogs.find(([r]) => r === rel)[1]
+    expect(source).not.toMatch(/\bautoFocus\b/)
   })
 })

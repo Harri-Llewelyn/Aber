@@ -161,8 +161,9 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
             </label>
             <input
               id="gw-cred-confirm"
+              // Not the dialog's initialFocus: a screen reader would start past the warning above,
+              // which says what the act does.
               className="form-control mono"
-              autoFocus
               autoComplete="off"
               value={typed}
               onChange={(e) => setTyped(e.target.value)}

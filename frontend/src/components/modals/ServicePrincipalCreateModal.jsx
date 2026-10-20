@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { Badge } from '../common/Badge'
@@ -25,6 +25,7 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
   const [permissions, setPermissions] = useState(() => new Set([GRANTABLE_PERMISSIONS[0]]))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
+  const nameRef = useRef(null)
 
   const close = useCallback(() => onClose(), [onClose])
 
@@ -74,6 +75,7 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
         chosen here and nothing else, and <strong>does not reach the broker</strong> — an MQTT
         client is issued a broker account, not a machine identity.
       </>}
+      initialFocus={nameRef}
       error={error}
       footer={
         <>
@@ -96,7 +98,7 @@ export function ServicePrincipalCreateModal({ onClose, onCreated, showToast }) {
         <input
           id="principal-name"
           className="form-control"
-          autoFocus
+          ref={nameRef}
           autoComplete="off"
           maxLength={NAME_MAX}
           placeholder="e.g. Line 4 OEE report"

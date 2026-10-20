@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useRef, useState } from 'react'
 import { api } from '../../api'
 import { ActionButton } from '../common/ActionButton'
 import { Modal } from '../common/Modal'
@@ -21,6 +21,7 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
   const [added, setAdded] = useState(null)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
+  const emailRef = useRef(null)
 
   const valid = EMAIL.test(email.trim())
 
@@ -85,6 +86,7 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
       size="md"
       onClose={busy ? () => {} : close}
       lead="They sign in to the dashboard with this email address, and can do what the role allows."
+      initialFocus={emailRef}
       error={error}
       footer={(
         <>
@@ -113,7 +115,7 @@ export function AddPersonModal({ onClose, onAdded, showToast }) {
           placeholder="name@example.com"
           autoComplete="off"
           disabled={busy}
-          autoFocus
+          ref={emailRef}
         />
       </div>
 

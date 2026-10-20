@@ -116,8 +116,9 @@ export function ServicePrincipalRevocationModal({
             </label>
             <input
               id="principal-revoke-reason"
+              // Not the dialog's initialFocus: a screen reader would start past the warning above,
+              // which says what the act does.
               className="form-control"
-              autoFocus
               autoComplete="off"
               placeholder="e.g. decommissioned, key suspected leaked"
               value={reason}
