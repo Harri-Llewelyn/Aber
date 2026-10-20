@@ -23,7 +23,7 @@ Related: supabase/migrations/archive/0055_capture_orchestration.sql (the tables 
          auto-terminates on).
 """
 
-import json
+import io
 import os
 import threading
 import time
@@ -116,8 +116,13 @@ class _JobState:
         self.max_messages = int(job.get("max_messages") or 100000)
         self.max_bytes = int(job.get("max_bytes") or 52428800)
 
-        self.messages = []
+        # Each message as the file holds it (capture.message_line()), and the bytes they come to:
+        # the buffer is the file's own bytes, and the size cap counts exactly what is written.
+        self.lines = []
         self.bytes = 0
+        self.count = 0
+        # Set by drain(): the buffer is handed over, and nothing more is appended.
+        self.closed = False
         # Set by observe() on the paho thread when a cap is met, read by the worker thread on its
         # next tick. The recording stops at a message boundary rather than mid-append.
         self.cap_reason = None
@@ -125,6 +130,15 @@ class _JobState:
         # Seconds from the start to the stop, set when the recording ends.
         self.stopped_after = None
         self.first_ms = None
+        # What the file's head and the manifest say, kept as the messages arrive.
+        self.epoch_ms = None
+        self.last_offset_ms = 0
+        self.edge_nodes = {}
+        self.devices = {}
+        self.topics = set()
+        self.metric_names = {}
+        self.uses_aliases = False
+        self.device_published = False
         self.birth_captured = False
         self.rebirth_requested = False
         self.started_monotonic = time.monotonic()
@@ -167,32 +181,56 @@ class _JobState:
             return None
 
         now_ms = int(time.time() * 1000)
+        payload_dict = capture.payload_to_dict(payload)
         with self.lock:
+            if self.closed:
+                return None
             if self.first_ms is None:
                 self.first_ms = now_ms
-            entry = {
-                "offset_ms": now_ms - self.first_ms,
+                self.epoch_ms = capture.first_message_epoch_ms(payload_dict, now_ms)
+            self.last_offset_ms = now_ms - self.first_ms
+            line = capture.message_line({
+                "offset_ms": self.last_offset_ms,
                 "topic": topic,
                 "encoding": encoding,
-                "payload": capture.payload_to_dict(payload),
-            }
-            self.messages.append(entry)
-            # MEASURED, NOT ESTIMATED FROM THE WIRE. A protobuf payload expands several-fold as
-            # JSON, so counting `len(raw)` would let a capture sail past its size cap and produce a
-            # file the bucket refuses -- after the recording has succeeded and while it exists only
-            # in this buffer. The file is written with indent=2 and is larger again, which is what
-            # the bucket's 100 MiB against this 50 MiB cap is headroom for.
-            self.bytes += len(json.dumps(entry))
+                "payload": payload_dict,
+            }, first=not self.count)
+            self.lines.append(line)
+            self.count += 1
+            # The JSON as written, never the wire's length: protobuf grows several-fold as JSON.
+            self.bytes += len(line)
+            self._describe(topic, payload_dict)
             if msg_type in _BIRTH_TYPES:
                 self.birth_captured = True
 
-            if len(self.messages) >= self.max_messages:
+            # Closed at once: the tick that finishes the job is up to a second away, and a busy
+            # edge node would otherwise carry the file that far past its cap.
+            if self.count >= self.max_messages:
                 self.cap_code = STOP_MESSAGES
+                self.closed = True
                 return "message cap reached (%d)" % self.max_messages
             if self.bytes >= self.max_bytes:
                 self.cap_code = STOP_SIZE
+                self.closed = True
                 return "size cap reached (%d bytes)" % self.max_bytes
         return None
+
+    def _describe(self, topic, payload_dict):
+        """Note what the file's head and the manifest say about one message."""
+        parts = topic.split("/")
+        self.topics.add(topic)
+        self.edge_nodes.setdefault(parts[3], None)
+        if len(parts) > 4:
+            self.devices.setdefault(parts[4], None)
+            if parts[4] == self.device:
+                self.device_published = True
+        for metric in payload_dict.get("metrics", ()):
+            name = metric.get("name")
+            if not name:
+                # Resolved only through the birth that defined the alias.
+                self.uses_aliases = self.uses_aliases or metric.get("alias") is not None
+            elif name not in self.metric_names and is_machine_metric(name):
+                self.metric_names[name] = None
 
     # ------------------------------------------------------------------------------------------
     @property
@@ -212,12 +250,64 @@ class _JobState:
 
     def snapshot(self):
         with self.lock:
-            return len(self.messages), self.bytes, self.birth_captured
+            return self.count, self.bytes, self.birth_captured
 
     def drain(self):
+        """Close the buffer and hand over its lines; what arrives later is not recorded."""
         with self.lock:
-            msgs, self.messages = self.messages, []
-            return msgs
+            self.closed = True
+            lines, self.lines = self.lines, []
+            return lines
+
+
+class _CaptureFile(io.RawIOBase):
+    """
+    A capture file read from its parts in order, so an upload streams the recorded lines without
+    joining them into a second copy. Seekable, so the client can take its length.
+    """
+
+    def __init__(self, parts):
+        super().__init__()
+        self._parts = parts
+        self.size = sum(len(part) for part in parts)
+        self._seek_to(0)
+
+    def readable(self):
+        return True
+
+    def seekable(self):
+        return True
+
+    def tell(self):
+        return self._pos
+
+    def seek(self, offset, whence=io.SEEK_SET):
+        base = {io.SEEK_SET: 0, io.SEEK_CUR: self._pos, io.SEEK_END: self.size}[whence]
+        self._seek_to(min(max(base + offset, 0), self.size))
+        return self._pos
+
+    def _seek_to(self, pos):
+        self._pos, self._index, self._offset = pos, 0, pos
+        if pos == self.size:
+            self._index, self._offset = len(self._parts), 0
+            return
+        while self._offset >= len(self._parts[self._index]):
+            self._offset -= len(self._parts[self._index])
+            self._index += 1
+
+    def readinto(self, buffer):
+        view = memoryview(buffer).cast("B")
+        written = 0
+        while written < len(view) and self._index < len(self._parts):
+            part = self._parts[self._index]
+            n = min(len(view) - written, len(part) - self._offset)
+            view[written:written + n] = memoryview(part)[self._offset:self._offset + n]
+            written += n
+            self._offset += n
+            if self._offset == len(part):
+                self._index, self._offset = self._index + 1, 0
+        self._pos += written
+        return written
 
 
 # The active job, or None. Read on the paho thread by observe() and written by the worker thread;
@@ -317,9 +407,8 @@ def _begin(job_row):
 
     if _rebirth is not None:
         try:
-            # False means REBIRTH_REQUEST_INTERVAL_SECONDS has not elapsed since the last request to
-            # this node. The recording still runs -- it simply may open without a birth, which
-            # `birth_captured` then records honestly rather than the capture pretending otherwise.
+            # The request is forced past the throttle, so False means it could not be published.
+            # The recording still runs, and `birth_captured` says whether a birth arrived anyway.
             state.rebirth_requested = bool(_rebirth(state.group, state.edge_node))
         except Exception as err:
             logger.warning("Capture %s: rebirth request failed: %s", state.id, err)
@@ -328,70 +417,75 @@ def _begin(job_row):
         "Capture %s started: %sedge node %s, caps %ds / %d messages / %d bytes%s",
         state.id, "device %s on " % state.device if state.device else "", state.edge_node,
         state.max_seconds, state.max_messages, state.max_bytes,
-        "" if state.rebirth_requested else " (rebirth rate-limited; may open without a birth)",
+        "" if state.rebirth_requested
+        else " (the rebirth request could not be published; it may record no birth)",
     )
     return state
 
 
 def _finish(state, reason, stop=None):
     """
-    Serialise, upload to the job's own path, and hand the capture to the database.
+    Upload the recording to the job's own path, and hand the capture to the database.
 
-    The active job is cleared before the buffer is drained, so observe() stops appending to a list
-    about to be serialised: the capture ends at a message boundary. The previous capture of the
-    subject is untouched until finalise repoints the row, and its file is deleted only after that.
+    The active job is cleared and the buffer closed before the upload, so the capture ends at a
+    message boundary. The file streams from the recorded lines, which are its bytes. The previous
+    capture of the subject is untouched until finalise repoints the row, and its file is deleted
+    only after that.
     """
     global _active
     _active = None
     state.stopped_after = state.elapsed
-    messages = state.drain()
+    lines = state.drain()
 
-    refusal = _nothing_recorded(state, messages)
+    refusal = _nothing_recorded(state)
     if refusal:
         _settle_failure(state, refusal)
         return
 
-    # The first message's own clock, or when it was received: the offsets count from that receipt.
-    capture_epoch_ms = capture.first_message_epoch_ms(messages[0]["payload"], state.first_ms)
-    edge_nodes, devices = capture.capture_identities(messages)
-
-    document = {
+    head = capture.file_head({
         "aber_capture_version": capture.CAPTURE_VERSION,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
         "recorded_from": {
             "broker": "%s:%d" % (capture.MQTT_HOST, capture.MQTT_PORT),
-            # The topic this WOULD have been recorded with by the CLI, so a downloaded file reads
-            # the same whichever path produced it.
+            # The topic `capture.py record` would have used, so the file reads the same either way.
             "topic": "spBv1.0/+/+/%s%s" % (
                 state.edge_node, "/" + state.device if state.device else "/#"),
         },
-        "capture_epoch_ms": capture_epoch_ms,
-        "duration_ms": messages[-1]["offset_ms"],
-        "identities": {"edge_nodes": edge_nodes, "devices": devices},
-        "messages": messages,
-    }
-    body = json.dumps(document, indent=2).encode("utf-8")
+        # The first message's own clock, or its receipt: the offsets count from that receipt.
+        "capture_epoch_ms": state.epoch_ms,
+        "duration_ms": state.last_offset_ms,
+        "identities": {"edge_nodes": list(state.edge_nodes), "devices": list(state.devices)},
+    })
+    body = _CaptureFile([head] + lines + [capture.FILE_TAIL])
+    size = body.size
+    del lines
 
+    failed = None
     try:
         # The job's own path, so this never writes over the capture it may replace. Upsert, so a
         # retried upload of the same path succeeds.
         _storage.from_(BUCKET).upload(
             path=state.storage_path,
-            file=body,
+            file=io.BufferedReader(body, buffer_size=1 << 16),
             file_options={"content-type": "application/json", "upsert": "true"},
         )
     except Exception as err:
+        failed = err
+    # The buffer goes before the job is settled, which may retry for half a minute.
+    del body
+    if failed is not None:
         # Written to the job: a capture that recorded and never appeared must say why.
-        logger.error("Capture %s: upload to %s failed: %s", state.id, state.storage_path, err)
-        _settle_failure(state, "upload to %s failed: %s" % (state.storage_path, err), uploaded=True)
+        logger.error("Capture %s: upload to %s failed: %s", state.id, state.storage_path, failed)
+        _settle_failure(state, "upload to %s failed: %s" % (state.storage_path, failed),
+                        uploaded=True)
         return
 
-    manifest = _manifest(messages, state, stop)
+    manifest = _manifest(state, stop)
     try:
         _call("ingest_finalise_capture", {
             "p_job_id": state.id,
-            "p_size_bytes": len(body),
-            "p_message_count": len(messages),
+            "p_size_bytes": size,
+            "p_message_count": state.count,
             "p_manifest": manifest,
         })
     except Exception as err:
@@ -411,13 +505,13 @@ def _finish(state, reason, stop=None):
     _remove_unclaimed(state.subject)
     logger.info(
         "Capture %s complete (%s): %d messages, %d bytes over %.1fs, birth_captured=%s",
-        state.id, reason, len(messages), len(body), state.stopped_after, state.birth_captured,
+        state.id, reason, state.count, size, state.stopped_after, state.birth_captured,
     )
 
 
-def _nothing_recorded(state, messages):
+def _nothing_recorded(state):
     """Why there is nothing worth storing, or None. Either way the stored capture is kept."""
-    if not messages:
+    if not state.count:
         # An empty capture is almost always a credential, ACL or identity problem rather than a
         # quiet fleet, and storing the file anyway would defer that discovery to playback.
         return (
@@ -427,60 +521,37 @@ def _nothing_recorded(state, messages):
         )
     # A device capture keeps its edge node's NBIRTH, which the capture's own rebirth request always
     # produces, so only a message carrying the device's segment shows the device published.
-    if state.device and not any(_device_segment(m["topic"]) == state.device for m in messages):
+    if state.device and not state.device_published:
         return (
             "recorded nothing from device %s: only %d message(s) from its edge node %s arrived. The "
             "device published nothing during the window. Check that it is switched on and "
             "publishing, then record again. The stored capture of this device is unchanged."
-            % (state.device, len(messages), state.edge_node)
+            % (state.device, state.count, state.edge_node)
         )
     return None
 
 
-def _device_segment(topic):
-    parts = topic.split("/")
-    return parts[4] if len(parts) > 4 else None
-
-
-def _manifest(messages, state, stop=None):
+def _manifest(state, stop=None):
     """
     What is in the file, so the page can describe a capture nobody has downloaded.
 
     `birth_captured` says an NBIRTH was recorded; playback refuses a capture without one.
     `metric_names` leaves out Sparkplug plumbing and identity, and the database keeps the first 50
-    with the true count beside them (`capped_capture_manifest()`). `stop_reason` and `duration_ms`
-    say whether the recording ran its window or a cap cut it short.
+    with the true count beside them (`capped_capture_manifest()`). The identities let the playback
+    dialog map devices without the file. `stop_reason` and `duration_ms` say whether the recording
+    ran its window or a cap cut it short.
     """
-    names, topics = [], set()
-    seen = set()
-    # Whether a missing birth costs anything: a metric with an alias and no name resolves only
-    # through the birth that defined it.
-    uses_aliases = False
-    for m in messages:
-        topics.add(m["topic"])
-        for metric in m["payload"].get("metrics", []):
-            name = metric.get("name")
-            if not name and metric.get("alias") is not None:
-                uses_aliases = True
-            if name and name not in seen:
-                seen.add(name)
-                if is_machine_metric(name):
-                    names.append(name)
-
-    # The identities, so the playback dialog can map devices without downloading the file.
-    edge_nodes, devices = capture.capture_identities(messages)
-
-    duration_s = max(messages[-1]["offset_ms"] / 1000.0, 0.001)
+    duration_s = max(state.last_offset_ms / 1000.0, 0.001)
     elapsed = state.stopped_after if state.stopped_after is not None else state.elapsed
     return {
-        "metric_names": names,
-        "topic_count": len(topics),
-        "observed_rate_hz": round(len(messages) / duration_s, 3),
+        "metric_names": list(state.metric_names),
+        "topic_count": len(state.topics),
+        "observed_rate_hz": round(state.count / duration_s, 3),
         "birth_captured": state.birth_captured,
         "rebirth_requested": state.rebirth_requested,
-        "edge_node_ids": edge_nodes,
-        "device_ids": devices,
-        "uses_aliases": uses_aliases,
+        "edge_node_ids": list(state.edge_nodes),
+        "device_ids": list(state.devices),
+        "uses_aliases": state.uses_aliases,
         "stop_reason": stop,
         "duration_ms": int(elapsed * 1000),
         "requested_seconds": state.max_seconds,

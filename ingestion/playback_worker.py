@@ -14,8 +14,13 @@ README.md -> "Playback from the dashboard" and the sections after it hold the re
 
 import json
 import os
+import shutil
+import tempfile
 import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
@@ -36,6 +41,9 @@ SUPABASE_PLAYBACK_KEY = os.getenv("SUPABASE_PLAYBACK_KEY", "")
 SUPABASE_GATEWAY_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 
 BUCKET = os.getenv("CAPTURE_BUCKET", "broker-captures")
+# A capture is downloaded, and read back, this much at a time.
+DOWNLOAD_CHUNK_BYTES = 1 << 20
+DOWNLOAD_TIMEOUT_SECONDS = 60
 POLL_INTERVAL_SECONDS = float(os.getenv("PLAYBACK_POLL_INTERVAL_SECONDS", "3"))
 PROGRESS_INTERVAL_SECONDS = float(os.getenv("PLAYBACK_PROGRESS_INTERVAL_SECONDS", "1"))
 # The longest single sleep while a job waits for its next message. request_playback_stop() treats a
@@ -223,24 +231,46 @@ def _supabase():
 
 
 def _storage():
-    """
-    A storage client authenticating as the worker, not as `anon`.
+    return _CaptureStore()
 
-    THE SHARED CLIENT WOULD READ AS `anon` AND SAY NOTHING ABOUT IT. `client.storage` keeps the key
-    it was constructed with; only the PostgREST sub-client is re-authenticated.
-    (docs/incidents.md -- "A storage client that quietly read as `anon`")
+
+class _CaptureStore:
     """
-    from storage3 import create_client as create_storage_client
-    return create_storage_client(
-        # TRAILING SLASH: storage3 warns and corrects it otherwise, and a UserWarning on every boot
-        # is noise that trains a reader to skip the startup lines.
-        SUPABASE_URL.rstrip("/") + "/storage/v1/",
-        {
+    Reads a capture from the bucket into a file, a chunk at a time, as the worker and not as
+    `anon`: the bearer is the playback key (docs/incidents.md -- "A storage client that quietly
+    read as `anon`"). The storage client's own download returns the object whole, joined from
+    its chunks, which is two copies of the file in memory.
+    """
+
+    def __init__(self):
+        self._objects = SUPABASE_URL.rstrip("/") + "/storage/v1/object/"
+        self._headers = {
             "apikey": SUPABASE_GATEWAY_KEY,
             "Authorization": "Bearer " + (SUPABASE_PLAYBACK_KEY or SUPABASE_GATEWAY_KEY),
-        },
-        is_async=False,
-    )
+        }
+
+    def download_to(self, path, sink):
+        """Write the object at `path` into the binary file `sink`."""
+        url = self._objects + urllib.parse.quote("%s/%s" % (BUCKET, path))
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=self._headers),
+                                        timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
+                length = response.headers.get("Content-Length")
+                shutil.copyfileobj(response, sink, DOWNLOAD_CHUNK_BYTES)
+        except urllib.error.HTTPError as err:
+            raise RuntimeError(_storage_refusal(err)) from None
+        if length and length.isdigit() and sink.tell() != int(length):
+            raise RuntimeError("the download stopped after %d of %s bytes" % (sink.tell(), length))
+
+
+def _storage_refusal(err):
+    """What storage-api said, from its JSON error body when it sent one."""
+    try:
+        body = json.loads(err.read().decode("utf-8"))
+        detail = "%s: %s" % (body.get("error"), body.get("message"))
+    except Exception:
+        detail = err.reason
+    return "HTTP %s %s" % (err.code, detail)
 
 
 class _SessionState:
@@ -697,7 +727,6 @@ def _run_job(supabase, storage, credentials, job, outcome=None):
     try them. `outcome` gets "stopped" when the operator stopped the job, and "accepted", the
     (source, password) the broker accepted.
     """
-    job_id = job["id"]
     edge_node = job["target_edge_node_id"]
     held = credentials.get(edge_node)
     candidates = [(None, held)] if isinstance(held, str) else list(held or [])
@@ -713,42 +742,50 @@ def _run_job(supabase, storage, credentials, job, outcome=None):
         )
 
     # ------------------------------------------------------------------------------------------
-    # The capture
+    # The capture, downloaded to a file of its own and read from it a message at a time, so
+    # memory does not grow with its size. The file is deleted when it is closed.
     # ------------------------------------------------------------------------------------------
-    try:
-        body = storage.from_(BUCKET).download(job["capture_storage_path"])
-    except Exception as err:
-        # 42501 here is the read gate: `Service_Playback` holds telemetry:read alone (0080), and the bucket's SELECT
-        # policy admits it only for the object of a RUNNING job. If this fails on a job that IS
-        # running, the policy arm is missing rather than the file.
-        return 0, 0, "could not read %s: %s" % (job["capture_storage_path"], err)
+    with tempfile.TemporaryFile() as spool:
+        try:
+            storage.download_to(job["capture_storage_path"], spool)
+        except Exception as err:
+            # 42501 here is the read gate: the bucket's SELECT policy admits `Service_Playback`
+            # only to the object of a RUNNING job. If this fails on a job that IS running, the
+            # policy arm is missing rather than the file.
+            return 0, 0, "could not read %s: %s" % (job["capture_storage_path"], err)
+        return _replay(supabase, _chunks_of(spool), job, candidates, outcome)
 
-    try:
-        document = json.loads(body.decode("utf-8") if isinstance(body, bytes) else body)
-    except ValueError as err:
-        return 0, 0, "%s is not valid JSON: %s" % (job["capture_storage_path"], err)
+
+def _chunks_of(spool):
+    """The spooled capture as capture.FilePlan reads it: from its start, in chunks, per call."""
+    def chunks():
+        spool.seek(0)
+        return iter(lambda: spool.read(DOWNLOAD_CHUNK_BYTES), b"")
+    return chunks
+
+
+def _replay(supabase, open_chunks, job, candidates, outcome):
+    """_run_job() once the capture is in hand: plan it, judge it, and publish it."""
+    job_id = job["id"]
+    edge_node = job["target_edge_node_id"]
 
     # ------------------------------------------------------------------------------------------
     # The plan
     # ------------------------------------------------------------------------------------------
     # Everything that can be wrong is decided here, with no broker; the loop below decides nothing.
-    # Planned with the bdSeq the next CONNECT carries, and planned again if a refused password
-    # moved the accepted CONNECT on to a later one.
+    # Planned with the bdSeq the next CONNECT carries, which a refused password may move on.
     play_epoch_ms = int(time.time() * 1000)
     speed = float(job.get("speed") or 1.0)
     device_map = job.get("device_map") or {}
     bdseq = _next_bdseq.get(edge_node, 0)
 
-    def make_plan(session_bdseq):
-        return capture.plan_playback(
-            document, edge_node, device_map, play_epoch_ms, speed=speed,
-            group=job.get("sparkplug_group"), bdseq=session_bdseq,
-        )
-
     try:
-        plan = make_plan(bdseq)
+        plan = capture.FilePlan(open_chunks, edge_node, device_map, play_epoch_ms, speed=speed,
+                                group=job.get("sparkplug_group"), bdseq=bdseq)
     except capture.CaptureError as err:
         return 0, 0, str(err)
+    except ValueError as err:
+        return 0, 0, "%s is not valid JSON: %s" % (job["capture_storage_path"], err)
 
     # DECIDED BEFORE PUBLISHING, not discovered after. The daemon's answer to an out-of-window
     # metric is a counter, not an error, and nothing travels back to the publisher -- so a playback
@@ -766,27 +803,26 @@ def _run_job(supabase, storage, credentials, job, outcome=None):
     # COUNTED PER MESSAGE, DECIDED PER METRIC, AND THE TWO ARE DIFFERENT QUESTIONS. The daemon
     # judges each metric on its own timestamp and falls back to the payload's only when it has none,
     # so a capture whose every message loses one reading and keeps another writes plenty. Refusing
-    # on `len(lossy) >= len(plan)` would report that one as having written nothing.
+    # on `plan.lossy >= len(plan)` would report that one as having written nothing.
     #
     # `capture.py play` refuses BOTH cases unless --allow-unsane is passed, and that difference is
     # deliberate rather than an oversight: the CLI has an escape hatch to pass and a person at a
     # terminal to read the message, and the page has neither.
-    lossy, metrics_kept, metrics_dropped = capture.window_outcome(plan, play_epoch_ms)
-    out_of_window = len(lossy)
-    if metrics_dropped and not metrics_kept:
-        topic, ts, at = lossy[0]
+    out_of_window = plan.lossy
+    if plan.metrics_dropped and not plan.metrics_kept:
+        topic, ts, at = plan.first_lossy
         return 0, out_of_window, (
             "every one of the %d reading(s) in this capture carries a timestamp the ingestion "
             "daemon will discard as too old or too far in the future, so this playback would "
             "publish the whole capture and write nothing to the historian (first: %s, stamped %s, "
             "would be sent at %s). %s" % (
-                metrics_dropped, topic,
+                plan.metrics_dropped, topic,
                 datetime.fromtimestamp(ts / 1000.0, timezone.utc).isoformat(),
                 datetime.fromtimestamp(at / 1000.0, timezone.utc).isoformat(),
                 capture.window_explanation(speed),
             )
         )
-    if lossy:
+    if out_of_window:
         logger.warning(
             "Playback %s: %d of %d message(s) carry timestamps the daemon will drop as too old or "
             "too far in the future. They will be published and silently discarded on ingest.",
@@ -797,7 +833,7 @@ def _run_job(supabase, storage, credentials, job, outcome=None):
     # Publishing
     # ------------------------------------------------------------------------------------------
     # Every planned topic is under the job's group, so the first names the edge node's.
-    will_topic = "spBv1.0/%s/NDEATH/%s" % (capture.split_topic(plan[0][1])[0], edge_node)
+    will_topic = "spBv1.0/%s/NDEATH/%s" % (capture.split_topic(plan.first_topic)[0], edge_node)
     host = PRIMARY_HOST_ID
     progress = _Progress(supabase, job_id, len(plan))
     session = None
@@ -824,10 +860,9 @@ def _run_job(supabase, storage, credentials, job, outcome=None):
     try:
         session = open_session()
         if session.client.aber.bdseq != bdseq:
-            # A refused password spent a bdSeq. The first plan is let go before the second is built.
+            # A refused password spent a bdSeq: the plan carries the one the broker accepted.
             bdseq = session.client.aber.bdseq
-            plan = None
-            plan = make_plan(bdseq)
+            plan.bdseq = bdseq
         progress.started = time.monotonic()
         for delay_ms, topic, payload_bytes, _ in plan:
             # An absolute schedule: per-message sleeps would drift by every publish and progress
@@ -1054,7 +1089,7 @@ def main():
         # Not fatal: a stack that has issued no playback credential yet is correctly configured.
         logger.warning(
             "This worker holds no playback credentials yet, so every job will be refused for want "
-            "of an identity to publish as. Issuing a broker credential for a simulated gateway "
+            "of an identity to publish as. Issuing a broker credential for the Playback gateway "
             "(Gateways page, Generate Broker Credential) delivers it here, and the worker picks it "
             "up without a restart."
         )

@@ -31,9 +31,11 @@ file is wrong in a way nobody finds until a playback ingests nothing.
 Like its sibling this suite needs the REAL generated protobuf and has to undo the other suites'
 stub; see test_capture_playback.py's header for why that is, at length.
 """
+import io
 import json
 import os
 import sys
+import tracemalloc
 import types
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -121,6 +123,11 @@ def parts(topic):
     return topic.split("/")
 
 
+def recorded(j):
+    """The messages a job has buffered, read back from the lines it will write."""
+    return json.loads(b"[" + b"".join(j.lines) + b"]")
+
+
 class SubjectMatching(unittest.TestCase):
     """Which messages belong to the capture, which is the whole of the alias argument."""
 
@@ -191,27 +198,27 @@ class Buffering(unittest.TestCase):
         j = job()
         j.append("spBv1.0/%s/NDATA/%s" % (GROUP, GWY), wire(), "NDATA")
         j.append("spBv1.0/%s/NDATA/%s" % (GROUP, GWY), wire(), "NDATA")
-        self.assertEqual(j.messages[0]["offset_ms"], 0)
-        self.assertGreaterEqual(j.messages[1]["offset_ms"], 0)
+        self.assertEqual(recorded(j)[0]["offset_ms"], 0)
+        self.assertGreaterEqual(recorded(j)[1]["offset_ms"], 0)
 
     def test_the_wire_encoding_is_recorded(self):
         """Playback re-encodes in the encoding a message ARRIVED in; losing it changes the test."""
         j = job()
         j.append("spBv1.0/%s/NDATA/%s" % (GROUP, GWY), wire(), "NDATA")
-        self.assertEqual(j.messages[0]["encoding"], capture.ENCODING_PROTOBUF)
+        self.assertEqual(recorded(j)[0]["encoding"], capture.ENCODING_PROTOBUF)
 
         payload = {"timestamp": 1700000000000,
                    "metrics": [{"name": "T", "datatype": 10, "double_value": 1.0}]}
         j.append("spBv1.0/%s/NDATA/%s" % (GROUP, GWY),
                  json.dumps(payload).encode("utf-8"), "NDATA")
-        self.assertEqual(j.messages[1]["encoding"], capture.ENCODING_JSON)
+        self.assertEqual(recorded(j)[1]["encoding"], capture.ENCODING_JSON)
 
     def test_an_undecodable_payload_is_skipped_not_invented(self):
         """A placeholder would replay something the fleet never sent, which is worse than short."""
         j = job()
         self.assertIsNone(j.append("spBv1.0/%s/NDATA/%s" % (GROUP, GWY), b"\xff\xfe not sparkplug",
                                    "NDATA"))
-        self.assertEqual(j.messages, [])
+        self.assertEqual(j.lines, [])
 
     def test_a_birth_sets_birth_captured(self):
         j = job()
@@ -231,6 +238,22 @@ class Caps(unittest.TestCase):
         topic = "spBv1.0/%s/NDATA/%s" % (GROUP, GWY)
         self.assertIsNone(j.append(topic, wire(), "NDATA"))
         self.assertIn("message cap", j.append(topic, wire(), "NDATA"))
+
+    def test_nothing_is_recorded_past_a_cap(self):
+        """The tick that finishes the job can be a second away; the file stops at the cap."""
+        topic = "spBv1.0/%s/NDATA/%s" % (GROUP, GWY)
+        for caps, stop in (({"max_messages": 2}, "message cap"), ({"max_bytes": 200}, "size cap")):
+            with self.subTest(stop=stop):
+                j = job(**caps)
+                reason = None
+                while not reason:
+                    reason = j.append(topic, wire(), "NDATA")
+                self.assertIn(stop, reason)
+                at_cap = (j.count, j.bytes, len(j.lines))
+                for _ in range(5):
+                    self.assertIsNone(j.append(topic, wire(), "NDATA"))
+                self.assertEqual((j.count, j.bytes, len(j.lines)), at_cap)
+                self.assertEqual(len(j.drain()), at_cap[0], "what reached the cap is still uploaded")
 
     def test_the_size_cap_counts_the_serialised_form_not_the_wire(self):
         """
@@ -275,7 +298,7 @@ class Manifest(unittest.TestCase):
         j.append("spBv1.0/%s/NBIRTH/%s" % (GROUP, GWY), wire(metrics=(("Temperature", 3.0),)),
                  "NBIRTH")
 
-        m = capture_worker._manifest(j.messages, j)
+        m = capture_worker._manifest(j)
         self.assertEqual(sorted(m["metric_names"]), ["Pressure", "Temperature"])
         self.assertEqual(m["topic_count"], 2)
         self.assertTrue(m["birth_captured"])
@@ -285,13 +308,13 @@ class Manifest(unittest.TestCase):
         topic = "spBv1.0/%s/NDATA/%s" % (GROUP, GWY)
         for _ in range(5):
             j.append(topic, wire(metrics=(("B", 1.0), ("A", 2.0))), "NDATA")
-        self.assertEqual(capture_worker._manifest(j.messages, j)["metric_names"], ["B", "A"])
+        self.assertEqual(capture_worker._manifest(j)["metric_names"], ["B", "A"])
 
     def test_a_capture_with_no_birth_says_so(self):
         """`birth_captured=false` is what stops a file that cannot replay looking like one that can."""
         j = job()
         j.append("spBv1.0/%s/NDATA/%s" % (GROUP, GWY), wire(), "NDATA")
-        self.assertFalse(capture_worker._manifest(j.messages, j)["birth_captured"])
+        self.assertFalse(capture_worker._manifest(j)["birth_captured"])
 
 
 class Observe(unittest.TestCase):
@@ -310,28 +333,28 @@ class Observe(unittest.TestCase):
         capture_worker._active = j
         topic = "spBv1.0/%s/NDATA/%s" % (GROUP, GWY)
         capture_worker.observe(topic, wire(), parts(topic))
-        self.assertEqual(len(j.messages), 1)
+        self.assertEqual(len(recorded(j)), 1)
 
     def test_it_buffers_its_edge_node_under_another_group(self):
         j = job()
         capture_worker._active = j
         topic = "spBv1.0/%s/NDATA/%s" % (OTHER_GROUP, GWY)
         capture_worker.observe(topic, wire(), parts(topic))
-        self.assertEqual([m["topic"] for m in j.messages], [topic])
+        self.assertEqual([m["topic"] for m in recorded(j)], [topic])
 
     def test_it_ignores_another_edge_node_under_that_group(self):
         j = job()
         capture_worker._active = j
         topic = "spBv1.0/%s/NDATA/%s" % (OTHER_GROUP, OTHER_GWY)
         capture_worker.observe(topic, wire(), parts(topic))
-        self.assertEqual(j.messages, [])
+        self.assertEqual(j.lines, [])
 
     def test_it_ignores_a_message_for_another_subject(self):
         j = job(device_sparkplug_id=DEV)
         capture_worker._active = j
         topic = "spBv1.0/%s/DDATA/%s/%s" % (GROUP, GWY, OTHER_DEV)
         capture_worker.observe(topic, wire(), parts(topic))
-        self.assertEqual(j.messages, [])
+        self.assertEqual(j.lines, [])
 
     def test_a_met_cap_is_recorded_for_the_worker_thread(self):
         """observe() never stops the job itself: it flags, and the worker finalises on its tick."""
@@ -428,7 +451,17 @@ class DrainIsExclusive(unittest.TestCase):
         j.append(topic, wire(), "NDATA")
         drained = j.drain()
         self.assertEqual(len(drained), 1)
-        self.assertEqual(j.messages, [])
+        self.assertEqual(j.lines, [])
+
+    def test_a_message_after_the_drain_is_not_recorded(self):
+        """The paho thread may still hold the job; what it appends after the drain is dropped, and
+        the counts the file's head and the manifest are made from stay as they were."""
+        j = job()
+        topic = "spBv1.0/%s/NDATA/%s" % (GROUP, GWY)
+        j.append(topic, wire(), "NDATA")
+        j.drain()
+        self.assertIsNone(j.append("spBv1.0/%s/NDATA/%s/%s" % (GROUP, GWY, DEV), wire(), "DDATA"))
+        self.assertEqual((j.lines, j.count, list(j.devices)), ([], 1, []))
 
 
 def unstamped_wire():
@@ -458,13 +491,13 @@ class TheCaptureEpoch(unittest.TestCase):
             j.append(topic, raw, "NDATA")
         uploads = []
         storage = MagicMock()
-        storage.from_.return_value.upload.side_effect = lambda **kw: uploads.append(kw)
+        storage.from_.return_value.upload.side_effect = lambda **kw: uploads.append(kw["file"].read())
         with patch.object(capture_worker, "_storage", storage), \
                 patch.object(capture_worker, "_supabase", MagicMock()), \
                 patch.object(capture_worker.time, "time", return_value=self.FINISHED_S):
             capture_worker._finish(j, "duration reached")
         self.assertEqual(len(uploads), 1, "the capture was not stored")
-        return json.loads(uploads[0]["file"])
+        return json.loads(uploads[0])
 
     def test_a_first_message_with_no_clock_is_rebased_from_its_receipt(self):
         document = self._finished(unstamped_wire())
@@ -793,7 +826,7 @@ class TheProgressTick(unittest.TestCase):
                 patch.object(capture_worker, "_supabase", FakeSupabase(log)):
             capture_worker._discard(state, "gone")
         self.assertEqual(log, [])
-        self.assertEqual(state.messages, [])
+        self.assertEqual(state.lines, [])
 
     def test_a_database_without_the_new_gate_is_asked_the_old_way(self):
         missing = FakeAPIError("Could not find the function", "PGRST202")
@@ -874,7 +907,7 @@ class BirthCapturedMeansTheNodesBirth(unittest.TestCase):
         j = job()
         j.append("spBv1.0/%s/DBIRTH/%s/%s" % (GROUP, GWY, DEV), wire(seq=0), "DBIRTH")
         self.assertFalse(j.birth_captured)
-        self.assertFalse(capture_worker._manifest(j.messages, j)["birth_captured"])
+        self.assertFalse(capture_worker._manifest(j)["birth_captured"])
         j.append("spBv1.0/%s/NBIRTH/%s" % (GROUP, GWY), wire(seq=1), "NBIRTH")
         self.assertTrue(j.birth_captured)
 
@@ -889,7 +922,7 @@ class CapturedMetricsAreTheMachines(unittest.TestCase):
             ("Asset_ID", 0.0), ("Asset_Name", 0.0), ("Instance_UUID", 0.0), ("Schema_UUID", 0.0),
             ("Properties/Serial", 0.0), ("Temperature", 1.0),
         )), "NBIRTH")
-        self.assertEqual(capture_worker._manifest(j.messages, j)["metric_names"],
+        self.assertEqual(capture_worker._manifest(j)["metric_names"],
                          ["Properties/Serial", "Temperature"])
 
     def test_the_rule(self):
@@ -902,6 +935,150 @@ class CapturedMetricsAreTheMachines(unittest.TestCase):
     def test_it_agrees_with_the_daemons_identity_list(self):
         for name in ingestion.IDENTITY_METRICS:
             self.assertFalse(capture_worker.is_machine_metric(name), name)
+
+
+class StreamingStorage:
+    """The upload as httpx reads a file field: its length by seeking, then 64 KiB at a time."""
+
+    def __init__(self):
+        self.body, self.length, self.reads = b"", None, 0
+
+    def from_(self, _bucket):
+        return self
+
+    def upload(self, path, file, file_options):
+        file.seek(0, os.SEEK_END)
+        self.length = file.tell()
+        file.seek(0)
+        received = []
+        while True:
+            chunk = file.read(64 * 1024)
+            if not chunk:
+                break
+            self.reads += 1
+            received.append(len(chunk))
+        self.received = sum(received)
+
+    def remove(self, paths):
+        return []
+
+
+def ten_doubles(n):
+    """A DDATA of ten named, stamped doubles: the audit's 1.1 KB message."""
+    return wire(metrics=[("Line1/Machine/Metric_%02d" % i, n * 1.5 + i) for i in range(10)],
+                seq=n % 256, timestamp=1_800_000_000_000 + n)
+
+
+class RecordingMemoryIsTheFilesBytes(unittest.TestCase):
+    """
+    A recording is held as the lines of the file it becomes, and uploaded from them, so the daemon
+    holds about the counted bytes and no second copy. The dicts the old buffer kept cost 3.4 to
+    6.6 bytes per counted byte, and the indent=2 file built at the end 1.6 to 2.2 more, which is
+    how a recording to the 50 MiB cap OOM-killed the daemon's 512Mi.
+    """
+
+    TOPIC = "spBv1.0/%s/DDATA/%s/%s" % (GROUP, GWY, DEV)
+
+    def record(self, counted_bytes):
+        """A job that buffered `counted_bytes` of DDATA, and the Python memory it holds."""
+        tracemalloc.start()
+        self.addCleanup(tracemalloc.stop)
+        before, _ = tracemalloc.get_traced_memory()
+        j = job(max_bytes=counted_bytes, device_sparkplug_id=DEV)
+        j.append("spBv1.0/%s/NBIRTH/%s" % (GROUP, GWY), wire(seq=0), "NBIRTH")
+        n = 0
+        while not j.append(self.TOPIC, ten_doubles(n), "DDATA"):
+            n += 1
+        held, _ = tracemalloc.get_traced_memory()
+        return j, held - before
+
+    def test_the_buffer_is_the_counted_bytes(self):
+        for size in (256 * 1024, 1024 * 1024, 2 * 1024 * 1024):
+            with self.subTest(size=size):
+                j, held = self.record(size)
+                tracemalloc.stop()
+                self.assertGreaterEqual(j.bytes, size)
+                # The lines themselves, a list slot and a bytes header each, and the manifest's sets.
+                self.assertLess(held, j.bytes * 1.1 + 64 * 1024,
+                                "%d messages, %d bytes counted, %d held" % (j.count, j.bytes, held))
+
+    def test_finalise_adds_no_copy_of_the_recording(self):
+        peaks = {}
+        for size in (512 * 1024, 2 * 1024 * 1024):
+            j, _ = self.record(size)
+            storage = StreamingStorage()
+            tracemalloc.reset_peak()
+            start, _ = tracemalloc.get_traced_memory()
+            with patch.object(capture_worker, "_storage", storage), \
+                    patch.object(capture_worker, "_supabase", FakeSupabase([])):
+                capture_worker._finish(j, "size cap reached", capture_worker.STOP_SIZE)
+            _, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            peaks[size] = peak - start
+            self.assertEqual(storage.received, storage.length)
+        # The head, a 64 KiB read buffer, the manifest: the same however long the recording.
+        self.assertLess(max(peaks.values()), 256 * 1024, peaks)
+
+    def test_the_uploaded_file_is_the_recording_and_its_size_is_counted_exactly(self):
+        log, uploads = [], []
+        j = job(storage_path=JOB_PATH, device_sparkplug_id=DEV)
+        j.append("spBv1.0/%s/NBIRTH/%s" % (GROUP, GWY), wire(seq=0), "NBIRTH")
+        for n in range(5):
+            j.append(self.TOPIC, ten_doubles(n), "DDATA")
+        lines = list(j.lines)
+        storage = FakeStorage(log)
+        storage.upload = lambda path, file, file_options: uploads.append(file.read())
+        with patch.object(capture_worker, "_storage", storage), \
+                patch.object(capture_worker, "_supabase", FakeSupabase(log, {
+                    "ingest_finalise_capture": ["cap-new"]})):
+            capture_worker._finish(j, "duration cap reached (60s)", capture_worker.STOP_DURATION)
+        body, = uploads
+        document = json.loads(body)
+        self.assertEqual([m["topic"] for m in document["messages"]],
+                         ["spBv1.0/%s/NBIRTH/%s" % (GROUP, GWY)] + [self.TOPIC] * 5)
+        self.assertEqual(document["identities"], {"edge_nodes": [GWY], "devices": [DEV]})
+        self.assertEqual(document["duration_ms"], document["messages"][-1]["offset_ms"])
+        finalise = [e[2] for e in log if e[:2] == ("rpc", "ingest_finalise_capture")][0]
+        self.assertEqual(finalise["p_size_bytes"], len(body))
+        self.assertEqual(finalise["p_message_count"], 6)
+        # What the cap counted is the messages as written; the rest is the head and the tail.
+        self.assertEqual(j.bytes, sum(len(line) for line in lines))
+        self.assertTrue(body.endswith(b"".join(lines) + capture.FILE_TAIL))
+
+    def test_each_message_is_one_line_of_the_file(self):
+        j = job()
+        for n in range(3):
+            j.append("spBv1.0/%s/NDATA/%s" % (GROUP, GWY), ten_doubles(n), "NDATA")
+        body = capture.file_head({"aber_capture_version": 1}) + b"".join(j.lines) + capture.FILE_TAIL
+        rows = body.decode("ascii").splitlines()
+        messages = [json.loads(row.strip().rstrip(",")) for row in rows if row.startswith("    {")]
+        self.assertEqual(messages, json.loads(body)["messages"])
+        self.assertEqual(len(messages), 3)
+
+
+class TheUploadStream(unittest.TestCase):
+    """_CaptureFile reads its parts in order, and seeks, as a file would."""
+
+    PARTS = [b"head-", b"", b"ab", b"cdefg", b"-tail"]
+
+    def stream(self):
+        return io.BufferedReader(capture_worker._CaptureFile(list(self.PARTS)), buffer_size=4)
+
+    def test_it_reads_as_the_parts_joined(self):
+        whole = b"".join(self.PARTS)
+        for size in (1, 2, 3, 7, 100):
+            stream = self.stream()
+            got = b"".join(iter(lambda s=stream: s.read(size), b""))
+            self.assertEqual(got, whole, size)
+
+    def test_it_seeks(self):
+        stream = self.stream()
+        self.assertEqual(stream.seek(0, os.SEEK_END), len(b"".join(self.PARTS)))
+        self.assertEqual(stream.tell(), 17)
+        stream.seek(6)
+        self.assertEqual(stream.read(4), b"bcde")
+        stream.seek(0)
+        self.assertEqual(stream.read(), b"".join(self.PARTS))
 
 
 if __name__ == "__main__":

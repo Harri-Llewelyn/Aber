@@ -144,7 +144,7 @@ spec:
             - name: playback-credentials
               mountPath: /var/lib/aber/playback
               readOnly: true
-            # The worker writes no file; Python and OpenSSL take TMPDIR when they need one.
+            # The capture being replayed is downloaded here and read back a message at a time.
             - name: tmp
               mountPath: /tmp
       volumes:
@@ -172,7 +172,8 @@ spec:
             items:
               - key: playback_credentials.json
                 path: credentials.json
+        # One capture, as large as the bucket accepts, and 16Mi for everything else.
         - name: tmp
           emptyDir:
-            sizeLimit: 16Mi
+            sizeLimit: {{ add (.Values.supabaseStorage.captureFileSizeLimit | int64) 16777216 }}
 {{- end }}

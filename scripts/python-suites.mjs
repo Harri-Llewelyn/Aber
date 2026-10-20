@@ -288,7 +288,8 @@ export const SUITES = {
       'Broker capture and playback -- identity rewriting, timestamp rebasing and the wire ' +
       'encodings. A capture cannot be republished under the identity it was recorded from, so ' +
       'every replayed frame passes through a rewrite; getting that wrong produces a job that ' +
-      'reports success while publishing under an edge node nothing is bound to.',
+      'reports success while publishing under an edge node nothing is bound to. The plan read from ' +
+      'a file a message at a time must be the same plan, with the same refusals, in flat memory.',
   },
   'ingestion/test_audit_write_dedup.py': {
     lanes: ['unit'],
@@ -329,7 +330,8 @@ export const SUITES = {
   'ingestion/test_capture_worker.py': {
     lanes: ['unit'],
     why:
-      'The daemon-side recording engine -- subject matching, the caps, the manifest, and the finish ' +
+      'The daemon-side recording engine -- subject matching, the caps, the manifest, a buffer that ' +
+      'is the file\'s own bytes and is uploaded with no second copy, and the finish ' +
       'path, where a failed step must leave the stored capture whole. The ' +
       'manifest is what ensure_shadow_devices() reads to mint replay lanes, so an error here ' +
       'surfaces much later, as a playback naming devices this stack does not know.',
@@ -361,7 +363,7 @@ export const SUITES = {
       'retried finish and startup sweep, and the heartbeat thread. A message counts only once ' +
       'paho accepted it on a connection that has not dropped: before this, a replay whose ' +
       'credential was re-issued at message 8 ended COMPLETED with all 41 counted and 7 in the ' +
-      'historian.',
+      'historian. A capture is read from a temporary file a message at a time, in flat memory.',
   },
   'ingestion/test_playback_session.py': {
     lanes: ['unit'],
@@ -1083,7 +1085,9 @@ export const SUITES = {
       'issues it, publishes live from the suite and answers the rebirth; an Administrator records it ' +
       'with start_capture_job() and stops it; the file and the row are checked against what was ' +
       'published; and that file is replayed into the historian under the replay lane and nowhere ' +
-      'else. Needs `playback.enabled`, which values-dev.yaml sets.',
+      'else. A second subject is recorded to the 50 MiB size cap and replayed, and the cgroup ' +
+      'memory.peak of each worker must stay under 60% of its limit. Needs `playback.enabled`, which ' +
+      'values-dev.yaml sets.',
   },
   'test-harness/test_load_generator.py': {
     // UNIT, AND THAT IS THE POINT. The suite exists precisely because the run it guards cannot be

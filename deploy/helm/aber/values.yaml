@@ -738,7 +738,8 @@ supabaseStorage:
   # invisible to every browser role, and a policy naming an absent bucket is dead text.
   # Broker captures, private, keyed <sparkplug_id>/ of the subject recorded.
   captureBucket: broker-captures
-  # Must exceed the 50 MiB cap `capture_jobs` puts on a recording.
+  # Must exceed the 50 MiB cap `capture_jobs` puts on a recording, which is the file's size. The
+  # playback worker's /tmp is sized to hold one file this large while it replays it.
   captureFileSizeLimit: 104857600
   # file | s3. See docs/kubernetes-architecture.md §4.4 and §11.
   backend: file

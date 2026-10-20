@@ -41,6 +41,7 @@ Related: README.md -> "Broker Capture and Playback" (what the feature is for, th
 import argparse
 import base64
 import binascii
+import codecs
 import json
 import math
 import os
@@ -581,6 +582,23 @@ def check_capture(capture):
     The capture file's shape, checked before anything is planned. Returns its messages; raises
     CaptureError naming the first problem.
     """
+    _check_fields(capture)
+    messages = capture.get("messages")
+    if not isinstance(messages, list):
+        raise CaptureError("the capture's messages are %s, not an array" % _json_kind(messages))
+    if not messages:
+        raise CaptureError("capture contains no messages")
+    previous = 0
+    for index, msg in enumerate(messages):
+        try:
+            previous = _check_message(msg, previous)
+        except CaptureError as err:
+            raise CaptureError("message %d: %s" % (index, err)) from None
+    return messages
+
+
+def _check_fields(capture):
+    """The document's own fields: an object of this version, with a numeric capture_epoch_ms."""
     if not isinstance(capture, dict):
         raise CaptureError("a capture file is a JSON object, and this one is %s"
                            % _json_kind(capture))
@@ -595,18 +613,6 @@ def check_capture(capture):
     if not _is_number(capture["capture_epoch_ms"]):
         raise CaptureError("capture_epoch_ms is %s, not a number; it cannot be rebased"
                            % _json_kind(capture["capture_epoch_ms"]))
-    messages = capture.get("messages")
-    if not isinstance(messages, list):
-        raise CaptureError("the capture's messages are %s, not an array" % _json_kind(messages))
-    if not messages:
-        raise CaptureError("capture contains no messages")
-    previous = 0
-    for index, msg in enumerate(messages):
-        try:
-            previous = _check_message(msg, previous)
-        except CaptureError as err:
-            raise CaptureError("message %d: %s" % (index, err)) from None
-    return messages
 
 
 def capture_identities(messages):
@@ -624,6 +630,238 @@ def capture_identities(messages):
         if device and device not in devices:
             devices.append(device)
     return edge_nodes, devices
+
+
+# ---------------------------------------------------------------------------------------------
+# The file, a message at a time
+# ---------------------------------------------------------------------------------------------
+# Written with each message on a line of its own, after the document's other fields, so a recorder
+# keeps each message only as the bytes it writes. read_capture() reads one a message at a time, in
+# any layout of the same JSON, for the playback worker. README.md -> "The file is JSON".
+MESSAGE_INDENT = b"    "
+MESSAGE_SEPARATOR = b",\n" + MESSAGE_INDENT
+FILE_TAIL = b"\n  ]\n}\n"
+
+
+def message_line(entry, first=False):
+    """One message as the file holds it, ASCII: its JSON on one line, after the separator from the
+    message before it."""
+    return (MESSAGE_INDENT if first else MESSAGE_SEPARATOR) + json.dumps(entry).encode("ascii")
+
+
+def file_head(fields):
+    """The file up to its first message: the document's other fields, one per line."""
+    lines = ["{\n"]
+    lines += ["  %s: %s,\n" % (json.dumps(key), json.dumps(value)) for key, value in fields.items()]
+    lines.append('  "messages": [\n')
+    return "".join(lines).encode("ascii")
+
+
+def write_capture(fh, fields, messages):
+    """Write a capture file to the binary file `fh`."""
+    fh.write(file_head(fields))
+    for index, entry in enumerate(messages):
+        fh.write(message_line(entry, first=index == 0))
+    fh.write(FILE_TAIL)
+
+
+_JSON_SPACE = re.compile(r"[ \t\n\r]*")
+_JSON = json.JSONDecoder()
+# A value json could not decode this close to the end of what has been read may have been cut by
+# the chunk boundary: `-Infinity` is the longest token, and a `\uXXXX` escape is six characters.
+_CUT_MARGIN = 16
+
+
+class _JsonText:
+    """A JSON text read from an iterable of byte chunks, decoded a value at a time."""
+
+    def __init__(self, chunks):
+        self._chunks = iter(chunks)
+        self._utf8 = codecs.getincrementaldecoder("utf-8")()
+        self._read_bytes = 0
+        self._ended = False
+        self.text = ""
+        self.pos = 0
+        # Where `text` starts in the whole text, for an error's position.
+        self._base = 0
+        self._lines = 0
+        self._line_start = 0
+
+    def _more(self):
+        """Append the next chunk, dropping what has been read. False at the end of the text."""
+        if self._ended:
+            return False
+        if self.pos:
+            newlines = self.text.count("\n", 0, self.pos)
+            if newlines:
+                self._lines += newlines
+                self._line_start = self._base + self.text.rfind("\n", 0, self.pos) + 1
+            self._base += self.pos
+            self.text = self.text[self.pos:]
+            self.pos = 0
+        for chunk in self._chunks:
+            added = self._decode(chunk, False)
+            self._read_bytes += len(chunk)
+            if added:
+                self.text += added
+                return True
+        self._ended = True
+        added = self._decode(b"", True)
+        self.text += added
+        return bool(added)
+
+    def _decode(self, chunk, final):
+        try:
+            return self._utf8.decode(chunk, final)
+        except UnicodeDecodeError as err:
+            raise ValueError("not UTF-8 at byte %d (%s)"
+                             % (self._read_bytes + err.start, err.reason)) from None
+
+    def error(self, message, pos=None):
+        """A ValueError placing `message` in the whole text, as json.loads() places one."""
+        pos = self.pos if pos is None else pos
+        newlines = self.text.count("\n", 0, pos)
+        if newlines:
+            column = pos - self.text.rfind("\n", 0, pos)
+        else:
+            column = self._base + pos - self._line_start + 1
+        return ValueError("%s: line %d column %d (char %d)"
+                          % (message, self._lines + newlines + 1, column, self._base + pos))
+
+    def peek(self):
+        """The next character after any whitespace, or '' at the end of the text."""
+        while True:
+            self.pos = _JSON_SPACE.match(self.text, self.pos).end()
+            if self.pos < len(self.text):
+                return self.text[self.pos]
+            if not self._more():
+                return ""
+
+    def take(self, char):
+        """Read past `char` if it is next."""
+        if self.peek() != char:
+            return False
+        self.pos += 1
+        return True
+
+    def value(self):
+        """The next JSON value, decoded."""
+        if not self.peek():
+            raise self.error("Expecting value")
+        # After reading more, the value is decoded again from its start, which `pos` still marks.
+        while True:
+            try:
+                value, end = _JSON.raw_decode(self.text, self.pos)
+            except json.JSONDecodeError as err:
+                cut = err.msg.startswith("Unterminated string") \
+                    or err.pos >= len(self.text) - _CUT_MARGIN
+                if cut and not self._ended:
+                    self._more()
+                    continue
+                raise self.error(err.msg, err.pos) from None
+            # A number that ends where the text read so far does may go on in the next chunk.
+            if end == len(self.text) and not self._ended:
+                self._more()
+                continue
+            self.pos = end
+            return value
+
+
+# What read_capture() yields as each top-level messages array begins, and what it records in
+# `fields` for a messages value that is an array.
+MESSAGES_BEGIN = object()
+MESSAGES_ARRAY = object()
+
+_FIRST_CHARACTER_KIND = {"[": "an array", '"': "a string", "t": "a boolean", "f": "a boolean",
+                         "n": "null"}
+
+
+def read_capture(chunks, fields):
+    """
+    Read a capture file from `chunks`, an iterable of its bytes, without holding the document.
+    Yields MESSAGES_BEGIN as each top-level "messages" array begins, then its messages one at a
+    time; a repeated key is read as json.loads() reads it, the last one counting. Every other
+    top-level field goes into `fields`, and so does a "messages" that is not an array (one that
+    is becomes MESSAGES_ARRAY). Raises ValueError where the text is not JSON, and CaptureError
+    for a document that is not an object.
+    """
+    reader = _JsonText(chunks)
+    first = reader.peek()
+    if first == "\ufeff":
+        raise reader.error("Unexpected UTF-8 BOM (decode using utf-8-sig)")
+    if first != "{":
+        if first and (first in _FIRST_CHARACTER_KIND or first in "-0123456789NI"):
+            raise CaptureError("a capture file is a JSON object, and this one is %s"
+                               % _FIRST_CHARACTER_KIND.get(first, "a number"))
+        raise reader.error("Expecting value")
+    reader.pos += 1
+    if not reader.take("}"):
+        while True:
+            if reader.peek() != '"':
+                raise reader.error("Expecting property name enclosed in double quotes")
+            key = reader.value()
+            if not reader.take(":"):
+                raise reader.error("Expecting ':' delimiter")
+            if key == "messages" and reader.take("["):
+                fields[key] = MESSAGES_ARRAY
+                yield MESSAGES_BEGIN
+                if not reader.take("]"):
+                    while True:
+                        yield reader.value()
+                        if reader.take("]"):
+                            break
+                        if not reader.take(","):
+                            raise reader.error("Expecting ',' delimiter")
+            else:
+                fields[key] = reader.value()
+            if reader.take("}"):
+                break
+            if not reader.take(","):
+                raise reader.error("Expecting ',' delimiter")
+    if reader.peek():
+        raise reader.error("Extra data")
+
+
+def check_capture_file(chunks):
+    """
+    check_capture() for a file read from `chunks`, a message at a time, with the same refusals.
+    Returns (fields, message_count, array): the document's other fields, and how many messages
+    are in which of its messages arrays (the last, counted from 0).
+    """
+    fields = {}
+    arrays = count = previous = 0
+    problem = None
+    for item in read_capture(chunks, fields):
+        if item is MESSAGES_BEGIN:
+            arrays += 1
+            count = previous = 0
+            problem = None
+            continue
+        if problem is None:
+            try:
+                previous = _check_message(item, previous)
+            except CaptureError as err:
+                problem = CaptureError("message %d: %s" % (count, err))
+        count += 1
+    _check_fields(fields)
+    if fields.get("messages") is not MESSAGES_ARRAY:
+        raise CaptureError("the capture's messages are %s, not an array"
+                           % _json_kind(fields.get("messages")))
+    if not count:
+        raise CaptureError("capture contains no messages")
+    if problem:
+        raise problem
+    return fields, count, arrays - 1
+
+
+def _messages_in(chunks, array):
+    """The messages of the file's `array`-th messages array, one at a time."""
+    current = -1
+    for item in read_capture(chunks, {}):
+        if item is MESSAGES_BEGIN:
+            current += 1
+        elif current == array:
+            yield item
 
 
 def rewrite_identity(topic, payload_dict, gateway_id, device_map):
@@ -647,8 +885,9 @@ def rewrite_identity(topic, payload_dict, gateway_id, device_map):
         if new_device is None:
             raise CaptureError(
                 "device %r appears in the capture but has no mapping. Every captured device needs "
-                "one: publishing it unmapped would address an asset this gateway does not own, "
-                "which the broker drops silently." % (device,)
+                "one, onto a replay lane: published unmapped, its readings would reach the "
+                "ingestion daemon as a device the Playback gateway has no lane for, and be "
+                "quarantined." % (device,)
             )
         new_topic = "%s/%s" % (new_topic, new_device)
 
@@ -854,6 +1093,15 @@ def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, gro
     recorded numbers. README.md -> "A replay is its own Sparkplug session".
     """
     messages = check_capture(capture)
+    _check_plan_arguments(gateway_id, device_map, group)
+    tally = _PlanTally()
+    plan = list(_planned(messages, capture["capture_epoch_ms"], gateway_id, device_map,
+                         play_epoch_ms, speed, group, bdseq, tally))
+    tally.refuse_unplayable()
+    return plan
+
+
+def _check_plan_arguments(gateway_id, device_map, group):
     if not GATEWAY_ID_RE.match(gateway_id or ""):
         raise CaptureError(
             "%r is not a gateway sparkplug_id ('gwy' followed by 21 lowercase hex characters). "
@@ -870,22 +1118,47 @@ def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, gro
     if problem:
         raise CaptureError("the group %r %s" % (group, problem))
 
-    capture_epoch_ms = capture["capture_epoch_ms"]
-    plan = []
+
+class _PlanTally:
+    """What a pass over the messages planned, for the refusals only a whole pass can make."""
+
+    def __init__(self):
+        self.births = self.data = self.left_out = 0
+
+    def refuse_unplayable(self):
+        if not self.births:
+            raise CaptureError(
+                "this capture holds no NBIRTH, the edge node's birth certificate, so it cannot be "
+                "replayed as a Sparkplug session: a session opens with one, and the data after it "
+                "is read through what it declares. Record it again on the Capture page, which asks "
+                "the edge node for its birth certificate when the recording starts."
+            )
+        if not self.data:
+            raise CaptureError(
+                "this capture holds only birth certificates and no NDATA or DDATA%s: nothing to "
+                "replay." % (
+                    ", once the %d message(s) recorded outside a Sparkplug session are left out "
+                    "(a device's data replays only after its DBIRTH)" % self.left_out
+                    if self.left_out else "")
+            )
+
+
+def _planned(messages, capture_epoch_ms, gateway_id, device_map, play_epoch_ms, speed, group,
+             bdseq, tally):
+    """plan_playback()'s messages, one at a time, from checked `messages`."""
     session = bdseq
     seq = 0
     born = False        # an NBIRTH has opened the session and no NDEATH has ended it
     devices = set()     # devices whose DBIRTH this session has published
-    births = data = left_out = 0
     for index, msg in enumerate(messages):
         try:
             topic, payload = rewrite_identity(msg["topic"], msg["payload"], gateway_id, device_map)
             _, msg_type, _, device = split_topic(topic)
             if msg_type == "NBIRTH":
                 born, devices, seq = True, set(), 0
-                births += 1
+                tally.births += 1
             elif not born or (msg_type in ("DDATA", "DDEATH") and device not in devices):
-                left_out += 1
+                tally.left_out += 1
                 continue
             elif msg_type == "DBIRTH":
                 devices.add(device)
@@ -904,7 +1177,7 @@ def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, gro
                 payload["seq"] = seq
                 seq = (seq + 1) % 256
             if msg_type in ("NDATA", "DDATA"):
-                data += 1
+                tally.data += 1
             if session is not None and msg_type in ("NBIRTH", "NDEATH"):
                 payload = with_bdseq(payload, session)
                 if msg_type == "NDEATH":
@@ -912,27 +1185,81 @@ def plan_playback(capture, gateway_id, device_map, play_epoch_ms, speed=1.0, gro
             delay_ms = int(msg["offset_ms"] / speed)
             # An absent encoding is protobuf: the Sparkplug B default and the daemon's first branch.
             encoding = msg.get("encoding", ENCODING_PROTOBUF)
-            plan.append((delay_ms, topic, encode_wire_payload(payload, encoding), payload))
+            planned = (delay_ms, topic, encode_wire_payload(payload, encoding), payload)
         except CaptureError as err:
             raise CaptureError("message %d: %s" % (index, err)) from None
         except (AttributeError, KeyError, OverflowError, TypeError, ValueError) as err:
             raise CaptureError("message %d cannot be encoded: %s" % (index, err)) from None
+        yield planned
 
-    if not births:
-        raise CaptureError(
-            "this capture holds no NBIRTH, the edge node's birth certificate, so it cannot be "
-            "replayed as a Sparkplug session: a session opens with one, and the data after it is "
-            "read through what it declares. Record it again on the Capture page, which asks the "
-            "edge node for its birth certificate when the recording starts."
-        )
-    if not data:
-        raise CaptureError(
-            "this capture holds only birth certificates and no NDATA or DDATA%s: nothing to "
-            "replay." % (
-                ", once the %d message(s) recorded outside a Sparkplug session are left out "
-                "(a device's data replays only after its DBIRTH)" % left_out if left_out else "")
-        )
-    return plan
+
+class FilePlan:
+    """
+    plan_playback() for a capture file, holding neither the document nor the plan.
+    `open_chunks()` returns the file's bytes as an iterable of chunks from its start, and is called
+    once per pass. Making the plan reads the file twice, to check it and to plan and judge every
+    message, so every refusal comes first; iterating reads it again and yields what plan_playback()
+    lists, one message at a time. `bdseq` may be changed before iterating: it changes no refusal.
+    """
+
+    def __init__(self, open_chunks, gateway_id, device_map, play_epoch_ms, speed=1.0, group=None,
+                 bdseq=None):
+        fields, self.message_count, self._array = check_capture_file(open_chunks())
+        _check_plan_arguments(gateway_id, device_map, group)
+        self._open = open_chunks
+        self._arguments = (fields["capture_epoch_ms"], gateway_id, device_map, play_epoch_ms,
+                           speed, group)
+        self.bdseq = bdseq
+        self.length = 0
+        self.first_topic = None
+        # window_outcome()'s verdict, judged at `play_epoch_ms`, keeping only the first lossy one.
+        self.lossy = self.metrics_kept = self.metrics_dropped = 0
+        self.first_lossy = None
+        tally = _PlanTally()
+        for delay_ms, topic, _, payload in self._planned(tally):
+            self.length += 1
+            self.first_topic = self.first_topic or topic
+            kept, dropped, first_bad = window_verdict(delay_ms, topic, payload, play_epoch_ms)
+            self.metrics_kept += kept
+            self.metrics_dropped += dropped
+            if first_bad is not None:
+                self.lossy += 1
+                self.first_lossy = self.first_lossy or (topic, first_bad, play_epoch_ms + delay_ms)
+        tally.refuse_unplayable()
+
+    def _planned(self, tally):
+        return _planned(_messages_in(self._open(), self._array), *self._arguments,
+                        bdseq=self.bdseq, tally=tally)
+
+    def __len__(self):
+        return self.length
+
+    def __iter__(self):
+        return self._planned(_PlanTally())
+
+
+def window_verdict(delay_ms, topic, payload, now_ms):
+    """window_outcome() for one planned message: (metrics kept, metrics dropped, the first dropped
+    one's stamp or None)."""
+    if split_topic(topic)[1] != "DDATA":
+        return 0, 0, None
+    at_send_ms = now_ms + delay_ms
+    payload_ts = payload.get("timestamp")
+    if payload_ts is None or payload_ts <= 0:
+        payload_ts = at_send_ms
+    kept = dropped = 0
+    first_bad = None
+    for metric in payload.get("metrics", []):
+        ts = metric.get("timestamp")
+        if ts is None or ts <= 0:
+            ts = payload_ts
+        if timestamp_is_sane(ts, at_send_ms, metric.get("is_historical") is True):
+            kept += 1
+        else:
+            dropped += 1
+            if first_bad is None:
+                first_bad = ts
+    return kept, dropped, first_bad
 
 
 def window_outcome(plan, now_ms):
@@ -950,25 +1277,11 @@ def window_outcome(plan, now_ms):
     lossy = []
     kept = dropped = 0
     for delay_ms, topic, _, payload in plan:
-        if split_topic(topic)[1] != "DDATA":
-            continue
-        at_send_ms = now_ms + delay_ms
-        payload_ts = payload.get("timestamp")
-        if payload_ts is None or payload_ts <= 0:
-            payload_ts = at_send_ms
-        first_bad = None
-        for metric in payload.get("metrics", []):
-            ts = metric.get("timestamp")
-            if ts is None or ts <= 0:
-                ts = payload_ts
-            if timestamp_is_sane(ts, at_send_ms, metric.get("is_historical") is True):
-                kept += 1
-            else:
-                dropped += 1
-                if first_bad is None:
-                    first_bad = ts
+        message_kept, message_dropped, first_bad = window_verdict(delay_ms, topic, payload, now_ms)
+        kept += message_kept
+        dropped += message_dropped
         if first_bad is not None:
-            lossy.append((topic, first_bad, at_send_ms))
+            lossy.append((topic, first_bad, now_ms + delay_ms))
     return lossy, kept, dropped
 
 
@@ -1126,9 +1439,8 @@ def cmd_record(args):
         "identities": {"edge_nodes": edge_nodes, "devices": devices},
         "messages": messages,
     }
-    with open(args.out, "w", encoding="utf-8") as fh:
-        json.dump(capture, fh, indent=2)
-        fh.write("\n")
+    with open(args.out, "wb") as fh:
+        write_capture(fh, {k: v for k, v in capture.items() if k != "messages"}, messages)
 
     print("\nWrote %s" % args.out)
     _print_summary(capture)
